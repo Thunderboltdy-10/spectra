@@ -1,89 +1,152 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { BarChart3, Bot, Compass, GraduationCap, LayoutDashboard, Sparkles } from "lucide-react";
-import { ThemeToggle } from "@/components/theme-toggle";
-import { cn } from "@/lib/utils";
+import { usePathname, useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { ChatSidebar } from "@/components/chat/chat-sidebar";
+import type { Chat, UserSpending } from "@/hooks/use-chat-state";
 
 type Role = "student" | "teacher" | "admin";
 
-const baseLinks = [
-  { href: "/", label: "Chat", icon: GraduationCap },
-  { href: "/agents", label: "Agents", icon: Bot },
-  { href: "/models", label: "Models", icon: Compass },
-  { href: "/analytics", label: "Analytics", icon: BarChart3 },
-] as const;
+type BootstrapResponse = {
+  actor?: { role?: Role };
+  chats?: Chat[];
+  userSpending?: UserSpending;
+  userMemory?: {
+    summary?: string;
+  };
+};
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+
+  const [chats, setChats] = useState<Chat[]>([]);
   const [role, setRole] = useState<Role>("student");
+  const [search, setSearch] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [userSpending, setUserSpending] = useState<UserSpending | null>(null);
+  const [userMemorySummary, setUserMemorySummary] = useState("");
+  const [pinnedChatIds, setPinnedChatIds] = useState<Set<string>>(new Set());
+
+  const selectedChatId = "";
 
   useEffect(() => {
     void (async () => {
       try {
         const response = await fetch("/api/bootstrap");
-        if (!response.ok) return;
-        const data = (await response.json()) as { actor?: { role?: Role } };
-        if (data.actor?.role) {
-          setRole(data.actor.role);
+        if (!response.ok) {
+          throw new Error(await response.text());
         }
-      } catch {
-        // Non-blocking.
+
+        const data = (await response.json()) as BootstrapResponse;
+        setRole(data.actor?.role ?? "student");
+        setChats(data.chats ?? []);
+        setUserSpending(data.userSpending ?? null);
+        setUserMemorySummary(data.userMemory?.summary ?? "");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to load sidebar data");
       }
     })();
   }, []);
 
-  const links = useMemo(() => {
-    if (role === "admin") {
-      return [...baseLinks, { href: "/admin", label: "Admin", icon: LayoutDashboard }];
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem("ai-school:pinned-chats");
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as string[];
+      if (!Array.isArray(parsed)) return;
+      setPinnedChatIds(new Set(parsed.filter((id) => typeof id === "string" && id.trim().length > 0)));
+    } catch {
+      // Ignore invalid persisted state.
     }
-    return baseLinks;
-  }, [role]);
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("ai-school:pinned-chats", JSON.stringify([...pinnedChatIds]));
+    } catch {
+      // Ignore storage errors.
+    }
+  }, [pinnedChatIds]);
+
+  const filteredChats = useMemo(() => {
+    const clean = search.trim().toLowerCase();
+    if (!clean) return chats;
+    return chats.filter((chat) =>
+      `${chat.latestUserPrompt ?? ""} ${chat.title}`.toLowerCase().includes(clean),
+    );
+  }, [chats, search]);
+
+  async function handleDeleteChat(chatId: string) {
+    const response = await fetch(`/api/chats/${chatId}`, { method: "DELETE" });
+    if (!response.ok) {
+      toast.error("Failed to delete chat");
+      return;
+    }
+    setChats((prev) => prev.filter((chat) => chat._id !== chatId));
+  }
+
+  async function handleRenameChat(chatId: string, title: string) {
+    const clean = title.trim();
+    if (!clean) return;
+
+    const response = await fetch(`/api/chats/${chatId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: clean }),
+    });
+
+    if (!response.ok) {
+      toast.error("Failed to rename chat");
+      return;
+    }
+
+    setChats((prev) => prev.map((chat) => (chat._id === chatId ? { ...chat, title: clean } : chat)));
+  }
+
+  function handlePinChat(chatId: string) {
+    setPinnedChatIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(chatId)) {
+        next.delete(chatId);
+      } else {
+        next.add(chatId);
+      }
+      return next;
+    });
+  }
 
   return (
-    <div className="flex min-h-screen bg-app text-ink-100">
-      <aside className="hidden w-[320px] shrink-0 border-r border-[var(--border-default)] bg-[var(--gradient-surface)] p-3 md:flex md:flex-col">
-        <div className="mb-3 flex items-center gap-2.5">
-          <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--gradient-brand)] text-white shadow-[var(--shadow-soft)]">
-            <Sparkles className="h-4 w-4" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="font-display text-lg leading-none">AI School</p>
-            <p className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">studio</p>
-          </div>
-        </div>
-
-        <div className="mb-3 flex items-center gap-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1">
-          {links.map((link) => {
-            const Icon = link.icon;
-            const active = pathname === link.href;
-            return (
-              <Link
-                key={link.href}
-                href={link.href}
-                title={link.label}
-                className={cn(
-                  "inline-flex h-8 w-8 items-center justify-center rounded-lg transition",
-                  active
-                    ? "bg-[var(--bg-primary)] text-[var(--text-primary)]"
-                    : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]",
-                )}
-              >
-                <Icon className="h-4 w-4" />
-              </Link>
-            );
-          })}
-        </div>
-
-        <div className="mt-auto flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2">
-          <p className="text-xs text-[var(--text-secondary)]">Theme</p>
-          <ThemeToggle />
-        </div>
+    <div className="flex h-screen overflow-hidden bg-[var(--bg-primary)] text-[var(--text-primary)]">
+      <aside className={`hidden h-full transition-all duration-300 md:block ${sidebarOpen ? "w-[320px]" : "w-[76px]"}`}>
+        <ChatSidebar
+          chats={filteredChats}
+          selectedChatId={selectedChatId}
+          search={search}
+          collapsed={!sidebarOpen}
+          onToggleCollapse={() => setSidebarOpen((prev) => !prev)}
+          onSearchChange={setSearch}
+          onSelectChat={(chatId) => router.push(`/?chatId=${encodeURIComponent(chatId)}`)}
+          onNewChat={() => router.push("/")}
+          onDeleteChat={(chatId) => void handleDeleteChat(chatId)}
+          onRenameChat={(chatId, title) => void handleRenameChat(chatId, title)}
+          onOpenSettings={() => {
+            if (pathname !== "/") {
+              router.push("/");
+              return;
+            }
+            window.dispatchEvent(new Event("ai-school:toggle-settings"));
+          }}
+          onPinChat={handlePinChat}
+          pinnedChatIds={pinnedChatIds}
+          role={role}
+          userSpending={userSpending}
+          userMemorySummary={userMemorySummary}
+        />
       </aside>
 
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 overflow-y-auto">
         <main className="mx-auto w-full max-w-6xl px-3 py-5 sm:px-6 lg:px-10">{children}</main>
       </div>
     </div>

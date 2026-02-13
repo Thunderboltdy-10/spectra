@@ -1,28 +1,91 @@
+import type { OpenRouterMessageContentPart } from "@/lib/openrouter";
 import type { ChatMessage, Citation } from "@/types";
-import { enforceCitationFallback } from "@/lib/prompts/policy";
 
-export function toOpenRouterMessages(messages: ChatMessage[]) {
-  return messages.map((message) => ({
-    role: message.role,
-    content: message.content,
-  }));
+export function toOpenRouterMessages(
+  messages: ChatMessage[],
+  imageBlocks?: Array<{ type: "image_url"; image_url: { url: string; detail?: "low" | "auto" } }>,
+) {
+  return messages.map((message, index) => {
+    const isLastUser = message.role === "user" && index === messages.length - 1;
+
+    if (isLastUser && imageBlocks && imageBlocks.length > 0) {
+      const content: OpenRouterMessageContentPart[] = [
+        { type: "text", text: message.content },
+        ...imageBlocks,
+      ];
+      return {
+        role: message.role,
+        content,
+      };
+    }
+
+    return {
+      role: message.role,
+      content: message.content,
+    };
+  });
 }
 
 export function extractCitationsFromText(text: string, fallback: Citation[]): Citation[] {
-  const lines = text.split("\n");
   const refs: Citation[] = [];
 
-  for (const line of lines) {
-    const match = line.match(/\[([^\]]+)\]/g);
-    if (!match) continue;
-    for (const token of match) {
-      if (token.toLowerCase().includes("general knowledge")) {
-        refs.push({ filename: "general knowledge", sourceType: "general" });
-      }
+  const numericRefs = Array.from(text.matchAll(/\[(\d{1,2})\]/g));
+  for (const match of numericRefs) {
+    const index = Number(match[1]) - 1;
+    if (Number.isNaN(index) || index < 0) continue;
+    const citation = fallback[index];
+    if (citation) refs.push(citation);
+  }
+
+  const verboseRefs = Array.from(text.matchAll(/\[([^\]\n]+?)\s+p\.\s*(\d+)\]/gi));
+  for (const match of verboseRefs) {
+    const filename = (match[1] ?? "").trim().toLowerCase();
+    const page = Number(match[2]);
+    if (!filename) continue;
+
+    const citation = fallback.find(
+      (item) =>
+        item.filename.toLowerCase().includes(filename) &&
+        (item.page === page || typeof item.page !== "number"),
+    );
+
+    if (citation) {
+      refs.push({
+        ...citation,
+        page: citation.page ?? page,
+      });
     }
   }
 
-  return enforceCitationFallback(refs.length > 0 ? refs : fallback);
+  const nameRefs = Array.from(text.matchAll(/\[([^\]\n]{3,80})\]/g));
+  for (const match of nameRefs) {
+    const token = (match[1] ?? "").trim();
+    if (!token) continue;
+    if (/^\d+$/.test(token)) continue;
+
+    const citation = fallback.find((item) =>
+      item.filename.toLowerCase().includes(token.toLowerCase()),
+    );
+
+    if (citation) refs.push(citation);
+  }
+
+  const urls = Array.from(new Set(text.match(/https?:\/\/[^\s)\]]+/g) ?? []));
+  for (const url of urls) {
+    refs.push({
+      filename: url.replace(/^https?:\/\//, "").split("/")[0] ?? "web",
+      sourceType: "search",
+      url,
+    });
+  }
+
+  const deduped = new Map<string, Citation>();
+  for (const item of refs) {
+    const key = `${item.sourceType}:${item.resourceId ?? ""}:${item.url ?? ""}:${item.filename}:${item.page ?? ""}`;
+    if (!deduped.has(key)) deduped.set(key, item);
+  }
+
+  return [...deduped.values()].slice(0, 8);
 }
 
 export function summarizeWhyResponse(mode: string, routeReason: string) {

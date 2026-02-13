@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button";
 import { ChatMessage } from "@/components/chat/chat-message";
 import { QuizView, isQuizContent } from "@/components/chat/quiz-view";
 import { FlashcardView, isFlashcardContent } from "@/components/chat/flashcard-view";
+import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { ThinkingMessages } from "@/components/loading-states";
+import { autoCloseMarkdown } from "@/lib/stream-markdown";
 import type { Message } from "@/hooks/use-chat-state";
 import type { StudyMode } from "@/types";
 
@@ -80,7 +82,7 @@ export function ChatMessages({
       return "You've reached your monthly usage tier. Budget-safe models are still available.";
     }
     if (lower.includes("429") || lower.includes("rate")) {
-      return "The model is busy. Trying a backup...";
+      return "The model is busy. Backup models were attempted automatically.";
     }
     if (lower.includes("network") || lower.includes("fetch") || lower.includes("connection")) {
       return "Connection lost. Retrying...";
@@ -125,20 +127,97 @@ export function ChatMessages({
     );
   }
 
+  function renderDraftMarkdown(text: string) {
+    return <MarkdownRenderer content={autoCloseMarkdown(text)} citations={[]} />;
+  }
+
   return (
     <section className="relative flex min-h-0 flex-1">
       <div ref={scrollRef} className="h-full w-full overflow-y-auto px-3 pb-40 pt-6 sm:px-6 lg:px-10">
-        <div className="mx-auto w-full max-w-4xl space-y-5">
+        <div className="mx-auto w-full max-w-6xl space-y-8">
           {!hasContent && emptyState}
 
           {messages.map((msg, index) => {
-            if (msg.role === "assistant" && mode === "quiz" && isQuizContent(msg.content)) {
-              return <QuizView key={msg._id} content={msg.content} />;
-            }
-            if (msg.role === "assistant" && mode === "flashcard" && isFlashcardContent(msg.content)) {
-              return <FlashcardView key={msg._id} content={msg.content} />;
-            }
             const isLastAssistant = msg.role === "assistant" && index === messages.length - 1;
+
+            if (msg.role === "assistant" && (mode === "quiz" || mode === "exam")) {
+              if (isQuizContent(msg.content)) {
+                return <QuizView key={msg._id} content={msg.content} />;
+              }
+              return (
+                <div key={msg._id}>
+                  <ChatMessage
+                    role={msg.role}
+                    content={msg.content}
+                    enhancedContent={msg.enhancedContent}
+                    attachments={msg.attachments}
+                    attachmentPreviews={msg.attachmentPreviews}
+                    modelUsed={msg.modelUsed}
+                    whyThisResponse={msg.whyThisResponse}
+                    routeTrace={msg.routeTrace}
+                    citations={msg.citations}
+                    mode={mode}
+                    isLastAssistant={isLastAssistant}
+                    onRegenerate={isLastAssistant ? onRegenerate : undefined}
+                  />
+                  <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+                    <p className="text-xs text-amber-600 dark:text-amber-400">
+                      Response didn&apos;t follow quiz format. Showing as text.
+                    </p>
+                    {isLastAssistant && onRegenerate && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={onRegenerate}
+                        className="mt-2"
+                      >
+                        Regenerate as strict quiz
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            }
+
+            if (msg.role === "assistant" && mode === "flashcard") {
+              if (isFlashcardContent(msg.content)) {
+                return <FlashcardView key={msg._id} content={msg.content} />;
+              }
+              return (
+                <div key={msg._id}>
+                  <ChatMessage
+                    role={msg.role}
+                    content={msg.content}
+                    enhancedContent={msg.enhancedContent}
+                    attachments={msg.attachments}
+                    attachmentPreviews={msg.attachmentPreviews}
+                    modelUsed={msg.modelUsed}
+                    whyThisResponse={msg.whyThisResponse}
+                    routeTrace={msg.routeTrace}
+                    citations={msg.citations}
+                    mode={mode}
+                    isLastAssistant={isLastAssistant}
+                    onRegenerate={isLastAssistant ? onRegenerate : undefined}
+                  />
+                  <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+                    <p className="text-xs text-amber-600 dark:text-amber-400">
+                      Response didn&apos;t follow flashcard format. Showing as text.
+                    </p>
+                    {isLastAssistant && onRegenerate && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={onRegenerate}
+                        className="mt-2"
+                      >
+                        Regenerate as strict flashcards
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            }
+
             return (
               <ChatMessage
                 key={msg._id}
@@ -146,8 +225,10 @@ export function ChatMessages({
                 content={msg.content}
                 enhancedContent={msg.enhancedContent}
                 attachments={msg.attachments}
+                attachmentPreviews={msg.attachmentPreviews}
                 modelUsed={msg.modelUsed}
                 whyThisResponse={msg.whyThisResponse}
+                routeTrace={msg.routeTrace}
                 citations={msg.citations}
                 mode={msg.role === "assistant" ? mode : undefined}
                 isLastAssistant={isLastAssistant}
@@ -156,7 +237,23 @@ export function ChatMessages({
             );
           })}
 
-          {draftResponse && (
+          {draftResponse && (mode === "quiz" || mode === "exam" || mode === "flashcard") ? (
+            <article className="chat-fade-in flex justify-start">
+              <div className="w-full max-w-5xl rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3">
+                <div className="mb-2 flex items-center gap-2 text-xs text-[var(--text-secondary)]">
+                  <span>
+                    {modelLabel(lastModelUsed)} is generating {(mode === "quiz" || mode === "exam") ? "quiz" : "flashcards"}...
+                  </span>
+                </div>
+                {renderDraft(draftResponse)}
+                <div className="mt-3 text-xs italic text-[var(--text-secondary)]">
+                  {(mode === "quiz" || mode === "exam")
+                    ? "Answers will appear after generation completes."
+                    : "Card backs will reveal after generation completes."}
+                </div>
+              </div>
+            </article>
+          ) : draftResponse ? (
             <article className="chat-fade-in flex justify-start">
               <div className="w-full max-w-5xl rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3">
                 <div className="mb-2 inline-flex items-center gap-2 text-xs text-[var(--text-secondary)]">
@@ -185,14 +282,14 @@ export function ChatMessages({
                   </div>
                 )}
                 <div>
-                  {renderDraft(draftResponse)}
+                  {renderDraftMarkdown(draftResponse)}
                   <span className="stream-cursor" aria-hidden>
                     |
                   </span>
                 </div>
               </div>
             </article>
-          )}
+          ) : null}
 
           {sending && !draftResponse && (
             <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">

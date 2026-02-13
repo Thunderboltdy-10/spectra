@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { createHash } from "node:crypto";
 import { requireActor } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
@@ -48,6 +49,11 @@ async function uploadToConvexStorage(uploadUrl: string, file: File) {
     throw new Error("Storage upload did not return storageId");
   }
   return json.storageId;
+}
+
+async function sha256OfFile(file: File) {
+  const bytes = await file.arrayBuffer();
+  return createHash("sha256").update(Buffer.from(bytes)).digest("hex");
 }
 
 async function regenerateAgentGuidelines(actorClerkId: string, agentId: string) {
@@ -113,8 +119,44 @@ export async function POST(request: NextRequest) {
     }
 
     const results: Array<{ file: string; resourceId?: string; status: string; error?: string }> = [];
+    const localHashToResourceId = new Map<string, string>();
+    const hashByKey = new Map<string, string>();
 
     for (const file of files) {
+      const hash = await sha256OfFile(file);
+      hashByKey.set(`${file.name}:${file.size}:${file.lastModified}`, hash);
+    }
+
+    const reusableByHash = new Map<string, string>();
+    if (scope === "personal") {
+      const reusable = (await convexQuery("resources:findReusablePersonalResourcesByHashes", {
+        actorClerkId: actor.clerkId,
+        hashes: [...new Set(hashByKey.values())],
+      })) as Array<{ resourceId: string; contentHash: string }>;
+
+      for (const match of reusable) {
+        if (!reusableByHash.has(match.contentHash)) {
+          reusableByHash.set(match.contentHash, match.resourceId);
+        }
+      }
+    }
+
+    for (const file of files) {
+      const hashKey = `${file.name}:${file.size}:${file.lastModified}`;
+      const contentHash = hashByKey.get(hashKey);
+
+      if (scope === "personal" && contentHash) {
+        const already = localHashToResourceId.get(contentHash) ?? reusableByHash.get(contentHash);
+        if (already) {
+          results.push({
+            file: file.name,
+            resourceId: already,
+            status: "reused",
+          });
+          continue;
+        }
+      }
+
       try {
         const uploadUrl = (await convexMutation("resources:createUploadUrl", {
           actorClerkId: actor.clerkId,
@@ -133,6 +175,7 @@ export async function POST(request: NextRequest) {
           filename: file.name,
           mimeType: file.type || "application/octet-stream",
           size: file.size,
+          contentHash,
           storageId,
         })) as { resourceId: string };
 
@@ -173,6 +216,9 @@ export async function POST(request: NextRequest) {
           resourceId: registered.resourceId,
           status: "processed",
         });
+        if (scope === "personal" && contentHash) {
+          localHashToResourceId.set(contentHash, registered.resourceId);
+        }
       } catch (error) {
         results.push({
           file: file.name,
@@ -190,6 +236,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return ok({ results });
+    return ok({
+      results,
+      resourceIds: results.map((item) => item.resourceId).filter((id): id is string => Boolean(id)),
+      count: results.length,
+    });
   });
 }

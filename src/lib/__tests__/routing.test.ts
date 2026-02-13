@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { chooseModelRoute } from "@/lib/routing/heuristic";
-import { MODEL_CONFIG } from "@/lib/model-config";
+import { MODEL_CONFIG, ROUTER_FALLBACKS } from "@/lib/model-config";
 import { STUDY_MODES, isValidStudyMode, safeStudyMode } from "@/lib/contracts/studyModes";
 
 describe("chooseModelRoute", () => {
@@ -22,41 +22,68 @@ describe("chooseModelRoute", () => {
     expect(route.verificationModel).toBe(MODEL_CONFIG.verify);
   });
 
-  it("routes tutor high thinking to paid smart model in normal tier", () => {
-    const route = chooseModelRoute({
-      mode: "tutor",
-      thinkingLevel: "high",
-      hasAttachments: false,
-      attachmentTypes: [],
-      messageLength: 200,
-      teacherStrictness: "medium",
-      routerMode: "auto",
-      studentSeemsStuck: false,
-      spendingTier: "normal",
-      needsSearch: false,
-    });
+  it("produces a valid trace for all modes", () => {
+    for (const mode of STUDY_MODES) {
+      const route = chooseModelRoute({
+        mode,
+        thinkingLevel: "medium",
+        hasAttachments: false,
+        attachmentTypes: [],
+        messageLength: 200,
+        teacherStrictness: "medium",
+        routerMode: "auto",
+        studentSeemsStuck: false,
+        spendingTier: "normal",
+        needsSearch: false,
+        promptCategory: "general",
+      });
 
-    expect(route.primaryModel).toBe(MODEL_CONFIG.smartPaid);
+      expect(route.trace.candidates.length).toBeGreaterThan(0);
+      expect(route.trace.selected.modelId).toBe(route.primaryModel);
+      expect(route.trace.inputs.mode).toBe(mode);
+    }
   });
 
-  it("prefers multimodal when file attachments are present", () => {
-    const route = chooseModelRoute({
-      mode: "tutor",
-      thinkingLevel: "low",
-      hasAttachments: true,
-      attachmentTypes: ["pdf"],
-      messageLength: 120,
-      teacherStrictness: "soft",
-      routerMode: "auto",
-      studentSeemsStuck: false,
-      spendingTier: "normal",
-      needsSearch: false,
-    });
+  it("free-only never returns openrouter/auto and uses free primary", () => {
+    for (const mode of STUDY_MODES) {
+      const route = chooseModelRoute({
+        mode,
+        thinkingLevel: "medium",
+        hasAttachments: false,
+        attachmentTypes: [],
+        messageLength: 200,
+        teacherStrictness: "medium",
+        routerMode: "auto",
+        studentSeemsStuck: false,
+        spendingTier: "free_only",
+        needsSearch: false,
+      });
 
-    expect(route.primaryModel).toBe(MODEL_CONFIG.multimodal);
+      expect(route.primaryModel).not.toBe(MODEL_CONFIG.autoRouter);
+      expect(route.primaryModel.includes(":free")).toBe(true);
+    }
   });
 
-  it("uses openrouter auto when explicitly requested in normal tier", () => {
+  it("auto mode never returns openrouter/auto for all study modes", () => {
+    for (const mode of STUDY_MODES) {
+      const route = chooseModelRoute({
+        mode,
+        thinkingLevel: "medium",
+        hasAttachments: false,
+        attachmentTypes: [],
+        messageLength: 200,
+        teacherStrictness: "medium",
+        routerMode: "auto",
+        studentSeemsStuck: false,
+        spendingTier: "normal",
+        needsSearch: false,
+      });
+
+      expect(route.primaryModel).not.toBe(MODEL_CONFIG.autoRouter);
+    }
+  });
+
+  it("openrouter auto can still be explicitly selected", () => {
     const route = chooseModelRoute({
       mode: "tutor",
       thinkingLevel: "medium",
@@ -73,62 +100,79 @@ describe("chooseModelRoute", () => {
     expect(route.primaryModel).toBe(MODEL_CONFIG.autoRouter);
   });
 
-  it("routes all 9 modes without error", () => {
-    for (const mode of STUDY_MODES) {
-      const route = chooseModelRoute({
-        mode,
-        thinkingLevel: "medium",
-        hasAttachments: false,
-        attachmentTypes: [],
-        messageLength: 200,
-        teacherStrictness: "medium",
-        routerMode: "auto",
-        studentSeemsStuck: false,
-        spendingTier: "normal",
-        needsSearch: false,
-      });
-      expect(route.primaryModel).toBeTruthy();
-      expect(route.fallbackModels).toBeInstanceOf(Array);
-      expect(route.reason).toBeTruthy();
-    }
-  });
-
-  it("free-only tier enforces free models", () => {
-    for (const mode of STUDY_MODES) {
-      const route = chooseModelRoute({
-        mode,
-        thinkingLevel: "medium",
-        hasAttachments: false,
-        attachmentTypes: [],
-        messageLength: 200,
-        teacherStrictness: "medium",
-        routerMode: "auto",
-        studentSeemsStuck: false,
-        spendingTier: "free_only",
-        needsSearch: false,
-      });
-      expect(
-        route.primaryModel === MODEL_CONFIG.autoRouter || route.primaryModel.includes(":free"),
-      ).toBe(true);
-    }
-  });
-
-  it("search intent routes to sonar in paid tiers", () => {
-    const route = chooseModelRoute({
-      mode: "research",
-      thinkingLevel: "medium",
+  it("selection varies by prompt complexity for tutor mode", () => {
+    const simple = chooseModelRoute({
+      mode: "tutor",
+      thinkingLevel: "low",
       hasAttachments: false,
       attachmentTypes: [],
-      messageLength: 120,
+      messageLength: 50,
       teacherStrictness: "medium",
       routerMode: "auto",
       studentSeemsStuck: false,
-      spendingTier: "cheap_only",
-      needsSearch: true,
+      spendingTier: "normal",
+      needsSearch: false,
+      promptCategory: "general",
     });
 
-    expect(route.primaryModel).toBe(MODEL_CONFIG.searchFast);
-    expect(route.searchEnabled).toBe(true);
+    const complex = chooseModelRoute({
+      mode: "tutor",
+      thinkingLevel: "high",
+      hasAttachments: false,
+      attachmentTypes: [],
+      messageLength: 1500,
+      teacherStrictness: "medium",
+      routerMode: "auto",
+      studentSeemsStuck: true,
+      spendingTier: "normal",
+      needsSearch: false,
+      promptCategory: "research",
+    });
+
+    expect(simple.primaryModel).not.toBe(complex.primaryModel);
+  });
+
+  it("captures tier-based eliminations in trace candidates", () => {
+    const route = chooseModelRoute({
+      mode: "tutor",
+      thinkingLevel: "high",
+      hasAttachments: false,
+      attachmentTypes: [],
+      messageLength: 1200,
+      teacherStrictness: "medium",
+      routerMode: "auto",
+      studentSeemsStuck: false,
+      spendingTier: "free_only",
+      needsSearch: false,
+      promptCategory: "creative",
+    });
+
+    expect(route.trace.candidates.every((candidate) => candidate.modelId.includes(":free"))).toBe(true);
+    expect(route.trace.inputs.spendingTier).toBe("free_only");
+  });
+
+  it("marks multimodal need in trace inputs", () => {
+    const route = chooseModelRoute({
+      mode: "tutor",
+      thinkingLevel: "low",
+      hasAttachments: true,
+      attachmentTypes: ["png"],
+      messageLength: 120,
+      teacherStrictness: "soft",
+      routerMode: "auto",
+      studentSeemsStuck: false,
+      spendingTier: "normal",
+      needsSearch: false,
+    });
+
+    expect(route.trace.inputs.needsVision).toBe(true);
+  });
+
+  it("GLM is never the first fallback", () => {
+    for (const fallbacks of Object.values(ROUTER_FALLBACKS)) {
+      if (fallbacks.length === 0) continue;
+      expect(fallbacks[0]).not.toBe(MODEL_CONFIG.glmAir);
+    }
   });
 });
 

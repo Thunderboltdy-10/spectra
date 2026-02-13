@@ -85,6 +85,8 @@ export const recordUsageWithCost = mutation({
     const now = Date.now();
     const totalTokens = Math.max(0, args.inputTokens + args.outputTokens);
 
+    const hasKnownPricing =
+      typeof args.inputCostPerM === "number" || typeof args.outputCostPerM === "number";
     const inPrice = args.inputCostPerM ?? 0;
     const outPrice = args.outputCostPerM ?? 0;
     const costCents = Math.max(
@@ -125,6 +127,7 @@ export const recordUsageWithCost = mutation({
       outputTokens: args.outputTokens,
       totalTokens,
       costCents,
+      pricingNote: hasKnownPricing ? undefined : "Pricing unknown at record time; cost defaulted to zero.",
       day,
       createdAt: now,
     });

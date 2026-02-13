@@ -70,7 +70,6 @@ export function ChatLayout() {
     chats: chat.filteredChats,
     selectedChatId: chat.selectedChatId,
     search: chat.search,
-    mode: chat.mode,
     onSearchChange: chat.setSearch,
     onSelectChat: (chatId: string) => {
       chat.setSelectedChatId(chatId);
@@ -80,8 +79,8 @@ export function ChatLayout() {
     onDeleteChat: (chatId: string) => void chat.handleDeleteChat(chatId),
     onRenameChat: (chatId: string, title: string) => void chat.renameChat(chatId, title),
     onOpenSettings: () => chat.setSettingsOpen(true),
-    onModeChange: handleModeChange,
     onPinChat: handlePinChat,
+    pinnedChatIds: chat.pinnedChatIds,
     role: chat.role,
     userSpending: chat.userSpending,
     userMemorySummary: chat.userMemorySummary,
@@ -152,7 +151,18 @@ export function ChatLayout() {
           message={chat.message}
           onMessageChange={chat.setMessage}
           fileList={chat.fileList}
-          onFilesAdd={(files) => chat.setFileList((prev) => [...prev, ...files])}
+          fileUploadState={chat.fileUploadState}
+          onFilesAdd={(files) =>
+            chat.setFileList((prev) => {
+              const seen = new Set(prev.map((file) => `${file.name}:${file.size}:${file.lastModified}`));
+              const deduped = files.filter((file) => {
+                const key = `${file.name}:${file.size}:${file.lastModified}`;
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+              });
+              return [...prev, ...deduped];
+            })}
           onRemoveFile={(file) => chat.setFileList((prev) => prev.filter((item) => item !== file))}
           onSend={() => void chat.sendMessage()}
           onStop={chat.stopGeneration}

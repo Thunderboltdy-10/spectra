@@ -1,25 +1,42 @@
 type ProviderPresentation = {
+  key: string;
   label: string;
   initial: string;
-  background: string;
-  foreground: string;
+  bgLight: string;
+  bgDark: string;
+  lightFill: string;
+  darkFill: string;
 };
 
 const PROVIDER_PRESETS: Array<{
+  key: string;
   match: RegExp;
   label: string;
   initial: string;
-  background: string;
-  foreground: string;
+  bgLight: string;
+  bgDark: string;
+  lightFill: string;
+  darkFill: string;
 }> = [
-  { match: /openai/i, label: "OpenAI", initial: "O", background: "#0b0f1a", foreground: "#f3f6ff" },
-  { match: /anthropic/i, label: "Anthropic", initial: "A", background: "#7a5c4b", foreground: "#fff5ed" },
-  { match: /google|gemini/i, label: "Google", initial: "G", background: "#1a73e8", foreground: "#ffffff" },
-  { match: /meta|llama/i, label: "Meta", initial: "M", background: "#0064e0", foreground: "#ffffff" },
-  { match: /deepseek/i, label: "DeepSeek", initial: "D", background: "#2556f2", foreground: "#ffffff" },
-  { match: /perplexity|sonar/i, label: "Perplexity", initial: "P", background: "#0f766e", foreground: "#ffffff" },
-  { match: /mistral/i, label: "Mistral", initial: "M", background: "#f97316", foreground: "#111827" },
-  { match: /x-ai|grok/i, label: "xAI", initial: "X", background: "#111827", foreground: "#f9fafb" },
+  { key: "openai", match: /openai|gpt/i, label: "OpenAI", initial: "O", bgLight: "#eef6f3", bgDark: "#0c1613", lightFill: "#0f172a", darkFill: "#d8f3e8" },
+  { key: "anthropic", match: /anthropic|claude/i, label: "Anthropic", initial: "A", bgLight: "#f5eee8", bgDark: "#1b140f", lightFill: "#623f2d", darkFill: "#f0dac9" },
+  { key: "google", match: /google|gemini|gemma/i, label: "Google", initial: "G", bgLight: "#e8f0ff", bgDark: "#0d1b3b", lightFill: "#1a56db", darkFill: "#cfe0ff" },
+  { key: "meta", match: /meta|llama/i, label: "Meta", initial: "M", bgLight: "#e8efff", bgDark: "#0d1735", lightFill: "#1144b6", darkFill: "#d6e1ff" },
+  { key: "deepseek", match: /deepseek|r1/i, label: "DeepSeek", initial: "D", bgLight: "#ecf1ff", bgDark: "#121a36", lightFill: "#3456d1", darkFill: "#d7defb" },
+  { key: "xai", match: /x\s?ai|grok/i, label: "xAI", initial: "X", bgLight: "#edf0f7", bgDark: "#151822", lightFill: "#111827", darkFill: "#e5e7eb" },
+  { key: "cohere", match: /cohere/i, label: "Cohere", initial: "C", bgLight: "#f0f7ea", bgDark: "#142011", lightFill: "#345d1d", darkFill: "#d9efcb" },
+  { key: "qwen", match: /qwen|alibaba/i, label: "Qwen", initial: "Q", bgLight: "#eef3ff", bgDark: "#131b33", lightFill: "#3556d6", darkFill: "#d9e4ff" },
+  { key: "nous", match: /nous/i, label: "Nous", initial: "N", bgLight: "#f8ecff", bgDark: "#241334", lightFill: "#7b2cbf", darkFill: "#efd6ff" },
+  { key: "01ai", match: /01\.ai|yi-/i, label: "01.AI", initial: "0", bgLight: "#ebf6ff", bgDark: "#132734", lightFill: "#0f6cbf", darkFill: "#ccecff" },
+  { key: "databricks", match: /databricks/i, label: "Databricks", initial: "D", bgLight: "#ffedea", bgDark: "#341714", lightFill: "#c2410c", darkFill: "#ffd7cf" },
+  { key: "ai21", match: /ai21/i, label: "AI21", initial: "A", bgLight: "#edf4f5", bgDark: "#142124", lightFill: "#256268", darkFill: "#d0eef2" },
+  { key: "together", match: /together/i, label: "Together", initial: "T", bgLight: "#f1f1ff", bgDark: "#191933", lightFill: "#4043c8", darkFill: "#d7d9ff" },
+  { key: "perplexity", match: /perplexity|sonar/i, label: "Perplexity", initial: "P", bgLight: "#e7f8f7", bgDark: "#102523", lightFill: "#0f766e", darkFill: "#bcebe7" },
+  { key: "mistral", match: /mistral|mixtral/i, label: "Mistral", initial: "M", bgLight: "#fff0e8", bgDark: "#331d12", lightFill: "#c25514", darkFill: "#ffd9c2" },
+  { key: "openrouter", match: /openrouter/i, label: "OpenRouter", initial: "R", bgLight: "#ecf7f5", bgDark: "#12231f", lightFill: "#0f766e", darkFill: "#bfe7df" },
+  { key: "zai", match: /z-ai|glm/i, label: "Z-AI", initial: "Z", bgLight: "#eef2ff", bgDark: "#141935", lightFill: "#3949ab", darkFill: "#d6dcff" },
+  { key: "moonshot", match: /moonshot|kimi/i, label: "Moonshot", initial: "K", bgLight: "#e9f5ff", bgDark: "#122433", lightFill: "#0a6bb5", darkFill: "#d3ecff" },
+  { key: "nvidia", match: /nvidia|nemotron/i, label: "NVIDIA", initial: "N", bgLight: "#eff9e8", bgDark: "#14260f", lightFill: "#3a7d1c", darkFill: "#d8f5c8" },
 ];
 
 export function inferProviderFromModel(modelId?: string) {
@@ -32,19 +49,25 @@ export function getProviderPresentation(modelId?: string, providerHint?: string)
   const preset = PROVIDER_PRESETS.find((item) => item.match.test(source));
   if (preset) {
     return {
+      key: preset.key,
       label: preset.label,
       initial: preset.initial,
-      background: preset.background,
-      foreground: preset.foreground,
+      bgLight: preset.bgLight,
+      bgDark: preset.bgDark,
+      lightFill: preset.lightFill,
+      darkFill: preset.darkFill,
     };
   }
 
   const provider = (providerHint || inferProviderFromModel(modelId)).trim();
   const initial = provider.slice(0, 1).toUpperCase() || "A";
   return {
+    key: provider.toLowerCase(),
     label: provider || "AI",
     initial,
-    background: "#334155",
-    foreground: "#f8fafc",
+    bgLight: "#e2e8f0",
+    bgDark: "#1e293b",
+    lightFill: "#0f172a",
+    darkFill: "#f1f5f9",
   };
 }

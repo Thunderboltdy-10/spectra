@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import type { Agent, Citation, RouterMode, StudyMode, ThinkingLevel } from "@/types";
+import type { Agent, Citation, RouteTrace, RouterMode, StudyMode, ThinkingLevel } from "@/types";
+import { appendToBuffer, createBufferState } from "@/lib/structured-stream-buffer";
 
 export type Chat = {
   _id: string;
@@ -20,11 +21,20 @@ export type Message = {
   content: string;
   enhancedContent?: string;
   attachments?: string[];
+  attachmentPreviews?: Array<{
+    name: string;
+    mimeType?: string;
+    isImage?: boolean;
+    thumbnailUrl?: string;
+  }>;
   modelUsed?: string;
   modelRequested?: string;
   whyThisResponse?: string;
+  routeTrace?: RouteTrace;
   citations?: Citation[];
 };
+
+export type FileStatus = "pending" | "uploading" | "ready" | "error";
 
 export type ModelOption = {
   _id: string;
@@ -89,6 +99,21 @@ type ChatDetailResponse = {
   messages: Message[];
 };
 
+type SendMessageOptions = {
+  regenerate?: boolean;
+  skipLocalUser?: boolean;
+  skipServerUserPersist?: boolean;
+  retryAttempt?: number;
+  chatIdOverride?: string;
+  routerModeOverride?: RouterMode;
+  manualModelOverride?: string;
+  forcedModelOverride?: string;
+  attemptedModels?: string[];
+  preservedText?: string;
+  preservedFiles?: File[];
+  localUserMessageId?: string;
+};
+
 function mergeFetchedMessages(fetched: Message[], local: Message[]) {
   const pendingLocalUsers = local.filter((item) => item.role === "user" && item._id.startsWith("local-"));
   if (pendingLocalUsers.length === 0) return fetched;
@@ -113,8 +138,47 @@ function ext(name: string) {
   return name.split(".").pop()?.toLowerCase() ?? "";
 }
 
-async function uploadComposerFiles(files: File[], agentId?: string) {
-  if (files.length === 0) return;
+function fileKey(file: File) {
+  return `${file.name}-${file.size}-${file.lastModified}`;
+}
+
+async function buildImageThumbnail(file: File): Promise<string | undefined> {
+  if (!file.type.startsWith("image/")) return undefined;
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onerror = () => resolve(undefined);
+    reader.onload = () => {
+      const image = new Image();
+      image.onload = () => {
+        const max = 320;
+        const ratio = Math.min(1, max / Math.max(image.width, image.height));
+        const width = Math.max(1, Math.round(image.width * ratio));
+        const height = Math.max(1, Math.round(image.height * ratio));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(undefined);
+          return;
+        }
+        ctx.drawImage(image, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/webp", 0.8));
+      };
+      image.onerror = () => resolve(undefined);
+      image.src = String(reader.result ?? "");
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+type UploadResponse = {
+  resourceIds?: string[];
+  results?: Array<{ file: string; resourceId?: string; status: string; error?: string }>;
+};
+
+async function uploadComposerFiles(files: File[], agentId?: string): Promise<UploadResponse> {
+  if (files.length === 0) return { resourceIds: [], results: [] };
 
   const formData = new FormData();
   formData.set("scope", "personal");
@@ -126,7 +190,7 @@ async function uploadComposerFiles(files: File[], agentId?: string) {
     formData.append("files", file);
   }
 
-  const response = await fetch(`/api/resources`, {
+  const response = await fetch("/api/resources", {
     method: "POST",
     body: formData,
   });
@@ -134,6 +198,8 @@ async function uploadComposerFiles(files: File[], agentId?: string) {
   if (!response.ok) {
     throw new Error(await response.text());
   }
+
+  return (await response.json()) as UploadResponse;
 }
 
 function isLocalProvider(value?: string) {
@@ -142,7 +208,12 @@ function isLocalProvider(value?: string) {
 }
 
 function sanitizeModelName(name: string) {
-  return name.replace(/:free/gi, "").trim();
+  return name
+    .replace(/:free/gi, "")
+    .replace(/\bfree\b/gi, "")
+    .replace(/\s*&\s*$/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 function mergeModels(catalog: ModelOption[], live: LiveModel[]) {
@@ -166,7 +237,10 @@ function mergeModels(catalog: ModelOption[], live: LiveModel[]) {
       tags: Array.from(new Set([...(existing?.tags ?? []), ...(model.tags ?? [])])),
       inputCostPerM: model.pricing.prompt ?? existing?.inputCostPerM,
       outputCostPerM: model.pricing.completion ?? existing?.outputCostPerM,
-      isFree: existing?.isFree ?? (model.id.includes(":free") || (model.pricing.prompt ?? 0) === 0),
+      isFree:
+        existing?.isFree ??
+        (model.id.includes(":free") ||
+          (model.pricing.prompt === 0 && model.pricing.completion === 0)),
     });
   }
 
@@ -214,6 +288,9 @@ export function useChatState() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [draftResponse, setDraftResponse] = useState("");
   const [fileList, setFileList] = useState<File[]>([]);
+  const [fileUploadState, setFileUploadState] = useState<
+    Record<string, { status: FileStatus; thumbnailUrl?: string; error?: string }>
+  >({});
   const [streamError, setStreamError] = useState<string | null>(null);
   const [lastFailedMessage, setLastFailedMessage] = useState<string | null>(null);
 
@@ -224,6 +301,7 @@ export function useChatState() {
   const [pinnedChatIds, setPinnedChatIds] = useState<Set<string>>(new Set());
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  const selectedChatIdRef = useRef("");
 
   const selectedAgent = useMemo(
     () => agents.find((item) => item._id === selectedAgentId),
@@ -273,6 +351,7 @@ export function useChatState() {
     const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
     const modelParam = params?.get("model") ?? null;
     const modeParam = (params?.get("mode") as StudyMode | null) ?? null;
+    const chatIdParam = params?.get("chatId") ?? null;
 
     if (modelParam) {
       setManualModel(modelParam);
@@ -288,10 +367,14 @@ export function useChatState() {
       setMode(modeParam);
     }
 
-    const firstChat = data.chats[0];
+    const firstChat = chatIdParam
+      ? data.chats.find((chat) => chat._id === chatIdParam) ?? data.chats[0]
+      : data.chats[0];
     if (firstChat?._id) {
+      selectedChatIdRef.current = firstChat._id;
       setSelectedChatId(firstChat._id);
     } else {
+      selectedChatIdRef.current = "";
       setSelectedChatId("");
       setMessages([]);
     }
@@ -308,6 +391,10 @@ export function useChatState() {
       }
     })();
   }, [loadBootstrap]);
+
+  useEffect(() => {
+    selectedChatIdRef.current = selectedChatId;
+  }, [selectedChatId]);
 
   useEffect(() => {
     if (!selectedChatId) {
@@ -338,13 +425,54 @@ export function useChatState() {
     })();
   }, [selectedChatId]);
 
+  useEffect(() => {
+    const activeKeys = new Set(fileList.map((file) => fileKey(file)));
+
+    setFileUploadState((prev) => {
+      const next: typeof prev = {};
+      for (const [key, value] of Object.entries(prev)) {
+        if (activeKeys.has(key)) next[key] = value;
+      }
+      for (const file of fileList) {
+        const key = fileKey(file);
+        if (!next[key]) {
+          next[key] = { status: "pending" };
+        }
+      }
+      return next;
+    });
+
+    void (async () => {
+      for (const file of fileList) {
+        if (!file.type.startsWith("image/")) continue;
+        const key = fileKey(file);
+        const thumbnail = await buildImageThumbnail(file);
+        if (!thumbnail) continue;
+        setFileUploadState((prev) => {
+          const current = prev[key];
+          if (!current) return prev;
+          if (current.thumbnailUrl) return prev;
+          return {
+            ...prev,
+            [key]: {
+              ...current,
+              thumbnailUrl: thumbnail,
+            },
+          };
+        });
+      }
+    })();
+  }, [fileList]);
+
   const startNewChat = useCallback(
     (agentId?: string) => {
+      selectedChatIdRef.current = "";
       setSelectedChatId("");
       setMessages([]);
       setMessage("");
       setDraftResponse("");
       setFileList([]);
+      setFileUploadState({});
       setStreamError(null);
       setLastFailedMessage(null);
       setMobileSidebarOpen(false);
@@ -355,6 +483,26 @@ export function useChatState() {
     },
     [],
   );
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem("ai-school:pinned-chats");
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as string[];
+      if (!Array.isArray(parsed)) return;
+      setPinnedChatIds(new Set(parsed.filter((id) => typeof id === "string" && id.trim().length > 0)));
+    } catch {
+      // Ignore invalid persisted state.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("ai-school:pinned-chats", JSON.stringify([...pinnedChatIds]));
+    } catch {
+      // Ignore storage errors.
+    }
+  }, [pinnedChatIds]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -417,8 +565,38 @@ export function useChatState() {
     };
   }, [selectedAgentId, startNewChat, updateExistingChatSettings]);
 
-  async function createChatIfNeeded() {
-    if (selectedChatId) return selectedChatId;
+  function pickBusyFallbackModel(exclude: string[]) {
+    const blocked = new Set(exclude.map((item) => item.trim()).filter(Boolean));
+    const spendingTier = userSpending?.tier ?? "normal";
+
+    const eligible = models
+      .filter((model) => model.modelId !== "openrouter/auto")
+      .filter((model) => !blocked.has(model.modelId))
+      .filter((model) =>
+        spendingTier === "free_only"
+          ? Boolean(model.isFree || model.modelId.includes(":free"))
+          : spendingTier === "cheap_only"
+            ? Boolean(model.isFree || (typeof model.inputCostPerM === "number" && model.inputCostPerM <= 3))
+            : true,
+      )
+      .sort((a, b) => {
+        const aFree = a.isFree || a.modelId.includes(":free");
+        const bFree = b.isFree || b.modelId.includes(":free");
+        if (aFree !== bFree) return aFree ? -1 : 1;
+        const aCost = typeof a.inputCostPerM === "number" ? a.inputCostPerM : Number.MAX_SAFE_INTEGER;
+        const bCost = typeof b.inputCostPerM === "number" ? b.inputCostPerM : Number.MAX_SAFE_INTEGER;
+        if (aCost !== bCost) return aCost - bCost;
+        return a.name.localeCompare(b.name);
+      });
+
+    return eligible[0]?.modelId;
+  }
+
+  async function createChatIfNeeded(chatIdOverride?: string) {
+    if (chatIdOverride) return chatIdOverride;
+
+    const currentChatId = selectedChatIdRef.current;
+    if (currentChatId) return currentChatId;
 
     const response = await fetch("/api/chats", {
       method: "POST",
@@ -443,6 +621,7 @@ export function useChatState() {
       updatedAt: Date.now(),
     };
 
+    selectedChatIdRef.current = data.chatId;
     setSelectedChatId(data.chatId);
     setChats((prev) => [newChat, ...prev]);
     return data.chatId;
@@ -502,40 +681,97 @@ export function useChatState() {
     });
   }
 
-  async function sendMessage(
-    override?: string,
-    options?: { regenerate?: boolean; skipLocalUser?: boolean; retryAttempt?: number },
-  ) {
+  async function sendMessage(override?: string, options?: SendMessageOptions) {
     const text = (override ?? message).trim();
-    if (!text || sending) return;
+    const retryAttempt = options?.retryAttempt ?? 0;
+    if (!text || (sending && retryAttempt === 0)) return;
+    const preservedText = options?.preservedText ?? text;
+    const preservedFiles = options?.preservedFiles ?? [...fileList];
+    const outgoingFiles = retryAttempt > 0 && options?.preservedFiles ? options.preservedFiles : [...fileList];
+    const requestedRouterMode = options?.routerModeOverride ?? routerMode;
+    const requestedManualModel = options?.manualModelOverride ?? manualModel;
+    const localUserMessageId = options?.localUserMessageId ?? `local-${Date.now()}`;
 
     setSending(true);
     setDraftResponse("");
     setStreamError(null);
+    setSearch("");
 
     abortControllerRef.current = new AbortController();
+    let activeChatId = options?.chatIdOverride;
 
     try {
-      const chatId = await createChatIfNeeded();
-      const attachedFileNames = fileList.map((file) => file.name);
+      const chatId = await createChatIfNeeded(options?.chatIdOverride);
+      activeChatId = chatId;
+      const attachedFileNames = outgoingFiles.map((file) => file.name);
       const isRegenerate = Boolean(options?.regenerate);
       const skipLocalUser = Boolean(options?.skipLocalUser);
+      const skipServerUserPersist = Boolean(options?.skipServerUserPersist);
+      const effectiveRouterMode = requestedRouterMode;
+      const effectiveManualModel = requestedManualModel;
+      let uploadedResourceIds: string[] = [];
+      const attachmentPreviews = await Promise.all(
+        outgoingFiles.map(async (file) => {
+          const key = fileKey(file);
+          const isImage = file.type.startsWith("image/");
+          const existingThumbnail = fileUploadState[key]?.thumbnailUrl;
+          const thumbnailUrl = isImage
+            ? existingThumbnail ?? (await buildImageThumbnail(file))
+            : undefined;
+          return {
+            name: file.name,
+            mimeType: file.type || undefined,
+            isImage,
+            thumbnailUrl,
+          };
+        }),
+      );
 
-      if (fileList.length > 0 && !isRegenerate) {
-        const uploadingToast = toast.loading("Uploading attachments...");
-        await uploadComposerFiles(fileList, selectedAgentId);
-        toast.success(`Uploaded ${fileList.length} attachment(s)`, { id: uploadingToast });
+      if (!isRegenerate && retryAttempt === 0) {
+        setMessage("");
+        setFileList([]);
+        setFileUploadState({});
       }
 
       if (!skipLocalUser) {
         const userMessage: Message = {
-          _id: `local-${Date.now()}`,
+          _id: localUserMessageId,
           role: "user",
           content: text,
           attachments: attachedFileNames,
+          attachmentPreviews: attachmentPreviews.length > 0 ? attachmentPreviews : undefined,
         };
         setMessages((prev) => [...prev, userMessage]);
-        setMessage("");
+      }
+
+      if (outgoingFiles.length > 0 && !isRegenerate) {
+        setFileUploadState((prev) => {
+          const next = { ...prev };
+          for (const file of outgoingFiles) {
+            const key = fileKey(file);
+            const current = next[key] ?? {};
+            next[key] = { ...current, status: "uploading", error: undefined };
+          }
+          return next;
+        });
+
+        const uploadResult = await uploadComposerFiles(outgoingFiles, selectedAgentId);
+        uploadedResourceIds = uploadResult.resourceIds ?? [];
+        const resultByFile = new Map((uploadResult.results ?? []).map((result) => [result.file, result]));
+        setFileUploadState((prev) => {
+          const next = { ...prev };
+          for (const file of outgoingFiles) {
+            const key = fileKey(file);
+            const current = next[key] ?? {};
+            const result = resultByFile.get(file.name);
+            next[key] = {
+              ...current,
+              status: result?.status === "processed" ? "ready" : result?.status === "failed" ? "error" : "ready",
+              error: result?.error,
+            };
+          }
+          return next;
+        });
       }
 
       const response = await fetch("/api/chat", {
@@ -547,11 +783,15 @@ export function useChatState() {
           mode,
           message: text,
           thinkingLevel,
-          routerMode,
-          manualModel: routerMode === "manual" ? manualModel : undefined,
+          routerMode: effectiveRouterMode,
+          manualModel: effectiveRouterMode === "manual" ? effectiveManualModel : undefined,
           usePersonalResources,
           regenerate: isRegenerate,
-          attachmentTypes: fileList.map((file) => ext(file.name)).filter(Boolean),
+          retryAttempt,
+          skipUserMessagePersist: !isRegenerate && skipServerUserPersist,
+          forcedModel: options?.forcedModelOverride,
+          attachmentTypes: outgoingFiles.map((file) => ext(file.name)).filter(Boolean),
+          attachmentResourceIds: uploadedResourceIds,
           autoSettings: {
             enhancePrompt: autoEnhancePrompt !== "off",
             autoModel,
@@ -565,13 +805,16 @@ export function useChatState() {
         signal: abortControllerRef.current.signal,
       });
 
-      if (!isRegenerate) {
-        setFileList([]);
-      }
-
       if (!response.ok || !response.body) {
         const errorText = await response.text();
-        throw new Error(errorText || "Failed to send message");
+        let normalizedError = errorText;
+        try {
+          const parsed = JSON.parse(errorText) as { error?: { message?: string }; message?: string };
+          normalizedError = parsed.error?.message ?? parsed.message ?? errorText;
+        } catch {
+          // Keep plain text error.
+        }
+        throw new Error(normalizedError || "Failed to send message");
       }
 
       const reader = response.body.getReader();
@@ -583,8 +826,10 @@ export function useChatState() {
         modelRequested?: string;
         whyThisResponse?: string;
         citations?: Citation[];
+        routeTrace?: RouteTrace;
       } = {};
       let enhancedPrompt: string | undefined;
+      let bufferState = createBufferState(mode);
 
       while (true) {
         const { done, value } = await reader.read();
@@ -612,19 +857,44 @@ export function useChatState() {
               promptEnhanced: boolean;
             };
             enhancedPrompt?: string;
+            routeTrace?: RouteTrace;
+            chatTitle?: string;
           };
 
           if (payload.type === "delta" && payload.content) {
             assistantBuffer += payload.content;
-            setDraftResponse((prev) => prev + payload.content);
+            if (bufferState.mode !== "none") {
+              bufferState = appendToBuffer(bufferState, assistantBuffer);
+              setDraftResponse(bufferState.safeContent);
+            } else {
+              setDraftResponse((prev) => prev + payload.content);
+            }
           }
 
           if (payload.type === "done") {
+            const actualModel =
+              payload.modelUsed && payload.modelUsed !== "openrouter/auto"
+                ? payload.modelUsed
+                : payload.modelRequested ?? payload.modelUsed;
+
+            const normalizedTrace =
+              payload.routeTrace && payload.modelUsed === "openrouter/auto"
+                ? {
+                    ...payload.routeTrace,
+                    toolchain: [...payload.routeTrace.toolchain, "openrouter_auto_unresolved_model"],
+                    selected: {
+                      ...payload.routeTrace.selected,
+                      reason: `${payload.routeTrace.selected.reason} (delegated model not reported by provider)`,
+                    },
+                  }
+                : payload.routeTrace;
+
             finalMeta = {
-              modelUsed: payload.modelUsed,
+              modelUsed: actualModel,
               modelRequested: payload.modelRequested,
               whyThisResponse: payload.whyThisResponse,
               citations: payload.citations,
+              routeTrace: normalizedTrace,
             };
 
             if (payload.spendingUpdate) {
@@ -635,6 +905,12 @@ export function useChatState() {
             }
             if (typeof payload.enhancedPrompt === "string" && payload.enhancedPrompt.trim()) {
               enhancedPrompt = payload.enhancedPrompt;
+            }
+            if (typeof payload.chatTitle === "string" && payload.chatTitle.trim()) {
+              const nextTitle = payload.chatTitle.trim();
+              setChats((prev) =>
+                prev.map((chat) => (chat._id === chatId ? { ...chat, title: nextTitle } : chat)),
+              );
             }
           }
 
@@ -693,23 +969,67 @@ export function useChatState() {
       if (error instanceof Error && error.name === "AbortError") {
         return;
       }
+      if (outgoingFiles.length > 0) {
+        setFileUploadState((prev) => {
+          const next = { ...prev };
+          for (const file of outgoingFiles) {
+            const key = fileKey(file);
+            const current = next[key];
+            if (!current) continue;
+            if (current.status === "uploading") {
+              next[key] = { ...current, status: "error", error: "Upload failed" };
+            }
+          }
+          return next;
+        });
+      }
       const message = error instanceof Error ? error.message : "Failed to send message";
       const isBusyError = /429|busy|rate/i.test(message);
-      if (isBusyError && (options?.retryAttempt ?? 0) < 2) {
-        toast.info("Primary model is busy. Retrying with backup route...");
-        setSending(false);
-        abortControllerRef.current = null;
-        await new Promise((resolve) => setTimeout(resolve, 900 + (options?.retryAttempt ?? 0) * 500));
-        return await sendMessage(override ?? text, {
-          regenerate: options?.regenerate,
-          skipLocalUser: true,
-          retryAttempt: (options?.retryAttempt ?? 0) + 1,
-        });
-      } else {
-        setStreamError(message);
-        setDraftResponse("");
-        setLastFailedMessage(text);
+      const allowBusyFallback = requestedRouterMode !== "manual";
+      if (isBusyError && allowBusyFallback) {
+        const attemptedModels = [
+          ...(options?.attemptedModels ?? []),
+          options?.forcedModelOverride,
+          options?.manualModelOverride,
+          requestedManualModel,
+          lastAutoResult?.modelUsed,
+        ].filter((value): value is string => Boolean(value && value.trim()));
+        const backupModel =
+          pickBusyFallbackModel(attemptedModels) ||
+          (!attemptedModels.includes("openrouter/auto") ? "openrouter/auto" : undefined);
+        const switchingModel = Boolean(backupModel) && options?.forcedModelOverride !== backupModel;
+        const canRetryWithNewModel = Boolean(switchingModel && backupModel);
+        const maxBusyRetries = Math.max(
+          3,
+          Math.min(12, models.filter((model) => model.modelId !== "openrouter/auto").length),
+        );
+
+        if (canRetryWithNewModel && retryAttempt < maxBusyRetries) {
+          abortControllerRef.current = null;
+          await new Promise((resolve) => setTimeout(resolve, 900 + retryAttempt * 500));
+          return await sendMessage(override ?? text, {
+            regenerate: options?.regenerate,
+            skipLocalUser: true,
+            skipServerUserPersist: true,
+            retryAttempt: retryAttempt + 1,
+            chatIdOverride: activeChatId,
+            routerModeOverride: requestedRouterMode,
+            manualModelOverride: requestedManualModel,
+            forcedModelOverride: backupModel,
+            attemptedModels,
+            preservedText,
+            preservedFiles,
+            localUserMessageId,
+          });
+        }
       }
+      setMessages((prev) => prev.filter((item) => item._id !== localUserMessageId));
+      setMessage(preservedText);
+      setFileList(preservedFiles);
+      setFileUploadState({});
+      setStreamError(message);
+      setDraftResponse("");
+      setLastFailedMessage(preservedText);
     } finally {
       setSending(false);
       abortControllerRef.current = null;
@@ -718,7 +1038,11 @@ export function useChatState() {
 
   async function retryLastMessage() {
     if (!lastFailedMessage) return;
-    await sendMessage(lastFailedMessage, { retryAttempt: 1, skipLocalUser: true });
+    await sendMessage(lastFailedMessage, {
+      retryAttempt: 0,
+      skipLocalUser: true,
+      skipServerUserPersist: true,
+    });
   }
 
   async function regenerateLastResponse() {
@@ -771,6 +1095,7 @@ export function useChatState() {
     messages,
     draftResponse,
     fileList,
+    fileUploadState,
     streamError,
     search,
     filteredChats,

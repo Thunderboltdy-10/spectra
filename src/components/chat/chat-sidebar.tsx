@@ -8,7 +8,6 @@ import { formatDistanceToNow } from "date-fns";
 import {
   BarChart3,
   Bot,
-  Check,
   ChevronLeft,
   ChevronRight,
   Compass,
@@ -31,8 +30,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ALL_MODES, getModeConfig } from "@/lib/modes";
-import type { StudyMode } from "@/types";
+import { getModeConfig } from "@/lib/modes";
 import type { Chat, UserSpending } from "@/hooks/use-chat-state";
 
 type GroupedChats = {
@@ -40,11 +38,13 @@ type GroupedChats = {
   chats: Chat[];
 };
 
+const EMPTY_PINNED_IDS = new Set<string>();
+const MONTHLY_HARD_LIMIT_CENTS = 900;
+
 type ChatSidebarProps = {
   chats: Chat[];
   selectedChatId: string;
   search: string;
-  mode: StudyMode;
   collapsed: boolean;
   onToggleCollapse: () => void;
   onSearchChange: (value: string) => void;
@@ -53,8 +53,8 @@ type ChatSidebarProps = {
   onDeleteChat: (chatId: string) => void;
   onRenameChat: (chatId: string, title: string) => void;
   onOpenSettings: () => void;
-  onModeChange: (mode: StudyMode) => void;
   onPinChat?: (chatId: string) => void;
+  pinnedChatIds?: Set<string>;
   role: "student" | "teacher" | "admin";
   userSpending: UserSpending | null;
   userMemorySummary?: string;
@@ -98,11 +98,16 @@ function initials(name: string) {
     .toUpperCase();
 }
 
+function spendingTierLabel(tier?: UserSpending["tier"]) {
+  if (tier === "free_only") return "Budget only";
+  if (tier === "cheap_only") return "Cheap only";
+  return "Normal";
+}
+
 export function ChatSidebar({
   chats,
   selectedChatId,
   search,
-  mode,
   collapsed,
   onToggleCollapse,
   onSearchChange,
@@ -111,8 +116,8 @@ export function ChatSidebar({
   onDeleteChat,
   onRenameChat,
   onOpenSettings,
-  onModeChange,
   onPinChat,
+  pinnedChatIds,
   role,
   userSpending,
   userMemorySummary,
@@ -122,15 +127,16 @@ export function ChatSidebar({
   const { signOut, openUserProfile } = useClerk();
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
-  const [pinnedChats] = useState<Set<string>>(new Set());
-  const [showModeMenu, setShowModeMenu] = useState(false);
+  const pinnedSet = pinnedChatIds ?? EMPTY_PINNED_IDS;
 
-  const grouped = useMemo(() => groupChats(chats), [chats]);
-  const pinned = useMemo(() => chats.filter((chat) => pinnedChats.has(chat._id)), [chats, pinnedChats]);
-  const modeConfig = getModeConfig(mode);
-  const spendRatio = userSpending
-    ? Math.min(userSpending.totalCostCents / Math.max(userSpending.totalCostCents, 1200), 1)
-    : 0;
+  const pinned = useMemo(() => chats.filter((chat) => pinnedSet.has(chat._id)), [chats, pinnedSet]);
+  const grouped = useMemo(
+    () => groupChats(chats.filter((chat) => !pinnedSet.has(chat._id))),
+    [chats, pinnedSet],
+  );
+  const spentCents = userSpending?.totalCostCents ?? 0;
+  const spendRatio = Math.min(spentCents / MONTHLY_HARD_LIMIT_CENTS, 1);
+  const spendingTier = spendingTierLabel(userSpending?.tier);
 
   const navItems = [
     { href: "/", label: "Chat", icon: Sparkles },
@@ -198,7 +204,7 @@ export function ChatSidebar({
         </Button>
       </div>
 
-      <div className="mb-3 flex items-center gap-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1">
+      <div className="mb-3 space-y-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5">
         {navItems.map((item) => {
           const Icon = item.icon;
           const active = pathname === item.href;
@@ -207,13 +213,14 @@ export function ChatSidebar({
               key={item.href}
               href={item.href}
               title={item.label}
-              className={`inline-flex h-8 w-8 items-center justify-center rounded-lg transition ${
+              className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition ${
                 active
                   ? "bg-[var(--bg-primary)] text-[var(--text-primary)]"
                   : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
               }`}
             >
               <Icon className="h-4 w-4" />
+              <span>{item.label}</span>
             </Link>
           );
         })}
@@ -223,44 +230,6 @@ export function ChatSidebar({
         <Plus className="h-4 w-4" />
         New chat
       </Button>
-
-      <div className="mb-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2">
-        <div className="flex items-center justify-between rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-1.5">
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setShowModeMenu((prev) => !prev)}
-              className="inline-flex items-center gap-2 rounded-md px-1 py-0.5 text-xs font-medium text-[var(--text-primary)]"
-            >
-              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: modeConfig.color }} />
-              <span>{modeConfig.label}</span>
-            </button>
-            {showModeMenu && (
-              <div className="absolute left-0 top-full z-20 mt-1 w-56 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[var(--shadow-soft)]">
-                {ALL_MODES.map((item) => {
-                  const config = getModeConfig(item.key);
-                  const isActive = item.key === mode;
-                  return (
-                    <button
-                      key={item.key}
-                      type="button"
-                      onClick={() => {
-                        onModeChange(item.key);
-                        setShowModeMenu(false);
-                      }}
-                      className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs hover:bg-[var(--bg-hover)]"
-                    >
-                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: config.color }} />
-                      <span className="flex-1 truncate">{config.label}</span>
-                      {isActive ? <Check className="h-3 w-3 text-[var(--accent)]" /> : null}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         <div className="mb-3 relative">
@@ -414,12 +383,17 @@ export function ChatSidebar({
           </p>
         )}
 
+        <div className="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+          <span>Usage</span>
+          <span>{spendingTier}</span>
+        </div>
         <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
           <div
             className="h-full rounded-full bg-[var(--gradient-brand)] transition-all"
             style={{ width: `${Math.max(2, spendRatio * 100)}%` }}
           />
         </div>
+        <p className="mb-3 text-[11px] text-[var(--text-secondary)]">Monthly budget indicator</p>
 
         <div className="flex items-center gap-2.5">
           <DropdownMenu>

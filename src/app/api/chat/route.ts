@@ -11,7 +11,11 @@ import {
   markerVerificationPrompt,
   tutorGate,
 } from "@/lib/prompts/policy";
-import { summarizeWhyResponse, toOpenRouterMessages } from "@/lib/orchestrator/compose";
+import {
+  extractCitationsFromText,
+  summarizeWhyResponse,
+  toOpenRouterMessages,
+} from "@/lib/orchestrator/compose";
 import { MODEL_CONFIG, ROUTER_FALLBACKS } from "@/lib/model-config";
 import {
   openRouterChatCompletion,
@@ -20,6 +24,10 @@ import {
 } from "@/lib/openrouter";
 import { runAutoSettingsPipeline } from "@/lib/auto-settings";
 import { safeStudyMode } from "@/lib/contracts/studyModes";
+import { createRequestLogger } from "@/lib/logging";
+import { normalizeAttachments } from "@/lib/attachments/normalizer";
+import { gateCapabilities } from "@/lib/attachments/capability-gate";
+import { runVisionPrepass } from "@/lib/attachments/vision-prepass";
 import type { ChatMessage, Citation, StudyMode } from "@/types";
 
 export const runtime = "nodejs";
@@ -33,9 +41,13 @@ type ChatRequestBody = {
   thinkingLevel: "low" | "medium" | "high";
   routerMode: "auto" | "manual" | "openrouter_auto";
   manualModel?: string;
+  forcedModel?: string;
   usePersonalResources: boolean;
   regenerate?: boolean;
+  retryAttempt?: number;
+  skipUserMessagePersist?: boolean;
   attachmentTypes?: string[];
+  attachmentResourceIds?: string[];
   autoSettings?: {
     enhancePrompt: boolean;
     autoModel: boolean;
@@ -110,6 +122,7 @@ function toChatMessageShape(messages: Array<Record<string, unknown>>): ChatMessa
     usageOut: typeof message.usageOut === "number" ? message.usageOut : undefined,
     verificationPassed:
       typeof message.verificationPassed === "boolean" ? message.verificationPassed : undefined,
+    routeTrace: message.routeTrace as ChatMessage["routeTrace"],
     createdAt: Number(message.createdAt ?? Date.now()),
   }));
 }
@@ -146,88 +159,56 @@ function inferCitations(
     score?: number;
   }>,
   searchUrls: string[],
+  attachmentFallback: Citation[] = [],
 ): Citation[] {
-  const parsed: Citation[] = [];
-  const lines = response.split("\n");
-  const numericRefs = Array.from(response.matchAll(/\[(\d{1,2})\]/g)).map((match) => Number(match[1]));
+  const fallback = retrieved.map((source) => ({
+    resourceId: source.resourceId,
+    filename: source.filename,
+    page: source.page,
+    sourceType: source.sourceType,
+    snippet: (source as { text?: string }).text?.slice(0, 220),
+  }));
 
-  if (numericRefs.length > 0) {
-    for (const ref of numericRefs) {
-      const idx = ref - 1;
-      if (idx < 0) continue;
-      const source = retrieved[idx];
-      if (!source) continue;
-      parsed.push({
-        resourceId: source.resourceId,
-        filename: source.filename,
-        page: source.page,
-        sourceType: source.sourceType,
-      });
-    }
-  }
-
-  for (const line of lines) {
-    const hasCitation = /\[[^\]]+\]/.test(line);
-    if (!hasCitation) continue;
-
-    for (const source of retrieved) {
-      if (line.toLowerCase().includes(source.filename.toLowerCase())) {
-        parsed.push({
-          resourceId: source.resourceId,
-          filename: source.filename,
-          page: source.page,
-          sourceType: source.sourceType,
-        });
-      }
-    }
-
-    if (line.toLowerCase().includes("general knowledge")) {
-      parsed.push({ filename: "general knowledge", sourceType: "general" });
-    }
-  }
-
+  const inferred = extractCitationsFromText(response, fallback);
+  const merged = [...inferred];
   for (const url of searchUrls) {
-    parsed.push({
+    merged.push({
       filename: url.replace(/^https?:\/\//, "").split("/")[0] ?? "web",
       sourceType: "search",
       url,
     });
   }
 
-  if (parsed.length > 0) {
-    const unique = new Map<string, Citation>();
-    for (const item of parsed) {
-      const key = `${item.sourceType}:${item.resourceId ?? ""}:${item.url ?? ""}:${item.filename}:${item.page ?? ""}`;
-      if (!unique.has(key)) unique.set(key, item);
+  const unique = new Map<string, Citation>();
+  for (const item of merged) {
+    const key = `${item.sourceType}:${item.resourceId ?? ""}:${item.url ?? ""}:${item.filename}`;
+    const existing = unique.get(key);
+    if (!existing) {
+      unique.set(key, item);
+      continue;
     }
-    return [...unique.values()].slice(0, 8);
-  }
-
-  if (searchUrls.length > 0) {
-    return searchUrls.map((url) => ({
-      filename: url,
-      sourceType: "search",
-      url,
-    }));
-  }
-
-  if (retrieved.length > 0) {
-    const relevant = retrieved
-      .filter((source) => (source.score ?? 0) > 0.5)
-      .slice(0, 6);
-    const sourceList = relevant.length > 0 ? relevant : [];
-    if (sourceList.length === 0) {
-      return [{ filename: "general knowledge", sourceType: "general" }];
+    if (typeof existing.page !== "number" && typeof item.page === "number") {
+      unique.set(key, { ...existing, page: item.page });
     }
-    return sourceList.map((source) => ({
-      resourceId: source.resourceId,
-      filename: source.filename,
-      page: source.page,
-      sourceType: source.sourceType,
-    }));
   }
 
-  return [{ filename: "general knowledge", sourceType: "general" }];
+  if (unique.size === 0 && attachmentFallback.length > 0) {
+    for (const attachment of attachmentFallback) {
+      const key = `${attachment.sourceType}:${attachment.resourceId ?? ""}:${attachment.url ?? ""}:${attachment.filename}`;
+      if (!unique.has(key)) {
+        unique.set(key, attachment);
+      }
+    }
+  }
+
+  return [...unique.values()].slice(0, 8);
+}
+
+function shouldInjectMemory(message: string) {
+  const normalized = message.toLowerCase();
+  return /(i\b|my\b|me\b|struggle|goal|preference|prefer|weakness|improve|last time|again|remember)/i.test(
+    normalized,
+  );
 }
 
 function mergeMemoryEntries(existing: MemoryEntry[], incoming: MemoryEntry[]) {
@@ -303,7 +284,7 @@ async function maybeGenerateTitle(params: {
   actorClerkId: string;
   userMessage: string;
   assistantMessage: string;
-}) {
+}) : Promise<string | undefined> {
   try {
     const completion = await openRouterChatCompletion({
       model: MODEL_CONFIG.tutorFast,
@@ -323,22 +304,24 @@ async function maybeGenerateTitle(params: {
     });
 
     const raw = completion.choices?.[0]?.message?.content?.trim();
-    if (!raw) return;
+    if (!raw) return undefined;
 
     const title = raw
       .replace(/[\n\r]+/g, " ")
       .replace(/^['\"`\s]+|['\"`\s]+$/g, "")
       .slice(0, 80);
 
-    if (!title) return;
+    if (!title) return undefined;
 
     await convexMutation("chats:setChatTitle", {
       actorClerkId: params.actorClerkId,
       chatId: params.chatId,
       title,
     });
+    return title;
   } catch {
     // Non-blocking enhancement.
+    return undefined;
   }
 }
 
@@ -474,7 +457,9 @@ async function maybeSearchWeb(message: string, thinkingLevel: "low" | "medium" |
 
 export async function POST(request: NextRequest) {
   return withRouteErrorHandling(async () => {
+    const requestStartedAt = Date.now();
     const actor = await requireActor();
+    const logger = createRequestLogger(request).child({ userId: actor.clerkId });
 
     const body = (await request.json().catch(() => null)) as ChatRequestBody | null;
     if (!body) {
@@ -500,6 +485,11 @@ export async function POST(request: NextRequest) {
         message: "Message cannot be empty.",
       });
     }
+    logger.info("chat request started", {
+      mode: body.mode,
+      routerMode: body.routerMode,
+      hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
+    });
 
     let selectedAgent: AgentSnapshot | undefined;
     if (body.agentId) {
@@ -554,6 +544,12 @@ export async function POST(request: NextRequest) {
       thinkingMode: autoSettings.thinkingMode,
       searchMode: autoSettings.searchMode,
     });
+    logger.info("auto-settings complete", {
+      promptEnhanced: auto.promptEnhanced,
+      searchEnabled: auto.searchEnabled,
+      promptCategory: auto.promptCategory,
+      complexity: auto.complexity,
+    });
 
     const effectiveMode = safeMode;
 
@@ -574,13 +570,22 @@ export async function POST(request: NextRequest) {
         ).chatId;
 
     const isRegenerate = Boolean(body.regenerate && body.chatId);
+    const shouldPersistUserMessage = !isRegenerate && !body.skipUserMessagePersist;
+    const rollbackPersistedUserMessage = async () => {
+      if (!shouldPersistUserMessage) return;
+      await convexMutation("chats:deleteLastUserMessage", {
+        actorClerkId: actor.clerkId,
+        chatId,
+        expectedContent: normalizedMessage,
+      }).catch(() => {});
+    };
 
     if (isRegenerate) {
       await convexMutation("chats:deleteLastAssistantMessage", {
         actorClerkId: actor.clerkId,
         chatId,
       });
-    } else {
+    } else if (shouldPersistUserMessage) {
       await convexMutation("chats:appendMessage", {
         actorClerkId: actor.clerkId,
         chatId,
@@ -596,6 +601,7 @@ export async function POST(request: NextRequest) {
         usageIn: undefined,
         usageOut: undefined,
         verificationPassed: undefined,
+        routeTrace: undefined,
       });
     }
 
@@ -702,12 +708,16 @@ export async function POST(request: NextRequest) {
           }>;
           sourceBlock: string;
         };
+        logger.info("RAG retrieval complete", {
+          sourceCount: retrieval.citations.length,
+        });
       }
     } catch {
       retrieval = {
         citations: [],
         sourceBlock: "Retrieval unavailable. Continue with general instructional support.",
       };
+      logger.warn("RAG retrieval failed; using fallback source block");
     }
 
     let searchBlock = "";
@@ -717,6 +727,7 @@ export async function POST(request: NextRequest) {
       const web = await maybeSearchWeb(auto.message, auto.thinkingLevel);
       searchBlock = web.text;
       searchUrls = web.urls;
+      logger.info("web search complete", { urlCount: searchUrls.length });
     }
 
     const route = chooseModelRoute({
@@ -731,8 +742,107 @@ export async function POST(request: NextRequest) {
       studentSeemsStuck: effectiveMode === "tutor" && attemptStats.attemptCount >= 2,
       spendingTier: budget.tier,
       needsSearch: auto.searchEnabled,
+      needsRag: retrieval.citations.length > 0,
+      promptEnhanced: auto.promptEnhanced,
       promptCategory: auto.promptCategory,
     });
+    const manualLockRequested = body.routerMode === "manual" && Boolean(body.manualModel) && !body.forcedModel;
+    if (manualLockRequested && body.manualModel && route.primaryModel !== body.manualModel) {
+      await rollbackPersistedUserMessage();
+      return jsonError(409, {
+        code: "MANUAL_MODEL_RESTRICTED",
+        message: "Selected model cannot be used under current tier limits. Choose a budget-safe model.",
+        retryable: false,
+      });
+    }
+    logger.info("routing complete", {
+      primaryModel: route.primaryModel,
+      fallbackCount: route.fallbackModels.length,
+      reason: route.reason,
+    });
+
+    if (body.forcedModel && body.forcedModel !== route.primaryModel) {
+      const originalPrimary = route.primaryModel;
+      route.primaryModel = body.forcedModel;
+      route.fallbackModels = [
+        originalPrimary,
+        ...route.fallbackModels.filter(
+          (candidate) => candidate !== body.forcedModel && candidate !== originalPrimary,
+        ),
+      ];
+      route.reason = `${route.reason}; retry override after temporary model saturation`;
+      route.trace.selected = {
+        modelId: route.primaryModel,
+        reason: route.reason,
+      };
+      route.trace.candidates.unshift({
+        modelId: body.forcedModel,
+        allowed: true,
+        score: 0.95,
+        reason: "Retry override selected to avoid repeating a saturated model",
+      });
+      route.trace.toolchain.push("retry_model_override");
+    }
+
+    if (retrieval.citations.length > 0) route.trace.toolchain.push("rag");
+    if (auto.searchEnabled) route.trace.toolchain.push("web_search");
+    if (auto.promptEnhanced) route.trace.toolchain.push("prompt_enhancement");
+
+    const attachments = await normalizeAttachments({
+      actorClerkId: actor.clerkId,
+      resourceIds: body.attachmentResourceIds ?? [],
+      convexQuery,
+    });
+    const attachmentCitations = attachments.prepared.map((attachment) => ({
+      resourceId: attachment.resourceId,
+      filename: attachment.filename,
+      sourceType: "personal" as const,
+    }));
+
+    if (attachments.requiresVision) {
+      route.trace.toolchain.push("vision");
+    }
+
+    const capability = gateCapabilities({
+      selectedModel: route.primaryModel,
+      requiresVision: attachments.requiresVision,
+      fallbackModels: route.fallbackModels,
+    });
+
+    if (capability.modelSwitched) {
+      if (manualLockRequested) {
+        await rollbackPersistedUserMessage();
+        return jsonError(409, {
+          code: "MANUAL_MODEL_CAPABILITY_MISMATCH",
+          message: "Selected model cannot process these attachments. Choose a compatible model or remove files.",
+          retryable: false,
+        });
+      }
+      const originalPrimary = route.primaryModel;
+      route.primaryModel = capability.finalModel;
+      route.fallbackModels = [
+        originalPrimary,
+        ...route.fallbackModels.filter(
+          (candidate) => candidate !== capability.finalModel && candidate !== originalPrimary,
+        ),
+      ];
+      route.reason = `${route.reason}; switched to vision-capable model`;
+      route.trace.selected = {
+        modelId: route.primaryModel,
+        reason: route.reason,
+      };
+      route.trace.toolchain.push("vision_model_switch");
+    }
+
+    let imageDescriptionBlock = "";
+    if (capability.requiresPrepass && capability.prepassModel && attachments.imageContentBlocks.length > 0) {
+      imageDescriptionBlock = await runVisionPrepass({
+        imageContentBlocks: attachments.imageContentBlocks,
+        userMessage: auto.message,
+        model: capability.prepassModel,
+      });
+      route.trace.toolchain.push("vision_prepass");
+    }
 
     const primaryModel = route.primaryModel;
     const modelSupportsExtendedThinking = /reason|r1|o3|o4|claude|gemini|sonar-pro/i.test(primaryModel);
@@ -744,7 +854,7 @@ export async function POST(request: NextRequest) {
 
     const gate = tutorGate(attemptStats.attemptCount, attemptStats.hasReflection);
 
-    const systemPrompt = buildSystemPrompt({
+    const systemPromptParts = [buildSystemPrompt({
       mode: effectiveMode,
       strictness: "medium",
       guidelines: {
@@ -766,17 +876,37 @@ export async function POST(request: NextRequest) {
             guidelinesTopicMap: selectedAgent.guidelinesTopicMap,
           }
         : undefined,
-      memoryProfile: userMemory.rawMemoryText,
+      memoryProfile: shouldInjectMemory(auto.message) ? userMemory.rawMemoryText : undefined,
       contextSummary: existingSummary,
       searchBlock,
-    });
+    })];
+
+    if (attachments.quickExtractBlock) {
+      systemPromptParts.push(attachments.quickExtractBlock);
+    }
+    if (imageDescriptionBlock) {
+      systemPromptParts.push(`IMAGE DESCRIPTION:\n${imageDescriptionBlock}`);
+    }
 
     const messages = [
-      { role: "system", content: systemPrompt },
-      ...toOpenRouterMessages(historyForModel),
+      { role: "system", content: systemPromptParts.join("\n\n") },
+      ...toOpenRouterMessages(
+        historyForModel,
+        capability.requiresPrepass ? undefined : attachments.imageContentBlocks,
+      ),
     ];
 
     const shouldVerify = effectiveMode === "marker" && Boolean(orgSettings.org?.verifyMarkerPassEnabled);
+    if (shouldVerify) {
+      route.trace.toolchain.push("marker_verification");
+    }
+    if (manualLockRequested) {
+      route.fallbackModels = [];
+    }
+    logger.info("streaming start", {
+      model: route.primaryModel,
+      shouldVerify,
+    });
 
     const stream = new TransformStream();
     const writer = stream.writable.getWriter();
@@ -790,16 +920,22 @@ export async function POST(request: NextRequest) {
       let responseText = "";
       let modelUsed = primaryModel;
       const modelRequested = primaryModel;
+      const fallbackModels = manualLockRequested ? [] : route.fallbackModels;
       let usageIn = 0;
       let usageOut = 0;
       let verificationPassed: boolean | undefined;
+      let assistantPersisted = false;
+      const onFallback = (event: { fromModel: string; toModel: string; error: string; attemptIndex: number }) => {
+        route.trace.fallbacks.push(event);
+      };
 
       try {
         if (!shouldVerify) {
           for await (const event of openRouterStreamChat({
             model: primaryModel,
-            fallbackModels: route.fallbackModels,
+            fallbackModels,
             messages,
+            onFallback,
           })) {
             if (event.type === "delta") {
               responseText += event.content;
@@ -817,8 +953,9 @@ export async function POST(request: NextRequest) {
         } else {
           const initial = await openRouterChatCompletion({
             model: primaryModel,
-            fallbackModels: route.fallbackModels,
+            fallbackModels,
             messages,
+            onFallback,
           });
 
           responseText = initial.choices?.[0]?.message?.content ?? "";
@@ -835,24 +972,29 @@ export async function POST(request: NextRequest) {
                 { role: "user", content: markerVerificationPrompt(responseText) },
               ],
               temperature: 0,
+              onFallback,
             });
 
             const parsed = parseVerificationJson(verify.choices?.[0]?.message?.content ?? "{}");
             verificationPassed = parsed.pass;
+            logger.info("marker verification complete", {
+              verificationPassed,
+            });
 
             if (!parsed.pass) {
               const retry = await openRouterChatCompletion({
                 model: primaryModel,
-                fallbackModels: route.fallbackModels,
+                fallbackModels,
                 messages: [
                   ...messages,
                   {
                     role: "system",
                     content:
-                      "Regenerate with stronger citation discipline and explicit rubric scoring. Ensure key claims map to provided sources or general knowledge.",
+                      "Regenerate with stronger citation discipline and explicit rubric scoring. Ensure key claims map to provided sources.",
                   },
                 ],
                 temperature: 0.1,
+                onFallback,
               });
 
               responseText = retry.choices?.[0]?.message?.content ?? responseText;
@@ -873,8 +1015,22 @@ export async function POST(request: NextRequest) {
             "\n\nPolicy correction: citation and study-mode structure tightened to match requirements.";
         }
 
-        const citations = inferCitations(responseText, retrieval.citations, searchUrls);
+        route.trace.toolchain = [...new Set(route.trace.toolchain)];
+
+        const citations = inferCitations(
+          responseText,
+          retrieval.citations,
+          searchUrls,
+          attachmentCitations,
+        );
         const whyThisResponse = summarizeWhyResponse(effectiveMode, route.reason);
+        route.trace.totalDurationMs = Date.now() - requestStartedAt;
+        logger.info("streaming complete", {
+          modelUsed,
+          usageIn,
+          usageOut,
+          fallbackCount: route.trace.fallbacks.length,
+        });
 
         const appended = (await convexMutation("chats:appendMessage", {
           actorClerkId: actor.clerkId,
@@ -889,12 +1045,14 @@ export async function POST(request: NextRequest) {
           usageIn,
           usageOut,
           verificationPassed,
+          routeTrace: route.trace,
         })) as { messageId: string };
+        assistantPersisted = true;
 
         const pricing = (await convexQuery("models:getModelPricing", {
           actorClerkId: actor.clerkId,
           modelId: modelUsed,
-        })) as { inputCostPerM: number; outputCostPerM: number };
+        })) as { inputCostPerM?: number; outputCostPerM?: number; isFree?: boolean };
 
         await convexMutation("usage:recordUsageWithCost", {
           actorClerkId: actor.clerkId,
@@ -940,8 +1098,9 @@ export async function POST(request: NextRequest) {
         }).catch(() => {});
 
         const assistantCount = history.filter((message) => message.role === "assistant").length;
+        let generatedTitle: string | undefined;
         if (assistantCount === 0) {
-          void maybeGenerateTitle({
+          generatedTitle = await maybeGenerateTitle({
             chatId,
             actorClerkId: actor.clerkId,
             userMessage: normalizedMessage,
@@ -958,6 +1117,7 @@ export async function POST(request: NextRequest) {
           whyThisResponse,
           citations,
           verificationPassed,
+          routeTrace: route.trace,
           spendingUpdate,
           autoResult: {
             modelUsed,
@@ -966,6 +1126,7 @@ export async function POST(request: NextRequest) {
             promptEnhanced: auto.promptEnhanced,
           },
           enhancedPrompt: auto.promptEnhanced ? auto.message : undefined,
+          chatTitle: generatedTitle,
           agent:
             selectedAgent && selectedAgent._id
               ? {
@@ -975,7 +1136,22 @@ export async function POST(request: NextRequest) {
                 }
               : undefined,
         });
+        logger.info("chat done event emitted", {
+          chatId,
+          messageId: appended.messageId,
+        });
       } catch (error) {
+        logger.error(
+          "chat stream failed",
+          error instanceof Error ? error : new Error("Unknown stream failure"),
+        );
+        if (shouldPersistUserMessage && !assistantPersisted) {
+          await convexMutation("chats:deleteLastUserMessage", {
+            actorClerkId: actor.clerkId,
+            chatId,
+            expectedContent: normalizedMessage,
+          }).catch(() => {});
+        }
         await send({
           type: "error",
           error: {

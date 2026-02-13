@@ -33,16 +33,22 @@ export const MODEL_COST_BLOCK_LIST = new Set<string>([
 ]);
 
 export const ROUTER_FALLBACKS: Record<string, string[]> = {
-  [MODEL_CONFIG.tutorFast]: [MODEL_CONFIG.glmAir, MODEL_CONFIG.marker],
+  [MODEL_CONFIG.tutorFast]: [MODEL_CONFIG.marker, MODEL_CONFIG.gptOss],
   [MODEL_CONFIG.tutorHigh]: [MODEL_CONFIG.marker, MODEL_CONFIG.tutorFast],
-  [MODEL_CONFIG.marker]: [MODEL_CONFIG.tutorFast, MODEL_CONFIG.glmAir],
+  [MODEL_CONFIG.marker]: [MODEL_CONFIG.tutorFast, MODEL_CONFIG.gptOss],
   [MODEL_CONFIG.multimodal]: [MODEL_CONFIG.tutorFast, MODEL_CONFIG.marker],
-  [MODEL_CONFIG.autoRouter]: [MODEL_CONFIG.tutorFast, MODEL_CONFIG.multimodal],
+  [MODEL_CONFIG.autoRouter]: [
+    MODEL_CONFIG.tutorFast,
+    MODEL_CONFIG.tutorHigh,
+    MODEL_CONFIG.gptOss,
+    MODEL_CONFIG.marker,
+    MODEL_CONFIG.smartCheap,
+  ],
   [MODEL_CONFIG.glmAir]: [MODEL_CONFIG.tutorFast, MODEL_CONFIG.marker],
   [MODEL_CONFIG.gptOss]: [MODEL_CONFIG.tutorHigh, MODEL_CONFIG.marker],
 
   [MODEL_CONFIG.smartPaid]: [MODEL_CONFIG.smartCheap, MODEL_CONFIG.tutorFast],
-  [MODEL_CONFIG.smartCheap]: [MODEL_CONFIG.tutorFast, MODEL_CONFIG.glmAir],
+  [MODEL_CONFIG.smartCheap]: [MODEL_CONFIG.tutorFast, MODEL_CONFIG.marker],
   [MODEL_CONFIG.reasoningPaid]: [MODEL_CONFIG.smartPaid, MODEL_CONFIG.tutorHigh],
   [MODEL_CONFIG.searchFast]: [MODEL_CONFIG.searchDeep, MODEL_CONFIG.tutorFast],
   [MODEL_CONFIG.searchDeep]: [MODEL_CONFIG.searchFast, MODEL_CONFIG.reasoningPaid],

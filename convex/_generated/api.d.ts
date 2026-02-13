@@ -11,8 +11,10 @@
 import type * as admin from "../admin.js";
 import type * as agents from "../agents.js";
 import type * as analytics from "../analytics.js";
+import type * as catalogSync from "../catalogSync.js";
 import type * as chats from "../chats.js";
 import type * as constants from "../constants.js";
+import type * as crons from "../crons.js";
 import type * as helpers from "../helpers.js";
 import type * as memory from "../memory.js";
 import type * as models from "../models.js";
@@ -34,8 +36,10 @@ declare const fullApi: ApiFromModules<{
   admin: typeof admin;
   agents: typeof agents;
   analytics: typeof analytics;
+  catalogSync: typeof catalogSync;
   chats: typeof chats;
   constants: typeof constants;
+  crons: typeof crons;
   helpers: typeof helpers;
   memory: typeof memory;
   models: typeof models;

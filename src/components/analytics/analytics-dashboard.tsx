@@ -32,55 +32,6 @@ type AnalyticsDashboardProps = {
   classData: AnalyticsRow[];
 };
 
-const TOPIC_STOPWORDS = new Set([
-  "the",
-  "and",
-  "for",
-  "with",
-  "about",
-  "from",
-  "this",
-  "that",
-  "into",
-  "your",
-  "their",
-  "what",
-  "when",
-  "where",
-  "how",
-  "why",
-  "latest",
-  "please",
-]);
-
-function toTitleCase(value: string) {
-  return value
-    .split(" ")
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ");
-}
-
-function synthesizeTopics(topics: string[]) {
-  const counts = new Map<string, number>();
-  for (const raw of topics) {
-    const normalized = raw
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, " ")
-      .split(/\s+/)
-      .filter((token) => token.length >= 3 && !TOPIC_STOPWORDS.has(token))
-      .slice(0, 3)
-      .join(" ");
-    const key = normalized || raw.trim().toLowerCase();
-    if (!key) continue;
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 18)
-    .map(([topic]) => toTitleCase(topic));
-}
-
 function formatHour(hour: number) {
   const suffix = hour >= 12 ? "PM" : "AM";
   const normalized = hour % 12 === 0 ? 12 : hour % 12;
@@ -106,7 +57,7 @@ function aggregateRows(rows: AnalyticsRow[]) {
   let totalSessions = 0;
   let totalMessages = 0;
   let totalTokens = 0;
-  const allTopics = new Set<string>();
+  const allTopics: string[] = [];
   const modeCounts: Record<string, number> = {};
   const allScores: number[] = [];
 
@@ -114,7 +65,7 @@ function aggregateRows(rows: AnalyticsRow[]) {
     totalSessions += row.sessionsCount;
     totalMessages += row.messagesCount;
     totalTokens += row.totalTokensUsed;
-    for (const t of row.topicsExplored) allTopics.add(t);
+    allTopics.push(...row.topicsExplored);
     for (const m of row.modesUsed) modeCounts[m] = (modeCounts[m] ?? 0) + 1;
     allScores.push(...row.quizScores);
   }
@@ -123,13 +74,30 @@ function aggregateRows(rows: AnalyticsRow[]) {
     ? Math.round(allScores.reduce((a, b) => a + b, 0) / allScores.length)
     : null;
 
-  return { totalSessions, totalMessages, totalTokens, topics: [...allTopics], modeCounts, avgScore, daysActive: rows.length };
+  const uniqueTopicCount = new Set(
+    allTopics.map((topic) => topic.trim().toLowerCase()).filter((topic) => topic.length > 0),
+  ).size;
+
+  return {
+    totalSessions,
+    totalMessages,
+    totalTokens,
+    topics: allTopics,
+    uniqueTopicCount,
+    modeCounts,
+    avgScore,
+    daysActive: rows.length,
+  };
 }
 
 function buildDailyActivity(rows: AnalyticsRow[]) {
   const now = new Date();
   const days: { day: string; count: number }[] = [];
-  const map = new Map(rows.map((r) => [r.day, r.messagesCount]));
+  const map = new Map<string, number>();
+
+  for (const row of rows) {
+    map.set(row.day, (map.get(row.day) ?? 0) + row.messagesCount);
+  }
 
   for (let i = 13; i >= 0; i--) {
     const d = new Date(now);
@@ -163,7 +131,6 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, classDat
   const dailyActivity = useMemo(() => buildDailyActivity(studentData), [studentData]);
   const classDailyActivity = useMemo(() => buildDailyActivity(classData), [classData]);
   const streak = useMemo(() => calculateStreak(studentData), [studentData]);
-  const synthesizedTopics = useMemo(() => synthesizeTopics(student.topics), [student.topics]);
   const topHour = useMemo(() => {
     const counts = studentSignals.hourlyPromptCounts ?? [];
     if (counts.length === 0) return 0;
@@ -208,7 +175,7 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, classDat
           <StatsCard
             icon={BookOpen}
             label="Topics explored"
-            value={synthesizedTopics.length}
+            value={student.uniqueTopicCount}
             color="#8b5cf6"
           />
           <StatsCard
@@ -245,7 +212,7 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, classDat
         <TimeOfDayChart hourlyCounts={studentSignals.hourlyPromptCounts} dailyPeaks={studentSignals.dailyPeakHours} />
       </div>
 
-      <TopicCloud topics={synthesizedTopics} />
+      <TopicCloud topics={student.topics} />
 
       {isTeacher && classData.length > 0 && (
         <div className="mt-8">

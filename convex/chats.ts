@@ -1,7 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { getUserByClerkId } from "./helpers";
-import { vStudyMode, vThinkingLevel, vRouterMode, vCitation } from "./shared";
+import { vStudyMode, vThinkingLevel, vRouterMode, vCitation, vRouteTrace } from "./shared";
 
 export const listChats = query({
   args: {
@@ -145,6 +145,7 @@ export const appendMessage = mutation({
     usageIn: v.optional(v.number()),
     usageOut: v.optional(v.number()),
     verificationPassed: v.optional(v.boolean()),
+    routeTrace: vRouteTrace,
   },
   handler: async (ctx, args) => {
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
@@ -174,6 +175,7 @@ export const appendMessage = mutation({
       usageIn: args.usageIn,
       usageOut: args.usageOut,
       verificationPassed: args.verificationPassed,
+      routeTrace: args.routeTrace,
       createdAt: now,
     });
 
@@ -356,6 +358,44 @@ export const deleteLastAssistantMessage = mutation({
     }
 
     await ctx.db.delete(lastAssistant._id);
+    await ctx.db.patch(chat._id, { updatedAt: Date.now() });
+    return { deleted: true };
+  },
+});
+
+export const deleteLastUserMessage = mutation({
+  args: {
+    actorClerkId: v.string(),
+    chatId: v.id("chats"),
+    expectedContent: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const chat = await ctx.db.get(args.chatId);
+    if (!chat || chat.ownerUserId !== actor._id || chat.deletedAt) {
+      throw new Error("Chat not found");
+    }
+
+    const messages = await ctx.db
+      .query("messages")
+      .withIndex("by_chat", (q) => q.eq("chatId", args.chatId))
+      .collect();
+
+    const sorted = [...messages].sort((a, b) => a.createdAt - b.createdAt);
+    const last = sorted[sorted.length - 1];
+    if (!last || last.role !== "user") {
+      return { deleted: false };
+    }
+
+    if (args.expectedContent && last.content.trim() !== args.expectedContent.trim()) {
+      return { deleted: false };
+    }
+
+    await ctx.db.delete(last._id);
     await ctx.db.patch(chat._id, { updatedAt: Date.now() });
     return { deleted: true };
   },

@@ -32,7 +32,7 @@ function parsePrice(value?: string) {
   const parsed = Number.parseFloat(value ?? "");
   if (!Number.isFinite(parsed)) return undefined;
   if (parsed < 0) return undefined;
-  return parsed;
+  return parsed * 1_000_000;
 }
 
 function mapTags(id: string, provider: string, modality?: string) {

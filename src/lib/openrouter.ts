@@ -1,4 +1,5 @@
 import { getEnv } from "@/lib/env";
+import type { RouteTraceFallback } from "@/types";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const OPENROUTER_TIMEOUT_MS = 30_000;
@@ -13,6 +14,15 @@ export type OpenRouterStreamEvent =
       raw?: unknown;
     }
   | { type: "error"; error: string };
+
+export type OpenRouterMessageContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string; detail?: "low" | "auto" } };
+
+export type OpenRouterMessage = {
+  role: string;
+  content: string | OpenRouterMessageContentPart[];
+};
 
 function openRouterHeaders() {
   const env = getEnv();
@@ -76,33 +86,60 @@ export async function openRouterEmbedding(input: string, model: string) {
 export async function openRouterChatCompletion(params: {
   model: string;
   fallbackModels: string[];
-  messages: Array<{ role: string; content: string }>;
+  messages: OpenRouterMessage[];
   temperature?: number;
+  onFallback?: (event: RouteTraceFallback) => void;
 }) {
   const candidates = uniqueModelList(params.model, params.fallbackModels);
   const errors: string[] = [];
 
-  for (const model of candidates) {
-    const response = await fetchWithTimeout(`${OPENROUTER_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: openRouterHeaders(),
-      body: JSON.stringify({
-        model,
-        messages: params.messages,
-        temperature: params.temperature ?? 0.2,
-      }),
-    });
+  for (let idx = 0; idx < candidates.length; idx += 1) {
+    const model = candidates[idx]!;
 
-    if (!response.ok) {
-      errors.push(`${model}: ${await response.text()}`);
-      continue;
+    try {
+      const response = await fetchWithTimeout(`${OPENROUTER_BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: openRouterHeaders(),
+        body: JSON.stringify({
+          model,
+          messages: params.messages,
+          temperature: params.temperature ?? 0.2,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        errors.push(`${model}: ${errorText}`);
+        const toModel = candidates[idx + 1];
+        if (toModel) {
+          params.onFallback?.({
+            fromModel: model,
+            toModel,
+            error: errorText,
+            attemptIndex: idx,
+          });
+        }
+        continue;
+      }
+
+      return response.json() as Promise<{
+        model?: string;
+        usage?: { prompt_tokens?: number; completion_tokens?: number };
+        choices?: Array<{ message?: { content?: string } }>;
+      }>;
+    } catch (error) {
+      const errorText = error instanceof Error ? error.message : "Unknown model request failure";
+      errors.push(`${model}: ${errorText}`);
+      const toModel = candidates[idx + 1];
+      if (toModel) {
+        params.onFallback?.({
+          fromModel: model,
+          toModel,
+          error: errorText,
+          attemptIndex: idx,
+        });
+      }
     }
-
-    return response.json() as Promise<{
-      model?: string;
-      usage?: { prompt_tokens?: number; completion_tokens?: number };
-      choices?: Array<{ message?: { content?: string } }>;
-    }>;
   }
 
   throw new Error(`Chat completion failed across fallback models. ${errors.join(" | ")}`);
@@ -111,84 +148,111 @@ export async function openRouterChatCompletion(params: {
 export async function* openRouterStreamChat(params: {
   model: string;
   fallbackModels: string[];
-  messages: Array<{ role: string; content: string }>;
+  messages: OpenRouterMessage[];
   temperature?: number;
+  onFallback?: (event: RouteTraceFallback) => void;
 }): AsyncGenerator<OpenRouterStreamEvent> {
   const candidates = uniqueModelList(params.model, params.fallbackModels);
   const errors: string[] = [];
 
-  for (const model of candidates) {
-    const response = await fetchWithTimeout(`${OPENROUTER_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: openRouterHeaders(),
-      body: JSON.stringify({
-        model,
-        messages: params.messages,
-        stream: true,
-        temperature: params.temperature ?? 0.2,
-      }),
-    });
+  for (let idx = 0; idx < candidates.length; idx += 1) {
+    const model = candidates[idx]!;
 
-    if (!response.ok || !response.body) {
-      errors.push(`${model}: ${await response.text()}`);
-      continue;
-    }
+    try {
+      const response = await fetchWithTimeout(`${OPENROUTER_BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: openRouterHeaders(),
+        body: JSON.stringify({
+          model,
+          messages: params.messages,
+          stream: true,
+          temperature: params.temperature ?? 0.2,
+        }),
+      });
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let finalModel: string | undefined;
-    let inputTokens: number | undefined;
-    let outputTokens: number | undefined;
-    let raw: unknown;
+      if (!response.ok || !response.body) {
+        const errorText = await response.text();
+        errors.push(`${model}: ${errorText}`);
+        const toModel = candidates[idx + 1];
+        if (toModel) {
+          params.onFallback?.({
+            fromModel: model,
+            toModel,
+            error: errorText,
+            attemptIndex: idx,
+          });
+        }
+        continue;
+      }
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalModel: string | undefined;
+      let inputTokens: number | undefined;
+      let outputTokens: number | undefined;
+      let raw: unknown;
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      for (const line of lines) {
-        if (!line.startsWith("data:")) continue;
-        const data = line.slice(5).trim();
-        if (!data || data === "[DONE]") continue;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
 
-        try {
-          const json = JSON.parse(data) as {
-            model?: string;
-            usage?: { prompt_tokens?: number; completion_tokens?: number };
-            choices?: Array<{ delta?: { content?: string } }>;
-          };
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+          const data = line.slice(5).trim();
+          if (!data || data === "[DONE]") continue;
 
-          raw = json;
-          if (json.model) {
-            finalModel = json.model;
+          try {
+            const json = JSON.parse(data) as {
+              model?: string;
+              usage?: { prompt_tokens?: number; completion_tokens?: number };
+              choices?: Array<{ delta?: { content?: string } }>;
+            };
+
+            raw = json;
+            if (json.model) {
+              finalModel = json.model;
+            }
+            if (json.usage) {
+              inputTokens = json.usage.prompt_tokens ?? inputTokens;
+              outputTokens = json.usage.completion_tokens ?? outputTokens;
+            }
+
+            const delta = json.choices?.[0]?.delta?.content;
+            if (delta) {
+              yield { type: "delta", content: delta };
+            }
+          } catch {
+            // Ignore malformed SSE lines from providers.
           }
-          if (json.usage) {
-            inputTokens = json.usage.prompt_tokens ?? inputTokens;
-            outputTokens = json.usage.completion_tokens ?? outputTokens;
-          }
-
-          const delta = json.choices?.[0]?.delta?.content;
-          if (delta) {
-            yield { type: "delta", content: delta };
-          }
-        } catch {
-          // Ignore malformed SSE lines from providers.
         }
       }
-    }
 
-    yield {
-      type: "done",
-      model: finalModel ?? model,
-      inputTokens,
-      outputTokens,
-      raw,
-    };
-    return;
+      yield {
+        type: "done",
+        model: finalModel ?? model,
+        inputTokens,
+        outputTokens,
+        raw,
+      };
+      return;
+    } catch (error) {
+      const errorText = error instanceof Error ? error.message : "Unknown stream request failure";
+      errors.push(`${model}: ${errorText}`);
+      const toModel = candidates[idx + 1];
+      if (toModel) {
+        params.onFallback?.({
+          fromModel: model,
+          toModel,
+          error: errorText,
+          attemptIndex: idx,
+        });
+      }
+    }
   }
 
   yield {

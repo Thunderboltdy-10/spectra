@@ -82,7 +82,11 @@ export const vCitation = v.object({
   sourceType: vSourceType,
   url: v.optional(v.string()),
   resourceId: v.optional(v.id("resources")),
+  snippet: v.optional(v.string()),
 });
+
+/** Route trace JSON blob validator */
+export const vRouteTrace = v.optional(v.any());
 
 /** Safely coerce to StudyMode, defaulting to "general" */
 export function safeStudyMode(value: string): StudyMode {

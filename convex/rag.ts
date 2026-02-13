@@ -84,23 +84,16 @@ export const retrieve: ReturnType<typeof action> = action({
 
     const topK = Math.max(1, Math.min(args.topK ?? LIMITS.retrievalTopK, 16));
 
-    const agentHits = args.agentId
-      ? await ctx.vectorSearch("chunks", "by_embedding", {
-          vector: args.embedding,
-          limit: topK * 4,
-          filter: (q) => q.eq("orgId", actor.orgId),
-        })
-      : [];
+    const allHits =
+      args.agentId || args.includePersonal
+        ? await ctx.vectorSearch("chunks", "by_embedding", {
+            vector: args.embedding,
+            limit: topK * 8,
+            filter: (q) => q.eq("orgId", actor.orgId),
+          })
+        : [];
 
-    const personalHits = args.includePersonal
-      ? await ctx.vectorSearch("chunks", "by_embedding", {
-          vector: args.embedding,
-          limit: topK * 4,
-          filter: (q) => q.eq("orgId", actor.orgId),
-        })
-      : [];
-
-    const allIds = [...agentHits, ...personalHits].map((hit) => hit._id);
+    const allIds = allHits.map((hit) => hit._id);
     const uniqueIds = Array.from(new Set(allIds));
 
     if (uniqueIds.length === 0) {
@@ -119,7 +112,7 @@ export const retrieve: ReturnType<typeof action> = action({
       chunkMap.set(String(doc._id), doc);
     }
 
-    const scored = [...agentHits, ...personalHits]
+    const scored = allHits
       .map((hit) => {
         const doc = chunkMap.get(String(hit._id));
         return {
@@ -139,22 +132,59 @@ export const retrieve: ReturnType<typeof action> = action({
         return false;
       })
       .sort((a, b) => (b.hit._score ?? 0) - (a.hit._score ?? 0))
-      .slice(0, topK)
       .map((row) => {
         const doc = row.doc as Record<string, unknown>;
         const scope = String(doc.scope ?? "pack");
+        const sourceType = (scope === "personal" ? "personal" : "pack") as "personal" | "pack";
         return {
           resourceId: String(doc.resourceId ?? ""),
           filename: String(doc.filename ?? "unknown"),
           page: typeof doc.page === "number" ? doc.page : undefined,
-          sourceType: scope === "personal" ? "personal" : "pack",
+          sourceType,
           scope,
           score: row.hit._score,
           text: String(doc.text ?? ""),
         };
       });
 
-    const filtered = scored.filter((item) => (item.score ?? 0) >= 0.35);
+    const dedupedByResource = new Map<
+      string,
+      {
+        resourceId: string;
+        filename: string;
+        page?: number;
+        sourceType: "pack" | "personal";
+        scope: string;
+        score?: number;
+        text: string;
+      }
+    >();
+
+    for (const item of scored) {
+      const key = item.resourceId || item.filename;
+      const existing = dedupedByResource.get(key);
+      if (!existing) {
+        dedupedByResource.set(key, { ...item });
+        continue;
+      }
+
+      if ((item.score ?? 0) > (existing.score ?? 0)) {
+        existing.score = item.score;
+      }
+
+      if (typeof existing.page !== "number" && typeof item.page === "number") {
+        existing.page = item.page;
+      }
+
+      if (item.text && !existing.text.includes(item.text.slice(0, 120)) && existing.text.length < 1800) {
+        existing.text = `${existing.text}\n\n${item.text.slice(0, 700)}`.slice(0, 2200);
+      }
+    }
+
+    const filtered = [...dedupedByResource.values()]
+      .filter((item) => (item.score ?? 0) >= 0.52)
+      .slice(0, topK);
+
     if (filtered.length === 0) {
       return {
         citations: [],

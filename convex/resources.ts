@@ -1,8 +1,10 @@
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { LIMITS } from "./constants";
 import { getUserByClerkId } from "./helpers";
 import { vScope } from "./shared";
+
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
 export const createUploadUrl = mutation({
   args: {
@@ -86,6 +88,7 @@ export const registerResource = mutation({
     filename: v.string(),
     mimeType: v.string(),
     size: v.number(),
+    contentHash: v.optional(v.string()),
     storageId: v.id("_storage"),
   },
   handler: async (ctx, args) => {
@@ -134,6 +137,7 @@ export const registerResource = mutation({
       filename: args.filename,
       mimeType: args.mimeType,
       size: args.size,
+      contentHash: args.contentHash,
       storageId: args.storageId,
       parsedCharCount: 0,
       status: "uploaded",
@@ -405,6 +409,118 @@ export const getResourceDownloadUrl = query({
   },
 });
 
+export const getResourcesByIds = query({
+  args: {
+    actorClerkId: v.string(),
+    resourceIds: v.array(v.id("resources")),
+    maxQuickExtractChars: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const maxChars = Math.max(400, Math.min(args.maxQuickExtractChars ?? 4000, 8000));
+    const results: Array<{
+      _id: string;
+      filename: string;
+      mimeType: string;
+      size: number;
+      scope: "pack" | "personal" | "agent";
+      status: "uploaded" | "processed" | "failed";
+      storageId?: string;
+      quickExtractText?: string;
+      createdAt: number;
+      pinned?: boolean;
+    }> = [];
+
+    for (const resourceId of args.resourceIds) {
+      const resource = await ctx.db.get(resourceId);
+      if (!resource || resource.orgId !== actor.orgId) continue;
+
+      let allowed = actor.role === "admin";
+      if (resource.scope === "personal" && resource.ownerUserId === actor._id) {
+        allowed = true;
+      }
+      if (resource.scope === "pack" && resource.packId) {
+        const pack = await ctx.db.get(resource.packId);
+        if (pack && (pack.ownerUserId === actor._id || actor.role === "teacher")) {
+          allowed = true;
+        }
+      }
+      if (resource.scope === "agent" && resource.agentId) {
+        const agent = await ctx.db.get(resource.agentId);
+        if (agent && (agent.visibility === "public" || agent.creatorUserId === actor._id || actor.role === "teacher")) {
+          allowed = true;
+        }
+      }
+      if (!allowed) continue;
+
+      let quickExtractText: string | undefined;
+      if (resource.status === "processed") {
+        const chunks = await ctx.db
+          .query("chunks")
+          .withIndex("by_resource", (q) => q.eq("resourceId", resource._id))
+          .collect();
+        const preview = chunks
+          .sort((a, b) => (a.page ?? Number.MAX_SAFE_INTEGER) - (b.page ?? Number.MAX_SAFE_INTEGER))
+          .map((chunk) => chunk.text)
+          .join("\n")
+          .slice(0, maxChars)
+          .trim();
+        if (preview) quickExtractText = preview;
+      }
+
+      results.push({
+        _id: resource._id,
+        filename: resource.filename,
+        mimeType: resource.mimeType,
+        size: resource.size,
+        scope: resource.scope,
+        status: resource.status,
+        storageId: resource.storageId,
+        quickExtractText,
+        createdAt: resource.createdAt,
+        pinned: resource.pinned,
+      });
+    }
+
+    return results;
+  },
+});
+
+export const findReusablePersonalResourcesByHashes = query({
+  args: {
+    actorClerkId: v.string(),
+    hashes: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const hashSet = new Set(args.hashes.filter((hash) => hash.trim().length > 0));
+    if (hashSet.size === 0) return [];
+
+    const personal = await ctx.db
+      .query("resources")
+      .withIndex("by_owner_scope", (q) => q.eq("ownerUserId", actor._id).eq("scope", "personal"))
+      .collect();
+
+    return personal
+      .filter((resource) => resource.contentHash && hashSet.has(resource.contentHash))
+      .filter((resource) => resource.status === "processed" || resource.status === "uploaded")
+      .map((resource) => ({
+        resourceId: resource._id,
+        contentHash: resource.contentHash as string,
+        filename: resource.filename,
+        status: resource.status,
+      }));
+  },
+});
+
 export const listPackTexts = query({
   args: {
     actorClerkId: v.string(),
@@ -476,5 +592,36 @@ export const listAgentTexts = query({
     }
 
     return chunks;
+  },
+});
+
+export const cleanupExpired = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const threshold = Date.now() - THIRTY_DAYS_MS;
+    const personalResources = (await ctx.db.query("resources").collect()).filter(
+      (resource) => resource.scope === "personal",
+    );
+
+    let deletedCount = 0;
+    for (const resource of personalResources) {
+      if ((resource.pinned ?? false) || resource.createdAt > threshold) continue;
+
+      const chunks = await ctx.db
+        .query("chunks")
+        .withIndex("by_resource", (q) => q.eq("resourceId", resource._id))
+        .collect();
+      for (const chunk of chunks) {
+        await ctx.db.delete(chunk._id);
+      }
+
+      if (resource.storageId) {
+        await ctx.storage.delete(resource.storageId);
+      }
+      await ctx.db.delete(resource._id);
+      deletedCount += 1;
+    }
+
+    return { ok: true, deletedCount };
   },
 });

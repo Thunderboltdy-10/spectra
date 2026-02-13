@@ -58,7 +58,7 @@ export function buildSystemPrompt(params: {
 
   const markerRules =
     params.mode === "marker"
-      ? "Marker mode policy:\n- Provide rubric-like breakdown and score band.\n- Explain what earns marks and what loses marks.\n- Give 3 targeted drill questions.\n- Cite sources where available; if none, label points as general knowledge."
+      ? "Marker mode policy:\n- Provide rubric-like breakdown and score band.\n- Explain what earns marks and what loses marks.\n- Give 3 targeted drill questions.\n- Cite sources where available and avoid unsupported factual claims."
       : "";
 
   const scaffoldRules =
@@ -183,7 +183,7 @@ ${params.sourceBlock || "No retrieved sources."}`;
 }
 
 export function enforceCitationFallback(citations: Citation[]): Citation[] {
-  return citations.length > 0 ? citations : [{ filename: "general knowledge", sourceType: "general" }];
+  return citations;
 }
 
 export function markerVerificationPrompt(response: string) {

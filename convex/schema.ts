@@ -1,7 +1,16 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { EMBEDDING_DIMENSIONS } from "./constants";
-import { vStudyMode, vThinkingLevel, vRouterMode, vStrictness, vRole, vScope, vCitation } from "./shared";
+import {
+  vStudyMode,
+  vThinkingLevel,
+  vRouterMode,
+  vStrictness,
+  vRole,
+  vScope,
+  vCitation,
+  vRouteTrace,
+} from "./shared";
 
 export default defineSchema({
   orgs: defineTable({
@@ -56,10 +65,12 @@ export default defineSchema({
     filename: v.string(),
     mimeType: v.string(),
     size: v.number(),
+    contentHash: v.optional(v.string()),
     storageId: v.optional(v.id("_storage")),
     parsedCharCount: v.number(),
     status: v.union(v.literal("uploaded"), v.literal("processed"), v.literal("failed")),
     error: v.optional(v.string()),
+    pinned: v.optional(v.boolean()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -150,6 +161,7 @@ export default defineSchema({
     usageIn: v.optional(v.number()),
     usageOut: v.optional(v.number()),
     verificationPassed: v.optional(v.boolean()),
+    routeTrace: vRouteTrace,
     createdAt: v.number(),
   })
     .index("by_chat", ["chatId"])
@@ -176,6 +188,7 @@ export default defineSchema({
     outputTokens: v.number(),
     totalTokens: v.number(),
     costCents: v.optional(v.number()),
+    pricingNote: v.optional(v.string()),
     day: v.string(),
     createdAt: v.number(),
   })
@@ -239,6 +252,8 @@ export default defineSchema({
     multimodalRating: v.union(v.literal("none"), v.literal("basic"), v.literal("strong")),
     recommendedForPhysics: v.boolean(),
     isFree: v.optional(v.boolean()),
+    isFeatured: v.optional(v.boolean()),
+    featuredOrder: v.optional(v.number()),
     capabilities: v.optional(v.object({
       reasoning: v.number(),
       creative: v.number(),
@@ -246,6 +261,8 @@ export default defineSchema({
       vision: v.number(),
       speed: v.number(),
     })),
+    strengthText: v.optional(v.string()),
+    strengthEmbedding: v.optional(v.array(v.float64())),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

@@ -1,12 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronDown, Cpu } from "lucide-react";
-import { ProviderLogo } from "@/components/provider-logo";
+import { RouteTraceDrawer } from "@/components/chat/route-trace-drawer";
+import type { RouteTrace } from "@/types";
 
 type ModelRoutingBadgeProps = {
   modelUsed?: string;
   whyThisResponse?: string;
+  routeTrace?: RouteTrace;
 };
 
 function formatModelName(modelId: string) {
@@ -31,41 +32,39 @@ function formatModelName(modelId: string) {
     .join(" ");
 }
 
-function providerFromModel(modelId: string) {
-  return modelId.split("/")[0] ?? "AI";
-}
+export function ModelRoutingBadge({ modelUsed, whyThisResponse, routeTrace }: ModelRoutingBadgeProps) {
+  const [traceOpen, setTraceOpen] = useState(false);
 
-export function ModelRoutingBadge({ modelUsed, whyThisResponse }: ModelRoutingBadgeProps) {
-  const [expanded, setExpanded] = useState(false);
+  const activeModelId = modelUsed ?? routeTrace?.selected.modelId;
+  const formattedName = useMemo(() => formatModelName(activeModelId ?? ""), [activeModelId]);
+  const hasTrace = Boolean(routeTrace);
+  const hintText = whyThisResponse ? "Why this model" : "Routing details";
 
-  const formattedName = useMemo(() => formatModelName(modelUsed ?? ""), [modelUsed]);
-
-  if (!modelUsed) return null;
+  if (!activeModelId) return null;
 
   return (
-    <div className="inline-flex flex-col">
-      <button
-        type="button"
-        onClick={() => setExpanded((prev) => !prev)}
-        className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)]"
-      >
-        <ProviderLogo
-          provider={providerFromModel(modelUsed)}
-          modelId={modelUsed}
-          className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-transparent"
-        />
-        <Cpu className="h-3.5 w-3.5" />
-        <span className="max-w-[190px] truncate">{formattedName}</span>
-        {whyThisResponse && (
-          <ChevronDown className={`h-3.5 w-3.5 transition ${expanded ? "rotate-180" : ""}`} />
-        )}
-      </button>
-
-      {expanded && whyThisResponse && (
-        <div className="mt-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-secondary)]">
-          <span className="font-medium text-[var(--text-primary)]">Routing rationale:</span> {whyThisResponse}
-        </div>
+    <div className="inline-flex min-w-0 items-center">
+      {hasTrace ? (
+        <button
+          type="button"
+          onClick={() => setTraceOpen(true)}
+          title={whyThisResponse ?? "Model route details"}
+          className="group inline-flex min-w-0 cursor-pointer items-baseline gap-2 text-left"
+        >
+          <span className="truncate text-[15px] font-semibold text-[var(--text-primary)]">{formattedName}</span>
+          <span className="text-[11px] text-[var(--text-secondary)] underline decoration-dotted underline-offset-4 transition group-hover:text-[var(--text-primary)]">
+            {hintText}
+          </span>
+        </button>
+      ) : (
+        <span className="truncate text-[15px] font-semibold text-[var(--text-primary)]">{formattedName}</span>
       )}
+
+      <RouteTraceDrawer
+        open={traceOpen}
+        onClose={() => setTraceOpen(false)}
+        trace={routeTrace}
+      />
     </div>
   );
 }

@@ -26,6 +26,7 @@ export type Citation = {
   sourceType: "pack" | "personal" | "general" | "search";
   url?: string;
   resourceId?: string;
+  snippet?: string;
 };
 
 export type Agent = {
@@ -61,6 +62,7 @@ export type ChatMessage = {
   usageIn?: number;
   usageOut?: number;
   verificationPassed?: boolean;
+  routeTrace?: RouteTrace;
   createdAt: number;
 };
 
@@ -78,7 +80,53 @@ export type ModelRouteInput = {
   studentSeemsStuck: boolean;
   spendingTier: SpendingTier;
   needsSearch: boolean;
+  needsRag?: boolean;
+  promptEnhanced?: boolean;
   promptCategory?: "code" | "math_science" | "creative" | "research" | "general";
+};
+
+export type RouteTraceCandidate = {
+  modelId: string;
+  allowed: boolean;
+  score?: number;
+  reason?: string;
+  scoreBreakdown?: string[];
+  eliminatedBecause?: string;
+};
+
+export type RouteTraceFallback = {
+  fromModel: string;
+  toModel: string;
+  error: string;
+  attemptIndex: number;
+};
+
+export type RouteTrace = {
+  inputs: {
+    routerMode: import("@/lib/contracts/studyModes").RouterMode;
+    manualModel?: string;
+    mode: import("@/lib/contracts/studyModes").StudyMode;
+    thinkingLevel: import("@/lib/contracts/studyModes").ThinkingLevel;
+    complexPrompt: boolean;
+    promptCategory: string;
+    needsSearch: boolean;
+    needsRag: boolean;
+    needsVision: boolean;
+    spendingTier: SpendingTier;
+    hasAttachments: boolean;
+    attachmentTypes: string[];
+    promptEnhanced: boolean;
+    messageLength: number;
+  };
+  candidates: RouteTraceCandidate[];
+  selected: {
+    modelId: string;
+    reason: string;
+  };
+  toolchain: string[];
+  fallbacks: RouteTraceFallback[];
+  routingDurationMs: number;
+  totalDurationMs?: number;
 };
 
 export type ModelRouteOutput = {
@@ -89,6 +137,8 @@ export type ModelRouteOutput = {
   autoEnhanced: boolean;
   searchEnabled: boolean;
 };
+
+export type ModelRouteResult = ModelRouteOutput & { trace: RouteTrace };
 
 export type PackGuidelines = {
   summary: string;

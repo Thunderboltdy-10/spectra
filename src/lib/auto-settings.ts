@@ -38,6 +38,7 @@ export type AutoSettingsInput = {
   enhanceMode?: "auto" | "on" | "off";
   thinkingMode?: "auto" | "on" | "off";
   searchMode?: "auto" | "on" | "off";
+  skipModelCalls?: boolean;
 };
 
 export type AutoSettingsResult = {
@@ -159,8 +160,9 @@ export async function maybeEnhancePrompt(message: string) {
 
   try {
     const parsed = JSON.parse(match[0]) as { prompt?: string; improvements?: string[] };
+    const normalizedPrompt = (parsed.prompt?.trim() || message).slice(0, 700);
     return {
-      prompt: parsed.prompt?.trim() || message,
+      prompt: normalizedPrompt,
       improvements: Array.isArray(parsed.improvements) ? parsed.improvements.slice(0, 4) : [],
     };
   } catch {
@@ -193,12 +195,16 @@ export async function runAutoSettingsPipeline(input: AutoSettingsInput): Promise
   let message = input.message;
   let promptEnhanced = false;
 
-  if (input.autoEnhancePrompt && enhanceMode !== "off") {
+  if (input.autoEnhancePrompt && enhanceMode !== "off" && !input.skipModelCalls) {
     const enhanced = await maybeEnhancePrompt(input.message);
     if (enhanced.prompt.trim() && enhanced.prompt.trim() !== input.message.trim()) {
       message = enhanced.prompt.trim();
       promptEnhanced = true;
+    } else if (enhanceMode === "on") {
+      promptEnhanced = true;
     }
+  } else if (enhanceMode === "on") {
+    promptEnhanced = true;
   }
 
   return {

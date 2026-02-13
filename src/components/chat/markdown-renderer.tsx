@@ -38,7 +38,7 @@ function CodeBlock({ children, className, ...props }: CodeBlockProps) {
   }
 
   return (
-    <div className="group relative my-4 overflow-hidden rounded-xl border border-[var(--border-default)]">
+    <div className="group relative my-4 overflow-hidden rounded-b-xl border border-[var(--border-default)]">
       <div className="flex items-center justify-between border-b border-[var(--border-default)] bg-[var(--bg-tertiary)] px-3 py-1.5">
         <span className="font-mono text-[11px] font-medium uppercase tracking-wider text-[var(--text-secondary)]">
           {language || "code"}
@@ -46,7 +46,7 @@ function CodeBlock({ children, className, ...props }: CodeBlockProps) {
         <button
           type="button"
           onClick={handleCopy}
-          className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+          className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
         >
           {copied ? (
             <>
@@ -76,20 +76,35 @@ function citationHref(citation: Citation) {
 
 export function MarkdownRenderer({ content, citations = [] }: MarkdownRendererProps) {
   const cleanContent = useMemo(() => {
-    const withoutVerboseRefs = content
-      .replace(/\[[^\]\n]*\bp\.\s*\d+[^\]\n]*\]/gi, "")
-      .replace(/\[general knowledge\]/gi, "")
-      .replace(/\n{3,}/g, "\n\n");
+    let processed = content;
 
-    const withLinks = withoutVerboseRefs.replace(/\[(\d+)\]/g, (token, rawIdx) => {
+    processed = processed.replace(/\[([^\]\n]+?)\s+p\.\s*(\d+)\]/gi, (match, filename, page) => {
+      const idx = citations.findIndex(
+        (citation) =>
+          citation.filename.toLowerCase().includes(String(filename).toLowerCase().trim()) &&
+          (citation.page === Number(page) || !citation.page),
+      );
+      return idx >= 0 ? `[${idx + 1}]` : match;
+    });
+
+    processed = processed.replace(/\[([^\]\n]{3,60})\]/gi, (match, name) => {
+      const token = String(name).trim();
+      if (/^\d+$/.test(token)) return match;
+      const idx = citations.findIndex((citation) =>
+        citation.filename.toLowerCase().includes(token.toLowerCase()),
+      );
+      return idx >= 0 ? `[${idx + 1}]` : match;
+    });
+
+    processed = processed.replace(/\[(\d+)\]/g, (token, rawIdx) => {
       const index = Number(rawIdx) - 1;
       const citation = citations[index];
       const href = citation ? citationHref(citation) : undefined;
-      if (!href) return token;
+      if (!href) return "";
       return `[${rawIdx}](${href})`;
     });
 
-    return withLinks.trim();
+    return processed.replace(/\n{3,}/g, "\n\n").trim();
   }, [citations, content]);
 
   return (
@@ -103,19 +118,29 @@ export function MarkdownRenderer({ content, citations = [] }: MarkdownRendererPr
               .map((item) => (typeof item === "string" ? item : ""))
               .join("");
             const isCitationRef = /^\[\d+\]$/.test(textValue.trim());
+            if (isCitationRef) {
+              return (
+                <sup>
+                  <a
+                    {...props}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mx-0.5 inline-flex cursor-pointer items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 py-0 text-[10px] font-medium text-[var(--accent-cyan)] no-underline transition hover:bg-[var(--bg-hover)]"
+                  >
+                    {children}
+                  </a>
+                </sup>
+              );
+            }
             return (
               <a
                 {...props}
                 target="_blank"
                 rel="noreferrer"
-                className={
-                  isCitationRef
-                    ? "mx-0.5 inline-flex items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 py-0 text-[11px] text-[var(--text-secondary)] no-underline hover:bg-[var(--bg-hover)]"
-                    : "inline-flex items-center gap-1 text-[var(--accent-cyan)] underline decoration-[var(--accent-cyan)]/30 underline-offset-2 transition hover:decoration-[var(--accent-cyan)]"
-                }
+                className="inline-flex cursor-pointer items-center gap-1 text-[var(--accent-cyan)] underline decoration-[var(--accent-cyan)]/30 underline-offset-2 transition hover:decoration-[var(--accent-cyan)]"
               >
                 {children}
-                {!isCitationRef ? <ExternalLink className="h-3 w-3" /> : null}
+                <ExternalLink className="h-3 w-3" />
               </a>
             );
           },

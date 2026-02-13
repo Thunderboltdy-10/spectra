@@ -32,6 +32,8 @@ type ChatSettingsDrawerProps = {
   onAutoSearchChange: (value: AutoPreference) => void;
 };
 
+const MONTHLY_HARD_LIMIT_CENTS = 900;
+
 function AutoChoice({
   label,
   value,
@@ -76,6 +78,16 @@ function row(label: string, description: string, checked: boolean, onChange: (va
   );
 }
 
+function formatEur(cents: number) {
+  return `€${(cents / 100).toFixed(2)}`;
+}
+
+function spendingTierLabel(tier?: UserSpending["tier"]) {
+  if (tier === "free_only") return "Budget only";
+  if (tier === "cheap_only") return "Cheap only";
+  return "Normal";
+}
+
 export function ChatSettingsDrawer({
   open,
   onClose,
@@ -102,9 +114,10 @@ export function ChatSettingsDrawer({
 
   if (!open) return null;
 
-  const ratio = userSpending
-    ? Math.min(userSpending.totalCostCents / Math.max(userSpending.totalCostCents, 1200), 1)
-    : 0;
+  const spentCents = userSpending?.totalCostCents ?? 0;
+  const ratio = Math.min(spentCents / MONTHLY_HARD_LIMIT_CENTS, 1);
+  const spendingTier = spendingTierLabel(userSpending?.tier);
+  const spendingCaption = `${formatEur(spentCents)} / ${formatEur(MONTHLY_HARD_LIMIT_CENTS)}`;
   const selectedModel = models.find((model) => model.modelId === manualModel);
 
   return (
@@ -228,17 +241,19 @@ export function ChatSettingsDrawer({
 
           {row("Use personal resources", "Include your uploaded files during retrieval", usePersonalResources, onTogglePersonalResources)}
 
-          {userSpending && (
-            <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+            <div className="flex items-center justify-between">
               <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Usage indicator</h3>
-              <div className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
-                <div
-                  className="h-full rounded-full bg-[var(--gradient-brand)]"
-                  style={{ width: `${Math.max(2, ratio * 100)}%` }}
-                />
-              </div>
-            </section>
-          )}
+              <span className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">{spendingTier}</span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
+              <div
+                className="h-full rounded-full bg-[var(--gradient-brand)]"
+                style={{ width: `${Math.max(2, ratio * 100)}%` }}
+              />
+            </div>
+            <p className="mt-2 text-xs text-[var(--text-secondary)]">{spendingCaption}</p>
+          </section>
         </div>
       </aside>
     </div>

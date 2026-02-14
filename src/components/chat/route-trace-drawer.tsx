@@ -1,6 +1,6 @@
 "use client";
 
-import { X, CheckCircle2, XCircle, Timer, Milestone } from "lucide-react";
+import { X, CheckCircle2, XCircle, Timer, Milestone, Gauge, ArrowRight } from "lucide-react";
 import type { RouteTrace } from "@/types";
 import { Button } from "@/components/ui/button";
 
@@ -37,6 +37,24 @@ function formatScore(value?: number) {
   return value.toFixed(2);
 }
 
+function estimateCostCents(trace: RouteTrace) {
+  const inputTokens = Math.max(150, Math.round((trace.inputs.messageLength ?? 120) * 1.45));
+  const outputTokens = Math.max(280, Math.round(inputTokens * 1.2));
+  const tokenTotal = inputTokens + outputTokens;
+  const baselinePerThousand = trace.inputs.spendingTier === "free_only" ? 0 : trace.inputs.spendingTier === "cheap_only" ? 0.02 : 0.05;
+  const cents = (tokenTotal / 1000) * baselinePerThousand;
+  return cents;
+}
+
+function CandidateBar({ score }: { score?: number }) {
+  const width = typeof score === "number" && Number.isFinite(score) ? Math.max(4, Math.round(score * 100)) : 4;
+  return (
+    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
+      <div className="h-full rounded-full bg-[var(--gradient-brand)]" style={{ width: `${width}%` }} />
+    </div>
+  );
+}
+
 export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps) {
   if (!open || !trace) return null;
 
@@ -68,6 +86,8 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
             <InputRow label="Thinking" value={trace.inputs.thinkingLevel} />
             <InputRow label="Complex" value={trace.inputs.complexPrompt ? "Yes" : "No"} />
             <InputRow label="Prompt Category" value={trace.inputs.promptCategory} />
+            <InputRow label="Question Type" value={trace.inputs.questionType ?? "—"} />
+            <InputRow label="Multipart" value={trace.inputs.isMultipart ? "Yes" : "No"} />
             <InputRow label="Enhanced" value={trace.inputs.promptEnhanced ? "Yes" : "No"} />
             <InputRow label="Attachments" value={`${trace.inputs.attachmentTypes.join(", ") || "none"}`} />
             <InputRow label="Message Length" value={trace.inputs.messageLength} />
@@ -75,6 +95,22 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
         </section>
 
         <section className="mb-5">
+          <h4 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Pipeline Timeline</h4>
+          <div className="mb-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+            <ol className="space-y-2">
+              {[
+                { label: "Route analysis", detail: `${formatMs(trace.routingDurationMs)}` },
+                { label: "Model execution", detail: trace.totalDurationMs ? `${formatMs(trace.totalDurationMs - trace.routingDurationMs)}` : "—" },
+                { label: "Post-process", detail: trace.toolchain.includes("marker_verification") ? "verification enabled" : "standard" },
+              ].map((step) => (
+                <li key={step.label} className="flex items-center justify-between rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2">
+                  <span className="text-xs font-medium text-[var(--text-primary)]">{step.label}</span>
+                  <span className="text-xs text-[var(--text-secondary)]">{step.detail}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+
           <h4 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Candidates</h4>
           <div className="space-y-2">
             {trace.candidates.map((candidate, index) => (
@@ -93,6 +129,7 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
                 <p className="mt-1 text-xs text-[var(--text-secondary)]">
                   Score: {formatScore(candidate.score)}
                 </p>
+                <CandidateBar score={candidate.score} />
                 {candidate.reason && (
                   <p className="mt-1 text-xs text-[var(--text-secondary)]">{candidate.reason}</p>
                 )}
@@ -148,8 +185,8 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
                     <Milestone className="h-3.5 w-3.5" />
                     <span className="font-medium">Attempt {fallback.attemptIndex + 1}</span>
                   </div>
-                  <p className="font-mono text-[11px] text-[var(--text-secondary)]">
-                    {fallback.fromModel} → {fallback.toModel}
+                  <p className="font-mono text-[11px] text-[var(--text-secondary)] inline-flex items-center gap-1">
+                    {fallback.fromModel} <ArrowRight className="h-3 w-3" /> {fallback.toModel}
                   </p>
                   <p className="mt-1 text-xs text-[var(--text-secondary)]">{fallback.error}</p>
                 </li>
@@ -157,6 +194,21 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
             </ol>
           )}
         </section>
+
+        {trace.collaborators && trace.collaborators.length > 0 ? (
+          <section className="mb-5">
+            <h4 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Collaborators</h4>
+            <div className="space-y-2">
+              {trace.collaborators.map((collaborator, index) => (
+                <div key={`${collaborator.role}-${index}`} className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2.5">
+                  <p className="text-xs font-medium text-[var(--text-primary)]">{collaborator.role}</p>
+                  <p className="text-[11px] text-[var(--text-secondary)]">{collaborator.model}</p>
+                  <p className="text-[11px] text-[var(--text-secondary)]">{collaborator.tokensUsed} tokens • {formatMs(collaborator.durationMs)}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
           <h4 className="mb-1 text-sm font-semibold text-[var(--text-primary)]">Timing</h4>
@@ -166,6 +218,10 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
               Routing: {formatMs(trace.routingDurationMs)}
             </p>
             <p>Total: {formatMs(trace.totalDurationMs)}</p>
+            <p className="inline-flex items-center gap-1.5">
+              <Gauge className="h-3.5 w-3.5" />
+              Estimated cost: ~${(estimateCostCents(trace) / 100).toFixed(4)}
+            </p>
           </div>
         </section>
       </aside>

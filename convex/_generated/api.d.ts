@@ -15,7 +15,9 @@ import type * as catalogSync from "../catalogSync.js";
 import type * as chats from "../chats.js";
 import type * as constants from "../constants.js";
 import type * as crons from "../crons.js";
+import type * as curatedModelRegistry from "../curatedModelRegistry.js";
 import type * as helpers from "../helpers.js";
+import type * as ingestQueue from "../ingestQueue.js";
 import type * as memory from "../memory.js";
 import type * as models from "../models.js";
 import type * as packs from "../packs.js";
@@ -23,6 +25,7 @@ import type * as rag from "../rag.js";
 import type * as resources from "../resources.js";
 import type * as seed from "../seed.js";
 import type * as shared from "../shared.js";
+import type * as soul from "../soul.js";
 import type * as usage from "../usage.js";
 import type * as users from "../users.js";
 
@@ -40,7 +43,9 @@ declare const fullApi: ApiFromModules<{
   chats: typeof chats;
   constants: typeof constants;
   crons: typeof crons;
+  curatedModelRegistry: typeof curatedModelRegistry;
   helpers: typeof helpers;
+  ingestQueue: typeof ingestQueue;
   memory: typeof memory;
   models: typeof models;
   packs: typeof packs;
@@ -48,6 +53,7 @@ declare const fullApi: ApiFromModules<{
   resources: typeof resources;
   seed: typeof seed;
   shared: typeof shared;
+  soul: typeof soul;
   usage: typeof usage;
   users: typeof users;
 }>;

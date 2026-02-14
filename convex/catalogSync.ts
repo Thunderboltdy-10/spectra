@@ -2,6 +2,7 @@ import { internalAction, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { MODEL_DEFAULTS } from "./constants";
+import { lookupCuratedModelMeta } from "./curatedModelRegistry";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
@@ -145,11 +146,18 @@ export const refreshCatalog: ReturnType<typeof internalAction> = internalAction(
           speed: fast ? 9 : 5,
         },
       };
+      const curated = lookupCuratedModelMeta(model.id);
 
       return {
         ...item,
         strengthText: strengthText(item),
         strengthEmbedding: undefined as number[] | undefined,
+        releaseDate: curated?.releaseDate,
+        knowledgeCutoff: curated?.knowledgeCutoff,
+        curatedNotes: curated?.curatedNotes,
+        benchmarkMMLU: curated?.benchmarkMMLU,
+        benchmarkHumanEval: curated?.benchmarkHumanEval,
+        arenaElo: curated?.arenaElo,
       };
     });
 

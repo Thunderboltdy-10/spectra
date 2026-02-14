@@ -54,6 +54,9 @@ export type ChatMessage = {
   role: "user" | "assistant" | "system";
   content: string;
   enhancedContent?: string;
+  thinkingContent?: string;
+  attachments?: string[];
+  attachmentResourceIds?: string[];
   mode: import("@/lib/contracts/studyModes").StudyMode;
   citations: Citation[];
   modelRequested?: string;
@@ -82,7 +85,22 @@ export type ModelRouteInput = {
   needsSearch: boolean;
   needsRag?: boolean;
   promptEnhanced?: boolean;
-  promptCategory?: "code" | "math_science" | "creative" | "research" | "general";
+  promptCategory?:
+    | "code"
+    | "math_science"
+    | "creative"
+    | "research"
+    | "general"
+    | "debate"
+    | "comparison"
+    | "synthesis"
+    | "practical_application";
+  questionType?: "what" | "why" | "how" | "evaluate" | "compare" | "other";
+  isMultipart?: boolean;
+  conversationLength?: number;
+  previousModelUsed?: string;
+  agentPreferredModel?: string;
+  agentTopModels?: Array<{ modelId: string; score: number }>;
 };
 
 export type RouteTraceCandidate = {
@@ -109,6 +127,8 @@ export type RouteTrace = {
     thinkingLevel: import("@/lib/contracts/studyModes").ThinkingLevel;
     complexPrompt: boolean;
     promptCategory: string;
+    questionType?: string;
+    isMultipart?: boolean;
     needsSearch: boolean;
     needsRag: boolean;
     needsVision: boolean;
@@ -117,6 +137,9 @@ export type RouteTrace = {
     attachmentTypes: string[];
     promptEnhanced: boolean;
     messageLength: number;
+    conversationLength?: number;
+    previousModelUsed?: string;
+    agentPreferredModel?: string;
   };
   candidates: RouteTraceCandidate[];
   selected: {
@@ -127,6 +150,7 @@ export type RouteTrace = {
   fallbacks: RouteTraceFallback[];
   routingDurationMs: number;
   totalDurationMs?: number;
+  collaborators?: Array<{ role: string; model: string; tokensUsed: number; durationMs: number }>;
 };
 
 export type ModelRouteOutput = {

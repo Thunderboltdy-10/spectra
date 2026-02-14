@@ -43,6 +43,8 @@ export function buildSystemPrompt(params: {
   memoryProfile?: string;
   contextSummary?: string;
   searchBlock?: string;
+  explainDepth?: "introductory" | "intermediate" | "advanced";
+  quizDifficultyLevel?: number;
 }) {
   const tutorRules =
     params.mode === "tutor"
@@ -80,7 +82,12 @@ export function buildSystemPrompt(params: {
 - Format each question as: "Q1. [question text]\\nA) [option]\\nB) [option]\\nC) [option]\\nD) [option]\\nCorrect: [letter]"
 - Include one-line feedback per answer to reinforce retrieval practice.
 - After listing all questions, provide a section "## Answers & Explanations" with the correct answer and brief explanation for each.
-- Generate 5 questions by default unless the student specifies a number.`
+- Generate 5 questions by default unless the student specifies a number.
+- Adaptive difficulty level: ${Math.max(1, Math.min(5, params.quizDifficultyLevel ?? 3))}.
+- Difficulty guide:
+  - Level 1-2: recall and recognition.
+  - Level 3: application questions.
+  - Level 4-5: analysis and evaluation.`
       : "";
 
   const flashcardRules =
@@ -108,7 +115,10 @@ export function buildSystemPrompt(params: {
       ? `Explain mode policy:
 - Use the Feynman technique.
 - Start simple, then build complexity gradually.
-- Use analogies and real-world examples.
+- Detected depth: ${params.explainDepth ?? "intermediate"}.
+- Introductory depth: use analogies, everyday language, and visual descriptions.
+- Intermediate depth: include technical terms with concise definitions and worked examples.
+- Advanced depth: include formal notation, edge cases, and research connections.
 - End with a short "teach it back" prompt for the student.`
       : "";
 

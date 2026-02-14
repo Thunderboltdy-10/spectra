@@ -3,8 +3,7 @@ import { v } from "convex/values";
 import { LIMITS } from "./constants";
 import { getUserByClerkId } from "./helpers";
 import { vScope } from "./shared";
-
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+import { internal } from "./_generated/api";
 
 export const createUploadUrl = mutation({
   args: {
@@ -250,6 +249,143 @@ export const completeResourceIngestion = mutation({
   },
 });
 
+export const completeResourceIngestionInternal = internalMutation({
+  args: {
+    resourceId: v.id("resources"),
+    parsedCharCount: v.number(),
+    chunks: v.array(
+      v.object({
+        text: v.string(),
+        embedding: v.array(v.float64()),
+        page: v.optional(v.number()),
+      }),
+    ),
+    failedReason: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const resource = await ctx.db.get(args.resourceId);
+    if (!resource) {
+      throw new Error("Resource not found");
+    }
+
+    await ctx.db
+      .query("chunks")
+      .withIndex("by_resource", (q) => q.eq("resourceId", args.resourceId))
+      .collect()
+      .then(async (rows) => {
+        for (const row of rows) {
+          await ctx.db.delete(row._id);
+        }
+      });
+
+    if (args.failedReason) {
+      await ctx.db.patch(args.resourceId, {
+        parsedCharCount: 0,
+        status: "failed",
+        error: args.failedReason,
+        updatedAt: Date.now(),
+      });
+      return { ok: false };
+    }
+
+    const capped = args.chunks.slice(0, LIMITS.maxChunksPerFile);
+    const now = Date.now();
+    for (const chunk of capped) {
+      await ctx.db.insert("chunks", {
+        orgId: resource.orgId,
+        packId: resource.packId,
+        agentId: resource.agentId,
+        ownerUserId: resource.scope === "personal" ? resource.ownerUserId : undefined,
+        scope: resource.scope,
+        resourceId: resource._id,
+        filename: resource.filename,
+        page: chunk.page,
+        text: chunk.text,
+        embedding: chunk.embedding,
+        createdAt: now,
+      });
+    }
+
+    await ctx.db.patch(args.resourceId, {
+      parsedCharCount: args.parsedCharCount,
+      status: "processed",
+      error: undefined,
+      updatedAt: now,
+    });
+
+    return { ok: true, chunkCount: capped.length };
+  },
+});
+
+export const enqueueResourceProcessing = mutation({
+  args: {
+    actorClerkId: v.string(),
+    resourceId: v.id("resources"),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const resource = await ctx.db.get(args.resourceId);
+    if (!resource || resource.orgId !== actor.orgId) {
+      throw new Error("Resource not found");
+    }
+
+    let allowed = actor.role === "admin";
+    if (resource.scope === "personal" && resource.ownerUserId === actor._id) allowed = true;
+    if (resource.scope === "pack" && resource.packId) {
+      const pack = await ctx.db.get(resource.packId);
+      if (pack && (pack.ownerUserId === actor._id || actor.role === "teacher")) {
+        allowed = true;
+      }
+    }
+    if (resource.scope === "agent" && resource.agentId) {
+      const agent = await ctx.db.get(resource.agentId);
+      if (agent && (agent.creatorUserId === actor._id || actor.role === "teacher")) {
+        allowed = true;
+      }
+    }
+    if (!allowed) {
+      throw new Error("No permission to process resource");
+    }
+
+    await ctx.scheduler.runAfter(0, internal.ingestQueue.processResource, {
+      resourceId: resource._id,
+    });
+    return { ok: true };
+  },
+});
+
+export const togglePin = mutation({
+  args: {
+    actorClerkId: v.string(),
+    resourceId: v.id("resources"),
+    pinned: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const resource = await ctx.db.get(args.resourceId);
+    if (!resource || resource.orgId !== actor.orgId) {
+      throw new Error("Resource not found");
+    }
+    if (resource.scope !== "personal" || resource.ownerUserId !== actor._id) {
+      throw new Error("Only personal resources can be pinned");
+    }
+
+    await ctx.db.patch(resource._id, {
+      pinned: args.pinned,
+      updatedAt: Date.now(),
+    });
+    return { ok: true };
+  },
+});
+
 export const listPersonalResources = query({
   args: { actorClerkId: v.string() },
   handler: async (ctx, args) => {
@@ -490,6 +626,52 @@ export const getResourcesByIds = query({
   },
 });
 
+export const getResourceNamesByIds = query({
+  args: {
+    actorClerkId: v.string(),
+    resourceIds: v.array(v.id("resources")),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const rows: Array<{
+      _id: string;
+      filename: string;
+      status: "uploaded" | "processed" | "failed";
+    }> = [];
+
+    for (const resourceId of args.resourceIds) {
+      const resource = await ctx.db.get(resourceId);
+      if (!resource || resource.orgId !== actor.orgId) continue;
+
+      let allowed = actor.role === "admin";
+      if (resource.scope === "personal" && resource.ownerUserId === actor._id) allowed = true;
+      if (resource.scope === "pack" && resource.packId) {
+        const pack = await ctx.db.get(resource.packId);
+        if (pack && (pack.ownerUserId === actor._id || actor.role === "teacher")) allowed = true;
+      }
+      if (resource.scope === "agent" && resource.agentId) {
+        const agent = await ctx.db.get(resource.agentId);
+        if (agent && (agent.visibility === "public" || agent.creatorUserId === actor._id || actor.role === "teacher")) {
+          allowed = true;
+        }
+      }
+      if (!allowed) continue;
+
+      rows.push({
+        _id: resource._id,
+        filename: resource.filename,
+        status: resource.status,
+      });
+    }
+
+    return rows;
+  },
+});
+
 export const findReusablePersonalResourcesByHashes = query({
   args: {
     actorClerkId: v.string(),
@@ -597,31 +779,7 @@ export const listAgentTexts = query({
 
 export const cleanupExpired = internalMutation({
   args: {},
-  handler: async (ctx) => {
-    const threshold = Date.now() - THIRTY_DAYS_MS;
-    const personalResources = (await ctx.db.query("resources").collect()).filter(
-      (resource) => resource.scope === "personal",
-    );
-
-    let deletedCount = 0;
-    for (const resource of personalResources) {
-      if ((resource.pinned ?? false) || resource.createdAt > threshold) continue;
-
-      const chunks = await ctx.db
-        .query("chunks")
-        .withIndex("by_resource", (q) => q.eq("resourceId", resource._id))
-        .collect();
-      for (const chunk of chunks) {
-        await ctx.db.delete(chunk._id);
-      }
-
-      if (resource.storageId) {
-        await ctx.storage.delete(resource.storageId);
-      }
-      await ctx.db.delete(resource._id);
-      deletedCount += 1;
-    }
-
-    return { ok: true, deletedCount };
+  handler: async () => {
+    return { ok: true, deletedCount: 0 };
   },
 });

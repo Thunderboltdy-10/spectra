@@ -154,6 +154,12 @@ const vModelInput = v.object({
   })),
   strengthText: v.optional(v.string()),
   strengthEmbedding: v.optional(v.array(v.float64())),
+  releaseDate: v.optional(v.string()),
+  knowledgeCutoff: v.optional(v.string()),
+  curatedNotes: v.optional(v.string()),
+  benchmarkMMLU: v.optional(v.number()),
+  benchmarkHumanEval: v.optional(v.number()),
+  arenaElo: v.optional(v.number()),
 });
 
 export const seedCatalogIfEmpty = mutation({
@@ -442,6 +448,12 @@ export const upsertModelCatalog = mutation({
         capabilities: model.capabilities,
         strengthText: model.strengthText,
         strengthEmbedding: model.strengthEmbedding,
+        releaseDate: model.releaseDate,
+        knowledgeCutoff: model.knowledgeCutoff,
+        curatedNotes: model.curatedNotes,
+        benchmarkMMLU: model.benchmarkMMLU,
+        benchmarkHumanEval: model.benchmarkHumanEval,
+        arenaElo: model.arenaElo,
         updatedAt: now,
       };
 
@@ -495,6 +507,12 @@ export const syncModelCatalog = mutation({
         capabilities: model.capabilities,
         strengthText: model.strengthText,
         strengthEmbedding: model.strengthEmbedding,
+        releaseDate: model.releaseDate,
+        knowledgeCutoff: model.knowledgeCutoff,
+        curatedNotes: model.curatedNotes,
+        benchmarkMMLU: model.benchmarkMMLU,
+        benchmarkHumanEval: model.benchmarkHumanEval,
+        arenaElo: model.arenaElo,
         updatedAt: now,
       };
 
@@ -546,6 +564,12 @@ export const upsertModelCatalogForOrg = internalMutation({
         capabilities: model.capabilities,
         strengthText: model.strengthText,
         strengthEmbedding: model.strengthEmbedding,
+        releaseDate: model.releaseDate,
+        knowledgeCutoff: model.knowledgeCutoff,
+        curatedNotes: model.curatedNotes,
+        benchmarkMMLU: model.benchmarkMMLU,
+        benchmarkHumanEval: model.benchmarkHumanEval,
+        arenaElo: model.arenaElo,
         updatedAt: now,
       };
 

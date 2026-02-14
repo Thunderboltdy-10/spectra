@@ -87,6 +87,99 @@ export const getStudentAnalytics = query({
   },
 });
 
+export const getRecentQuizPerformance = query({
+  args: {
+    actorClerkId: v.string(),
+    days: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) throw new Error("Actor not found");
+
+    const daysBack = Math.min(Math.max(args.days ?? 30, 1), 120);
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - daysBack);
+    const cutoffDay = cutoff.toISOString().slice(0, 10);
+
+    const rows = await ctx.db
+      .query("studentAnalytics")
+      .withIndex("by_user_day", (q) => q.eq("userId", actor._id))
+      .collect();
+
+    const scores = rows
+      .filter((row) => row.day >= cutoffDay)
+      .flatMap((row) => row.quizScores ?? [])
+      .filter((score) => Number.isFinite(score));
+
+    const averageScore =
+      scores.length > 0
+        ? scores.reduce((sum, score) => sum + score, 0) / scores.length
+        : undefined;
+
+    const recommendedDifficulty =
+      averageScore === undefined
+        ? 3
+        : averageScore >= 85
+          ? 5
+          : averageScore >= 75
+            ? 4
+            : averageScore >= 60
+              ? 3
+              : averageScore >= 45
+                ? 2
+                : 1;
+
+    return {
+      averageScore,
+      attempts: scores.length,
+      recommendedDifficulty,
+    };
+  },
+});
+
+export const setQuizDifficultySignal = mutation({
+  args: {
+    actorClerkId: v.string(),
+    difficulty: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) throw new Error("Actor not found");
+
+    const day = dayKey();
+    const difficulty = Math.min(5, Math.max(1, Math.round(args.difficulty)));
+    const existing = await ctx.db
+      .query("studentAnalytics")
+      .withIndex("by_user_day", (q) => q.eq("userId", actor._id).eq("day", day))
+      .unique();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        quizDifficultyLevel: difficulty,
+        updatedAt: Date.now(),
+      });
+      return { ok: true };
+    }
+
+    await ctx.db.insert("studentAnalytics", {
+      orgId: actor.orgId,
+      userId: actor._id,
+      day,
+      sessionsCount: 1,
+      messagesCount: 0,
+      topicsExplored: [],
+      modesUsed: ["quiz"],
+      modelsUsed: [],
+      quizScores: [],
+      quizDifficultyLevel: difficulty,
+      totalTokensUsed: 0,
+      updatedAt: Date.now(),
+    });
+
+    return { ok: true };
+  },
+});
+
 export const getClassAnalytics = query({
   args: {
     actorClerkId: v.string(),

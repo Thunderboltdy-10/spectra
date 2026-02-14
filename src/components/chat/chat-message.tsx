@@ -1,21 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Image from "next/image";
-import { Code2, Copy, FileText, Globe, Paperclip, RefreshCw, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Code2, Copy, FileText, GitBranch, Globe, Paperclip, Pencil, RefreshCw, ThumbsDown, ThumbsUp } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { ModelRoutingBadge } from "@/components/chat/model-routing-badge";
 import { ProviderLogo } from "@/components/provider-logo";
 import { SourcesDrawer } from "@/components/chat/sources-drawer";
+import { ThinkingBlock } from "@/components/chat/thinking-block";
+import { CollaboratorsBadge } from "@/components/chat/collaborators-badge";
 import type { Citation, RouteTrace, StudyMode } from "@/types";
 import { getModeConfig } from "@/lib/modes";
 import { cn } from "@/lib/utils";
+import { useTextToSpeech } from "@/hooks/use-text-to-speech";
 
 type ChatMessageProps = {
   role: "user" | "assistant" | "system";
   content: string;
+  thinkingContent?: string;
   enhancedContent?: string;
   attachments?: string[];
   attachmentPreviews?: Array<{
@@ -31,7 +35,15 @@ type ChatMessageProps = {
   mode?: StudyMode;
   isLastAssistant?: boolean;
   onRegenerate?: () => void;
+  onRegenerateWithModel?: (modelId: string) => void;
+  regenModels?: Array<{ modelId: string; name: string }>;
   onEdit?: (newContent: string) => void;
+  onFeedback?: (positive: boolean, modelId?: string) => void;
+  usageIn?: number;
+  usageOut?: number;
+  createdAt?: number;
+  onOpenCanvas?: (params: { code: string; language: string }) => void;
+  onBranch?: () => void;
 };
 
 function CitationCards({ citations, onOpen }: { citations: Citation[]; onOpen: () => void }) {
@@ -75,6 +87,7 @@ function CitationCards({ citations, onOpen }: { citations: Citation[]; onOpen: (
 export function ChatMessage({
   role,
   content,
+  thinkingContent,
   enhancedContent,
   attachments,
   attachmentPreviews,
@@ -85,12 +98,25 @@ export function ChatMessage({
   mode,
   isLastAssistant = false,
   onRegenerate,
+  onRegenerateWithModel,
+  regenModels = [],
+  onEdit,
+  onFeedback,
+  usageIn,
+  usageOut,
+  createdAt,
+  onOpenCanvas,
+  onBranch,
 }: ChatMessageProps) {
   const isUser = role === "user";
   const modeConfig = mode ? getModeConfig(mode) : undefined;
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
   const [showEnhanced, setShowEnhanced] = useState(false);
   const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editedContent, setEditedContent] = useState(content);
+  const [regenModel, setRegenModel] = useState(regenModels[0]?.modelId ?? "");
+  const tts = useTextToSpeech();
   const hasInlineCitations = /\[\d+\]/.test(content);
   const searchCitations = citations.filter((citation) => citation.sourceType === "search");
   const activeModelId = modelUsed ?? routeTrace?.selected.modelId;
@@ -102,10 +128,23 @@ export function ChatMessage({
           .map((_, index) => `[${index + 1}]`)
           .join(" ")}`
       : content;
+  const totalTokens = (usageIn ?? 0) + (usageOut ?? 0);
+  const estimatedCost = totalTokens > 0 ? totalTokens * 0.000002 : 0;
+  const timeLabel = useMemo(() => formatRelativeTime(createdAt), [createdAt]);
 
   function handleCopy() {
     void navigator.clipboard.writeText(content);
     toast.success("Copied to clipboard");
+  }
+
+  function handleSaveEdit() {
+    const clean = editedContent.trim();
+    if (!clean || clean === content.trim()) {
+      setEditing(false);
+      return;
+    }
+    onEdit?.(clean);
+    setEditing(false);
   }
 
   return (
@@ -114,7 +153,25 @@ export function ChatMessage({
         {isUser ? (
           <div className="ml-auto rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3 shadow-[var(--shadow-soft)]">
             <p className="mb-1 text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">You</p>
-            <p className="whitespace-pre-wrap text-[15px] leading-7 text-[var(--text-primary)]">{content}</p>
+            {editing ? (
+              <div className="space-y-2">
+                <textarea
+                  value={editedContent}
+                  onChange={(event) => setEditedContent(event.target.value)}
+                  className="min-h-[96px] w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[14px] outline-none focus:ring-2 focus:ring-[var(--accent-cyan)]/35"
+                />
+                <div className="flex items-center gap-2">
+                  <Button type="button" size="sm" onClick={handleSaveEdit}>
+                    Save
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <p className="whitespace-pre-wrap text-[15px] leading-7 text-[var(--text-primary)]">{content}</p>
+            )}
             {attachmentPreviews && attachmentPreviews.length > 0 ? (
               <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
                 {attachmentPreviews.map((attachment, index) => {
@@ -163,14 +220,14 @@ export function ChatMessage({
                 ))}
               </div>
             ) : null}
-            {enhancedContent && enhancedContent.trim() && enhancedContent.trim() !== content.trim() && (
+            {enhancedContent && enhancedContent.trim() && (
               <div className="mt-3 rounded-xl border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_75%,transparent)] p-2.5">
                 <button
                   type="button"
                   onClick={() => setShowEnhanced((prev) => !prev)}
                   className="text-xs font-medium text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
                 >
-                  {showEnhanced ? "Hide enhanced prompt" : "View enhanced prompt"}
+                  {showEnhanced ? "Hide enhanced prompt" : "Enhanced prompt used"}
                 </button>
                 {showEnhanced && (
                   <p className="mt-2 whitespace-pre-wrap text-[13px] leading-6 text-[var(--text-secondary)]">
@@ -179,6 +236,23 @@ export function ChatMessage({
                 )}
               </div>
             )}
+            {(onEdit || onBranch) && !editing ? (
+              <div className="mt-3 flex items-center gap-1.5">
+                {onEdit ? (
+                  <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setEditing(true)}>
+                    <Pencil className="h-3.5 w-3.5" />
+                    Edit
+                  </Button>
+                ) : null}
+                {onBranch ? (
+                  <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={onBranch}>
+                    <GitBranch className="h-3.5 w-3.5" />
+                    Branch
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+            {timeLabel ? <p className="mt-2 text-[11px] text-[var(--text-secondary)]">{timeLabel}</p> : null}
           </div>
         ) : (
           <div className="flex min-w-0 items-start gap-3 border-t border-[var(--border-default)] pt-4">
@@ -202,7 +276,9 @@ export function ChatMessage({
                 />
               </div>
 
-              <MarkdownRenderer content={renderedContent} citations={citations} />
+              <ThinkingBlock content={thinkingContent ?? ""} />
+              <MarkdownRenderer content={renderedContent} citations={citations} mode={mode} onOpenCanvas={onOpenCanvas} />
+              <CollaboratorsBadge collaborators={routeTrace?.collaborators} />
               {mode === "research" && searchCitations.length > 0 && (
                 <div className="mt-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2.5">
                   <p className="mb-1 text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
@@ -250,23 +326,50 @@ export function ChatMessage({
                   Copy
                 </Button>
                 {isLastAssistant && onRegenerate && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={onRegenerate}
-                    className="h-8 cursor-pointer gap-1.5 text-xs"
-                  >
-                    <RefreshCw className="h-3.5 w-3.5" />
-                    Regenerate
-                  </Button>
+                  <>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={onRegenerate}
+                      className="h-8 cursor-pointer gap-1.5 text-xs"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      Regenerate
+                    </Button>
+                    {onRegenerateWithModel && regenModels.length > 0 ? (
+                      <div className="flex items-center gap-1 rounded-full border border-[var(--border-default)] px-2 py-0.5 text-xs">
+                        <select
+                          value={regenModel}
+                          onChange={(event) => setRegenModel(event.target.value)}
+                          className="max-w-[180px] cursor-pointer bg-transparent text-[11px] outline-none"
+                        >
+                          {regenModels.map((model) => (
+                            <option key={model.modelId} value={model.modelId}>
+                              {model.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="cursor-pointer text-[11px] text-[var(--accent-cyan)]"
+                          onClick={() => onRegenerateWithModel(regenModel)}
+                        >
+                          Retry model
+                        </button>
+                      </div>
+                    ) : null}
+                  </>
                 )}
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
                   className={`h-8 cursor-pointer gap-1.5 text-xs ${feedback === "up" ? "text-[var(--success)]" : ""}`}
-                  onClick={() => setFeedback("up")}
+                  onClick={() => {
+                    setFeedback("up");
+                    onFeedback?.(true, activeModelId);
+                  }}
                 >
                   <ThumbsUp className="h-3.5 w-3.5" />
                   Helpful
@@ -276,11 +379,30 @@ export function ChatMessage({
                   variant="ghost"
                   size="sm"
                   className={`h-8 cursor-pointer gap-1.5 text-xs ${feedback === "down" ? "text-[var(--danger)]" : ""}`}
-                  onClick={() => setFeedback("down")}
+                  onClick={() => {
+                    setFeedback("down");
+                    onFeedback?.(false, activeModelId);
+                  }}
                 >
                   <ThumbsDown className="h-3.5 w-3.5" />
                   Improve
                 </Button>
+                {tts.isSupported ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 cursor-pointer gap-1.5 text-xs"
+                    onClick={() => (tts.isSpeaking ? tts.stop() : tts.speak(content))}
+                  >
+                    {tts.isSpeaking ? "Stop audio" : "Read aloud"}
+                  </Button>
+                ) : null}
+              </div>
+              <div className="mt-2 flex items-center gap-2 text-[11px] text-[var(--text-secondary)]">
+                {totalTokens > 0 ? <span>{totalTokens.toLocaleString()} tokens</span> : null}
+                {estimatedCost > 0 ? <span>~${estimatedCost.toFixed(4)}</span> : null}
+                {timeLabel ? <span>{timeLabel}</span> : null}
               </div>
             </div>
           </div>
@@ -289,4 +411,21 @@ export function ChatMessage({
       </div>
     </article>
   );
+}
+
+function formatRelativeTime(timestamp?: number) {
+  if (!timestamp) return "";
+  const now = Date.now();
+  const diffMs = timestamp - now;
+  const absMs = Math.abs(diffMs);
+  const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
+
+  const minutes = Math.round(diffMs / 60000);
+  if (absMs < 60_000) return "just now";
+  if (absMs < 3_600_000) return rtf.format(minutes, "minute");
+  const hours = Math.round(diffMs / 3_600_000);
+  if (absMs < 86_400_000) return rtf.format(hours, "hour");
+  const days = Math.round(diffMs / 86_400_000);
+  if (Math.abs(days) <= 6) return rtf.format(days, "day");
+  return new Date(timestamp).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }

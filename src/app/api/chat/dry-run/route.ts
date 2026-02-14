@@ -86,6 +86,8 @@ export async function POST(request: NextRequest) {
       needsRag: Boolean(body.usePersonalResources),
       promptEnhanced: auto.promptEnhanced,
       promptCategory: auto.promptCategory,
+      questionType: auto.questionType,
+      isMultipart: auto.isMultipart,
     });
 
     return ok({ routeTrace: route.trace });

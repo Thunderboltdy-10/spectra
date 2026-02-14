@@ -28,6 +28,33 @@ const HIGH_THINKING_MARKERS = [
   "critique",
 ];
 
+const DOMAIN_TERMS = [
+  "hypothesis",
+  "methodology",
+  "counterargument",
+  "causation",
+  "variance",
+  "evaluation",
+  "framework",
+  "taxonomy",
+  "rubric",
+  "synthesis",
+];
+
+export type PromptCategory =
+  | "code"
+  | "math_science"
+  | "creative"
+  | "research"
+  | "general"
+  | "debate"
+  | "comparison"
+  | "synthesis"
+  | "practical_application";
+
+export type QuestionType = "what" | "why" | "how" | "evaluate" | "compare" | "other";
+export type ExplainDepth = "introductory" | "intermediate" | "advanced";
+
 export type AutoSettingsInput = {
   message: string;
   currentThinkingLevel: ThinkingLevel;
@@ -47,8 +74,28 @@ export type AutoSettingsResult = {
   searchEnabled: boolean;
   thinkingLevel: ThinkingLevel;
   complexity: "simple" | "medium" | "complex";
-  promptCategory: "code" | "math_science" | "creative" | "research" | "general";
+  promptCategory: PromptCategory;
+  questionType: QuestionType;
+  isMultipart: boolean;
 };
+
+export function classifyExplainDepth(prompt: string, userMemory?: string): ExplainDepth {
+  const text = `${prompt}\n${userMemory ?? ""}`.toLowerCase();
+  const advancedMarkers =
+    /(formal proof|edge case|asymptotic|theorem|research paper|graduate|phd|abstraction|optimization)/i.test(text);
+  const introMarkers =
+    /(for beginners|eli5|simple terms|basic|new to this|just starting|beginner)/i.test(text);
+  const domainMarkers =
+    /(newton|photosynthesis|mitosis|calculus|thermodynamics|algorithm|macroeconomics|chemistry|biology|physics)/i.test(text);
+
+  if (advancedMarkers) return "advanced";
+  if (introMarkers) return "introductory";
+  if (prompt.length > 260 || /(evaluate|compare|synthesize|derive)/i.test(prompt)) return "advanced";
+  if ((prompt.length < 80 && !domainMarkers) || /(what is|explain like)/i.test(prompt.toLowerCase())) {
+    return "introductory";
+  }
+  return "intermediate";
+}
 
 export function detectSearchIntent(message: string) {
   const normalized = message.toLowerCase();
@@ -65,18 +112,69 @@ export function detectThinkingLevel(message: string, fallback: ThinkingLevel): T
   return fallback;
 }
 
+function detectQuestionType(message: string): QuestionType {
+  const normalized = message.trim().toLowerCase();
+  if (/^(what|which)\b/.test(normalized)) return "what";
+  if (/^(why)\b/.test(normalized)) return "why";
+  if (/^(how)\b/.test(normalized)) return "how";
+  if (/^(evaluate|assess|critique|analyze)\b/.test(normalized)) return "evaluate";
+  if (/^(compare|contrast)\b/.test(normalized)) return "compare";
+  return "other";
+}
+
+function detectMultipart(message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    /(^|\n)\s*(\d+\.|-|\*)\s+/.test(message) ||
+    /\b(first|second|third|then|finally)\b/.test(normalized)
+  );
+}
+
 export function classifyComplexity(message: string): "simple" | "medium" | "complex" {
   const normalized = message.toLowerCase();
   const hasComplexVerb = HIGH_THINKING_MARKERS.some((marker) => normalized.includes(marker));
-  if (hasComplexVerb || message.length > 500) return "complex";
-  if (message.length > 180) return "medium";
+  const multipart = detectMultipart(message);
+  const questionType = detectQuestionType(message);
+  const wordCount = Math.max(1, message.trim().split(/\s+/).length);
+  const avgWordLength =
+    message
+      .trim()
+      .split(/\s+/)
+      .reduce((sum, part) => sum + part.length, 0) / wordCount;
+  const domainHits = DOMAIN_TERMS.filter((term) => normalized.includes(term)).length;
+
+  let score = 0;
+  score += Math.min(1, wordCount / 280) * 0.35;
+  score += hasComplexVerb ? 0.2 : 0;
+  score += multipart ? 0.18 : 0;
+  score += Math.min(1, domainHits / 5) * 0.2;
+  score += avgWordLength > 5 ? 0.05 : 0;
+  if (questionType === "evaluate" || questionType === "compare") score += 0.12;
+  if (questionType === "why" || questionType === "how") score += 0.05;
+
+  if (hasComplexVerb && multipart && wordCount >= 20) return "complex";
+
+  if (score >= 0.62 || message.length > 550) return "complex";
+  if (score >= 0.34 || message.length > 190) return "medium";
   return "simple";
 }
 
 function classifyPromptCategory(
   message: string,
-): "code" | "math_science" | "creative" | "research" | "general" {
+): PromptCategory {
   const normalized = message.toLowerCase();
+  if (/(debate|argue both sides|counterargument|rebuttal|position statement)/i.test(normalized)) {
+    return "debate";
+  }
+  if (/(compare|contrast|versus|vs\.?|difference between|similarities)/i.test(normalized)) {
+    return "comparison";
+  }
+  if (/(synthesize|combine these sources|integrate evidence|meta-analysis|cross-reference)/i.test(normalized)) {
+    return "synthesis";
+  }
+  if (/(apply this|real-world|case study|practical|implementation plan|action plan)/i.test(normalized)) {
+    return "practical_application";
+  }
   if (/(code|typescript|javascript|python|debug|function|api|sql|algorithm|bug)/i.test(normalized)) {
     return "code";
   }
@@ -173,6 +271,8 @@ export async function maybeEnhancePrompt(message: string) {
 export async function runAutoSettingsPipeline(input: AutoSettingsInput): Promise<AutoSettingsResult> {
   const complexity = classifyComplexity(input.message);
   const promptCategory = classifyPromptCategory(input.message);
+  const questionType = detectQuestionType(input.message);
+  const isMultipart = detectMultipart(input.message);
   const enhanceMode = input.enhanceMode ?? "auto";
   const thinkingMode = input.thinkingMode ?? "auto";
   const searchMode = input.searchMode ?? "auto";
@@ -214,5 +314,7 @@ export async function runAutoSettingsPipeline(input: AutoSettingsInput): Promise
     thinkingLevel,
     complexity,
     promptCategory,
+    questionType,
+    isMultipart,
   };
 }

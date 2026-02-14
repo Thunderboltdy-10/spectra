@@ -11,6 +11,7 @@ import {
   ChevronDown,
   FileText,
   Loader2,
+  Mic,
   Paperclip,
   Search,
   Sparkles,
@@ -18,12 +19,15 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { SlashCommandMenu } from "@/components/chat/slash-command-menu";
 import { ALL_MODES, getModeConfig } from "@/lib/modes";
 import type { Agent } from "@/types";
 import type { AutoPreference, FileStatus, ModelOption } from "@/hooks/use-chat-state";
 import type { RouterMode, StudyMode } from "@/types";
 import { fuzzyScore } from "@/lib/fuzzy-model-search";
 import { cn } from "@/lib/utils";
+import { parseSlashCommand } from "@/lib/slash-commands";
+import { useSpeechToText } from "@/hooks/use-speech-to-text";
 
 type ChatComposerProps = {
   message: string;
@@ -51,6 +55,7 @@ type ChatComposerProps = {
   onAutoEnhancePromptChange: (value: AutoPreference) => void;
   onAutoThinkingChange: (value: AutoPreference) => void;
   onAutoSearchChange: (value: AutoPreference) => void;
+  onSlashCommand?: (value: string) => Promise<boolean> | boolean;
   lastAutoResult?: {
     promptEnhanced: boolean;
     searchEnabled: boolean;
@@ -200,6 +205,7 @@ export function ChatComposer({
   onAutoEnhancePromptChange,
   onAutoThinkingChange,
   onAutoSearchChange,
+  onSlashCommand,
   lastAutoResult,
 }: ChatComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -250,6 +256,8 @@ export function ChatComposer({
   }, [modelSearch, models]);
   const selectorTriggerClass =
     "inline-flex cursor-pointer items-center gap-2 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]";
+  const slashActive = message.trimStart().startsWith("/");
+  const speech = useSpeechToText();
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -309,6 +317,11 @@ export function ChatComposer({
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
+      const maybeSlash = parseSlashCommand(message.trim());
+      if (maybeSlash && onSlashCommand) {
+        void onSlashCommand(message.trim());
+        return;
+      }
       onSend();
     }
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
@@ -371,6 +384,19 @@ export function ChatComposer({
     }
   }
 
+  function handleToggleMic() {
+    if (!speech.isSupported) return;
+    if (speech.isListening) {
+      speech.stop();
+      if (speech.transcript.trim()) {
+        onMessageChange([message, speech.transcript.trim()].filter(Boolean).join(message.trim() ? " " : ""));
+      }
+      speech.reset();
+      return;
+    }
+    speech.start();
+  }
+
   function renderStatus(status: FileStatus) {
     if (status === "uploading") {
       return (
@@ -411,6 +437,15 @@ export function ChatComposer({
       onDrop={handleDrop}
     >
       <div className="mx-auto w-full max-w-5xl">
+        {slashActive ? (
+          <SlashCommandMenu
+            query={message.trim()}
+            onSelect={(command) => {
+              onMessageChange(command);
+              textareaRef.current?.focus();
+            }}
+          />
+        ) : null}
         {draggingFiles && (
           <div className="mb-2 rounded-xl border border-dashed border-[color-mix(in_oklab,var(--accent-cyan)_55%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)] px-3 py-2 text-xs font-medium text-[var(--accent-cyan)]">
             Drop files to attach
@@ -700,15 +735,34 @@ export function ChatComposer({
           </div>
 
           <div className="flex items-end gap-2 px-3 py-2.5">
-            <textarea
-              ref={textareaRef}
-              value={message}
-              onChange={(event) => onMessageChange(event.target.value)}
-              onPaste={handlePaste}
-              placeholder="Ask anything. For best results, include your context and goal."
-              className="max-h-[220px] min-h-[70px] flex-1 resize-none bg-transparent px-2 py-1 text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] outline-none"
-              onKeyDown={handleKeyDown}
-            />
+            <div className="flex-1">
+              <textarea
+                ref={textareaRef}
+                value={message}
+                onChange={(event) => onMessageChange(event.target.value)}
+                onPaste={handlePaste}
+                placeholder="Ask anything. For best results, include your context and goal."
+                className="max-h-[220px] min-h-[70px] w-full resize-none bg-transparent px-2 py-1 text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] outline-none"
+                onKeyDown={handleKeyDown}
+              />
+              {speech.isListening ? (
+                <p className="px-2 pb-1 text-xs text-[var(--danger)]">
+                  Recording... {speech.transcript || "Listening"}
+                </p>
+              ) : null}
+            </div>
+
+            {speech.isSupported ? (
+              <Button
+                onClick={handleToggleMic}
+                variant={speech.isListening ? "destructive" : "secondary"}
+                size="icon"
+                className={cn("h-10 w-10 rounded-full", speech.isListening && "animate-pulse")}
+                aria-label={speech.isListening ? "Stop voice input" : "Start voice input"}
+              >
+                <Mic className="h-4 w-4" />
+              </Button>
+            ) : null}
 
             {sending && onStop ? (
               <Button

@@ -32,9 +32,10 @@ type ChatWelcomeProps = {
   onSelectAgent: (agentId: string) => void;
   onSelectMode: (mode: StudyMode) => void;
   agents: Agent[];
+  welcomeMessage?: string;
 };
 
-export function ChatWelcome({ onSelectAgent, onSelectMode, agents }: ChatWelcomeProps) {
+export function ChatWelcome({ onSelectAgent, onSelectMode, agents, welcomeMessage }: ChatWelcomeProps) {
   return (
     <div className="flex flex-col items-center justify-center px-4 py-12">
       <div className="w-full max-w-5xl">
@@ -48,7 +49,9 @@ export function ChatWelcome({ onSelectAgent, onSelectMode, agents }: ChatWelcome
             Start With A Study Mode
           </h1>
           <p className="mx-auto mt-3 max-w-xl text-sm text-[var(--text-secondary)] sm:text-base">
-            Pick a mode to control how the assistant responds. You can switch at any time without resetting the conversation.
+            {welcomeMessage?.trim()
+              ? welcomeMessage
+              : "Pick a mode to control how the assistant responds. You can switch at any time without resetting the conversation."}
           </p>
         </div>
 

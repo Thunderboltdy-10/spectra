@@ -56,6 +56,12 @@ type CatalogModel = {
   isFeatured?: boolean;
   featuredOrder?: number;
   capabilities?: CapabilityScores;
+  releaseDate?: string;
+  knowledgeCutoff?: string;
+  curatedNotes?: string;
+  benchmarkMMLU?: number;
+  benchmarkHumanEval?: number;
+  arenaElo?: number;
 };
 
 type LiveModel = {
@@ -268,6 +274,26 @@ function ModelCard({
           <p className="mt-0.5 text-[var(--text-primary)]">{formatCost(model.outputCostPerM, model.isFree)}</p>
         </div>
       </div>
+
+      <div className="mt-2 grid grid-cols-2 gap-1.5 text-[11px] text-[var(--text-secondary)]">
+        <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1.5">
+          <p className="uppercase tracking-wide">Released</p>
+          <p className="mt-0.5 text-[var(--text-primary)]">{model.releaseDate ?? "Unknown"}</p>
+        </div>
+        <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1.5">
+          <p className="uppercase tracking-wide">Knowledge</p>
+          <p className="mt-0.5 text-[var(--text-primary)]">{model.knowledgeCutoff ?? "Unknown"}</p>
+        </div>
+      </div>
+
+      {(typeof model.benchmarkMMLU === "number" || typeof model.benchmarkHumanEval === "number" || typeof model.arenaElo === "number") ? (
+        <div className="mt-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1.5 text-[11px] text-[var(--text-secondary)]">
+          <p className="uppercase tracking-wide">Benchmarks</p>
+          <p className="mt-0.5 text-[var(--text-primary)]">
+            MMLU {typeof model.benchmarkMMLU === "number" ? model.benchmarkMMLU.toFixed(1) : "—"} • HumanEval {typeof model.benchmarkHumanEval === "number" ? model.benchmarkHumanEval.toFixed(1) : "—"} • Elo {typeof model.arenaElo === "number" ? Math.round(model.arenaElo) : "—"}
+          </p>
+        </div>
+      ) : null}
 
       {model.usageCount > 0 && (
         <p className="mt-2 text-[11px] text-[var(--text-secondary)]">Used {model.usageCount}x in your school</p>

@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -58,6 +59,8 @@ type ChatSidebarProps = {
   role: "student" | "teacher" | "admin";
   userSpending: UserSpending | null;
   userMemorySummary?: string;
+  orgName?: string;
+  orgLogoUrl?: string;
 };
 
 function toGroupHeading(ts: number) {
@@ -121,6 +124,8 @@ export function ChatSidebar({
   role,
   userSpending,
   userMemorySummary,
+  orgName,
+  orgLogoUrl,
 }: ChatSidebarProps) {
   const pathname = usePathname();
   const { user } = useUser();
@@ -150,9 +155,13 @@ export function ChatSidebar({
     return (
       <div className="chat-sidebar flex h-full flex-col border-r border-[var(--border-default)] px-2 py-3">
         <div className="mb-4 flex items-center justify-between">
-          <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--gradient-brand)] text-white">
-            <Sparkles className="h-4 w-4" />
-          </div>
+          {orgLogoUrl ? (
+            <Image src={orgLogoUrl} alt={orgName ?? "Org"} width={32} height={32} className="h-8 w-8 rounded-xl object-cover" />
+          ) : (
+            <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--gradient-brand)] text-white">
+              <Sparkles className="h-4 w-4" />
+            </div>
+          )}
           <Button type="button" variant="ghost" size="icon" onClick={onToggleCollapse} aria-label="Expand sidebar">
             <ChevronRight className="h-4 w-4" />
           </Button>
@@ -192,11 +201,21 @@ export function ChatSidebar({
   return (
     <div className="chat-sidebar flex h-full flex-col border-r border-[var(--border-default)] p-3">
       <div className="mb-3 flex items-center gap-2.5">
-        <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--gradient-brand)] text-white shadow-[var(--shadow-soft)]">
-          <Sparkles className="h-4 w-4" />
-        </div>
+        {orgLogoUrl ? (
+          <Image
+            src={orgLogoUrl}
+            alt={orgName ?? "Org"}
+            width={32}
+            height={32}
+            className="h-8 w-8 rounded-xl border border-[var(--border-default)] bg-white/70 object-cover shadow-[var(--shadow-soft)]"
+          />
+        ) : (
+          <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--gradient-brand)] text-white shadow-[var(--shadow-soft)]">
+            <Sparkles className="h-4 w-4" />
+          </div>
+        )}
         <div className="min-w-0 flex-1">
-          <p className="font-display text-lg leading-none">AI School</p>
+          <p className="font-display text-lg leading-none">{orgName ?? "AI School"}</p>
           <p className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">studio</p>
         </div>
         <Button type="button" variant="ghost" size="icon" onClick={onToggleCollapse} aria-label="Collapse sidebar">

@@ -19,6 +19,15 @@ export default defineSchema({
     tokenBudgetDaily: v.number(),
     verifyMarkerPassEnabled: v.boolean(),
     allowPaidModels: v.optional(v.boolean()),
+    orchestratorV2Enabled: v.optional(v.boolean()),
+    soulEnabled: v.optional(v.boolean()),
+    agentModelBoostEnabled: v.optional(v.boolean()),
+    adaptiveQuizEnabled: v.optional(v.boolean()),
+    spacedRepetitionEnabled: v.optional(v.boolean()),
+    logoStorageId: v.optional(v.id("_storage")),
+    primaryColor: v.optional(v.string()),
+    accentColor: v.optional(v.string()),
+    welcomeMessage: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -109,6 +118,13 @@ export default defineSchema({
     category: v.string(),
     preferredModel: v.optional(v.string()),
     preferredMode: v.optional(vStudyMode),
+    temperature: v.optional(v.number()),
+    maxTokens: v.optional(v.number()),
+    originalDescription: v.optional(v.string()),
+    allowedTools: v.optional(v.array(v.string())),
+    modelAllowlist: v.optional(v.array(v.string())),
+    modelDenylist: v.optional(v.array(v.string())),
+    attachmentPolicy: v.optional(v.string()),
     visibility: v.union(v.literal("public"), v.literal("private")),
     usageCount: v.number(),
     guidelinesSummary: v.optional(v.string()),
@@ -124,6 +140,18 @@ export default defineSchema({
       searchField: "name",
       filterFields: ["orgId", "visibility"],
     }),
+
+  agentModelStats: defineTable({
+    agentId: v.id("agents"),
+    modelId: v.string(),
+    totalUses: v.number(),
+    positiveRatings: v.number(),
+    negativeRatings: v.number(),
+    avgResponseQuality: v.number(),
+    lastUsedAt: v.number(),
+  })
+    .index("by_agent", ["agentId"])
+    .index("by_agent_model", ["agentId", "modelId"]),
 
   chats: defineTable({
     orgId: v.id("orgs"),
@@ -153,6 +181,8 @@ export default defineSchema({
     role: v.union(v.literal("user"), v.literal("assistant"), v.literal("system")),
     mode: vStudyMode,
     content: v.string(),
+    attachments: v.optional(v.array(v.string())),
+    attachmentResourceIds: v.optional(v.array(v.id("resources"))),
     enhancedContent: v.optional(v.string()),
     citations: v.array(vCitation),
     modelRequested: v.optional(v.string()),
@@ -161,12 +191,17 @@ export default defineSchema({
     usageIn: v.optional(v.number()),
     usageOut: v.optional(v.number()),
     verificationPassed: v.optional(v.boolean()),
+    thinkingContent: v.optional(v.string()),
     routeTrace: vRouteTrace,
     createdAt: v.number(),
   })
     .index("by_chat", ["chatId"])
     .index("by_user_created", ["userId", "createdAt"])
-    .index("by_org", ["orgId"]),
+    .index("by_org", ["orgId"])
+    .searchIndex("search_content", {
+      searchField: "content",
+      filterFields: ["userId"],
+    }),
 
   usageDaily: defineTable({
     orgId: v.id("orgs"),
@@ -230,11 +265,74 @@ export default defineSchema({
     modesUsed: v.array(v.string()),
     modelsUsed: v.array(v.string()),
     quizScores: v.array(v.number()),
+    quizDifficultyLevel: v.optional(v.number()),
     totalTokensUsed: v.number(),
     updatedAt: v.number(),
   })
     .index("by_user_day", ["userId", "day"])
     .index("by_org_day", ["orgId", "day"]),
+
+  weeklySummaries: defineTable({
+    userId: v.id("users"),
+    orgId: v.id("orgs"),
+    weekKey: v.string(),
+    insights: v.array(v.string()),
+    suggestions: v.array(v.string()),
+    strengths: v.array(v.string()),
+    improvements: v.array(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_org_week", ["orgId", "weekKey"]),
+
+  nudges: defineTable({
+    userId: v.id("users"),
+    orgId: v.id("orgs"),
+    type: v.string(),
+    message: v.string(),
+    actionUrl: v.optional(v.string()),
+    dismissed: v.boolean(),
+    createdAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_org", ["orgId"]),
+
+  flashcardProgress: defineTable({
+    userId: v.id("users"),
+    orgId: v.id("orgs"),
+    cardHash: v.string(),
+    easeFactor: v.number(),
+    interval: v.number(),
+    nextReviewAt: v.number(),
+    repetitions: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_user_card", ["userId", "cardHash"]),
+
+  orgSoulDocs: defineTable({
+    orgId: v.id("orgs"),
+    title: v.string(),
+    section: v.string(),
+    content: v.string(),
+    version: v.number(),
+    publishedAt: v.optional(v.number()),
+    updatedAt: v.number(),
+  })
+    .index("by_org", ["orgId"]),
+
+  orgSoulChunks: defineTable({
+    orgId: v.id("orgs"),
+    docId: v.id("orgSoulDocs"),
+    text: v.string(),
+    embedding: v.array(v.float64()),
+    createdAt: v.number(),
+  })
+    .index("by_doc", ["docId"])
+    .vectorIndex("by_embedding", {
+      vectorField: "embedding",
+      dimensions: EMBEDDING_DIMENSIONS,
+      filterFields: ["orgId"],
+    }),
 
   modelCatalog: defineTable({
     orgId: v.id("orgs"),
@@ -263,6 +361,12 @@ export default defineSchema({
     })),
     strengthText: v.optional(v.string()),
     strengthEmbedding: v.optional(v.array(v.float64())),
+    releaseDate: v.optional(v.string()),
+    knowledgeCutoff: v.optional(v.string()),
+    curatedNotes: v.optional(v.string()),
+    benchmarkMMLU: v.optional(v.number()),
+    benchmarkHumanEval: v.optional(v.number()),
+    arenaElo: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

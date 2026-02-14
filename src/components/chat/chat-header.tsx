@@ -1,6 +1,6 @@
 "use client";
 
-import { Menu, Plus, Settings2, Square } from "lucide-react";
+import { Download, FileText, Menu, Plus, Settings2, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type ChatHeaderProps = {
@@ -12,6 +12,8 @@ type ChatHeaderProps = {
   onToggleMobileSidebar: () => void;
   onOpenSettings: () => void;
   onNewChat: () => void;
+  onExportMarkdown: () => void;
+  onExportPdf: () => void;
 };
 
 export function ChatHeader({
@@ -23,6 +25,8 @@ export function ChatHeader({
   onToggleMobileSidebar,
   onOpenSettings,
   onNewChat,
+  onExportMarkdown,
+  onExportPdf,
 }: ChatHeaderProps) {
   const modelLabel = lastModelUsed
     ? (lastModelUsed.split("/").pop() ?? lastModelUsed).replace(/:free$/i, "")
@@ -73,6 +77,14 @@ export function ChatHeader({
                 Settings
               </Button>
             )}
+            <Button type="button" variant="secondary" size="sm" className="h-9 gap-1.5" onClick={onExportMarkdown}>
+              <FileText className="h-3.5 w-3.5" />
+              MD
+            </Button>
+            <Button type="button" variant="secondary" size="sm" className="h-9 gap-1.5" onClick={onExportPdf}>
+              <Download className="h-3.5 w-3.5" />
+              PDF
+            </Button>
             <Button type="button" variant="secondary" size="icon" onClick={onNewChat} aria-label="New chat">
               <Plus className="h-4 w-4" />
             </Button>

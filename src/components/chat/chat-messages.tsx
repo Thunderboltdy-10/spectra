@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowDown, Brain, RefreshCw, TriangleAlert, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChatMessage } from "@/components/chat/chat-message";
+import { CollaboratorsLive, type ActiveCollaborator } from "@/components/chat/collaborators-live";
 import { QuizView, isQuizContent } from "@/components/chat/quiz-view";
 import { FlashcardView, isFlashcardContent } from "@/components/chat/flashcard-view";
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
+import { ThinkingBlock } from "@/components/chat/thinking-block";
 import { ThinkingMessages } from "@/components/loading-states";
 import { autoCloseMarkdown } from "@/lib/stream-markdown";
 import type { Message } from "@/hooks/use-chat-state";
@@ -15,10 +17,16 @@ import type { StudyMode } from "@/types";
 type ChatMessagesProps = {
   messages: Message[];
   draftResponse: string;
+  draftThinking?: string;
   sending: boolean;
   streamError: string | null;
   onRetry: () => void;
   onRegenerate?: () => void;
+  onRegenerateWithModel?: (modelId: string) => void;
+  onAssistantFeedback?: (positive: boolean, modelId?: string) => void;
+  onEditMessage?: (messageId: string, newContent: string) => Promise<void>;
+  onBranchMessage?: (messageId: string) => Promise<void> | void;
+  regenModels?: Array<{ modelId: string; name: string }>;
   emptyState?: React.ReactNode;
   mode: StudyMode;
   lastModelUsed?: string;
@@ -28,19 +36,31 @@ type ChatMessagesProps = {
     thinkingLevel: "low" | "medium" | "high";
     promptEnhanced: boolean;
   } | null;
+  activeCollaborators?: ActiveCollaborator[];
+  collaboratorPhase?: "idle" | "running" | "synthesizing";
+  onOpenCanvas?: (params: { code: string; language: string }) => void;
 };
 
 export function ChatMessages({
   messages,
   draftResponse,
+  draftThinking,
   sending,
   streamError,
   onRetry,
   onRegenerate,
+  onRegenerateWithModel,
+  onAssistantFeedback,
+  onEditMessage,
+  onBranchMessage,
+  regenModels = [],
   emptyState,
   mode,
   lastModelUsed,
   lastAutoResult,
+  activeCollaborators = [],
+  collaboratorPhase = "idle",
+  onOpenCanvas,
 }: ChatMessagesProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
@@ -149,6 +169,7 @@ export function ChatMessages({
                   <ChatMessage
                     role={msg.role}
                     content={msg.content}
+                    thinkingContent={msg.thinkingContent}
                     enhancedContent={msg.enhancedContent}
                     attachments={msg.attachments}
                     attachmentPreviews={msg.attachmentPreviews}
@@ -159,6 +180,14 @@ export function ChatMessages({
                     mode={mode}
                     isLastAssistant={isLastAssistant}
                     onRegenerate={isLastAssistant ? onRegenerate : undefined}
+                    onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
+                    regenModels={regenModels}
+                    onEdit={undefined}
+                    usageIn={msg.usageIn}
+                    usageOut={msg.usageOut}
+                    createdAt={msg.createdAt}
+                    onFeedback={msg.role === "assistant" ? onAssistantFeedback : undefined}
+                    onOpenCanvas={onOpenCanvas}
                   />
                   <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
                     <p className="text-xs text-amber-600 dark:text-amber-400">
@@ -184,37 +213,30 @@ export function ChatMessages({
                 return <FlashcardView key={msg._id} content={msg.content} />;
               }
               return (
-                <div key={msg._id}>
-                  <ChatMessage
-                    role={msg.role}
-                    content={msg.content}
-                    enhancedContent={msg.enhancedContent}
-                    attachments={msg.attachments}
-                    attachmentPreviews={msg.attachmentPreviews}
-                    modelUsed={msg.modelUsed}
-                    whyThisResponse={msg.whyThisResponse}
-                    routeTrace={msg.routeTrace}
-                    citations={msg.citations}
-                    mode={mode}
-                    isLastAssistant={isLastAssistant}
-                    onRegenerate={isLastAssistant ? onRegenerate : undefined}
-                  />
-                  <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
-                    <p className="text-xs text-amber-600 dark:text-amber-400">
-                      Response didn&apos;t follow flashcard format. Showing as text.
-                    </p>
-                    {isLastAssistant && onRegenerate && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={onRegenerate}
-                        className="mt-2"
-                      >
-                        Regenerate as strict flashcards
-                      </Button>
-                    )}
-                  </div>
-                </div>
+                <ChatMessage
+                  key={msg._id}
+                  role={msg.role}
+                  content={msg.content}
+                  thinkingContent={msg.thinkingContent}
+                  enhancedContent={msg.enhancedContent}
+                  attachments={msg.attachments}
+                  attachmentPreviews={msg.attachmentPreviews}
+                  modelUsed={msg.modelUsed}
+                  whyThisResponse={msg.whyThisResponse}
+                  routeTrace={msg.routeTrace}
+                  citations={msg.citations}
+                  mode={mode}
+                  isLastAssistant={isLastAssistant}
+                  onRegenerate={isLastAssistant ? onRegenerate : undefined}
+                  onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
+                  regenModels={regenModels}
+                  onEdit={undefined}
+                  usageIn={msg.usageIn}
+                  usageOut={msg.usageOut}
+                  createdAt={msg.createdAt}
+                  onFeedback={msg.role === "assistant" ? onAssistantFeedback : undefined}
+                  onOpenCanvas={onOpenCanvas}
+                />
               );
             }
 
@@ -223,6 +245,7 @@ export function ChatMessages({
                 key={msg._id}
                 role={msg.role}
                 content={msg.content}
+                thinkingContent={msg.thinkingContent}
                 enhancedContent={msg.enhancedContent}
                 attachments={msg.attachments}
                 attachmentPreviews={msg.attachmentPreviews}
@@ -233,9 +256,22 @@ export function ChatMessages({
                 mode={msg.role === "assistant" ? mode : undefined}
                 isLastAssistant={isLastAssistant}
                 onRegenerate={isLastAssistant ? onRegenerate : undefined}
+                onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
+                regenModels={regenModels}
+                onEdit={msg.role === "user" && onEditMessage ? (value) => void onEditMessage(msg._id, value) : undefined}
+                onBranch={msg.role === "user" && onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
+                usageIn={msg.usageIn}
+                usageOut={msg.usageOut}
+                createdAt={msg.createdAt}
+                onFeedback={msg.role === "assistant" ? onAssistantFeedback : undefined}
+                onOpenCanvas={onOpenCanvas}
               />
             );
           })}
+
+          {sending && activeCollaborators.length > 0 ? (
+            <CollaboratorsLive collaborators={activeCollaborators} phase={collaboratorPhase} />
+          ) : null}
 
           {draftResponse && (mode === "quiz" || mode === "exam" || mode === "flashcard") ? (
             <article className="chat-fade-in flex justify-start">
@@ -282,6 +318,9 @@ export function ChatMessages({
                   </div>
                 )}
                 <div>
+                  {draftThinking ? (
+                    <ThinkingBlock content={draftThinking} streaming />
+                  ) : null}
                   {renderDraftMarkdown(draftResponse)}
                   <span className="stream-cursor" aria-hidden>
                     |
@@ -296,6 +335,7 @@ export function ChatMessages({
               <div className="flex items-center gap-3">
                 <ThinkingMessages />
               </div>
+              {draftThinking ? <div className="mt-3"><ThinkingBlock content={draftThinking} streaming /></div> : null}
             </div>
           )}
 

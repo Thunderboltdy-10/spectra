@@ -8,16 +8,22 @@ import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
 import { Check, Copy, ExternalLink } from "lucide-react";
 
+import { QuizReveal } from "@/components/chat/quiz-reveal";
+import { FlashcardReveal } from "@/components/chat/flashcard-reveal";
 import type { Citation } from "@/types";
+import type { StudyMode } from "@/types";
 
 type MarkdownRendererProps = {
   content: string;
   citations?: Citation[];
+  mode?: StudyMode;
+  onOpenCanvas?: (params: { code: string; language: string }) => void;
 };
 
 type CodeBlockProps = {
   children?: React.ReactNode;
   className?: string;
+  onOpenCanvas?: (params: { code: string; language: string }) => void;
 } & React.HTMLAttributes<HTMLElement>;
 
 function normalizeCode(children: React.ReactNode) {
@@ -26,10 +32,11 @@ function normalizeCode(children: React.ReactNode) {
   return String(children ?? "");
 }
 
-function CodeBlock({ children, className, ...props }: CodeBlockProps) {
+function CodeBlock({ children, className, onOpenCanvas, ...props }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
   const language = className?.replace("language-", "") || "";
   const codeText = useMemo(() => normalizeCode(children).trim(), [children]);
+  const canOpenCanvas = Boolean(onOpenCanvas) && codeText.split("\n").length > 10;
 
   function handleCopy() {
     void navigator.clipboard.writeText(codeText);
@@ -60,6 +67,15 @@ function CodeBlock({ children, className, ...props }: CodeBlockProps) {
             </>
           )}
         </button>
+        {canOpenCanvas ? (
+          <button
+            type="button"
+            onClick={() => onOpenCanvas?.({ code: codeText, language: language || "text" })}
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[11px] text-[var(--accent-cyan)] transition hover:bg-[var(--bg-hover)]"
+          >
+            Open in Canvas
+          </button>
+        ) : null}
       </div>
       <pre className="!m-0 overflow-x-auto bg-[var(--bg-code)] !p-4" {...props}>
         <code className={className}>{children}</code>
@@ -74,14 +90,26 @@ function citationHref(citation: Citation) {
   return undefined;
 }
 
-export function MarkdownRenderer({ content, citations = [] }: MarkdownRendererProps) {
+function normalizeCitationToken(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/§\s*\d+(\.\d+)*/g, " ")
+    .replace(/\.[a-z0-9]{2,5}$/i, " ")
+    .replace(/[_-]+/g, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function MarkdownRenderer({ content, citations = [], mode, onOpenCanvas }: MarkdownRendererProps) {
   const cleanContent = useMemo(() => {
     let processed = content;
 
     processed = processed.replace(/\[([^\]\n]+?)\s+p\.\s*(\d+)\]/gi, (match, filename, page) => {
+      const target = normalizeCitationToken(String(filename));
       const idx = citations.findIndex(
         (citation) =>
-          citation.filename.toLowerCase().includes(String(filename).toLowerCase().trim()) &&
+          normalizeCitationToken(citation.filename).includes(target) &&
           (citation.page === Number(page) || !citation.page),
       );
       return idx >= 0 ? `[${idx + 1}]` : match;
@@ -90,8 +118,9 @@ export function MarkdownRenderer({ content, citations = [] }: MarkdownRendererPr
     processed = processed.replace(/\[([^\]\n]{3,60})\]/gi, (match, name) => {
       const token = String(name).trim();
       if (/^\d+$/.test(token)) return match;
+      const normalizedToken = normalizeCitationToken(token);
       const idx = citations.findIndex((citation) =>
-        citation.filename.toLowerCase().includes(token.toLowerCase()),
+        normalizeCitationToken(citation.filename).includes(normalizedToken),
       );
       return idx >= 0 ? `[${idx + 1}]` : match;
     });
@@ -106,6 +135,14 @@ export function MarkdownRenderer({ content, citations = [] }: MarkdownRendererPr
 
     return processed.replace(/\n{3,}/g, "\n\n").trim();
   }, [citations, content]);
+
+  const isQuizMode = mode === "quiz" || mode === "exam";
+  if (isQuizMode && /\n\d+[.)]\s+/.test(cleanContent) && /[A-D][.)]\s+/.test(cleanContent)) {
+    return <QuizReveal content={cleanContent} />;
+  }
+  if (mode === "flashcard" && /FRONT\s*:/i.test(cleanContent) && /BACK\s*:/i.test(cleanContent)) {
+    return <FlashcardReveal content={cleanContent} />;
+  }
 
   return (
     <div className="chat-markdown text-[15px] leading-7 text-[var(--text-primary)]">
@@ -150,7 +187,8 @@ export function MarkdownRenderer({ content, citations = [] }: MarkdownRendererPr
             </div>
           ),
           code: ({ className, children, ...props }) => {
-            const isInline = !className?.includes("language-");
+            const codeText = normalizeCode(children);
+            const isInline = !className?.includes("language-") && !codeText.includes("\n");
             if (isInline) {
               return (
                 <code
@@ -161,7 +199,11 @@ export function MarkdownRenderer({ content, citations = [] }: MarkdownRendererPr
                 </code>
               );
             }
-            return <CodeBlock className={className} {...props}>{children}</CodeBlock>;
+            return (
+              <CodeBlock className={className} onOpenCanvas={onOpenCanvas} {...props}>
+                {children}
+              </CodeBlock>
+            );
           },
         }}
       >

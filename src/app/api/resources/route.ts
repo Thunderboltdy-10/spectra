@@ -4,9 +4,6 @@ import { requireActor } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
-import { chunkTextWithPages, embedChunks, parseUploadedFile } from "@/lib/ingest";
-import { openRouterChatCompletion } from "@/lib/openrouter";
-import { MODEL_CONFIG } from "@/lib/model-config";
 
 export const runtime = "nodejs";
 
@@ -54,50 +51,6 @@ async function uploadToConvexStorage(uploadUrl: string, file: File) {
 async function sha256OfFile(file: File) {
   const bytes = await file.arrayBuffer();
   return createHash("sha256").update(Buffer.from(bytes)).digest("hex");
-}
-
-async function regenerateAgentGuidelines(actorClerkId: string, agentId: string) {
-  const texts = (await convexQuery("resources:listAgentTexts", {
-    actorClerkId,
-    agentId,
-  })) as Array<{ filename: string; text: string }>;
-
-  if (texts.length === 0) return;
-
-  const sourceText = texts
-    .map((resource, idx) => `Source ${idx + 1} (${resource.filename}):\n${resource.text.slice(0, 4_000)}`)
-    .join("\n\n")
-    .slice(0, 20_000);
-
-  const response = await openRouterChatCompletion({
-    model: MODEL_CONFIG.tutorFast,
-    fallbackModels: [MODEL_CONFIG.marker],
-    messages: [
-      {
-        role: "system",
-        content:
-          "Generate concise JSON with keys: summary (string), topicMap (string[]). Keep it teacher-friendly.",
-      },
-      {
-        role: "user",
-        content: sourceText,
-      },
-    ],
-    temperature: 0.1,
-  });
-
-  const content = response.choices?.[0]?.message?.content ?? "{}";
-  const parsed = JSON.parse(content.match(/\{[\s\S]*\}/)?.[0] ?? "{}");
-
-  await convexMutation("agents:updateAgentGuidelines", {
-    actorClerkId,
-    agentId,
-    guidelinesSummary:
-      typeof parsed.summary === "string"
-        ? parsed.summary
-        : "Guidelines generated from uploaded resources.",
-    guidelinesTopicMap: Array.isArray(parsed.topicMap) ? parsed.topicMap.slice(0, 24) : [],
-  });
 }
 
 export async function POST(request: NextRequest) {
@@ -178,43 +131,15 @@ export async function POST(request: NextRequest) {
           contentHash,
           storageId,
         })) as { resourceId: string };
-
-        const parsed = await parseUploadedFile(file);
-        const chunks = chunkTextWithPages(parsed.pages);
-
-        let embedded: Array<{ text: string; page?: number; embedding: number[] }> = [];
-
-        try {
-          embedded = await embedChunks(chunks);
-        } catch {
-          await convexMutation("resources:completeResourceIngestion", {
-            actorClerkId: actor.clerkId,
-            resourceId: registered.resourceId,
-            parsedCharCount: 0,
-            chunks: [],
-            failedReason: "Embedding failed. Verify OpenRouter embedding model availability.",
-          });
-
-          results.push({
-            file: file.name,
-            resourceId: registered.resourceId,
-            status: "failed",
-            error: "Embedding failed. Verify OpenRouter embedding model availability.",
-          });
-          continue;
-        }
-
-        await convexMutation("resources:completeResourceIngestion", {
+        await convexMutation("resources:enqueueResourceProcessing", {
           actorClerkId: actor.clerkId,
           resourceId: registered.resourceId,
-          parsedCharCount: parsed.text.length,
-          chunks: embedded,
         });
 
         results.push({
           file: file.name,
           resourceId: registered.resourceId,
-          status: "processed",
+          status: "uploaded",
         });
         if (scope === "personal" && contentHash) {
           localHashToResourceId.set(contentHash, registered.resourceId);
@@ -228,18 +153,50 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (scope === "agent" && agentId) {
-      try {
-        await regenerateAgentGuidelines(actor.clerkId, agentId);
-      } catch {
-        // Upload should succeed even if guideline refresh fails.
-      }
-    }
-
     return ok({
       results,
       resourceIds: results.map((item) => item.resourceId).filter((id): id is string => Boolean(id)),
       count: results.length,
     });
+  });
+}
+
+export async function PATCH(request: NextRequest) {
+  return withRouteErrorHandling(async () => {
+    const actor = await requireActor();
+    const body = (await request.json().catch(() => null)) as {
+      resourceId?: string;
+      pinned?: boolean;
+    } | null;
+    if (!body?.resourceId || typeof body.pinned !== "boolean") {
+      return badRequest("resourceId and pinned are required");
+    }
+
+    await convexMutation("resources:togglePin", {
+      actorClerkId: actor.clerkId,
+      resourceId: body.resourceId,
+      pinned: body.pinned,
+    });
+
+    return ok({ ok: true });
+  });
+}
+
+export async function DELETE(request: NextRequest) {
+  return withRouteErrorHandling(async () => {
+    const actor = await requireActor();
+    const body = (await request.json().catch(() => null)) as {
+      resourceId?: string;
+    } | null;
+    if (!body?.resourceId) {
+      return badRequest("resourceId is required");
+    }
+
+    await convexMutation("resources:deleteResource", {
+      actorClerkId: actor.clerkId,
+      resourceId: body.resourceId,
+    });
+
+    return ok({ ok: true });
   });
 }

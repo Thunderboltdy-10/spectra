@@ -13,6 +13,13 @@ export const createAgent = mutation({
     category: v.string(),
     preferredModel: v.optional(v.string()),
     preferredMode: v.optional(vStudyMode),
+    temperature: v.optional(v.number()),
+    maxTokens: v.optional(v.number()),
+    originalDescription: v.optional(v.string()),
+    allowedTools: v.optional(v.array(v.string())),
+    modelAllowlist: v.optional(v.array(v.string())),
+    modelDenylist: v.optional(v.array(v.string())),
+    attachmentPolicy: v.optional(v.string()),
     visibility: v.union(v.literal("public"), v.literal("private")),
   },
   handler: async (ctx, args) => {
@@ -32,6 +39,13 @@ export const createAgent = mutation({
       category: args.category,
       preferredModel: args.preferredModel,
       preferredMode: args.preferredMode,
+      temperature: args.temperature,
+      maxTokens: args.maxTokens,
+      originalDescription: args.originalDescription,
+      allowedTools: args.allowedTools,
+      modelAllowlist: args.modelAllowlist,
+      modelDenylist: args.modelDenylist,
+      attachmentPolicy: args.attachmentPolicy,
       visibility: args.visibility,
       usageCount: 0,
       guidelinesSummary: undefined,
@@ -56,6 +70,13 @@ export const updateAgent = mutation({
     category: v.optional(v.string()),
     preferredModel: v.optional(v.string()),
     preferredMode: v.optional(vStudyMode),
+    temperature: v.optional(v.number()),
+    maxTokens: v.optional(v.number()),
+    originalDescription: v.optional(v.string()),
+    allowedTools: v.optional(v.array(v.string())),
+    modelAllowlist: v.optional(v.array(v.string())),
+    modelDenylist: v.optional(v.array(v.string())),
+    attachmentPolicy: v.optional(v.string()),
     visibility: v.optional(v.union(v.literal("public"), v.literal("private"))),
   },
   handler: async (ctx, args) => {
@@ -81,6 +102,13 @@ export const updateAgent = mutation({
       category: args.category ?? agent.category,
       preferredModel: args.preferredModel ?? agent.preferredModel,
       preferredMode: args.preferredMode ?? agent.preferredMode,
+      temperature: args.temperature ?? agent.temperature,
+      maxTokens: args.maxTokens ?? agent.maxTokens,
+      originalDescription: args.originalDescription ?? agent.originalDescription,
+      allowedTools: args.allowedTools ?? agent.allowedTools,
+      modelAllowlist: args.modelAllowlist ?? agent.modelAllowlist,
+      modelDenylist: args.modelDenylist ?? agent.modelDenylist,
+      attachmentPolicy: args.attachmentPolicy ?? agent.attachmentPolicy,
       visibility: args.visibility ?? agent.visibility,
       updatedAt: Date.now(),
     });
@@ -239,5 +267,108 @@ export const incrementUsageCount = mutation({
     });
 
     return { ok: true };
+  },
+});
+
+export const recordAgentModelUse = mutation({
+  args: {
+    actorClerkId: v.string(),
+    agentId: v.id("agents"),
+    modelId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) throw new Error("Unauthorized");
+
+    const agent = await ctx.db.get(args.agentId);
+    if (!agent || agent.orgId !== actor.orgId) {
+      throw new Error("Agent not found");
+    }
+
+    const existing = await ctx.db
+      .query("agentModelStats")
+      .withIndex("by_agent_model", (q) => q.eq("agentId", args.agentId).eq("modelId", args.modelId))
+      .unique();
+
+    const now = Date.now();
+    if (!existing) {
+      await ctx.db.insert("agentModelStats", {
+        agentId: args.agentId,
+        modelId: args.modelId,
+        totalUses: 1,
+        positiveRatings: 0,
+        negativeRatings: 0,
+        avgResponseQuality: 0.5,
+        lastUsedAt: now,
+      });
+      return { ok: true };
+    }
+
+    await ctx.db.patch(existing._id, {
+      totalUses: existing.totalUses + 1,
+      lastUsedAt: now,
+    });
+    return { ok: true };
+  },
+});
+
+export const recordAgentModelFeedback = mutation({
+  args: {
+    actorClerkId: v.string(),
+    agentId: v.id("agents"),
+    modelId: v.string(),
+    positive: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) throw new Error("Unauthorized");
+
+    const stat = await ctx.db
+      .query("agentModelStats")
+      .withIndex("by_agent_model", (q) => q.eq("agentId", args.agentId).eq("modelId", args.modelId))
+      .unique();
+    if (!stat) return { ok: true };
+
+    const positiveRatings = stat.positiveRatings + (args.positive ? 1 : 0);
+    const negativeRatings = stat.negativeRatings + (args.positive ? 0 : 1);
+    const totalRatings = positiveRatings + negativeRatings;
+    const avgResponseQuality = totalRatings > 0 ? positiveRatings / totalRatings : stat.avgResponseQuality;
+
+    await ctx.db.patch(stat._id, {
+      positiveRatings,
+      negativeRatings,
+      avgResponseQuality,
+      lastUsedAt: Date.now(),
+    });
+    return { ok: true };
+  },
+});
+
+export const getTopModelsForAgent = query({
+  args: {
+    actorClerkId: v.string(),
+    agentId: v.id("agents"),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) throw new Error("Unauthorized");
+
+    const agent = await ctx.db.get(args.agentId);
+    if (!agent || agent.orgId !== actor.orgId) throw new Error("Agent not found");
+
+    const stats = await ctx.db
+      .query("agentModelStats")
+      .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
+      .collect();
+
+    return stats
+      .map((row) => ({
+        modelId: row.modelId,
+        score: Math.max(0, Math.min(1, row.avgResponseQuality)),
+        totalUses: row.totalUses,
+      }))
+      .sort((a, b) => b.score - a.score || b.totalUses - a.totalUses)
+      .slice(0, Math.min(10, Math.max(1, args.limit ?? 5)));
   },
 });

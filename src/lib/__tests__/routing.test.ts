@@ -168,6 +168,48 @@ describe("chooseModelRoute", () => {
     expect(route.trace.inputs.needsVision).toBe(true);
   });
 
+  it("applies cost efficiency penalty for expensive model on simple prompts", () => {
+    const route = chooseModelRoute({
+      mode: "tutor",
+      thinkingLevel: "low",
+      hasAttachments: false,
+      attachmentTypes: [],
+      messageLength: 40,
+      teacherStrictness: "soft",
+      routerMode: "auto",
+      studentSeemsStuck: false,
+      spendingTier: "normal",
+      needsSearch: false,
+      promptCategory: "general",
+    });
+
+    const scored = route.trace.candidates.find((candidate) => candidate.allowed && candidate.scoreBreakdown?.length);
+    expect(scored?.scoreBreakdown?.join(" ")).toContain("costEfficiency");
+  });
+
+  it("boosts agent top model when provided", () => {
+    const route = chooseModelRoute({
+      mode: "tutor",
+      thinkingLevel: "medium",
+      hasAttachments: false,
+      attachmentTypes: [],
+      messageLength: 250,
+      teacherStrictness: "medium",
+      routerMode: "auto",
+      studentSeemsStuck: false,
+      spendingTier: "normal",
+      needsSearch: false,
+      promptCategory: "general",
+      agentTopModels: [{ modelId: MODEL_CONFIG.smartPaid, score: 1 }],
+      agentPreferredModel: MODEL_CONFIG.smartPaid,
+    });
+
+    expect(route.trace.candidates.some((candidate) =>
+      candidate.modelId === MODEL_CONFIG.smartPaid &&
+      (candidate.scoreBreakdown ?? []).some((line) => line.includes("agent_model_boost"))
+    )).toBe(true);
+  });
+
   it("GLM is never the first fallback", () => {
     for (const fallbacks of Object.values(ROUTER_FALLBACKS)) {
       if (fallbacks.length === 0) continue;

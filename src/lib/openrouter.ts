@@ -6,6 +6,7 @@ const OPENROUTER_TIMEOUT_MS = 30_000;
 
 export type OpenRouterStreamEvent =
   | { type: "delta"; content: string }
+  | { type: "thinking"; content: string }
   | {
       type: "done";
       model?: string;
@@ -210,7 +211,8 @@ export async function* openRouterStreamChat(params: {
             const json = JSON.parse(data) as {
               model?: string;
               usage?: { prompt_tokens?: number; completion_tokens?: number };
-              choices?: Array<{ delta?: { content?: string } }>;
+              choices?: Array<{ delta?: { content?: string; reasoning?: string }; reasoning?: string }>;
+              reasoning?: string;
             };
 
             raw = json;
@@ -225,6 +227,14 @@ export async function* openRouterStreamChat(params: {
             const delta = json.choices?.[0]?.delta?.content;
             if (delta) {
               yield { type: "delta", content: delta };
+            }
+
+            const reasoningDelta =
+              json.choices?.[0]?.delta?.reasoning ??
+              json.choices?.[0]?.reasoning ??
+              json.reasoning;
+            if (typeof reasoningDelta === "string" && reasoningDelta.trim()) {
+              yield { type: "thinking", content: reasoningDelta };
             }
           } catch {
             // Ignore malformed SSE lines from providers.

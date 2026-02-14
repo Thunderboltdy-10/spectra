@@ -11,6 +11,14 @@ type Role = "student" | "teacher" | "admin";
 type BootstrapResponse = {
   actor?: { role?: Role };
   chats?: Chat[];
+  orgSettings?: {
+    org?: {
+      name?: string;
+      logoUrl?: string;
+      primaryColor?: string;
+      accentColor?: string;
+    };
+  };
   userSpending?: UserSpending;
   userMemory?: {
     summary?: string;
@@ -27,6 +35,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [userSpending, setUserSpending] = useState<UserSpending | null>(null);
   const [userMemorySummary, setUserMemorySummary] = useState("");
+  const [orgName, setOrgName] = useState("AI School");
+  const [orgLogoUrl, setOrgLogoUrl] = useState<string | undefined>(undefined);
   const [pinnedChatIds, setPinnedChatIds] = useState<Set<string>>(new Set());
 
   const selectedChatId = "";
@@ -44,6 +54,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         setChats(data.chats ?? []);
         setUserSpending(data.userSpending ?? null);
         setUserMemorySummary(data.userMemory?.summary ?? "");
+        setOrgName(data.orgSettings?.org?.name ?? "AI School");
+        setOrgLogoUrl(data.orgSettings?.org?.logoUrl);
+        if (typeof document !== "undefined") {
+          const root = document.documentElement;
+          if (data.orgSettings?.org?.primaryColor) {
+            root.style.setProperty("--brand-primary", data.orgSettings.org.primaryColor);
+          }
+          if (data.orgSettings?.org?.accentColor) {
+            root.style.setProperty("--brand-accent", data.orgSettings.org.accentColor);
+          }
+        }
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Failed to load sidebar data");
       }
@@ -143,6 +164,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           role={role}
           userSpending={userSpending}
           userMemorySummary={userMemorySummary}
+          orgName={orgName}
+          orgLogoUrl={orgLogoUrl}
         />
       </aside>
 

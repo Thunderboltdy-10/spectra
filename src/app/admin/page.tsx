@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { ShieldCheck, Users2, WalletCards } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
@@ -30,18 +31,38 @@ export default function AdminPage() {
   const [usage, setUsage] = useState<UsageRow[]>([]);
   const [verify, setVerify] = useState(false);
   const [budget, setBudget] = useState("1500000");
+  const [orchestratorV2Enabled, setOrchestratorV2Enabled] = useState(false);
+  const [soulEnabled, setSoulEnabled] = useState(false);
+  const [agentModelBoostEnabled, setAgentModelBoostEnabled] = useState(false);
+  const [adaptiveQuizEnabled, setAdaptiveQuizEnabled] = useState(false);
+  const [spacedRepetitionEnabled, setSpacedRepetitionEnabled] = useState(false);
 
   async function loadAll() {
     const bootstrapResponse = await fetch("/api/bootstrap");
     if (!bootstrapResponse.ok) throw new Error(await bootstrapResponse.text());
     const bootstrap = (await bootstrapResponse.json()) as {
       actor: { role: "student" | "teacher" | "admin" };
-      orgSettings: { org: { verifyMarkerPassEnabled: boolean; tokenBudgetDaily: number } };
+      orgSettings: {
+        org: {
+          verifyMarkerPassEnabled: boolean;
+          tokenBudgetDaily: number;
+          orchestratorV2Enabled?: boolean;
+          soulEnabled?: boolean;
+          agentModelBoostEnabled?: boolean;
+          adaptiveQuizEnabled?: boolean;
+          spacedRepetitionEnabled?: boolean;
+        };
+      };
     };
 
     setRole(bootstrap.actor.role);
     setVerify(Boolean(bootstrap.orgSettings.org.verifyMarkerPassEnabled));
     setBudget(String(bootstrap.orgSettings.org.tokenBudgetDaily));
+    setOrchestratorV2Enabled(Boolean(bootstrap.orgSettings.org.orchestratorV2Enabled));
+    setSoulEnabled(Boolean(bootstrap.orgSettings.org.soulEnabled));
+    setAgentModelBoostEnabled(Boolean(bootstrap.orgSettings.org.agentModelBoostEnabled));
+    setAdaptiveQuizEnabled(Boolean(bootstrap.orgSettings.org.adaptiveQuizEnabled));
+    setSpacedRepetitionEnabled(Boolean(bootstrap.orgSettings.org.spacedRepetitionEnabled));
 
     if (bootstrap.actor.role !== "admin") {
       return;
@@ -80,6 +101,11 @@ export default function AdminPage() {
       body: JSON.stringify({
         verifyMarkerPassEnabled: verify,
         tokenBudgetDaily: Number(budget),
+        orchestratorV2Enabled,
+        soulEnabled,
+        agentModelBoostEnabled,
+        adaptiveQuizEnabled,
+        spacedRepetitionEnabled,
       }),
     });
     if (!response.ok) {
@@ -112,6 +138,14 @@ export default function AdminPage() {
       <div className="mb-5">
         <h1 className="text-2xl font-semibold tracking-tight">Admin Console</h1>
         <p className="text-sm text-ink-400">Control roles, quality checks, and spending limits for your school workspace.</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Link href="/admin/soul" className="inline-flex items-center rounded-md border border-app-border bg-app-muted px-3 py-1.5 text-sm">
+            Open School Soul
+          </Link>
+          <Link href="/admin/branding" className="inline-flex items-center rounded-md border border-app-border bg-app-muted px-3 py-1.5 text-sm">
+            Open Branding
+          </Link>
+        </div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
@@ -161,6 +195,41 @@ export default function AdminPage() {
                   <p className="text-xs text-ink-500">Adds an extra check for grading responses.</p>
                 </div>
                 <Switch checked={verify} onCheckedChange={setVerify} />
+              </div>
+              <div className="flex items-center justify-between rounded-lg border border-app-border bg-app-muted px-3 py-2">
+                <div>
+                  <p className="text-sm">Multi-agent orchestrator</p>
+                  <p className="text-xs text-ink-500">Enable orchestrator v2 collaboration pipeline.</p>
+                </div>
+                <Switch checked={orchestratorV2Enabled} onCheckedChange={setOrchestratorV2Enabled} />
+              </div>
+              <div className="flex items-center justify-between rounded-lg border border-app-border bg-app-muted px-3 py-2">
+                <div>
+                  <p className="text-sm">School Soul injection</p>
+                  <p className="text-xs text-ink-500">Inject published School Soul guidance at runtime.</p>
+                </div>
+                <Switch checked={soulEnabled} onCheckedChange={setSoulEnabled} />
+              </div>
+              <div className="flex items-center justify-between rounded-lg border border-app-border bg-app-muted px-3 py-2">
+                <div>
+                  <p className="text-sm">Agent model boost</p>
+                  <p className="text-xs text-ink-500">Use agent historical model performance for routing boosts.</p>
+                </div>
+                <Switch checked={agentModelBoostEnabled} onCheckedChange={setAgentModelBoostEnabled} />
+              </div>
+              <div className="flex items-center justify-between rounded-lg border border-app-border bg-app-muted px-3 py-2">
+                <div>
+                  <p className="text-sm">Adaptive quiz difficulty</p>
+                  <p className="text-xs text-ink-500">Allow quiz mode to adapt difficulty based on performance.</p>
+                </div>
+                <Switch checked={adaptiveQuizEnabled} onCheckedChange={setAdaptiveQuizEnabled} />
+              </div>
+              <div className="flex items-center justify-between rounded-lg border border-app-border bg-app-muted px-3 py-2">
+                <div>
+                  <p className="text-sm">Spaced repetition</p>
+                  <p className="text-xs text-ink-500">Enable SM-2 flashcard scheduling features.</p>
+                </div>
+                <Switch checked={spacedRepetitionEnabled} onCheckedChange={setSpacedRepetitionEnabled} />
               </div>
               <div>
                 <label className="mb-1 block text-xs uppercase tracking-wide text-ink-500">Daily token budget</label>

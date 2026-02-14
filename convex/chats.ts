@@ -135,6 +135,8 @@ export const appendMessage = mutation({
     chatId: v.id("chats"),
     role: v.union(v.literal("user"), v.literal("assistant"), v.literal("system")),
     content: v.string(),
+    attachments: v.optional(v.array(v.string())),
+    attachmentResourceIds: v.optional(v.array(v.id("resources"))),
     enhancedContent: v.optional(v.string()),
     mode: vStudyMode,
     packId: v.optional(v.id("packs")),
@@ -145,6 +147,7 @@ export const appendMessage = mutation({
     usageIn: v.optional(v.number()),
     usageOut: v.optional(v.number()),
     verificationPassed: v.optional(v.boolean()),
+    thinkingContent: v.optional(v.string()),
     routeTrace: vRouteTrace,
   },
   handler: async (ctx, args) => {
@@ -167,6 +170,8 @@ export const appendMessage = mutation({
       role: args.role,
       mode: args.mode,
       content: args.content,
+      attachments: args.attachments,
+      attachmentResourceIds: args.attachmentResourceIds,
       enhancedContent: args.enhancedContent,
       citations: args.citations,
       modelRequested: args.modelRequested,
@@ -175,6 +180,7 @@ export const appendMessage = mutation({
       usageIn: args.usageIn,
       usageOut: args.usageOut,
       verificationPassed: args.verificationPassed,
+      thinkingContent: args.thinkingContent,
       routeTrace: args.routeTrace,
       createdAt: now,
     });
@@ -189,6 +195,189 @@ export const appendMessage = mutation({
     });
 
     return { messageId };
+  },
+});
+
+export const editMessageAndPrune = mutation({
+  args: {
+    actorClerkId: v.string(),
+    messageId: v.id("messages"),
+    newContent: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const target = await ctx.db.get(args.messageId);
+    if (!target || target.userId !== actor._id || target.role !== "user") {
+      throw new Error("Message not found");
+    }
+
+    const chat = await ctx.db.get(target.chatId);
+    if (!chat || chat.ownerUserId !== actor._id || chat.deletedAt) {
+      throw new Error("Chat not found");
+    }
+
+    const clean = args.newContent.trim();
+    if (!clean) {
+      throw new Error("Message cannot be empty");
+    }
+
+    const all = await ctx.db
+      .query("messages")
+      .withIndex("by_chat", (q) => q.eq("chatId", target.chatId))
+      .collect();
+    const sorted = all.sort((a, b) => a.createdAt - b.createdAt);
+    const idx = sorted.findIndex((row) => row._id === args.messageId);
+    if (idx === -1) {
+      throw new Error("Message not found");
+    }
+
+    await ctx.db.patch(target._id, {
+      content: clean,
+      enhancedContent: undefined,
+    });
+
+    for (let i = idx + 1; i < sorted.length; i += 1) {
+      const row = sorted[i]!;
+      await ctx.db.delete(row._id);
+    }
+
+    await ctx.db.patch(chat._id, {
+      updatedAt: Date.now(),
+      title: clean.slice(0, 60) || chat.title,
+    });
+
+    return {
+      chatId: target.chatId,
+      prunedCount: Math.max(0, sorted.length - idx - 1),
+    };
+  },
+});
+
+export const branchFromMessage = mutation({
+  args: {
+    actorClerkId: v.string(),
+    messageId: v.id("messages"),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const pivot = await ctx.db.get(args.messageId);
+    if (!pivot || pivot.userId !== actor._id) {
+      throw new Error("Message not found");
+    }
+
+    const sourceChat = await ctx.db.get(pivot.chatId);
+    if (!sourceChat || sourceChat.ownerUserId !== actor._id || sourceChat.deletedAt) {
+      throw new Error("Chat not found");
+    }
+
+    const allMessages = await ctx.db
+      .query("messages")
+      .withIndex("by_chat", (q) => q.eq("chatId", sourceChat._id))
+      .collect();
+    const sorted = allMessages.sort((a, b) => a.createdAt - b.createdAt);
+    const pivotIndex = sorted.findIndex((message) => message._id === pivot._id);
+    if (pivotIndex < 0) {
+      throw new Error("Message not found");
+    }
+
+    const now = Date.now();
+    const branchedTitleBase = pivot.content.trim().slice(0, 56) || sourceChat.title;
+    const branchedTitle = `${branchedTitleBase} (branch)`.slice(0, 80);
+    const chatId = await ctx.db.insert("chats", {
+      orgId: sourceChat.orgId,
+      packId: sourceChat.packId,
+      agentId: sourceChat.agentId,
+      ownerUserId: sourceChat.ownerUserId,
+      title: branchedTitle,
+      mode: sourceChat.mode,
+      thinkingLevel: sourceChat.thinkingLevel,
+      routerMode: sourceChat.routerMode,
+      manualModel: sourceChat.manualModel,
+      usePersonalResources: sourceChat.usePersonalResources,
+      contextSummary: sourceChat.contextSummary,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    for (let i = 0; i <= pivotIndex; i += 1) {
+      const row = sorted[i]!;
+      await ctx.db.insert("messages", {
+        orgId: row.orgId,
+        packId: row.packId,
+        chatId,
+        userId: row.userId,
+        role: row.role,
+        mode: row.mode,
+        content: row.content,
+        attachments: row.attachments,
+        attachmentResourceIds: row.attachmentResourceIds,
+        enhancedContent: row.enhancedContent,
+        citations: row.citations,
+        modelRequested: row.modelRequested,
+        modelUsed: row.modelUsed,
+        whyThisResponse: row.whyThisResponse,
+        usageIn: row.usageIn,
+        usageOut: row.usageOut,
+        verificationPassed: row.verificationPassed,
+        thinkingContent: row.thinkingContent,
+        routeTrace: row.routeTrace,
+        createdAt: now + i,
+      });
+    }
+
+    return { chatId };
+  },
+});
+
+export const searchMessages = query({
+  args: {
+    actorClerkId: v.string(),
+    query: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const clean = args.query.trim();
+    if (!clean) return [];
+
+    const hits = await ctx.db
+      .query("messages")
+      .withSearchIndex("search_content", (q) => q.search("content", clean).eq("userId", actor._id))
+      .take(Math.min(80, Math.max(1, args.limit ?? 30)));
+
+    const out: Array<{
+      chatId: string;
+      chatTitle: string;
+      messageSnippet: string;
+      createdAt: number;
+      messageId: string;
+    }> = [];
+
+    for (const hit of hits) {
+      const chat = await ctx.db.get(hit.chatId);
+      if (!chat || chat.ownerUserId !== actor._id || chat.deletedAt) continue;
+      out.push({
+        chatId: hit.chatId,
+        chatTitle: chat.title,
+        messageSnippet: hit.content.slice(0, 180),
+        createdAt: hit.createdAt,
+        messageId: hit._id,
+      });
+    }
+
+    return out.sort((a, b) => b.createdAt - a.createdAt);
   },
 });
 

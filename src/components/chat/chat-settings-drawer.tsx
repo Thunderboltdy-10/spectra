@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, X } from "lucide-react";
+import { ChevronDown, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { ChatModeSelector } from "@/components/chat/chat-mode-selector";
-import type { AutoPreference, ModelOption, UserSpending } from "@/hooks/use-chat-state";
+import type { AutoPreference, ModelOption, PersonalResource, UserSpending } from "@/hooks/use-chat-state";
 import type { RouterMode, StudyMode, ThinkingLevel } from "@/types";
 
 type ChatSettingsDrawerProps = {
@@ -18,6 +18,7 @@ type ChatSettingsDrawerProps = {
   routerMode: RouterMode;
   manualModel: string;
   usePersonalResources: boolean;
+  personalResources: PersonalResource[];
   userSpending: UserSpending | null;
   autoEnhancePrompt: AutoPreference;
   autoThinking: AutoPreference;
@@ -30,6 +31,7 @@ type ChatSettingsDrawerProps = {
   onAutoEnhancePromptChange: (value: AutoPreference) => void;
   onAutoThinkingChange: (value: AutoPreference) => void;
   onAutoSearchChange: (value: AutoPreference) => void;
+  onDeleteResource: (resourceId: string) => void;
 };
 
 const MONTHLY_HARD_LIMIT_CENTS = 900;
@@ -78,10 +80,6 @@ function row(label: string, description: string, checked: boolean, onChange: (va
   );
 }
 
-function formatEur(cents: number) {
-  return `€${(cents / 100).toFixed(2)}`;
-}
-
 function spendingTierLabel(tier?: UserSpending["tier"]) {
   if (tier === "free_only") return "Budget only";
   if (tier === "cheap_only") return "Cheap only";
@@ -97,6 +95,7 @@ export function ChatSettingsDrawer({
   routerMode,
   manualModel,
   usePersonalResources,
+  personalResources,
   userSpending,
   autoEnhancePrompt,
   autoThinking,
@@ -109,6 +108,7 @@ export function ChatSettingsDrawer({
   onAutoEnhancePromptChange,
   onAutoThinkingChange,
   onAutoSearchChange,
+  onDeleteResource,
 }: ChatSettingsDrawerProps) {
   const [showManual, setShowManual] = useState(false);
 
@@ -117,7 +117,6 @@ export function ChatSettingsDrawer({
   const spentCents = userSpending?.totalCostCents ?? 0;
   const ratio = Math.min(spentCents / MONTHLY_HARD_LIMIT_CENTS, 1);
   const spendingTier = spendingTierLabel(userSpending?.tier);
-  const spendingCaption = `${formatEur(spentCents)} / ${formatEur(MONTHLY_HARD_LIMIT_CENTS)}`;
   const selectedModel = models.find((model) => model.modelId === manualModel);
 
   return (
@@ -242,6 +241,38 @@ export function ChatSettingsDrawer({
           {row("Use personal resources", "Include your uploaded files during retrieval", usePersonalResources, onTogglePersonalResources)}
 
           <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+            <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">My files</h3>
+            <div className="mt-3 max-h-48 space-y-2 overflow-y-auto pr-1">
+              {personalResources.length === 0 ? (
+                <p className="text-xs text-[var(--text-secondary)]">No personal files yet.</p>
+              ) : (
+                personalResources.map((resource) => (
+                  <div
+                    key={resource._id}
+                    className="flex items-center justify-between gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-medium text-[var(--text-primary)]">{resource.filename}</p>
+                      <p className="text-[10px] text-[var(--text-secondary)]">{resource.status}</p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-[var(--danger)]"
+                        onClick={() => onDeleteResource(resource._id)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
             <div className="flex items-center justify-between">
               <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Usage indicator</h3>
               <span className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">{spendingTier}</span>
@@ -252,7 +283,6 @@ export function ChatSettingsDrawer({
                 style={{ width: `${Math.max(2, ratio * 100)}%` }}
               />
             </div>
-            <p className="mt-2 text-xs text-[var(--text-secondary)]">{spendingCaption}</p>
           </section>
         </div>
       </aside>

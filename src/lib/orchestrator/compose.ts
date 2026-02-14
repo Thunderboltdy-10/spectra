@@ -1,6 +1,17 @@
 import type { OpenRouterMessageContentPart } from "@/lib/openrouter";
 import type { ChatMessage, Citation } from "@/types";
 
+function normalizeCitationToken(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/§\s*\d+(\.\d+)*/g, " ")
+    .replace(/\.[a-z0-9]{2,5}$/i, " ")
+    .replace(/[_-]+/g, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function toOpenRouterMessages(
   messages: ChatMessage[],
   imageBlocks?: Array<{ type: "image_url"; image_url: { url: string; detail?: "low" | "auto" } }>,
@@ -39,13 +50,13 @@ export function extractCitationsFromText(text: string, fallback: Citation[]): Ci
 
   const verboseRefs = Array.from(text.matchAll(/\[([^\]\n]+?)\s+p\.\s*(\d+)\]/gi));
   for (const match of verboseRefs) {
-    const filename = (match[1] ?? "").trim().toLowerCase();
+    const filename = normalizeCitationToken((match[1] ?? "").trim().toLowerCase());
     const page = Number(match[2]);
     if (!filename) continue;
 
     const citation = fallback.find(
       (item) =>
-        item.filename.toLowerCase().includes(filename) &&
+        normalizeCitationToken(item.filename).includes(filename) &&
         (item.page === page || typeof item.page !== "number"),
     );
 
@@ -62,9 +73,10 @@ export function extractCitationsFromText(text: string, fallback: Citation[]): Ci
     const token = (match[1] ?? "").trim();
     if (!token) continue;
     if (/^\d+$/.test(token)) continue;
+    const normalizedToken = normalizeCitationToken(token);
 
     const citation = fallback.find((item) =>
-      item.filename.toLowerCase().includes(token.toLowerCase()),
+      normalizeCitationToken(item.filename).includes(normalizedToken),
     );
 
     if (citation) refs.push(citation);

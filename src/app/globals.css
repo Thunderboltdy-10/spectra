@@ -1,6 +1,9 @@
 @import "tailwindcss";
 
 :root {
+  --brand-primary: #0e8ee8;
+  --brand-accent: #20b8b2;
+
   --bg-primary: #f4f6f8;
   --bg-secondary: #e9edf2;
   --bg-tertiary: #dbe2ea;
@@ -17,8 +20,8 @@
   --text-inverse: #f8fafc;
 
   --border-default: #cfd8e3;
-  --accent: #0e8ee8;
-  --accent-cyan: #0e8ee8;
+  --accent: var(--brand-primary);
+  --accent-cyan: var(--brand-primary);
   --accent-coral: #ff6f45;
   --accent-mint: #0fa57a;
   --danger: #d33a4a;
@@ -49,11 +52,14 @@
   --mode-explain: #ff6f45;
   --mode-general: #637083;
 
-  --gradient-brand: linear-gradient(132deg, #0e8ee8 0%, #20b8b2 52%, #ff8751 100%);
+  --gradient-brand: linear-gradient(132deg, var(--brand-primary) 0%, var(--brand-accent) 52%, #ff8751 100%);
   --gradient-surface: linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(243, 248, 255, 0.88));
 }
 
 .dark {
+  --brand-primary: #2cb5ff;
+  --brand-accent: #25bc89;
+
   --bg-primary: #0f1420;
   --bg-secondary: #161d2c;
   --bg-tertiary: #222c3d;
@@ -70,8 +76,8 @@
   --text-inverse: #0b1220;
 
   --border-default: #2b3950;
-  --accent: #2cb5ff;
-  --accent-cyan: #2cb5ff;
+  --accent: var(--brand-primary);
+  --accent-cyan: var(--brand-primary);
   --accent-coral: #ff8a65;
   --accent-mint: #25bc89;
   --danger: #ff6b78;

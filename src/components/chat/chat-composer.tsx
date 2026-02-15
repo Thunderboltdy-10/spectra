@@ -65,7 +65,11 @@ type ChatComposerProps = {
 
 function formatModelLabel(modelId: string) {
   const raw = modelId.split("/").pop() ?? modelId;
-  const clean = raw.replace(/:free$/i, "").replace(/-\d{4}-\d{2}-\d{2}$/i, "");
+  const clean = raw
+    .replace(/:free$/i, "")
+    .replace(/[\s(_-]*\bfree\b[\s)_-]*/gi, " ")
+    .replace(/-\d{4}-\d{2}-\d{2}$/i, "")
+    .trim();
   return clean
     .split(/[-_ ]+/)
     .filter(Boolean)
@@ -83,9 +87,9 @@ function formatNumberCompact(value?: number) {
 }
 
 function formatModelCost(value?: number, isFree?: boolean) {
-  if (isFree) return "$0.0000/M";
-  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
-  if (value <= 0) return "$0.0000/M";
+  if (isFree) return "--";
+  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
+  if (value <= 0) return "--";
   if (value < 0.01) return `$${value.toFixed(4)}/M`;
   return `$${value.toFixed(2)}/M`;
 }
@@ -97,7 +101,7 @@ function normalizeModelSearch(value: string) {
 function cleanModelDisplayText(value: string) {
   return value
     .replace(/:free/gi, "")
-    .replace(/\bfree\b/gi, "")
+    .replace(/[\s(_-]*\bfree\b[\s)_-]*/gi, " ")
     .replace(/\s*&\s*$/g, "")
     .replace(/\s{2,}/g, " ")
     .trim();
@@ -453,43 +457,45 @@ export function ChatComposer({
         )}
 
         {fileList.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-2">
-            {fileList.map((file) => {
-              const status = fileUploadState[fileKey(file)]?.status ?? "pending";
-              const thumbnailUrl = fileUploadState[fileKey(file)]?.thumbnailUrl;
-              const extension = file.name.split(".").pop()?.toUpperCase().slice(0, 4) || "FILE";
-              return (
-              <span
-                key={`${file.name}-${file.size}`}
-                className="inline-flex items-center gap-2 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2 text-xs font-medium shadow-sm"
-              >
-                {thumbnailUrl ? (
-                  <Image
-                    src={thumbnailUrl}
-                    alt={file.name}
-                    className="h-16 w-16 rounded-lg object-cover"
-                    width={64}
-                    height={64}
-                  />
-                ) : (
-                  <span className="inline-flex h-12 min-w-12 items-center justify-center rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-1.5 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
-                    <FileText className="mr-1 h-3 w-3" />
-                    {extension}
+          <div className="mb-2 rounded-xl bg-[var(--bg-secondary)] p-2">
+            <div className="flex flex-wrap gap-2">
+              {fileList.map((file) => {
+                const status = fileUploadState[fileKey(file)]?.status ?? "pending";
+                const thumbnailUrl = fileUploadState[fileKey(file)]?.thumbnailUrl;
+                const extension = file.name.split(".").pop()?.toUpperCase().slice(0, 4) || "FILE";
+                return (
+                  <span
+                    key={`${file.name}-${file.size}`}
+                    className="inline-flex items-center gap-2 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 py-2 text-xs font-medium shadow-sm"
+                  >
+                    {thumbnailUrl ? (
+                      <Image
+                        src={thumbnailUrl}
+                        alt={file.name}
+                        className="h-16 w-16 rounded-lg object-cover"
+                        width={64}
+                        height={64}
+                      />
+                    ) : (
+                      <span className="inline-flex h-12 min-w-12 items-center justify-center rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-1.5 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                        <FileText className="mr-1 h-3 w-3" />
+                        {extension}
+                      </span>
+                    )}
+                    <span className="max-w-[220px] truncate">{file.name}</span>
+                    {renderStatus(status)}
+                    <button
+                      type="button"
+                      className="inline-flex h-4 w-4 items-center justify-center rounded-full transition hover:bg-[var(--bg-hover)]"
+                      onClick={() => onRemoveFile(file)}
+                      aria-label={`Remove ${file.name}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
                   </span>
-                )}
-                <span className="max-w-[220px] truncate">{file.name}</span>
-                {renderStatus(status)}
-                <button
-                  type="button"
-                  className="inline-flex h-4 w-4 items-center justify-center rounded-full transition hover:bg-[var(--bg-hover)]"
-                  onClick={() => onRemoveFile(file)}
-                  aria-label={`Remove ${file.name}`}
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         )}
 
@@ -509,7 +515,7 @@ export function ChatComposer({
                 </button>
 
                 {showModeSelector && (
-                  <div className="absolute bottom-full left-0 z-20 mb-2 max-h-[360px] w-[min(92vw,22rem)] overflow-y-auto rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[var(--shadow-soft)]">
+                  <div className="absolute bottom-full left-0 z-20 mb-2 max-h-[320px] w-[min(92vw,22rem)] overflow-y-auto overscroll-contain rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[var(--shadow-soft)]">
                     {ALL_MODES.map((m) => {
                       const mc = getModeConfig(m.key);
                       const isActive = m.key === mode;

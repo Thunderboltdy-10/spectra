@@ -323,6 +323,9 @@ export const recordAgentModelFeedback = mutation({
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
     if (!actor) throw new Error("Unauthorized");
 
+    const agent = await ctx.db.get(args.agentId);
+    if (!agent || agent.orgId !== actor.orgId) throw new Error("Unauthorized");
+
     const stat = await ctx.db
       .query("agentModelStats")
       .withIndex("by_agent_model", (q) => q.eq("agentId", args.agentId).eq("modelId", args.modelId))

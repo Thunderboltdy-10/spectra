@@ -10,6 +10,7 @@ import {
   Search,
   Lightbulb,
   MessageCircle,
+  ImagePlus,
 } from "lucide-react";
 import { ALL_MODES, getModeConfig } from "@/lib/modes";
 import type { StudyMode } from "@/types";
@@ -24,6 +25,7 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   Search,
   Lightbulb,
   MessageCircle,
+  ImagePlus,
 };
 
 type ChatModeSelectorProps = {

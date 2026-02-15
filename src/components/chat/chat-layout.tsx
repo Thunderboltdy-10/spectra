@@ -207,7 +207,7 @@ export function ChatLayout() {
         </div>
       )}
 
-      <main className="flex min-w-0 flex-1 flex-col">
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <ChatHeader
           title={chat.selectedChat?.title ?? "New chat"}
           agentLabel={chat.selectedAgent ? `${chat.selectedAgent.avatarEmoji} ${chat.selectedAgent.name}` : undefined}
@@ -236,9 +236,22 @@ export function ChatLayout() {
           messages={chat.messages}
           draftResponse={chat.draftResponse}
           draftThinking={chat.draftThinking}
+          hasRealThinking={chat.hasRealThinking}
           sending={chat.sending}
           streamError={chat.streamError}
           onRetry={() => void chat.retryLastMessage()}
+          onSubmitQuizAnswers={(payload) => {
+            void chat.submitQuizAnswers(payload);
+          }}
+          onSaveFlashcardDeck={(payload) => {
+            void chat.saveFlashcardDeck(payload);
+          }}
+          onRateFlashcardCard={(payload) => {
+            void chat.rateFlashcardCard({
+              cardHash: payload.cardHash,
+              quality: payload.quality,
+            });
+          }}
           onRegenerate={handleRegenerateLastResponse}
           onRegenerateWithModel={handleRegenerateWithModel}
           onEditMessage={async (messageId, newContent) => {
@@ -261,6 +274,7 @@ export function ChatLayout() {
           }}
           regenModels={regenModels}
           mode={chat.mode}
+          thinkingLevel={chat.thinkingLevel}
           lastModelUsed={lastModelUsed}
           lastAutoResult={chat.lastAutoResult}
           activeCollaborators={chat.activeCollaborators}

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { Agent, Citation, RouteTrace, RouterMode, StudyMode, ThinkingLevel } from "@/types";
 import { appendToBuffer, createBufferState } from "@/lib/structured-stream-buffer";
+import { useSidebar } from "@/context/sidebar-context";
 
 export type Chat = {
   _id: string;
@@ -89,28 +90,6 @@ export type UserSpending = {
 };
 
 export type AutoPreference = "auto" | "on" | "off";
-
-type BootstrapResponse = {
-  actor: { role: "student" | "teacher" | "admin" };
-  chats: Chat[];
-  models: ModelOption[];
-  agents: Agent[];
-  orgSettings?: {
-    org?: {
-      name?: string;
-      welcomeMessage?: string;
-      primaryColor?: string;
-      accentColor?: string;
-      logoUrl?: string;
-    };
-  };
-  userSpending: UserSpending;
-  userMemory: {
-    summary: string;
-    updatedAt: number;
-    entryCount: number;
-  };
-};
 
 type LiveModel = {
   id: string;
@@ -250,7 +229,7 @@ function isLocalProvider(value?: string) {
 function sanitizeModelName(name: string) {
   return name
     .replace(/:free/gi, "")
-    .replace(/\bfree\b/gi, "")
+    .replace(/[\s(_-]*\bfree\b[\s)_-]*/gi, " ")
     .replace(/\s*&\s*$/g, "")
     .replace(/\s{2,}/g, " ")
     .trim();
@@ -293,11 +272,12 @@ function mergeModels(catalog: ModelOption[], live: LiveModel[]) {
 }
 
 export function useChatState() {
+  const sidebar = useSidebar();
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [role, setRole] = useState<"student" | "teacher" | "admin">("student");
-
-  const [chats, setChats] = useState<Chat[]>([]);
+  const role = sidebar.role;
+  const chats = sidebar.chats;
+  const setChats = sidebar.setChats;
   const [models, setModels] = useState<ModelOption[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [personalResources, setPersonalResources] = useState<PersonalResource[]>([]);
@@ -316,11 +296,12 @@ export function useChatState() {
   const [autoThinking, setAutoThinking] = useState<AutoPreference>("auto");
   const [autoSearch, setAutoSearch] = useState<AutoPreference>("auto");
 
-  const [userSpending, setUserSpending] = useState<UserSpending | null>(null);
-  const [userMemorySummary, setUserMemorySummary] = useState<string>("");
-  const [orgWelcomeMessage, setOrgWelcomeMessage] = useState<string>("");
-  const [orgLogoUrl, setOrgLogoUrl] = useState<string | undefined>(undefined);
-  const [orgName, setOrgName] = useState<string>("AI School");
+  const userSpending = sidebar.userSpending;
+  const setUserSpending = sidebar.setUserSpending;
+  const userMemorySummary = sidebar.userMemorySummary;
+  const orgWelcomeMessage = sidebar.orgWelcomeMessage;
+  const orgLogoUrl = sidebar.orgLogoUrl;
+  const orgName = sidebar.orgName;
   const [lastAutoResult, setLastAutoResult] = useState<{
     modelUsed?: string;
     searchEnabled: boolean;
@@ -332,6 +313,7 @@ export function useChatState() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [draftResponse, setDraftResponse] = useState("");
   const [draftThinking, setDraftThinking] = useState("");
+  const [hasRealThinking, setHasRealThinking] = useState(false);
   const [activeCollaborators, setActiveCollaborators] = useState<ActiveCollaboratorState[]>([]);
   const [collaboratorPhase, setCollaboratorPhase] = useState<"idle" | "running" | "synthesizing">("idle");
   const [fileList, setFileList] = useState<File[]>([]);
@@ -341,15 +323,22 @@ export function useChatState() {
   const [streamError, setStreamError] = useState<string | null>(null);
   const [lastFailedMessage, setLastFailedMessage] = useState<string | null>(null);
 
-  const [search, setSearch] = useState("");
+  const search = sidebar.search;
+  const setSearch = sidebar.setSearch;
   const [searchHits, setSearchHits] = useState<ChatSearchHit[]>([]);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const sidebarOpen = sidebar.sidebarOpen;
+  const setSidebarOpen = sidebar.setSidebarOpen;
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [pinnedChatIds, setPinnedChatIds] = useState<Set<string>>(new Set());
+  const pinnedChatIds = sidebar.pinnedChatIds;
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const selectedChatIdRef = useRef("");
+  const initializedRef = useRef(false);
+  const lastAttachmentPreviewsRef = useRef<Map<string, Message["attachmentPreviews"]>>(new Map());
+  const pendingCompletionsRef = useRef<Map<string, Message[]>>(new Map());
+  const streamChatIdRef = useRef<string | null>(null);
+  const activeStreamsRef = useRef<Set<string>>(new Set());
 
   const selectedAgent = useMemo(
     () => agents.find((item) => item._id === selectedAgentId),
@@ -391,48 +380,12 @@ export function useChatState() {
     );
   }, [chats, search, searchHits]);
 
-  const loadBootstrap = useCallback(async () => {
-    const [bootstrapRes, liveRes, resourceRes] = await Promise.all([
-      fetch("/api/bootstrap"),
-      fetch("/api/models/live").catch(() => null),
-      fetch("/api/resources?scope=personal").catch(() => null),
-    ]);
-    if (!bootstrapRes.ok) {
-      throw new Error(await bootstrapRes.text());
-    }
+  useEffect(() => {
+    if (sidebar.loading || initializedRef.current) return;
+    initializedRef.current = true;
 
-    const data = (await bootstrapRes.json()) as BootstrapResponse;
-    const liveData =
-      liveRes && liveRes.ok
-        ? ((await liveRes.json()) as { models: LiveModel[] })
-        : { models: [] as LiveModel[] };
-    const resourceData =
-      resourceRes && resourceRes.ok
-        ? ((await resourceRes.json()) as { resources: PersonalResource[] })
-        : { resources: [] as PersonalResource[] };
-
-    setRole(data.actor.role);
-    setChats(data.chats);
-    setModels(mergeModels(data.models, liveData.models));
-    setAgents(data.agents);
-    setPersonalResources(
-      [...(resourceData.resources ?? [])].sort((a, b) => b.createdAt - a.createdAt),
-    );
-    setUserSpending(data.userSpending);
-    setUserMemorySummary(data.userMemory.summary);
-    setOrgWelcomeMessage(data.orgSettings?.org?.welcomeMessage ?? "");
-    setOrgLogoUrl(data.orgSettings?.org?.logoUrl);
-    setOrgName(data.orgSettings?.org?.name ?? "AI School");
-
-    if (typeof document !== "undefined") {
-      const root = document.documentElement;
-      if (data.orgSettings?.org?.primaryColor) {
-        root.style.setProperty("--brand-primary", data.orgSettings.org.primaryColor);
-      }
-      if (data.orgSettings?.org?.accentColor) {
-        root.style.setProperty("--brand-accent", data.orgSettings.org.accentColor);
-      }
-    }
+    setModels(mergeModels(sidebar.models as ModelOption[], []));
+    setAgents(sidebar.agents);
 
     const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
     const modelParam = params?.get("model") ?? null;
@@ -443,7 +396,7 @@ export function useChatState() {
       setManualModel(modelParam);
       setRouterMode("manual");
     } else {
-      const mergedModels = mergeModels(data.models, liveData.models);
+      const mergedModels = mergeModels(sidebar.models as ModelOption[], []);
       if (mergedModels.length > 0) {
         setManualModel(mergedModels[0].modelId);
       }
@@ -454,8 +407,8 @@ export function useChatState() {
     }
 
     const firstChat = chatIdParam
-      ? data.chats.find((chat) => chat._id === chatIdParam) ?? data.chats[0]
-      : data.chats[0];
+      ? chats.find((chat) => chat._id === chatIdParam) ?? chats[0]
+      : chats[0];
     if (firstChat?._id) {
       selectedChatIdRef.current = firstChat._id;
       setSelectedChatId(firstChat._id);
@@ -464,19 +417,28 @@ export function useChatState() {
       setSelectedChatId("");
       setMessages([]);
     }
-  }, []);
 
-  useEffect(() => {
+    void refreshPersonalResources().catch(() => {});
     void (async () => {
       try {
-        await loadBootstrap();
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Failed to load workspace");
-      } finally {
-        setLoading(false);
+        const liveRes = await fetch("/api/models/live");
+        if (!liveRes.ok) return;
+        const liveData = (await liveRes.json()) as { models: LiveModel[] };
+        setModels(mergeModels(sidebar.models as ModelOption[], liveData.models));
+      } catch {
+        // Ignore live model fetch failures.
       }
     })();
-  }, [loadBootstrap]);
+
+    setLoading(false);
+  }, [sidebar.loading, sidebar.models, sidebar.agents, chats]);
+
+  useEffect(() => {
+    if (sidebar.loading || !initializedRef.current) return;
+    if (models.length > 0) return;
+    setModels(mergeModels(sidebar.models as ModelOption[], []));
+    setAgents(sidebar.agents);
+  }, [models.length, sidebar.agents, sidebar.loading, sidebar.models]);
 
   useEffect(() => {
     selectedChatIdRef.current = selectedChatId;
@@ -490,8 +452,18 @@ export function useChatState() {
       setActiveCollaborators([]);
       setCollaboratorPhase("idle");
       setStreamError(null);
+      setLastAutoResult(null);
       return;
     }
+
+    // Merge any pending completions for this chat
+    const pending = pendingCompletionsRef.current.get(selectedChatId);
+    if (pending && pending.length > 0) {
+      setMessages((prev) => [...prev, ...pending]);
+      pendingCompletionsRef.current.delete(selectedChatId);
+    }
+
+    setLastAutoResult(null);
 
     void (async () => {
       try {
@@ -507,7 +479,17 @@ export function useChatState() {
         if (data.chat.manualModel) {
           setManualModel(data.chat.manualModel);
         }
-        setMessages((prev) => mergeFetchedMessages(data.messages, prev));
+        const messagesWithPreviews = data.messages.map((msg) => {
+          if (msg.role === "user" && msg.attachments && msg.attachments.length > 0 && !msg.attachmentPreviews) {
+            const previewKey = [...msg.attachments].sort().join("|");
+            const cached = lastAttachmentPreviewsRef.current.get(previewKey);
+            if (cached) {
+              return { ...msg, attachmentPreviews: cached };
+            }
+          }
+          return msg;
+        });
+        setMessages((prev) => mergeFetchedMessages(messagesWithPreviews, prev));
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Failed to load chat");
       }
@@ -565,6 +547,7 @@ export function useChatState() {
       setFileUploadState({});
       setStreamError(null);
       setLastFailedMessage(null);
+      setLastAutoResult(null);
       setMobileSidebarOpen(false);
 
       if (agentId) {
@@ -573,18 +556,6 @@ export function useChatState() {
     },
     [],
   );
-
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem("ai-school:pinned-chats");
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as string[];
-      if (!Array.isArray(parsed)) return;
-      setPinnedChatIds(new Set(parsed.filter((id) => typeof id === "string" && id.trim().length > 0)));
-    } catch {
-      // Ignore invalid persisted state.
-    }
-  }, []);
 
   useEffect(() => {
     const clean = search.trim();
@@ -610,14 +581,6 @@ export function useChatState() {
   }, [search]);
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem("ai-school:pinned-chats", JSON.stringify([...pinnedChatIds]));
-    } catch {
-      // Ignore storage errors.
-    }
-  }, [pinnedChatIds]);
-
-  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const isMod = event.metaKey || event.ctrlKey;
       if (isMod && event.shiftKey && event.key.toLowerCase() === "s") {
@@ -633,7 +596,7 @@ export function useChatState() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [setSidebarOpen]);
 
   const updateExistingChatSettings = useCallback(
     async (next: {
@@ -736,18 +699,17 @@ export function useChatState() {
 
     selectedChatIdRef.current = data.chatId;
     setSelectedChatId(data.chatId);
-    setChats((prev) => [newChat, ...prev]);
+    sidebar.addChat(newChat);
     return data.chatId;
   }
 
   async function handleDeleteChat(chatId: string) {
-    const response = await fetch(`/api/chats/${chatId}`, { method: "DELETE" });
-    if (!response.ok) {
+    try {
+      await sidebar.deleteChat(chatId);
+    } catch {
       toast.error("Failed to delete chat");
       return;
     }
-
-    setChats((prev) => prev.filter((chat) => chat._id !== chatId));
     if (selectedChatId === chatId) {
       startNewChat(selectedAgentId);
     }
@@ -756,19 +718,11 @@ export function useChatState() {
   async function renameChat(chatId: string, title: string) {
     const clean = title.trim();
     if (!clean) return;
-
-    const response = await fetch(`/api/chats/${chatId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: clean }),
-    });
-
-    if (!response.ok) {
+    try {
+      await sidebar.renameChat(chatId, clean);
+    } catch {
       toast.error("Failed to rename chat");
-      return;
     }
-
-    setChats((prev) => prev.map((chat) => (chat._id === chatId ? { ...chat, title: clean } : chat)));
   }
 
   function stopGeneration() {
@@ -781,17 +735,12 @@ export function useChatState() {
   }
 
   function pinChat(chatId: string) {
-    setPinnedChatIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(chatId)) {
-        next.delete(chatId);
-        toast.info("Chat unpinned");
-      } else {
-        next.add(chatId);
-        toast.success("Chat pinned");
-      }
-      return next;
-    });
+    if (pinnedChatIds.has(chatId)) {
+      toast.info("Chat unpinned");
+    } else {
+      toast.success("Chat pinned");
+    }
+    sidebar.pinChat(chatId);
   }
 
   async function sendMessage(override?: string, options?: SendMessageOptions) {
@@ -804,28 +753,71 @@ export function useChatState() {
     const requestedRouterMode = options?.routerModeOverride ?? routerMode;
     const requestedManualModel = options?.manualModelOverride ?? manualModel;
     const localUserMessageId = options?.localUserMessageId ?? `local-${Date.now()}`;
+    const attachedFileNames = outgoingFiles.map((file) => file.name);
+    const isRegenerate = Boolean(options?.regenerate);
+    const skipLocalUser = Boolean(options?.skipLocalUser);
+    const skipServerUserPersist = Boolean(options?.skipServerUserPersist);
+    const effectiveRouterMode = requestedRouterMode;
+    const effectiveManualModel = requestedManualModel;
 
     setSending(true);
     setDraftResponse("");
-    setDraftThinking("Preparing response plan.\n\nAnalyzing prompt and selecting the best strategy.");
+    setDraftThinking("");
+    setHasRealThinking(false);
     setActiveCollaborators([]);
     setCollaboratorPhase("idle");
     setStreamError(null);
     setSearch("");
+    // Capture which chat this stream belongs to
+    const streamChatId = selectedChatIdRef.current || options?.chatIdOverride || "";
+    streamChatIdRef.current = streamChatId;
+    if (retryAttempt === 0) {
+      setMessage("");
+      if (!options?.regenerate) {
+        setFileList([]);
+        setFileUploadState({});
+      }
+    }
 
     abortControllerRef.current = new AbortController();
     let activeChatId = options?.chatIdOverride;
 
     try {
+      if (!skipLocalUser) {
+        const initialPreviews = outgoingFiles.map((file) => {
+          const key = fileKey(file);
+          const existingThumbnail = fileUploadState[key]?.thumbnailUrl;
+          return {
+            name: file.name,
+            mimeType: file.type || undefined,
+            isImage: file.type.startsWith("image/"),
+            thumbnailUrl: existingThumbnail,
+          };
+        });
+        const userMessage: Message = {
+          _id: localUserMessageId,
+          role: "user",
+          content: text,
+          createdAt: Date.now(),
+          attachments: attachedFileNames,
+          attachmentPreviews: initialPreviews.length > 0 ? initialPreviews : undefined,
+        };
+        setMessages((prev) => [...prev, userMessage]);
+      }
+
       const chatId = await createChatIfNeeded(options?.chatIdOverride);
       activeChatId = chatId;
-      const attachedFileNames = outgoingFiles.map((file) => file.name);
-      const isRegenerate = Boolean(options?.regenerate);
-      const skipLocalUser = Boolean(options?.skipLocalUser);
-      const skipServerUserPersist = Boolean(options?.skipServerUserPersist);
-      const effectiveRouterMode = requestedRouterMode;
-      const effectiveManualModel = requestedManualModel;
+      streamChatIdRef.current = chatId;
+      activeStreamsRef.current.add(chatId);
+      setChats((prev) =>
+        prev.map((chat) =>
+          chat._id === chatId && chat.title === "New chat"
+            ? { ...chat, title: text.slice(0, 60) }
+            : chat,
+        ),
+      );
       let uploadedResourceIds: string[] = [];
+
       const attachmentPreviews = await Promise.all(
         outgoingFiles.map(async (file) => {
           const key = fileKey(file);
@@ -843,22 +835,22 @@ export function useChatState() {
         }),
       );
 
-      if (!isRegenerate && retryAttempt === 0) {
-        setMessage("");
-        setFileList([]);
-        setFileUploadState({});
+      if (!skipLocalUser && attachmentPreviews.length > 0) {
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg._id === localUserMessageId
+              ? {
+                  ...msg,
+                  attachmentPreviews,
+                }
+              : msg,
+          ),
+        );
       }
 
-      if (!skipLocalUser) {
-        const userMessage: Message = {
-          _id: localUserMessageId,
-          role: "user",
-          content: text,
-          createdAt: Date.now(),
-          attachments: attachedFileNames,
-          attachmentPreviews: attachmentPreviews.length > 0 ? attachmentPreviews : undefined,
-        };
-        setMessages((prev) => [...prev, userMessage]);
+      if (attachmentPreviews.length > 0) {
+        const previewKey = outgoingFiles.map((f) => f.name).sort().join("|");
+        lastAttachmentPreviewsRef.current.set(previewKey, attachmentPreviews);
       }
 
       if (outgoingFiles.length > 0 && !isRegenerate) {
@@ -939,6 +931,7 @@ export function useChatState() {
       let buffer = "";
       let assistantBuffer = "";
       let finalMeta: {
+        messageId?: string;
         modelUsed?: string;
         modelRequested?: string;
         whyThisResponse?: string;
@@ -972,13 +965,15 @@ export function useChatState() {
               | "collab_start"
               | "collab_progress"
               | "collab_done"
-              | "collab_synthesizing";
+              | "collab_synthesizing"
+              | "chat_title";
             content?: string;
             error?: string | { message?: string };
             modelUsed?: string;
             modelRequested?: string;
             whyThisResponse?: string;
             citations?: Citation[];
+            messageId?: string;
             usageIn?: number;
             usageOut?: number;
             thinkingContent?: string;
@@ -992,6 +987,7 @@ export function useChatState() {
             enhancedPrompt?: string;
             routeTrace?: RouteTrace;
             chatTitle?: string;
+            suggestedMode?: string;
             agents?: string[];
             agent?: string;
             status?: "pending" | "running" | "done" | "failed";
@@ -1000,98 +996,103 @@ export function useChatState() {
             model?: string;
           };
 
+          // Guard: only update visual draft state if user is still viewing this chat
+          const isViewingStreamChat = selectedChatIdRef.current === chatId;
+
           if (payload.type === "delta" && payload.content) {
             assistantBuffer += payload.content;
-            if (bufferState.mode !== "none") {
-              bufferState = appendToBuffer(bufferState, assistantBuffer);
-              setDraftResponse(bufferState.safeContent);
-            } else {
-              setDraftResponse((prev) => prev + payload.content);
+            if (isViewingStreamChat) {
+              if (bufferState.mode !== "none") {
+                bufferState = appendToBuffer(bufferState, assistantBuffer);
+                setDraftResponse(bufferState.safeContent);
+              } else {
+                setDraftResponse((prev) => prev + payload.content);
+              }
             }
           }
 
-          if (payload.type === "thinking" && payload.content) {
+          if (payload.type === "thinking" && payload.content?.trim()) {
             if (!hasModelThinking) {
               thinkingBuffer = payload.content;
               hasModelThinking = true;
             } else {
               thinkingBuffer += payload.content;
             }
-            setDraftThinking(thinkingBuffer);
+            if (isViewingStreamChat) {
+              setHasRealThinking(true);
+              setDraftThinking(thinkingBuffer);
+            }
           }
 
           if (payload.type === "collab_start") {
             const agents = payload.agents ?? [];
-            setActiveCollaborators(
-              agents.map((role) => ({
-                role,
-                status: "pending",
-              })),
-            );
-            if (agents.length > 0) {
-              setCollaboratorPhase("running");
-              if (!hasModelThinking) {
-                setDraftThinking(
-                  `Planning specialist collaboration.\n\nActive agents: ${agents
-                    .map((role) => role.replace(/_/g, " "))
-                    .join(", ")}.`,
-                );
+            if (isViewingStreamChat) {
+              setActiveCollaborators(
+                agents.map((role) => ({
+                  role,
+                  status: "pending",
+                })),
+              );
+              if (agents.length > 0) {
+                setCollaboratorPhase("running");
               }
             }
           }
 
           if (payload.type === "collab_progress" && payload.agent) {
             const agentRole = payload.agent;
-            setCollaboratorPhase("running");
-            if (!hasModelThinking) {
-              const label = agentRole.replace(/_/g, " ");
-              setDraftThinking(`Coordinating specialist steps.\n\nNow running: ${label}.`);
-            }
-            setActiveCollaborators((prev) => {
-              const has = prev.some((item) => item.role === agentRole);
-              if (!has) {
-                return [
-                  ...prev,
-                  {
-                    role: agentRole,
-                    status: payload.status ?? "running",
-                    model: payload.model,
-                    preview: payload.preview,
-                  },
-                ];
-              }
-              return prev.map((item) =>
-                item.role === agentRole
-                  ? {
-                      ...item,
+            if (isViewingStreamChat) {
+              setCollaboratorPhase("running");
+              setActiveCollaborators((prev) => {
+                const has = prev.some((item) => item.role === agentRole);
+                if (!has) {
+                  return [
+                    ...prev,
+                    {
+                      role: agentRole,
                       status: payload.status ?? "running",
-                      model: payload.model ?? item.model,
-                      preview: payload.preview ?? item.preview,
-                    }
-                  : item,
-              );
-            });
+                      model: payload.model,
+                      preview: payload.preview,
+                    },
+                  ];
+                }
+                return prev.map((item) =>
+                  item.role === agentRole
+                    ? {
+                        ...item,
+                        status: payload.status ?? "running",
+                        model: payload.model ?? item.model,
+                        preview: payload.preview ?? item.preview,
+                      }
+                    : item,
+                );
+              });
+            }
           }
 
           if (payload.type === "collab_done" && payload.agent) {
             const agentRole = payload.agent;
-            setActiveCollaborators((prev) =>
-              prev.map((item) =>
-                item.role === agentRole
-                  ? {
-                      ...item,
-                      status: "done",
-                      model: payload.model ?? item.model,
-                      preview: payload.preview ?? item.preview,
-                      tokensUsed: payload.tokensUsed ?? item.tokensUsed,
-                    }
-                  : item,
-              ),
-            );
+            if (isViewingStreamChat) {
+              setActiveCollaborators((prev) =>
+                prev.map((item) =>
+                  item.role === agentRole
+                    ? {
+                        ...item,
+                        status: "done",
+                        model: payload.model ?? item.model,
+                        preview: payload.preview ?? item.preview,
+                        tokensUsed: payload.tokensUsed ?? item.tokensUsed,
+                      }
+                    : item,
+                ),
+              );
+            }
           }
 
           if (payload.type === "collab_synthesizing") {
-            setCollaboratorPhase("synthesizing");
+            if (isViewingStreamChat) {
+              setCollaboratorPhase("synthesizing");
+            }
           }
 
           if (payload.type === "done") {
@@ -1122,6 +1123,7 @@ export function useChatState() {
                 : payload.routeTrace;
 
             finalMeta = {
+              messageId: payload.messageId,
               modelUsed: actualModel,
               modelRequested: payload.modelRequested,
               whyThisResponse: payload.whyThisResponse,
@@ -1147,7 +1149,19 @@ export function useChatState() {
                 prev.map((chat) => (chat._id === chatId ? { ...chat, title: nextTitle } : chat)),
               );
             }
+            if (payload.suggestedMode && payload.suggestedMode !== mode) {
+              setMode(payload.suggestedMode as StudyMode);
+              void updateExistingChatSettings({ mode: payload.suggestedMode as StudyMode }).catch(() => {});
+              toast.info(`Auto-switched to ${payload.suggestedMode} mode`);
+            }
             setCollaboratorPhase("idle");
+          }
+
+          if (payload.type === "chat_title" && typeof payload.chatTitle === "string" && payload.chatTitle.trim()) {
+            const nextTitle = payload.chatTitle.trim();
+            setChats((prev) =>
+              prev.map((chat) => (chat._id === chatId ? { ...chat, title: nextTitle } : chat)),
+            );
           }
 
           if (payload.type === "error") {
@@ -1159,36 +1173,49 @@ export function useChatState() {
       }
 
       if (assistantBuffer) {
-        if (enhancedPrompt) {
-          setMessages((prev) => {
-            const updated = [...prev];
-            for (let i = updated.length - 1; i >= 0; i -= 1) {
-              const candidate = updated[i];
-              if (candidate?.role === "user") {
-                updated[i] = {
-                  ...candidate,
-                  enhancedContent: enhancedPrompt,
-                };
-                break;
-              }
-            }
-            return updated;
-          });
-        }
-
         const assistantMessage: Message = {
-          _id: `assistant-${Date.now()}`,
+          _id: finalMeta.messageId ?? `assistant-${Date.now()}`,
           role: "assistant",
           content: assistantBuffer,
           createdAt: Date.now(),
           ...finalMeta,
         };
 
-        setMessages((prev) => [...prev, assistantMessage]);
+        const stillViewingStreamChat = selectedChatIdRef.current === chatId;
+
+        if (stillViewingStreamChat) {
+          if (enhancedPrompt) {
+            setMessages((prev) => {
+              const updated = [...prev];
+              for (let i = updated.length - 1; i >= 0; i -= 1) {
+                const candidate = updated[i];
+                if (candidate?.role === "user") {
+                  updated[i] = {
+                    ...candidate,
+                    enhancedContent: enhancedPrompt,
+                  };
+                  break;
+                }
+              }
+              return updated;
+            });
+          }
+          setMessages((prev) => [...prev, assistantMessage]);
+        } else {
+          // User navigated away - store for later merge
+          const existing = pendingCompletionsRef.current.get(chatId) ?? [];
+          existing.push(assistantMessage);
+          pendingCompletionsRef.current.set(chatId, existing);
+
+          // Find the chat title for the toast
+          const chatTitle = chats.find((c) => c._id === chatId)?.title ?? "a chat";
+          toast.info(`Response ready in "${chatTitle}"`);
+        }
       }
 
       setDraftResponse("");
       setDraftThinking("");
+      setHasRealThinking(false);
       setLastFailedMessage(null);
       setChats((prev) =>
         prev.map((chat) =>
@@ -1238,8 +1265,8 @@ export function useChatState() {
         const switchingModel = Boolean(backupModel) && options?.forcedModelOverride !== backupModel;
         const canRetryWithNewModel = Boolean(switchingModel && backupModel);
         const maxBusyRetries = Math.max(
-          3,
-          Math.min(12, models.filter((model) => model.modelId !== "openrouter/auto").length),
+          2,
+          Math.min(5, models.filter((model) => model.modelId !== "openrouter/auto").length),
         );
 
         if (canRetryWithNewModel && retryAttempt < maxBusyRetries) {
@@ -1268,10 +1295,13 @@ export function useChatState() {
       setStreamError(message);
       setDraftResponse("");
       setDraftThinking("");
+      setHasRealThinking(false);
       setLastFailedMessage(preservedText);
     } finally {
+      if (activeChatId) activeStreamsRef.current.delete(activeChatId);
       setActiveCollaborators([]);
       setCollaboratorPhase("idle");
+      setHasRealThinking(false);
       setSending(false);
       abortControllerRef.current = null;
     }
@@ -1306,6 +1336,103 @@ export function useChatState() {
       skipLocalUser: true,
       retryAttempt: 0,
     });
+  }
+
+  async function submitQuizAnswers(payload: {
+    messageId: string;
+    result: {
+      score: number;
+      total: number;
+      questions: Array<{
+        id: string;
+        prompt: string;
+        selected?: string;
+        correct?: string;
+        isCorrect: boolean;
+        explanation?: string;
+      }>;
+      incorrectDetails: string[];
+    };
+  }) {
+    if (!selectedChatId) return;
+    try {
+      await fetch("/api/quizzes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chatId: selectedChatId,
+          messageId: payload.messageId,
+          questions: payload.result.questions,
+          score: payload.result.score,
+          total: payload.result.total,
+        }),
+      });
+
+      const incorrectSummary =
+        payload.result.incorrectDetails.length > 0
+          ? payload.result.incorrectDetails.slice(0, 8).join("; ")
+          : "None";
+      const followUpPrompt = [
+        `Student answered quiz. Score: ${payload.result.score}/${payload.result.total}.`,
+        `Incorrect: ${incorrectSummary}.`,
+        "Provide concise explanations for misses, identify patterns in mistakes, and give 3 targeted practice prompts.",
+      ].join(" ");
+
+      await sendMessage(followUpPrompt, {
+        chatIdOverride: selectedChatId,
+        skipLocalUser: true,
+        skipServerUserPersist: true,
+        retryAttempt: 0,
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to submit quiz");
+    }
+  }
+
+  async function saveFlashcardDeck(payload: {
+    messageId: string;
+    title: string;
+    cards: Array<{ front: string; back: string; cardHash: string }>;
+  }) {
+    if (!selectedChatId) return;
+    try {
+      const response = await fetch("/api/flashcards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save_deck",
+          chatId: selectedChatId,
+          sourceMessageId: payload.messageId,
+          title: payload.title,
+          cards: payload.cards,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      toast.success("Flashcard deck saved");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save deck");
+    }
+  }
+
+  async function rateFlashcardCard(payload: { cardHash: string; quality: number }) {
+    try {
+      const response = await fetch("/api/flashcards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "rate_card",
+          cardHash: payload.cardHash,
+          quality: payload.quality,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to rate card");
+    }
   }
 
   async function refreshPersonalResources() {
@@ -1392,11 +1519,7 @@ export function useChatState() {
     const branchChatId = data.chatId;
     if (!branchChatId) return;
 
-    const chatsRes = await fetch("/api/chats");
-    if (chatsRes.ok) {
-      const chatsData = (await chatsRes.json()) as { chats: Chat[] };
-      setChats(chatsData.chats);
-    }
+    await sidebar.refreshBootstrap().catch(() => {});
     setSelectedChatId(branchChatId);
   }
 
@@ -1445,6 +1568,7 @@ export function useChatState() {
     messages,
     draftResponse,
     draftThinking,
+    hasRealThinking,
     activeCollaborators,
     collaboratorPhase,
     fileList,
@@ -1479,6 +1603,9 @@ export function useChatState() {
     sendMessage,
     retryLastMessage,
     regenerateLastResponse,
+    submitQuizAnswers,
+    saveFlashcardDeck,
+    rateFlashcardCard,
     regenerateWithModel,
     editAndResend,
     branchFromMessage,

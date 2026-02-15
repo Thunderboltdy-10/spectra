@@ -117,20 +117,30 @@ export function ChatMessage({
   const [editedContent, setEditedContent] = useState(content);
   const [regenModel, setRegenModel] = useState(regenModels[0]?.modelId ?? "");
   const tts = useTextToSpeech();
-  const hasInlineCitations = /\[\d+\]/.test(content);
   const searchCitations = citations.filter((citation) => citation.sourceType === "search");
   const activeModelId = modelUsed ?? routeTrace?.selected.modelId;
   const activeProvider = activeModelId?.split("/")[0] ?? "AI";
-  const renderedContent =
-    !isUser && citations.length > 0 && !hasInlineCitations
-      ? `${content}\n\n${citations
-          .slice(0, 4)
-          .map((_, index) => `[${index + 1}]`)
-          .join(" ")}`
-      : content;
-  const totalTokens = (usageIn ?? 0) + (usageOut ?? 0);
-  const estimatedCost = totalTokens > 0 ? totalTokens * 0.000002 : 0;
+  const renderedContent = content;
+  const directTokens = (usageIn ?? 0) + (usageOut ?? 0);
+  const collaboratorExtraTokens =
+    routeTrace?.collaborators
+      ?.filter((item) => item.role !== "synthesizer")
+      .reduce((sum, item) => sum + (item.tokensUsed ?? 0), 0) ?? 0;
+  const collaboratorTotalTokens = routeTrace?.collaborators?.reduce((sum, item) => sum + (item.tokensUsed ?? 0), 0) ?? 0;
+  const totalTokens =
+    directTokens > 0
+      ? directTokens + collaboratorExtraTokens
+      : collaboratorTotalTokens;
   const timeLabel = useMemo(() => formatRelativeTime(createdAt), [createdAt]);
+  const hasEnhanced = Boolean(enhancedContent && enhancedContent.trim());
+  const displayUserContent = isUser && showEnhanced && hasEnhanced ? enhancedContent ?? content : content;
+
+  const sanitizeModelLabel = (value: string) =>
+    value
+      .replace(/:free$/i, "")
+      .replace(/[\s(_-]*\bfree\b[\s)_-]*/gi, " ")
+      .replace(/\s{2,}/g, " ")
+      .trim();
 
   function handleCopy() {
     void navigator.clipboard.writeText(content);
@@ -152,7 +162,29 @@ export function ChatMessage({
       <div className={cn("w-full", isUser ? "max-w-3xl" : "max-w-5xl")}>
         {isUser ? (
           <div className="ml-auto rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3 shadow-[var(--shadow-soft)]">
-            <p className="mb-1 text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">You</p>
+            <div className="mb-1 flex items-center gap-2">
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[var(--accent-cyan)] text-[11px] font-bold text-white">
+                U
+              </span>
+              <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+                {showEnhanced && hasEnhanced ? "Enhanced" : "You"}
+              </span>
+              {timeLabel ? (
+                <>
+                  <span className="text-[10px] text-[var(--text-secondary)]">·</span>
+                  <span className="text-[10px] text-[var(--text-secondary)]">{timeLabel}</span>
+                </>
+              ) : null}
+              {hasEnhanced ? (
+                <button
+                  type="button"
+                  onClick={() => setShowEnhanced((prev) => !prev)}
+                  className="text-[10px] text-[var(--text-secondary)] underline underline-offset-2 transition hover:text-[var(--text-primary)]"
+                >
+                  {showEnhanced ? "Show original" : "See enhanced prompt"}
+                </button>
+              ) : null}
+            </div>
             {editing ? (
               <div className="space-y-2">
                 <textarea
@@ -170,7 +202,7 @@ export function ChatMessage({
                 </div>
               </div>
             ) : (
-              <p className="whitespace-pre-wrap text-[15px] leading-7 text-[var(--text-primary)]">{content}</p>
+              <p className="whitespace-pre-wrap text-[15px] leading-7 text-[var(--text-primary)]">{displayUserContent}</p>
             )}
             {attachmentPreviews && attachmentPreviews.length > 0 ? (
               <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -220,24 +252,8 @@ export function ChatMessage({
                 ))}
               </div>
             ) : null}
-            {enhancedContent && enhancedContent.trim() && (
-              <div className="mt-3 rounded-xl border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_75%,transparent)] p-2.5">
-                <button
-                  type="button"
-                  onClick={() => setShowEnhanced((prev) => !prev)}
-                  className="text-xs font-medium text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
-                >
-                  {showEnhanced ? "Hide enhanced prompt" : "Enhanced prompt used"}
-                </button>
-                {showEnhanced && (
-                  <p className="mt-2 whitespace-pre-wrap text-[13px] leading-6 text-[var(--text-secondary)]">
-                    {enhancedContent}
-                  </p>
-                )}
-              </div>
-            )}
             {(onEdit || onBranch) && !editing ? (
-              <div className="mt-3 flex items-center gap-1.5">
+              <div className="mt-1 flex items-center gap-1.5">
                 {onEdit ? (
                   <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setEditing(true)}>
                     <Pencil className="h-3.5 w-3.5" />
@@ -252,7 +268,6 @@ export function ChatMessage({
                 ) : null}
               </div>
             ) : null}
-            {timeLabel ? <p className="mt-2 text-[11px] text-[var(--text-secondary)]">{timeLabel}</p> : null}
           </div>
         ) : (
           <div className="flex min-w-0 items-start gap-3 border-t border-[var(--border-default)] pt-4">
@@ -346,7 +361,7 @@ export function ChatMessage({
                         >
                           {regenModels.map((model) => (
                             <option key={model.modelId} value={model.modelId}>
-                              {model.name}
+                              {sanitizeModelLabel(model.name)}
                             </option>
                           ))}
                         </select>
@@ -401,7 +416,6 @@ export function ChatMessage({
               </div>
               <div className="mt-2 flex items-center gap-2 text-[11px] text-[var(--text-secondary)]">
                 {totalTokens > 0 ? <span>{totalTokens.toLocaleString()} tokens</span> : null}
-                {estimatedCost > 0 ? <span>~${estimatedCost.toFixed(4)}</span> : null}
                 {timeLabel ? <span>{timeLabel}</span> : null}
               </div>
             </div>

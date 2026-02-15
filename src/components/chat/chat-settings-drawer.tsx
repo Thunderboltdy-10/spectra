@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -8,6 +8,8 @@ import { Switch } from "@/components/ui/switch";
 import { ChatModeSelector } from "@/components/chat/chat-mode-selector";
 import type { AutoPreference, ModelOption, PersonalResource, UserSpending } from "@/hooks/use-chat-state";
 import type { RouterMode, StudyMode, ThinkingLevel } from "@/types";
+import { useCompactSheet } from "@/hooks/use-compact-sheet";
+import { useRightPanelDock } from "@/hooks/use-right-panel-dock";
 
 type ChatSettingsDrawerProps = {
   open: boolean;
@@ -86,6 +88,14 @@ function spendingTierLabel(tier?: UserSpending["tier"]) {
   return "Normal";
 }
 
+function sanitizeModelLabel(value: string) {
+  return value
+    .replace(/:free$/i, "")
+    .replace(/[\s(_-]*\bfree\b[\s)_-]*/gi, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 export function ChatSettingsDrawer({
   open,
   onClose,
@@ -110,7 +120,21 @@ export function ChatSettingsDrawer({
   onAutoSearchChange,
   onDeleteResource,
 }: ChatSettingsDrawerProps) {
+  const compact = useCompactSheet(860);
+  const docked = useRightPanelDock({ id: "chat-settings-drawer", open, compact, maxWidthPx: 448 });
+  const [collapsed, setCollapsed] = useState(false);
   const [showManual, setShowManual] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setCollapsed(compact);
+  }, [open, compact]);
+
+  useEffect(() => {
+    if (!compact) {
+      setCollapsed(false);
+    }
+  }, [compact]);
 
   if (!open) return null;
 
@@ -121,22 +145,46 @@ export function ChatSettingsDrawer({
 
   return (
     <div className="fixed inset-0 z-40">
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/45"
-        aria-label="Close settings"
-        onClick={onClose}
-      />
+      {!docked ? (
+        <button
+          type="button"
+          className="absolute inset-0 bg-transparent"
+          aria-label="Close settings"
+          onClick={onClose}
+        />
+      ) : null}
 
-      <aside className="chat-settings-panel absolute inset-y-0 right-0 w-full max-w-md border-l border-[var(--border-default)] bg-[var(--bg-primary)] p-4 shadow-[var(--shadow-soft)] sm:p-5">
+      <aside
+        className={`right-panel-shell absolute border-[var(--border-default)] bg-[var(--bg-sidebar)] p-4 shadow-[var(--shadow-soft)] sm:p-5 ${
+          docked ? "right-panel-shell--docked" : "right-panel-shell--sheet"
+        } ${
+          compact
+            ? "bottom-3 left-3 right-3 max-h-[78vh] rounded-2xl border"
+            : "inset-y-0 right-0 w-full max-w-md border-l"
+        }`}
+      >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-display text-xl">Chat settings</h2>
-          <Button type="button" variant="secondary" size="icon" onClick={onClose}>
-            <X className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-1.5">
+            {compact ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="icon"
+                onClick={() => setCollapsed((prev) => !prev)}
+                aria-label={collapsed ? "Expand settings" : "Collapse settings"}
+              >
+                <ChevronDown className={`h-4 w-4 transition ${collapsed ? "-rotate-90" : "rotate-0"}`} />
+              </Button>
+            ) : null}
+            <Button type="button" variant="secondary" size="icon" onClick={onClose}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
 
-        <div className="space-y-4">
+        {!collapsed ? (
+          <div className={`right-panel-content ${compact ? "max-h-[calc(78vh-4rem)]" : "max-h-[calc(100vh-6rem)]"} space-y-4 overflow-y-auto pr-1`}>
           <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
             <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Automation profile</h3>
             <div className="mt-2 grid gap-2">
@@ -209,7 +257,7 @@ export function ChatSettingsDrawer({
                       <SelectContent>
                         {models.map((model) => (
                           <SelectItem key={model.modelId} value={model.modelId}>
-                            {model.name}
+                            {sanitizeModelLabel(model.name)}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -223,10 +271,13 @@ export function ChatSettingsDrawer({
           {selectedModel && (
             <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
               <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Selected model</h3>
-              <p className="mt-1 text-sm font-medium text-[var(--text-primary)]">{selectedModel.name}</p>
+              <p className="mt-1 text-sm font-medium text-[var(--text-primary)]">{sanitizeModelLabel(selectedModel.name)}</p>
               <p className="text-xs text-[var(--text-secondary)]">{selectedModel.provider}</p>
-              <div className="mt-2 flex flex-wrap gap-1">
-                {(selectedModel.tags ?? []).slice(0, 6).map((tag) => (
+                <div className="mt-2 flex flex-wrap gap-1">
+                {(selectedModel.tags ?? [])
+                  .filter((tag) => !/\bfree\b/i.test(tag))
+                  .slice(0, 6)
+                  .map((tag) => (
                   <span
                     key={tag}
                     className="rounded-full border border-[var(--border-default)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]"
@@ -234,8 +285,8 @@ export function ChatSettingsDrawer({
                     {tag}
                   </span>
                 ))}
-              </div>
-            </section>
+                </div>
+              </section>
           )}
 
           {row("Use personal resources", "Include your uploaded files during retrieval", usePersonalResources, onTogglePersonalResources)}
@@ -284,7 +335,8 @@ export function ChatSettingsDrawer({
               />
             </div>
           </section>
-        </div>
+          </div>
+        ) : null}
       </aside>
     </div>
   );

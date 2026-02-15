@@ -19,7 +19,16 @@ export const MODEL_CONFIG = {
   // Search-focused routes.
   searchFast: "perplexity/sonar",
   searchDeep: "perplexity/sonar-pro",
+
+  // Image generation.
+  imageGen: "google/gemini-2.5-flash-image-preview",
 } as const;
+
+export const IMAGE_GEN_FALLBACKS = [
+  "google/gemini-2.5-flash-image-preview",
+  "openai/gpt-image-1",
+  "black-forest-labs/flux-1-schnell",
+] as const;
 
 export type ModelConfigKey = keyof typeof MODEL_CONFIG;
 export type ModelId = (typeof MODEL_CONFIG)[ModelConfigKey];

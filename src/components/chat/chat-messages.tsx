@@ -5,8 +5,8 @@ import { ArrowDown, Brain, RefreshCw, TriangleAlert, WifiOff } from "lucide-reac
 import { Button } from "@/components/ui/button";
 import { ChatMessage } from "@/components/chat/chat-message";
 import { CollaboratorsLive, type ActiveCollaborator } from "@/components/chat/collaborators-live";
-import { QuizView, isQuizContent } from "@/components/chat/quiz-view";
-import { FlashcardView, isFlashcardContent } from "@/components/chat/flashcard-view";
+import { QuizReveal, isQuizContent, type QuizSubmitResult } from "@/components/chat/quiz-reveal";
+import { FlashcardReveal, isFlashcardContent, type FlashcardCard } from "@/components/chat/flashcard-reveal";
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { ThinkingBlock } from "@/components/chat/thinking-block";
 import { ThinkingMessages } from "@/components/loading-states";
@@ -18,9 +18,13 @@ type ChatMessagesProps = {
   messages: Message[];
   draftResponse: string;
   draftThinking?: string;
+  hasRealThinking?: boolean;
   sending: boolean;
   streamError: string | null;
   onRetry: () => void;
+  onSubmitQuizAnswers?: (payload: { messageId: string; result: QuizSubmitResult }) => void;
+  onSaveFlashcardDeck?: (payload: { messageId: string; title: string; cards: FlashcardCard[] }) => void;
+  onRateFlashcardCard?: (payload: { messageId: string; cardHash: string; quality: number }) => void;
   onRegenerate?: () => void;
   onRegenerateWithModel?: (modelId: string) => void;
   onAssistantFeedback?: (positive: boolean, modelId?: string) => void;
@@ -29,6 +33,7 @@ type ChatMessagesProps = {
   regenModels?: Array<{ modelId: string; name: string }>;
   emptyState?: React.ReactNode;
   mode: StudyMode;
+  thinkingLevel?: "low" | "medium" | "high";
   lastModelUsed?: string;
   lastAutoResult?: {
     modelUsed?: string;
@@ -45,9 +50,13 @@ export function ChatMessages({
   messages,
   draftResponse,
   draftThinking,
+  hasRealThinking = false,
   sending,
   streamError,
   onRetry,
+  onSubmitQuizAnswers,
+  onSaveFlashcardDeck,
+  onRateFlashcardCard,
   onRegenerate,
   onRegenerateWithModel,
   onAssistantFeedback,
@@ -56,6 +65,7 @@ export function ChatMessages({
   regenModels = [],
   emptyState,
   mode,
+  thinkingLevel = "medium",
   lastModelUsed,
   lastAutoResult,
   activeCollaborators = [],
@@ -65,7 +75,6 @@ export function ChatMessages({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const [showJumpButton, setShowJumpButton] = useState(false);
-  const [showThinking, setShowThinking] = useState(false);
   const shouldAutoScrollRef = useRef(true);
 
   const hasContent = messages.length > 0 || Boolean(draftResponse);
@@ -114,41 +123,17 @@ export function ChatMessages({
     return error;
   }
 
-  function renderDraft(text: string) {
-    const lines = text.split("\n");
-    return (
-      <div className="space-y-1.5">
-        {lines.map((line, idx) => {
-          const trimmed = line.trim();
-          if (!trimmed) {
-            return <div key={`sp-${idx}`} className="h-2" />;
-          }
-          if (/^#{1,3}\s/.test(trimmed)) {
-            return (
-              <p key={idx} className="font-semibold text-[var(--text-primary)]">
-                {trimmed.replace(/^#{1,3}\s/, "")}
-              </p>
-            );
-          }
-          if (/^[-*]\s/.test(trimmed)) {
-            return (
-              <p key={idx} className="pl-4 text-[15px] leading-7 text-[var(--text-primary)]">
-                • {trimmed.slice(2)}
-              </p>
-            );
-          }
-          return (
-            <p key={idx} className="text-[15px] leading-7 text-[var(--text-primary)]">
-              {line}
-            </p>
-          );
-        })}
-      </div>
-    );
-  }
-
   function renderDraftMarkdown(text: string) {
     return <MarkdownRenderer content={autoCloseMarkdown(text)} citations={[]} />;
+  }
+
+  function isLikelyClarifyingText(value: string) {
+    const clean = value.trim();
+    if (!clean) return false;
+    if (!clean.includes("?")) return false;
+    if (isQuizContent(clean) || isFlashcardContent(clean)) return false;
+    const lines = clean.split("\n").filter((line) => line.trim().length > 0);
+    return clean.length < 420 && lines.length <= 7;
   }
 
   return (
@@ -162,11 +147,23 @@ export function ChatMessages({
 
             if (msg.role === "assistant" && (mode === "quiz" || mode === "exam")) {
               if (isQuizContent(msg.content)) {
-                return <QuizView key={msg._id} content={msg.content} />;
+                return (
+                  <QuizReveal
+                    key={msg._id}
+                    content={msg.content}
+                    onSubmitAnswers={(result) => {
+                      onSubmitQuizAnswers?.({
+                        messageId: msg._id,
+                        result,
+                      });
+                    }}
+                  />
+                );
               }
-              return (
-                <div key={msg._id}>
+              if (isLikelyClarifyingText(msg.content)) {
+                return (
                   <ChatMessage
+                    key={msg._id}
                     role={msg.role}
                     content={msg.content}
                     thinkingContent={msg.thinkingContent}
@@ -189,28 +186,58 @@ export function ChatMessages({
                     onFeedback={msg.role === "assistant" ? onAssistantFeedback : undefined}
                     onOpenCanvas={onOpenCanvas}
                   />
-                  <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
-                    <p className="text-xs text-amber-600 dark:text-amber-400">
-                      Response didn&apos;t follow quiz format. Showing as text.
-                    </p>
-                    {isLastAssistant && onRegenerate && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={onRegenerate}
-                        className="mt-2"
-                      >
-                        Regenerate as strict quiz
-                      </Button>
-                    )}
-                  </div>
-                </div>
+                );
+              }
+              return (
+                <ChatMessage
+                  key={msg._id}
+                  role={msg.role}
+                  content={msg.content}
+                  thinkingContent={msg.thinkingContent}
+                  enhancedContent={msg.enhancedContent}
+                  attachments={msg.attachments}
+                  attachmentPreviews={msg.attachmentPreviews}
+                  modelUsed={msg.modelUsed}
+                  whyThisResponse={msg.whyThisResponse}
+                  routeTrace={msg.routeTrace}
+                  citations={msg.citations}
+                  mode={mode}
+                  isLastAssistant={isLastAssistant}
+                  onRegenerate={isLastAssistant ? onRegenerate : undefined}
+                  onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
+                  regenModels={regenModels}
+                  onEdit={undefined}
+                  usageIn={msg.usageIn}
+                  usageOut={msg.usageOut}
+                  createdAt={msg.createdAt}
+                  onFeedback={msg.role === "assistant" ? onAssistantFeedback : undefined}
+                  onOpenCanvas={onOpenCanvas}
+                />
               );
             }
 
             if (msg.role === "assistant" && mode === "flashcard") {
               if (isFlashcardContent(msg.content)) {
-                return <FlashcardView key={msg._id} content={msg.content} />;
+                return (
+                  <FlashcardReveal
+                    key={msg._id}
+                    content={msg.content}
+                    onSaveDeck={(payload) => {
+                      onSaveFlashcardDeck?.({
+                        messageId: msg._id,
+                        title: payload.title,
+                        cards: payload.cards,
+                      });
+                    }}
+                    onRateCard={(payload) => {
+                      onRateFlashcardCard?.({
+                        messageId: msg._id,
+                        cardHash: payload.cardHash,
+                        quality: payload.quality,
+                      });
+                    }}
+                  />
+                );
               }
               return (
                 <ChatMessage
@@ -281,7 +308,11 @@ export function ChatMessages({
                     {modelLabel(lastModelUsed)} is generating {(mode === "quiz" || mode === "exam") ? "quiz" : "flashcards"}...
                   </span>
                 </div>
-                {renderDraft(draftResponse)}
+                <p className="text-sm text-[var(--text-secondary)]">
+                  {(mode === "quiz" || mode === "exam")
+                    ? "Generating quiz structure and answer key."
+                    : "Generating flashcard fronts and backs."}
+                </p>
                 <div className="mt-3 text-xs italic text-[var(--text-secondary)]">
                   {(mode === "quiz" || mode === "exam")
                     ? "Answers will appear after generation completes."
@@ -291,7 +322,7 @@ export function ChatMessages({
             </article>
           ) : draftResponse ? (
             <article className="chat-fade-in flex justify-start">
-              <div className="w-full max-w-5xl rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3">
+              <div className="w-full max-w-5xl px-1 py-1">
                 <div className="mb-2 inline-flex items-center gap-2 text-xs text-[var(--text-secondary)]">
                   <span>{modelLabel(lastModelUsed)} is drafting...</span>
                   {lastAutoResult?.searchEnabled ? (
@@ -300,25 +331,14 @@ export function ChatMessages({
                     </span>
                   ) : null}
                 </div>
-                {lastAutoResult && lastAutoResult.thinkingLevel !== "low" && (
-                  <div className="mb-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowThinking((prev) => !prev)}
-                      className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--text-secondary)]"
-                    >
-                      <Brain className="h-3.5 w-3.5" />
-                      Reasoning {lastAutoResult.thinkingLevel}
-                    </button>
-                    {showThinking && (
-                      <p className="mt-2 text-xs leading-relaxed text-[var(--text-secondary)]">
-                        The model is using extended reasoning before finalizing the response.
-                      </p>
-                    )}
+                {!hasRealThinking && thinkingLevel !== "low" ? (
+                  <div className="mb-3 inline-flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-1 text-xs text-[var(--text-secondary)]">
+                    <Brain className="h-3.5 w-3.5" />
+                    Reasoning enabled. Some models keep reasoning private.
                   </div>
-                )}
+                ) : null}
                 <div>
-                  {draftThinking ? (
+                  {hasRealThinking && draftThinking ? (
                     <ThinkingBlock content={draftThinking} streaming />
                   ) : null}
                   {renderDraftMarkdown(draftResponse)}
@@ -331,11 +351,29 @@ export function ChatMessages({
           ) : null}
 
           {sending && !draftResponse && (
-            <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+            <div className="chat-fade-in">
               <div className="flex items-center gap-3">
                 <ThinkingMessages />
               </div>
-              {draftThinking ? <div className="mt-3"><ThinkingBlock content={draftThinking} streaming /></div> : null}
+              {thinkingLevel !== "low" && !hasRealThinking ? (
+                <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-1 text-xs text-[var(--text-secondary)]">
+                  <Brain className="h-3.5 w-3.5 animate-pulse" />
+                  Reasoning...
+                </div>
+              ) : null}
+              {hasRealThinking && draftThinking ? (
+                <div className="mt-3">
+                  <ThinkingBlock content={draftThinking} streaming />
+                </div>
+              ) : null}
+              {/* Shimmer skeleton for slow initial response */}
+              {!hasRealThinking && activeCollaborators.length === 0 ? (
+                <div className="mt-4 space-y-2">
+                  <div className="h-4 w-3/4 animate-pulse rounded bg-[var(--bg-secondary)]" />
+                  <div className="h-4 w-1/2 animate-pulse rounded bg-[var(--bg-secondary)]" />
+                  <div className="h-4 w-5/6 animate-pulse rounded bg-[var(--bg-secondary)]" />
+                </div>
+              ) : null}
             </div>
           )}
 

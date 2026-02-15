@@ -33,4 +33,13 @@ describe("structured stream buffer", () => {
     expect(state.safeContent).not.toContain("Force equals mass times acceleration");
     expect(state.isComplete).toBe(true);
   });
+
+  it("flashcard buffer recognizes inline FRONT/BACK pairs", () => {
+    let state = createBufferState("flashcard");
+    const raw =
+      "FRONT: Bonjour BACK: Hello FRONT: Merci BACK: Thank you FRONT: Poubelle BACK: Bin FRONT: Manger sain BACK: Eat healthy";
+    state = appendToBuffer(state, raw);
+    expect(state.detectedQuestionCount).toBe(4);
+    expect(state.isComplete).toBe(true);
+  });
 });

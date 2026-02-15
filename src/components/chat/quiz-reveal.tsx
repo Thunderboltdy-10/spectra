@@ -1,117 +1,438 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { QuizPanel, type QuizPanelQuestion } from "@/components/chat/quiz-panel";
+import { RichText } from "@/components/chat/rich-text";
 
-type QuizQuestion = {
+export type QuizQuestionResult = {
   id: string;
   prompt: string;
-  options: string[];
+  selected?: string;
   correct?: string;
+  isCorrect: boolean;
+  explanation?: string;
+};
+
+export type QuizSubmitResult = {
+  score: number;
+  total: number;
+  questions: QuizQuestionResult[];
+  incorrectDetails: string[];
+};
+
+export type ParsedQuizQuestion = QuizPanelQuestion & {
+  number: number;
 };
 
 type QuizRevealProps = {
   content: string;
+  onSubmitAnswers?: (result: QuizSubmitResult) => void;
 };
 
-function parseQuiz(content: string): QuizQuestion[] {
-  const [questionsPart, answersPartRaw = ""] = content.split(/\n##\s*(answers?|explanations?)\b/i);
-  const answerMap = new Map<string, string>();
-  const answersPart = `\n${answersPartRaw}`;
-  for (const line of answersPart.split("\n")) {
-    const m = line.match(/(\d+)\s*[:.)-]?\s*(?:correct\s*[:=]\s*)?([A-D])/i);
-    if (m) answerMap.set(m[1]!, m[2]!.toUpperCase());
+function parseQuiz(content: string): ParsedQuizQuestion[] {
+  const lines = content.split("\n");
+  const questions: ParsedQuizQuestion[] = [];
+  const byNumber = new Map<number, ParsedQuizQuestion>();
+  let inAnswerSection = false;
+  let current: ParsedQuizQuestion | null = null;
+  let currentOptionIndex = -1;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    if (/^#{1,4}\s*(answers?|explanations?)\b/i.test(line)) {
+      inAnswerSection = true;
+      current = null;
+      currentOptionIndex = -1;
+      continue;
+    }
+
+    const qMatch = line.match(/^(?:Q(?:uestion)?\s*)?(\d+)[.):-]\s*(.+)$/i);
+    if (qMatch && !inAnswerSection) {
+      const number = Number.parseInt(qMatch[1] ?? "0", 10);
+      const question: ParsedQuizQuestion = {
+        number,
+        id: String(number),
+        prompt: qMatch[2] ?? "",
+        options: [],
+      };
+      questions.push(question);
+      byNumber.set(number, question);
+      current = question;
+      currentOptionIndex = -1;
+      continue;
+    }
+
+    const optionMatch = line.match(/^[-*]?\s*([A-D])[.)]\s*(.+)$/i);
+    if (optionMatch && !inAnswerSection && current) {
+      current.options.push({
+        letter: optionMatch[1] ?? "",
+        text: optionMatch[2] ?? "",
+      });
+      currentOptionIndex = current.options.length - 1;
+      continue;
+    }
+
+    const directCorrectMatch = line.match(/^Correct\s*[:=-]\s*([A-D])\b/i);
+    if (directCorrectMatch && current) {
+      current.correct = (directCorrectMatch[1] ?? "").toUpperCase();
+      continue;
+    }
+
+    if (inAnswerSection) {
+      const answerMatch = line.match(
+        /^(?:Q(?:uestion)?\s*)?(\d+)[\s:.)-]*(?:correct\s*[:=-]\s*)?([A-D])\b(?:\s*[-:]\s*(.*))?$/i,
+      );
+      if (answerMatch) {
+        const number = Number.parseInt(answerMatch[1] ?? "0", 10);
+        const question = byNumber.get(number);
+        if (question) {
+          question.correct = (answerMatch[2] ?? "").toUpperCase();
+          const maybeExplanation = answerMatch[3]?.trim();
+          if (maybeExplanation) {
+            question.explanation = maybeExplanation;
+          }
+        }
+      }
+      continue;
+    }
+
+    if (current && !inAnswerSection) {
+      if (currentOptionIndex >= 0 && current.options[currentOptionIndex]) {
+        current.options[currentOptionIndex]!.text = `${current.options[currentOptionIndex]!.text}\n${line}`;
+      } else {
+        current.prompt = `${current.prompt}\n${line}`;
+      }
+    }
   }
 
-  const blocks = questionsPart
-    .split(/\n(?=\d+[.)]\s+)/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-
-  const out: QuizQuestion[] = [];
-  for (const block of blocks) {
-    const m = block.match(/^(\d+)[.)]\s*([\s\S]+)$/);
-    if (!m) continue;
-    const id = m[1]!;
-    const rest = m[2]!;
-    const lines = rest.split("\n").map((line) => line.trim()).filter(Boolean);
-    const options = lines.filter((line) => /^[A-D][.)]\s+/.test(line));
-    const promptLines = lines.filter((line) => !/^[A-D][.)]\s+/.test(line));
-    out.push({
-      id,
-      prompt: promptLines.join(" "),
-      options,
-      correct: answerMap.get(id),
-    });
-  }
-  return out;
+  return questions.filter((q) => q.prompt && q.options.length >= 2);
 }
 
-export function QuizReveal({ content }: QuizRevealProps) {
+export function isQuizContent(content: string): boolean {
+  const parsed = parseQuiz(content);
+  return parsed.length >= 2 && parsed.every((question) => question.options.length >= 2);
+}
+
+function buildSubmission(questions: ParsedQuizQuestion[], answers: Record<string, string>): QuizSubmitResult {
+  const results: QuizQuestionResult[] = questions.map((question) => {
+    const selected = answers[question.id];
+    const correct = question.correct;
+    const isCorrect = Boolean(correct && selected && selected === correct);
+    return {
+      id: question.id,
+      prompt: question.prompt,
+      selected,
+      correct,
+      isCorrect,
+      explanation: question.explanation,
+    };
+  });
+
+  const score = results.filter((item) => item.isCorrect).length;
+  const incorrectDetails = results
+    .filter((item) => !item.isCorrect)
+    .map((item) => `${item.id}: chose ${item.selected ?? "none"}, correct ${item.correct ?? "unknown"}`);
+
+  return {
+    score,
+    total: questions.length,
+    questions: results,
+    incorrectDetails,
+  };
+}
+
+export function QuizReveal({ content, onSubmitAnswers }: QuizRevealProps) {
   const questions = useMemo(() => parseQuiz(content), [content]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [revealed, setRevealed] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
 
-  const score = useMemo(() => {
-    if (!revealed) return null;
-    let correct = 0;
-    for (const question of questions) {
-      if (!question.correct) continue;
-      if (answers[question.id] === question.correct) correct += 1;
+  const [aiExplanations, setAiExplanations] = useState<Record<string, string>>({});
+  const [loadingExplanations, setLoadingExplanations] = useState(false);
+
+  const score = useMemo(
+    () =>
+      submitted
+        ? questions.filter((question) => question.correct && answers[question.id] === question.correct).length
+        : 0,
+    [answers, questions, submitted],
+  );
+
+  const fetchExplanations = useCallback(async (qs: ParsedQuizQuestion[], ans: Record<string, string>) => {
+    setLoadingExplanations(true);
+    try {
+      const questionsPayload = qs.map((q) => ({
+        question: q.prompt,
+        selected: ans[q.id] ?? "none",
+        correct: q.correct ?? "unknown",
+        isCorrect: q.correct ? ans[q.id] === q.correct : false,
+      }));
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "general",
+          message: `Explain each quiz answer briefly (1-2 sentences each). Questions:\n${questionsPayload
+            .map((q, i) => `Q${i + 1}: ${q.question} (chose: ${q.selected}, correct: ${q.correct})`)
+            .join("\n")}`,
+          thinkingLevel: "low",
+          routerMode: "auto",
+          usePersonalResources: false,
+          skipUserMessagePersist: true,
+          autoSettings: { enhancePrompt: false, autoModel: true, autoThinking: false, autoSearch: false },
+        }),
+      });
+      if (!res.ok || !res.body) return;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullText = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const payload = JSON.parse(line) as { type: string; content?: string };
+            if (payload.type === "delta" && payload.content) fullText += payload.content;
+            if (payload.type === "done" && typeof payload.content === "string") fullText = payload.content;
+          } catch { /* skip */ }
+        }
+      }
+      // Parse explanations by Q number
+      const explanationMap: Record<string, string> = {};
+      for (let i = 0; i < qs.length; i++) {
+        const qRegex = new RegExp(`Q${i + 1}[:.\\s]*(.+?)(?=Q${i + 2}[:.\\s]|$)`, "is");
+        const match = fullText.match(qRegex);
+        if (match?.[1]) {
+          explanationMap[qs[i]!.id] = match[1].trim();
+        }
+      }
+      setAiExplanations(explanationMap);
+    } catch { /* ignore */ } finally {
+      setLoadingExplanations(false);
     }
-    return { correct, total: questions.length };
-  }, [answers, questions, revealed]);
+  }, []);
+
+  useEffect(() => {
+    setActiveIndex(0);
+    setSubmitted(false);
+    setAnswers({});
+    setAiExplanations({});
+  }, [content]);
+
+  // Auto-open panel on mount for all quizzes
+  useEffect(() => {
+    if (questions.length > 0) {
+      setPanelOpen(true);
+    }
+  }, [questions.length]);
 
   if (questions.length === 0) return null;
 
+  const longQuiz = questions.length >= 3;
+  const currentQuestion = questions[Math.min(activeIndex, Math.max(0, questions.length - 1))];
+  const isLast = activeIndex >= questions.length - 1;
+
+  function submitAnswers() {
+    if (submitted) return;
+    setSubmitted(true);
+    onSubmitAnswers?.(buildSubmission(questions, answers));
+    // Fetch AI explanations for incorrect answers
+    void fetchExplanations(questions, answers);
+  }
+
+  if (longQuiz) {
+    return (
+      <>
+        <div className="space-y-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+          <div className="flex items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] bg-[var(--mode-quiz)] px-2.5 py-1 text-xs font-medium text-white">
+              Quiz - {questions.length} questions
+            </span>
+            {submitted ? (
+              <span className="text-sm font-medium text-[var(--text-primary)]">
+                Score: {score}/{questions.length}
+              </span>
+            ) : null}
+          </div>
+          <p className="text-sm text-[var(--text-secondary)]">
+            This quiz opens in a panel with Back/Next navigation and final answer check.
+          </p>
+          <div className="flex items-center gap-2">
+            <Button type="button" onClick={() => setPanelOpen(true)}>
+              Open Quiz Panel
+            </Button>
+            {!submitted ? (
+              <p className="text-xs text-[var(--text-secondary)]">
+                Progress: {Object.keys(answers).length}/{questions.length}
+              </p>
+            ) : null}
+          </div>
+        </div>
+        <QuizPanel
+          open={panelOpen}
+          onClose={() => setPanelOpen(false)}
+          questions={questions}
+          answers={answers}
+          submitted={submitted}
+          onSelectAnswer={(questionId, letter) => {
+            if (submitted) return;
+            setAnswers((prev) => ({ ...prev, [questionId]: letter }));
+          }}
+          onSubmit={submitAnswers}
+        />
+      </>
+    );
+  }
+
   return (
     <div className="space-y-4">
-      {questions.map((question) => (
-        <div key={question.id} className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-          <p className="mb-2 text-sm font-medium text-[var(--text-primary)]">
-            {question.id}. {question.prompt}
-          </p>
-          <div className="space-y-1.5">
-            {question.options.map((option) => {
-              const letter = option.charAt(0).toUpperCase();
-              const selected = answers[question.id] === letter;
-              const isCorrect = revealed && question.correct === letter;
-              const isWrongSelected = revealed && selected && question.correct && question.correct !== letter;
+      <div className="flex items-center gap-2">
+        <span className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] bg-[var(--mode-quiz)] px-2.5 py-1 text-xs font-medium text-white">
+          Quiz - {questions.length} questions
+        </span>
+        {submitted ? (
+          <span className="text-sm font-medium">
+            Score: {score}/{questions.length} ({Math.round((score / questions.length) * 100)}%)
+          </span>
+        ) : null}
+      </div>
+
+      {currentQuestion ? (
+        <div className="card-entrance rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-card)]">
+          <div className="mb-3 flex items-start text-sm font-medium">
+            <span className="mr-2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-[var(--mode-quiz)] text-xs text-white">
+              {currentQuestion.id}
+            </span>
+            <RichText content={currentQuestion.prompt} className="flex-1 text-sm" />
+          </div>
+          <div className="space-y-2">
+            {currentQuestion.options.map((option) => {
+              const selected = answers[currentQuestion.id] === option.letter;
+              const showCorrect = submitted && option.letter === currentQuestion.correct;
+              const showWrong = submitted && selected && option.letter !== currentQuestion.correct;
               return (
                 <button
-                  key={`${question.id}-${letter}`}
+                  key={`${currentQuestion.id}-${option.letter}`}
                   type="button"
-                  onClick={() => setAnswers((prev) => ({ ...prev, [question.id]: letter }))}
-                  className={`block w-full rounded-lg border px-3 py-2 text-left text-sm transition ${
-                    isCorrect
-                      ? "border-emerald-500/40 bg-emerald-500/10"
-                      : isWrongSelected
-                        ? "border-rose-500/40 bg-rose-500/10"
+                  disabled={submitted}
+                  onClick={() => setAnswers((prev) => ({ ...prev, [currentQuestion.id]: option.letter }))}
+                  className={`quiz-option flex w-full items-center gap-3 rounded-[var(--radius-input)] border px-3 py-2.5 text-left text-sm transition ${
+                    showCorrect
+                      ? "quiz-correct"
+                      : showWrong
+                        ? "quiz-incorrect"
                         : selected
-                          ? "border-[var(--accent-cyan)]/45 bg-[var(--bg-secondary)]"
-                          : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
+                          ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_18%,var(--bg-primary))] ring-1 ring-[var(--accent-cyan)]/50"
+                          : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:bg-[var(--bg-hover)]"
                   }`}
                 >
-                  {option}
+                  <span
+                    className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-medium ${
+                      selected
+                        ? "border-[var(--accent-cyan)] bg-[var(--accent-cyan)] text-white"
+                        : "border-[var(--border-default)]"
+                    }`}
+                  >
+                    {option.letter}
+                  </span>
+                  <RichText content={option.text} className="flex-1 text-sm" />
+                  {!submitted && selected ? <CheckCircle2 className="h-4 w-4 text-[var(--accent-cyan)]" /> : null}
+                  {showCorrect ? <CheckCircle2 className="h-4 w-4 text-[var(--success)]" /> : null}
+                  {showWrong ? <XCircle className="h-4 w-4 text-[var(--danger)]" /> : null}
                 </button>
               );
             })}
           </div>
+          {submitted && (currentQuestion.explanation || aiExplanations[currentQuestion.id]) ? (
+            <div className="mt-3 rounded-[var(--radius-input)] bg-[var(--bg-secondary)] p-2.5 text-xs text-[var(--text-secondary)]">
+              <span>{answers[currentQuestion.id] === currentQuestion.correct ? "Correct! " : "Review: "}</span>
+              <RichText content={currentQuestion.explanation || aiExplanations[currentQuestion.id] || ""} className="text-xs text-[var(--text-secondary)]" />
+            </div>
+          ) : submitted && loadingExplanations ? (
+            <div className="mt-3 flex items-center gap-1.5 text-xs text-[var(--text-secondary)]">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Loading AI explanation...
+            </div>
+          ) : null}
         </div>
-      ))}
+      ) : null}
 
-      <div className="flex items-center gap-2">
-        {!revealed ? (
-          <Button type="button" onClick={() => setRevealed(true)}>Check Answers</Button>
-        ) : (
-          <Button type="button" variant="secondary" onClick={() => setRevealed(false)}>Hide Answers</Button>
-        )}
-        {score ? (
-          <p className="text-sm text-[var(--text-secondary)]">
-            Score: <span className="font-medium text-[var(--text-primary)]">{score.correct}/{score.total}</span>
-          </p>
-        ) : null}
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          {activeIndex > 0 ? (
+            <Button type="button" variant="secondary" onClick={() => setActiveIndex((prev) => Math.max(0, prev - 1))}>
+              Back
+            </Button>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-2">
+          {!submitted ? (
+            <Button
+              type="button"
+              onClick={() => {
+                if (isLast) {
+                  submitAnswers();
+                  return;
+                }
+                setActiveIndex((prev) => Math.min(questions.length - 1, prev + 1));
+              }}
+            >
+              {isLast ? "Check Answers" : "Next"}
+            </Button>
+          ) : !isLast ? (
+            <Button type="button" onClick={() => setActiveIndex((prev) => Math.min(questions.length - 1, prev + 1))}>
+              Next
+            </Button>
+          ) : null}
+        </div>
       </div>
+
+      <div className="flex gap-1">
+        {questions.map((question, index) => {
+          const answered = Boolean(answers[question.id]);
+          return (
+            <div
+              key={question.id}
+              className={`h-1.5 flex-1 rounded-full ${
+                index === activeIndex
+                  ? "bg-[var(--mode-quiz)]"
+                  : answered
+                    ? "bg-[color-mix(in_oklab,var(--mode-quiz)_45%,var(--bg-secondary))]"
+                    : "bg-[var(--border-default)]"
+              }`}
+            />
+          );
+        })}
+      </div>
+
+      {!submitted ? (
+        <p className="text-xs text-[var(--text-secondary)]">
+          Answered {Object.keys(answers).length}/{questions.length}
+        </p>
+      ) : (
+        <div className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 text-center">
+          <p className="text-2xl font-bold">
+            {score}/{questions.length}
+          </p>
+          <p className="text-sm text-[var(--text-secondary)]">
+            {score === questions.length
+              ? "Perfect score!"
+              : score >= questions.length * 0.7
+                ? "Great job!"
+                : "Keep practicing!"}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

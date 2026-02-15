@@ -182,6 +182,50 @@ export async function maybeGenerateTitle(params: {
   }
 }
 
+export async function maybeGenerateTitleFromUserPrompt(params: {
+  chatId: string;
+  actorClerkId: string;
+  userMessage: string;
+}): Promise<string | undefined> {
+  try {
+    const completion = await openRouterChatCompletion({
+      model: MODEL_CONFIG.tutorFast,
+      fallbackModels: [MODEL_CONFIG.promptEnhance],
+      messages: [
+        {
+          role: "system",
+          content:
+            "Summarize in 3-5 words as a conversation title. Return only the title.",
+        },
+        {
+          role: "user",
+          content: params.userMessage.slice(0, 300),
+        },
+      ],
+      temperature: 0.2,
+      maxTokens: 20,
+    });
+
+    const raw = completion.choices?.[0]?.message?.content?.trim();
+    if (!raw) return undefined;
+
+    const title = raw
+      .replace(/[\n\r]+/g, " ")
+      .replace(/^['\"`\s]+|['\"`\s]+$/g, "")
+      .slice(0, 80);
+    if (!title) return undefined;
+
+    await convexMutation("chats:setChatTitle", {
+      actorClerkId: params.actorClerkId,
+      chatId: params.chatId,
+      title,
+    });
+    return title;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function maybeExtractMemory(params: {
   actorClerkId: string;
   existingEntries: MemoryEntry[];

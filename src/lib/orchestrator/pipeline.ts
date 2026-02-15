@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireActor } from "@/lib/auth-server";
 import { convexAction, convexMutation, convexQuery } from "@/lib/convex-server";
-import { chooseModelRoute } from "@/lib/routing/heuristic";
+import { openRouterChatCompletion, openRouterGenerateImage } from "@/lib/openrouter";
+import { canUseInTier, chooseModelRoute } from "@/lib/routing/heuristic";
 import {
   buildSystemPrompt,
   checkPromptPolicyResponse,
@@ -11,7 +12,7 @@ import {
   summarizeWhyResponse,
   toOpenRouterMessages,
 } from "@/lib/orchestrator/compose";
-import { MODEL_CONFIG } from "@/lib/model-config";
+import { IMAGE_GEN_FALLBACKS, MODEL_CONFIG } from "@/lib/model-config";
 import { classifyExplainDepth, runAutoSettingsPipeline } from "@/lib/auto-settings";
 import { safeStudyMode } from "@/lib/contracts/studyModes";
 import { createRequestLogger } from "@/lib/logging";
@@ -19,7 +20,14 @@ import { normalizeAttachments } from "@/lib/attachments/normalizer";
 import { gateCapabilities } from "@/lib/attachments/capability-gate";
 import { runVisionPrepass } from "@/lib/attachments/vision-prepass";
 import { extractAttemptStats, maybeCompactHistory, toChatMessageShape, type MemoryEntry } from "@/lib/orchestrator/history";
-import { inferCitations, maybeExtractMemory, maybeGenerateTitle, rewriteCitationMarkers, shouldInjectMemory } from "@/lib/orchestrator/post-process";
+import {
+  inferCitations,
+  maybeExtractMemory,
+  maybeGenerateTitle,
+  maybeGenerateTitleFromUserPrompt,
+  rewriteCitationMarkers,
+  shouldInjectMemory,
+} from "@/lib/orchestrator/post-process";
 import { buildResearchEvidenceBlock, maybeSearchWeb, runRagRetrieval } from "@/lib/orchestrator/retrieval";
 import { runAssistantStreaming, runCollaborativeStreaming } from "@/lib/orchestrator/streaming";
 import { buildTaskGraph, shouldUseMultiAgent } from "@/lib/orchestrator/task-graph";
@@ -69,6 +77,67 @@ type StructuredError = {
   message: string;
   retryable?: boolean;
 };
+
+const MODE_MAX_TOKENS: Record<StudyMode, number> = {
+  research: 4096,
+  exam: 4096,
+  marker: 3072,
+  explain: 3072,
+  tutor: 2048,
+  general: 2048,
+  draft_coach: 2048,
+  quiz: 1500,
+  flashcard: 1500,
+  image: 1024,
+};
+const MIN_QUIZ_QUESTIONS = 2;
+const MIN_FLASHCARD_PAIRS = 4;
+
+function isQuizStructured(value: string) {
+  return countQuizQuestions(value) >= 2;
+}
+
+function isFlashcardStructured(value: string) {
+  return countFlashcards(value) >= 2;
+}
+
+function countQuizQuestions(value: string) {
+  const questionLineRegex = /(?:^|\n)\s*(?:Q(?:uestion)?\s*)?(\d+)[.):-]\s+.+/gi;
+  const optionRegex = /(?:^|\n)\s*[-*]?\s*[A-D][.)]\s+.+/gim;
+  const ids = new Set<string>();
+  for (const match of value.matchAll(questionLineRegex)) {
+    const id = (match[1] ?? "").trim();
+    if (id) ids.add(id);
+  }
+  const options = value.match(optionRegex) ?? [];
+  const byCount = ids.size;
+  if (byCount === 0) return 0;
+  if (options.length < byCount * 2) return 0;
+  return byCount;
+}
+
+function countFlashcards(value: string) {
+  const normalized = value.replace(/\r/g, "");
+  const inlinePairs = normalized.match(/(?:^|\n|\s)FRONT\s*:\s*[\s\S]*?\s+BACK\s*:\s*[\s\S]*?(?=(?:\s+FRONT\s*:)|$)/gi) ?? [];
+  if (inlinePairs.length > 0) return inlinePairs.length;
+
+  const lines = normalized.split("\n");
+  let frontOpen = false;
+  let pairs = 0;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (/^(?:[-*]\s*)?(?:Card\s*\d+\s*[:.)-]\s*)?FRONT\s*:\s*.+/i.test(line)) {
+      frontOpen = true;
+      continue;
+    }
+    if (/^(?:[-*]\s*)?BACK\s*:\s*.+/i.test(line) && frontOpen) {
+      pairs += 1;
+      frontOpen = false;
+    }
+  }
+  return pairs;
+}
 
 function jsonError(status: number, error: StructuredError, extra: Record<string, unknown> = {}) {
   return NextResponse.json(
@@ -175,7 +244,17 @@ export async function runChatPipeline(request: NextRequest) {
     complexity: auto.complexity,
   });
 
-  const effectiveMode = safeMode;
+  // Auto mode selection: if user is in a default mode, auto-detect from message
+  const effectiveMode = (
+    auto.suggestedMode &&
+    (safeMode === "tutor" || safeMode === "general") &&
+    safeMode !== auto.suggestedMode
+  ) ? (auto.suggestedMode as typeof safeMode) : safeMode;
+
+  // Research mode always enables search
+  if (effectiveMode === "research") {
+    auto.searchEnabled = true;
+  }
   const attachmentResourceIds = (body.attachmentResourceIds ?? []).filter((id) => typeof id === "string" && id.trim().length > 0);
   const uploadedAttachmentMeta = attachmentResourceIds.length > 0
     ? ((await convexQuery("resources:getResourceNamesByIds", {
@@ -272,6 +351,7 @@ export async function runChatPipeline(request: NextRequest) {
   }
 
   const history = toChatMessageShape(chatData.messages);
+  const isFirstAssistantTurn = history.every((message) => message.role !== "assistant");
   const attemptStats = extractAttemptStats(history);
 
   const existingSummary =
@@ -421,26 +501,33 @@ export async function runChatPipeline(request: NextRequest) {
   });
 
   if (body.forcedModel && body.forcedModel !== route.primaryModel) {
-    const originalPrimary = route.primaryModel;
-    route.primaryModel = body.forcedModel;
-    route.fallbackModels = [
-      originalPrimary,
-      ...route.fallbackModels.filter(
-        (candidate) => candidate !== body.forcedModel && candidate !== originalPrimary,
-      ),
-    ];
-    route.reason = `${route.reason}; retry override after temporary model saturation`;
-    route.trace.selected = {
-      modelId: route.primaryModel,
-      reason: route.reason,
-    };
-    route.trace.candidates.unshift({
-      modelId: body.forcedModel,
-      allowed: true,
-      score: 0.95,
-      reason: "Retry override selected to avoid repeating a saturated model",
-    });
-    route.trace.toolchain.push("retry_model_override");
+    if (!canUseInTier(body.forcedModel, budget.tier)) {
+      logger.warn("forcedModel rejected by tier policy", {
+        forcedModel: body.forcedModel,
+        tier: budget.tier,
+      });
+    } else {
+      const originalPrimary = route.primaryModel;
+      route.primaryModel = body.forcedModel;
+      route.fallbackModels = [
+        originalPrimary,
+        ...route.fallbackModels.filter(
+          (candidate) => candidate !== body.forcedModel && candidate !== originalPrimary,
+        ),
+      ];
+      route.reason = `${route.reason}; retry override after temporary model saturation`;
+      route.trace.selected = {
+        modelId: route.primaryModel,
+        reason: route.reason,
+      };
+      route.trace.candidates.unshift({
+        modelId: body.forcedModel,
+        allowed: true,
+        score: 0.95,
+        reason: "Retry override selected to avoid repeating a saturated model",
+      });
+      route.trace.toolchain.push("retry_model_override");
+    }
   }
 
   if (retrieval.citations.length > 0) route.trace.toolchain.push("rag_retrieval");
@@ -469,7 +556,7 @@ export async function runChatPipeline(request: NextRequest) {
     route.trace.toolchain.push("vision_gate");
   }
 
-  const capability = gateCapabilities({
+  let capability = gateCapabilities({
     selectedModel: route.primaryModel,
     requiresVision: attachments.requiresVision,
     fallbackModels: route.fallbackModels,
@@ -477,27 +564,31 @@ export async function runChatPipeline(request: NextRequest) {
 
   if (capability.modelSwitched) {
     if (manualLockRequested) {
-      await rollbackPersistedUserMessage();
-      return jsonError(409, {
-        code: "MANUAL_MODEL_CAPABILITY_MISMATCH",
-        message: "Selected model cannot process these attachments. Choose a compatible model or remove files.",
-        retryable: false,
-      });
+      capability = {
+        finalModel: route.primaryModel,
+        modelSwitched: false,
+        requiresPrepass: true,
+        prepassModel: capability.prepassModel ?? MODEL_CONFIG.multimodal,
+        userNotice: "Manual model kept; using vision prepass for attached images.",
+      };
+      route.reason = `${route.reason}; manual model retained with vision prepass`;
+      route.trace.toolchain.push("vision_prepass_manual_lock");
+    } else {
+      const originalPrimary = route.primaryModel;
+      route.primaryModel = capability.finalModel;
+      route.fallbackModels = [
+        originalPrimary,
+        ...route.fallbackModels.filter(
+          (candidate) => candidate !== capability.finalModel && candidate !== originalPrimary,
+        ),
+      ];
+      route.reason = `${route.reason}; switched to vision-capable model`;
+      route.trace.selected = {
+        modelId: route.primaryModel,
+        reason: route.reason,
+      };
+      route.trace.toolchain.push("vision_gate");
     }
-    const originalPrimary = route.primaryModel;
-    route.primaryModel = capability.finalModel;
-    route.fallbackModels = [
-      originalPrimary,
-      ...route.fallbackModels.filter(
-        (candidate) => candidate !== capability.finalModel && candidate !== originalPrimary,
-      ),
-    ];
-    route.reason = `${route.reason}; switched to vision-capable model`;
-    route.trace.selected = {
-      modelId: route.primaryModel,
-      reason: route.reason,
-    };
-    route.trace.toolchain.push("vision_gate");
   }
 
   let imageDescriptionBlock = "";
@@ -568,13 +659,25 @@ export async function runChatPipeline(request: NextRequest) {
   }
 
   const multiAgentEnabled =
+    budget.tier !== "free_only" && (
     effectiveMode === "research"
       ? auto.searchEnabled || retrieval.citations.length > 0 || auto.complexity !== "simple"
       : auto.searchEnabled ||
         (Boolean(orgSettings.org?.orchestratorV2Enabled) &&
-          shouldUseMultiAgent(auto.message, effectiveMode, auto.complexity));
+          shouldUseMultiAgent(auto.message, effectiveMode, auto.complexity))
+    );
   if (multiAgentEnabled) {
     route.trace.toolchain.push("multi_agent_collaboration");
+  }
+
+  const collabLimits =
+    budget.tier === "free_only"
+      ? { maxSpecialists: 1, maxSubcalls: 2, maxTokensPerSpecialist: 600, includeCritic: false }
+      : budget.tier === "cheap_only"
+        ? { maxSpecialists: 2, maxSubcalls: 3, maxTokensPerSpecialist: 900, includeCritic: false }
+        : { maxSpecialists: 3, maxSubcalls: 4, maxTokensPerSpecialist: 1200, includeCritic: true };
+  if (!collabLimits.includeCritic) {
+    route.trace.toolchain.push("critic_skipped_budget_guard");
   }
 
   const taskGraph = multiAgentEnabled
@@ -583,6 +686,8 @@ export async function runChatPipeline(request: NextRequest) {
         searchEnabled: auto.searchEnabled,
         sourceBlock: retrieval.sourceBlock,
         searchBlock,
+        includeCritic: collabLimits.includeCritic,
+        maxSpecialists: collabLimits.maxSpecialists,
       })
     : [];
 
@@ -606,6 +711,14 @@ export async function runChatPipeline(request: NextRequest) {
     shouldVerify,
     multiAgentEnabled,
   });
+  const maxTokens = MODE_MAX_TOKENS[effectiveMode] ?? 2048;
+  const earlyTitlePromise = isFirstAssistantTurn
+    ? maybeGenerateTitleFromUserPrompt({
+        chatId,
+        actorClerkId: actor.clerkId,
+        userMessage: normalizedMessage,
+      }).catch(() => undefined)
+    : Promise.resolve(undefined);
 
   const stream = new TransformStream();
   const writer = stream.writable.getWriter();
@@ -619,6 +732,180 @@ export async function runChatPipeline(request: NextRequest) {
     let assistantPersisted = false;
 
     try {
+      void earlyTitlePromise.then((title) => {
+        if (!title) return;
+        void send({
+          type: "chat_title",
+          chatTitle: title,
+        });
+      });
+
+      if (effectiveMode === "image") {
+        route.trace.toolchain.push("image_prompt_refinement");
+        const promptRefinement = await openRouterChatCompletion({
+          model: primaryModel,
+          fallbackModels: route.fallbackModels,
+          messages: [
+            {
+              role: "system",
+              content:
+                "Rewrite the user request into one concise image-generation prompt. Keep style, subject, framing, and lighting details. Return only the prompt text.",
+            },
+            { role: "user", content: auto.message },
+          ],
+          maxTokens: 220,
+          temperature: 0.3,
+        }).catch(() => null);
+
+        const refinedPrompt =
+          promptRefinement?.choices?.[0]?.message?.content?.trim() || auto.message;
+
+        route.trace.toolchain.push("image_generation");
+        const imageResult = await openRouterGenerateImage({
+          model: MODEL_CONFIG.imageGen,
+          fallbackModels: [...IMAGE_GEN_FALLBACKS],
+          prompt: refinedPrompt,
+          size: "1024x1024",
+          onFallback: (event) => {
+            route.trace.fallbacks.push(event);
+          },
+        });
+        const imageUrl = imageResult.imageUrl;
+        const imageModel = imageResult.modelUsed;
+
+        await convexMutation("images:saveGeneratedImage", {
+          actorClerkId: actor.clerkId,
+          chatId,
+          prompt: refinedPrompt,
+          imageUrl,
+          model: imageModel,
+        }).catch(() => {});
+
+        const finalizedResponse = `![Generated image](${imageUrl})\n\nPrompt: ${refinedPrompt}`;
+        const whyThisResponse = summarizeWhyResponse(effectiveMode, route.reason);
+        const modelRequested = primaryModel;
+        const modelUsed = imageModel;
+        const usageIn = 0;
+        const usageOut = 0;
+        const citations: Array<{
+          filename: string;
+          url?: string;
+          page?: number;
+          sourceType: "pack" | "personal" | "general" | "search";
+          resourceId?: string;
+        }> = [];
+
+        route.trace.toolchain = [...new Set(route.trace.toolchain)];
+        route.trace.totalDurationMs = Date.now() - requestStartedAt;
+
+        const appended = (await convexMutation("chats:appendMessage", {
+          actorClerkId: actor.clerkId,
+          chatId,
+          role: "assistant",
+          content: finalizedResponse,
+          attachments: undefined,
+          attachmentResourceIds: undefined,
+          mode: effectiveMode,
+          citations,
+          modelRequested,
+          modelUsed,
+          whyThisResponse,
+          usageIn,
+          usageOut,
+          verificationPassed: undefined,
+          thinkingContent: undefined,
+          routeTrace: route.trace,
+        })) as { messageId: string };
+        assistantPersisted = true;
+
+        await convexMutation("usage:recordUsageWithCost", {
+          actorClerkId: actor.clerkId,
+          chatId,
+          messageId: appended.messageId,
+          model: modelUsed,
+          inputTokens: usageIn,
+          outputTokens: usageOut,
+          inputCostPerM: 0,
+          outputCostPerM: 0,
+        }).catch(() => {});
+
+        const spendingUpdate = (await convexQuery("usage:checkUserBudget", {
+          actorClerkId: actor.clerkId,
+        })) as {
+          totalSpentEur: number;
+          totalCostCents: number;
+          tier: "normal" | "cheap_only" | "free_only";
+          softLimitReached: boolean;
+          hardLimitReached: boolean;
+        };
+
+        void convexMutation("analytics:recordSession", {
+          actorClerkId: actor.clerkId,
+          mode: effectiveMode,
+          model: modelUsed,
+          tokensUsed: usageIn + usageOut,
+          topic: normalizedMessage.slice(0, 60),
+        }).catch(() => {});
+
+        if (selectedAgent) {
+          await convexMutation("agents:incrementUsageCount", {
+            actorClerkId: actor.clerkId,
+            agentId: selectedAgent._id,
+          }).catch(() => {});
+
+          await convexMutation("agents:recordAgentModelUse", {
+            actorClerkId: actor.clerkId,
+            agentId: selectedAgent._id,
+            modelId: modelUsed,
+          }).catch(() => {});
+        }
+
+        const assistantCount = history.filter((message) => message.role === "assistant").length;
+        let generatedTitle: string | undefined;
+        if (assistantCount === 0) {
+          generatedTitle = await maybeGenerateTitle({
+            chatId,
+            actorClerkId: actor.clerkId,
+            userMessage: normalizedMessage,
+            assistantMessage: finalizedResponse,
+          });
+        }
+
+        await send({
+          type: "done",
+          content: finalizedResponse,
+          chatId,
+          messageId: appended.messageId,
+          modelUsed,
+          modelRequested,
+          usageIn,
+          usageOut,
+          whyThisResponse,
+          citations,
+          verificationPassed: undefined,
+          thinkingContent: undefined,
+          routeTrace: route.trace,
+          spendingUpdate,
+          autoResult: {
+            modelUsed,
+            searchEnabled: false,
+            thinkingLevel: effectiveThinkingLevel,
+            promptEnhanced: auto.promptEnhanced,
+          },
+          enhancedPrompt: auto.promptEnhanced ? auto.message : undefined,
+          chatTitle: generatedTitle,
+          agent:
+            selectedAgent && selectedAgent._id
+              ? {
+                  id: selectedAgent._id,
+                  name: selectedAgent.name,
+                  emoji: selectedAgent.avatarEmoji,
+                }
+              : undefined,
+        });
+        return;
+      }
+
       const fallbackModels = manualLockRequested ? [] : route.fallbackModels;
       const onFallback = (event: { fromModel: string; toModel: string; error: string; attemptIndex: number }) => {
         route.trace.fallbacks.push(event);
@@ -631,6 +918,9 @@ export async function runChatPipeline(request: NextRequest) {
             baseSystemPrompt: systemPromptParts.join("\n\n"),
             primaryModel,
             fallbackModels,
+            maxTokens,
+            maxSubcalls: collabLimits.maxSubcalls,
+            maxTokensPerSpecialist: collabLimits.maxTokensPerSpecialist,
             send,
             onFallback,
             logger,
@@ -641,6 +931,7 @@ export async function runChatPipeline(request: NextRequest) {
             fallbackModels,
             verificationModel: route.verificationModel,
             messages,
+            maxTokens,
             send,
             onFallback,
             logger,
@@ -658,10 +949,94 @@ export async function runChatPipeline(request: NextRequest) {
       }
 
       const policyPass = checkPromptPolicyResponse({ mode: effectiveMode, response: responseText });
-      const correctedResponse =
+      let correctedResponse =
         policyPass
           ? responseText
           : `${responseText}\n\nPolicy correction: citation and study-mode structure tightened to match requirements.`;
+
+      const quizCount = countQuizQuestions(correctedResponse);
+      const flashcardCount = countFlashcards(correctedResponse);
+      const needsQuizRepair = effectiveMode === "quiz" && (!isQuizStructured(correctedResponse) || quizCount < MIN_QUIZ_QUESTIONS);
+      const needsFlashcardRepair =
+        effectiveMode === "flashcard" &&
+        (!isFlashcardStructured(correctedResponse) || flashcardCount < MIN_FLASHCARD_PAIRS);
+      if (needsQuizRepair || needsFlashcardRepair) {
+        const repaired = await openRouterChatCompletion({
+          model: MODEL_CONFIG.tutorFast,
+          fallbackModels: [route.primaryModel, ...route.fallbackModels].slice(0, 3),
+          messages: [
+            {
+              role: "system",
+              content:
+                needsQuizRepair
+                  ? `Reformat into strict quiz syntax only. Keep intent and output at least ${MIN_QUIZ_QUESTIONS} questions. Output ONLY quiz content with numbered questions, A-D options, a "Correct: [letter]" line per question, then "## Answers & Explanations".`
+                  : `Reformat into strict flashcard syntax only. Output ONLY FRONT/BACK pairs and produce at least ${MIN_FLASHCARD_PAIRS} cards. Format exactly: FRONT: ... then BACK: ...`,
+            },
+            { role: "user", content: correctedResponse },
+          ],
+          maxTokens: MODE_MAX_TOKENS[effectiveMode],
+          temperature: 0.1,
+        });
+        const candidate = repaired.choices?.[0]?.message?.content?.trim() ?? "";
+        if (candidate) {
+          if (needsQuizRepair && isQuizStructured(candidate) && countQuizQuestions(candidate) >= MIN_QUIZ_QUESTIONS) {
+            correctedResponse = candidate;
+            route.trace.toolchain.push("quiz_format_repair");
+          }
+          if (
+            needsFlashcardRepair &&
+            isFlashcardStructured(candidate) &&
+            countFlashcards(candidate) >= MIN_FLASHCARD_PAIRS
+          ) {
+            correctedResponse = candidate;
+            route.trace.toolchain.push("flashcard_format_repair");
+          }
+        }
+      }
+
+      const stillNeedsQuizRepair =
+        effectiveMode === "quiz" &&
+        (!isQuizStructured(correctedResponse) || countQuizQuestions(correctedResponse) < MIN_QUIZ_QUESTIONS);
+      const stillNeedsFlashcardRepair =
+        effectiveMode === "flashcard" &&
+        (!isFlashcardStructured(correctedResponse) || countFlashcards(correctedResponse) < MIN_FLASHCARD_PAIRS);
+
+      if (stillNeedsQuizRepair || stillNeedsFlashcardRepair) {
+        const regenerated = await openRouterChatCompletion({
+          model: MODEL_CONFIG.tutorFast,
+          fallbackModels: [route.primaryModel, ...route.fallbackModels].slice(0, 3),
+          messages: [
+            {
+              role: "system",
+              content: stillNeedsQuizRepair
+                ? `Generate a complete quiz now. Output ONLY strict quiz format with at least ${MIN_QUIZ_QUESTIONS} questions, A-D options, Correct line for each, and a final section "## Answers & Explanations".`
+                : `Generate a complete flashcard deck now. Output ONLY FRONT/BACK pairs with at least ${MIN_FLASHCARD_PAIRS} cards. One FRONT line then one BACK line per card.`,
+            },
+            { role: "user", content: auto.message },
+          ],
+          maxTokens: MODE_MAX_TOKENS[effectiveMode],
+          temperature: 0.15,
+        });
+        const regeneratedCandidate = regenerated.choices?.[0]?.message?.content?.trim() ?? "";
+        if (regeneratedCandidate) {
+          if (
+            stillNeedsQuizRepair &&
+            isQuizStructured(regeneratedCandidate) &&
+            countQuizQuestions(regeneratedCandidate) >= MIN_QUIZ_QUESTIONS
+          ) {
+            correctedResponse = regeneratedCandidate;
+            route.trace.toolchain.push("quiz_regenerate_repair");
+          }
+          if (
+            stillNeedsFlashcardRepair &&
+            isFlashcardStructured(regeneratedCandidate) &&
+            countFlashcards(regeneratedCandidate) >= MIN_FLASHCARD_PAIRS
+          ) {
+            correctedResponse = regeneratedCandidate;
+            route.trace.toolchain.push("flashcard_regenerate_repair");
+          }
+        }
+      }
 
       route.trace.toolchain = [...new Set(route.trace.toolchain)];
 
@@ -789,6 +1164,7 @@ export async function runChatPipeline(request: NextRequest) {
         },
         enhancedPrompt: auto.promptEnhanced ? auto.message : undefined,
         chatTitle: generatedTitle,
+        suggestedMode: effectiveMode !== safeMode ? effectiveMode : undefined,
         agent:
           selectedAgent && selectedAgent._id
             ? {

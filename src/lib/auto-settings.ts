@@ -77,6 +77,7 @@ export type AutoSettingsResult = {
   promptCategory: PromptCategory;
   questionType: QuestionType;
   isMultipart: boolean;
+  suggestedMode: string | null;
 };
 
 export function classifyExplainDepth(prompt: string, userMemory?: string): ExplainDepth {
@@ -190,6 +191,31 @@ function classifyPromptCategory(
   return "general";
 }
 
+export function detectSuggestedMode(message: string): string | null {
+  const normalized = message.toLowerCase().trim();
+  // Quiz detection
+  if (/\b(quiz me|test me|test my knowledge|give me a quiz|pop quiz)\b/i.test(normalized)) {
+    return "quiz";
+  }
+  // Flashcard detection
+  if (/\b(make flashcards?|create cards?|flashcard|study cards?)\b/i.test(normalized)) {
+    return "flashcard";
+  }
+  // Research detection
+  if (/\b(research|find sources|cite sources|literature review|find papers)\b/i.test(normalized)) {
+    return "research";
+  }
+  // Explain detection - require explicit teaching/explanation intent, not simple factual questions
+  if (/\b(explain (?:how|why|the)|teach me|break down|eli5|help me understand)\b/i.test(normalized) && normalized.length < 200) {
+    return "explain";
+  }
+  // Image detection
+  if (/\b(generate (?:an? )?image|draw|create (?:an? )?(?:image|picture|illustration))\b/i.test(normalized)) {
+    return "image";
+  }
+  return null;
+}
+
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
   return new Promise((resolve) => {
     let resolved = false;
@@ -295,17 +321,34 @@ export async function runAutoSettingsPipeline(input: AutoSettingsInput): Promise
   let message = input.message;
   let promptEnhanced = false;
 
+  const forceLocalEnhancement = (raw: string) => {
+    const clean = raw.trim();
+    return [
+      "Student request:",
+      clean,
+      "",
+      "Clarified objective:",
+      "- Keep scope focused on the core task.",
+      "- Explain steps clearly and explicitly.",
+      "- Include concise examples where useful.",
+    ].join("\n");
+  };
+
   if (input.autoEnhancePrompt && enhanceMode !== "off" && !input.skipModelCalls) {
     const enhanced = await maybeEnhancePrompt(input.message);
     if (enhanced.prompt.trim() && enhanced.prompt.trim() !== input.message.trim()) {
       message = enhanced.prompt.trim();
       promptEnhanced = true;
     } else if (enhanceMode === "on") {
+      message = forceLocalEnhancement(input.message);
       promptEnhanced = true;
     }
   } else if (enhanceMode === "on") {
+    message = forceLocalEnhancement(input.message);
     promptEnhanced = true;
   }
+
+  const suggestedMode = detectSuggestedMode(input.message);
 
   return {
     message,
@@ -316,5 +359,6 @@ export async function runAutoSettingsPipeline(input: AutoSettingsInput): Promise
     promptCategory,
     questionType,
     isMultipart,
+    suggestedMode,
   };
 }

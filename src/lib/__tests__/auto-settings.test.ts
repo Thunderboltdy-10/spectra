@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyComplexity, classifyExplainDepth, runAutoSettingsPipeline } from "@/lib/auto-settings";
+import { classifyComplexity, classifyExplainDepth, detectSuggestedMode, runAutoSettingsPipeline } from "@/lib/auto-settings";
 
 describe("auto-settings prompt analysis", () => {
   it("classifies multipart analytical prompts as complex", () => {
@@ -41,5 +41,43 @@ describe("auto-settings prompt analysis", () => {
     expect(classifyExplainDepth("Explain photosynthesis in simple terms for beginners.")).toBe("introductory");
     expect(classifyExplainDepth("Derive the asymptotic behavior and discuss edge cases.")).toBe("advanced");
     expect(classifyExplainDepth("Explain Newton's laws with examples.")).toBe("intermediate");
+  });
+
+  it("detects suggested mode from quiz intent", () => {
+    expect(detectSuggestedMode("quiz me on biology")).toBe("quiz");
+    expect(detectSuggestedMode("test my knowledge of WW2")).toBe("quiz");
+  });
+
+  it("detects suggested mode from flashcard intent", () => {
+    expect(detectSuggestedMode("make flashcards about chemistry")).toBe("flashcard");
+    expect(detectSuggestedMode("create study cards for vocab")).toBe("flashcard");
+  });
+
+  it("detects suggested mode from research intent", () => {
+    expect(detectSuggestedMode("research the effects of climate change")).toBe("research");
+    expect(detectSuggestedMode("find sources about the French Revolution")).toBe("research");
+  });
+
+  it("detects suggested mode from image intent", () => {
+    expect(detectSuggestedMode("generate an image of a sunset")).toBe("image");
+    expect(detectSuggestedMode("draw a cat")).toBe("image");
+  });
+
+  it("returns null for general messages", () => {
+    expect(detectSuggestedMode("What is the capital of France?")).toBe(null);
+    expect(detectSuggestedMode("Help me with this homework")).toBe(null);
+  });
+
+  it("includes suggestedMode in auto-settings result", async () => {
+    const result = await runAutoSettingsPipeline({
+      message: "quiz me on photosynthesis",
+      currentThinkingLevel: "low",
+      spendingTier: "normal",
+      autoEnhancePrompt: false,
+      autoThinking: false,
+      autoSearch: false,
+      skipModelCalls: true,
+    });
+    expect(result.suggestedMode).toBe("quiz");
   });
 });

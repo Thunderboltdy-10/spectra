@@ -12,10 +12,12 @@ import {
   Sparkles,
   Tag,
   Timer,
+  Trophy,
 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/layout/app-shell";
 import { ProviderLogo } from "@/components/provider-logo";
+import { ModelLeaderboardDrawer } from "@/components/chat/model-leaderboard-drawer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { fuzzyScore } from "@/lib/fuzzy-model-search";
@@ -88,7 +90,7 @@ type ExplorerModel = CatalogModel & {
 function sanitizeName(value: string) {
   return value
     .replace(/:free$/i, "")
-    .replace(/\bfree\b/gi, "")
+    .replace(/[\s(_-]*\bfree\b[\s)_-]*/gi, " ")
     .replace(/\s*&\s*$/g, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -327,6 +329,7 @@ export default function ModelsPage() {
   const [capability, setCapability] = useState<CapabilityFilter>("all");
   const [price, setPrice] = useState<PriceFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("recommended");
+  const [leaderboardOpen, setLeaderboardOpen] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -410,7 +413,20 @@ export default function ModelsPage() {
   }, [catalogModels, liveModels, mostUsed]);
 
   const providers = useMemo(() => {
-    return ["all", ...Array.from(new Set(models.map((model) => model.provider).filter(Boolean))).sort((a, b) => a.localeCompare(b))];
+    const scores = new Map<string, number>();
+    for (const model of models) {
+      const providerName = model.provider?.trim();
+      if (!providerName) continue;
+      const base = scores.get(providerName) ?? 0;
+      const usageBoost = Math.max(1, model.usageCount);
+      const featuredBoost = model.isFeatured ? 8 : 0;
+      const costBoost = isIncludedModel(model) ? 2 : 0;
+      scores.set(providerName, base + usageBoost + featuredBoost + costBoost);
+    }
+
+    return ["all", ...Array.from(scores.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([providerName]) => providerName)];
   }, [models]);
 
   const filteredProviders = useMemo(() => {
@@ -475,11 +491,9 @@ export default function ModelsPage() {
 
   const allModels = useMemo(() => {
     const clean = query.trim().toLowerCase();
-    const providerNeedle = providerSearch.trim().toLowerCase();
 
     const scopedInitial = models
       .filter((model) => (provider === "all" ? true : model.provider === provider))
-      .filter((model) => (providerNeedle ? model.provider.toLowerCase().includes(providerNeedle) : true))
       .filter((model) => hasCapability(model, capability));
     const scoped = scopedInitial.length > 0 ? scopedInitial : models;
 
@@ -508,8 +522,21 @@ export default function ModelsPage() {
           if (aSemantic !== bSemantic) return bSemantic - aSemantic;
           return b.score - a.score;
         })
-        .map((row) => row.model);
-      filtered = searched.length > 0 ? searched : filtered;
+        .map((row) => row.model)
+        .slice(0, Math.min(30, filtered.length));
+      if (searched.length > 0) {
+        filtered = searched;
+      } else {
+        filtered = [...filtered]
+          .sort((a, b) => scoreModel(b, tier) - scoreModel(a, tier))
+          .slice(0, Math.min(12, filtered.length));
+      }
+    }
+
+    if (filtered.length === 0) {
+      filtered = [...models]
+        .sort((a, b) => scoreModel(b, tier) - scoreModel(a, tier))
+        .slice(0, Math.min(12, models.length));
     }
 
     return [...filtered].sort((a, b) => {
@@ -522,7 +549,7 @@ export default function ModelsPage() {
       if (sortMode === "popular") return b.usageCount - a.usageCount;
       return scoreModel(b, tier) - scoreModel(a, tier);
     });
-  }, [capability, models, price, provider, providerSearch, query, semanticSet, sortMode, tier]);
+  }, [capability, models, price, provider, query, semanticSet, sortMode, tier]);
 
   const featured = useMemo(() => {
     const source = featuredModels.length > 0 ? featuredModels : models.filter((model) => model.isFeatured);
@@ -577,50 +604,57 @@ export default function ModelsPage() {
 
   return (
     <AppShell>
-      <section className="mb-5">
-        <h1 className="font-display text-4xl tracking-tight">Model Explorer</h1>
-        <p className="mt-1 text-sm text-[var(--text-secondary)]">
-          Strength-first browsing with real context length and pricing visibility.
-        </p>
+      <section className="mb-5 flex items-start justify-between">
+        <div>
+          <h1 className="font-display text-4xl tracking-tight">Model Explorer</h1>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">
+            Strength-first browsing with real context length and pricing visibility.
+          </p>
+        </div>
+        <Button variant="secondary" className="gap-2" onClick={() => setLeaderboardOpen(true)}>
+          <Trophy className="h-4 w-4" />
+          Leaderboard
+        </Button>
       </section>
 
       <section className="mb-5 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-        <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,16rem)_auto_auto_auto_auto]">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-secondary)]" />
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search tasks, model names, or providers"
-              className="pl-9"
-            />
-          </div>
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-4 top-4 h-5 w-5 text-[var(--text-secondary)]" />
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search tasks or model names"
+            className="h-14 w-full pl-12 text-lg"
+          />
+        </div>
 
+        <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_260px]">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-secondary)]" />
             <Input
               value={providerSearch}
               onChange={(event) => setProviderSearch(event.target.value)}
               placeholder="Search providers"
-              className="pl-9"
+              className="h-9 pl-9 text-sm"
             />
           </div>
-
           <select
             value={provider}
             onChange={(event) => setProvider(event.target.value)}
-            className="h-10 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-sm text-[var(--text-primary)]"
+            className="h-9 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-sm text-[var(--text-primary)]"
           >
-            {filteredProviders.length === 0 && <option value="all">No providers</option>}
+            {filteredProviders.length === 0 && <option value="all">All providers</option>}
             {filteredProviders.map((item) => (
-              <option key={item} value={item}>{item === "all" ? "All providers" : item}</option>
+              <option key={item} value={item}>{item === "all" ? "All providers (recommended)" : item}</option>
             ))}
           </select>
+        </div>
 
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           <select
             value={capability}
             onChange={(event) => setCapability(event.target.value as CapabilityFilter)}
-            className="h-10 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-sm text-[var(--text-primary)]"
+            className="h-9 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-sm text-[var(--text-primary)]"
           >
             <option value="all">All capabilities</option>
             <option value="reasoning">Reasoning</option>
@@ -633,7 +667,7 @@ export default function ModelsPage() {
           <select
             value={price}
             onChange={(event) => setPrice(event.target.value as PriceFilter)}
-            className="h-10 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-sm text-[var(--text-primary)]"
+            className="h-9 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-sm text-[var(--text-primary)]"
           >
             <option value="all">All prices</option>
             <option value="free">Included</option>
@@ -645,16 +679,14 @@ export default function ModelsPage() {
           <select
             value={sortMode}
             onChange={(event) => setSortMode(event.target.value as SortMode)}
-            className="h-10 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-sm text-[var(--text-primary)]"
+            className="h-9 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-sm text-[var(--text-primary)]"
           >
             <option value="recommended">Recommended</option>
             <option value="popular">Most used</option>
             <option value="context">Largest context</option>
             <option value="input_price">Lowest input cost</option>
           </select>
-        </div>
 
-        <div className="mt-3 flex flex-wrap gap-2">
           {TASK_CHIPS.map((chip) => (
             <button
               key={chip.label}
@@ -723,6 +755,8 @@ export default function ModelsPage() {
           ))}
         </div>
       </section>
+
+      <ModelLeaderboardDrawer open={leaderboardOpen} onClose={() => setLeaderboardOpen(false)} />
     </AppShell>
   );
 }

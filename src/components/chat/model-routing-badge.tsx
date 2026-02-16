@@ -12,7 +12,11 @@ type ModelRoutingBadgeProps = {
 
 function formatModelName(modelId: string) {
   const raw = modelId.split("/").pop() || modelId;
-  const withoutSuffix = raw.replace(/:free$/i, "").replace(/-\d{4}-\d{2}-\d{2}$/i, "");
+  const withoutSuffix = raw
+    .replace(/:free$/i, "")
+    .replace(/[\s(_-]*\bfree\b[\s)_-]*/gi, " ")
+    .replace(/-\d{4}-\d{2}-\d{2}$/i, "")
+    .trim();
   const normalized = withoutSuffix
     .replace(/gpt-4\.1/gi, "GPT-4.1")
     .replace(/gpt-5/gi, "GPT-5")

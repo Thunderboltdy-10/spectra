@@ -19,6 +19,7 @@ export async function runMarkerVerificationPipeline(params: {
   primaryModel: string;
   fallbackModels: string[];
   messages: OpenRouterMessage[];
+  maxTokens?: number;
   verificationModel?: string;
   onFallback?: (event: RouteTraceFallback) => void;
   logger?: {
@@ -35,6 +36,7 @@ export async function runMarkerVerificationPipeline(params: {
     model: params.primaryModel,
     fallbackModels: params.fallbackModels,
     messages: params.messages,
+    maxTokens: params.maxTokens,
     onFallback: params.onFallback,
   });
 
@@ -74,6 +76,7 @@ export async function runMarkerVerificationPipeline(params: {
           },
         ],
         temperature: 0.1,
+        maxTokens: params.maxTokens,
         onFallback: params.onFallback,
       });
 

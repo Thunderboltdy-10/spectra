@@ -8,10 +8,12 @@ import { useClerk, useUser } from "@clerk/nextjs";
 import { formatDistanceToNow } from "date-fns";
 import {
   BarChart3,
+  BookOpen,
   Bot,
   ChevronLeft,
   ChevronRight,
   Compass,
+  ImagePlus,
   LayoutDashboard,
   Pencil,
   Pin,
@@ -145,8 +147,10 @@ export function ChatSidebar({
 
   const navItems = [
     { href: "/", label: "Chat", icon: Sparkles },
+    { href: "/flashcards", label: "Flashcards", icon: BookOpen },
     { href: "/agents", label: "Agents", icon: Bot },
     { href: "/models", label: "Models", icon: Compass },
+    { href: "/images", label: "Images", icon: ImagePlus },
     { href: "/analytics", label: "Analytics", icon: BarChart3 },
     ...(role === "admin" ? [{ href: "/admin", label: "Admin", icon: LayoutDashboard }] : []),
   ];

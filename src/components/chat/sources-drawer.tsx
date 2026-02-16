@@ -1,8 +1,12 @@
 "use client";
 
-import { FileText, Globe, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronDown, FileText, Globe, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Citation } from "@/types";
+import { useCompactSheet } from "@/hooks/use-compact-sheet";
+import { RichText } from "@/components/chat/rich-text";
+import { useRightPanelDock } from "@/hooks/use-right-panel-dock";
 
 type SourcesDrawerProps = {
   open: boolean;
@@ -17,28 +21,67 @@ function hrefForCitation(citation: Citation) {
 }
 
 export function SourcesDrawer({ open, onClose, citations }: SourcesDrawerProps) {
+  const compact = useCompactSheet(860);
+  const docked = useRightPanelDock({ id: "sources-drawer", open, compact, maxWidthPx: 576 });
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setCollapsed(compact);
+  }, [open, compact]);
+
+  useEffect(() => {
+    if (!compact) {
+      setCollapsed(false);
+    }
+  }, [compact]);
+
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50">
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/35"
-        onClick={onClose}
-        aria-label="Close sources drawer"
-      />
-      <aside className="absolute inset-y-0 right-0 w-[92vw] max-w-xl overflow-y-auto border-l border-[var(--border-default)] bg-[var(--bg-primary)] p-4 shadow-[var(--shadow-soft)]">
+    <div className={`fixed z-50 ${docked ? "inset-y-0 right-0 pointer-events-none" : "inset-0"}`} style={docked ? { width: "var(--right-panel-space, 576px)" } : undefined}>
+      {!docked ? (
+        <button
+          type="button"
+          className="absolute inset-0 bg-transparent"
+          onClick={onClose}
+          aria-label="Close sources drawer"
+        />
+      ) : null}
+      <aside
+        className={`right-panel-shell pointer-events-auto absolute border-[var(--border-default)] bg-[var(--bg-sidebar)] p-4 shadow-[var(--shadow-soft)] ${
+          docked ? "right-panel-shell--docked" : "right-panel-shell--sheet"
+        } ${
+          compact
+            ? "bottom-3 left-3 right-3 max-h-[78vh] rounded-2xl border"
+            : "inset-y-0 right-0 w-[92vw] max-w-xl border-l"
+        }`}
+      >
         <div className="mb-4 flex items-center justify-between">
           <div>
             <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Sources</p>
             <h3 className="font-display text-2xl text-[var(--text-primary)]">Citation Details</h3>
           </div>
-          <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="Close sources drawer">
-            <X className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-1.5">
+            {compact ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="icon"
+                onClick={() => setCollapsed((prev) => !prev)}
+                aria-label={collapsed ? "Expand sources" : "Collapse sources"}
+              >
+                <ChevronDown className={`h-4 w-4 transition ${collapsed ? "-rotate-90" : "rotate-0"}`} />
+              </Button>
+            ) : null}
+            <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="Close sources drawer">
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
 
-        <div className="space-y-3">
+        {!collapsed ? (
+          <div className={`right-panel-content ${compact ? "max-h-[calc(78vh-4rem)]" : "max-h-[calc(100vh-6rem)]"} space-y-3 overflow-y-auto pr-1`}>
           {citations.length === 0 ? (
             <p className="text-sm text-[var(--text-secondary)]">No sources available for this response.</p>
           ) : (
@@ -62,7 +105,7 @@ export function SourcesDrawer({ open, onClose, citations }: SourcesDrawerProps) 
                   ) : null}
 
                   {citation.snippet ? (
-                    <p className="mt-2 text-xs leading-relaxed text-[var(--text-secondary)]">{citation.snippet}</p>
+                    <RichText content={citation.snippet} className="mt-2 text-xs leading-relaxed text-[var(--text-secondary)]" />
                   ) : (
                     <p className="mt-2 text-xs leading-relaxed text-[var(--text-secondary)]">
                       No preview snippet available for this source.
@@ -83,7 +126,8 @@ export function SourcesDrawer({ open, onClose, citations }: SourcesDrawerProps) 
               );
             })
           )}
-        </div>
+          </div>
+        ) : null}
       </aside>
     </div>
   );

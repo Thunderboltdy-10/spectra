@@ -49,6 +49,12 @@ export const PROMPT_TIPS: Record<StudyMode, string[]> = {
     "Ask for analogies or real-world examples",
     "Try: 'Explain quantum tunneling like I'm 10'",
   ],
+  image: [
+    "Describe the scene, style, and mood in one sentence",
+    "Specify composition details like angle, lighting, and aspect ratio",
+    "Mention what to avoid for cleaner outputs",
+    "Try: 'Generate a cinematic lab scene with warm rim lighting'",
+  ],
   general: [
     "Ask anything - I'll find the best approach",
     "Be specific for better responses",

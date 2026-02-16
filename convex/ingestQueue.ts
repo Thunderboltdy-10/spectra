@@ -136,6 +136,18 @@ export const processResource = internalAction({
     try {
       const bytes = await blob.arrayBuffer();
       const parsed = await parseFileBytes(resource.filename, bytes);
+      const ext = extension(resource.filename);
+
+      if (!parsed.text && (ext === "pdf" || ext === "docx")) {
+        await ctx.runMutation(internal.resources.completeResourceIngestionInternal, {
+          resourceId: args.resourceId,
+          parsedCharCount: 0,
+          chunks: [],
+          failedReason: `Background text extraction not available for .${ext} files`,
+        });
+        return { ok: false, reason: `no_text_extraction_for_${ext}` };
+      }
+
       const chunks = chunkTextWithPages(parsed.pages);
 
       const embedded: Array<{ text: string; page?: number; embedding: number[] }> = [];

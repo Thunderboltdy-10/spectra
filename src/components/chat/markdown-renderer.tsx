@@ -8,8 +8,9 @@ import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
 import { Check, Copy, ExternalLink } from "lucide-react";
 
-import { QuizReveal } from "@/components/chat/quiz-reveal";
-import { FlashcardReveal } from "@/components/chat/flashcard-reveal";
+import { QuizReveal, isQuizContent } from "@/components/chat/quiz-reveal";
+import { FlashcardReveal, isFlashcardContent } from "@/components/chat/flashcard-reveal";
+import { ImageReveal } from "@/components/chat/image-reveal";
 import type { Citation } from "@/types";
 import type { StudyMode } from "@/types";
 
@@ -18,6 +19,7 @@ type MarkdownRendererProps = {
   citations?: Citation[];
   mode?: StudyMode;
   onOpenCanvas?: (params: { code: string; language: string }) => void;
+  onCitationClick?: (index: number) => void;
 };
 
 type CodeBlockProps = {
@@ -101,47 +103,106 @@ function normalizeCitationToken(value: string) {
     .trim();
 }
 
-export function MarkdownRenderer({ content, citations = [], mode, onOpenCanvas }: MarkdownRendererProps) {
+function extractImagePayload(content: string) {
+  const imageMatch = content.match(/!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/i);
+  if (!imageMatch) return null;
+  const alt = imageMatch[1]?.trim() || "Generated image";
+  const src = imageMatch[2]?.trim();
+  if (!src) return null;
+
+  const promptMatch = content.match(/(?:^|\n)Prompt:\s*(.+)$/im);
+  const prompt = promptMatch?.[1]?.trim();
+  return { src, alt, prompt };
+}
+
+export function MarkdownRenderer({ content, citations = [], mode, onOpenCanvas, onCitationClick }: MarkdownRendererProps) {
   const cleanContent = useMemo(() => {
-    let processed = content;
+    if (citations.length === 0) {
+      return content.replace(/\n{3,}/g, "\n\n").trim();
+    }
 
-    processed = processed.replace(/\[([^\]\n]+?)\s+p\.\s*(\d+)\]/gi, (match, filename, page) => {
-      const target = normalizeCitationToken(String(filename));
-      const idx = citations.findIndex(
-        (citation) =>
-          normalizeCitationToken(citation.filename).includes(target) &&
-          (citation.page === Number(page) || !citation.page),
-      );
-      return idx >= 0 ? `[${idx + 1}]` : match;
-    });
+    const rewriteSegment = (segment: string) => {
+      let processed = segment;
+      processed = processed.replace(/\[([^\]\n]+?)\s+p\.\s*(\d+)\]/gi, (match, filename, page) => {
+        const target = normalizeCitationToken(String(filename));
+        const idx = citations.findIndex(
+          (citation) =>
+            normalizeCitationToken(citation.filename).includes(target) &&
+            (citation.page === Number(page) || !citation.page),
+        );
+        return idx >= 0 ? `[${idx + 1}]` : match;
+      });
 
-    processed = processed.replace(/\[([^\]\n]{3,60})\]/gi, (match, name) => {
-      const token = String(name).trim();
-      if (/^\d+$/.test(token)) return match;
-      const normalizedToken = normalizeCitationToken(token);
-      const idx = citations.findIndex((citation) =>
-        normalizeCitationToken(citation.filename).includes(normalizedToken),
-      );
-      return idx >= 0 ? `[${idx + 1}]` : match;
-    });
+      processed = processed.replace(/\[([^\]\n]{3,60})\]/gi, (match, name) => {
+        const token = String(name).trim();
+        if (/^\d+$/.test(token)) return match;
+        const normalizedToken = normalizeCitationToken(token);
+        const idx = citations.findIndex((citation) =>
+          normalizeCitationToken(citation.filename).includes(normalizedToken),
+        );
+        return idx >= 0 ? `[${idx + 1}]` : match;
+      });
 
-    processed = processed.replace(/\[(\d+)\]/g, (token, rawIdx) => {
-      const index = Number(rawIdx) - 1;
-      const citation = citations[index];
-      const href = citation ? citationHref(citation) : undefined;
-      if (!href) return "";
-      return `[${rawIdx}](${href})`;
-    });
+      processed = processed.replace(/\[(\d+)\]/g, (token, rawIdx) => {
+        const index = Number(rawIdx) - 1;
+        const citation = citations[index];
+        if (!citation) return token;
+        const href = citationHref(citation) ?? `#source-${rawIdx}`;
+        return `[${rawIdx}](${href})`;
+      });
+      return processed;
+    };
 
-    return processed.replace(/\n{3,}/g, "\n\n").trim();
+    const chunks = content.split(/(```[\s\S]*?```)/g);
+    const rewritten = chunks
+      .map((chunk) => (chunk.startsWith("```") ? chunk : rewriteSegment(chunk)))
+      .join("");
+    return rewritten.replace(/\n{3,}/g, "\n\n").trim();
   }, [citations, content]);
 
   const isQuizMode = mode === "quiz" || mode === "exam";
-  if (isQuizMode && /\n\d+[.)]\s+/.test(cleanContent) && /[A-D][.)]\s+/.test(cleanContent)) {
+
+  // Pure mode rendering for full-content matches
+  if (isQuizMode && isQuizContent(cleanContent)) {
     return <QuizReveal content={cleanContent} />;
   }
-  if (mode === "flashcard" && /FRONT\s*:/i.test(cleanContent) && /BACK\s*:/i.test(cleanContent)) {
+  if (mode === "flashcard" && isFlashcardContent(cleanContent)) {
     return <FlashcardReveal content={cleanContent} />;
+  }
+  if (mode === "image") {
+    const image = extractImagePayload(cleanContent);
+    if (image) {
+      return <ImageReveal src={image.src} alt={image.alt} prompt={image.prompt} />;
+    }
+  }
+
+  // Mixed content: check if content has embedded quiz/flashcard segments within text
+  if (isQuizMode || mode === "flashcard") {
+    // Try to split content into text preamble + structured content
+    const quizStart = cleanContent.search(/(?:^|\n)(?:Q(?:uestion)?\s*)?1[.):-]\s+/m);
+    const flashcardStart = cleanContent.search(/(?:^|\n)\s*(?:Card\s*1|FRONT)\s*:/im);
+    const structuredStart = isQuizMode ? quizStart : flashcardStart;
+
+    if (structuredStart > 20) {
+      const textPart = cleanContent.slice(0, structuredStart).trim();
+      const structuredPart = cleanContent.slice(structuredStart).trim();
+      const hasValidStructured = isQuizMode
+        ? isQuizContent(structuredPart)
+        : isFlashcardContent(structuredPart);
+
+      if (hasValidStructured && textPart) {
+        return (
+          <div className="space-y-4">
+            <div className="chat-markdown text-[15px] leading-7 text-[var(--text-primary)]">
+              <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex, rehypeHighlight]}>
+                {textPart}
+              </ReactMarkdown>
+            </div>
+            {isQuizMode ? <QuizReveal content={structuredPart} /> : <FlashcardReveal content={structuredPart} />}
+          </div>
+        );
+      }
+    }
   }
 
   return (
@@ -156,12 +217,23 @@ export function MarkdownRenderer({ content, citations = [], mode, onOpenCanvas }
               .join("");
             const isCitationRef = /^\[\d+\]$/.test(textValue.trim());
             if (isCitationRef) {
+              const citationIndex = Number.parseInt(textValue.replace(/[[\]]/g, ""), 10) - 1;
+              const href = props.href ?? "";
+              const isDeadAnchor = !href || href.startsWith("#source-");
+              const handleClick = (e: React.MouseEvent) => {
+                if (isDeadAnchor && onCitationClick) {
+                  e.preventDefault();
+                  onCitationClick(citationIndex);
+                }
+              };
               return (
                 <sup>
                   <a
                     {...props}
-                    target="_blank"
-                    rel="noreferrer"
+                    href={isDeadAnchor ? undefined : href}
+                    target={isDeadAnchor ? undefined : "_blank"}
+                    rel={isDeadAnchor ? undefined : "noreferrer"}
+                    onClick={handleClick}
                     className="mx-0.5 inline-flex cursor-pointer items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 py-0 text-[10px] font-medium text-[var(--accent-cyan)] no-underline transition hover:bg-[var(--bg-hover)]"
                   >
                     {children}

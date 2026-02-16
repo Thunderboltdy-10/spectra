@@ -219,7 +219,7 @@ describe("chooseModelRoute", () => {
 });
 
 describe("StudyMode validation", () => {
-  it("isValidStudyMode accepts all 9 modes", () => {
+  it("isValidStudyMode accepts all 10 modes", () => {
     for (const mode of STUDY_MODES) {
       expect(isValidStudyMode(mode)).toBe(true);
     }
@@ -246,8 +246,8 @@ describe("StudyMode validation", () => {
     }
   });
 
-  it("STUDY_MODES has exactly 9 entries", () => {
-    expect(STUDY_MODES).toHaveLength(9);
+  it("STUDY_MODES has exactly 10 entries", () => {
+    expect(STUDY_MODES).toHaveLength(10);
   });
 
   it("STUDY_MODES includes research mode", () => {

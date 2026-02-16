@@ -44,12 +44,13 @@ function processQuizBuffer(rawContent: string): Pick<BufferState, "safeContent" 
 }
 
 function processFlashcardBuffer(rawContent: string): Pick<BufferState, "safeContent" | "isComplete" | "detectedQuestionCount"> {
-  const frontLines = rawContent.match(/^\s*FRONT\s*:\s*.*$/gim) ?? [];
-  const backLines = rawContent.match(/^\s*BACK\s*:\s*.*$/gim) ?? [];
-  const pairCount = Math.min(frontLines.length, backLines.length);
+  const lineFronts = rawContent.match(/^\s*(?:[-*]\s*)?(?:Card\s*\d+\s*[:.)-]\s*)?FRONT\s*:\s*.+$/gim) ?? [];
+  const lineBacks = rawContent.match(/^\s*(?:[-*]\s*)?BACK\s*:\s*.+$/gim) ?? [];
+  const inlinePairs = rawContent.match(/FRONT\s*:\s*[\s\S]*?\s+BACK\s*:\s*[\s\S]*?(?=(?:\s+FRONT\s*:)|$)/gi) ?? [];
+  const pairCount = Math.max(Math.min(lineFronts.length, lineBacks.length), inlinePairs.length);
 
   const safeContent = rawContent
-    .replace(/^\s*BACK\s*:\s*.*$/gim, "BACK: [Tap to reveal after generation]")
+    .replace(/^\s*(?:[-*]\s*)?BACK\s*:\s*.*$/gim, "BACK: [Tap to reveal after generation]")
     .replace(/\n{3,}/g, "\n\n")
     .trimEnd();
 

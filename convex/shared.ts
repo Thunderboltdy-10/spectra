@@ -15,6 +15,7 @@ export const STUDY_MODES = [
   "research",
   "explain",
   "general",
+  "image",
 ] as const;
 
 export type StudyMode = (typeof STUDY_MODES)[number];
@@ -30,6 +31,7 @@ export const vStudyMode = v.union(
   v.literal("research"),
   v.literal("explain"),
   v.literal("general"),
+  v.literal("image"),
 );
 
 /** Convex v.union validator for ThinkingLevel */

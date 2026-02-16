@@ -14,6 +14,7 @@ export const STUDY_MODES = [
   "research",
   "explain",
   "general",
+  "image",
 ] as const;
 
 export type StudyMode = (typeof STUDY_MODES)[number];

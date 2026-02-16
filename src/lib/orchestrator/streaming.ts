@@ -15,6 +15,7 @@ export async function runAssistantStreaming(params: {
   fallbackModels: string[];
   verificationModel?: string;
   messages: OpenRouterMessage[];
+  maxTokens?: number;
   send: (payload: Record<string, unknown>) => Promise<void>;
   onFallback?: (event: RouteTraceFallback) => void;
   logger?: {
@@ -33,6 +34,7 @@ export async function runAssistantStreaming(params: {
       model: params.primaryModel,
       fallbackModels: params.fallbackModels,
       messages: params.messages,
+      maxTokens: params.maxTokens,
       onFallback: params.onFallback,
     })) {
       if (event.type === "delta") {
@@ -57,6 +59,7 @@ export async function runAssistantStreaming(params: {
       primaryModel: params.primaryModel,
       fallbackModels: params.fallbackModels,
       messages: params.messages,
+      maxTokens: params.maxTokens,
       verificationModel: params.verificationModel,
       onFallback: params.onFallback,
       logger: params.logger,
@@ -107,6 +110,9 @@ export async function runCollaborativeStreaming(params: {
   baseSystemPrompt: string;
   primaryModel: string;
   fallbackModels: string[];
+  maxTokens?: number;
+  maxSubcalls?: number;
+  maxTokensPerSpecialist?: number;
   send: (payload: Record<string, unknown>) => Promise<void>;
   onFallback?: (event: RouteTraceFallback) => void;
   logger?: {
@@ -155,6 +161,7 @@ export async function runCollaborativeStreaming(params: {
           },
         ],
         temperature: 0.2,
+        maxTokens: Math.min(1800, Math.max(800, params.maxTokens ?? 1800)),
         onFallback: params.onFallback,
       });
 
@@ -175,8 +182,8 @@ export async function runCollaborativeStreaming(params: {
       return { result, tokens, durationMs };
     },
     {
-      maxSubcalls: 5,
-      maxTokensPerSpecialist: 8000,
+      maxSubcalls: params.maxSubcalls ?? 4,
+      maxTokensPerSpecialist: params.maxTokensPerSpecialist ?? 1200,
       maxWallTimeMs: 30_000,
     },
   );
@@ -200,7 +207,11 @@ export async function runCollaborativeStreaming(params: {
 
   const combinedFindings = synthesize(executed, params.originalPrompt);
   const synthesisStartedAt = Date.now();
-  const synthesis = await openRouterChatCompletion({
+  let responseText = "";
+  let usageIn = 0;
+  let usageOut = 0;
+  let modelUsed = params.primaryModel;
+  for await (const event of openRouterStreamChat({
     model: params.primaryModel,
     fallbackModels: params.fallbackModels,
     messages: [
@@ -215,18 +226,26 @@ export async function runCollaborativeStreaming(params: {
       },
     ],
     temperature: 0.2,
+    maxTokens: params.maxTokens,
     onFallback: params.onFallback,
-  });
-
-  const responseText = synthesis.choices?.[0]?.message?.content?.trim() ?? "";
-  const usageIn = synthesis.usage?.prompt_tokens ?? 0;
-  const usageOut = synthesis.usage?.completion_tokens ?? 0;
-  const modelUsed = synthesis.model ?? params.primaryModel;
-  const synthesisDurationMs = Date.now() - synthesisStartedAt;
-
-  for (const chunk of chunkString(responseText, 28)) {
-    await params.send({ type: "delta", content: chunk });
+  })) {
+    if (event.type === "delta") {
+      responseText += event.content;
+      await params.send({ type: "delta", content: event.content });
+    }
+    if (event.type === "thinking") {
+      await params.send({ type: "thinking", content: event.content });
+    }
+    if (event.type === "done") {
+      modelUsed = event.model ?? modelUsed;
+      usageIn = event.inputTokens ?? usageIn;
+      usageOut = event.outputTokens ?? usageOut;
+    }
+    if (event.type === "error") {
+      throw new Error(event.error);
+    }
   }
+  const synthesisDurationMs = Date.now() - synthesisStartedAt;
 
   const collaborators: CollaboratorTrace[] = executed
     .filter((node) => node.role !== "synthesizer")

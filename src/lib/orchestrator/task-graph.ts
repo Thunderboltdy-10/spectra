@@ -23,6 +23,8 @@ type BuildTaskGraphContext = {
   searchEnabled?: boolean;
   sourceBlock?: string;
   searchBlock?: string;
+  includeCritic?: boolean;
+  maxSpecialists?: number;
 };
 
 type ExecutionLimits = {
@@ -46,7 +48,10 @@ export function shouldUseMultiAgent(
   const normalizedComplexity = normalizeComplexityScore(complexity);
   const lower = prompt.toLowerCase();
   const multipart = /(^|\n)\s*(\d+\.|-|\*)\s+/.test(prompt) || /(first|second|finally|compare|contrast)/i.test(lower);
-  if (mode === "research" && normalizedComplexity > 0.62) return true;
+  // Research mode: lower threshold — use multi-agent for anything non-simple
+  if (mode === "research" && normalizedComplexity > 0.3) return true;
+  // Explain mode: use multi-agent for complex prompts
+  if (mode === "explain" && normalizedComplexity > 0.58) return true;
   if (mode === "exam" && multipart && normalizedComplexity > 0.58) return true;
   if (mode === "draft_coach" && /evidence|citation|sources?|counter-argument/i.test(lower) && normalizedComplexity > 0.52) return true;
   return false;
@@ -108,21 +113,38 @@ export function buildTaskGraph(prompt: string, mode: string, context: BuildTaskG
     });
   }
 
-  graph.push({
-    id: "critic",
-    role: "critic",
-    specialist: "critic",
-    prompt: `Critique and verify this answer plan:\n${packedPrompt}`,
-    dependsOn: graph.map((node) => node.id),
-    status: "pending",
-  });
+  const maxSpecialists = Math.max(1, context.maxSpecialists ?? 4);
+  const priority = ["retriever", "web_researcher", "vision_interpreter", "code_helper"] as const;
+  const rank = (role: TaskRole) => {
+    const idx = priority.indexOf(role as (typeof priority)[number]);
+    return idx === -1 ? 999 : idx;
+  };
+  const specialistNodes = graph
+    .slice()
+    .sort((a, b) => rank(a.role) - rank(b.role))
+    .slice(0, maxSpecialists);
+
+  graph.length = 0;
+  graph.push(...specialistNodes);
+
+  const includeCritic = context.includeCritic ?? true;
+  if (includeCritic) {
+    graph.push({
+      id: "critic",
+      role: "critic",
+      specialist: "critic",
+      prompt: `Review and critique the specialist findings below against the original question. Check for accuracy, completeness, contradictions, and missing perspectives. Flag any issues.\n\nOriginal question:\n${packedPrompt}`,
+      dependsOn: specialistNodes.map((node) => node.id),
+      status: "pending",
+    });
+  }
 
   graph.push({
     id: "synth",
     role: "synthesizer",
     specialist: "synthesizer",
     prompt: packedPrompt,
-    dependsOn: ["critic"],
+    dependsOn: includeCritic ? ["critic"] : specialistNodes.map((node) => node.id),
     status: "pending",
   });
 

@@ -25,6 +25,13 @@ export type OpenRouterMessage = {
   content: string | OpenRouterMessageContentPart[];
 };
 
+export type OpenRouterImageResult = {
+  imageUrl: string;
+  modelUsed: string;
+  text?: string;
+  raw?: unknown;
+};
+
 function openRouterHeaders() {
   const env = getEnv();
   if (!env.OPENROUTER_API_KEY) {
@@ -59,6 +66,68 @@ async function fetchWithTimeout(url: string, init: RequestInit) {
   }
 }
 
+async function readOpenRouterError(response: Response) {
+  const text = await response.text();
+  if (!text) return `HTTP ${response.status}`;
+
+  try {
+    const parsed = JSON.parse(text) as {
+      error?: string | { message?: string };
+      message?: string;
+    };
+    if (typeof parsed.error === "string") return parsed.error;
+    if (typeof parsed.error?.message === "string") return parsed.error.message;
+    if (typeof parsed.message === "string") return parsed.message;
+  } catch {
+    // OpenRouter may return HTML for missing paths; keep this compact.
+  }
+
+  if (/<!doctype html/i.test(text) || /<html/i.test(text)) {
+    return `HTTP ${response.status} ${response.statusText || "Not Found"} (non-JSON response)`;
+  }
+
+  return text.replace(/\s+/g, " ").trim().slice(0, 500);
+}
+
+function imageUrlFromCompletionPayload(payload: unknown) {
+  const json = payload as {
+    choices?: Array<{
+      message?: {
+        images?: Array<{
+          image_url?: string | { url?: string };
+          url?: string;
+        }>;
+        content?: string;
+      };
+    }>;
+    data?: Array<{ url?: string }>;
+  };
+
+  const firstImage = json.choices?.[0]?.message?.images?.[0];
+  if (typeof firstImage?.image_url === "string") {
+    return firstImage.image_url;
+  }
+  if (typeof firstImage?.image_url?.url === "string") {
+    return firstImage.image_url.url;
+  }
+  if (typeof firstImage?.url === "string") {
+    return firstImage.url;
+  }
+  if (typeof json.data?.[0]?.url === "string") {
+    return json.data[0].url;
+  }
+
+  const content = json.choices?.[0]?.message?.content;
+  if (typeof content === "string") {
+    const markdownImage = content.match(/!\[[^\]]*\]\((data:image\/[^\s)]+|https?:\/\/[^\s)]+)\)/i);
+    if (markdownImage?.[1]) return markdownImage[1];
+    const directUrl = content.match(/(data:image\/[^\s]+|https?:\/\/[^\s]+)/i);
+    if (directUrl?.[1]) return directUrl[1];
+  }
+
+  return undefined;
+}
+
 export async function openRouterEmbedding(input: string, model: string) {
   const response = await fetchWithTimeout(`${OPENROUTER_BASE_URL}/embeddings`, {
     method: "POST",
@@ -89,6 +158,7 @@ export async function openRouterChatCompletion(params: {
   fallbackModels: string[];
   messages: OpenRouterMessage[];
   temperature?: number;
+  maxTokens?: number;
   onFallback?: (event: RouteTraceFallback) => void;
 }) {
   const candidates = uniqueModelList(params.model, params.fallbackModels);
@@ -105,6 +175,7 @@ export async function openRouterChatCompletion(params: {
           model,
           messages: params.messages,
           temperature: params.temperature ?? 0.2,
+          max_tokens: params.maxTokens,
         }),
       });
 
@@ -146,11 +217,94 @@ export async function openRouterChatCompletion(params: {
   throw new Error(`Chat completion failed across fallback models. ${errors.join(" | ")}`);
 }
 
+export async function openRouterGenerateImage(params: {
+  model: string;
+  fallbackModels?: string[];
+  prompt: string;
+  size?: string;
+  onFallback?: (event: RouteTraceFallback) => void;
+}): Promise<OpenRouterImageResult> {
+  const candidates = uniqueModelList(params.model, params.fallbackModels ?? []);
+  const errors: string[] = [];
+
+  for (let idx = 0; idx < candidates.length; idx += 1) {
+    const model = candidates[idx]!;
+    try {
+      const response = await fetchWithTimeout(`${OPENROUTER_BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: openRouterHeaders(),
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: params.prompt }],
+          modalities: ["image", "text"],
+          image: { size: params.size ?? "1024x1024" },
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await readOpenRouterError(response);
+        errors.push(`${model}: ${errorText}`);
+        const toModel = candidates[idx + 1];
+        if (toModel) {
+          params.onFallback?.({
+            fromModel: model,
+            toModel,
+            error: errorText,
+            attemptIndex: idx,
+          });
+        }
+        continue;
+      }
+
+      const json = (await response.json()) as unknown;
+      const imageUrl = imageUrlFromCompletionPayload(json);
+      if (!imageUrl) {
+        errors.push(`${model}: No image returned in completion payload`);
+        const toModel = candidates[idx + 1];
+        if (toModel) {
+          params.onFallback?.({
+            fromModel: model,
+            toModel,
+            error: "No image returned in completion payload",
+            attemptIndex: idx,
+          });
+        }
+        continue;
+      }
+
+      const text =
+        (json as { choices?: Array<{ message?: { content?: string } }> })?.choices?.[0]?.message?.content;
+
+      return {
+        imageUrl,
+        modelUsed: model,
+        text: typeof text === "string" ? text : undefined,
+        raw: json,
+      };
+    } catch (error) {
+      const errorText = error instanceof Error ? error.message : "Unknown image generation failure";
+      errors.push(`${model}: ${errorText}`);
+      const toModel = candidates[idx + 1];
+      if (toModel) {
+        params.onFallback?.({
+          fromModel: model,
+          toModel,
+          error: errorText,
+          attemptIndex: idx,
+        });
+      }
+    }
+  }
+
+  throw new Error(`Image generation failed across fallback models. ${errors.join(" | ")}`);
+}
+
 export async function* openRouterStreamChat(params: {
   model: string;
   fallbackModels: string[];
   messages: OpenRouterMessage[];
   temperature?: number;
+  maxTokens?: number;
   onFallback?: (event: RouteTraceFallback) => void;
 }): AsyncGenerator<OpenRouterStreamEvent> {
   const candidates = uniqueModelList(params.model, params.fallbackModels);
@@ -167,7 +321,9 @@ export async function* openRouterStreamChat(params: {
           model,
           messages: params.messages,
           stream: true,
+          stream_options: { include_usage: true },
           temperature: params.temperature ?? 0.2,
+          max_tokens: params.maxTokens,
         }),
       });
 
@@ -211,8 +367,18 @@ export async function* openRouterStreamChat(params: {
             const json = JSON.parse(data) as {
               model?: string;
               usage?: { prompt_tokens?: number; completion_tokens?: number };
-              choices?: Array<{ delta?: { content?: string; reasoning?: string }; reasoning?: string }>;
+              choices?: Array<{
+                delta?: {
+                  content?: string;
+                  reasoning?: string;
+                  reasoning_content?: string;
+                  thinking?: string;
+                };
+                reasoning?: string;
+                reasoning_content?: string;
+              }>;
               reasoning?: string;
+              reasoning_content?: string;
             };
 
             raw = json;
@@ -231,7 +397,11 @@ export async function* openRouterStreamChat(params: {
 
             const reasoningDelta =
               json.choices?.[0]?.delta?.reasoning ??
+              json.choices?.[0]?.delta?.reasoning_content ??
+              json.choices?.[0]?.delta?.thinking ??
               json.choices?.[0]?.reasoning ??
+              json.choices?.[0]?.reasoning_content ??
+              json.reasoning_content ??
               json.reasoning;
             if (typeof reasoningDelta === "string" && reasoningDelta.trim()) {
               yield { type: "thinking", content: reasoningDelta };

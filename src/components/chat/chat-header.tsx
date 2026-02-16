@@ -29,7 +29,10 @@ export function ChatHeader({
   onExportPdf,
 }: ChatHeaderProps) {
   const modelLabel = lastModelUsed
-    ? (lastModelUsed.split("/").pop() ?? lastModelUsed).replace(/:free$/i, "")
+    ? (lastModelUsed.split("/").pop() ?? lastModelUsed)
+        .replace(/:free$/i, "")
+        .replace(/[\s(_-]*\bfree\b[\s)_-]*/gi, " ")
+        .trim()
     : undefined;
 
   return (

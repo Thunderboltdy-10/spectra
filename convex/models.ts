@@ -7,7 +7,7 @@ type Rating = "low" | "medium" | "high";
 type MultiRating = "none" | "basic" | "strong";
 
 const FEATURED_LABELS: Record<string, string> = {
-  "google/gemini-2.0-flash-exp:free": "Fast & Free",
+  "google/gemini-2.0-flash-exp:free": "Fast Included",
   "deepseek/deepseek-r1-0528:free": "Deep Reasoning",
   "anthropic/claude-sonnet-4-5": "Best Writing",
   "google/gemini-2.5-pro": "Best Reasoning",
@@ -357,6 +357,53 @@ export const getMostUsedModelsByUser = query({
         usageCount: entry.count,
       };
     });
+  },
+});
+
+export const getModelLeaderboard = query({
+  args: {
+    actorClerkId: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Actor not found");
+    }
+
+    const usage = await ctx.db
+      .query("usageEvents")
+      .withIndex("by_org_day", (q) => q.eq("orgId", actor.orgId))
+      .collect();
+
+    const totals = new Map<string, { totalTokens: number; usageCount: number }>();
+    for (const event of usage) {
+      const current = totals.get(event.model) ?? { totalTokens: 0, usageCount: 0 };
+      current.totalTokens += Math.max(0, event.totalTokens ?? 0);
+      current.usageCount += 1;
+      totals.set(event.model, current);
+    }
+
+    const catalog = await ctx.db
+      .query("modelCatalog")
+      .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
+      .collect();
+    const modelById = new Map(catalog.map((model) => [model.modelId, model]));
+
+    const limit = Math.max(1, Math.min(args.limit ?? 25, 100));
+    return [...totals.entries()]
+      .sort((a, b) => b[1].totalTokens - a[1].totalTokens || b[1].usageCount - a[1].usageCount)
+      .slice(0, limit)
+      .map(([modelId, aggregate]) => {
+        const known = modelById.get(modelId);
+        return {
+          modelId,
+          provider: known?.provider ?? modelId.split("/")[0] ?? "Unknown",
+          name: known?.name ?? (modelId.split("/").pop() ?? modelId),
+          totalTokens: aggregate.totalTokens,
+          usageCount: aggregate.usageCount,
+        };
+      });
   },
 });
 

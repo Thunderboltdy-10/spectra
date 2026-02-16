@@ -307,7 +307,51 @@ export default defineSchema({
     repetitions: v.number(),
   })
     .index("by_user", ["userId"])
-    .index("by_user_card", ["userId", "cardHash"]),
+    .index("by_user_card", ["userId", "cardHash"])
+    .index("by_user_due", ["userId", "nextReviewAt"]),
+
+  quizResults: defineTable({
+    userId: v.id("users"),
+    orgId: v.id("orgs"),
+    chatId: v.id("chats"),
+    messageId: v.id("messages"),
+    questions: v.array(
+      v.object({
+        id: v.string(),
+        prompt: v.string(),
+        selected: v.optional(v.string()),
+        correct: v.optional(v.string()),
+        isCorrect: v.boolean(),
+        explanation: v.optional(v.string()),
+      }),
+    ),
+    score: v.number(),
+    total: v.number(),
+    submittedAt: v.number(),
+  })
+    .index("by_user_submitted", ["userId", "submittedAt"])
+    .index("by_chat_submitted", ["chatId", "submittedAt"])
+    .index("by_message", ["messageId"]),
+
+  flashcardDecks: defineTable({
+    userId: v.id("users"),
+    orgId: v.id("orgs"),
+    chatId: v.id("chats"),
+    sourceMessageId: v.optional(v.id("messages")),
+    title: v.string(),
+    cards: v.array(
+      v.object({
+        front: v.string(),
+        back: v.string(),
+        cardHash: v.string(),
+      }),
+    ),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    lastReviewedAt: v.optional(v.number()),
+  })
+    .index("by_user_updated", ["userId", "updatedAt"])
+    .index("by_chat_updated", ["chatId", "updatedAt"]),
 
   orgSoulDocs: defineTable({
     orgId: v.id("orgs"),
@@ -333,6 +377,18 @@ export default defineSchema({
       dimensions: EMBEDDING_DIMENSIONS,
       filterFields: ["orgId"],
     }),
+
+  generatedImages: defineTable({
+    orgId: v.id("orgs"),
+    userId: v.id("users"),
+    chatId: v.id("chats"),
+    prompt: v.string(),
+    imageUrl: v.string(),
+    model: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_chat", ["chatId"]),
 
   modelCatalog: defineTable({
     orgId: v.id("orgs"),

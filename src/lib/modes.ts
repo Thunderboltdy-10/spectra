@@ -82,6 +82,14 @@ export const MODE_REGISTRY: Record<StudyMode, ModeConfig> = {
     cssVar: "var(--mode-general)",
     description: "Open dialogue for unstructured exploration",
   },
+  image: {
+    key: "image",
+    label: "Image",
+    icon: "ImagePlus",
+    color: "#ec4899",
+    cssVar: "var(--mode-image)",
+    description: "Generate images from text prompts",
+  },
 };
 
 export const ALL_MODES = Object.values(MODE_REGISTRY);

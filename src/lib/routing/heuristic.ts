@@ -35,7 +35,7 @@ function eliminationReason(modelId: string, tier: ModelRouteInput["spendingTier"
   return undefined;
 }
 
-function canUseInTier(modelId: string, tier: ModelRouteInput["spendingTier"]) {
+export function canUseInTier(modelId: string, tier: ModelRouteInput["spendingTier"]) {
   return !eliminationReason(modelId, tier);
 }
 
@@ -570,6 +570,9 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
   } else if (input.mode === "explain") {
     baseModel = input.spendingTier === "normal" ? MODEL_CONFIG.smartCheap : MODEL_CONFIG.tutorFast;
     reason = "Explain mode with simplified pedagogy emphasis";
+  } else if (input.mode === "image") {
+    baseModel = MODEL_CONFIG.tutorFast;
+    reason = "Image mode prompt refinement route";
   }
 
   if (multimodalNeeded) {

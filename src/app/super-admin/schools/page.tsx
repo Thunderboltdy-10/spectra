@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Building2, Plus, Search } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
@@ -50,6 +51,7 @@ function formatDate(ts: number) {
 }
 
 export default function SchoolsListPage() {
+  const router = useRouter();
   const [orgs, setOrgs] = useState<OrgRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -173,7 +175,7 @@ export default function SchoolsListPage() {
                       className={`cursor-pointer border-b border-[var(--border-default)] transition hover:bg-[var(--bg-hover)] ${
                         i === filtered.length - 1 ? "border-b-0" : ""
                       }`}
-                      onClick={() => { window.location.href = `/super-admin/schools/${org._id}`; }}
+                      onClick={() => router.push(`/super-admin/schools/${org._id}`)}
                     >
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-3">

@@ -8,11 +8,20 @@ import {
   Building2,
   BarChart3,
   BookOpen,
+  MailPlus,
   Settings,
+  Trash2,
   Users,
 } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 
 type Member = {
@@ -63,19 +72,6 @@ function formatDate(ts?: number) {
     month: "short",
     year: "numeric",
   });
-}
-
-function RoleBadge({ role }: { role: string }) {
-  const colors: Record<string, string> = {
-    admin: "bg-[color-mix(in_oklab,var(--accent-cyan)_15%,transparent)] text-[var(--accent-cyan)]",
-    teacher: "bg-[color-mix(in_oklab,var(--success)_15%,transparent)] text-[var(--success)]",
-    student: "bg-[color-mix(in_oklab,var(--text-secondary)_12%,transparent)] text-[var(--text-secondary)]",
-  };
-  return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${colors[role] ?? colors.student}`}>
-      {role}
-    </span>
-  );
 }
 
 // ---- Overview Tab ----
@@ -132,40 +128,148 @@ function OverviewTab({ data }: { data: OrgDetail }) {
 }
 
 // ---- Members Tab ----
-function MembersTab({ members }: { members: Member[] }) {
+function MembersTab({ members, orgId, onChanged }: { members: Member[]; orgId: string; onChanged: () => void }) {
+  const [adminEmail, setAdminEmail] = useState("");
+  const [assigningAdmin, setAssigningAdmin] = useState(false);
+  const [busyMemberId, setBusyMemberId] = useState<string | null>(null);
+
+  async function assignAdmin() {
+    const email = adminEmail.trim();
+    if (!email || !email.includes("@")) {
+      toast.error("Enter a valid admin email");
+      return;
+    }
+    setAssigningAdmin(true);
+    try {
+      const response = await fetch(`/api/super-admin/schools/${orgId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "assignAdmin", email }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      toast.success("Admin assigned");
+      setAdminEmail("");
+      onChanged();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to assign admin");
+    } finally {
+      setAssigningAdmin(false);
+    }
+  }
+
+  async function updateRole(userId: string, role: "student" | "teacher" | "admin") {
+    setBusyMemberId(userId);
+    try {
+      const response = await fetch(`/api/super-admin/schools/${orgId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "updateMemberRole", userId, role }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      toast.success("Role updated");
+      onChanged();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update role");
+    } finally {
+      setBusyMemberId(null);
+    }
+  }
+
+  async function removeMember(userId: string, name: string) {
+    if (!window.confirm(`Remove ${name} from this school?`)) return;
+    setBusyMemberId(userId);
+    try {
+      const response = await fetch(`/api/super-admin/schools/${orgId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "removeMember", userId }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      toast.success("Member removed");
+      onChanged();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to remove member");
+    } finally {
+      setBusyMemberId(null);
+    }
+  }
+
   return (
-    <div className="overflow-hidden rounded-xl border border-[var(--border-default)]">
-      {members.length === 0 ? (
-        <p className="p-6 text-center text-sm text-[var(--text-secondary)]">No members yet.</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-[var(--border-default)] bg-[var(--bg-secondary)]">
-                {["Name", "Email", "Role", "Joined", "Last Active"].map((h) => (
-                  <th key={h} className="px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {members.map((m, i) => (
-                <tr
-                  key={m._id}
-                  className={`border-b border-[var(--border-default)] ${i === members.length - 1 ? "border-b-0" : ""}`}
-                >
-                  <td className="px-5 py-3.5 font-medium text-[var(--text-primary)]">{m.name}</td>
-                  <td className="px-5 py-3.5 text-[var(--text-secondary)]">{m.email}</td>
-                  <td className="px-5 py-3.5"><RoleBadge role={m.role} /></td>
-                  <td className="px-5 py-3.5 text-xs text-[var(--text-secondary)]">{formatDate(m.createdAt)}</td>
-                  <td className="px-5 py-3.5 text-xs text-[var(--text-secondary)]">{formatDate(m.lastActiveAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <div className="space-y-4">
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+        <p className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Assign School Admin</p>
+        <p className="mb-3 text-xs text-[var(--text-secondary)]">
+          Promote an existing member by email, or create an admin invitation if the user has not joined yet.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <input
+            value={adminEmail}
+            onChange={(event) => setAdminEmail(event.target.value)}
+            placeholder="admin@school.edu"
+            className="h-10 flex-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-sm text-[var(--text-primary)]"
+          />
+          <Button onClick={() => void assignAdmin()} disabled={assigningAdmin} className="cursor-pointer gap-1.5">
+            <MailPlus className="h-4 w-4" />
+            {assigningAdmin ? "Assigning..." : "Assign Admin"}
+          </Button>
         </div>
-      )}
+      </div>
+
+      <div className="overflow-hidden rounded-xl border border-[var(--border-default)]">
+        {members.length === 0 ? (
+          <p className="p-6 text-center text-sm text-[var(--text-secondary)]">No members yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-[var(--border-default)] bg-[var(--bg-secondary)]">
+                  {["Name", "Email", "Role", "Joined", "Last Active", ""].map((h) => (
+                    <th key={h} className="px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {members.map((m, i) => (
+                  <tr
+                    key={m._id}
+                    className={`border-b border-[var(--border-default)] ${i === members.length - 1 ? "border-b-0" : ""}`}
+                  >
+                    <td className="px-5 py-3.5 font-medium text-[var(--text-primary)]">{m.name}</td>
+                    <td className="px-5 py-3.5 text-[var(--text-secondary)]">{m.email}</td>
+                    <td className="px-5 py-3.5">
+                      <Select value={m.role} onValueChange={(value) => void updateRole(m._id, value as "student" | "teacher" | "admin")}>
+                        <SelectTrigger className="h-8 w-[120px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="student">student</SelectItem>
+                          <SelectItem value="teacher">teacher</SelectItem>
+                          <SelectItem value="admin">admin</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </td>
+                    <td className="px-5 py-3.5 text-xs text-[var(--text-secondary)]">{formatDate(m.createdAt)}</td>
+                    <td className="px-5 py-3.5 text-xs text-[var(--text-secondary)]">{formatDate(m.lastActiveAt)}</td>
+                    <td className="px-5 py-3.5">
+                      <button
+                        type="button"
+                        disabled={busyMemberId === m._id}
+                        onClick={() => void removeMember(m._id, m.name)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[color-mix(in_oklab,var(--danger)_10%,transparent)] hover:text-[var(--danger)] disabled:opacity-50"
+                        aria-label="Remove member"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -385,7 +489,7 @@ export default function SchoolDetailPage() {
         ) : (
           <>
             {activeTab === "overview" && <OverviewTab data={data} />}
-            {activeTab === "members" && <MembersTab members={data.members} />}
+            {activeTab === "members" && <MembersTab members={data.members} orgId={id} onChanged={() => void load()} />}
             {activeTab === "usage" && <UsageTab />}
             {activeTab === "settings" && (
               <SettingsTab data={data} orgId={id} onSaved={() => void load()} />

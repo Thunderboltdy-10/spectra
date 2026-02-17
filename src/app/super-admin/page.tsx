@@ -18,6 +18,14 @@ type GlobalStats = {
   totalOrgs: number;
   totalUsers: number;
   totalMessages: number;
+  totalAdmins: number;
+};
+
+type AdminRow = {
+  _id: string;
+  name: string;
+  email: string;
+  orgName: string;
 };
 
 type StatCardProps = {
@@ -63,6 +71,7 @@ const MOCK_RECENT_ACTIVITY = [
 
 export default function SuperAdminDashboard() {
   const [stats, setStats] = useState<GlobalStats | null>(null);
+  const [admins, setAdmins] = useState<AdminRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
 
@@ -77,6 +86,12 @@ export default function SuperAdminDashboard() {
         if (!response.ok) throw new Error(await response.text());
         const data = (await response.json()) as GlobalStats;
         setStats(data);
+
+        const adminsResponse = await fetch("/api/super-admin/admins");
+        if (adminsResponse.ok) {
+          const adminsData = (await adminsResponse.json()) as { admins?: AdminRow[] };
+          setAdmins((adminsData.admins ?? []).slice(0, 6));
+        }
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Failed to load stats");
       } finally {
@@ -161,10 +176,10 @@ export default function SuperAdminDashboard() {
             sub="Lifetime messages"
           />
           <StatCard
-            label="Active Today"
-            value={loading ? "..." : "—"}
+            label="School Admins"
+            value={loading ? "..." : (stats?.totalAdmins ?? 0)}
             icon={<Zap className="h-4 w-4" />}
-            sub="Sessions in last 24h"
+            sub="Users with admin role"
           />
         </div>
 
@@ -221,6 +236,28 @@ export default function SuperAdminDashboard() {
               ))}
             </div>
           </div>
+        </div>
+
+        <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 shadow-[var(--shadow-soft)]">
+          <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+            School Admin Directory
+          </h2>
+          {admins.length === 0 ? (
+            <p className="text-sm text-[var(--text-secondary)]">No admins found yet.</p>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {admins.map((admin) => (
+                <div
+                  key={admin._id}
+                  className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3"
+                >
+                  <p className="truncate text-sm font-semibold text-[var(--text-primary)]">{admin.name}</p>
+                  <p className="truncate text-xs text-[var(--text-secondary)]">{admin.email}</p>
+                  <p className="mt-1 truncate text-xs text-[var(--text-secondary)]">{admin.orgName}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </AppShell>

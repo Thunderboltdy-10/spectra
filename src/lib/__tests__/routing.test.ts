@@ -168,6 +168,41 @@ describe("chooseModelRoute", () => {
     expect(route.trace.inputs.needsVision).toBe(true);
   });
 
+  it("detects multimodal need from MIME attachment types", () => {
+    const route = chooseModelRoute({
+      mode: "tutor",
+      thinkingLevel: "low",
+      hasAttachments: true,
+      attachmentTypes: ["image/png"],
+      messageLength: 120,
+      teacherStrictness: "soft",
+      routerMode: "auto",
+      studentSeemsStuck: false,
+      spendingTier: "normal",
+      needsSearch: false,
+    });
+
+    expect(route.trace.inputs.needsVision).toBe(true);
+  });
+
+  it("marks tabular analysis when spreadsheet attachments are present", () => {
+    const route = chooseModelRoute({
+      mode: "tutor",
+      thinkingLevel: "medium",
+      hasAttachments: true,
+      attachmentTypes: ["csv"],
+      messageLength: 180,
+      teacherStrictness: "medium",
+      routerMode: "auto",
+      studentSeemsStuck: false,
+      spendingTier: "normal",
+      needsSearch: false,
+    });
+
+    expect(route.trace.inputs.needsTabular).toBe(true);
+    expect(route.trace.toolchain).toContain("tabular_analysis");
+  });
+
   it("applies cost efficiency penalty for expensive model on simple prompts", () => {
     const route = chooseModelRoute({
       mode: "tutor",

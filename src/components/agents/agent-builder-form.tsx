@@ -6,24 +6,17 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+type WizardStep = "audience" | "purpose" | "personality" | "expertise" | "boundaries" | "review";
 
-type WizardStep = "purpose" | "personality" | "expertise" | "boundaries" | "review";
-
-const STEP_ORDER: WizardStep[] = ["purpose", "personality", "expertise", "boundaries", "review"];
+const STEP_ORDER: WizardStep[] = ["audience", "purpose", "personality", "expertise", "boundaries", "review"];
 const STEP_LABELS: Record<WizardStep, string> = {
+  audience: "Audience",
   purpose: "Purpose",
   personality: "Personality",
   expertise: "Expertise",
   boundaries: "Boundaries",
   review: "Review",
 };
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
 
 const SUBJECT_EMOJIS: Record<string, string> = {
   math: "🧮",
@@ -42,6 +35,7 @@ const COMMUNICATION_STYLES = ["Formal", "Friendly", "Encouraging", "Direct", "So
 const TEACHING_STYLES = ["Step-by-step", "Discovery-based", "Example-driven", "Discussion-oriented"] as const;
 const SUBJECTS = ["Math", "Science", "English", "History", "CS", "Languages", "Arts", "Economics", "Philosophy", "Other"] as const;
 const LEVELS = ["Primary", "Secondary", "A-Level", "University", "Professional"] as const;
+const AUDIENCE_OPTIONS = ["Students", "Teachers", "Parents", "Administrators", "General"] as const;
 const PATIENCE_LABELS: Record<number, string> = {
   1: "Quick & Direct",
   2: "Concise",
@@ -198,6 +192,39 @@ function ProgressBar({ currentStepIndex }: { currentStepIndex: number }) {
 }
 
 // ---------------------------------------------------------------------------
+// Step: Audience
+// ---------------------------------------------------------------------------
+
+function StepAudience({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-bold text-[var(--text-primary)]">Who is this agent for?</h2>
+        <p className="mt-1 text-sm text-[var(--text-secondary)]">
+          Select the primary audience this agent will serve.
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {AUDIENCE_OPTIONS.map((option) => (
+          <Chip
+            key={option}
+            label={option}
+            selected={value === option}
+            onClick={() => onChange(option)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Step: Purpose
 // ---------------------------------------------------------------------------
 
@@ -209,7 +236,7 @@ function StepPurpose({
   onChange: (v: string) => void;
 }) {
   const charCount = value.length;
-  const minLength = 10;
+  const minLength = 50;
 
   return (
     <div className="space-y-4">
@@ -659,29 +686,32 @@ function SparklesAnimation() {
 
 export function AgentBuilderForm({ onSubmit, onCancelHref = "/agents" }: AgentBuilderFormProps) {
   // Wizard navigation
-  const [currentStep, setCurrentStep] = useState<WizardStep>("purpose");
+  const [currentStep, setCurrentStep] = useState<WizardStep>("audience");
   const currentStepIndex = STEP_ORDER.indexOf(currentStep);
 
-  // Step 1: Purpose
+  // Step 1: Audience
+  const [audience, setAudience] = useState("Students");
+
+  // Step 2: Purpose
   const [purpose, setPurpose] = useState("");
 
-  // Step 2: Personality
+  // Step 3: Personality
   const [communication, setCommunication] = useState("Friendly");
   const [teachingStyle, setTeachingStyle] = useState("Step-by-step");
   const [patience, setPatience] = useState(3);
 
-  // Step 3: Expertise
+  // Step 4: Expertise
   const [subjects, setSubjects] = useState<string[]>([]);
   const [level, setLevel] = useState("Secondary");
 
-  // Step 4: Boundaries
+  // Step 5: Boundaries
   const [boundaries, setBoundaries] = useState<string[]>([
     "no-homework-answers",
     "no-fabrication",
   ]);
   const [strictness, setStrictness] = useState(3);
 
-  // Step 5: Review / Generate
+  // Step 6: Review / Generate
   const [generated, setGenerated] = useState<GeneratedAgent | null>(null);
   const [generating, setGenerating] = useState(false);
   const [editedSystemPrompt, setEditedSystemPrompt] = useState("");
@@ -693,8 +723,10 @@ export function AgentBuilderForm({ onSubmit, onCancelHref = "/agents" }: AgentBu
 
   function canProceed(): boolean {
     switch (currentStep) {
+      case "audience":
+        return Boolean(audience);
       case "purpose":
-        return purpose.trim().length >= 10;
+        return purpose.trim().length >= 50;
       case "personality":
         return Boolean(communication && teachingStyle);
       case "expertise":
@@ -745,6 +777,7 @@ export function AgentBuilderForm({ onSubmit, onCancelHref = "/agents" }: AgentBu
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          audience,
           purpose: purpose.trim(),
           personality: communication,
           teachingStyle,
@@ -841,6 +874,10 @@ export function AgentBuilderForm({ onSubmit, onCancelHref = "/agents" }: AgentBu
 
       {/* Step content */}
       <div className="min-h-[320px]">
+        {currentStep === "audience" && (
+          <StepAudience value={audience} onChange={setAudience} />
+        )}
+
         {currentStep === "purpose" && (
           <StepPurpose value={purpose} onChange={setPurpose} />
         )}

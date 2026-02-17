@@ -4,6 +4,8 @@ import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 
+const SCHOOL_MANAGED_ROLES = new Set(["student", "teacher"]);
+
 export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();
@@ -35,6 +37,9 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as { email?: string; role?: string };
     if (!body.email?.trim()) return badRequest("email is required");
     if (!body.role) return badRequest("role is required");
+    if (!SCHOOL_MANAGED_ROLES.has(body.role)) {
+      return badRequest("School admins can only invite student or teacher roles");
+    }
 
     const result = await convexMutation<{
       actorClerkId: string;
@@ -87,6 +92,9 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (body.userId && body.role) {
+      if (!SCHOOL_MANAGED_ROLES.has(body.role)) {
+        return badRequest("School admins can only assign student or teacher roles");
+      }
       await convexMutation("schoolAdmin:updateMemberRole", {
         actorClerkId: actor.clerkId,
         userId: body.userId,

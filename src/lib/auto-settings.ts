@@ -6,8 +6,8 @@ const SEARCH_KEYWORDS = [
   "latest",
   "current",
   "today",
-  "2025",
-  "2026",
+  "yesterday",
+  "tomorrow",
   "news",
   "who won",
   "recent",
@@ -15,6 +15,17 @@ const SEARCH_KEYWORDS = [
   "update",
   "last week",
   "this month",
+  "live",
+  "up-to-date",
+];
+
+const SEARCH_OPT_OUT = [
+  "don't search",
+  "do not search",
+  "without searching",
+  "no web search",
+  "no browsing",
+  "offline only",
 ];
 
 const HIGH_THINKING_MARKERS = [
@@ -101,7 +112,25 @@ export function classifyExplainDepth(prompt: string, userMemory?: string): Expla
 
 export function detectSearchIntent(message: string) {
   const normalized = message.toLowerCase();
-  return SEARCH_KEYWORDS.some((keyword) => normalized.includes(keyword));
+  if (SEARCH_OPT_OUT.some((phrase) => normalized.includes(phrase))) {
+    return false;
+  }
+  if (SEARCH_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
+    return true;
+  }
+  if (/\b(search|look up|lookup|find online|web)\b/i.test(normalized)) {
+    return true;
+  }
+  if (/\b(score|stock|price|weather|forecast|election|ceo|president)\b/i.test(normalized)) {
+    return true;
+  }
+
+  const currentYear = new Date().getUTCFullYear();
+  const years = [...normalized.matchAll(/\b(20\d{2})\b/g)]
+    .map((match) => Number(match[1]))
+    .filter((year) => Number.isFinite(year));
+
+  return years.some((year) => year >= currentYear - 1);
 }
 
 export function detectThinkingLevel(message: string, fallback: ThinkingLevel): ThinkingLevel {
@@ -204,12 +233,23 @@ export type ConversationHistoryEntry = {
  */
 export function detectSuggestedMode(message: string): string | null {
   const normalized = message.toLowerCase().trim();
-  // Image generation - check first as it's most distinct
-  if (/\b(create|generate|draw|make|design)\s+(an?\s+)?(image|picture|photo|illustration|art|artwork)\b/i.test(message)) {
+  const abstractOutputPattern =
+    /\b(plan|summary|conclusion|comparison|list|table|chart|diagram|outline|roadmap|analysis|report|essay|email)\b/i;
+  const visualNounPattern =
+    /\b(image|picture|photo|illustration|art|artwork|logo|poster|icon|banner|wallpaper|render|portrait|scene|character|landscape|cover|thumbnail|concept art)\b/i;
+
+  // Image generation - check first as it's most distinct.
+  if (
+    /\b(create|generate|make|design)\b/i.test(message) &&
+    visualNounPattern.test(message)
+  ) {
     return "image";
   }
-  // Simple draw/generate pattern (e.g., "draw a cat", "generate a sunset")
-  if (/\b(draw|generate|make)\s+(a|an|some)\s+\w+/i.test(message) && !/\b(draw|generate|make)\s+(a|an)\s+(conclusion|summary|distinction|comparison|list|table|chart|diagram)\b/i.test(message)) {
+  // Direct drawing commands (e.g., "draw a cat"), excluding abstract outputs.
+  if (
+    /^\s*(draw|sketch|paint|illustrate|render)\b/i.test(message) &&
+    !abstractOutputPattern.test(message)
+  ) {
     return "image";
   }
   // Quiz detection

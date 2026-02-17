@@ -619,12 +619,12 @@ export default function ModelsPage() {
 
       <section className="mb-5 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
         <div className="relative">
-          <Search className="pointer-events-none absolute left-4 top-4 h-5 w-5 text-[var(--text-secondary)]" />
+          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-secondary)]" />
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search tasks or model names"
-            className="h-14 w-full pl-12 text-lg"
+            className="h-10 w-full pl-10 text-sm"
           />
         </div>
 
@@ -730,7 +730,7 @@ export default function ModelsPage() {
         </section>
       )}
 
-      {mostUsedByUserCards.length > 0 && (
+      {mostUsedByUserCards.length > 0 && !query.trim() && (
         <section className="mb-6">
           <h2 className="mb-3 text-lg font-semibold text-[var(--text-primary)]">Most Used By You</h2>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">

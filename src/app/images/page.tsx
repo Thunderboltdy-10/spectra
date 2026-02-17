@@ -6,6 +6,7 @@ import { ImagePlus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
+import { ImageLightbox } from "@/components/images/image-lightbox";
 
 type GeneratedImage = {
   _id: string;
@@ -29,7 +30,6 @@ async function readErrorMessage(response: Response, fallback: string) {
     if (typeof parsed.error?.message === "string") return parsed.error.message;
     if (typeof parsed.message === "string") return parsed.message;
   } catch {
-    // Non-JSON responses (such as HTML error pages) should not be shown raw.
   }
   return fallback;
 }
@@ -37,6 +37,8 @@ async function readErrorMessage(response: Response, fallback: string) {
 export default function ImagesPage() {
   const [images, setImages] = useState<GeneratedImage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
 
   useEffect(() => {
     void (async () => {
@@ -68,6 +70,11 @@ export default function ImagesPage() {
     }
   }
 
+  function openLightbox(index: number) {
+    setLightboxIndex(index);
+    setLightboxOpen(true);
+  }
+
   if (loading) {
     return (
       <AppShell>
@@ -88,7 +95,7 @@ export default function ImagesPage() {
           Image Gallery
         </h1>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">
-          All images generated in your chats.
+          All images generated in your chats. Click to view full size.
         </p>
       </section>
 
@@ -98,10 +105,11 @@ export default function ImagesPage() {
         </p>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {images.map((image) => (
+          {images.map((image, index) => (
             <div
               key={image._id}
-              className="group overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-card)]"
+              className="group cursor-pointer overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-card)] transition hover:shadow-lg"
+              onClick={() => openLightbox(index)}
             >
               <div className="relative aspect-square">
                 {(image.fullUrl || image.thumbnailUrl || image.imageUrl) ? (
@@ -115,6 +123,7 @@ export default function ImagesPage() {
                 ) : (
                   <div className="flex h-full items-center justify-center bg-[var(--bg-secondary)] text-xs text-[var(--text-secondary)]">No preview</div>
                 )}
+                <div className="absolute inset-0 bg-black/0 transition group-hover:bg-black/20" />
               </div>
               <div className="p-3">
                 <p className="line-clamp-2 text-xs text-[var(--text-secondary)]">{image.prompt}</p>
@@ -127,7 +136,10 @@ export default function ImagesPage() {
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7 text-[var(--danger)] opacity-0 transition group-hover:opacity-100"
-                    onClick={() => void handleDelete(image._id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleDelete(image._id);
+                    }}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
@@ -137,6 +149,13 @@ export default function ImagesPage() {
           ))}
         </div>
       )}
+
+      <ImageLightbox
+        images={images}
+        initialIndex={lightboxIndex}
+        isOpen={lightboxOpen}
+        onClose={() => setLightboxOpen(false)}
+      />
     </AppShell>
   );
 }

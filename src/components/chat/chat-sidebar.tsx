@@ -154,6 +154,7 @@ export function ChatSidebar({
   const spentCents = userSpending?.totalCostCents ?? 0;
   const spendRatio = Math.min(spentCents / MONTHLY_HARD_LIMIT_CENTS, 1);
   const spendingTier = spendingTierLabel(userSpending?.tier);
+  const canAccessSchoolAdmin = role === "admin" && !isSuperAdmin;
 
   const navItems = [
     { href: "/", label: "Chat", icon: Sparkles },
@@ -162,8 +163,8 @@ export function ChatSidebar({
     { href: "/models", label: "Models", icon: Compass },
     { href: "/images", label: "Images", icon: ImagePlus },
     { href: "/analytics", label: "Analytics", icon: BarChart3 },
-    ...(role === "admin" ? [{ href: "/admin", label: "Admin", icon: LayoutDashboard }] : []),
-    ...(role === "admin" ? [{ href: "/admin/school", label: "School Admin", icon: School }] : []),
+    ...(canAccessSchoolAdmin ? [{ href: "/admin", label: "Admin", icon: LayoutDashboard }] : []),
+    ...(canAccessSchoolAdmin ? [{ href: "/admin/school", label: "School Admin", icon: School }] : []),
     ...(isSuperAdmin ? [{ href: "/super-admin", label: "Super Admin", icon: Shield }] : []),
   ];
 
@@ -186,7 +187,7 @@ export function ChatSidebar({
         <div className="flex flex-col gap-1">
           {navItems.map((item) => {
             const Icon = item.icon;
-            const active = pathname === item.href;
+            const active = item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(`${item.href}/`);
             return (
               <Link
                 key={item.href}
@@ -242,7 +243,7 @@ export function ChatSidebar({
       <div className="mb-3 space-y-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5">
                 {navItems.map((item) => {
           const Icon = item.icon;
-          const active = pathname === item.href;
+          const active = item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
             <Link
               key={item.href}

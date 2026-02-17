@@ -134,6 +134,7 @@ const STARTER_TEMPLATES: Record<string, string> = {
 export default function SchoolSoulPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [seeding, setSeeding] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [docs, setDocs] = useState<SoulDoc[]>([]);
   const [activeSection, setActiveSection] = useState(SECTIONS[0]!.section);
@@ -234,6 +235,50 @@ export default function SchoolSoulPage() {
     }
   }
 
+  async function seedAllSections() {
+    setSeeding(true);
+    try {
+      const existingBySection = new Map(docs.map((doc) => [doc.section, doc]));
+      const tasks = SECTIONS
+        .map((section) => {
+          const existing = existingBySection.get(section.section);
+          if (existing?.content?.trim()) {
+            return null;
+          }
+          const starter = (STARTER_TEMPLATES[section.section] ?? "").trim();
+          if (!starter) return null;
+          return fetch("/api/admin/soul", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title: existing?.title?.trim() || section.title,
+              section: section.section,
+              content: starter,
+            }),
+          });
+        })
+        .filter(Boolean) as Promise<Response>[];
+
+      if (tasks.length === 0) {
+        toast.info("All sections already have content");
+        return;
+      }
+
+      const responses = await Promise.all(tasks);
+      const failed = responses.find((response) => !response.ok);
+      if (failed) {
+        throw new Error(await failed.text());
+      }
+
+      await loadDocs();
+      toast.success(`Added starter content to ${tasks.length} section${tasks.length === 1 ? "" : "s"}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to seed SOUL sections");
+    } finally {
+      setSeeding(false);
+    }
+  }
+
   async function publishSoul() {
     setPublishing(true);
     try {
@@ -286,6 +331,15 @@ export default function SchoolSoulPage() {
             >
               <RefreshCw className="h-3.5 w-3.5" />
               Auto-generate Starter
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => void seedAllSections()}
+              disabled={seeding || loading}
+              className="cursor-pointer gap-1.5"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              {seeding ? "Preparing..." : "Quick Setup All"}
             </Button>
             <Button
               onClick={() => void saveSection()}
@@ -412,7 +466,7 @@ export default function SchoolSoulPage() {
                 </h2>
               </div>
               <p className="mb-3 text-xs text-[var(--text-secondary)]">
-                Enter a sample student query and see how the published SOUL shapes the AI's
+                Enter a sample student query and see how the published SOUL shapes the AI&apos;s
                 injected guidelines.
               </p>
 
@@ -449,7 +503,7 @@ export default function SchoolSoulPage() {
                 {testBullets.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-[var(--border-default)] px-4 py-6 text-center">
                     <p className="text-xs text-[var(--text-secondary)]">
-                      Click "Test" to preview how the SOUL guidance would be injected for this
+                      Click &quot;Test&quot; to preview how the SOUL guidance would be injected for this
                       query.
                     </p>
                   </div>

@@ -37,6 +37,7 @@ export type SidebarSpending = {
 
 type BootstrapResponse = {
   actor: { role: "student" | "teacher" | "admin" };
+  isSuperAdmin?: boolean;
   chats: SidebarChat[];
   models: SidebarModel[];
   agents: Agent[];
@@ -60,6 +61,7 @@ type BootstrapResponse = {
 type SidebarContextValue = {
   loading: boolean;
   role: "student" | "teacher" | "admin";
+  isSuperAdmin: boolean;
   chats: SidebarChat[];
   models: SidebarModel[];
   agents: Agent[];
@@ -91,6 +93,7 @@ const PINNED_KEY = "ai-school:pinned-chats";
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [role, setRole] = useState<"student" | "teacher" | "admin">("student");
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [chats, setChats] = useState<SidebarChat[]>([]);
   const [models, setModels] = useState<SidebarModel[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -112,6 +115,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
     const data = (await response.json()) as BootstrapResponse;
     setRole(data.actor?.role ?? "student");
+    setIsSuperAdmin(data.isSuperAdmin ?? false);
     setChats(data.chats ?? []);
     setModels(data.models ?? []);
     setAgents(data.agents ?? []);
@@ -216,6 +220,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       value={{
         loading,
         role,
+        isSuperAdmin,
         chats,
         models,
         agents,

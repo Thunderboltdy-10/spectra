@@ -81,6 +81,7 @@ export function buildSystemPrompt(params: {
   const quizRules =
     params.mode === "quiz"
       ? `Quiz mode policy:
+- If the student's request is vague (e.g., just 'quiz me' or 'make flashcards' without a topic), ask a clarifying question: 'What topic would you like me to quiz you on? How many questions? What difficulty level?' Do NOT generate content for an ambiguous request.
 - If the student request is vague for quiz generation, ask clarifying questions first about scope, level, and number of items.
 - If the student asks a follow-up that is NOT asking for a new quiz, answer in plain text instead of quiz format.
 - When producing a quiz, output MUST follow this structure exactly:
@@ -102,6 +103,7 @@ export function buildSystemPrompt(params: {
   const flashcardRules =
     params.mode === "flashcard"
       ? `Flashcard mode policy:
+- If the student's request is vague (e.g., just 'make flashcards' or 'quiz me' without a topic), ask a clarifying question: 'What topic would you like me to quiz you on? How many questions? What difficulty level?' Do NOT generate content for an ambiguous request.
 - If the topic is too broad, ask the student to narrow the scope before generating cards.
 - If the student asks a follow-up question not requesting a new deck, respond in plain text.
 - When generating a deck, output ONLY flashcards as FRONT/BACK pairs.
@@ -157,6 +159,31 @@ export function buildSystemPrompt(params: {
 - Adapt to the student's needs and question type.`
       : "";
 
+  const autoRules =
+    params.mode === "auto"
+      ? `Auto mode policy:
+- Analyze the student's message and respond in the most appropriate format.
+- Be helpful and pedagogical.
+- Adapt your response style to the nature of the request.`
+      : "";
+
+  const topicAnchor =
+    (params.mode === "quiz" || params.mode === "flashcard" || params.mode === "exam")
+      ? "CRITICAL: Generate content STRICTLY about the topic the student asked about. Never deviate to unrelated subjects. If the topic is unclear, ask for clarification before generating."
+      : "";
+
+  const clarificationInstruction =
+    (params.mode === "quiz" || params.mode === "flashcard")
+      ? `If the student's request is vague (e.g., just "${params.mode === "quiz" ? "quiz me" : "make flashcards"}" without a topic), ask a clarifying question: "${params.mode === "quiz" ? "What topic would you like me to quiz you on? How many questions? What difficulty level?" : "What topic would you like flashcards for? How many cards? What level of detail?"}" Do NOT generate ${params.mode === "quiz" ? "quiz questions" : "flashcard pairs"} for an ambiguous request.`
+      : "";
+
+  const preambleInstruction =
+    (params.mode === "quiz" || params.mode === "exam")
+      ? "Before the quiz questions, include 1-2 sentences of context about the topic and what the quiz covers. Then output the questions."
+      : params.mode === "flashcard"
+        ? "Before the flashcard pairs, include 1-2 sentences of context about the topic. Then output the cards."
+        : "";
+
   const agentRules = params.agent
     ? `Agent profile:
 - Name: ${params.agent.name}
@@ -208,6 +235,10 @@ ${researchRules}
 ${explainRules}
 ${imageRules}
 ${generalRules}
+${autoRules}
+${topicAnchor}
+${clarificationInstruction}
+${preambleInstruction}
 ${agentRules}
 
 Output format:

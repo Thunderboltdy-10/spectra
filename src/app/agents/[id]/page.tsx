@@ -5,17 +5,12 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Paperclip, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
-import { AgentBuilderForm } from "@/components/agents/agent-builder-form";
+import { AgentEditForm } from "@/components/agents/agent-edit-form";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { Agent } from "@/types";
-
-type ModelOption = {
-  modelId: string;
-  name: string;
-};
 
 type ResourceItem = {
   _id: string;
@@ -30,27 +25,22 @@ export default function AgentDetailPage() {
   const router = useRouter();
 
   const [agent, setAgent] = useState<Agent | null>(null);
-  const [models, setModels] = useState<ModelOption[]>([]);
   const [resources, setResources] = useState<ResourceItem[]>([]);
   const [uploading, setUploading] = useState(false);
 
   const refresh = useCallback(async () => {
-    const [agentResponse, modelsResponse, resourcesResponse] = await Promise.all([
+    const [agentResponse, resourcesResponse] = await Promise.all([
       fetch(`/api/agents/${id}`),
-      fetch("/api/models"),
       fetch(`/api/resources?scope=agent&agentId=${id}`),
     ]);
 
     if (!agentResponse.ok) throw new Error(await agentResponse.text());
-    if (!modelsResponse.ok) throw new Error(await modelsResponse.text());
     if (!resourcesResponse.ok) throw new Error(await resourcesResponse.text());
 
     const agentData = (await agentResponse.json()) as { agent: Agent };
-    const modelsData = (await modelsResponse.json()) as { models: ModelOption[] };
     const resourcesData = (await resourcesResponse.json()) as { resources: ResourceItem[] };
 
     setAgent(agentData.agent);
-    setModels(modelsData.models);
     setResources(resourcesData.resources);
   }, [id]);
 
@@ -140,8 +130,7 @@ export default function AgentDetailPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <AgentBuilderForm
-                models={models}
+              <AgentEditForm
                 submitLabel="Save changes"
                 initialValues={{
                   name: agent.name,

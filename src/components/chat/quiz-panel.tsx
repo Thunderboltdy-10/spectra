@@ -67,13 +67,13 @@ export function QuizPanel({
       {!docked ? (
         <button
           type="button"
-          className="absolute inset-0 bg-transparent"
+          className="absolute inset-0 cursor-pointer bg-transparent"
           aria-label="Close quiz panel"
           onClick={onClose}
         />
       ) : null}
       <aside
-        className={`right-panel-shell pointer-events-auto absolute flex w-full flex-col border-[var(--border-default)] bg-[var(--bg-sidebar)] p-4 shadow-[var(--shadow-soft)] ${
+        className={`right-panel-shell pointer-events-auto absolute flex w-full flex-col border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)] ${
           docked ? "right-panel-shell--docked" : "right-panel-shell--sheet"
         } ${
           compact
@@ -159,7 +159,7 @@ export function QuizPanel({
                       type="button"
                       disabled={submitted}
                       onClick={() => onSelectAnswer(current.id, option.letter)}
-                      className={`flex w-full items-start gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition ${
+                      className={`flex w-full cursor-pointer items-start gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition disabled:cursor-default ${
                         isCorrect
                           ? "border-[color-mix(in_oklab,var(--success)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_10%,transparent)]"
                           : isWrongSelected

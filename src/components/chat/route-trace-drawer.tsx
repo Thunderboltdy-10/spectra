@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X, CheckCircle2, XCircle, Timer, Milestone, ArrowRight, ChevronDown } from "lucide-react";
+import { X, CheckCircle2, XCircle, Timer, Milestone, ArrowRight, ChevronDown, Settings2 } from "lucide-react";
 import type { RouteTrace } from "@/types";
 import { Button } from "@/components/ui/button";
 import { useCompactSheet } from "@/hooks/use-compact-sheet";
@@ -80,7 +80,7 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
       {!docked ? (
         <button
           type="button"
-          className="absolute inset-0 bg-transparent"
+          className="absolute inset-0 cursor-pointer bg-transparent"
           onClick={onClose}
           aria-label="Close route trace"
         />
@@ -112,6 +112,19 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
                 <ChevronDown className={`h-4 w-4 transition ${collapsed ? "-rotate-90" : "rotate-0"}`} />
               </Button>
             ) : null}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                onClose();
+                window.dispatchEvent(new CustomEvent("ai-school:toggle-settings"));
+              }}
+              aria-label="Open settings"
+              title="Open settings"
+            >
+              <Settings2 className="h-4 w-4" />
+            </Button>
             <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="Close route trace">
               <X className="h-4 w-4" />
             </Button>

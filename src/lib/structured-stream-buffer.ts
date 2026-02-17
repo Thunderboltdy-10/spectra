@@ -11,29 +11,39 @@ export type BufferState = {
 function normalizeMode(mode: string): BufferMode {
   if (mode === "quiz" || mode === "exam") return "quiz";
   if (mode === "flashcard") return "flashcard";
+  // "auto" mode uses "none" buffering since the effective mode is resolved server-side
   return "none";
 }
 
 function processQuizBuffer(rawContent: string): Pick<BufferState, "safeContent" | "isComplete" | "detectedQuestionCount"> {
-  const answerHeaderMatch = rawContent.match(/^##\s*(answers?|explanations?)\b.*$/im);
+  // Detect the start of any answer/explanation section and strip it entirely from safeContent
+  const answerHeaderMatch =
+    rawContent.match(/^#{1,4}\s*(answers?|explanations?|solutions?|key)\b.*$/im) ||
+    rawContent.match(/^(?:Answers?|Explanations?|Solutions?|Answer Key)\s*[:=-]/im);
   const answerHeaderIndex = answerHeaderMatch?.index ?? -1;
 
-  const answerLineRegex = /^\s*(correct\s*:\s*[A-D]).*$/gim;
+  // Strip the answer section (from header to end) so correct answers are never exposed
+  let safeContent = answerHeaderIndex >= 0 ? rawContent.slice(0, answerHeaderIndex) : rawContent;
 
-  let safeContent = rawContent;
-  if (answerHeaderIndex >= 0) {
-    safeContent = rawContent.slice(0, answerHeaderIndex);
-  }
-
-  safeContent = safeContent.replace(answerLineRegex, "").replace(/\n{3,}/g, "\n\n").trimEnd();
+  // Also strip any inline "Correct: [letter]" lines that appear within the question body
+  // Use a new RegExp each call to avoid `lastIndex` state issues with the `g` flag
+  const inlineCorrectRegex = new RegExp(
+    /^\s*(?:Correct\s*[:=-]\s*[A-D]|Q(?:uestion)?\s*\d+[\s:.)-]*(?:correct\s*[:=-]\s*)?[A-D])\b.*$/,
+    "gim",
+  );
+  safeContent = safeContent.replace(inlineCorrectRegex, "").replace(/\n{3,}/g, "\n\n").trimEnd();
 
   const questionCount = (rawContent.match(/^\s*\d+\./gm) ?? []).length;
 
   const isComplete = (() => {
     if (answerHeaderIndex < 0) return false;
     const answerSection = rawContent.slice(answerHeaderIndex);
-    const answerLines = answerSection.match(answerLineRegex) ?? [];
-    return answerLines.length > 0;
+    // Check that the answer section contains at least one answer line
+    const answerLineCheck = new RegExp(
+      /^\s*(?:Correct\s*[:=-]\s*[A-D]|Q(?:uestion)?\s*\d+[\s:.)-]*(?:correct\s*[:=-]\s*)?[A-D])\b.*$/,
+      "im",
+    );
+    return answerLineCheck.test(answerSection);
   })();
 
   return {

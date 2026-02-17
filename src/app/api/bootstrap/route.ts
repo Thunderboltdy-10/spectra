@@ -3,6 +3,12 @@ import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 
+const SUPER_ADMIN_EMAILS = (
+  process.env.SUPER_ADMIN_EMAILS ?? "pablo.martinez.dovale@gmail.com"
+)
+  .split(",")
+  .map((e) => e.trim());
+
 export async function GET() {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();
@@ -28,8 +34,11 @@ export async function GET() {
       }>,
     ]);
 
+    const isSuperAdmin = SUPER_ADMIN_EMAILS.includes(actor.email);
+
     return ok({
       actor,
+      isSuperAdmin,
       chats,
       models,
       orgSettings,

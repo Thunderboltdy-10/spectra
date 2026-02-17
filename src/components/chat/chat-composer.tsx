@@ -21,6 +21,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { SlashCommandMenu } from "@/components/chat/slash-command-menu";
 import { ALL_MODES, getModeConfig } from "@/lib/modes";
+import { getRecommendedModelsForMode } from "@/lib/model-config";
 import type { Agent } from "@/types";
 import type { AutoPreference, FileStatus, ModelOption } from "@/hooks/use-chat-state";
 import type { RouterMode, StudyMode } from "@/types";
@@ -47,8 +48,10 @@ type ChatComposerProps = {
   models: ModelOption[];
   routerMode: RouterMode;
   manualModel: string;
+  imageModel?: string;
   onSelectAuto: () => void;
   onSelectModel: (modelId: string) => void;
+  onSelectImageModel?: (modelId: string) => void;
   autoEnhancePrompt: AutoPreference;
   autoThinking: AutoPreference;
   autoSearch: AutoPreference;
@@ -157,6 +160,51 @@ function sortedByPopularity(models: ModelOption[]) {
   });
 }
 
+// Get models categorized for display in dropdown
+function getCategorizedModels(
+  models: ModelOption[],
+  mode: StudyMode,
+  modelSearch: string,
+): {
+  recommended: ModelOption[];
+  others: ModelOption[];
+} {
+  const sorted = sortedByPopularity(models);
+  
+  // If searching, return all matching models without categorization
+  const clean = modelSearch.trim();
+  if (clean) {
+    const normalized = normalizeModelSearch(clean);
+    const filtered = sorted.filter((model) => {
+      const haystack = normalizeModelSearch(`${model.name} ${model.modelId} ${model.provider}`);
+      const score = fuzzyScore(normalized, {
+        name: model.name,
+        modelId: model.modelId,
+        provider: model.provider,
+        description: model.description,
+      });
+      return haystack.includes(normalized) || score > 0.35;
+    });
+    return { recommended: filtered, others: [] };
+  }
+  
+  // Get recommended model IDs for this mode
+  const recommendedIds = new Set(getRecommendedModelsForMode(mode));
+  
+  const recommended: ModelOption[] = [];
+  const others: ModelOption[] = [];
+  
+  for (const model of sorted) {
+    if (recommendedIds.has(model.modelId)) {
+      recommended.push(model);
+    } else {
+      others.push(model);
+    }
+  }
+  
+  return { recommended, others };
+}
+
 function SettingPill({
   label,
   value,
@@ -201,8 +249,10 @@ export function ChatComposer({
   models,
   routerMode,
   manualModel,
+  imageModel,
   onSelectAuto,
   onSelectModel,
+  onSelectImageModel,
   autoEnhancePrompt,
   autoThinking,
   autoSearch,
@@ -232,32 +282,13 @@ export function ChatComposer({
     () => agents.find((agent) => agent._id === selectedAgentId),
     [agents, selectedAgentId],
   );
-  const displayedModels = useMemo(() => {
-    const clean = modelSearch.trim();
-    const normalized = normalizeModelSearch(clean);
-    const sorted = sortedByPopularity(models);
-    if (!normalized) return sorted;
-    return sorted
-      .map((model) => {
-        const haystack = normalizeModelSearch(`${model.name} ${model.modelId} ${model.provider}`);
-        const compactHaystack = haystack.replace(/\s+/g, "");
-        const compactNeedle = normalized.replace(/\s+/g, "");
-        const includes = haystack.includes(normalized) || compactHaystack.includes(compactNeedle);
-        const score = fuzzyScore(normalized, {
-          name: model.name,
-          modelId: model.modelId,
-          provider: model.provider,
-          description: model.description,
-        });
-        return { model, includes, score };
-      })
-      .filter((row) => row.includes || row.score > 0.35)
-      .sort((a, b) => {
-        if (a.includes !== b.includes) return a.includes ? -1 : 1;
-        return b.score - a.score;
-      })
-      .map((row) => row.model);
-  }, [modelSearch, models]);
+  
+  // Get categorized models for dropdown
+  const { recommended, others } = useMemo(
+    () => getCategorizedModels(models, mode, modelSearch),
+    [models, mode, modelSearch]
+  );
+  
   const selectorTriggerClass =
     "inline-flex cursor-pointer items-center gap-2 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]";
   const slashActive = message.trimStart().startsWith("/");
@@ -509,7 +540,7 @@ export function ChatComposer({
                   title={modeConfig.description}
                   className={selectorTriggerClass}
                 >
-                  <span className="inline-flex h-2.5 w-2.5 rounded-full" style={{ backgroundColor: modeConfig.color }} />
+                  <span className="inline-flex h-2.5 w-2.5 rounded-full" style={{ background: modeConfig.color }} />
                   <span>{modeConfig.label}</span>
                   <ChevronDown className="h-3.5 w-3.5" />
                 </button>
@@ -559,9 +590,9 @@ export function ChatComposer({
                 </button>
 
                 {showModelSelector && (
-                  <div className="absolute bottom-full left-1/2 z-20 mb-2 max-h-[420px] w-[min(92vw,30rem)] -translate-x-1/2 overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-soft)]">
+                  <div className="absolute bottom-full left-1/2 z-20 mb-2 max-h-[480px] w-[min(92vw,32rem)] -translate-x-1/2 overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-soft)]">
                     <div className="mb-2 flex items-center justify-between">
-                      <p className="text-sm font-semibold text-[var(--text-primary)]">Choose model</p>
+                      <p className="text-xs font-medium text-[var(--text-primary)]">Choose model</p>
                       <button
                         type="button"
                         onClick={() => setShowModelSelector(false)}
@@ -579,33 +610,103 @@ export function ChatComposer({
                           ref={modelSearchRef}
                           value={modelSearch}
                           onChange={(event) => setModelSearch(event.target.value)}
-                          placeholder="Search models"
+                          placeholder="Search models..."
                           className="h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] pl-8 pr-2 text-sm"
                         />
                       </div>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onSelectAuto();
-                        setShowModelSelector(false);
-                      }}
-                      className={`mb-1 flex w-full cursor-pointer items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition ${
-                        routerMode === "auto" || routerMode === "openrouter_auto"
-                          ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
-                          : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                      }`}
-                    >
-                      <span>Auto model routing</span>
-                      <ChevronDown className="h-3.5 w-3.5" />
-                    </button>
+                    <div className="max-h-[360px] overflow-y-auto pr-1">
+                      {/* Auto Router Option */}
+                      {!modelSearch.trim() && (
+                        <>
+                          <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+                            Auto Routing
+                          </p>
+                          
+                          {/* OpenRouter Premium Auto */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onSelectModel("openrouter/auto");
+                              setShowModelSelector(false);
+                            }}
+                            className={`mb-2 flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${
+                              routerMode === "manual" && manualModel === "openrouter/auto"
+                                ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
+                                : routerMode === "auto"
+                                  ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
+                                  : "hover:bg-[var(--bg-hover)]"
+                            }`}
+                          >
+                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--bg-secondary))]">
+                              <Sparkles className="h-4 w-4 text-[var(--accent-cyan)]" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-medium text-[var(--text-primary)]">Auto Routing</p>
+                              <p className="truncate text-[10px] text-[var(--text-secondary)]">Smart model selection based on your prompt</p>
+                            </div>
+                            {(routerMode === "auto" || (routerMode === "manual" && manualModel === "openrouter/auto")) && (
+                              <span className="shrink-0 rounded-full bg-[var(--accent-cyan)] px-1.5 py-0.5 text-[10px] font-medium text-white">
+                                Active
+                              </span>
+                            )}
+                          </button>
+                        </>
+                      )}
 
-                    <div className="max-h-[300px] overflow-y-auto pr-1">
-                      {displayedModels.map((model) => {
+                      {/* Recommended Models */}
+                      {!modelSearch.trim() && recommended.length > 0 && (
+                        <>
+                          <p className="mb-1 mt-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+                            Recommended for {modeConfig.label}
+                          </p>
+                          {recommended.map((model) => {
+                            const displayName = cleanModelDisplayText(model.name) || formatModelLabel(model.modelId);
+                            const isSelected = routerMode === "manual" && manualModel === model.modelId;
+
+                            return (
+                              <button
+                                key={model.modelId}
+                                type="button"
+                                onClick={() => {
+                                  onSelectModel(model.modelId);
+                                  setShowModelSelector(false);
+                                }}
+                                className={`mb-0.5 flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-left transition ${
+                                  isSelected
+                                    ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
+                                    : "hover:bg-[var(--bg-hover)]"
+                                }`}
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-sm font-medium text-[var(--text-primary)]">{displayName}</p>
+                                  <p className="truncate text-[10px] text-[var(--text-secondary)]">
+                                    {model.provider}
+                                    {model.contextLength ? ` · ${Math.round((model.contextLength ?? 0) / 1000)}k ctx` : ""}
+                                    {model.isFree
+                                      ? " · Free"
+                                      : model.inputCostPerM != null
+                                        ? ` · $${model.inputCostPerM.toFixed(2)}/$${(model.outputCostPerM ?? 0).toFixed(2)}`
+                                        : ""}
+                                  </p>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </>
+                      )}
+
+                      {/* All Other Models */}
+                      {!modelSearch.trim() && (
+                        <p className="mb-1 mt-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+                          All Models
+                        </p>
+                      )}
+                      
+                      {others.map((model) => {
                         const displayName = cleanModelDisplayText(model.name) || formatModelLabel(model.modelId);
                         const isSelected = routerMode === "manual" && manualModel === model.modelId;
-                        const displayModelId = cleanModelDisplayText(model.modelId);
 
                         return (
                           <button
@@ -615,25 +716,38 @@ export function ChatComposer({
                               onSelectModel(model.modelId);
                               setShowModelSelector(false);
                             }}
-                            className={`mb-1 flex w-full cursor-pointer items-start justify-between gap-3 rounded-lg px-3 py-2.5 text-left transition ${
+                            className={`mb-0.5 flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-left transition ${
                               isSelected
                                 ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
                                 : "hover:bg-[var(--bg-hover)]"
                             }`}
                           >
-                            <div className="min-w-0">
-                              <p className="truncate text-base font-semibold text-[var(--text-primary)]">{displayName}</p>
-                              <p className="truncate text-[11px] text-[var(--text-secondary)]">{model.provider}</p>
-                              <p className="truncate text-[10px] text-[var(--text-secondary)]">{displayModelId}</p>
-                            </div>
-                            <div className="shrink-0 text-right text-[10px] text-[var(--text-secondary)]">
-                              <p>Ctx {formatNumberCompact(model.contextLength)}</p>
-                              <p>In {formatModelCost(model.inputCostPerM, model.isFree)}</p>
-                              <p>Out {formatModelCost(model.outputCostPerM, model.isFree)}</p>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-medium text-[var(--text-primary)]">{displayName}</p>
+                              <p className="truncate text-[10px] text-[var(--text-secondary)]">
+                                {model.provider}
+                                {model.contextLength ? ` · ${Math.round((model.contextLength ?? 0) / 1000)}k ctx` : ""}
+                                {model.isFree
+                                  ? " · Free"
+                                  : model.inputCostPerM != null
+                                    ? ` · $${model.inputCostPerM.toFixed(2)}/$${(model.outputCostPerM ?? 0).toFixed(2)}`
+                                    : ""}
+                              </p>
                             </div>
                           </button>
                         );
                       })}
+
+                      {/* Search Results */}
+                      {modelSearch.trim() && (
+                        <>
+                          {recommended.length === 0 && others.length === 0 && (
+                            <p className="px-3 py-4 text-center text-sm text-[var(--text-secondary)]">
+                              No models found
+                            </p>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
                 )}

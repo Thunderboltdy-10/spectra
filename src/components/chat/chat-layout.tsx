@@ -177,6 +177,8 @@ export function ChatLayout() {
     onToggleCollapse: () => chat.setSidebarOpen((prev) => !prev),
     orgName: chat.orgName,
     orgLogoUrl: chat.orgLogoUrl,
+    activeStreamIds: chat.activeStreamIds,
+    hasDraft: chat.hasDraft,
   };
 
   return (
@@ -239,6 +241,7 @@ export function ChatLayout() {
           hasRealThinking={chat.hasRealThinking}
           sending={chat.sending}
           streamError={chat.streamError}
+          chatId={chat.selectedChatId}
           onRetry={() => void chat.retryLastMessage()}
           onSubmitQuizAnswers={(payload) => {
             void chat.submitQuizAnswers(payload);
@@ -251,6 +254,16 @@ export function ChatLayout() {
               cardHash: payload.cardHash,
               quality: payload.quality,
             });
+          }}
+          onFollowUp={(followUpMessage) => {
+            void chat.sendMessage(followUpMessage, {
+              chatIdOverride: chat.selectedChatId || undefined,
+              skipLocalUser: false,
+              retryAttempt: 0,
+            });
+          }}
+          onModeChange={(newMode) => {
+            handleModeChange(newMode as StudyMode);
           }}
           onRegenerate={handleRegenerateLastResponse}
           onRegenerateWithModel={handleRegenerateWithModel}
@@ -338,6 +351,8 @@ export function ChatLayout() {
             void chat.updateExistingChatSettings({ routerMode: "manual", manualModel: modelId })
               .catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Failed to update model"));
           }}
+          imageModel={chat.imageModel}
+          onSelectImageModel={chat.setImageModel}
           autoEnhancePrompt={chat.autoEnhancePrompt}
           autoThinking={chat.autoThinking}
           autoSearch={chat.autoSearch}

@@ -3,6 +3,12 @@ import { getAdminEmails } from "@/lib/env";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import type { Role } from "@/types";
 
+const SUPER_ADMIN_EMAILS = (
+  process.env.SUPER_ADMIN_EMAILS ?? "pablo.martinez.dovale@gmail.com"
+)
+  .split(",")
+  .map((e) => e.trim());
+
 export type SessionActor = {
   clerkId: string;
   email: string;
@@ -124,4 +130,12 @@ export async function requireActor(): Promise<SessionActor> {
     name,
     bootstrapAdmin,
   });
+}
+
+export async function requireSuperAdmin(): Promise<SessionActor> {
+  const actor = await requireActor();
+  if (!SUPER_ADMIN_EMAILS.includes(actor.email)) {
+    throw new Error("Super admin access required");
+  }
+  return actor;
 }

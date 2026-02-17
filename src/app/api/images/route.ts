@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireActor } from "@/lib/auth-server";
-import { convexMutation, convexQuery } from "@/lib/convex-server";
+import { convexMutation, convexQuery, convexAction } from "@/lib/convex-server";
 import { openRouterGenerateImage } from "@/lib/openrouter";
 import { IMAGE_GEN_FALLBACKS, MODEL_CONFIG } from "@/lib/model-config";
 
 export async function GET() {
   const actor = await requireActor();
-  const images = await convexQuery("images:listGeneratedImages", {
+  const result = await convexQuery("images:listGeneratedImages", {
     actorClerkId: actor.clerkId,
     limit: 100,
-  });
+  }) as { images: unknown[] };
 
-  return NextResponse.json({ images });
+  return NextResponse.json({ images: result.images ?? [] });
 }
 
 export async function POST(request: NextRequest) {
@@ -36,17 +36,28 @@ export async function POST(request: NextRequest) {
     const imageUrl = generated.imageUrl;
     const modelUsed = generated.modelUsed;
 
-    if (body.chatId) {
-      await convexMutation("images:saveGeneratedImage", {
+    let servingUrl: string;
+
+    // Store image in Convex storage if it's a base64 data URL.
+    // CRITICAL: never fall back to returning raw base64 - it would exceed
+    // Convex's 1MB per-document limit when stored in messages.
+    if (body.chatId && imageUrl.startsWith("data:")) {
+      const storeResult = await convexAction("images:storeImageBlob", {
         actorClerkId: actor.clerkId,
         chatId: body.chatId,
+        base64Data: imageUrl,
+        mimeType: "image/png",
         prompt: body.prompt.trim(),
-        imageUrl,
         model: modelUsed,
-      }).catch(() => {});
+        size: "1024x1024",
+      }) as { servingUrl: string };
+      servingUrl = storeResult.servingUrl;
+    } else {
+      // Already an external URL (not base64), safe to use directly
+      servingUrl = imageUrl;
     }
 
-    return NextResponse.json({ imageUrl, prompt: body.prompt.trim(), modelUsed });
+    return NextResponse.json({ imageUrl: servingUrl, prompt: body.prompt.trim(), modelUsed });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Image generation failed";
     const isModelError = /not found|unavailable|not supported|invalid model/i.test(message);

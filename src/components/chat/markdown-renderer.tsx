@@ -8,7 +8,7 @@ import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
 import { Check, Copy, ExternalLink } from "lucide-react";
 
-import { QuizReveal, isQuizContent } from "@/components/chat/quiz-reveal";
+import { QuizReveal, isQuizContent, type QuizSubmitResult } from "@/components/chat/quiz-reveal";
 import { FlashcardReveal, isFlashcardContent } from "@/components/chat/flashcard-reveal";
 import { ImageReveal } from "@/components/chat/image-reveal";
 import type { Citation } from "@/types";
@@ -18,8 +18,10 @@ type MarkdownRendererProps = {
   content: string;
   citations?: Citation[];
   mode?: StudyMode;
+  chatId?: string;
   onOpenCanvas?: (params: { code: string; language: string }) => void;
   onCitationClick?: (index: number) => void;
+  onSubmitQuizAnswers?: (result: QuizSubmitResult) => void;
 };
 
 type CodeBlockProps = {
@@ -110,12 +112,12 @@ function extractImagePayload(content: string) {
   const src = imageMatch[2]?.trim();
   if (!src) return null;
 
-  const promptMatch = content.match(/(?:^|\n)Prompt:\s*(.+)$/im);
+  const promptMatch = content.match(/(?:^|\n)\*{0,2}Prompt:\*{0,2}\s*(.+)$/im);
   const prompt = promptMatch?.[1]?.trim();
   return { src, alt, prompt };
 }
 
-export function MarkdownRenderer({ content, citations = [], mode, onOpenCanvas, onCitationClick }: MarkdownRendererProps) {
+export function MarkdownRenderer({ content, citations = [], mode, chatId, onOpenCanvas, onCitationClick, onSubmitQuizAnswers }: MarkdownRendererProps) {
   const cleanContent = useMemo(() => {
     if (citations.length === 0) {
       return content.replace(/\n{3,}/g, "\n\n").trim();
@@ -164,7 +166,7 @@ export function MarkdownRenderer({ content, citations = [], mode, onOpenCanvas, 
 
   // Pure mode rendering for full-content matches
   if (isQuizMode && isQuizContent(cleanContent)) {
-    return <QuizReveal content={cleanContent} />;
+    return <QuizReveal content={cleanContent} chatId={chatId} onSubmitAnswers={onSubmitQuizAnswers} />;
   }
   if (mode === "flashcard" && isFlashcardContent(cleanContent)) {
     return <FlashcardReveal content={cleanContent} />;
@@ -198,7 +200,7 @@ export function MarkdownRenderer({ content, citations = [], mode, onOpenCanvas, 
                 {textPart}
               </ReactMarkdown>
             </div>
-            {isQuizMode ? <QuizReveal content={structuredPart} /> : <FlashcardReveal content={structuredPart} />}
+            {isQuizMode ? <QuizReveal content={structuredPart} chatId={chatId} onSubmitAnswers={onSubmitQuizAnswers} /> : <FlashcardReveal content={structuredPart} />}
           </div>
         );
       }
@@ -258,6 +260,14 @@ export function MarkdownRenderer({ content, citations = [], mode, onOpenCanvas, 
               <table {...props} />
             </div>
           ),
+          img: ({ src: imgSrc, alt: imgAlt }) => {
+            const srcStr = typeof imgSrc === "string" ? imgSrc : "";
+            if (!srcStr || srcStr.trim() === "") return null;
+            if (srcStr.startsWith("http") || srcStr.startsWith("data:")) {
+              return <ImageReveal src={srcStr} alt={typeof imgAlt === "string" ? imgAlt : undefined} />;
+            }
+            return null;
+          },
           code: ({ className, children, ...props }) => {
             const codeText = normalizeCode(children);
             const isInline = !className?.includes("language-") && !codeText.includes("\n");

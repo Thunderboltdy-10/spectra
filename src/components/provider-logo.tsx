@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import {
   siAlibabacloud,
   siAnthropic,
@@ -47,22 +47,46 @@ const CUSTOM_ICONS: Record<string, IconLike> = {
     title: "Qwen",
     path: "M12 4a8 8 0 1 1-4.92 14.3L4 21.38 2.62 20l3.07-3.08A8 8 0 0 1 12 4Zm0 2.1A5.9 5.9 0 1 0 12 17.9a5.9 5.9 0 0 0 0-11.8Z",
   },
+  nous: {
+    title: "Nous Research",
+    path: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3a2 2 0 110 4 2 2 0 010-4zm-3 6h6v2H9v-2zm0 3h6v2H9v-2z",
+  },
+  together: {
+    title: "Together AI",
+    path: "M4 4h4v4H4V4zm6 0h4v4h-4V4zm6 0h4v4h-4V4zM7 10h4v4H7v-4zm6 0h4v4h-4v-4zM4 16h4v4H4v-4zm6 0h4v4h-4v-4zm6 0h4v4h-4v-4z",
+  },
+  fireworks: {
+    title: "Fireworks AI",
+    path: "M12 2L9.5 8.5 3 7l4.5 5L3 17l6.5-1.5L12 22l2.5-6.5L21 17l-4.5-5L21 7l-6.5 1.5L12 2z",
+  },
+  ai21: {
+    title: "AI21 Labs",
+    path: "M3 4h3v16H3V4zm5 4h3v12H8V8zm5-2h3v14h-3V6zm5 6h3v8h-3v-8z",
+  },
 };
 
+const iconCache = new Map<string, IconLike | null>();
+
 function pickIcon(key: string): IconLike | null {
-  if (key === "anthropic") return { ...siAnthropic, title: siAnthropic.title };
-  if (key === "google") return { ...siGoogle, title: siGoogle.title };
-  if (key === "meta") return { ...siMeta, title: siMeta.title };
-  if (key === "perplexity") return { ...siPerplexity, title: siPerplexity.title };
-  if (key === "mistral") return { ...siMistralai, title: siMistralai.title };
-  if (key === "openrouter") return { ...siOpenrouter, title: siOpenrouter.title };
-  if (key === "databricks") return { ...siDatabricks, title: siDatabricks.title };
-  if (key === "qwen") return { ...siAlibabacloud, title: "Alibaba Cloud" };
-  if (CUSTOM_ICONS[key]) return CUSTOM_ICONS[key]!;
-  return null;
+  const cached = iconCache.get(key);
+  if (cached !== undefined) return cached;
+
+  let result: IconLike | null = null;
+  if (key === "anthropic") result = { ...siAnthropic, title: siAnthropic.title };
+  else if (key === "google") result = { ...siGoogle, title: siGoogle.title };
+  else if (key === "meta") result = { ...siMeta, title: siMeta.title };
+  else if (key === "perplexity") result = { ...siPerplexity, title: siPerplexity.title };
+  else if (key === "mistral") result = { ...siMistralai, title: siMistralai.title };
+  else if (key === "openrouter") result = { ...siOpenrouter, title: siOpenrouter.title };
+  else if (key === "databricks") result = { ...siDatabricks, title: siDatabricks.title };
+  else if (key === "qwen") result = { ...siAlibabacloud, title: "Alibaba Cloud" };
+  else if (CUSTOM_ICONS[key]) result = CUSTOM_ICONS[key]!;
+
+  iconCache.set(key, result);
+  return result;
 }
 
-export function ProviderLogo({ provider, modelId, className }: ProviderLogoProps) {
+export const ProviderLogo = memo(function ProviderLogo({ provider, modelId, className }: ProviderLogoProps) {
   const preset = getProviderPresentation(modelId, provider);
   const icon = pickIcon(preset.key);
   const [isDark, setIsDark] = useState(false);
@@ -107,4 +131,4 @@ export function ProviderLogo({ provider, modelId, className }: ProviderLogoProps
       {preset.initial}
     </span>
   );
-}
+});

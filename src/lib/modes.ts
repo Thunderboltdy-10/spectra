@@ -10,6 +10,14 @@ export type ModeConfig = {
 };
 
 export const MODE_REGISTRY: Record<StudyMode, ModeConfig> = {
+  auto: {
+    key: "auto",
+    label: "Auto",
+    icon: "Sparkles",
+    color: "linear-gradient(135deg, #3b82f6, #8b5cf6, #ec4899)",
+    cssVar: "var(--accent-cyan)",
+    description: "AI automatically selects the best mode for your message",
+  },
   tutor: {
     key: "tutor",
     label: "Learn",

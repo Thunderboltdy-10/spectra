@@ -13,13 +13,17 @@ import {
   ChevronLeft,
   ChevronRight,
   Compass,
+  FileText,
   ImagePlus,
   LayoutDashboard,
+  Loader2,
   Pencil,
   Pin,
   Plus,
+  School,
   Search,
   Settings2,
+  Shield,
   Sparkles,
   Trash2,
   UserRound,
@@ -59,10 +63,13 @@ type ChatSidebarProps = {
   onPinChat?: (chatId: string) => void;
   pinnedChatIds?: Set<string>;
   role: "student" | "teacher" | "admin";
+  isSuperAdmin?: boolean;
   userSpending: UserSpending | null;
   userMemorySummary?: string;
   orgName?: string;
   orgLogoUrl?: string;
+  activeStreamIds?: Set<string>;
+  hasDraft?: (chatId: string) => boolean;
 };
 
 function toGroupHeading(ts: number) {
@@ -124,10 +131,13 @@ export function ChatSidebar({
   onPinChat,
   pinnedChatIds,
   role,
+  isSuperAdmin = false,
   userSpending,
   userMemorySummary,
   orgName,
   orgLogoUrl,
+  activeStreamIds,
+  hasDraft,
 }: ChatSidebarProps) {
   const pathname = usePathname();
   const { user } = useUser();
@@ -153,13 +163,15 @@ export function ChatSidebar({
     { href: "/images", label: "Images", icon: ImagePlus },
     { href: "/analytics", label: "Analytics", icon: BarChart3 },
     ...(role === "admin" ? [{ href: "/admin", label: "Admin", icon: LayoutDashboard }] : []),
+    ...(role === "admin" ? [{ href: "/admin/school", label: "School Admin", icon: School }] : []),
+    ...(isSuperAdmin ? [{ href: "/super-admin", label: "Super Admin", icon: Shield }] : []),
   ];
 
   if (collapsed) {
     return (
       <div className="chat-sidebar flex h-full flex-col border-r border-[var(--border-default)] px-2 py-3">
         <div className="mb-4 flex items-center justify-between">
-          {orgLogoUrl ? (
+          {orgLogoUrl && orgLogoUrl.trim() ? (
             <Image src={orgLogoUrl} alt={orgName ?? "Org"} width={32} height={32} className="h-8 w-8 rounded-xl object-cover" />
           ) : (
             <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--gradient-brand)] text-white">
@@ -205,7 +217,7 @@ export function ChatSidebar({
   return (
     <div className="chat-sidebar flex h-full flex-col border-r border-[var(--border-default)] p-3">
       <div className="mb-3 flex items-center gap-2.5">
-        {orgLogoUrl ? (
+        {orgLogoUrl && orgLogoUrl.trim() ? (
           <Image
             src={orgLogoUrl}
             alt={orgName ?? "Org"}
@@ -228,7 +240,7 @@ export function ChatSidebar({
       </div>
 
       <div className="mb-3 space-y-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5">
-        {navItems.map((item) => {
+                {navItems.map((item) => {
           const Icon = item.icon;
           const active = pathname === item.href;
           return (
@@ -236,6 +248,9 @@ export function ChatSidebar({
               key={item.href}
               href={item.href}
               title={item.label}
+              onClick={() => {
+                // navigation handled by Link
+              }}
               className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition ${
                 active
                   ? "bg-[var(--bg-primary)] text-[var(--text-primary)]"
@@ -273,8 +288,11 @@ export function ChatSidebar({
             <div className="space-y-1">
               {pinned.map((chat) => {
                 const active = selectedChatId === chat._id;
-                const promptPreview = (chat.latestUserPrompt || chat.title || "New chat").trim();
+                // Show AI-generated title as primary, fallback to user prompt or "New chat"
+                const promptPreview = chat.title || chat.latestUserPrompt || "New chat";
                 const chatModeConfig = getModeConfig(chat.mode);
+                const isStreaming = activeStreamIds?.has(chat._id);
+                const hasDraftIndicator = hasDraft?.(chat._id);
                 return (
                   <button
                     key={chat._id}
@@ -287,8 +305,13 @@ export function ChatSidebar({
                     }`}
                   >
                     <div className="flex items-center gap-1.5">
-                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: chatModeConfig.color }} />
+                      {isStreaming ? (
+                        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--accent-cyan)]" />
+                      ) : (
+                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: chatModeConfig.color }} />
+                      )}
                       <p className="truncate text-sm font-medium">{promptPreview}</p>
+                      {hasDraftIndicator && !isStreaming && <FileText className="h-3 w-3 shrink-0 text-[var(--text-tertiary)]" />}
                     </div>
                   </button>
                 );
@@ -311,12 +334,12 @@ export function ChatSidebar({
               <div className="space-y-1">
                 {group.chats.map((chat) => {
                   const active = selectedChatId === chat._id;
-                  const promptPreview = (chat.latestUserPrompt || chat.title || "New chat").trim();
-                  const secondaryLine =
-                    chat.latestUserPrompt && chat.title && chat.latestUserPrompt !== chat.title
-                      ? chat.title
-                      : formatDistanceToNow(chat.updatedAt, { addSuffix: true });
+                  // Show AI-generated title as primary, fallback to user prompt or "New chat"
+                  const promptPreview = chat.title || chat.latestUserPrompt || "New chat";
+                  const secondaryLine = formatDistanceToNow(chat.updatedAt, { addSuffix: true });
                   const chatModeConfig = getModeConfig(chat.mode);
+                  const isStreaming = activeStreamIds?.has(chat._id);
+                  const hasDraftIndicator = hasDraft?.(chat._id);
                   return (
                     <div key={chat._id} className="group relative">
                       <button
@@ -347,13 +370,25 @@ export function ChatSidebar({
                         ) : (
                           <>
                             <div className="flex items-center gap-1.5">
-                              <span
-                                className="h-2 w-2 shrink-0 rounded-full"
-                                style={{ backgroundColor: chatModeConfig.color }}
-                              />
+                              {isStreaming ? (
+                                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--accent-cyan)]" />
+                              ) : (
+                                <span
+                                  className="h-2 w-2 shrink-0 rounded-full"
+                                  style={{ background: chatModeConfig.color }}
+                                />
+                              )}
                               <p className="truncate text-sm font-medium">{promptPreview}</p>
+                              {hasDraftIndicator && !isStreaming && <FileText className="h-3 w-3 shrink-0 text-[var(--text-tertiary)]" />}
                             </div>
-                            <p className="truncate pl-3.5 text-xs text-[var(--text-secondary)]">{secondaryLine}</p>
+                            <p className="truncate pl-3.5 text-xs text-[var(--text-secondary)]">
+                              {isStreaming ? (
+                                <span className="text-[var(--accent-cyan)]">Generating...</span>
+                              ) : (
+                                secondaryLine
+                              )}
+                              {hasDraftIndicator && !isStreaming && <span className="ml-1.5 text-[var(--text-tertiary)]">Draft</span>}
+                            </p>
                           </>
                         )}
                       </button>
@@ -362,7 +397,7 @@ export function ChatSidebar({
                           {onPinChat && (
                             <button
                               type="button"
-                              className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
+                              className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
                               onClick={() => onPinChat(chat._id)}
                               aria-label="Pin chat"
                             >
@@ -371,7 +406,7 @@ export function ChatSidebar({
                           )}
                           <button
                             type="button"
-                            className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
+                            className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
                             onClick={() => {
                               setEditingChatId(chat._id);
                               setEditingValue(chat.title);
@@ -382,7 +417,7 @@ export function ChatSidebar({
                           </button>
                           <button
                             type="button"
-                            className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
+                            className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
                             onClick={() => onDeleteChat(chat._id)}
                             aria-label="Delete"
                           >
@@ -408,20 +443,27 @@ export function ChatSidebar({
 
         <div className="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
           <span>Usage</span>
-          <span>{spendingTier}</span>
+          <span>{spentCents > 0 ? `$${(spentCents / 100).toFixed(2)}` : spendingTier}</span>
         </div>
         <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
           <div
-            className="h-full rounded-full bg-[var(--gradient-brand)] transition-all"
-            style={{ width: `${Math.max(2, spendRatio * 100)}%` }}
+            className="h-full min-w-[3px] rounded-full transition-all"
+            style={{
+              width: `${Math.max(spentCents > 0 ? 3 : 0, spendRatio * 100)}%`,
+              background: "var(--gradient-brand)",
+            }}
           />
         </div>
-        <p className="mb-3 text-[11px] text-[var(--text-secondary)]">Monthly budget indicator</p>
+        <p className="mb-3 text-[11px] text-[var(--text-secondary)]">
+          {spentCents > 0
+            ? `$${(spentCents / 100).toFixed(2)} of $${(MONTHLY_HARD_LIMIT_CENTS / 100).toFixed(0)} monthly`
+            : "Monthly budget indicator"}
+        </p>
 
         <div className="flex items-center gap-2.5">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button type="button" className="rounded-full">
+              <button type="button" className="cursor-pointer rounded-full">
                 <Avatar>
                   <AvatarImage src={user?.imageUrl} alt={user?.fullName ?? "User"} />
                   <AvatarFallback>{initials(user?.fullName || user?.firstName || "User")}</AvatarFallback>

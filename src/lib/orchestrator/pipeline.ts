@@ -13,7 +13,7 @@ import {
   toOpenRouterMessages,
 } from "@/lib/orchestrator/compose";
 import { IMAGE_GEN_FALLBACKS, MODEL_CONFIG } from "@/lib/model-config";
-import { classifyExplainDepth, runAutoSettingsPipeline } from "@/lib/auto-settings";
+import { classifyExplainDepth, runAutoSettingsPipeline, suggestMode } from "@/lib/auto-settings";
 import { safeStudyMode } from "@/lib/contracts/studyModes";
 import { createRequestLogger } from "@/lib/logging";
 import { normalizeAttachments } from "@/lib/attachments/normalizer";
@@ -27,6 +27,7 @@ import {
   maybeGenerateTitleFromUserPrompt,
   rewriteCitationMarkers,
   shouldInjectMemory,
+  stripOrphanCitations,
 } from "@/lib/orchestrator/post-process";
 import { buildResearchEvidenceBlock, maybeSearchWeb, runRagRetrieval } from "@/lib/orchestrator/retrieval";
 import { runAssistantStreaming, runCollaborativeStreaming } from "@/lib/orchestrator/streaming";
@@ -43,6 +44,7 @@ type ChatRequestBody = {
   routerMode: "auto" | "manual" | "openrouter_auto";
   manualModel?: string;
   forcedModel?: string;
+  imageModel?: string;
   usePersonalResources: boolean;
   regenerate?: boolean;
   retryAttempt?: number;
@@ -79,6 +81,7 @@ type StructuredError = {
 };
 
 const MODE_MAX_TOKENS: Record<StudyMode, number> = {
+  auto: 3072,
   research: 4096,
   exam: 4096,
   marker: 3072,
@@ -244,12 +247,31 @@ export async function runChatPipeline(request: NextRequest) {
     complexity: auto.complexity,
   });
 
-  // Auto mode selection: if user is in a default mode, auto-detect from message
-  const effectiveMode = (
-    auto.suggestedMode &&
-    (safeMode === "tutor" || safeMode === "general") &&
-    safeMode !== auto.suggestedMode
-  ) ? (auto.suggestedMode as typeof safeMode) : safeMode;
+  // Auto mode selection: if user selected "auto", always use suggested mode;
+  // also auto-detect from default modes.
+  // NOTE: effectiveMode is a `let` so that conversation-aware mode refinement
+  // (applied after history is fetched) can override it when necessary.
+  let effectiveMode: StudyMode = (() => {
+    if (safeMode === "auto") {
+      return (auto.suggestedMode ?? "general") as StudyMode;
+    }
+    // Even in manual modes, detect severe conflicts
+    if (auto.suggestedMode && safeMode !== auto.suggestedMode) {
+      const isSevereConflict = (
+        (auto.suggestedMode === "image" && safeMode !== "image") ||
+        (auto.suggestedMode === "quiz" && !["quiz", "exam"].includes(safeMode)) ||
+        (safeMode === "quiz" && auto.suggestedMode === "image")
+      );
+      if (isSevereConflict) {
+        return auto.suggestedMode as StudyMode;
+      }
+      // Soft suggestion for default modes
+      if (safeMode === "tutor" || safeMode === "general") {
+        return auto.suggestedMode as StudyMode;
+      }
+    }
+    return safeMode;
+  })();
 
   // Research mode always enables search
   if (effectiveMode === "research") {
@@ -353,6 +375,41 @@ export async function runChatPipeline(request: NextRequest) {
   const history = toChatMessageShape(chatData.messages);
   const isFirstAssistantTurn = history.every((message) => message.role !== "assistant");
   const attemptStats = extractAttemptStats(history);
+
+  // Conversation-aware mode refinement: now that we have history, run suggestMode
+  // again with full context and optionally override the initial effectiveMode.
+  // Only applies when in auto mode or soft-switchable modes (tutor/general).
+  if (safeMode === "auto" || safeMode === "tutor" || safeMode === "general") {
+    const conversationHistory = history.map((msg) => ({
+      role: msg.role,
+      content: msg.content,
+      mode: msg.mode as string | undefined,
+    }));
+    const conversationSuggestedMode = suggestMode(normalizedMessage, conversationHistory);
+    if (conversationSuggestedMode && conversationSuggestedMode !== effectiveMode) {
+      const refined = conversationSuggestedMode as StudyMode;
+      logger.info("conversation-aware mode refinement", {
+        from: effectiveMode,
+        to: refined,
+        safeMode,
+      });
+      effectiveMode = refined;
+      // Keep auto.suggestedMode updated so done-event metadata is consistent
+      auto.suggestedMode = conversationSuggestedMode;
+      // Research mode always enables search
+      if (effectiveMode === "research") {
+        auto.searchEnabled = true;
+      }
+    }
+  }
+
+  // Vague request detection for quiz/flashcard modes.
+  // When a request is ambiguous (no topic specified), skip format-repair so the
+  // model can ask a clarifying question instead of generating empty/wrong content.
+  const isVagueRequest =
+    (effectiveMode === "quiz" || effectiveMode === "flashcard") &&
+    normalizedMessage.split(/\s+/).length < 4 &&
+    !/\b(about|on|for|regarding|the|topic)\b/i.test(normalizedMessage);
 
   const existingSummary =
     typeof chatData.chat.contextSummary === "string" && chatData.chat.contextSummary.trim().length > 0
@@ -711,7 +768,12 @@ export async function runChatPipeline(request: NextRequest) {
     shouldVerify,
     multiAgentEnabled,
   });
-  const maxTokens = MODE_MAX_TOKENS[effectiveMode] ?? 2048;
+
+  // Lower token budget for vague quiz/flashcard requests - the model only needs
+  // a short clarifying question, not a full quiz or flashcard deck.
+  const maxTokens = isVagueRequest
+    ? Math.min(512, MODE_MAX_TOKENS[effectiveMode] ?? 2048)
+    : (MODE_MAX_TOKENS[effectiveMode] ?? 2048);
   const earlyTitlePromise = isFirstAssistantTurn
     ? maybeGenerateTitleFromUserPrompt({
         chatId,
@@ -737,6 +799,7 @@ export async function runChatPipeline(request: NextRequest) {
         void send({
           type: "chat_title",
           chatTitle: title,
+          chatId,
         });
       });
 
@@ -761,8 +824,9 @@ export async function runChatPipeline(request: NextRequest) {
           promptRefinement?.choices?.[0]?.message?.content?.trim() || auto.message;
 
         route.trace.toolchain.push("image_generation");
+        const selectedImageModel = body.imageModel || MODEL_CONFIG.imageGen;
         const imageResult = await openRouterGenerateImage({
-          model: MODEL_CONFIG.imageGen,
+          model: selectedImageModel,
           fallbackModels: [...IMAGE_GEN_FALLBACKS],
           prompt: refinedPrompt,
           size: "1024x1024",
@@ -773,15 +837,28 @@ export async function runChatPipeline(request: NextRequest) {
         const imageUrl = imageResult.imageUrl;
         const imageModel = imageResult.modelUsed;
 
-        await convexMutation("images:saveGeneratedImage", {
-          actorClerkId: actor.clerkId,
-          chatId,
-          prompt: refinedPrompt,
-          imageUrl,
-          model: imageModel,
-        }).catch(() => {});
+        // Store image in Convex storage to avoid 1MB document limit.
+        // CRITICAL: never fall back to embedding raw base64 in message content
+        // because that would exceed Convex's 1MB per-document limit.
+        let servingUrl: string;
+        if (imageUrl.startsWith("data:")) {
+          // Must go through Convex _storage - no base64 fallback allowed
+          const storeResult = await convexAction("images:storeImageBlob", {
+            actorClerkId: actor.clerkId,
+            chatId,
+            base64Data: imageUrl,
+            mimeType: "image/png",
+            prompt: refinedPrompt,
+            model: imageModel,
+            size: "1024x1024",
+          }) as { servingUrl: string };
+          servingUrl = storeResult.servingUrl;
+        } else {
+          // Already an external URL (not base64), safe to use directly
+          servingUrl = imageUrl;
+        }
 
-        const finalizedResponse = `![Generated image](${imageUrl})\n\nPrompt: ${refinedPrompt}`;
+        const finalizedResponse = `![Generated image](${servingUrl})\n\n**Prompt:** ${refinedPrompt}`;
         const whyThisResponse = summarizeWhyResponse(effectiveMode, route.reason);
         const modelRequested = primaryModel;
         const modelUsed = imageModel;
@@ -818,6 +895,11 @@ export async function runChatPipeline(request: NextRequest) {
         })) as { messageId: string };
         assistantPersisted = true;
 
+        const pricing = (await convexQuery("models:getModelPricing", {
+          actorClerkId: actor.clerkId,
+          modelId: modelUsed,
+        })) as { inputCostPerM?: number; outputCostPerM?: number; isFree?: boolean };
+
         await convexMutation("usage:recordUsageWithCost", {
           actorClerkId: actor.clerkId,
           chatId,
@@ -825,8 +907,8 @@ export async function runChatPipeline(request: NextRequest) {
           model: modelUsed,
           inputTokens: usageIn,
           outputTokens: usageOut,
-          inputCostPerM: 0,
-          outputCostPerM: 0,
+          inputCostPerM: pricing.inputCostPerM,
+          outputCostPerM: pricing.outputCostPerM,
         }).catch(() => {});
 
         const spendingUpdate = (await convexQuery("usage:checkUserBudget", {
@@ -894,6 +976,10 @@ export async function runChatPipeline(request: NextRequest) {
           },
           enhancedPrompt: auto.promptEnhanced ? auto.message : undefined,
           chatTitle: generatedTitle,
+          // Mode metadata: always include effective/suggested/userSelected for client tracking
+          effectiveMode,
+          suggestedMode: safeMode !== effectiveMode ? effectiveMode : undefined,
+          userSelectedMode: safeMode,
           agent:
             selectedAgent && selectedAgent._id
               ? {
@@ -954,10 +1040,17 @@ export async function runChatPipeline(request: NextRequest) {
           ? responseText
           : `${responseText}\n\nPolicy correction: citation and study-mode structure tightened to match requirements.`;
 
+      // isVagueRequest is computed in the outer scope before streaming begins.
+      // When true, skip format-repair so the model's clarification question is preserved.
+
       const quizCount = countQuizQuestions(correctedResponse);
       const flashcardCount = countFlashcards(correctedResponse);
-      const needsQuizRepair = effectiveMode === "quiz" && (!isQuizStructured(correctedResponse) || quizCount < MIN_QUIZ_QUESTIONS);
+      const needsQuizRepair =
+        !isVagueRequest &&
+        effectiveMode === "quiz" &&
+        (!isQuizStructured(correctedResponse) || quizCount < MIN_QUIZ_QUESTIONS);
       const needsFlashcardRepair =
+        !isVagueRequest &&
         effectiveMode === "flashcard" &&
         (!isFlashcardStructured(correctedResponse) || flashcardCount < MIN_FLASHCARD_PAIRS);
       if (needsQuizRepair || needsFlashcardRepair) {
@@ -969,8 +1062,8 @@ export async function runChatPipeline(request: NextRequest) {
               role: "system",
               content:
                 needsQuizRepair
-                  ? `Reformat into strict quiz syntax only. Keep intent and output at least ${MIN_QUIZ_QUESTIONS} questions. Output ONLY quiz content with numbered questions, A-D options, a "Correct: [letter]" line per question, then "## Answers & Explanations".`
-                  : `Reformat into strict flashcard syntax only. Output ONLY FRONT/BACK pairs and produce at least ${MIN_FLASHCARD_PAIRS} cards. Format exactly: FRONT: ... then BACK: ...`,
+                  ? `The student asked: "${normalizedMessage}". Reformat the following response into strict quiz syntax about EXACTLY this topic. Do NOT change the subject. Output at least ${MIN_QUIZ_QUESTIONS} questions with A-D options, a "Correct: [letter]" line per question, then "## Answers & Explanations".`
+                  : `The student asked: "${normalizedMessage}". Reformat into strict flashcard syntax about EXACTLY this topic. Do NOT change the subject. Output at least ${MIN_FLASHCARD_PAIRS} FRONT/BACK pairs. Format exactly: FRONT: ... then BACK: ...`,
             },
             { role: "user", content: correctedResponse },
           ],
@@ -995,9 +1088,11 @@ export async function runChatPipeline(request: NextRequest) {
       }
 
       const stillNeedsQuizRepair =
+        !isVagueRequest &&
         effectiveMode === "quiz" &&
         (!isQuizStructured(correctedResponse) || countQuizQuestions(correctedResponse) < MIN_QUIZ_QUESTIONS);
       const stillNeedsFlashcardRepair =
+        !isVagueRequest &&
         effectiveMode === "flashcard" &&
         (!isFlashcardStructured(correctedResponse) || countFlashcards(correctedResponse) < MIN_FLASHCARD_PAIRS);
 
@@ -1009,8 +1104,8 @@ export async function runChatPipeline(request: NextRequest) {
             {
               role: "system",
               content: stillNeedsQuizRepair
-                ? `Generate a complete quiz now. Output ONLY strict quiz format with at least ${MIN_QUIZ_QUESTIONS} questions, A-D options, Correct line for each, and a final section "## Answers & Explanations".`
-                : `Generate a complete flashcard deck now. Output ONLY FRONT/BACK pairs with at least ${MIN_FLASHCARD_PAIRS} cards. One FRONT line then one BACK line per card.`,
+                ? `The student wants a quiz about: "${normalizedMessage}". Generate a complete quiz about EXACTLY this topic. Output strict quiz format with at least ${MIN_QUIZ_QUESTIONS} questions, A-D options, Correct line for each, and a final section "## Answers & Explanations".`
+                : `The student wants flashcards about: "${normalizedMessage}". Generate flashcard pairs about EXACTLY this topic. Output ONLY FRONT/BACK pairs with at least ${MIN_FLASHCARD_PAIRS} cards. One FRONT line then one BACK line per card.`,
             },
             { role: "user", content: auto.message },
           ],
@@ -1046,7 +1141,9 @@ export async function runChatPipeline(request: NextRequest) {
         searchUrls,
         attachmentCitations,
       );
-      const finalizedResponse = rewriteCitationMarkers(correctedResponse, citations);
+      const rewrittenResponse = rewriteCitationMarkers(correctedResponse, citations);
+      // Strip orphan citation markers [N] that have no matching citation
+      const finalizedResponse = stripOrphanCitations(rewrittenResponse, citations);
       const whyThisResponse = summarizeWhyResponse(effectiveMode, route.reason);
       route.trace.totalDurationMs = Date.now() - requestStartedAt;
       logger.info("streaming complete", {
@@ -1164,7 +1261,10 @@ export async function runChatPipeline(request: NextRequest) {
         },
         enhancedPrompt: auto.promptEnhanced ? auto.message : undefined,
         chatTitle: generatedTitle,
+        // Mode metadata: always include effective/suggested/userSelected for client tracking
+        effectiveMode,
         suggestedMode: effectiveMode !== safeMode ? effectiveMode : undefined,
+        userSelectedMode: safeMode,
         agent:
           selectedAgent && selectedAgent._id
             ? {

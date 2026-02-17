@@ -28,6 +28,13 @@ export default defineSchema({
     primaryColor: v.optional(v.string()),
     accentColor: v.optional(v.string()),
     welcomeMessage: v.optional(v.string()),
+    description: v.optional(v.string()),
+    schoolType: v.optional(v.string()),
+    country: v.optional(v.string()),
+    timezone: v.optional(v.string()),
+    maxStudents: v.optional(v.number()),
+    isActive: v.optional(v.boolean()),
+    createdBy: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -39,6 +46,9 @@ export default defineSchema({
     name: v.string(),
     role: vRole,
     orgId: v.id("orgs"),
+    invitedAt: v.optional(v.number()),
+    lastActiveAt: v.optional(v.number()),
+    onboardingComplete: v.optional(v.boolean()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -382,13 +392,25 @@ export default defineSchema({
     orgId: v.id("orgs"),
     userId: v.id("users"),
     chatId: v.id("chats"),
+    // New storage-based fields (preferred)
+    storageId: v.optional(v.id("_storage")),
+    servingUrl: v.optional(v.string()),
+    thumbnailStorageId: v.optional(v.id("_storage")),
+    thumbnailUrl: v.optional(v.string()),
+    // Legacy field — old documents stored base64/URL here directly
+    imageUrl: v.optional(v.string()),
     prompt: v.string(),
-    imageUrl: v.string(),
     model: v.optional(v.string()),
+    size: v.optional(v.string()),
+    pinned: v.optional(v.boolean()),
+    pinnedAt: v.optional(v.number()),
     createdAt: v.number(),
+    expiresAt: v.optional(v.number()),
   })
     .index("by_user", ["userId"])
-    .index("by_chat", ["chatId"]),
+    .index("by_chat", ["chatId"])
+    .index("by_expires", ["expiresAt"])
+    .index("by_pinned", ["userId", "pinned"]),
 
   modelCatalog: defineTable({
     orgId: v.id("orgs"),
@@ -428,4 +450,35 @@ export default defineSchema({
   })
     .index("by_org", ["orgId"])
     .index("by_org_model", ["orgId", "modelId"]),
+
+  schoolInvitations: defineTable({
+    orgId: v.id("orgs"),
+    email: v.string(),
+    role: vRole,
+    invitedBy: v.id("users"),
+    status: v.union(v.literal("pending"), v.literal("accepted"), v.literal("expired")),
+    token: v.string(),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_org", ["orgId"])
+    .index("by_email", ["email"])
+    .index("by_token", ["token"]),
+
+  userSoulPreferences: defineTable({
+    userId: v.id("users"),
+    orgId: v.id("orgs"),
+    learningStyle: v.optional(v.string()),
+    preferredDifficulty: v.optional(v.string()),
+    interests: v.optional(v.array(v.string())),
+    weakAreas: v.optional(v.array(v.string())),
+    preferredModes: v.optional(v.array(v.string())),
+    communicationStyle: v.optional(v.string()),
+    customGuidance: v.optional(v.string()),
+    onboardingComplete: v.optional(v.boolean()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_org", ["orgId"]),
 });

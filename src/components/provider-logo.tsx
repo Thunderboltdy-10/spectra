@@ -66,6 +66,11 @@ const CUSTOM_ICONS: Record<string, IconLike> = {
 };
 
 const iconCache = new Map<string, IconLike | null>();
+const ICON_SCALE: Record<string, number> = {
+  google: 0.9,
+  anthropic: 0.88,
+  openai: 0.9,
+};
 
 function pickIcon(key: string): IconLike | null {
   const cached = iconCache.get(key);
@@ -103,6 +108,7 @@ export const ProviderLogo = memo(function ProviderLogo({ provider, modelId, clas
   const fill = icon?.hex ? `#${icon.hex}` : isDark ? preset.darkFill : preset.lightFill;
 
   if (icon) {
+    const scale = ICON_SCALE[preset.key] ?? 1;
     return (
       <span
         className={cn(
@@ -112,7 +118,13 @@ export const ProviderLogo = memo(function ProviderLogo({ provider, modelId, clas
         style={{ backgroundColor: background }}
         title={icon.title}
       >
-        <svg viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" className="h-4 w-4 shrink-0" aria-hidden>
+        <svg
+          viewBox="0 0 24 24"
+          preserveAspectRatio="xMidYMid meet"
+          className="h-5 w-5 shrink-0"
+          style={{ transform: `scale(${scale})` }}
+          aria-hidden
+        >
           <path d={icon.path} fill={fill} />
         </svg>
       </span>

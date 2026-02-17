@@ -11,6 +11,7 @@ export const createUploadUrl = mutation({
     scope: vScope,
     packId: v.optional(v.id("packs")),
     agentId: v.optional(v.id("agents")),
+    ignorePersonalLimit: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
@@ -69,7 +70,7 @@ export const createUploadUrl = mutation({
         .query("resources")
         .withIndex("by_owner_scope", (q) => q.eq("ownerUserId", actor._id).eq("scope", "personal"))
         .collect();
-      if (mine.length >= LIMITS.maxStudentPersonalFiles) {
+      if (!args.ignorePersonalLimit && mine.length >= LIMITS.maxStudentPersonalFiles) {
         throw new Error(`Personal file limit reached (${LIMITS.maxStudentPersonalFiles})`);
       }
     }

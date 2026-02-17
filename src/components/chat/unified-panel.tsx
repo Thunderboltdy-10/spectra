@@ -12,6 +12,7 @@ import { useCompactSheet } from "@/hooks/use-compact-sheet";
 import { useRightPanelDock } from "@/hooks/use-right-panel-dock";
 import type { AutoPreference, ModelOption, PersonalResource, UserSpending } from "@/hooks/use-chat-state";
 import type { RouterMode, StudyMode, ThinkingLevel, Citation, RouteTrace } from "@/types";
+import { FILE_LIMITS } from "@/lib/file-limits";
 
 const MONTHLY_HARD_LIMIT_CENTS = 900;
 
@@ -79,6 +80,12 @@ function spendingTierLabel(tier?: UserSpending["tier"]) {
   return "Normal";
 }
 
+function resourceStatusLabel(status: PersonalResource["status"]) {
+  if (status === "uploaded") return "Indexing";
+  if (status === "processed") return "Ready";
+  return "Failed";
+}
+
 type SettingsViewProps = {
   models: ModelOption[];
   mode: StudyMode;
@@ -126,7 +133,7 @@ function SettingsView({
 }: SettingsViewProps) {
   const [showManual, setShowManual] = useState(false);
   const spentCents = userSpending?.totalCostCents ?? 0;
-  const ratio = Math.min(spentCents / MONTHLY_HARD_LIMIT_CENTS, 1);
+  const ratio = Math.min(Math.max(spentCents / MONTHLY_HARD_LIMIT_CENTS, 0), 1);
   const spendingTier = spendingTierLabel(userSpending?.tier);
   const selectedModel = models.find((model) => model.modelId === manualModel);
 
@@ -246,6 +253,9 @@ function SettingsView({
 
       <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
         <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">My files</h3>
+        <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+          Saved in personal library: {personalResources.length}/{FILE_LIMITS.maxPersonalLibraryFiles}
+        </p>
         <div className="mt-3 max-h-48 space-y-2 overflow-y-auto pr-1">
           {personalResources.length === 0 ? (
             <p className="text-xs text-[var(--text-secondary)]">No personal files yet.</p>
@@ -257,7 +267,7 @@ function SettingsView({
               >
                 <div className="min-w-0">
                   <p className="truncate text-xs font-medium text-[var(--text-primary)]">{resource.filename}</p>
-                  <p className="text-[10px] text-[var(--text-secondary)]">{resource.status}</p>
+                  <p className="text-[10px] text-[var(--text-secondary)]">{resourceStatusLabel(resource.status)}</p>
                 </div>
                 <Button
                   type="button"
@@ -282,9 +292,12 @@ function SettingsView({
         <div className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
           <div
             className="h-full rounded-full bg-[var(--gradient-brand)]"
-            style={{ width: `${Math.max(2, ratio * 100)}%` }}
+            style={{ width: `${Math.max(0, ratio * 100)}%` }}
           />
         </div>
+        <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+          €{(spentCents / 100).toFixed(2)} / €{(MONTHLY_HARD_LIMIT_CENTS / 100).toFixed(2)} monthly soft cap
+        </p>
       </section>
     </div>
   );

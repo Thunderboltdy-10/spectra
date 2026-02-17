@@ -178,9 +178,10 @@ function ViewTabs({ active, onChange, total }: ViewTabProps) {
 type CardsViewProps = {
   cards: FlashcardCard[];
   onRateCard?: (payload: { cardHash: string; quality: number }) => Promise<void> | void;
+  onLearningCountChange?: (count: number) => void;
 };
 
-function CardsView({ cards, onRateCard }: CardsViewProps) {
+function CardsView({ cards, onRateCard, onLearningCountChange }: CardsViewProps) {
   const [order, setOrder] = useState<number[]>(() => cards.map((_, i) => i));
   const [currentPos, setCurrentPos] = useState(0);
   const [flipped, setFlipped] = useState(false);
@@ -194,6 +195,10 @@ function CardsView({ cards, onRateCard }: CardsViewProps) {
   const current = cards[currentIndex];
   const total = order.length;
   const knownCount = known.size;
+
+  useEffect(() => {
+    onLearningCountChange?.(stillLearning.size);
+  }, [onLearningCountChange, stillLearning.size]);
 
   function goNext() {
     setFlipped(false);
@@ -818,11 +823,13 @@ export function FlashcardReveal({ content, onSaveDeck, onRateCard, onFollowUp }:
   const cards = useMemo(() => parseFlashcards(content), [content]);
   const [viewMode, setViewMode] = useState<StudyViewMode>("cards");
   const [stillLearningCount, setStillLearningCount] = useState(0);
-  const autoSavedRef = useRef(false);
+  const saveSignatureRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (autoSavedRef.current || !onSaveDeck || cards.length === 0) return;
-    autoSavedRef.current = true;
+    if (!onSaveDeck || cards.length === 0) return;
+    const signature = cards.map((card) => card.cardHash).join("|");
+    if (saveSignatureRef.current === signature) return;
+    saveSignatureRef.current = signature;
     void onSaveDeck({ title: inferDeckTitle(cards), cards });
   }, [cards, onSaveDeck]);
 
@@ -845,7 +852,9 @@ export function FlashcardReveal({ content, onSaveDeck, onRateCard, onFollowUp }:
       </div>
 
       {/* View content */}
-      {viewMode === "cards" && <CardsView cards={cards} onRateCard={onRateCard} />}
+      {viewMode === "cards" && (
+        <CardsView cards={cards} onRateCard={onRateCard} onLearningCountChange={setStillLearningCount} />
+      )}
       {viewMode === "grid" && <GridView cards={cards} />}
       {viewMode === "test" && <TestView cards={cards} onFollowUp={onFollowUp} />}
 

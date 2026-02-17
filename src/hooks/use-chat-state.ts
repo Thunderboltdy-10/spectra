@@ -195,7 +195,14 @@ async function buildImageThumbnail(file: File): Promise<string | undefined> {
 
 type UploadResponse = {
   resourceIds?: string[];
-  results?: Array<{ file: string; resourceId?: string; status: string; error?: string }>;
+  chatOnlyResourceIds?: string[];
+  results?: Array<{
+    file: string;
+    resourceId?: string;
+    status: string;
+    error?: string;
+    savedToLibrary?: boolean;
+  }>;
 };
 
 async function uploadComposerFiles(files: File[], agentId?: string): Promise<UploadResponse> {
@@ -491,6 +498,15 @@ export function useChatState() {
     setModels(mergeModels(sidebar.models as ModelOption[], []));
     setAgents(sidebar.agents);
   }, [models.length, sidebar.agents, sidebar.loading, sidebar.models]);
+
+  useEffect(() => {
+    const hasIndexing = personalResources.some((resource) => resource.status === "uploaded");
+    if (!hasIndexing) return;
+    const timer = window.setTimeout(() => {
+      void refreshPersonalResources().catch(() => {});
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [personalResources]);
 
   useEffect(() => {
     selectedChatIdRef.current = selectedChatId;
@@ -907,6 +923,7 @@ export function useChatState() {
 
     abortControllerRef.current = new AbortController();
     let activeChatId = options?.chatIdOverride;
+    let chatOnlyResourceIds: string[] = [];
 
     try {
       if (!skipLocalUser) {
@@ -993,6 +1010,7 @@ export function useChatState() {
 
         const uploadResult = await uploadComposerFiles(outgoingFiles, selectedAgentId);
         uploadedResourceIds = uploadResult.resourceIds ?? [];
+        chatOnlyResourceIds = uploadResult.chatOnlyResourceIds ?? [];
         const resultByFile = new Map((uploadResult.results ?? []).map((result) => [result.file, result]));
         setFileUploadState((prev) => {
           const next = { ...prev };
@@ -1003,11 +1021,21 @@ export function useChatState() {
             next[key] = {
               ...current,
               status: result?.status === "processed" ? "ready" : result?.status === "failed" ? "error" : "ready",
-              error: result?.error,
+              error:
+                result?.status === "failed"
+                  ? result?.error
+                  : result?.savedToLibrary === false
+                    ? result?.error ?? "Attached for this chat only (not saved in My Files)."
+                    : undefined,
             };
           }
           return next;
         });
+        if (chatOnlyResourceIds.length > 0) {
+          toast.warning(
+            `${chatOnlyResourceIds.length} file${chatOnlyResourceIds.length === 1 ? "" : "s"} attached for this chat only. Personal library limit reached.`,
+          );
+        }
       }
 
       const response = await fetch("/api/chat", {
@@ -1428,6 +1456,21 @@ export function useChatState() {
       setHasRealThinking(false);
       setLastFailedMessage(preservedText);
     } finally {
+      if (chatOnlyResourceIds.length > 0) {
+        await Promise.all(
+          chatOnlyResourceIds.map(async (resourceId) => {
+            try {
+              await fetch("/api/resources", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ resourceId }),
+              });
+            } catch {
+              // Best-effort cleanup for chat-only uploads.
+            }
+          }),
+        );
+      }
       if (activeChatId) {
         activeStreamsRef.current.delete(activeChatId);
         setActiveStreamIds(prev => { const next = new Set(prev); next.delete(activeChatId!); return next; });
@@ -1500,15 +1543,40 @@ export function useChatState() {
         }),
       });
 
+      const scoreRatio = payload.result.total > 0 ? payload.result.score / payload.result.total : 0;
       const incorrectSummary =
         payload.result.incorrectDetails.length > 0
           ? payload.result.incorrectDetails.slice(0, 8).join("; ")
           : "None";
-      const followUpPrompt = [
-        `Student answered quiz. Score: ${payload.result.score}/${payload.result.total}.`,
-        `Incorrect: ${incorrectSummary}.`,
-        "Provide concise explanations for misses, identify patterns in mistakes, and give 3 targeted practice prompts.",
-      ].join(" ");
+
+      let nextMode: StudyMode = mode;
+      let followUpPrompt = "";
+      if (scoreRatio < 0.5) {
+        nextMode = "tutor";
+        followUpPrompt = [
+          `Student answered quiz. Score: ${payload.result.score}/${payload.result.total}.`,
+          `Incorrect: ${incorrectSummary}.`,
+          "Teach the missed concepts step-by-step in Learn mode, then generate 6 flashcards focused on weak areas, then end with a short 3-question checkpoint quiz.",
+        ].join(" ");
+      } else if (scoreRatio < 0.8) {
+        nextMode = "flashcard";
+        followUpPrompt = [
+          `Student answered quiz. Score: ${payload.result.score}/${payload.result.total}.`,
+          `Incorrect: ${incorrectSummary}.`,
+          "Provide concise explanations for misses, then generate a targeted flashcard deck for the weak concepts.",
+        ].join(" ");
+      } else {
+        nextMode = "quiz";
+        followUpPrompt = [
+          `Student answered quiz. Score: ${payload.result.score}/${payload.result.total}.`,
+          "Generate a slightly harder follow-up quiz on the same topic with short explanations.",
+        ].join(" ");
+      }
+
+      if (nextMode !== mode) {
+        setMode(nextMode);
+        void updateExistingChatSettings({ mode: nextMode }).catch(() => {});
+      }
 
       await sendMessage(followUpPrompt, {
         chatIdOverride: selectedChatId,
@@ -1542,7 +1610,12 @@ export function useChatState() {
       if (!response.ok) {
         throw new Error(await response.text());
       }
-      toast.success("Flashcard deck saved");
+      const result = (await response.json()) as { updated?: boolean; created?: boolean };
+      if (result.updated) {
+        toast.message("Flashcard deck updated");
+      } else {
+        toast.success("Flashcard deck saved");
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save deck");
     }

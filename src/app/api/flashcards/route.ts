@@ -15,15 +15,27 @@ export async function GET(request: NextRequest) {
     const actor = await requireActor();
     const action = request.nextUrl.searchParams.get("action") ?? "list";
     const chatId = request.nextUrl.searchParams.get("chatId") ?? undefined;
+    const deckId = request.nextUrl.searchParams.get("deckId") ?? undefined;
     const parsedLimit = Number(request.nextUrl.searchParams.get("limit") ?? "50");
     const limit = Number.isFinite(parsedLimit) ? parsedLimit : 50;
+    const includeAll = request.nextUrl.searchParams.get("includeAll") === "true";
 
     if (action === "due") {
       const cards = await convexQuery("flashcards:getDueCards", {
         actorClerkId: actor.clerkId,
         limit,
+        deckId,
+        includeAll,
       });
       return ok({ cards });
+    }
+
+    if (action === "deck" && deckId) {
+      const deck = await convexQuery("flashcards:getDeck", {
+        actorClerkId: actor.clerkId,
+        deckId,
+      });
+      return ok({ deck });
     }
 
     const decks = await convexQuery("flashcards:listDecks", {
@@ -50,6 +62,10 @@ export async function POST(request: NextRequest) {
           action: "rate_card";
           cardHash?: string;
           quality?: number;
+        }
+      | {
+          action: "delete_deck";
+          deckId?: string;
         };
 
     if (body.action === "rate_card") {
@@ -60,6 +76,17 @@ export async function POST(request: NextRequest) {
         actorClerkId: actor.clerkId,
         cardHash: body.cardHash,
         quality: body.quality,
+      });
+      return ok(result);
+    }
+
+    if (body.action === "delete_deck") {
+      if (!body.deckId) {
+        throw new Error("Missing deck id");
+      }
+      const result = await convexMutation("flashcards:deleteDeck", {
+        actorClerkId: actor.clerkId,
+        deckId: body.deckId,
       });
       return ok(result);
     }

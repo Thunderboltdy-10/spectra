@@ -4,8 +4,17 @@ import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ChatSidebar } from "@/components/chat/chat-sidebar";
 import { useSidebar } from "@/context/sidebar-context";
+import { cn } from "@/lib/utils";
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({
+  children,
+  fullBleed = false,
+  contentClassName,
+}: {
+  children: React.ReactNode;
+  fullBleed?: boolean;
+  contentClassName?: string;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const sidebar = useSidebar();
@@ -55,7 +64,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       <div className="min-w-0 flex-1 overflow-y-auto">
-        <main className="mx-auto w-full max-w-6xl px-3 py-5 sm:px-6 lg:px-10">{children}</main>
+        <main
+          className={cn(
+            "w-full px-3 py-5 sm:px-6 lg:px-10",
+            fullBleed ? "max-w-none" : "mx-auto max-w-6xl",
+            contentClassName,
+          )}
+        >
+          {children}
+        </main>
       </div>
     </div>
   );

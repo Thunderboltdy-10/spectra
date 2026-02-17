@@ -3,7 +3,7 @@ export const DEFAULT_ORG_SLUG = "demo-school";
 
 export const LIMITS = {
   maxTeacherFilesPerPack: 30,
-  maxStudentPersonalFiles: 10,
+  maxStudentPersonalFiles: 25,
   maxCharsPerFile: 250_000,
   maxChunksPerFile: 240,
   retrievalTopK: 8,

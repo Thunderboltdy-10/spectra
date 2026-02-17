@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { requireActor } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
+import { FILE_LIMITS } from "@/lib/file-limits";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 
 export const runtime = "nodejs";
@@ -71,7 +72,14 @@ export async function POST(request: NextRequest) {
       return badRequest("agentId is required for agent uploads");
     }
 
-    const results: Array<{ file: string; resourceId?: string; status: string; error?: string }> = [];
+    const results: Array<{
+      file: string;
+      resourceId?: string;
+      status: string;
+      error?: string;
+      savedToLibrary?: boolean;
+    }> = [];
+    let currentPersonalCount = 0;
     const localHashToResourceId = new Map<string, string>();
     const hashByKey = new Map<string, string>();
 
@@ -82,6 +90,11 @@ export async function POST(request: NextRequest) {
 
     const reusableByHash = new Map<string, string>();
     if (scope === "personal") {
+      const existingPersonal = (await convexQuery("resources:listPersonalResources", {
+        actorClerkId: actor.clerkId,
+      })) as Array<unknown>;
+      currentPersonalCount = existingPersonal.length;
+
       const reusable = (await convexQuery("resources:findReusablePersonalResourcesByHashes", {
         actorClerkId: actor.clerkId,
         hashes: [...new Set(hashByKey.values())],
@@ -105,17 +118,21 @@ export async function POST(request: NextRequest) {
             file: file.name,
             resourceId: already,
             status: "reused",
+            savedToLibrary: true,
           });
           continue;
         }
       }
 
       try {
+        const saveToLibrary = scope !== "personal" || currentPersonalCount < FILE_LIMITS.maxPersonalLibraryFiles;
+
         const uploadUrl = (await convexMutation("resources:createUploadUrl", {
           actorClerkId: actor.clerkId,
           scope,
           packId,
           agentId,
+          ignorePersonalLimit: scope === "personal" ? !saveToLibrary : undefined,
         })) as string;
 
         const storageId = await uploadToConvexStorage(uploadUrl, file);
@@ -140,9 +157,16 @@ export async function POST(request: NextRequest) {
           file: file.name,
           resourceId: registered.resourceId,
           status: "uploaded",
+          savedToLibrary: saveToLibrary,
+          error: saveToLibrary
+            ? undefined
+            : `Attached for this chat only (personal file cap ${FILE_LIMITS.maxPersonalLibraryFiles} reached).`,
         });
         if (scope === "personal" && contentHash) {
           localHashToResourceId.set(contentHash, registered.resourceId);
+        }
+        if (scope === "personal" && saveToLibrary) {
+          currentPersonalCount += 1;
         }
       } catch (error) {
         results.push({
@@ -153,9 +177,14 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const chatOnlyResourceIds = results
+      .filter((item) => item.resourceId && item.savedToLibrary === false)
+      .map((item) => item.resourceId as string);
+
     return ok({
       results,
       resourceIds: results.map((item) => item.resourceId).filter((id): id is string => Boolean(id)),
+      chatOnlyResourceIds,
       count: results.length,
     });
   });

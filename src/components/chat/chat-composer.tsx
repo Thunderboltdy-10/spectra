@@ -468,7 +468,7 @@ export function ChatComposer({
     speech.start();
   }
 
-  function renderStatus(status: FileStatus) {
+  function renderStatus(status: FileStatus, warning?: string) {
     if (status === "uploading") {
       return (
         <span className="inline-flex items-center gap-1 text-[10px] text-[var(--text-secondary)]">
@@ -478,6 +478,14 @@ export function ChatComposer({
       );
     }
     if (status === "ready") {
+      if (warning?.trim()) {
+        return (
+          <span className="inline-flex items-center gap-1 text-[10px] text-[var(--warning)]">
+            <AlertCircle className="h-3 w-3" />
+            Chat-only
+          </span>
+        );
+      }
       return (
         <span className="inline-flex items-center gap-1 text-[10px] text-[var(--success)]">
           <CheckCircle2 className="h-3 w-3" />
@@ -529,6 +537,7 @@ export function ChatComposer({
               {fileList.map((file) => {
                 const status = fileUploadState[fileKey(file)]?.status ?? "pending";
                 const thumbnailUrl = fileUploadState[fileKey(file)]?.thumbnailUrl;
+                const warning = fileUploadState[fileKey(file)]?.error;
                 const extension = file.name.split(".").pop()?.toUpperCase().slice(0, 4) || "FILE";
                 return (
                   <span
@@ -536,13 +545,22 @@ export function ChatComposer({
                     className="inline-flex items-center gap-2 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 py-2 text-xs font-medium shadow-sm"
                   >
                     {thumbnailUrl ? (
-                      <Image
-                        src={thumbnailUrl}
-                        alt={file.name}
-                        className="h-16 w-16 rounded-lg object-cover"
-                        width={64}
-                        height={64}
-                      />
+                      <span
+                        className="inline-flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-[size:12px_12px]"
+                        style={{
+                          backgroundImage:
+                            "linear-gradient(45deg, rgba(148,163,184,0.14) 25%, transparent 25%, transparent 75%, rgba(148,163,184,0.14) 75%, rgba(148,163,184,0.14)), linear-gradient(45deg, rgba(148,163,184,0.14) 25%, transparent 25%, transparent 75%, rgba(148,163,184,0.14) 75%, rgba(148,163,184,0.14))",
+                          backgroundPosition: "0 0, 6px 6px",
+                        }}
+                      >
+                        <Image
+                          src={thumbnailUrl}
+                          alt={file.name}
+                          className="h-16 w-16 rounded-lg object-contain"
+                          width={64}
+                          height={64}
+                        />
+                      </span>
                     ) : (
                       <span className="inline-flex h-12 min-w-12 items-center justify-center rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-1.5 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
                         <FileText className="mr-1 h-3 w-3" />
@@ -550,7 +568,7 @@ export function ChatComposer({
                       </span>
                     )}
                     <span className="max-w-[220px] truncate">{file.name}</span>
-                    {renderStatus(status)}
+                    {renderStatus(status, warning)}
                     <button
                       type="button"
                       className="inline-flex h-4 w-4 items-center justify-center rounded-full transition hover:bg-[var(--bg-hover)]"

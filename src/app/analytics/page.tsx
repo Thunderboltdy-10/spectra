@@ -68,7 +68,7 @@ export default function AnalyticsPage() {
   }, []);
 
   return (
-    <AppShell>
+    <AppShell fullBleed contentClassName="2xl:px-14">
       <div className="mb-5">
         <h1 className="text-2xl font-semibold tracking-tight">Analytics</h1>
         <p className="text-sm text-[var(--text-secondary)]">

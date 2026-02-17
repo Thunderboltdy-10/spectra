@@ -16,6 +16,7 @@ import { downloadTextFile, exportConversationMarkdown } from "@/lib/export/markd
 import { exportElementToPrintPdf } from "@/lib/export/pdf-export";
 import { parseSlashCommand, normalizeModeArg, SLASH_COMMANDS } from "@/lib/slash-commands";
 import { useCanvasState } from "@/hooks/use-canvas-state";
+import { FILE_LIMITS } from "@/lib/file-limits";
 
 function SidebarSkeleton() {
   return (
@@ -326,7 +327,21 @@ export function ChatLayout() {
                 seen.add(key);
                 return true;
               });
-              return [...prev, ...deduped];
+              if (deduped.length === 0) return prev;
+
+              const available = Math.max(0, FILE_LIMITS.maxConversationAttachments - prev.length);
+              if (available <= 0) {
+                toast.error(
+                  `Attachment limit reached (${FILE_LIMITS.maxConversationAttachments} files per conversation).`,
+                );
+                return prev;
+              }
+              if (deduped.length > available) {
+                toast.warning(
+                  `Only ${available} file${available === 1 ? "" : "s"} added. Limit is ${FILE_LIMITS.maxConversationAttachments} files per conversation.`,
+                );
+              }
+              return [...prev, ...deduped.slice(0, available)];
             })}
           onRemoveFile={(file) => chat.setFileList((prev) => prev.filter((item) => item !== file))}
           onSend={() => void chat.sendMessage()}

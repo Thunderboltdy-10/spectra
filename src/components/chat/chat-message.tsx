@@ -118,7 +118,7 @@ export function ChatMessage({
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
   const [showEnhanced, setShowEnhanced] = useState(false);
   const [showWhy, setShowWhy] = useState(false);
-  const { togglePanel } = usePanel();
+  const { openPanel } = usePanel();
   const [editing, setEditing] = useState(false);
   const [editedContent, setEditedContent] = useState(content);
   const [regenModel, setRegenModel] = useState(regenModels[0]?.modelId ?? "");
@@ -221,13 +221,22 @@ export function ChatMessage({
                         key={`${attachment.name}-${index}`}
                         className="overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]"
                       >
-                        <Image
-                          src={attachment.thumbnailUrl}
-                          alt={attachment.name}
-                          width={240}
-                          height={180}
-                          className="h-28 w-full object-cover"
-                        />
+                        <div
+                          className="flex h-32 w-full items-center justify-center bg-[size:16px_16px]"
+                          style={{
+                            backgroundImage:
+                              "linear-gradient(45deg, rgba(148,163,184,0.16) 25%, transparent 25%, transparent 75%, rgba(148,163,184,0.16) 75%, rgba(148,163,184,0.16)), linear-gradient(45deg, rgba(148,163,184,0.16) 25%, transparent 25%, transparent 75%, rgba(148,163,184,0.16) 75%, rgba(148,163,184,0.16))",
+                            backgroundPosition: "0 0, 8px 8px",
+                          }}
+                        >
+                          <Image
+                            src={attachment.thumbnailUrl}
+                            alt={attachment.name}
+                            width={300}
+                            height={220}
+                            className="h-full w-full object-contain"
+                          />
+                        </div>
                         <p className="truncate px-2 py-1 text-[10px] text-[var(--text-secondary)]">{attachment.name}</p>
                       </div>
                     );
@@ -328,13 +337,13 @@ export function ChatMessage({
               {validCitations.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => togglePanel("sources", { sources: validCitations })}
+                  onClick={() => openPanel("sources", { sources: validCitations })}
                   className="mt-4 cursor-pointer rounded-full border border-[var(--border-default)] px-2.5 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
                 >
                   View sources ({validCitations.length})
                 </button>
               )}
-              {validCitations.length > 0 && <CitationCards citations={validCitations} onOpen={() => togglePanel("sources", { sources: validCitations })} />}
+              {validCitations.length > 0 && <CitationCards citations={validCitations} onOpen={() => openPanel("sources", { sources: validCitations })} />}
 
               <div className="mt-5 flex flex-wrap items-center gap-1.5">
                 <Button

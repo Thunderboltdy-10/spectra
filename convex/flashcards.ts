@@ -11,6 +11,10 @@ function hashCard(front: string, back: string) {
   return `fc_${(hash >>> 0).toString(16)}`;
 }
 
+function normalizeDeckTitle(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
 function calculateNextReview(
   quality: number,
   easeFactor: number,
@@ -80,6 +84,30 @@ export const saveDeck = mutation({
     }
 
     const now = Date.now();
+    const normalizedTitle = normalizeDeckTitle(args.title || "Untitled deck");
+    const existingDecks = await ctx.db
+      .query("flashcardDecks")
+      .withIndex("by_user_updated", (q) => q.eq("userId", actor._id))
+      .collect();
+
+    const existing = existingDecks.find((deck) => {
+      if (deck.chatId !== chat._id) return false;
+      if (args.sourceMessageId && deck.sourceMessageId) {
+        return deck.sourceMessageId === args.sourceMessageId;
+      }
+      return normalizeDeckTitle(deck.title) === normalizedTitle;
+    });
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        title: args.title.trim() || existing.title || "Untitled deck",
+        sourceMessageId: args.sourceMessageId ?? existing.sourceMessageId,
+        cards,
+        updatedAt: now,
+      });
+      return { deckId: existing._id, cardCount: cards.length, updated: true };
+    }
+
     const deckId = await ctx.db.insert("flashcardDecks", {
       userId: actor._id,
       orgId: actor.orgId,
@@ -92,7 +120,7 @@ export const saveDeck = mutation({
       lastReviewedAt: undefined,
     });
 
-    return { deckId, cardCount: cards.length };
+    return { deckId, cardCount: cards.length, created: true };
   },
 });
 
@@ -135,6 +163,7 @@ export const listDecks = query({
           ...deck,
           dueCount,
           cardCount: deck.cards.length,
+          nextReviewAt: dueCount > 0 ? now : undefined,
         };
       }),
     );
@@ -145,6 +174,8 @@ export const getDueCards = query({
   args: {
     actorClerkId: v.string(),
     limit: v.optional(v.number()),
+    deckId: v.optional(v.id("flashcardDecks")),
+    includeAll: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
@@ -156,6 +187,7 @@ export const getDueCards = query({
       .query("flashcardDecks")
       .withIndex("by_user_updated", (q) => q.eq("userId", actor._id))
       .collect();
+    const scopedDecks = args.deckId ? decks.filter((deck) => deck._id === args.deckId) : decks;
 
     const out: Array<{
       deckId: string;
@@ -172,13 +204,14 @@ export const getDueCards = query({
       } | null;
     }> = [];
 
-    for (const deck of decks) {
+    for (const deck of scopedDecks) {
       for (const card of deck.cards) {
         const progress = await ctx.db
           .query("flashcardProgress")
           .withIndex("by_user_card", (q) => q.eq("userId", actor._id).eq("cardHash", card.cardHash))
           .unique();
-        if (!progress || progress.nextReviewAt <= now) {
+        const isDue = !progress || progress.nextReviewAt <= now;
+        if (isDue || args.includeAll) {
           out.push({
             deckId: deck._id,
             deckTitle: deck.title,
@@ -200,6 +233,43 @@ export const getDueCards = query({
     }
 
     return out.slice(0, limit);
+  },
+});
+
+export const getDeck = query({
+  args: {
+    actorClerkId: v.string(),
+    deckId: v.id("flashcardDecks"),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) throw new Error("Unauthorized");
+
+    const deck = await ctx.db.get(args.deckId);
+    if (!deck || deck.userId !== actor._id || deck.orgId !== actor.orgId) {
+      throw new Error("Deck not found");
+    }
+
+    return deck;
+  },
+});
+
+export const deleteDeck = mutation({
+  args: {
+    actorClerkId: v.string(),
+    deckId: v.id("flashcardDecks"),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) throw new Error("Unauthorized");
+
+    const deck = await ctx.db.get(args.deckId);
+    if (!deck || deck.userId !== actor._id || deck.orgId !== actor.orgId) {
+      throw new Error("Deck not found");
+    }
+
+    await ctx.db.delete(deck._id);
+    return { ok: true };
   },
 });
 

@@ -142,6 +142,40 @@ function countFlashcards(value: string) {
   return pairs;
 }
 
+function extractImageReferences(value: string) {
+  const refs = [...value.matchAll(/\[image\s*#\s*(\d+)\]/gi)]
+    .map((match) => Number.parseInt(match[1] ?? "", 10))
+    .filter((index) => Number.isFinite(index) && index > 0);
+  return Array.from(new Set(refs)).slice(0, 4);
+}
+
+function extractMarkdownImageUrls(value: string) {
+  const urls = [...value.matchAll(/!\[[^\]]*]\(([^)\s]+)\)/g)]
+    .map((match) => (match[1] ?? "").trim())
+    .filter((url) => /^(https?:\/\/|data:image\/)/i.test(url));
+  return urls;
+}
+
+function getReferencedHistoryImageBlocks(params: {
+  message: string;
+  history: Array<{ role: string; content: string }>;
+}) {
+  const refs = extractImageReferences(params.message);
+  if (refs.length === 0) return [];
+
+  const images = params.history
+    .filter((item) => item.role === "assistant")
+    .flatMap((item) => extractMarkdownImageUrls(item.content));
+
+  return refs
+    .map((refIndex) => images[refIndex - 1])
+    .filter((url): url is string => Boolean(url))
+    .map((url) => ({
+      type: "image_url" as const,
+      image_url: { url, detail: "auto" as const },
+    }));
+}
+
 function jsonError(status: number, error: StructuredError, extra: Record<string, unknown> = {}) {
   return NextResponse.json(
     {
@@ -437,6 +471,11 @@ export async function runChatPipeline(request: NextRequest) {
     return message;
   });
 
+  const referencedHistoryImageBlocks = getReferencedHistoryImageBlocks({
+    message: normalizedMessage,
+    history,
+  });
+
   const retrievalPromise = runRagRetrieval({
     actorClerkId: actor.clerkId,
     usePersonalResources: body.usePersonalResources,
@@ -608,14 +647,22 @@ export async function runChatPipeline(request: NextRequest) {
     filename: attachment.filename,
     sourceType: "personal" as const,
   }));
+  const allImageBlocks = [
+    ...attachments.imageContentBlocks,
+    ...referencedHistoryImageBlocks,
+  ];
+  const requiresVision = allImageBlocks.length > 0;
 
-  if (attachments.requiresVision) {
+  if (requiresVision) {
     route.trace.toolchain.push("vision_gate");
+  }
+  if (referencedHistoryImageBlocks.length > 0) {
+    route.trace.toolchain.push("history_image_reference");
   }
 
   let capability = gateCapabilities({
     selectedModel: route.primaryModel,
-    requiresVision: attachments.requiresVision,
+    requiresVision,
     fallbackModels: route.fallbackModels,
   });
 
@@ -649,9 +696,9 @@ export async function runChatPipeline(request: NextRequest) {
   }
 
   let imageDescriptionBlock = "";
-  if (capability.requiresPrepass && capability.prepassModel && attachments.imageContentBlocks.length > 0) {
+  if (capability.requiresPrepass && capability.prepassModel && allImageBlocks.length > 0) {
     imageDescriptionBlock = await runVisionPrepass({
-      imageContentBlocks: attachments.imageContentBlocks,
+      imageContentBlocks: allImageBlocks,
       userMessage: auto.message,
       model: capability.prepassModel,
     });
@@ -752,7 +799,7 @@ export async function runChatPipeline(request: NextRequest) {
     { role: "system", content: systemPromptParts.join("\n\n") },
     ...toOpenRouterMessages(
       historyForModel,
-      capability.requiresPrepass ? undefined : attachments.imageContentBlocks,
+      capability.requiresPrepass ? undefined : allImageBlocks,
     ),
   ];
 

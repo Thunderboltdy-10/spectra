@@ -64,6 +64,7 @@ type CatalogModel = {
   benchmarkMMLU?: number;
   benchmarkHumanEval?: number;
   arenaElo?: number;
+  openRouterRank?: number;
 };
 
 type LiveModel = {
@@ -190,10 +191,32 @@ function scoreModel(model: ExplorerModel, tier: SpendingTier) {
     else if (inputCost > 12) score -= 5;
   }
 
+  if (model.releaseDate) {
+    const releaseTs = Date.parse(model.releaseDate);
+    if (Number.isFinite(releaseTs)) {
+      const ageDays = (Date.now() - releaseTs) / 86_400_000;
+      if (ageDays > 720) score -= 2;
+      if (ageDays > 1200) score -= 4;
+    }
+  }
+
   if (tier === "free_only" && !isIncludedModel(model)) score -= 100;
   if (tier === "cheap_only" && !isIncludedModel(model) && (inputCost ?? Number.MAX_SAFE_INTEGER) > 3) score -= 60;
 
   return score;
+}
+
+function diversifyByProvider(models: ExplorerModel[], maxPerProvider: number) {
+  const byProvider = new Map<string, number>();
+  const out: ExplorerModel[] = [];
+  for (const model of models) {
+    const key = (model.provider || "unknown").toLowerCase();
+    const count = byProvider.get(key) ?? 0;
+    if (count >= maxPerProvider) continue;
+    byProvider.set(key, count + 1);
+    out.push(model);
+  }
+  return out;
 }
 
 function capabilityPills(model: ExplorerModel) {
@@ -324,11 +347,10 @@ export default function ModelsPage() {
 
   const [tier, setTier] = useState<SpendingTier>("normal");
   const [query, setQuery] = useState("");
-  const [provider, setProvider] = useState("all");
-  const [providerSearch, setProviderSearch] = useState("");
+  const [providerFilter, setProviderFilter] = useState("");
   const [capability, setCapability] = useState<CapabilityFilter>("all");
   const [price, setPrice] = useState<PriceFilter>("all");
-  const [sortMode, setSortMode] = useState<SortMode>("recommended");
+  const [sortMode, setSortMode] = useState<SortMode>("popular");
   const [leaderboardOpen, setLeaderboardOpen] = useState(false);
 
   useEffect(() => {
@@ -375,6 +397,7 @@ export default function ModelsPage() {
 
   const models = useMemo(() => {
     const usageMap = new Map(mostUsed.map((model) => [model.modelId, model.usageCount]));
+    const liveRankMap = new Map(liveModels.map((model, index) => [model.id, index]));
     const merged = new Map<string, ExplorerModel>();
 
     for (const model of catalogModels) {
@@ -382,6 +405,7 @@ export default function ModelsPage() {
         ...model,
         name: sanitizeName(model.name || model.modelId),
         usageCount: usageMap.get(model.modelId) ?? 0,
+        openRouterRank: model.openRouterRank ?? liveRankMap.get(model.modelId),
       });
     }
 
@@ -404,6 +428,7 @@ export default function ModelsPage() {
         featuredOrder: existing?.featuredOrder,
         capabilities: existing?.capabilities,
         usageCount: usageMap.get(live.id) ?? existing?.usageCount ?? 0,
+        openRouterRank: existing?.openRouterRank ?? liveRankMap.get(live.id),
       });
     }
 
@@ -428,16 +453,6 @@ export default function ModelsPage() {
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .map(([providerName]) => providerName)];
   }, [models]);
-
-  const filteredProviders = useMemo(() => {
-    const needle = providerSearch.trim().toLowerCase();
-    if (!needle) return providers;
-    const filtered = providers.filter((item) => item === "all" || item.toLowerCase().includes(needle));
-    if (provider !== "all" && !filtered.includes(provider)) {
-      return [provider, ...filtered];
-    }
-    return filtered;
-  }, [provider, providerSearch, providers]);
 
   async function runSemanticSearch(value: string) {
     const clean = value.trim();
@@ -491,9 +506,10 @@ export default function ModelsPage() {
 
   const allModels = useMemo(() => {
     const clean = query.trim().toLowerCase();
+    const providerNeedle = providerFilter.trim().toLowerCase();
 
     const scopedInitial = models
-      .filter((model) => (provider === "all" ? true : model.provider === provider))
+      .filter((model) => (providerNeedle ? model.provider.toLowerCase().includes(providerNeedle) : true))
       .filter((model) => hasCapability(model, capability));
     const scoped = scopedInitial.length > 0 ? scopedInitial : models;
 
@@ -535,21 +551,35 @@ export default function ModelsPage() {
 
     if (filtered.length === 0) {
       filtered = [...models]
-        .sort((a, b) => scoreModel(b, tier) - scoreModel(a, tier))
+        .sort((a, b) => {
+          const aRank = typeof a.openRouterRank === "number" ? a.openRouterRank : Number.MAX_SAFE_INTEGER;
+          const bRank = typeof b.openRouterRank === "number" ? b.openRouterRank : Number.MAX_SAFE_INTEGER;
+          if (aRank !== bRank) return aRank - bRank;
+          return scoreModel(b, tier) - scoreModel(a, tier);
+        })
         .slice(0, Math.min(12, models.length));
     }
 
-    return [...filtered].sort((a, b) => {
+    const sorted = [...filtered].sort((a, b) => {
       if (sortMode === "context") return (b.contextLength ?? 0) - (a.contextLength ?? 0);
       if (sortMode === "input_price") {
         const aCost = typeof a.inputCostPerM === "number" ? a.inputCostPerM : Number.MAX_SAFE_INTEGER;
         const bCost = typeof b.inputCostPerM === "number" ? b.inputCostPerM : Number.MAX_SAFE_INTEGER;
         return aCost - bCost;
       }
-      if (sortMode === "popular") return b.usageCount - a.usageCount;
+      if (sortMode === "popular") {
+        const aRank = typeof a.openRouterRank === "number" ? a.openRouterRank : Number.MAX_SAFE_INTEGER;
+        const bRank = typeof b.openRouterRank === "number" ? b.openRouterRank : Number.MAX_SAFE_INTEGER;
+        if (aRank !== bRank) return aRank - bRank;
+        return b.usageCount - a.usageCount;
+      }
       return scoreModel(b, tier) - scoreModel(a, tier);
     });
-  }, [capability, models, price, provider, query, semanticSet, sortMode, tier]);
+    if (sortMode === "recommended" && !clean) {
+      return diversifyByProvider(sorted, 2);
+    }
+    return sorted;
+  }, [capability, models, price, providerFilter, query, semanticSet, sortMode, tier]);
 
   const featured = useMemo(() => {
     const source = featuredModels.length > 0 ? featuredModels : models.filter((model) => model.isFeatured);
@@ -628,26 +658,24 @@ export default function ModelsPage() {
           />
         </div>
 
-        <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_260px]">
+        <div className="mt-3">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-secondary)]" />
             <Input
-              value={providerSearch}
-              onChange={(event) => setProviderSearch(event.target.value)}
-              placeholder="Search providers"
+              list="provider-list"
+              value={providerFilter}
+              onChange={(event) => setProviderFilter(event.target.value)}
+              placeholder="Filter providers (type to search)"
               className="h-9 pl-9 text-sm"
             />
+            <datalist id="provider-list">
+              {providers
+                .filter((item) => item !== "all")
+                .map((item) => (
+                  <option key={item} value={item} />
+                ))}
+            </datalist>
           </div>
-          <select
-            value={provider}
-            onChange={(event) => setProvider(event.target.value)}
-            className="h-9 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-sm text-[var(--text-primary)]"
-          >
-            {filteredProviders.length === 0 && <option value="all">All providers</option>}
-            {filteredProviders.map((item) => (
-              <option key={item} value={item}>{item === "all" ? "All providers (recommended)" : item}</option>
-            ))}
-          </select>
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -682,7 +710,7 @@ export default function ModelsPage() {
             className="h-9 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-sm text-[var(--text-primary)]"
           >
             <option value="recommended">Recommended</option>
-            <option value="popular">Most used</option>
+            <option value="popular">OpenRouter popular</option>
             <option value="context">Largest context</option>
             <option value="input_price">Lowest input cost</option>
           </select>

@@ -10,6 +10,7 @@ import {
   Search,
   Lightbulb,
   MessageCircle,
+  ImagePlus,
   Sparkles,
   Users,
 } from "lucide-react";
@@ -26,6 +27,8 @@ const MODE_ICONS: Record<string, React.ReactNode> = {
   Search: <Search className="h-5 w-5" />,
   Lightbulb: <Lightbulb className="h-5 w-5" />,
   MessageCircle: <MessageCircle className="h-5 w-5" />,
+  ImagePlus: <ImagePlus className="h-5 w-5" />,
+  Sparkles: <Sparkles className="h-5 w-5" />,
 };
 
 type ChatWelcomeProps = {

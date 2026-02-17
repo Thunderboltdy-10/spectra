@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { RotateCcw } from "lucide-react";
+import { Layers, RotateCcw, Shuffle, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ type DeckItem = {
   dueCount: number;
   updatedAt: number;
   lastReviewedAt?: number;
+  nextReviewAt?: number;
 };
 
 type DueCard = {
@@ -35,18 +36,30 @@ const QUALITY_OPTIONS = [
   { label: "Hard", value: 2 },
   { label: "Good", value: 4 },
   { label: "Easy", value: 5 },
-];
+] as const;
+
+function shuffleCards(items: DueCard[]) {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j]!, out[i]!];
+  }
+  return out;
+}
 
 export default function FlashcardsPage() {
   const [loading, setLoading] = useState(true);
   const [savingRating, setSavingRating] = useState(false);
   const [decks, setDecks] = useState<DeckItem[]>([]);
   const [dueCards, setDueCards] = useState<DueCard[]>([]);
+  const [deckCards, setDeckCards] = useState<DueCard[]>([]);
+  const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
+  const [reviewQueue, setReviewQueue] = useState<DueCard[]>([]);
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
+  const [shuffle, setShuffle] = useState(false);
 
-  const current = dueCards[index];
-  const completed = index >= dueCards.length;
+  const reviewScopeLabel = selectedDeckId ? "Selected deck" : "Due across all decks";
 
   async function loadData() {
     setLoading(true);
@@ -62,8 +75,6 @@ export default function FlashcardsPage() {
       const duePayload = (await dueRes.json()) as { cards?: DueCard[] };
       setDecks(deckPayload.decks ?? []);
       setDueCards(duePayload.cards ?? []);
-      setIndex(0);
-      setFlipped(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load flashcards");
     } finally {
@@ -71,20 +82,53 @@ export default function FlashcardsPage() {
     }
   }
 
+  async function loadDeckCards(deckId: string) {
+    try {
+      const response = await fetch(`/api/flashcards?action=due&deckId=${encodeURIComponent(deckId)}&includeAll=true&limit=500`);
+      if (!response.ok) throw new Error(await response.text());
+      const payload = (await response.json()) as { cards?: DueCard[] };
+      setDeckCards(payload.cards ?? []);
+      setSelectedDeckId(deckId);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load deck cards");
+    }
+  }
+
   useEffect(() => {
     void loadData();
   }, []);
 
-  const nextReviewHint = useMemo(() => {
-    if (!current) return null;
+  useEffect(() => {
+    const base = selectedDeckId ? deckCards : dueCards;
+    const nextQueue = shuffle ? shuffleCards(base) : [...base];
+    setReviewQueue(nextQueue);
+    setIndex(0);
+    setFlipped(false);
+  }, [deckCards, dueCards, selectedDeckId, shuffle]);
+
+  const current = reviewQueue[index];
+  const completed = reviewQueue.length === 0 || index >= reviewQueue.length;
+
+  const selectedDeck = useMemo(
+    () => decks.find((deck) => deck._id === selectedDeckId) ?? null,
+    [decks, selectedDeckId],
+  );
+
+  const projectedDates = useMemo(() => {
+    if (!current) return [] as Array<{ label: string; date: string }>;
     const baseline = current.progress ?? {
       easeFactor: 2.5,
       interval: 0,
       repetitions: 0,
       nextReviewAt: Date.now(),
     };
-    const projected = calculateNextReview(4, baseline.easeFactor, baseline.interval, baseline.repetitions);
-    return new Date(projected.nextReviewAt).toLocaleDateString();
+    return QUALITY_OPTIONS.map((option) => {
+      const next = calculateNextReview(option.value, baseline.easeFactor, baseline.interval, baseline.repetitions);
+      return {
+        label: option.label,
+        date: new Date(next.nextReviewAt).toLocaleDateString(),
+      };
+    });
   }, [current]);
 
   async function rateCurrent(quality: number) {
@@ -101,8 +145,18 @@ export default function FlashcardsPage() {
         }),
       });
       if (!response.ok) throw new Error(await response.text());
+
       setFlipped(false);
-      setIndex((prev) => prev + 1);
+      setReviewQueue((prev) => {
+        const next = prev.filter((_, idx) => idx !== index);
+        const nextIndex = Math.min(index, Math.max(0, next.length - 1));
+        setIndex(nextIndex);
+        return next;
+      });
+      await loadData();
+      if (selectedDeckId) {
+        await loadDeckCards(selectedDeckId);
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to rate card");
     } finally {
@@ -110,70 +164,143 @@ export default function FlashcardsPage() {
     }
   }
 
+  async function deleteDeck(deckId: string) {
+    try {
+      const response = await fetch("/api/flashcards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete_deck", deckId }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      if (selectedDeckId === deckId) {
+        setSelectedDeckId(null);
+        setDeckCards([]);
+      }
+      await loadData();
+      toast.success("Deck removed");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to delete deck");
+    }
+  }
+
   return (
-    <AppShell>
+    <AppShell fullBleed contentClassName="2xl:px-14">
       <section className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="font-display text-2xl">Flashcard Review</h1>
+            <h1 className="font-display text-3xl">Flashcard Studio</h1>
             <p className="text-sm text-[var(--text-secondary)]">
-              Review due cards with spaced repetition and track deck progress.
+              Auto-saved decks, shuffle review, and spaced repetition scheduling.
             </p>
           </div>
-          <Button type="button" variant="secondary" onClick={() => void loadData()}>
-            <RotateCcw className="h-4 w-4" />
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="secondary" onClick={() => setShuffle((prev) => !prev)}>
+              <Shuffle className="h-4 w-4" />
+              {shuffle ? "Shuffle on" : "Shuffle off"}
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => void loadData()}>
+              <RotateCcw className="h-4 w-4" />
+              Refresh
+            </Button>
+          </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-          <article className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
-            <h2 className="mb-3 text-sm font-semibold">Saved Decks</h2>
-            {loading ? (
-              <p className="text-sm text-[var(--text-secondary)]">Loading decks...</p>
-            ) : decks.length === 0 ? (
-              <p className="text-sm text-[var(--text-secondary)]">No saved decks yet. Generate flashcards in chat and save a deck.</p>
-            ) : (
-              <div className="space-y-2">
-                {decks.map((deck) => (
-                  <div
-                    key={deck._id}
-                    className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5"
-                  >
-                    <p className="text-sm font-medium text-[var(--text-primary)]">{deck.title}</p>
-                    <p className="text-xs text-[var(--text-secondary)]">
-                      {deck.cardCount} cards • {deck.dueCount} due • updated {new Date(deck.updatedAt).toLocaleDateString()}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </article>
+        <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
+          <aside className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-semibold">Saved Decks</h2>
+              <span className="text-xs text-[var(--text-secondary)]">{decks.length} total</span>
+            </div>
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedDeckId(null);
+                  setDeckCards([]);
+                }}
+                className={`w-full rounded-xl border px-3 py-2 text-left text-sm transition ${
+                  !selectedDeckId
+                    ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_10%,transparent)]"
+                    : "border-[var(--border-default)] bg-[var(--bg-secondary)]"
+                }`}
+              >
+                <p className="font-medium">Due review queue</p>
+                <p className="text-xs text-[var(--text-secondary)]">{dueCards.length} cards due now</p>
+              </button>
 
-          <article className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
-            <h2 className="mb-3 text-sm font-semibold">Due Review</h2>
-            {loading ? (
-              <p className="text-sm text-[var(--text-secondary)]">Loading due cards...</p>
-            ) : dueCards.length === 0 || completed ? (
-              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 text-sm text-[var(--text-secondary)]">
-                All due cards reviewed.
+              {loading ? (
+                <p className="text-sm text-[var(--text-secondary)]">Loading decks...</p>
+              ) : decks.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-[var(--border-default)] p-3 text-sm text-[var(--text-secondary)]">
+                  No decks yet. Generate flashcards in chat and they save automatically.
+                </p>
+              ) : (
+                decks.map((deck) => (
+                  <div key={deck._id} className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
+                    <button
+                      type="button"
+                      onClick={() => void loadDeckCards(deck._id)}
+                      className="w-full text-left"
+                    >
+                      <p className="truncate text-sm font-medium text-[var(--text-primary)]">{deck.title}</p>
+                      <p className="text-xs text-[var(--text-secondary)]">
+                        {deck.cardCount} cards • {deck.dueCount} due • updated {new Date(deck.updatedAt).toLocaleDateString()}
+                      </p>
+                    </button>
+                    <div className="mt-2 flex items-center justify-between">
+                      <Button type="button" size="sm" variant="secondary" onClick={() => void loadDeckCards(deck._id)}>
+                        <Layers className="h-3.5 w-3.5" />
+                        Review
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="text-[var(--danger)]"
+                        onClick={() => void deleteDeck(deck._id)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </aside>
+
+          <article className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 sm:p-6">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-base font-semibold">{selectedDeck?.title ?? "Due Review"}</h2>
+              <p className="text-xs text-[var(--text-secondary)]">{reviewScopeLabel}</p>
+            </div>
+
+            {completed ? (
+              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-6 text-center">
+                <p className="text-lg font-semibold text-[var(--text-primary)]">All done for this round</p>
+                <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                  {selectedDeckId ? "This deck has no remaining cards in the current queue." : "No cards are currently due."}
+                </p>
               </div>
             ) : current ? (
-              <div className="space-y-3">
-                <p className="text-xs uppercase tracking-[0.11em] text-[var(--text-secondary)]">
-                  {current.deckTitle} • {index + 1}/{dueCards.length}
+              <div className="space-y-4">
+                <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+                  {current.deckTitle} • {index + 1}/{reviewQueue.length}
                 </p>
+
                 <button
                   type="button"
                   onClick={() => setFlipped((prev) => !prev)}
-                  className="min-h-[220px] w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-5 text-left"
+                  className="min-h-[320px] w-full rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-6 text-left transition hover:border-[var(--accent-cyan)]"
                 >
-                  <p className="text-xs uppercase tracking-[0.11em] text-[var(--text-secondary)]">
+                  <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">
                     {flipped ? "Back" : "Front"}
                   </p>
-                  <p className="mt-3 text-base text-[var(--text-primary)]">{flipped ? current.back : current.front}</p>
-                  <p className="mt-4 text-xs text-[var(--text-secondary)]">Tap to {flipped ? "hide" : "reveal"} answer</p>
+                  <p className="mt-5 text-xl font-semibold text-[var(--text-primary)]">
+                    {flipped ? current.back : current.front}
+                  </p>
+                  <p className="mt-6 text-xs text-[var(--text-secondary)]">Click to {flipped ? "hide" : "reveal"} answer</p>
                 </button>
+
                 {flipped ? (
                   <div className="flex flex-wrap gap-2">
                     {QUALITY_OPTIONS.map((option) => (
@@ -190,7 +317,20 @@ export default function FlashcardsPage() {
                     ))}
                   </div>
                 ) : null}
-                <p className="text-xs text-[var(--text-secondary)]">Projected next review (Good): {nextReviewHint}</p>
+
+                <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
+                  <p className="mb-2 text-xs font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)]">
+                    Spaced review projection
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                    {projectedDates.map((item) => (
+                      <div key={item.label} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2">
+                        <p className="text-xs text-[var(--text-secondary)]">{item.label}</p>
+                        <p className="text-sm font-medium text-[var(--text-primary)]">{item.date}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             ) : null}
           </article>

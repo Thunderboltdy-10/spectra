@@ -27,8 +27,6 @@ type AgentEditFormProps = {
   onCancelHref?: string;
 };
 
-const EMOJIS = ["🎓", "🧠", "📚", "🧪", "🧮", "✍️", "🔬", "🌍", "📈", "🤖", "📝", "🧩"];
-
 function buildPromptFromAssisted(input: {
   name: string;
   purpose: string;
@@ -243,26 +241,12 @@ export function AgentEditForm({
           <Input
             value={avatarEmoji}
             onChange={(event) => setAvatarEmoji(event.target.value)}
-            maxLength={2}
-            placeholder="🎓"
+            maxLength={12}
+            placeholder="e.g. 🎓 or PG"
           />
-          <div className="flex flex-wrap gap-1 pt-1">
-            {EMOJIS.map((emoji) => (
-              <button
-                key={emoji}
-                type="button"
-                onClick={() => setAvatarEmoji(emoji)}
-                className={`cursor-pointer rounded-md border px-2 py-1 text-lg transition ${
-                  avatarEmoji === emoji
-                    ? "border-[var(--accent)] bg-[color-mix(in_oklab,var(--accent)_10%,transparent)]"
-                    : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
-                }`}
-                aria-label={`Pick ${emoji}`}
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
+          <p className="pt-1 text-[11px] text-[var(--text-secondary)]">
+            Use any emoji or short initials. Preconfigured emoji presets were removed.
+          </p>
         </label>
 
         <label className="space-y-1">

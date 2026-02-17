@@ -35,14 +35,25 @@ export function PanelProvider({ children }: { children: React.ReactNode }) {
     setActiveView(null);
   }, []);
 
+  const hasData = useCallback((data: PanelData) => {
+    return Object.values(data).some((value) => {
+      if (Array.isArray(value)) return value.length > 0;
+      return value !== undefined && value !== null;
+    });
+  }, []);
+
   const togglePanel = useCallback((view: PanelView, data: PanelData = {}) => {
     if (activeView === view) {
-      setActiveView(null);
+      if (hasData(data)) {
+        setPanelData((prev) => ({ ...prev, ...data }));
+      } else {
+        setActiveView(null);
+      }
     } else {
       setActiveView(view);
       setPanelData(data);
     }
-  }, [activeView]);
+  }, [activeView, hasData]);
 
   return (
     <PanelContext.Provider

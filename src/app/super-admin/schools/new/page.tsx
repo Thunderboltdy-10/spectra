@@ -6,7 +6,6 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 
 const SCHOOL_TYPES = [
   { value: "", label: "Select type..." },

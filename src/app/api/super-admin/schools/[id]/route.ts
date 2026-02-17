@@ -28,7 +28,50 @@ export async function PATCH(
   return withRouteErrorHandling(async () => {
     const actor = await requireSuperAdmin();
     const { id } = await params;
-    const body = (await request.json()) as Record<string, unknown>;
+    const body = (await request.json()) as {
+      action?: "assignAdmin" | "updateMemberRole" | "removeMember";
+      email?: string;
+      userId?: string;
+      role?: "student" | "teacher" | "admin";
+      [key: string]: unknown;
+    };
+
+    if (body.action === "assignAdmin") {
+      if (!body.email || !body.email.trim()) {
+        throw new Error("Admin email is required");
+      }
+      const result = await convexMutation("superAdmin:assignOrgAdmin", {
+        actorClerkId: actor.clerkId,
+        orgId: id,
+        email: body.email.trim(),
+      });
+      return ok(result);
+    }
+
+    if (body.action === "updateMemberRole") {
+      if (!body.userId || !body.role) {
+        throw new Error("userId and role are required");
+      }
+      await convexMutation("superAdmin:updateOrgMemberRole", {
+        actorClerkId: actor.clerkId,
+        orgId: id,
+        userId: body.userId,
+        role: body.role,
+      });
+      return ok({ ok: true });
+    }
+
+    if (body.action === "removeMember") {
+      if (!body.userId) {
+        throw new Error("userId is required");
+      }
+      await convexMutation("superAdmin:removeOrgMember", {
+        actorClerkId: actor.clerkId,
+        orgId: id,
+        userId: body.userId,
+      });
+      return ok({ ok: true });
+    }
 
     await convexMutation("superAdmin:updateOrg", {
       actorClerkId: actor.clerkId,

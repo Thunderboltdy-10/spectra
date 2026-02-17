@@ -2,14 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ShieldCheck, Users2, WalletCards } from "lucide-react";
+import { Users2, WalletCards } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { useSidebar } from "@/context/sidebar-context";
 
 type UserRow = {
   _id: string;
@@ -26,7 +28,8 @@ type UsageRow = {
 };
 
 export default function AdminPage() {
-  const [role, setRole] = useState<"student" | "teacher" | "admin">("student");
+  const router = useRouter();
+  const { role: userRole, loading: sidebarLoading } = useSidebar();
   const [users, setUsers] = useState<UserRow[]>([]);
   const [usage, setUsage] = useState<UsageRow[]>([]);
   const [verify, setVerify] = useState(false);
@@ -55,7 +58,6 @@ export default function AdminPage() {
       };
     };
 
-    setRole(bootstrap.actor.role);
     setVerify(Boolean(bootstrap.orgSettings.org.verifyMarkerPassEnabled));
     setBudget(String(bootstrap.orgSettings.org.tokenBudgetDaily));
     setOrchestratorV2Enabled(Boolean(bootstrap.orgSettings.org.orchestratorV2Enabled));
@@ -76,8 +78,15 @@ export default function AdminPage() {
   }
 
   useEffect(() => {
+    if (!sidebarLoading && userRole !== "admin") {
+      router.replace("/");
+    }
+  }, [sidebarLoading, userRole, router]);
+
+  useEffect(() => {
+    if (sidebarLoading || userRole !== "admin") return;
     void loadAll().catch((error) => toast.error(error instanceof Error ? error.message : "Failed to load admin data"));
-  }, []);
+  }, [sidebarLoading, userRole]);
 
   const usageSum = useMemo(() => usage.reduce((sum, row) => sum + row.totalTokens, 0), [usage]);
 
@@ -116,19 +125,12 @@ export default function AdminPage() {
     await loadAll();
   }
 
-  if (role !== "admin") {
+  if (sidebarLoading || userRole !== "admin") {
     return (
       <AppShell>
-        <Card>
-          <CardHeader>
-            <CardTitle className="inline-flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4" /> Admin access required
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-ink-300">You need the admin role to manage users and organization settings.</p>
-          </CardContent>
-        </Card>
+        <div className="flex items-center justify-center p-8">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--border-default)] border-t-[var(--accent-cyan)]" />
+        </div>
       </AppShell>
     );
   }
@@ -139,7 +141,7 @@ export default function AdminPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Admin Console</h1>
         <p className="text-sm text-ink-400">Control roles, quality checks, and spending limits for your school workspace.</p>
         <div className="mt-3 flex flex-wrap gap-2">
-          <Link href="/admin/soul" className="inline-flex items-center rounded-md border border-app-border bg-app-muted px-3 py-1.5 text-sm">
+          <Link href="/admin/school/soul" className="inline-flex items-center rounded-md border border-app-border bg-app-muted px-3 py-1.5 text-sm">
             Open School Soul
           </Link>
           <Link href="/admin/branding" className="inline-flex items-center rounded-md border border-app-border bg-app-muted px-3 py-1.5 text-sm">

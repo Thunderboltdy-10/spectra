@@ -132,6 +132,7 @@ export type RouteTrace = {
     needsSearch: boolean;
     needsRag: boolean;
     needsVision: boolean;
+    needsTabular?: boolean;
     spendingTier: SpendingTier;
     hasAttachments: boolean;
     attachmentTypes: string[];

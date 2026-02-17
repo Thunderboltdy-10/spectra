@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   Clock,
   MailPlus,
+  RefreshCw,
   Search,
   Trash2,
   UserCheck,
@@ -70,7 +71,7 @@ function timeAgo(ts: number) {
 // ---- Invite Dialog ----
 function InviteDialog({ onClose, onInvited }: { onClose: () => void; onInvited: () => void }) {
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<"student" | "teacher" | "admin">("student");
+  const [role, setRole] = useState<"student" | "teacher">("student");
   const [saving, setSaving] = useState(false);
 
   async function handleSubmit(event: React.FormEvent) {
@@ -131,7 +132,6 @@ function InviteDialog({ onClose, onInvited }: { onClose: () => void; onInvited: 
               <SelectContent>
                 <SelectItem value="student">Student</SelectItem>
                 <SelectItem value="teacher">Teacher</SelectItem>
-                <SelectItem value="admin">Admin</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -257,6 +257,21 @@ export default function SchoolMembersPage() {
     }
   }
 
+  async function resendInvite(invitationId: string) {
+    try {
+      const response = await fetch("/api/school-admin/members", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "resendInvite", invitationId }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      toast.success("Invitation resent");
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to resend invitation");
+    }
+  }
+
   return (
     <AppShell>
       {showInvite && (
@@ -287,6 +302,9 @@ export default function SchoolMembersPage() {
             <h1 className="font-display text-3xl text-[var(--text-primary)]">Members</h1>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">
               {loading ? "Loading..." : `${members.length} member${members.length !== 1 ? "s" : ""}`}
+            </p>
+            <p className="mt-1 text-xs text-[var(--text-secondary)]">
+              Admin-role assignment is managed by Super Admin.
             </p>
           </div>
           <Button onClick={() => setShowInvite(true)} className="cursor-pointer gap-2">
@@ -343,19 +361,22 @@ export default function SchoolMembersPage() {
                       <td className="px-5 py-4 font-medium text-[var(--text-primary)]">{member.name}</td>
                       <td className="px-5 py-4 text-[var(--text-secondary)]">{member.email}</td>
                       <td className="px-5 py-4">
-                        <Select
-                          value={member.role}
-                          onValueChange={(v) => void updateRole(member._id, v)}
-                        >
-                          <SelectTrigger className="h-8 w-[110px]">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="student">student</SelectItem>
-                            <SelectItem value="teacher">teacher</SelectItem>
-                            <SelectItem value="admin">admin</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        {member.role === "admin" ? (
+                          <RoleBadge role={member.role} />
+                        ) : (
+                          <Select
+                            value={member.role}
+                            onValueChange={(v) => void updateRole(member._id, v)}
+                          >
+                            <SelectTrigger className="h-8 w-[110px]">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="student">student</SelectItem>
+                              <SelectItem value="teacher">teacher</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        )}
                       </td>
                       <td className="px-5 py-4 text-xs text-[var(--text-secondary)]">
                         {member.lastActiveAt ? timeAgo(member.lastActiveAt) : "—"}
@@ -367,8 +388,10 @@ export default function SchoolMembersPage() {
                         <button
                           type="button"
                           onClick={() => setRemoveTarget(member)}
+                          disabled={member.role === "admin"}
                           className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[color-mix(in_oklab,var(--danger)_10%,transparent)] hover:text-[var(--danger)]"
                           aria-label="Remove member"
+                          title={member.role === "admin" ? "Only super admin can remove admins" : "Remove member"}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -411,14 +434,24 @@ export default function SchoolMembersPage() {
                         <td className="px-5 py-3.5 text-xs text-[var(--text-secondary)]">{formatDate(inv.createdAt)}</td>
                         <td className="px-5 py-3.5 text-xs text-[var(--text-secondary)]">{formatDate(inv.expiresAt)}</td>
                         <td className="px-5 py-3.5">
-                          <button
-                            type="button"
-                            onClick={() => void cancelInvite(inv._id)}
-                            className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[color-mix(in_oklab,var(--danger)_10%,transparent)] hover:text-[var(--danger)]"
-                            aria-label="Cancel invitation"
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => void resendInvite(inv._id)}
+                              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)] hover:text-[var(--accent-cyan)]"
+                              aria-label="Resend invitation"
+                            >
+                              <RefreshCw className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void cancelInvite(inv._id)}
+                              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[color-mix(in_oklab,var(--danger)_10%,transparent)] hover:text-[var(--danger)]"
+                              aria-label="Cancel invitation"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -426,6 +459,9 @@ export default function SchoolMembersPage() {
                 </table>
               </div>
             </div>
+            <p className="mt-2 text-xs text-[var(--text-secondary)]">
+              Admin invitations and admin-role changes are managed by Super Admin.
+            </p>
           </div>
         )}
       </div>

@@ -11,6 +11,7 @@ export async function GET() {
       totalOrgs: number;
       totalUsers: number;
       totalMessages: number;
+      totalAdmins: number;
     }>("superAdmin:getGlobalStats", { actorClerkId: actor.clerkId });
 
     return ok(stats);

@@ -160,14 +160,27 @@ function sortedByPopularity(models: ModelOption[]) {
   });
 }
 
+function hasVisionSupport(model: ModelOption): boolean {
+  const visionKeywords = ["vision", "image", "multimodal", "gpt-4o", "gpt-4-turbo", "claude-3", "gemini", "sonar"];
+  const modelSource = `${model.modelId} ${model.name} ${(model.tags ?? []).join(" ")}`.toLowerCase();
+  return visionKeywords.some((keyword) => modelSource.includes(keyword));
+}
+
+function estimateTokens(message: string): number {
+  return Math.ceil(message.length / 4);
+}
+
 // Get models categorized for display in dropdown
 function getCategorizedModels(
   models: ModelOption[],
   mode: StudyMode,
   modelSearch: string,
+  hasImages: boolean,
+  estimatedTokens: number,
 ): {
   recommended: ModelOption[];
   others: ModelOption[];
+  notRecommended: Array<{ model: ModelOption; reason: string }>;
 } {
   const sorted = sortedByPopularity(models);
   
@@ -185,7 +198,7 @@ function getCategorizedModels(
       });
       return haystack.includes(normalized) || score > 0.35;
     });
-    return { recommended: filtered, others: [] };
+    return { recommended: filtered, others: [], notRecommended: [] };
   }
   
   // Get recommended model IDs for this mode
@@ -193,16 +206,29 @@ function getCategorizedModels(
   
   const recommended: ModelOption[] = [];
   const others: ModelOption[] = [];
+  const notRecommended: Array<{ model: ModelOption; reason: string }> = [];
   
   for (const model of sorted) {
-    if (recommendedIds.has(model.modelId)) {
+    const reasons: string[] = [];
+    
+    if (hasImages && !hasVisionSupport(model)) {
+      reasons.push("No image support");
+    }
+    
+    if (model.contextLength && estimatedTokens > model.contextLength) {
+      reasons.push("Context too small");
+    }
+    
+    if (reasons.length > 0) {
+      notRecommended.push({ model, reason: reasons.join(" · ") });
+    } else if (recommendedIds.has(model.modelId)) {
       recommended.push(model);
     } else {
       others.push(model);
     }
   }
   
-  return { recommended, others };
+  return { recommended, others, notRecommended };
 }
 
 function SettingPill({
@@ -283,10 +309,20 @@ export function ChatComposer({
     [agents, selectedAgentId],
   );
   
+  const hasImages = useMemo(
+    () => fileList.some((f) => f.type.startsWith("image/")),
+    [fileList]
+  );
+  
+  const estimatedTokens = useMemo(
+    () => estimateTokens(message),
+    [message]
+  );
+  
   // Get categorized models for dropdown
-  const { recommended, others } = useMemo(
-    () => getCategorizedModels(models, mode, modelSearch),
-    [models, mode, modelSearch]
+  const { recommended, others, notRecommended } = useMemo(
+    () => getCategorizedModels(models, mode, modelSearch, hasImages, estimatedTokens),
+    [models, mode, modelSearch, hasImages, estimatedTokens]
   );
   
   const selectorTriggerClass =
@@ -463,7 +499,7 @@ export function ChatComposer({
   return (
     <footer
       className={cn(
-        "border-t border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_90%,transparent)] px-3 pb-[calc(0.9rem+env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl sm:px-6 lg:px-10",
+        "bg-[var(--bg-primary)] px-3 pb-[calc(0.9rem+env(safe-area-inset-bottom))] pt-3 sm:px-6 lg:px-10",
         draggingFiles && "bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-primary))]",
       )}
       onDragEnter={handleDragEnter}
@@ -737,6 +773,45 @@ export function ChatComposer({
                           </button>
                         );
                       })}
+
+                      {/* Not Recommended Models */}
+                      {!modelSearch.trim() && notRecommended.length > 0 && (
+                        <>
+                          <p className="mb-1 mt-3 px-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--warning)]">
+                            Not Recommended
+                          </p>
+                          {notRecommended.map(({ model, reason }) => {
+                            const displayName = cleanModelDisplayText(model.name) || formatModelLabel(model.modelId);
+                            const isSelected = routerMode === "manual" && manualModel === model.modelId;
+
+                            return (
+                              <button
+                                key={model.modelId}
+                                type="button"
+                                onClick={() => {
+                                  onSelectModel(model.modelId);
+                                  setShowModelSelector(false);
+                                }}
+                                className={`mb-0.5 flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-left transition opacity-60 hover:opacity-80 ${
+                                  isSelected
+                                    ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
+                                    : "hover:bg-[var(--bg-hover)]"
+                                }`}
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-sm font-medium text-[var(--text-primary)]">{displayName}</p>
+                                  <p className="truncate text-[10px] text-[var(--text-secondary)]">
+                                    <span className="text-[var(--warning)]">{reason}</span>
+                                    {" · "}
+                                    {model.provider}
+                                    {model.contextLength ? ` · ${Math.round((model.contextLength ?? 0) / 1000)}k ctx` : ""}
+                                  </p>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </>
+                      )}
 
                       {/* Search Results */}
                       {modelSearch.trim() && (

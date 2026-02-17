@@ -6,10 +6,11 @@ import { ChatComposer } from "@/components/chat/chat-composer";
 import { CodeCanvas } from "@/components/chat/code-canvas";
 import { ChatHeader } from "@/components/chat/chat-header";
 import { ChatMessages } from "@/components/chat/chat-messages";
-import { ChatSettingsDrawer } from "@/components/chat/chat-settings-drawer";
+import { UnifiedPanel } from "@/components/chat/unified-panel";
 import { ChatSidebar } from "@/components/chat/chat-sidebar";
 import { ChatWelcome } from "@/components/chat/chat-welcome";
 import { useChatState } from "@/hooks/use-chat-state";
+import { usePanel } from "@/context/panel-context";
 import type { StudyMode } from "@/types";
 import { downloadTextFile, exportConversationMarkdown } from "@/lib/export/markdown-export";
 import { exportElementToPrintPdf } from "@/lib/export/pdf-export";
@@ -32,6 +33,7 @@ function SidebarSkeleton() {
 export function ChatLayout() {
   const chat = useChatState();
   const canvas = useCanvasState();
+  const panel = usePanel();
 
   const lastModelUsed = useMemo(() => {
     const lastAssistant = [...chat.messages].reverse().find((item) => item.role === "assistant");
@@ -167,10 +169,11 @@ export function ChatLayout() {
     onNewChat: () => chat.startNewChat(chat.selectedAgentId),
     onDeleteChat: (chatId: string) => void chat.handleDeleteChat(chatId),
     onRenameChat: (chatId: string, title: string) => void chat.renameChat(chatId, title),
-    onOpenSettings: () => chat.setSettingsOpen(true),
+    onOpenSettings: () => panel.openPanel("settings"),
     onPinChat: handlePinChat,
     pinnedChatIds: chat.pinnedChatIds,
     role: chat.role,
+    isSuperAdmin: chat.isSuperAdmin,
     userSpending: chat.userSpending,
     userMemorySummary: chat.userMemorySummary,
     collapsed: !chat.sidebarOpen,
@@ -217,7 +220,7 @@ export function ChatLayout() {
           sending={chat.sending}
           onStop={chat.stopGeneration}
           onToggleMobileSidebar={() => chat.setMobileSidebarOpen(true)}
-          onOpenSettings={() => chat.setSettingsOpen(true)}
+          onOpenSettings={() => panel.openPanel("settings")}
           onNewChat={() => chat.startNewChat(chat.selectedAgentId)}
           onExportMarkdown={() => {
             const markdown = exportConversationMarkdown({
@@ -397,48 +400,48 @@ export function ChatLayout() {
         }}
       />
 
-      <ChatSettingsDrawer
-        open={chat.settingsOpen}
-        onClose={() => chat.setSettingsOpen(false)}
-        models={chat.models}
-        mode={chat.mode}
-        thinkingLevel={chat.thinkingLevel}
-        routerMode={chat.routerMode}
-        manualModel={chat.manualModel}
-        usePersonalResources={chat.usePersonalResources}
-        personalResources={chat.personalResources}
-        userSpending={chat.userSpending}
-        autoEnhancePrompt={chat.autoEnhancePrompt}
-        autoThinking={chat.autoThinking}
-        autoSearch={chat.autoSearch}
-        onModeChange={handleModeChange}
-        onThinkingChange={(thinkingLevel) => {
-          chat.setThinkingLevel(thinkingLevel);
-          void chat.updateExistingChatSettings({ thinkingLevel }).catch((error: unknown) =>
-            toast.error(error instanceof Error ? error.message : "Failed to update thinking level"));
-        }}
-        onRouterChange={(routerMode) => {
-          chat.setRouterMode(routerMode);
-          void chat.updateExistingChatSettings({ routerMode, manualModel: routerMode === "manual" ? chat.manualModel : undefined })
-            .catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Failed to update routing"));
-        }}
-        onManualModelChange={(manualModel) => {
-          chat.setManualModel(manualModel);
-          void chat.updateExistingChatSettings({ manualModel }).catch((error: unknown) =>
-            toast.error(error instanceof Error ? error.message : "Failed to save model"));
-        }}
-        onTogglePersonalResources={(usePersonalResources) => {
-          chat.setUsePersonalResources(usePersonalResources);
-          void chat.updateExistingChatSettings({ usePersonalResources }).catch((error: unknown) =>
-            toast.error(error instanceof Error ? error.message : "Failed to save setting"));
-        }}
-        onAutoEnhancePromptChange={chat.setAutoEnhancePrompt}
-        onAutoThinkingChange={chat.setAutoThinking}
-        onAutoSearchChange={chat.setAutoSearch}
-        onDeleteResource={(resourceId) => {
-          void chat.deletePersonalResource(resourceId).catch((error: unknown) =>
-            toast.error(error instanceof Error ? error.message : "Failed to delete file"),
-          );
+      <UnifiedPanel
+        settingsProps={{
+          models: chat.models,
+          mode: chat.mode,
+          thinkingLevel: chat.thinkingLevel,
+          routerMode: chat.routerMode,
+          manualModel: chat.manualModel,
+          usePersonalResources: chat.usePersonalResources,
+          personalResources: chat.personalResources,
+          userSpending: chat.userSpending,
+          autoEnhancePrompt: chat.autoEnhancePrompt,
+          autoThinking: chat.autoThinking,
+          autoSearch: chat.autoSearch,
+          onModeChange: handleModeChange,
+          onThinkingChange: (thinkingLevel) => {
+            chat.setThinkingLevel(thinkingLevel);
+            void chat.updateExistingChatSettings({ thinkingLevel }).catch((error: unknown) =>
+              toast.error(error instanceof Error ? error.message : "Failed to update thinking level"));
+          },
+          onRouterChange: (routerMode) => {
+            chat.setRouterMode(routerMode);
+            void chat.updateExistingChatSettings({ routerMode, manualModel: routerMode === "manual" ? chat.manualModel : undefined })
+              .catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Failed to update routing"));
+          },
+          onManualModelChange: (manualModel) => {
+            chat.setManualModel(manualModel);
+            void chat.updateExistingChatSettings({ manualModel }).catch((error: unknown) =>
+              toast.error(error instanceof Error ? error.message : "Failed to save model"));
+          },
+          onTogglePersonalResources: (usePersonalResources) => {
+            chat.setUsePersonalResources(usePersonalResources);
+            void chat.updateExistingChatSettings({ usePersonalResources }).catch((error: unknown) =>
+              toast.error(error instanceof Error ? error.message : "Failed to save setting"));
+          },
+          onAutoEnhancePromptChange: chat.setAutoEnhancePrompt,
+          onAutoThinkingChange: chat.setAutoThinking,
+          onAutoSearchChange: chat.setAutoSearch,
+          onDeleteResource: (resourceId) => {
+            void chat.deletePersonalResource(resourceId).catch((error: unknown) =>
+              toast.error(error instanceof Error ? error.message : "Failed to delete file"),
+            );
+          },
         }}
       />
     </div>

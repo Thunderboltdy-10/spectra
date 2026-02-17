@@ -294,6 +294,7 @@ export function useChatState() {
   const sidebar = useSidebar();
   const [loading, setLoading] = useState(true);
   const role = sidebar.role;
+  const isSuperAdmin = sidebar.isSuperAdmin;
   const chats = sidebar.chats;
   const setChats = sidebar.setChats;
   const [models, setModels] = useState<ModelOption[]>([]);
@@ -1671,6 +1672,7 @@ export function useChatState() {
     loading,
     sending,
     role,
+    isSuperAdmin,
     chats,
     models,
     agents,

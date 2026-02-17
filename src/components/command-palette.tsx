@@ -12,6 +12,7 @@ import {
   useMatches,
 } from "kbar";
 import { ALL_MODES, getModeConfig } from "@/lib/modes";
+import { useSidebar } from "@/context/sidebar-context";
 
 function toggleTheme() {
   const root = document.documentElement;
@@ -71,6 +72,8 @@ function CommandResults() {
 
 export function CommandPaletteProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const { role, isSuperAdmin } = useSidebar();
+  const isAdmin = role === "admin" || isSuperAdmin;
 
   const actions = useMemo(
     () => [
@@ -118,12 +121,26 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
         section: "Navigation",
         perform: () => router.push("/analytics"),
       },
-      {
-        id: "open-admin",
-        name: "Open admin",
-        section: "Navigation",
-        perform: () => router.push("/admin"),
-      },
+      ...(isAdmin
+        ? [
+            {
+              id: "open-admin",
+              name: "Open admin",
+              section: "Navigation",
+              perform: () => router.push("/admin"),
+            },
+          ]
+        : []),
+      ...(isSuperAdmin
+        ? [
+            {
+              id: "open-super-admin",
+              name: "Open super admin",
+              section: "Navigation",
+              perform: () => router.push("/super-admin"),
+            },
+          ]
+        : []),
       ...ALL_MODES.map((mode) => ({
         id: `mode-${mode.key}`,
         name: `Switch mode: ${getModeConfig(mode.key).label}`,
@@ -136,7 +153,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
         },
       })),
     ],
-    [router],
+    [router, isAdmin, isSuperAdmin],
   );
 
   return (

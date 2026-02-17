@@ -200,7 +200,7 @@ export default function SchoolAdminDashboard() {
               accent="var(--accent-coral)"
             />
             <NavCard
-              href="/admin/soul"
+              href="/admin/school/soul"
               icon={<BookOpen className="h-5 w-5" />}
               label="School SOUL"
               desc="Institutional guidance and AI policies"

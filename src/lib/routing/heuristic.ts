@@ -1,7 +1,8 @@
 import { CHEAP_MODEL_DEFAULTS, MODEL_CONFIG, MODEL_COST_BLOCK_LIST, ROUTER_FALLBACKS } from "@/lib/model-config";
 import type { ModelRouteInput, ModelRouteResult, RouteTrace, RouteTraceCandidate } from "@/types";
 
-const multimodalExts = ["pdf", "png", "jpg", "jpeg", "webp", "docx", "gif"];
+const multimodalExts = ["pdf", "png", "jpg", "jpeg", "webp", "docx", "gif", "heic", "heif"];
+const tabularExts = ["csv", "tsv", "xlsx", "xls"];
 
 function nowMs() {
   if (typeof performance !== "undefined" && typeof performance.now === "function") {
@@ -12,7 +13,31 @@ function nowMs() {
 
 function hasMultimodalAttachment(attachmentTypes: string[]) {
   const normalized = attachmentTypes.map((type) => type.toLowerCase());
-  return normalized.some((type) => multimodalExts.includes(type));
+  return normalized.some((type) => {
+    if (type.includes("/")) {
+      return (
+        type.startsWith("image/") ||
+        type === "application/pdf" ||
+        type.includes("wordprocessingml") ||
+        type === "application/msword"
+      );
+    }
+    return multimodalExts.includes(type);
+  });
+}
+
+function hasTabularAttachment(attachmentTypes: string[]) {
+  const normalized = attachmentTypes.map((type) => type.toLowerCase());
+  return normalized.some((type) => {
+    if (type.includes("/")) {
+      return (
+        type.includes("spreadsheet") ||
+        type.includes("excel") ||
+        type.includes("csv")
+      );
+    }
+    return tabularExts.includes(type);
+  });
 }
 
 function isFreeModel(modelId: string) {
@@ -95,6 +120,7 @@ function buildTrace(params: {
       needsSearch: params.input.needsSearch,
       needsRag: params.input.needsRag ?? false,
       needsVision: params.multimodalNeeded,
+      needsTabular: params.input.hasAttachments && hasTabularAttachment(params.input.attachmentTypes),
       spendingTier: params.input.spendingTier,
       hasAttachments: params.input.hasAttachments,
       attachmentTypes: params.input.attachmentTypes,
@@ -322,6 +348,9 @@ function finalizeRoute(params: {
   if (params.searchEnabled) trace.toolchain.push("web_search");
   if (params.input.needsRag) trace.toolchain.push("rag_retrieval");
   if (params.multimodalNeeded) trace.toolchain.push("vision_gate");
+  if (params.input.hasAttachments && hasTabularAttachment(params.input.attachmentTypes)) {
+    trace.toolchain.push("tabular_analysis");
+  }
 
   return {
     primaryModel: params.primaryModel,
@@ -338,8 +367,9 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
   const routingStartedAt = nowMs();
   const candidates: RouteTraceCandidate[] = [];
   const multimodalNeeded = input.hasAttachments && hasMultimodalAttachment(input.attachmentTypes);
+  const tabularNeeded = input.hasAttachments && hasTabularAttachment(input.attachmentTypes);
   const longMessage = input.messageLength > 1200;
-  const complexPrompt = longMessage || input.thinkingLevel === "high" || input.studentSeemsStuck;
+  const complexPrompt = longMessage || input.thinkingLevel === "high" || input.studentSeemsStuck || tabularNeeded;
   const promptCategory = input.promptCategory ?? "general";
   const searchAuxModel = input.thinkingLevel === "high" ? MODEL_CONFIG.searchDeep : MODEL_CONFIG.searchFast;
 
@@ -429,6 +459,9 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
     } else if (promptCategory === "code") {
       freeModel = MODEL_CONFIG.gptOss;
       reason = "Free-tier code route";
+    } else if (tabularNeeded) {
+      freeModel = MODEL_CONFIG.gptOss;
+      reason = "Free-tier tabular analysis route";
     }
 
     pushCandidate(candidates, MODEL_CONFIG.tutorFast, input.spendingTier, 0.85, "Free-tier fast tutoring baseline");
@@ -578,6 +611,9 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
   if (multimodalNeeded) {
     baseModel = MODEL_CONFIG.multimodal;
     reason = `${reason} with multimodal attachments`;
+  } else if (tabularNeeded) {
+    baseModel = input.spendingTier === "normal" ? MODEL_CONFIG.reasoningPaid : MODEL_CONFIG.smartCheap;
+    reason = `${reason} with tabular attachment analysis`;
   }
 
   pushCandidate(candidates, baseModel, input.spendingTier, 0.9, reason);

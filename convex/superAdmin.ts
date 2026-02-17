@@ -4,14 +4,17 @@ import { getUserByClerkId } from "./helpers";
 import { vRole } from "./shared";
 import type { Id } from "./_generated/dataModel";
 
-const SUPER_ADMIN_EMAILS = [
-  "pablo.martinez.dovale@gmail.com",
-];
+const SUPER_ADMIN_EMAILS = new Set(
+  (process.env.SUPER_ADMIN_EMAILS ?? "pablo.martinez.dovale@gmail.com")
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean),
+);
 
 async function requireSuperAdmin(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string) {
   const actor = await getUserByClerkId(ctx, actorClerkId);
   if (!actor) throw new Error("Unauthorized");
-  if (!SUPER_ADMIN_EMAILS.includes(actor.email)) {
+  if (!SUPER_ADMIN_EMAILS.has(actor.email.toLowerCase())) {
     throw new Error("Super admin access required");
   }
   return actor;
@@ -88,12 +91,37 @@ export const getGlobalStats = query({
       ctx.db.query("users").collect(),
       ctx.db.query("messages").collect(),
     ]);
+    const totalAdmins = users.filter((user) => user.role === "admin").length;
 
     return {
       totalOrgs: orgs.length,
       totalUsers: users.length,
       totalMessages: messages.length,
+      totalAdmins,
     };
+  },
+});
+
+/**
+ * List all admin users across schools.
+ */
+export const listAllAdmins = query({
+  args: { actorClerkId: v.string() },
+  handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx, args.actorClerkId);
+    const [admins, orgs] = await Promise.all([
+      ctx.db.query("users").collect(),
+      ctx.db.query("orgs").collect(),
+    ]);
+    const orgById = new Map(orgs.map((org) => [org._id, org]));
+    return admins
+      .filter((user) => user.role === "admin")
+      .map((admin) => ({
+        ...admin,
+        orgName: orgById.get(admin.orgId)?.name ?? "Unknown",
+        orgSlug: orgById.get(admin.orgId)?.slug ?? "unknown",
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   },
 });
 
@@ -216,17 +244,18 @@ export const assignOrgAdmin = mutation({
     name: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx, args.actorClerkId);
+    const actor = await requireSuperAdmin(ctx, args.actorClerkId);
 
     const org = await ctx.db.get(args.orgId);
     if (!org) throw new Error("Org not found");
+    const normalizedEmail = args.email.trim().toLowerCase();
 
     // Try to find existing user by email in this org
     const allUsers = await ctx.db
       .query("users")
       .withIndex("by_org", (q) => q.eq("orgId", args.orgId))
       .collect();
-    const existingInOrg = allUsers.find((u) => u.email === args.email);
+    const existingInOrg = allUsers.find((u) => u.email.toLowerCase() === normalizedEmail);
 
     if (existingInOrg) {
       await ctx.db.patch(existingInOrg._id, {
@@ -238,10 +267,9 @@ export const assignOrgAdmin = mutation({
 
     // Try to find existing user in any org
     const allOrgUsers = await ctx.db.query("users").collect();
-    const existingAnywhere = allOrgUsers.find((u) => u.email === args.email);
+    const existingAnywhere = allOrgUsers.find((u) => u.email.toLowerCase() === normalizedEmail);
 
     if (existingAnywhere) {
-      // Move user to this org as admin
       await ctx.db.patch(existingAnywhere._id, {
         orgId: args.orgId,
         role: "admin",
@@ -250,20 +278,112 @@ export const assignOrgAdmin = mutation({
       return { userId: existingAnywhere._id, transferred: true };
     }
 
-    // Create a placeholder user record (will be fully populated on first login)
     const now = Date.now();
-    const userId = await ctx.db.insert("users", {
-      clerkId: `pending-${args.email}-${now}`,
-      email: args.email,
-      name: args.name ?? args.email,
-      role: "admin",
+    const existingInvitation = await ctx.db
+      .query("schoolInvitations")
+      .withIndex("by_email", (q) => q.eq("email", normalizedEmail))
+      .collect();
+    
+    const pendingForOrg = existingInvitation.find(
+      (inv) => inv.orgId === args.orgId && inv.status === "pending" && inv.expiresAt > now
+    );
+    
+    if (pendingForOrg) {
+      await ctx.db.patch(pendingForOrg._id, {
+        role: "admin",
+        expiresAt: now + 7 * 24 * 60 * 60 * 1000,
+      });
+      return { invitationId: pendingForOrg._id, invitationUpdated: true };
+    }
+
+    for (const inv of existingInvitation) {
+      if (inv.orgId === args.orgId && inv.status === "pending") {
+        await ctx.db.patch(inv._id, { status: "expired" });
+      }
+    }
+
+    const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let token = "";
+    for (let i = 0; i < 48; i++) {
+      token += chars[Math.floor(Math.random() * chars.length)];
+    }
+
+    const invitationId = await ctx.db.insert("schoolInvitations", {
       orgId: args.orgId,
-      invitedAt: now,
+      email: normalizedEmail,
+      role: "admin",
+      invitedBy: actor._id as Id<"users">,
+      status: "pending",
+      token,
       createdAt: now,
-      updatedAt: now,
+      expiresAt: now + 7 * 24 * 60 * 60 * 1000,
     });
 
-    return { userId, created: true };
+    return { invitationId, invitationCreated: true };
+  },
+});
+
+/**
+ * Super admin can update any member role within a school.
+ */
+export const updateOrgMemberRole = mutation({
+  args: {
+    actorClerkId: v.string(),
+    orgId: v.id("orgs"),
+    userId: v.id("users"),
+    role: vRole,
+  },
+  handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx, args.actorClerkId);
+    const user = await ctx.db.get(args.userId);
+    if (!user) throw new Error("User not found");
+    if (user.orgId !== args.orgId) throw new Error("User is not in this school");
+
+    if (user.role === "admin" && args.role !== "admin") {
+      const admins = await ctx.db
+        .query("users")
+        .withIndex("by_org_role", (q) => q.eq("orgId", args.orgId).eq("role", "admin"))
+        .collect();
+      if (admins.length <= 1) {
+        throw new Error("School must keep at least one admin");
+      }
+    }
+
+    await ctx.db.patch(args.userId, {
+      role: args.role,
+      updatedAt: Date.now(),
+    });
+    return { ok: true };
+  },
+});
+
+/**
+ * Super admin can remove members from a school.
+ */
+export const removeOrgMember = mutation({
+  args: {
+    actorClerkId: v.string(),
+    orgId: v.id("orgs"),
+    userId: v.id("users"),
+  },
+  handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx, args.actorClerkId);
+    const user = await ctx.db.get(args.userId);
+    if (!user) throw new Error("User not found");
+    if (user.orgId !== args.orgId) throw new Error("User is not in this school");
+
+    if (user.role === "admin") {
+      const admins = await ctx.db
+        .query("users")
+        .withIndex("by_org_role", (q) => q.eq("orgId", args.orgId).eq("role", "admin"))
+        .collect();
+      if (admins.length <= 1) {
+        throw new Error("School must keep at least one admin");
+      }
+    }
+
+    await ctx.db.delete(args.userId);
+    return { ok: true };
   },
 });
 

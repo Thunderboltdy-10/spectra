@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { classifyComplexity, classifyExplainDepth, detectSuggestedMode, runAutoSettingsPipeline } from "@/lib/auto-settings";
+import {
+  classifyComplexity,
+  classifyExplainDepth,
+  detectSearchIntent,
+  detectSuggestedMode,
+  runAutoSettingsPipeline,
+} from "@/lib/auto-settings";
 
 describe("auto-settings prompt analysis", () => {
   it("classifies multipart analytical prompts as complex", () => {
@@ -61,6 +67,16 @@ describe("auto-settings prompt analysis", () => {
   it("detects suggested mode from image intent", () => {
     expect(detectSuggestedMode("generate an image of a sunset")).toBe("image");
     expect(detectSuggestedMode("draw a cat")).toBe("image");
+  });
+
+  it("does not misclassify abstract outputs as image mode", () => {
+    expect(detectSuggestedMode("make a plan for revising chemistry")).toBe(null);
+    expect(detectSuggestedMode("draw a conclusion from this data")).toBe(null);
+  });
+
+  it("detects time-sensitive search intent and opt-out hints", () => {
+    expect(detectSearchIntent("What is the latest 2026 inflation update?")).toBe(true);
+    expect(detectSearchIntent("Do not search the web, answer from memory")).toBe(false);
   });
 
   it("returns null for general messages", () => {

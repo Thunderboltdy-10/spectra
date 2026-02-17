@@ -8,10 +8,10 @@ import { Button } from "@/components/ui/button";
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { ModelRoutingBadge } from "@/components/chat/model-routing-badge";
 import { ProviderLogo } from "@/components/provider-logo";
-import { SourcesDrawer } from "@/components/chat/sources-drawer";
 import { ThinkingBlock } from "@/components/chat/thinking-block";
 import { CollaboratorsBadge } from "@/components/chat/collaborators-badge";
 import { type QuizSubmitResult } from "@/components/chat/quiz-reveal";
+import { usePanel } from "@/context/panel-context";
 import type { Citation, RouteTrace, StudyMode } from "@/types";
 import { getModeConfig } from "@/lib/modes";
 import { cn } from "@/lib/utils";
@@ -118,7 +118,7 @@ export function ChatMessage({
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
   const [showEnhanced, setShowEnhanced] = useState(false);
   const [showWhy, setShowWhy] = useState(false);
-  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const { togglePanel } = usePanel();
   const [editing, setEditing] = useState(false);
   const [editedContent, setEditedContent] = useState(content);
   const [regenModel, setRegenModel] = useState(regenModels[0]?.modelId ?? "");
@@ -328,13 +328,13 @@ export function ChatMessage({
               {validCitations.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => setSourcesOpen(true)}
+                  onClick={() => togglePanel("sources", { sources: validCitations })}
                   className="mt-4 cursor-pointer rounded-full border border-[var(--border-default)] px-2.5 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
                 >
                   View sources ({validCitations.length})
                 </button>
               )}
-              {validCitations.length > 0 && <CitationCards citations={validCitations} onOpen={() => setSourcesOpen(true)} />}
+              {validCitations.length > 0 && <CitationCards citations={validCitations} onOpen={() => togglePanel("sources", { sources: validCitations })} />}
 
               <div className="mt-5 flex flex-wrap items-center gap-1.5">
                 <Button
@@ -462,7 +462,6 @@ export function ChatMessage({
             </div>
           </div>
         )}
-        <SourcesDrawer open={sourcesOpen} onClose={() => setSourcesOpen(false)} citations={citations} />
       </div>
     </article>
   );

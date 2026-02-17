@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { RouteTraceDrawer } from "@/components/chat/route-trace-drawer";
+import { useMemo } from "react";
+import { usePanel } from "@/context/panel-context";
 import type { RouteTrace } from "@/types";
 
 type ModelRoutingBadgeProps = {
@@ -37,7 +37,7 @@ function formatModelName(modelId: string) {
 }
 
 export function ModelRoutingBadge({ modelUsed, whyThisResponse, routeTrace }: ModelRoutingBadgeProps) {
-  const [traceOpen, setTraceOpen] = useState(false);
+  const { activeView, togglePanel } = usePanel();
 
   const activeModelId = modelUsed ?? routeTrace?.selected.modelId;
   const formattedName = useMemo(() => formatModelName(activeModelId ?? ""), [activeModelId]);
@@ -51,7 +51,7 @@ export function ModelRoutingBadge({ modelUsed, whyThisResponse, routeTrace }: Mo
       {hasTrace ? (
         <button
           type="button"
-          onClick={() => setTraceOpen(true)}
+          onClick={() => togglePanel("route-trace", { routeTrace })}
           title={whyThisResponse ?? "Model route details"}
           className="group inline-flex min-w-0 cursor-pointer items-baseline gap-2 text-left transition"
         >
@@ -63,12 +63,6 @@ export function ModelRoutingBadge({ modelUsed, whyThisResponse, routeTrace }: Mo
       ) : (
         <span className="truncate text-[15px] font-semibold text-[var(--text-primary)]">{formattedName}</span>
       )}
-
-      <RouteTraceDrawer
-        open={traceOpen}
-        onClose={() => setTraceOpen(false)}
-        trace={routeTrace}
-      />
     </div>
   );
 }

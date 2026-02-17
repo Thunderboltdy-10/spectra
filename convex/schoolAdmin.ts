@@ -1,6 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { getUserByClerkId, dayKey } from "./helpers";
+import { getUserByClerkId } from "./helpers";
 import { vRole } from "./shared";
 
 function randomToken(): string {
@@ -27,8 +27,6 @@ export const getSchoolDashboard = query({
   handler: async (ctx, args) => {
     const actor = await requireAdmin(ctx, args.actorClerkId);
 
-    const today = dayKey();
-
     const [members, messagesToday, invitations, org] = await Promise.all([
       ctx.db
         .query("users")
@@ -43,7 +41,7 @@ export const getSchoolDashboard = query({
         .query("schoolInvitations")
         .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
         .collect()
-        .then((invs) => invs.filter((i) => i.status === "pending")),
+        .then((invs) => invs.filter((i) => i.status === "pending" && i.expiresAt > Date.now())),
       ctx.db.get(actor.orgId),
     ]);
 
@@ -223,6 +221,9 @@ export const inviteMember = mutation({
   },
   handler: async (ctx, args) => {
     const actor = await requireAdmin(ctx, args.actorClerkId);
+    if (args.role === "admin") {
+      throw new Error("Only super admin can invite admins");
+    }
 
     const email = args.email.trim().toLowerCase();
     if (!email.includes("@")) throw new Error("Invalid email address");
@@ -326,6 +327,7 @@ export const removeMember = mutation({
     if (!target) throw new Error("User not found");
     if (target.orgId !== actor.orgId) throw new Error("User is not in your school");
     if (target._id === actor._id) throw new Error("Cannot remove yourself");
+    if (target.role === "admin") throw new Error("Only super admin can remove admins");
 
     await ctx.db.delete(args.userId);
     return { ok: true };
@@ -343,10 +345,14 @@ export const updateMemberRole = mutation({
   },
   handler: async (ctx, args) => {
     const actor = await requireAdmin(ctx, args.actorClerkId);
+    if (args.role === "admin") {
+      throw new Error("Only super admin can assign admin role");
+    }
 
     const target = await ctx.db.get(args.userId);
     if (!target) throw new Error("User not found");
     if (target.orgId !== actor.orgId) throw new Error("User is not in your school");
+    if (target.role === "admin") throw new Error("Only super admin can change admin roles");
 
     await ctx.db.patch(args.userId, {
       role: args.role,
@@ -416,6 +422,58 @@ export const updateBranding = mutation({
     }
 
     await ctx.db.patch(actor.orgId, patch);
+    return { ok: true };
+  },
+});
+
+export const acceptInvitation = mutation({
+  args: {
+    invitationId: v.id("schoolInvitations"),
+    clerkId: v.string(),
+    email: v.string(),
+    name: v.string(),
+    role: vRole,
+    orgId: v.id("orgs"),
+  },
+  handler: async (ctx, args) => {
+    const invitation = await ctx.db.get(args.invitationId);
+    if (!invitation) throw new Error("Invitation not found");
+    if (invitation.status !== "pending") throw new Error("Invitation is not pending");
+    if (invitation.email.toLowerCase() !== args.email.toLowerCase()) {
+      throw new Error("Email mismatch");
+    }
+
+    const existingUser = await ctx.db
+      .query("users")
+      .withIndex("by_clerk_id", (q) => q.eq("clerkId", args.clerkId))
+      .unique();
+
+    const now = Date.now();
+
+    if (existingUser) {
+      await ctx.db.patch(existingUser._id, {
+        orgId: args.orgId,
+        role: args.role,
+        email: args.email,
+        name: args.name,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.insert("users", {
+        clerkId: args.clerkId,
+        email: args.email,
+        name: args.name,
+        role: args.role,
+        orgId: args.orgId,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    await ctx.db.patch(args.invitationId, {
+      status: "accepted",
+    });
+
     return { ok: true };
   },
 });

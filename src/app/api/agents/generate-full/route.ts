@@ -25,6 +25,7 @@ function pickAvatarEmoji(subjects: string[]): string {
 }
 
 function buildFallbackResult(body: {
+  audience?: string;
   purpose?: string;
   subjects?: string[];
   level?: string;
@@ -39,18 +40,21 @@ function buildFallbackResult(body: {
   const personality = body.personality ?? "Friendly";
   const teachingStyle = body.teachingStyle ?? "Step-by-step";
   const purpose = body.purpose ?? "Support student learning";
+  const audience = body.audience ?? "Students";
   const strictness = body.strictness ?? 3;
 
   const strictLabel = strictness >= 4 ? "strict" : strictness <= 2 ? "lenient" : "balanced";
   const subjectLabel = subjects.join(", ");
 
   const name = `${subjectLabel.split(",")[0]?.trim()} Tutor`;
-  const description = `An AI tutor specialising in ${subjectLabel} for ${level}-level students. ${purpose.slice(0, 80)}.`;
+  const description = `An AI tutor for ${audience.toLowerCase()}, specialising in ${subjectLabel} at ${level}-level. ${purpose.slice(0, 80)}.`;
 
-  const systemPrompt = `You are an educational AI tutor specialising in ${subjectLabel} for ${level}-level students.
+  const systemPrompt = `You are an educational AI tutor designed for ${audience.toLowerCase()}, specialising in ${subjectLabel} at ${level}-level.
 
 Primary purpose:
 ${purpose}
+
+Target audience: ${audience}
 
 Communication style:
 - Tone: ${personality}
@@ -88,6 +92,7 @@ export async function POST(request: NextRequest) {
     await requireActor();
 
     const body = (await request.json().catch(() => null)) as {
+      audience?: string;
       purpose?: string;
       personality?: string;
       teachingStyle?: string;
@@ -122,6 +127,7 @@ Output ONLY valid JSON with these exact keys:
 Do not include markdown fences, prose, or any text outside the JSON object.`;
 
     const userMessage = JSON.stringify({
+      audience: body.audience ?? "Students",
       purpose: body.purpose,
       personality: body.personality ?? "Friendly",
       teachingStyle: body.teachingStyle ?? "Step-by-step",

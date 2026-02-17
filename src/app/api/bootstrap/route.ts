@@ -1,13 +1,7 @@
-import { requireActor } from "@/lib/auth-server";
+import { isSuperAdminEmail, requireActor } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
-
-const SUPER_ADMIN_EMAILS = (
-  process.env.SUPER_ADMIN_EMAILS ?? "pablo.martinez.dovale@gmail.com"
-)
-  .split(",")
-  .map((e) => e.trim());
 
 export async function GET() {
   return withRouteErrorHandling(async () => {
@@ -34,7 +28,7 @@ export async function GET() {
       }>,
     ]);
 
-    const isSuperAdmin = SUPER_ADMIN_EMAILS.includes(actor.email);
+    const isSuperAdmin = isSuperAdminEmail(actor.email);
 
     return ok({
       actor,

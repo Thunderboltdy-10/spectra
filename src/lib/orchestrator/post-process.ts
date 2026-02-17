@@ -113,6 +113,23 @@ function normalizeCitationToken(value: string) {
     .trim();
 }
 
+/**
+ * Remove citation markers [N] that do not correspond to any citation in the
+ * provided array. Numeric markers whose index (1-based) is out of range are
+ * stripped entirely, preventing orphan footnote references in the UI.
+ */
+export function stripOrphanCitations(text: string, citations: Citation[]): string {
+  if (!text) return text;
+  if (citations.length === 0) {
+    return text.replace(/\[(\d+)\]/g, "");
+  }
+  const validNums = new Set(citations.map((_, i) => i + 1));
+  return text.replace(/\[(\d+)\]/g, (match, numStr) => {
+    const num = parseInt(numStr, 10);
+    return validNums.has(num) ? match : "";
+  });
+}
+
 export function rewriteCitationMarkers(response: string, citations: Citation[]) {
   if (!response || citations.length === 0) return response;
 

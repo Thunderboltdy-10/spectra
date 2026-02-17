@@ -56,7 +56,7 @@ export function ModelLeaderboardDrawer({ open, onClose }: ModelLeaderboardDrawer
       {!docked ? (
         <button
           type="button"
-          className="absolute inset-0 bg-transparent"
+          className="absolute inset-0 cursor-pointer bg-transparent"
           aria-label="Close leaderboard"
           onClick={onClose}
         />

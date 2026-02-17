@@ -10,7 +10,9 @@ import { Button } from "@/components/ui/button";
 type GeneratedImage = {
   _id: string;
   prompt: string;
-  imageUrl: string;
+  fullUrl?: string;
+  thumbnailUrl?: string;
+  imageUrl?: string;
   model?: string;
   createdAt: number;
 };
@@ -102,13 +104,17 @@ export default function ImagesPage() {
               className="group overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-card)]"
             >
               <div className="relative aspect-square">
-                <Image
-                  src={image.imageUrl}
-                  alt={image.prompt}
-                  fill
-                  className="object-cover"
-                  unoptimized
-                />
+                {(image.fullUrl || image.thumbnailUrl || image.imageUrl) ? (
+                  <Image
+                    src={(image.fullUrl || image.thumbnailUrl || image.imageUrl)!}
+                    alt={image.prompt}
+                    fill
+                    className="object-cover"
+                    unoptimized
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center bg-[var(--bg-secondary)] text-xs text-[var(--text-secondary)]">No preview</div>
+                )}
               </div>
               <div className="p-3">
                 <p className="line-clamp-2 text-xs text-[var(--text-secondary)]">{image.prompt}</p>

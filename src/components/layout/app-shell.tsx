@@ -46,6 +46,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           onPinChat={sidebar.pinChat}
           pinnedChatIds={sidebar.pinnedChatIds}
           role={sidebar.role}
+          isSuperAdmin={sidebar.isSuperAdmin}
           userSpending={sidebar.userSpending}
           userMemorySummary={sidebar.userMemorySummary}
           orgName={sidebar.orgName}

@@ -11,6 +11,7 @@ import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { ThinkingBlock } from "@/components/chat/thinking-block";
 import { ThinkingMessages } from "@/components/loading-states";
 import { autoCloseMarkdown } from "@/lib/stream-markdown";
+import { getModeConfig } from "@/lib/modes";
 import type { Message } from "@/hooks/use-chat-state";
 import type { StudyMode } from "@/types";
 
@@ -21,6 +22,7 @@ type ChatMessagesProps = {
   hasRealThinking?: boolean;
   sending: boolean;
   streamError: string | null;
+  chatId?: string;
   onRetry: () => void;
   onSubmitQuizAnswers?: (payload: { messageId: string; result: QuizSubmitResult }) => void;
   onSaveFlashcardDeck?: (payload: { messageId: string; title: string; cards: FlashcardCard[] }) => void;
@@ -30,6 +32,8 @@ type ChatMessagesProps = {
   onAssistantFeedback?: (positive: boolean, modelId?: string) => void;
   onEditMessage?: (messageId: string, newContent: string) => Promise<void>;
   onBranchMessage?: (messageId: string) => Promise<void> | void;
+  onFollowUp?: (message: string) => void;
+  onModeChange?: (mode: string) => void;
   regenModels?: Array<{ modelId: string; name: string }>;
   emptyState?: React.ReactNode;
   mode: StudyMode;
@@ -53,6 +57,7 @@ export function ChatMessages({
   hasRealThinking = false,
   sending,
   streamError,
+  chatId,
   onRetry,
   onSubmitQuizAnswers,
   onSaveFlashcardDeck,
@@ -62,6 +67,8 @@ export function ChatMessages({
   onAssistantFeedback,
   onEditMessage,
   onBranchMessage,
+  onFollowUp,
+  onModeChange,
   regenModels = [],
   emptyState,
   mode,
@@ -136,6 +143,28 @@ export function ChatMessages({
     return clean.length < 420 && lines.length <= 7;
   }
 
+  function splitMixedContent(content: string, contentMode: StudyMode): { preamble: string; structuredContent: string } {
+    if (contentMode === "quiz" || contentMode === "exam") {
+      const match = content.match(/(?:^|\n)\s*(?:Q(?:uestion)?\s*)?1[.):-]\s/m);
+      if (match?.index !== undefined && match.index > 0) {
+        return {
+          preamble: content.slice(0, match.index).trim(),
+          structuredContent: content.slice(match.index).trim(),
+        };
+      }
+    }
+    if (contentMode === "flashcard") {
+      const match = content.match(/(?:^|\n)\s*(?:Card\s*1|FRONT\s*:)/im);
+      if (match?.index !== undefined && match.index > 0) {
+        return {
+          preamble: content.slice(0, match.index).trim(),
+          structuredContent: content.slice(match.index).trim(),
+        };
+      }
+    }
+    return { preamble: "", structuredContent: content };
+  }
+
   return (
     <section className="relative flex min-h-0 flex-1">
       <div ref={scrollRef} className="h-full w-full overflow-y-auto px-3 pb-40 pt-6 sm:px-6 lg:px-10">
@@ -144,26 +173,120 @@ export function ChatMessages({
 
           {messages.map((msg, index) => {
             const isLastAssistant = msg.role === "assistant" && index === messages.length - 1;
+            const msgMode = msg.mode ?? mode;
+            const prevMsg = messages[index - 1];
+            const showModeTransition =
+              index > 0 &&
+              prevMsg?.mode !== msg.mode &&
+              msg.mode !== undefined;
 
-            if (msg.role === "assistant" && (mode === "quiz" || mode === "exam")) {
+            if (msg.role === "assistant" && (msgMode === "quiz" || msgMode === "exam")) {
               if (isQuizContent(msg.content)) {
+                const { preamble, structuredContent } = splitMixedContent(msg.content, msgMode);
                 return (
-                  <QuizReveal
-                    key={msg._id}
-                    content={msg.content}
-                    onSubmitAnswers={(result) => {
-                      onSubmitQuizAnswers?.({
-                        messageId: msg._id,
-                        result,
-                      });
-                    }}
-                  />
+                  <div key={msg._id}>
+                    {showModeTransition && (
+                      <div className="flex items-center gap-2 py-2">
+                        <div className="h-px flex-1 bg-[var(--border-default)]" />
+                        <span className="text-[10px] text-[var(--text-tertiary)]">
+                          Switched to {getModeConfig(msg.mode!)?.label ?? msg.mode} mode
+                        </span>
+                        <div className="h-px flex-1 bg-[var(--border-default)]" />
+                      </div>
+                    )}
+                    <ChatMessage
+                      role={msg.role}
+                      content=""
+                      thinkingContent={msg.thinkingContent}
+                      enhancedContent={msg.enhancedContent}
+                      attachments={msg.attachments}
+                      attachmentPreviews={msg.attachmentPreviews}
+                      modelUsed={msg.modelUsed}
+                      whyThisResponse={msg.whyThisResponse}
+                      routeTrace={msg.routeTrace}
+                      citations={msg.citations}
+                      mode={msgMode}
+                      isLastAssistant={isLastAssistant}
+                      onRegenerate={isLastAssistant ? onRegenerate : undefined}
+                      onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
+                      regenModels={regenModels}
+                      onEdit={undefined}
+                      usageIn={msg.usageIn}
+                      usageOut={msg.usageOut}
+                      createdAt={msg.createdAt}
+                      onFeedback={onAssistantFeedback}
+                      onOpenCanvas={onOpenCanvas}
+                      onSubmitQuizAnswers={(result) => {
+                        onSubmitQuizAnswers?.({ messageId: msg._id, result });
+                      }}
+                    >
+                      {preamble && <MarkdownRenderer content={preamble} citations={[]} />}
+                      <QuizReveal
+                        content={structuredContent}
+                        chatId={chatId}
+                        onSubmitAnswers={(result) => {
+                          onSubmitQuizAnswers?.({ messageId: msg._id, result });
+                        }}
+                        onFollowUp={onFollowUp}
+                        onModeChange={onModeChange}
+                      />
+                    </ChatMessage>
+                  </div>
                 );
               }
               if (isLikelyClarifyingText(msg.content)) {
                 return (
+                  <div key={msg._id}>
+                    {showModeTransition && (
+                      <div className="flex items-center gap-2 py-2">
+                        <div className="h-px flex-1 bg-[var(--border-default)]" />
+                        <span className="text-[10px] text-[var(--text-tertiary)]">
+                          Switched to {getModeConfig(msg.mode!)?.label ?? msg.mode} mode
+                        </span>
+                        <div className="h-px flex-1 bg-[var(--border-default)]" />
+                      </div>
+                    )}
+                    <ChatMessage
+                      role={msg.role}
+                      content={msg.content}
+                      thinkingContent={msg.thinkingContent}
+                      enhancedContent={msg.enhancedContent}
+                      attachments={msg.attachments}
+                      attachmentPreviews={msg.attachmentPreviews}
+                      modelUsed={msg.modelUsed}
+                      whyThisResponse={msg.whyThisResponse}
+                      routeTrace={msg.routeTrace}
+                      citations={msg.citations}
+                      mode={msgMode}
+                      isLastAssistant={isLastAssistant}
+                      onRegenerate={isLastAssistant ? onRegenerate : undefined}
+                      onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
+                      regenModels={regenModels}
+                      onEdit={undefined}
+                      usageIn={msg.usageIn}
+                      usageOut={msg.usageOut}
+                      createdAt={msg.createdAt}
+                      onFeedback={onAssistantFeedback}
+                      onOpenCanvas={onOpenCanvas}
+                      onSubmitQuizAnswers={(result) => {
+                        onSubmitQuizAnswers?.({ messageId: msg._id, result });
+                      }}
+                    />
+                  </div>
+                );
+              }
+              return (
+                <div key={msg._id}>
+                  {showModeTransition && (
+                    <div className="flex items-center gap-2 py-2">
+                      <div className="h-px flex-1 bg-[var(--border-default)]" />
+                      <span className="text-[10px] text-[var(--text-tertiary)]">
+                        Switched to {getModeConfig(msg.mode!)?.label ?? msg.mode} mode
+                      </span>
+                      <div className="h-px flex-1 bg-[var(--border-default)]" />
+                    </div>
+                  )}
                   <ChatMessage
-                    key={msg._id}
                     role={msg.role}
                     content={msg.content}
                     thinkingContent={msg.thinkingContent}
@@ -174,7 +297,7 @@ export function ChatMessages({
                     whyThisResponse={msg.whyThisResponse}
                     routeTrace={msg.routeTrace}
                     citations={msg.citations}
-                    mode={mode}
+                    mode={msgMode}
                     isLastAssistant={isLastAssistant}
                     onRegenerate={isLastAssistant ? onRegenerate : undefined}
                     onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
@@ -183,116 +306,153 @@ export function ChatMessages({
                     usageIn={msg.usageIn}
                     usageOut={msg.usageOut}
                     createdAt={msg.createdAt}
-                    onFeedback={msg.role === "assistant" ? onAssistantFeedback : undefined}
+                    onFeedback={onAssistantFeedback}
                     onOpenCanvas={onOpenCanvas}
+                    onSubmitQuizAnswers={(result) => {
+                      onSubmitQuizAnswers?.({ messageId: msg._id, result });
+                    }}
                   />
-                );
-              }
-              return (
-                <ChatMessage
-                  key={msg._id}
-                  role={msg.role}
-                  content={msg.content}
-                  thinkingContent={msg.thinkingContent}
-                  enhancedContent={msg.enhancedContent}
-                  attachments={msg.attachments}
-                  attachmentPreviews={msg.attachmentPreviews}
-                  modelUsed={msg.modelUsed}
-                  whyThisResponse={msg.whyThisResponse}
-                  routeTrace={msg.routeTrace}
-                  citations={msg.citations}
-                  mode={mode}
-                  isLastAssistant={isLastAssistant}
-                  onRegenerate={isLastAssistant ? onRegenerate : undefined}
-                  onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
-                  regenModels={regenModels}
-                  onEdit={undefined}
-                  usageIn={msg.usageIn}
-                  usageOut={msg.usageOut}
-                  createdAt={msg.createdAt}
-                  onFeedback={msg.role === "assistant" ? onAssistantFeedback : undefined}
-                  onOpenCanvas={onOpenCanvas}
-                />
+                </div>
               );
             }
 
-            if (msg.role === "assistant" && mode === "flashcard") {
+            if (msg.role === "assistant" && msgMode === "flashcard") {
               if (isFlashcardContent(msg.content)) {
+                const { preamble, structuredContent } = splitMixedContent(msg.content, msgMode);
                 return (
-                  <FlashcardReveal
-                    key={msg._id}
-                    content={msg.content}
-                    onSaveDeck={(payload) => {
-                      onSaveFlashcardDeck?.({
-                        messageId: msg._id,
-                        title: payload.title,
-                        cards: payload.cards,
-                      });
-                    }}
-                    onRateCard={(payload) => {
-                      onRateFlashcardCard?.({
-                        messageId: msg._id,
-                        cardHash: payload.cardHash,
-                        quality: payload.quality,
-                      });
-                    }}
-                  />
+                  <div key={msg._id}>
+                    {showModeTransition && (
+                      <div className="flex items-center gap-2 py-2">
+                        <div className="h-px flex-1 bg-[var(--border-default)]" />
+                        <span className="text-[10px] text-[var(--text-tertiary)]">
+                          Switched to {getModeConfig(msg.mode!)?.label ?? msg.mode} mode
+                        </span>
+                        <div className="h-px flex-1 bg-[var(--border-default)]" />
+                      </div>
+                    )}
+                    <ChatMessage
+                      role={msg.role}
+                      content=""
+                      thinkingContent={msg.thinkingContent}
+                      enhancedContent={msg.enhancedContent}
+                      attachments={msg.attachments}
+                      attachmentPreviews={msg.attachmentPreviews}
+                      modelUsed={msg.modelUsed}
+                      whyThisResponse={msg.whyThisResponse}
+                      routeTrace={msg.routeTrace}
+                      citations={msg.citations}
+                      mode={msgMode}
+                      isLastAssistant={isLastAssistant}
+                      onRegenerate={isLastAssistant ? onRegenerate : undefined}
+                      onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
+                      regenModels={regenModels}
+                      onEdit={undefined}
+                      usageIn={msg.usageIn}
+                      usageOut={msg.usageOut}
+                      createdAt={msg.createdAt}
+                      onFeedback={onAssistantFeedback}
+                      onOpenCanvas={onOpenCanvas}
+                    >
+                      {preamble && <MarkdownRenderer content={preamble} citations={[]} />}
+                      <FlashcardReveal
+                        content={structuredContent}
+                        onSaveDeck={(payload) => {
+                          onSaveFlashcardDeck?.({
+                            messageId: msg._id,
+                            title: payload.title,
+                            cards: payload.cards,
+                          });
+                        }}
+                        onRateCard={(payload) => {
+                          onRateFlashcardCard?.({
+                            messageId: msg._id,
+                            cardHash: payload.cardHash,
+                            quality: payload.quality,
+                          });
+                        }}
+                        onFollowUp={onFollowUp}
+                      />
+                    </ChatMessage>
+                  </div>
                 );
               }
               return (
-                <ChatMessage
-                  key={msg._id}
-                  role={msg.role}
-                  content={msg.content}
-                  thinkingContent={msg.thinkingContent}
-                  enhancedContent={msg.enhancedContent}
-                  attachments={msg.attachments}
-                  attachmentPreviews={msg.attachmentPreviews}
-                  modelUsed={msg.modelUsed}
-                  whyThisResponse={msg.whyThisResponse}
-                  routeTrace={msg.routeTrace}
-                  citations={msg.citations}
-                  mode={mode}
-                  isLastAssistant={isLastAssistant}
-                  onRegenerate={isLastAssistant ? onRegenerate : undefined}
-                  onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
-                  regenModels={regenModels}
-                  onEdit={undefined}
-                  usageIn={msg.usageIn}
-                  usageOut={msg.usageOut}
-                  createdAt={msg.createdAt}
-                  onFeedback={msg.role === "assistant" ? onAssistantFeedback : undefined}
-                  onOpenCanvas={onOpenCanvas}
-                />
+                <div key={msg._id}>
+                  {showModeTransition && (
+                    <div className="flex items-center gap-2 py-2">
+                      <div className="h-px flex-1 bg-[var(--border-default)]" />
+                      <span className="text-[10px] text-[var(--text-tertiary)]">
+                        Switched to {getModeConfig(msg.mode!)?.label ?? msg.mode} mode
+                      </span>
+                      <div className="h-px flex-1 bg-[var(--border-default)]" />
+                    </div>
+                  )}
+                  <ChatMessage
+                    role={msg.role}
+                    content={msg.content}
+                    thinkingContent={msg.thinkingContent}
+                    enhancedContent={msg.enhancedContent}
+                    attachments={msg.attachments}
+                    attachmentPreviews={msg.attachmentPreviews}
+                    modelUsed={msg.modelUsed}
+                    whyThisResponse={msg.whyThisResponse}
+                    routeTrace={msg.routeTrace}
+                    citations={msg.citations}
+                    mode={msgMode}
+                    isLastAssistant={isLastAssistant}
+                    onRegenerate={isLastAssistant ? onRegenerate : undefined}
+                    onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
+                    regenModels={regenModels}
+                    onEdit={undefined}
+                    usageIn={msg.usageIn}
+                    usageOut={msg.usageOut}
+                    createdAt={msg.createdAt}
+                    onFeedback={onAssistantFeedback}
+                    onOpenCanvas={onOpenCanvas}
+                  />
+                </div>
               );
             }
 
             return (
-              <ChatMessage
-                key={msg._id}
-                role={msg.role}
-                content={msg.content}
-                thinkingContent={msg.thinkingContent}
-                enhancedContent={msg.enhancedContent}
-                attachments={msg.attachments}
-                attachmentPreviews={msg.attachmentPreviews}
-                modelUsed={msg.modelUsed}
-                whyThisResponse={msg.whyThisResponse}
-                routeTrace={msg.routeTrace}
-                citations={msg.citations}
-                mode={msg.role === "assistant" ? mode : undefined}
-                isLastAssistant={isLastAssistant}
-                onRegenerate={isLastAssistant ? onRegenerate : undefined}
-                onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
-                regenModels={regenModels}
-                onEdit={msg.role === "user" && onEditMessage ? (value) => void onEditMessage(msg._id, value) : undefined}
-                onBranch={msg.role === "user" && onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
-                usageIn={msg.usageIn}
-                usageOut={msg.usageOut}
-                createdAt={msg.createdAt}
-                onFeedback={msg.role === "assistant" ? onAssistantFeedback : undefined}
-                onOpenCanvas={onOpenCanvas}
-              />
+              <div key={msg._id}>
+                {showModeTransition && (
+                  <div className="flex items-center gap-2 py-2">
+                    <div className="h-px flex-1 bg-[var(--border-default)]" />
+                    <span className="text-[10px] text-[var(--text-tertiary)]">
+                      Switched to {getModeConfig(msg.mode!)?.label ?? msg.mode} mode
+                    </span>
+                    <div className="h-px flex-1 bg-[var(--border-default)]" />
+                  </div>
+                )}
+                <ChatMessage
+                  role={msg.role}
+                  content={msg.content}
+                  thinkingContent={msg.thinkingContent}
+                  enhancedContent={msg.enhancedContent}
+                  attachments={msg.attachments}
+                  attachmentPreviews={msg.attachmentPreviews}
+                  modelUsed={msg.modelUsed}
+                  whyThisResponse={msg.whyThisResponse}
+                  routeTrace={msg.routeTrace}
+                  citations={msg.citations}
+                  mode={msg.role === "assistant" ? msgMode : undefined}
+                  isLastAssistant={isLastAssistant}
+                  onRegenerate={isLastAssistant ? onRegenerate : undefined}
+                  onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
+                  regenModels={regenModels}
+                  onEdit={msg.role === "user" && onEditMessage ? (value) => void onEditMessage(msg._id, value) : undefined}
+                  onBranch={msg.role === "user" && onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
+                  usageIn={msg.usageIn}
+                  usageOut={msg.usageOut}
+                  createdAt={msg.createdAt}
+                  onFeedback={msg.role === "assistant" ? onAssistantFeedback : undefined}
+                  onOpenCanvas={onOpenCanvas}
+                  onSubmitQuizAnswers={(result) => {
+                    onSubmitQuizAnswers?.({ messageId: msg._id, result });
+                  }}
+                />
+              </div>
             );
           })}
 

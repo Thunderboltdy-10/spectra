@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Image from "next/image";
-import { Code2, Copy, FileText, GitBranch, Globe, Paperclip, Pencil, RefreshCw, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Code2, Copy, FileText, GitBranch, Globe, Info, Paperclip, Pencil, RefreshCw, ThumbsDown, ThumbsUp } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
@@ -11,6 +11,7 @@ import { ProviderLogo } from "@/components/provider-logo";
 import { SourcesDrawer } from "@/components/chat/sources-drawer";
 import { ThinkingBlock } from "@/components/chat/thinking-block";
 import { CollaboratorsBadge } from "@/components/chat/collaborators-badge";
+import { type QuizSubmitResult } from "@/components/chat/quiz-reveal";
 import type { Citation, RouteTrace, StudyMode } from "@/types";
 import { getModeConfig } from "@/lib/modes";
 import { cn } from "@/lib/utils";
@@ -43,7 +44,9 @@ type ChatMessageProps = {
   usageOut?: number;
   createdAt?: number;
   onOpenCanvas?: (params: { code: string; language: string }) => void;
+  onSubmitQuizAnswers?: (result: QuizSubmitResult) => void;
   onBranch?: () => void;
+  children?: React.ReactNode;
 };
 
 function CitationCards({ citations, onOpen }: { citations: Citation[]; onOpen: () => void }) {
@@ -106,18 +109,22 @@ export function ChatMessage({
   usageOut,
   createdAt,
   onOpenCanvas,
+  onSubmitQuizAnswers,
   onBranch,
+  children,
 }: ChatMessageProps) {
   const isUser = role === "user";
   const modeConfig = mode ? getModeConfig(mode) : undefined;
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
   const [showEnhanced, setShowEnhanced] = useState(false);
+  const [showWhy, setShowWhy] = useState(false);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editedContent, setEditedContent] = useState(content);
   const [regenModel, setRegenModel] = useState(regenModels[0]?.modelId ?? "");
   const tts = useTextToSpeech();
-  const searchCitations = citations.filter((citation) => citation.sourceType === "search");
+  const validCitations = citations.filter((c) => c.url || c.resourceId || c.filename);
+  const searchCitations = validCitations.filter((citation) => citation.sourceType === "search");
   const activeModelId = modelUsed ?? routeTrace?.selected.modelId;
   const activeProvider = activeModelId?.split("/")[0] ?? "AI";
   const renderedContent = content;
@@ -179,7 +186,7 @@ export function ChatMessage({
                 <button
                   type="button"
                   onClick={() => setShowEnhanced((prev) => !prev)}
-                  className="text-[10px] text-[var(--text-secondary)] underline underline-offset-2 transition hover:text-[var(--text-primary)]"
+                  className="cursor-pointer text-[10px] text-[var(--text-secondary)] underline underline-offset-2 transition hover:text-[var(--text-primary)]"
                 >
                   {showEnhanced ? "Show original" : "See enhanced prompt"}
                 </button>
@@ -281,7 +288,7 @@ export function ChatMessage({
                 {modeConfig && (
                   <span
                     className="inline-flex h-2 w-2 rounded-full"
-                    style={{ backgroundColor: modeConfig.color }}
+                    style={{ background: modeConfig.color }}
                   />
                 )}
                 <ModelRoutingBadge
@@ -292,7 +299,7 @@ export function ChatMessage({
               </div>
 
               <ThinkingBlock content={thinkingContent ?? ""} />
-              <MarkdownRenderer content={renderedContent} citations={citations} mode={mode} onOpenCanvas={onOpenCanvas} />
+              {children ? children : <MarkdownRenderer content={renderedContent} citations={citations} mode={mode} onOpenCanvas={onOpenCanvas} onSubmitQuizAnswers={onSubmitQuizAnswers} />}
               <CollaboratorsBadge collaborators={routeTrace?.collaborators} />
               {mode === "research" && searchCitations.length > 0 && (
                 <div className="mt-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2.5">
@@ -318,16 +325,16 @@ export function ChatMessage({
                   </div>
                 </div>
               )}
-              {citations.length > 0 && (
+              {validCitations.length > 0 && (
                 <button
                   type="button"
                   onClick={() => setSourcesOpen(true)}
                   className="mt-4 cursor-pointer rounded-full border border-[var(--border-default)] px-2.5 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
                 >
-                  View sources
+                  View sources ({validCitations.length})
                 </button>
               )}
-              <CitationCards citations={citations} onOpen={() => setSourcesOpen(true)} />
+              {validCitations.length > 0 && <CitationCards citations={validCitations} onOpen={() => setSourcesOpen(true)} />}
 
               <div className="mt-5 flex flex-wrap items-center gap-1.5">
                 <Button
@@ -413,7 +420,41 @@ export function ChatMessage({
                     {tts.isSpeaking ? "Stop audio" : "Read aloud"}
                   </Button>
                 ) : null}
+                {whyThisResponse && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className={`h-8 cursor-pointer gap-1.5 text-xs ${showWhy ? "text-[var(--accent-cyan)]" : ""}`}
+                    onClick={() => setShowWhy(!showWhy)}
+                  >
+                    <Info className="h-3.5 w-3.5" />
+                    Why
+                  </Button>
+                )}
               </div>
+              {showWhy && whyThisResponse && (
+                <div className="mt-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Why this response</p>
+                  <p className="text-xs text-[var(--text-secondary)] leading-relaxed">{whyThisResponse}</p>
+                  {routeTrace && routeTrace.toolchain.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {routeTrace.toolchain.map((tool) => (
+                        <span key={tool} className="inline-flex items-center rounded-full bg-[var(--bg-primary)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)] border border-[var(--border-default)]">
+                          {tool.replace(/_/g, " ")}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {routeTrace && (
+                    <div className="mt-2 flex items-center gap-3 text-[10px] text-[var(--text-secondary)]">
+                      {routeTrace.routingDurationMs > 0 && <span>Routing: {routeTrace.routingDurationMs}ms</span>}
+                      {routeTrace.totalDurationMs && routeTrace.totalDurationMs > 0 && <span>Total: {(routeTrace.totalDurationMs / 1000).toFixed(1)}s</span>}
+                      {routeTrace.fallbacks.length > 0 && <span className="text-[var(--warning)]">{routeTrace.fallbacks.length} fallback{routeTrace.fallbacks.length > 1 ? "s" : ""}</span>}
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="mt-2 flex items-center gap-2 text-[11px] text-[var(--text-secondary)]">
                 {totalTokens > 0 ? <span>{totalTokens.toLocaleString()} tokens</span> : null}
                 {timeLabel ? <span>{timeLabel}</span> : null}

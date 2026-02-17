@@ -53,7 +53,7 @@ export function ModelRoutingBadge({ modelUsed, whyThisResponse, routeTrace }: Mo
           type="button"
           onClick={() => setTraceOpen(true)}
           title={whyThisResponse ?? "Model route details"}
-          className="group inline-flex min-w-0 cursor-pointer items-baseline gap-2 text-left"
+          className="group inline-flex min-w-0 cursor-pointer items-baseline gap-2 text-left transition"
         >
           <span className="truncate text-[15px] font-semibold text-[var(--text-primary)]">{formattedName}</span>
           <span className="text-[11px] text-[var(--text-secondary)] underline decoration-dotted underline-offset-4 transition group-hover:text-[var(--text-primary)]">

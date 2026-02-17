@@ -1,20 +1,72 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import Link from "next/link";
-import { Loader2, Sparkles, Wand2 } from "lucide-react";
+import { useState } from "react";
+import { ChevronLeft, ChevronRight, Loader2, Sparkles, CheckCircle2, ChevronDown, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
-type ModelOption = {
-  modelId: string;
-  name: string;
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+type WizardStep = "purpose" | "personality" | "expertise" | "boundaries" | "review";
+
+const STEP_ORDER: WizardStep[] = ["purpose", "personality", "expertise", "boundaries", "review"];
+const STEP_LABELS: Record<WizardStep, string> = {
+  purpose: "Purpose",
+  personality: "Personality",
+  expertise: "Expertise",
+  boundaries: "Boundaries",
+  review: "Review",
 };
 
-type Visibility = "public" | "private";
-type BuilderMode = "assisted" | "manual";
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const SUBJECT_EMOJIS: Record<string, string> = {
+  math: "🧮",
+  science: "🔬",
+  english: "📝",
+  history: "🏛️",
+  cs: "💻",
+  languages: "🌍",
+  arts: "🎨",
+  economics: "📈",
+  philosophy: "🤔",
+  default: "🎓",
+};
+
+const COMMUNICATION_STYLES = ["Formal", "Friendly", "Encouraging", "Direct", "Socratic"] as const;
+const TEACHING_STYLES = ["Step-by-step", "Discovery-based", "Example-driven", "Discussion-oriented"] as const;
+const SUBJECTS = ["Math", "Science", "English", "History", "CS", "Languages", "Arts", "Economics", "Philosophy", "Other"] as const;
+const LEVELS = ["Primary", "Secondary", "A-Level", "University", "Professional"] as const;
+const PATIENCE_LABELS: Record<number, string> = {
+  1: "Quick & Direct",
+  2: "Concise",
+  3: "Balanced",
+  4: "Patient",
+  5: "Very Patient & Thorough",
+};
+const STRICTNESS_LABELS: Record<number, string> = {
+  1: "Lenient",
+  2: "Relaxed",
+  3: "Balanced",
+  4: "Firm",
+  5: "Strict",
+};
+const BOUNDARY_OPTIONS = [
+  { id: "no-homework-answers", label: "Don't give direct homework answers — guide instead" },
+  { id: "no-inappropriate", label: "Don't generate inappropriate content" },
+  { id: "no-fabrication", label: "Don't fabricate sources or facts" },
+  { id: "stay-on-topic", label: "Don't go off-topic" },
+  { id: "ask-clarification", label: "Always ask for clarification when unsure" },
+] as const;
+
+// ---------------------------------------------------------------------------
+// Public types (consumed by parent page)
+// ---------------------------------------------------------------------------
 
 export type AgentBuilderValues = {
   name: string;
@@ -22,161 +74,721 @@ export type AgentBuilderValues = {
   category: string;
   systemPrompt: string;
   avatarEmoji?: string;
-  visibility: Visibility;
+  visibility: "public" | "private";
+  preferredMode?: string;
 };
 
 type AgentBuilderFormProps = {
-  models: ModelOption[];
-  submitLabel: string;
-  initialValues?: Partial<AgentBuilderValues>;
   onSubmit: (values: AgentBuilderValues) => Promise<void>;
   onCancelHref?: string;
 };
 
-const EMOJIS = ["🎓", "🧠", "📚", "🧪", "🧮", "✍️", "🔬", "🌍", "📈", "🤖", "📝", "🧩"];
+// ---------------------------------------------------------------------------
+// Generated result shape
+// ---------------------------------------------------------------------------
 
-function buildPromptFromAssisted(input: {
+type GeneratedAgent = {
   name: string;
-  purpose: string;
-  audience: string;
-  success: string;
-  boundaries: string;
-  responseStyle: string;
+  description: string;
+  systemPrompt: string;
+  suggestedMode: string;
+  suggestedCategory: string;
+  avatarEmoji: string;
+};
+
+// ---------------------------------------------------------------------------
+// Chip component
+// ---------------------------------------------------------------------------
+
+function Chip({
+  label,
+  selected,
+  onClick,
+}: {
+  label: string;
+  selected: boolean;
+  onClick: () => void;
 }) {
-  return `You are ${input.name}, an educational AI agent for ${input.audience}.
-
-Primary purpose:
-- ${input.purpose}
-
-Success criteria for each response:
-- ${input.success}
-
-Instructional behavior:
-- Start by clarifying the learner's goal and level.
-- Use concise step-by-step support with checks for understanding.
-- If the learner asks for direct answers too early, provide guided hints first.
-- Keep outputs structured and classroom-appropriate.
-
-Boundaries and safety:
-- ${input.boundaries}
-
-Response style:
-- ${input.responseStyle}
-- Use headings and compact bullet points when helpful.
-- End with one concrete next step for the student.`;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`cursor-pointer rounded-full border px-4 py-1.5 text-sm font-medium transition-all duration-150 select-none ${
+        selected
+          ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_15%,transparent)] text-[var(--accent-cyan)]"
+          : "border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:border-[var(--accent-cyan)] hover:text-[var(--text-primary)]"
+      }`}
+    >
+      {label}
+    </button>
+  );
 }
 
-export function AgentBuilderForm({
-  models,
-  submitLabel,
-  initialValues,
-  onSubmit,
-  onCancelHref = "/agents",
-}: AgentBuilderFormProps) {
-  const [mode, setMode] = useState<BuilderMode>(initialValues?.systemPrompt ? "manual" : "assisted");
-  const [submitting, setSubmitting] = useState(false);
-  const [generatingPrompt, setGeneratingPrompt] = useState(false);
+// ---------------------------------------------------------------------------
+// Slider component
+// ---------------------------------------------------------------------------
 
-  const [name, setName] = useState(initialValues?.name ?? "");
-  const [description, setDescription] = useState(initialValues?.description ?? "");
-  const [category, setCategory] = useState(initialValues?.category ?? "");
-  const [systemPrompt, setSystemPrompt] = useState(initialValues?.systemPrompt ?? "");
-  const [avatarEmoji, setAvatarEmoji] = useState(initialValues?.avatarEmoji ?? "");
-  const [visibility, setVisibility] = useState<Visibility>(initialValues?.visibility ?? "public");
-
-  const [purpose, setPurpose] = useState("");
-  const [audience, setAudience] = useState("secondary school students");
-  const [success, setSuccess] = useState("The learner can apply the concept independently in a similar problem.");
-  const [boundaries, setBoundaries] = useState(
-    "Do not fabricate sources or facts. If uncertain, state limits and ask for context.",
+function LabeledSlider({
+  value,
+  min,
+  max,
+  labels,
+  onChange,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  labels: Record<number, string>;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex justify-between text-xs text-[var(--text-secondary)]">
+        <span>{labels[min]}</span>
+        <span className="font-semibold text-[var(--accent-cyan)]">{labels[value]}</span>
+        <span>{labels[max]}</span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="h-2 w-full cursor-pointer appearance-none rounded-full bg-[var(--border-default)] accent-[var(--accent-cyan)]"
+      />
+    </div>
   );
-  const [responseStyle, setResponseStyle] = useState(
-    "Clear, supportive, and academically precise with short examples.",
-  );
+}
 
-  const generatedPreview = useMemo(
-    () =>
-      buildPromptFromAssisted({
-        name: name || "this agent",
-        purpose: purpose || "Support student learning goals.",
-        audience,
-        success,
-        boundaries,
-        responseStyle,
-      }),
-    [audience, boundaries, name, purpose, responseStyle, success],
-  );
+// ---------------------------------------------------------------------------
+// Progress bar
+// ---------------------------------------------------------------------------
 
-  async function handleGeneratePromptWithAI() {
-    if (!name.trim() || !description.trim() || !category.trim()) {
-      toast.error("Add name, description, and category first.");
-      return;
+function ProgressBar({ currentStepIndex }: { currentStepIndex: number }) {
+  return (
+    <div className="mb-8">
+      <div className="flex gap-2 mb-3">
+        {STEP_ORDER.map((step, i) => (
+          <div
+            key={step}
+            className={`flex-1 h-1.5 rounded-full transition-all duration-300 ${
+              i <= currentStepIndex ? "bg-[var(--accent-cyan)]" : "bg-[var(--border-default)]"
+            }`}
+          />
+        ))}
+      </div>
+      <div className="flex justify-between">
+        {STEP_ORDER.map((step, i) => (
+          <span
+            key={step}
+            className={`text-xs font-medium transition-colors duration-150 ${
+              i === currentStepIndex
+                ? "text-[var(--accent-cyan)]"
+                : i < currentStepIndex
+                ? "text-[var(--text-secondary)]"
+                : "text-[var(--text-secondary)] opacity-40"
+            }`}
+          >
+            {STEP_LABELS[step]}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Step: Purpose
+// ---------------------------------------------------------------------------
+
+function StepPurpose({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const charCount = value.length;
+  const minLength = 10;
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-bold text-[var(--text-primary)]">What should this agent help students with?</h2>
+        <p className="mt-1 text-sm text-[var(--text-secondary)]">
+          Describe the agent's primary teaching goal in plain language.
+        </p>
+      </div>
+      <div className="space-y-2">
+        <Textarea
+          className="min-h-[140px] resize-none font-inherit text-base leading-relaxed"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="e.g. Help students understand calculus concepts through worked examples and guided practice, building confidence step by step."
+          autoFocus
+        />
+        <div className="flex items-center justify-between text-xs">
+          <span className={charCount < minLength ? "text-[var(--text-secondary)]" : "text-[var(--accent-cyan)]"}>
+            {charCount < minLength ? `${minLength - charCount} more characters needed` : "Looks good"}
+          </span>
+          <span className="text-[var(--text-secondary)]">{charCount} characters</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Step: Personality
+// ---------------------------------------------------------------------------
+
+function StepPersonality({
+  communication,
+  teachingStyle,
+  patience,
+  onCommunicationChange,
+  onTeachingStyleChange,
+  onPatienceChange,
+}: {
+  communication: string;
+  teachingStyle: string;
+  patience: number;
+  onCommunicationChange: (v: string) => void;
+  onTeachingStyleChange: (v: string) => void;
+  onPatienceChange: (v: number) => void;
+}) {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-bold text-[var(--text-primary)]">How should it communicate?</h2>
+        <p className="mt-1 text-sm text-[var(--text-secondary)]">
+          Shape the agent's voice and teaching approach.
+        </p>
+      </div>
+
+      <div className="space-y-3">
+        <p className="text-sm font-semibold text-[var(--text-primary)]">Communication style</p>
+        <div className="flex flex-wrap gap-2">
+          {COMMUNICATION_STYLES.map((style) => (
+            <Chip
+              key={style}
+              label={style}
+              selected={communication === style}
+              onClick={() => onCommunicationChange(style)}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <p className="text-sm font-semibold text-[var(--text-primary)]">Teaching style</p>
+        <div className="flex flex-wrap gap-2">
+          {TEACHING_STYLES.map((style) => (
+            <Chip
+              key={style}
+              label={style}
+              selected={teachingStyle === style}
+              onClick={() => onTeachingStyleChange(style)}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <p className="text-sm font-semibold text-[var(--text-primary)]">Patience level</p>
+        <LabeledSlider
+          value={patience}
+          min={1}
+          max={5}
+          labels={PATIENCE_LABELS}
+          onChange={onPatienceChange}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Step: Expertise
+// ---------------------------------------------------------------------------
+
+function StepExpertise({
+  subjects,
+  level,
+  onSubjectsChange,
+  onLevelChange,
+}: {
+  subjects: string[];
+  level: string;
+  onSubjectsChange: (v: string[]) => void;
+  onLevelChange: (v: string) => void;
+}) {
+  function toggleSubject(subject: string) {
+    if (subjects.includes(subject)) {
+      onSubjectsChange(subjects.filter((s) => s !== subject));
+    } else {
+      onSubjectsChange([...subjects, subject]);
     }
+  }
 
-    setGeneratingPrompt(true);
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-bold text-[var(--text-primary)]">What is this agent expert in?</h2>
+        <p className="mt-1 text-sm text-[var(--text-secondary)]">
+          Select the subjects and the level of students it will teach.
+        </p>
+      </div>
+
+      <div className="space-y-3">
+        <p className="text-sm font-semibold text-[var(--text-primary)]">Subjects</p>
+        <div className="flex flex-wrap gap-2">
+          {SUBJECTS.map((subject) => (
+            <Chip
+              key={subject}
+              label={subject}
+              selected={subjects.includes(subject)}
+              onClick={() => toggleSubject(subject)}
+            />
+          ))}
+        </div>
+        {subjects.length === 0 && (
+          <p className="text-xs text-[var(--text-secondary)]">Select at least one subject</p>
+        )}
+      </div>
+
+      <div className="space-y-3">
+        <p className="text-sm font-semibold text-[var(--text-primary)]">Education level</p>
+        <div className="flex flex-wrap gap-2">
+          {LEVELS.map((lvl) => (
+            <Chip
+              key={lvl}
+              label={lvl}
+              selected={level === lvl}
+              onClick={() => onLevelChange(lvl)}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Step: Boundaries
+// ---------------------------------------------------------------------------
+
+function StepBoundaries({
+  selected,
+  strictness,
+  onToggle,
+  onStrictnessChange,
+}: {
+  selected: string[];
+  strictness: number;
+  onToggle: (id: string) => void;
+  onStrictnessChange: (v: number) => void;
+}) {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-bold text-[var(--text-primary)]">Set agent boundaries</h2>
+        <p className="mt-1 text-sm text-[var(--text-secondary)]">
+          Define what this agent should and should not do.
+        </p>
+      </div>
+
+      <div className="space-y-3">
+        <p className="text-sm font-semibold text-[var(--text-primary)]">What should it NOT do?</p>
+        <div className="space-y-2">
+          {BOUNDARY_OPTIONS.map((option) => {
+            const isChecked = selected.includes(option.id);
+            return (
+              <label
+                key={option.id}
+                className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-all duration-150 ${
+                  isChecked
+                    ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,transparent)]"
+                    : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:border-[var(--accent-cyan)] hover:bg-[var(--bg-elevated)]"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={isChecked}
+                  onChange={() => onToggle(option.id)}
+                  className="mt-0.5 h-4 w-4 cursor-pointer accent-[var(--accent-cyan)]"
+                />
+                <span className="text-sm text-[var(--text-primary)]">{option.label}</span>
+              </label>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <p className="text-sm font-semibold text-[var(--text-primary)]">Enforcement strictness</p>
+        <LabeledSlider
+          value={strictness}
+          min={1}
+          max={5}
+          labels={STRICTNESS_LABELS}
+          onChange={onStrictnessChange}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Step: Review & Generate
+// ---------------------------------------------------------------------------
+
+function StepReview({
+  purpose,
+  communication,
+  teachingStyle,
+  patience,
+  subjects,
+  level,
+  boundaries,
+  strictness,
+  generated,
+  generating,
+  editedSystemPrompt,
+  onEditedSystemPromptChange,
+  onGenerate,
+  onSubmit,
+  submitting,
+}: {
+  purpose: string;
+  communication: string;
+  teachingStyle: string;
+  patience: number;
+  subjects: string[];
+  level: string;
+  boundaries: string[];
+  strictness: number;
+  generated: GeneratedAgent | null;
+  generating: boolean;
+  editedSystemPrompt: string;
+  onEditedSystemPromptChange: (v: string) => void;
+  onGenerate: () => void;
+  onSubmit: () => void;
+  submitting: boolean;
+}) {
+  const [promptExpanded, setPromptExpanded] = useState(false);
+
+  const boundaryLabels = BOUNDARY_OPTIONS.filter((o) => boundaries.includes(o.id)).map((o) => o.label);
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-bold text-[var(--text-primary)]">Review & Generate</h2>
+        <p className="mt-1 text-sm text-[var(--text-secondary)]">
+          Review your choices then generate your agent's full configuration with AI.
+        </p>
+      </div>
+
+      {/* Summary cards */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <SummaryCard label="Purpose" value={purpose} />
+        <SummaryCard
+          label="Personality"
+          value={`${communication} • ${teachingStyle} • Patience ${patience}/5`}
+        />
+        <SummaryCard
+          label="Expertise"
+          value={subjects.length ? `${subjects.join(", ")} — ${level}` : `${level} (no subjects selected)`}
+        />
+        <SummaryCard
+          label="Boundaries"
+          value={
+            boundaryLabels.length
+              ? `${boundaryLabels.length} rule${boundaryLabels.length > 1 ? "s" : ""} — Strictness ${strictness}/5`
+              : `No rules set — Strictness ${strictness}/5`
+          }
+        />
+      </div>
+
+      {/* Generate button */}
+      {!generated && (
+        <button
+          type="button"
+          onClick={onGenerate}
+          disabled={generating}
+          className={`relative w-full cursor-pointer overflow-hidden rounded-xl border px-6 py-4 text-center transition-all duration-200 ${
+            generating
+              ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_10%,transparent)]"
+              : "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,transparent)] hover:bg-[color-mix(in_oklab,var(--accent-cyan)_15%,transparent)]"
+          }`}
+        >
+          {generating ? (
+            <span className="flex items-center justify-center gap-2 text-[var(--accent-cyan)]">
+              <SparklesAnimation />
+              <span className="font-semibold">Generating agent configuration...</span>
+            </span>
+          ) : (
+            <span className="flex items-center justify-center gap-2 font-semibold text-[var(--accent-cyan)]">
+              <Sparkles className="h-5 w-5" />
+              Generate Agent
+            </span>
+          )}
+        </button>
+      )}
+
+      {/* Generated result */}
+      {generated && (
+        <div className="space-y-4 rounded-xl border border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_6%,transparent)] p-4">
+          <div className="flex items-start gap-3">
+            <span className="text-3xl leading-none">{generated.avatarEmoji}</span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <h3 className="text-lg font-bold text-[var(--text-primary)]">{generated.name}</h3>
+                <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-[var(--accent-cyan)]" />
+              </div>
+              <p className="mt-0.5 text-sm text-[var(--text-secondary)]">{generated.description}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Tag label={generated.suggestedCategory} />
+                <Tag label={generated.suggestedMode} />
+              </div>
+            </div>
+          </div>
+
+          {/* Collapsible prompt editor */}
+          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+            <button
+              type="button"
+              onClick={() => setPromptExpanded((p) => !p)}
+              className="flex w-full cursor-pointer items-center justify-between px-4 py-3 text-left"
+            >
+              <span className="text-sm font-semibold text-[var(--text-primary)]">
+                System prompt preview
+              </span>
+              {promptExpanded ? (
+                <ChevronUp className="h-4 w-4 text-[var(--text-secondary)]" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-[var(--text-secondary)]" />
+              )}
+            </button>
+            {promptExpanded && (
+              <div className="border-t border-[var(--border-default)] p-3">
+                <Textarea
+                  className="min-h-[200px] resize-y font-mono text-xs"
+                  value={editedSystemPrompt}
+                  onChange={(e) => onEditedSystemPromptChange(e.target.value)}
+                />
+                <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                  You can edit the prompt before creating the agent.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Regenerate + Create */}
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              variant="secondary"
+              className="gap-1.5"
+              onClick={onGenerate}
+              disabled={generating || submitting}
+            >
+              {generating ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
+              Regenerate
+            </Button>
+            <Button
+              type="button"
+              onClick={onSubmit}
+              disabled={submitting || generating}
+              className="flex-1 gap-1.5 sm:flex-none"
+            >
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+              Create Agent
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Small helper components
+// ---------------------------------------------------------------------------
+
+function SummaryCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">{label}</p>
+      <p className="mt-1 text-sm text-[var(--text-primary)] line-clamp-3">{value}</p>
+    </div>
+  );
+}
+
+function Tag({ label }: { label: string }) {
+  return (
+    <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-0.5 text-xs font-medium text-[var(--text-secondary)]">
+      {label}
+    </span>
+  );
+}
+
+function SparklesAnimation() {
+  return (
+    <span className="inline-flex gap-0.5">
+      {["✦", "✦", "✦"].map((star, i) => (
+        <span
+          key={i}
+          className="inline-block animate-pulse text-[var(--accent-cyan)]"
+          style={{ animationDelay: `${i * 150}ms` }}
+        >
+          {star}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main wizard component
+// ---------------------------------------------------------------------------
+
+export function AgentBuilderForm({ onSubmit, onCancelHref = "/agents" }: AgentBuilderFormProps) {
+  // Wizard navigation
+  const [currentStep, setCurrentStep] = useState<WizardStep>("purpose");
+  const currentStepIndex = STEP_ORDER.indexOf(currentStep);
+
+  // Step 1: Purpose
+  const [purpose, setPurpose] = useState("");
+
+  // Step 2: Personality
+  const [communication, setCommunication] = useState("Friendly");
+  const [teachingStyle, setTeachingStyle] = useState("Step-by-step");
+  const [patience, setPatience] = useState(3);
+
+  // Step 3: Expertise
+  const [subjects, setSubjects] = useState<string[]>([]);
+  const [level, setLevel] = useState("Secondary");
+
+  // Step 4: Boundaries
+  const [boundaries, setBoundaries] = useState<string[]>([
+    "no-homework-answers",
+    "no-fabrication",
+  ]);
+  const [strictness, setStrictness] = useState(3);
+
+  // Step 5: Review / Generate
+  const [generated, setGenerated] = useState<GeneratedAgent | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [editedSystemPrompt, setEditedSystemPrompt] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  // -------------------------------------------------------------------------
+  // Validation per step
+  // -------------------------------------------------------------------------
+
+  function canProceed(): boolean {
+    switch (currentStep) {
+      case "purpose":
+        return purpose.trim().length >= 10;
+      case "personality":
+        return Boolean(communication && teachingStyle);
+      case "expertise":
+        return subjects.length > 0 && Boolean(level);
+      case "boundaries":
+        return true;
+      case "review":
+        return false;
+    }
+  }
+
+  function goNext() {
+    if (!canProceed()) return;
+    const nextIndex = currentStepIndex + 1;
+    if (nextIndex < STEP_ORDER.length) {
+      setCurrentStep(STEP_ORDER[nextIndex]!);
+    }
+  }
+
+  function goBack() {
+    const prevIndex = currentStepIndex - 1;
+    if (prevIndex >= 0) {
+      setCurrentStep(STEP_ORDER[prevIndex]!);
+    }
+  }
+
+  function goToStep(index: number) {
+    if (index <= currentStepIndex) {
+      setCurrentStep(STEP_ORDER[index]!);
+    }
+  }
+
+  function toggleBoundary(id: string) {
+    setBoundaries((prev) =>
+      prev.includes(id) ? prev.filter((b) => b !== id) : [...prev, id],
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Generate
+  // -------------------------------------------------------------------------
+
+  async function handleGenerate() {
+    setGenerating(true);
     try {
-      const response = await fetch("/api/agents/generate-prompt", {
+      const boundaryLabels = BOUNDARY_OPTIONS.filter((o) => boundaries.includes(o.id)).map((o) => o.label);
+      const response = await fetch("/api/agents/generate-full", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: name.trim(),
-          description: description.trim(),
-          category: category.trim(),
+          purpose: purpose.trim(),
+          personality: communication,
+          teachingStyle,
+          patience,
+          subjects: subjects.map((s) => s.toLowerCase()),
+          level,
+          boundaries: boundaryLabels,
+          strictness,
         }),
       });
       if (!response.ok) {
         throw new Error(await response.text());
       }
-      const data = (await response.json()) as { prompt?: string };
-      if (!data.prompt?.trim()) {
-        throw new Error("Prompt generation returned empty output.");
-      }
-      setSystemPrompt(data.prompt.trim());
-      toast.success("System prompt generated");
+      const data = (await response.json()) as GeneratedAgent;
+      setGenerated(data);
+      setEditedSystemPrompt(data.systemPrompt);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to generate system prompt");
+      toast.error(error instanceof Error ? error.message : "Failed to generate agent");
     } finally {
-      setGeneratingPrompt(false);
+      setGenerating(false);
     }
   }
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  // -------------------------------------------------------------------------
+  // Submit
+  // -------------------------------------------------------------------------
+
+  async function handleSubmit() {
+    if (!generated) return;
     if (submitting) return;
-
-    const cleanName = name.trim();
-    const cleanDescription = description.trim();
-    const cleanCategory = category.trim();
-    const cleanEmoji = avatarEmoji.trim();
-
-    if (!cleanName || !cleanDescription || !cleanCategory) {
-      toast.error("Name, description, and category are required.");
-      return;
-    }
-
-    let finalPrompt = systemPrompt.trim();
-    if (mode === "assisted") {
-      if (!purpose.trim() || !audience.trim() || !success.trim() || !boundaries.trim() || !responseStyle.trim()) {
-        toast.error("Complete all assisted-creation questions.");
-        return;
-      }
-      finalPrompt = generatedPreview.trim();
-    }
-
-    if (!finalPrompt) {
-      toast.error("System prompt is required.");
-      return;
-    }
 
     setSubmitting(true);
     try {
+      const primarySubject = subjects[0]?.toLowerCase() ?? "default";
+      const avatarEmoji = SUBJECT_EMOJIS[primarySubject] ?? SUBJECT_EMOJIS.default;
+
       await onSubmit({
-        name: cleanName,
-        description: cleanDescription,
-        category: cleanCategory,
-        systemPrompt: finalPrompt,
-        avatarEmoji: cleanEmoji || undefined,
-        visibility,
+        name: generated.name,
+        description: generated.description,
+        category: generated.suggestedCategory,
+        systemPrompt: editedSystemPrompt.trim() || generated.systemPrompt,
+        avatarEmoji: generated.avatarEmoji || avatarEmoji,
+        visibility: "public",
+        preferredMode: generated.suggestedMode,
       });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save agent");
@@ -185,202 +797,135 @@ export function AgentBuilderForm({
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Render
+  // -------------------------------------------------------------------------
+
+  const isFirstStep = currentStepIndex === 0;
+  const isLastStep = currentStep === "review";
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2">
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            onClick={() => setMode("assisted")}
-            className={`rounded-lg border px-3 py-2 text-left text-sm transition ${
-              mode === "assisted"
-                ? "border-[var(--accent)] bg-[color-mix(in_oklab,var(--accent)_12%,transparent)]"
-                : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
-            }`}
-          >
-            <p className="font-medium text-[var(--text-primary)]">Assisted creation</p>
-            <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
-              Guided questionnaire, no AI generation required.
-            </p>
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("manual")}
-            className={`rounded-lg border px-3 py-2 text-left text-sm transition ${
-              mode === "manual"
-                ? "border-[var(--accent)] bg-[color-mix(in_oklab,var(--accent)_12%,transparent)]"
-                : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
-            }`}
-          >
-            <p className="font-medium text-[var(--text-primary)]">Manual setup</p>
-            <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
-              Write your own system prompt and fine-tune behavior.
-            </p>
-          </button>
+    <div className="space-y-2">
+      {/* Progress indicator with clickable step labels */}
+      <div className="mb-8">
+        <div className="flex gap-2 mb-3">
+          {STEP_ORDER.map((step, i) => (
+            <div
+              key={step}
+              className={`flex-1 h-1.5 rounded-full transition-all duration-300 ${
+                i <= currentStepIndex ? "bg-[var(--accent-cyan)]" : "bg-[var(--border-default)]"
+              }`}
+            />
+          ))}
+        </div>
+        <div className="flex justify-between">
+          {STEP_ORDER.map((step, i) => (
+            <button
+              key={step}
+              type="button"
+              onClick={() => goToStep(i)}
+              disabled={i > currentStepIndex}
+              className={`cursor-pointer text-xs font-medium transition-colors duration-150 disabled:cursor-default ${
+                i === currentStepIndex
+                  ? "text-[var(--accent-cyan)]"
+                  : i < currentStepIndex
+                  ? "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                  : "text-[var(--text-secondary)] opacity-40"
+              }`}
+            >
+              {STEP_LABELS[step]}
+            </button>
+          ))}
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="space-y-1">
-          <span className="text-xs font-medium uppercase tracking-[0.08em] text-[var(--text-secondary)]">Name</span>
-          <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Physics Coach" />
-        </label>
+      {/* Step content */}
+      <div className="min-h-[320px]">
+        {currentStep === "purpose" && (
+          <StepPurpose value={purpose} onChange={setPurpose} />
+        )}
 
-        <label className="space-y-1">
-          <span className="text-xs font-medium uppercase tracking-[0.08em] text-[var(--text-secondary)]">Category</span>
-          <Input value={category} onChange={(event) => setCategory(event.target.value)} placeholder="Science" />
-        </label>
+        {currentStep === "personality" && (
+          <StepPersonality
+            communication={communication}
+            teachingStyle={teachingStyle}
+            patience={patience}
+            onCommunicationChange={setCommunication}
+            onTeachingStyleChange={setTeachingStyle}
+            onPatienceChange={setPatience}
+          />
+        )}
+
+        {currentStep === "expertise" && (
+          <StepExpertise
+            subjects={subjects}
+            level={level}
+            onSubjectsChange={setSubjects}
+            onLevelChange={setLevel}
+          />
+        )}
+
+        {currentStep === "boundaries" && (
+          <StepBoundaries
+            selected={boundaries}
+            strictness={strictness}
+            onToggle={toggleBoundary}
+            onStrictnessChange={setStrictness}
+          />
+        )}
+
+        {currentStep === "review" && (
+          <StepReview
+            purpose={purpose}
+            communication={communication}
+            teachingStyle={teachingStyle}
+            patience={patience}
+            subjects={subjects}
+            level={level}
+            boundaries={boundaries}
+            strictness={strictness}
+            generated={generated}
+            generating={generating}
+            editedSystemPrompt={editedSystemPrompt}
+            onEditedSystemPromptChange={setEditedSystemPrompt}
+            onGenerate={handleGenerate}
+            onSubmit={handleSubmit}
+            submitting={submitting}
+          />
+        )}
       </div>
 
-      <label className="space-y-1">
-        <span className="text-xs font-medium uppercase tracking-[0.08em] text-[var(--text-secondary)]">Description</span>
-        <Textarea
-          className="min-h-[92px] resize-none font-inherit"
-          value={description}
-          onChange={(event) => setDescription(event.target.value)}
-          placeholder="What this agent helps with and for whom."
-        />
-      </label>
+      {/* Navigation buttons */}
+      <div className="flex items-center justify-between border-t border-[var(--border-default)] pt-5">
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={isFirstStep ? undefined : goBack}
+          asChild={isFirstStep}
+          className="gap-1.5"
+        >
+          {isFirstStep ? (
+            <a href={onCancelHref}>Cancel</a>
+          ) : (
+            <>
+              <ChevronLeft className="h-4 w-4" />
+              Back
+            </>
+          )}
+        </Button>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="space-y-1">
-          <span className="text-xs font-medium uppercase tracking-[0.08em] text-[var(--text-secondary)]">
-            Avatar (optional)
-          </span>
-          <Input
-            value={avatarEmoji}
-            onChange={(event) => setAvatarEmoji(event.target.value)}
-            maxLength={2}
-            placeholder="🎓"
-          />
-          <div className="flex flex-wrap gap-1 pt-1">
-            {EMOJIS.map((emoji) => (
-              <button
-                key={emoji}
-                type="button"
-                onClick={() => setAvatarEmoji(emoji)}
-                className={`rounded-md border px-2 py-1 text-lg transition ${
-                  avatarEmoji === emoji
-                    ? "border-[var(--accent)] bg-[color-mix(in_oklab,var(--accent)_10%,transparent)]"
-                    : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
-                }`}
-                aria-label={`Pick ${emoji}`}
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
-        </label>
-
-        <label className="space-y-1">
-          <span className="text-xs font-medium uppercase tracking-[0.08em] text-[var(--text-secondary)]">Visibility</span>
-          <select
-            value={visibility}
-            onChange={(event) => setVisibility(event.target.value as Visibility)}
-            className="h-10 w-full rounded-[var(--radius-input)] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-sm"
+        {!isLastStep && (
+          <Button
+            type="button"
+            onClick={goNext}
+            disabled={!canProceed()}
+            className="gap-1.5"
           >
-            <option value="public">Public</option>
-            <option value="private">Private</option>
-          </select>
-        </label>
+            Next
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        )}
       </div>
-
-      {mode === "assisted" ? (
-        <section className="space-y-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-          <h3 className="text-sm font-semibold text-[var(--text-primary)]">Assisted brief (required)</h3>
-
-          <label className="space-y-1">
-            <span className="text-xs text-[var(--text-secondary)]">What is this agent for?</span>
-            <Textarea
-              className="min-h-[84px] resize-none font-inherit"
-              value={purpose}
-              onChange={(event) => setPurpose(event.target.value)}
-              placeholder="Example: Help students reason through GCSE math proofs with guided hints."
-            />
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-xs text-[var(--text-secondary)]">Who is the audience?</span>
-            <Input value={audience} onChange={(event) => setAudience(event.target.value)} />
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-xs text-[var(--text-secondary)]">How do we define a successful response?</span>
-            <Textarea
-              className="min-h-[78px] resize-none font-inherit"
-              value={success}
-              onChange={(event) => setSuccess(event.target.value)}
-            />
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-xs text-[var(--text-secondary)]">What boundaries must it follow?</span>
-            <Textarea
-              className="min-h-[78px] resize-none font-inherit"
-              value={boundaries}
-              onChange={(event) => setBoundaries(event.target.value)}
-            />
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-xs text-[var(--text-secondary)]">Preferred response style</span>
-            <Textarea
-              className="min-h-[78px] resize-none font-inherit"
-              value={responseStyle}
-              onChange={(event) => setResponseStyle(event.target.value)}
-            />
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-xs text-[var(--text-secondary)]">Generated system prompt preview</span>
-            <Textarea readOnly className="min-h-[180px] resize-none font-inherit" value={generatedPreview} />
-          </label>
-        </section>
-      ) : (
-        <section className="space-y-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div>
-              <h3 className="text-sm font-semibold text-[var(--text-primary)]">System prompt</h3>
-              <p className="text-xs text-[var(--text-secondary)]">
-                The system prompt is the hidden instruction set that defines the agent&apos;s behavior and limits.
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="secondary"
-              className="gap-1.5"
-              onClick={handleGeneratePromptWithAI}
-              disabled={generatingPrompt}
-            >
-              {generatingPrompt ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-              Generate with AI
-            </Button>
-          </div>
-
-          <Textarea
-            className="min-h-[220px] resize-none font-inherit"
-            value={systemPrompt}
-            onChange={(event) => setSystemPrompt(event.target.value)}
-            placeholder="Define persona, teaching strategy, boundaries, and response format."
-          />
-        </section>
-      )}
-
-      {models.length > 0 && (
-        <p className="text-xs text-[var(--text-secondary)]">
-          {models.length} models available in workspace. Model choice is handled in chat orchestration.
-        </p>
-      )}
-
-      <div className="flex items-center justify-between pt-1">
-        <Button type="button" variant="ghost" asChild>
-          <Link href={onCancelHref}>Exit</Link>
-        </Button>
-        <Button type="submit" disabled={submitting} className="gap-1.5">
-          {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-          {submitLabel}
-        </Button>
-      </div>
-    </form>
+    </div>
   );
 }

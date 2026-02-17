@@ -5,6 +5,7 @@
  */
 
 export const STUDY_MODES = [
+  "auto",
   "tutor",
   "marker",
   "exam",

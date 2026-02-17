@@ -28,7 +28,10 @@ export type ParsedQuizQuestion = QuizPanelQuestion & {
 
 type QuizRevealProps = {
   content: string;
+  chatId?: string;
   onSubmitAnswers?: (result: QuizSubmitResult) => void;
+  onFollowUp?: (message: string) => void;
+  onModeChange?: (mode: string) => void;
 };
 
 function parseQuiz(content: string): ParsedQuizQuestion[] {
@@ -145,7 +148,7 @@ function buildSubmission(questions: ParsedQuizQuestion[], answers: Record<string
   };
 }
 
-export function QuizReveal({ content, onSubmitAnswers }: QuizRevealProps) {
+export function QuizReveal({ content, chatId, onSubmitAnswers, onFollowUp, onModeChange }: QuizRevealProps) {
   const questions = useMemo(() => parseQuiz(content), [content]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState(false);
@@ -164,6 +167,7 @@ export function QuizReveal({ content, onSubmitAnswers }: QuizRevealProps) {
   );
 
   const fetchExplanations = useCallback(async (qs: ParsedQuizQuestion[], ans: Record<string, string>) => {
+    if (!chatId) return; // Don't fetch without chatId
     setLoadingExplanations(true);
     try {
       const questionsPayload = qs.map((q) => ({
@@ -176,6 +180,7 @@ export function QuizReveal({ content, onSubmitAnswers }: QuizRevealProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          chatId, // Pass chatId to avoid creating orphan chat
           mode: "general",
           message: `Explain each quiz answer briefly (1-2 sentences each). Questions:\n${questionsPayload
             .map((q, i) => `Q${i + 1}: ${q.question} (chose: ${q.selected}, correct: ${q.correct})`)
@@ -250,6 +255,45 @@ export function QuizReveal({ content, onSubmitAnswers }: QuizRevealProps) {
     void fetchExplanations(questions, answers);
   }
 
+  function requestHarderQuiz() {
+    onFollowUp?.("Create a harder quiz about the same topic with more challenging questions.");
+  }
+
+  function requestNewTopic() {
+    onFollowUp?.("Suggest a related topic to quiz me on next.");
+  }
+
+  function requestExplanation() {
+    const incorrectDetails = questions
+      .filter((q) => answers[q.id] !== q.correct)
+      .map((q) => `Q: "${q.prompt}" - chose "${answers[q.id] ?? "none"}" but correct was "${q.correct ?? "unknown"}"`);
+    onFollowUp?.(`Explain why I got these wrong: ${incorrectDetails.join("; ")}`);
+  }
+
+  function requestRetry() {
+    onFollowUp?.("Give me the same quiz again so I can retry.");
+  }
+
+  function switchToLearnMode() {
+    const incorrectTopics = questions
+      .filter((q) => answers[q.id] !== q.correct)
+      .map((q) => q.prompt);
+    onFollowUp?.(
+      `I got ${score}/${questions.length}. Please teach me about the topics I got wrong: ${incorrectTopics.join(", ")}.`,
+    );
+    onModeChange?.("tutor");
+  }
+
+  function requestEasierQuiz() {
+    onFollowUp?.("Create an easier version of this quiz with simpler questions.");
+  }
+
+  const scorePct = questions.length > 0 ? score / questions.length : 0;
+  const isPerfect = score === questions.length;
+  const isGood = scorePct > 0.7;
+  const isLow = scorePct > 0.3 && !isGood;
+  // else: very low / zero
+
   if (longQuiz) {
     return (
       <>
@@ -260,7 +304,7 @@ export function QuizReveal({ content, onSubmitAnswers }: QuizRevealProps) {
             </span>
             {submitted ? (
               <span className="text-sm font-medium text-[var(--text-primary)]">
-                Score: {score}/{questions.length}
+                {score}/{questions.length}
               </span>
             ) : null}
           </div>
@@ -326,7 +370,7 @@ export function QuizReveal({ content, onSubmitAnswers }: QuizRevealProps) {
                   type="button"
                   disabled={submitted}
                   onClick={() => setAnswers((prev) => ({ ...prev, [currentQuestion.id]: option.letter }))}
-                  className={`quiz-option flex w-full items-center gap-3 rounded-[var(--radius-input)] border px-3 py-2.5 text-left text-sm transition ${
+                  className={`quiz-option flex w-full cursor-pointer items-center gap-3 rounded-[var(--radius-input)] border px-3 py-2.5 text-left text-sm transition disabled:cursor-default ${
                     showCorrect
                       ? "quiz-correct"
                       : showWrong
@@ -346,7 +390,11 @@ export function QuizReveal({ content, onSubmitAnswers }: QuizRevealProps) {
                     {option.letter}
                   </span>
                   <RichText content={option.text} className="flex-1 text-sm" />
-                  {!submitted && selected ? <CheckCircle2 className="h-4 w-4 text-[var(--accent-cyan)]" /> : null}
+                  {!submitted && selected ? (
+                    <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 border-[var(--accent-cyan)] bg-[var(--accent-cyan)]">
+                      <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                    </span>
+                  ) : null}
                   {showCorrect ? <CheckCircle2 className="h-4 w-4 text-[var(--success)]" /> : null}
                   {showWrong ? <XCircle className="h-4 w-4 text-[var(--danger)]" /> : null}
                 </button>
@@ -420,17 +468,53 @@ export function QuizReveal({ content, onSubmitAnswers }: QuizRevealProps) {
           Answered {Object.keys(answers).length}/{questions.length}
         </p>
       ) : (
-        <div className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 text-center">
-          <p className="text-2xl font-bold">
-            {score}/{questions.length}
-          </p>
-          <p className="text-sm text-[var(--text-secondary)]">
-            {score === questions.length
-              ? "Perfect score!"
-              : score >= questions.length * 0.7
-                ? "Great job!"
-                : "Keep practicing!"}
-          </p>
+        <div className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+          <div className="mb-3 text-center">
+            <p className="text-3xl font-bold">
+              {score}/{questions.length}
+            </p>
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">
+              {isPerfect
+                ? "Perfect score! Outstanding work."
+                : isGood
+                  ? "Great job! You're getting there."
+                  : isLow
+                    ? "Good effort. Review the missed questions."
+                    : "Let's revisit this topic together."}
+            </p>
+          </div>
+          {onFollowUp ? (
+            <div className="flex flex-wrap justify-center gap-2">
+              {isPerfect ? (
+                <>
+                  <Button type="button" size="sm" onClick={requestHarderQuiz}>
+                    Harder Quiz
+                  </Button>
+                  <Button type="button" size="sm" variant="secondary" onClick={requestNewTopic}>
+                    New Topic
+                  </Button>
+                </>
+              ) : isGood || isLow ? (
+                <>
+                  <Button type="button" size="sm" onClick={requestExplanation}>
+                    Explain Mistakes
+                  </Button>
+                  <Button type="button" size="sm" variant="secondary" onClick={requestRetry}>
+                    Retry Quiz
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button type="button" size="sm" onClick={switchToLearnMode}>
+                    Teach Me First
+                  </Button>
+                  <Button type="button" size="sm" variant="secondary" onClick={requestEasierQuiz}>
+                    Easier Quiz
+                  </Button>
+                </>
+              )}
+            </div>
+          ) : null}
         </div>
       )}
     </div>

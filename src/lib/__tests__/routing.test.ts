@@ -246,8 +246,8 @@ describe("StudyMode validation", () => {
     }
   });
 
-  it("STUDY_MODES has exactly 10 entries", () => {
-    expect(STUDY_MODES).toHaveLength(10);
+  it("STUDY_MODES has exactly 11 entries", () => {
+    expect(STUDY_MODES).toHaveLength(11);
   });
 
   it("STUDY_MODES includes research mode", () => {

@@ -6,6 +6,7 @@
 import { v } from "convex/values";
 
 export const STUDY_MODES = [
+  "auto",
   "tutor",
   "marker",
   "exam",
@@ -22,6 +23,7 @@ export type StudyMode = (typeof STUDY_MODES)[number];
 
 /** Convex v.union validator for StudyMode */
 export const vStudyMode = v.union(
+  v.literal("auto"),
   v.literal("tutor"),
   v.literal("marker"),
   v.literal("exam"),

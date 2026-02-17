@@ -112,12 +112,21 @@ function calculateStreak(rows: AnalyticsRow[]) {
   const days = new Set(rows.map((r) => r.day));
   let streak = 0;
   const now = new Date();
+  
+  // Start checking from "today" (UTC)
+  let current = new Date(now.toISOString().slice(0, 10));
+  
+  // If no activity today, check if there was activity yesterday to continue the streak
+  const todayKey = current.toISOString().slice(0, 10);
+  if (!days.has(todayKey)) {
+    current.setDate(current.getDate() - 1);
+  }
+
   for (let i = 0; i < 365; i++) {
-    const d = new Date(now);
-    d.setDate(d.getDate() - i);
-    const key = d.toISOString().slice(0, 10);
+    const key = current.toISOString().slice(0, 10);
     if (days.has(key)) {
       streak++;
+      current.setDate(current.getDate() - 1);
     } else {
       break;
     }

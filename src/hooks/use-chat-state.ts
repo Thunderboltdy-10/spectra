@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import type { Agent, Citation, RouteTrace, RouterMode, StudyMode, ThinkingLevel } from "@/types";
 import { appendToBuffer, createBufferState } from "@/lib/structured-stream-buffer";
 import { useSidebar } from "@/context/sidebar-context";
+import { IMAGE_GEN_MODELS } from "@/lib/model-config";
 
 export type Chat = {
   _id: string;
@@ -54,6 +55,7 @@ export type Message = {
   usageIn?: number;
   usageOut?: number;
   createdAt?: number;
+  mode?: StudyMode;
 };
 
 export type FileStatus = "pending" | "uploading" | "ready" | "error";
@@ -263,6 +265,23 @@ function mergeModels(catalog: ModelOption[], live: LiveModel[]) {
     });
   }
 
+  // Add hardcoded image generation models
+  for (const imgModel of IMAGE_GEN_MODELS) {
+    if (!merged.has(imgModel.id)) {
+      merged.set(imgModel.id, {
+        _id: imgModel.id,
+        modelId: imgModel.id,
+        name: imgModel.name,
+        provider: imgModel.provider,
+        description: imgModel.recommended ? "Recommended for image generation" : "Image generation model",
+        tags: ["image", "generation"],
+        inputCostPerM: 0,
+        outputCostPerM: 0,
+        isFree: true,
+      });
+    }
+  }
+
   return [...merged.values()].sort((a, b) => {
     const aCost = a.inputCostPerM ?? Number.MAX_SAFE_INTEGER;
     const bCost = b.inputCostPerM ?? Number.MAX_SAFE_INTEGER;
@@ -274,7 +293,6 @@ function mergeModels(catalog: ModelOption[], live: LiveModel[]) {
 export function useChatState() {
   const sidebar = useSidebar();
   const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
   const role = sidebar.role;
   const chats = sidebar.chats;
   const setChats = sidebar.setChats;
@@ -311,9 +329,13 @@ export function useChatState() {
 
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
-  const [draftResponse, setDraftResponse] = useState("");
-  const [draftThinking, setDraftThinking] = useState("");
+  const [draftResponses, setDraftResponses] = useState<Map<string, string>>(new Map());
+  const [draftThinkings, setDraftThinkings] = useState<Map<string, string>>(new Map());
+  const [activeStreamIds, setActiveStreamIds] = useState<Set<string>>(new Set());
   const [hasRealThinking, setHasRealThinking] = useState(false);
+  const draftResponse = draftResponses.get(selectedChatId) ?? "";
+  const draftThinking = draftThinkings.get(selectedChatId) ?? "";
+  const sending = activeStreamIds.has(selectedChatId);
   const [activeCollaborators, setActiveCollaborators] = useState<ActiveCollaboratorState[]>([]);
   const [collaboratorPhase, setCollaboratorPhase] = useState<"idle" | "running" | "synthesizing">("idle");
   const [fileList, setFileList] = useState<File[]>([]);
@@ -331,6 +353,7 @@ export function useChatState() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const pinnedChatIds = sidebar.pinnedChatIds;
+  const [imageModel, setImageModel] = useState<string>("");
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const selectedChatIdRef = useRef("");
@@ -339,6 +362,34 @@ export function useChatState() {
   const pendingCompletionsRef = useRef<Map<string, Message[]>>(new Map());
   const streamChatIdRef = useRef<string | null>(null);
   const activeStreamsRef = useRef<Set<string>>(new Set());
+
+  // Draft persistence helpers
+  const getDraftKey = (chatId: string) => `ai-school:draft:${chatId}`;
+  
+  const saveDraft = useCallback((chatId: string, draft: string) => {
+    if (!chatId) return;
+    if (draft.trim()) {
+      localStorage.setItem(getDraftKey(chatId), draft);
+    } else {
+      localStorage.removeItem(getDraftKey(chatId));
+    }
+  }, []);
+
+  const loadDraft = useCallback((chatId: string): string => {
+    if (!chatId) return "";
+    return localStorage.getItem(getDraftKey(chatId)) ?? "";
+  }, []);
+
+  const clearDraft = useCallback((chatId: string) => {
+    if (!chatId) return;
+    localStorage.removeItem(getDraftKey(chatId));
+  }, []);
+
+  const hasDraft = useCallback((chatId: string): boolean => {
+    if (!chatId) return false;
+    const draft = localStorage.getItem(getDraftKey(chatId));
+    return draft !== null && draft.trim().length > 0;
+  }, []);
 
   const selectedAgent = useMemo(
     () => agents.find((item) => item._id === selectedAgentId),
@@ -447,14 +498,22 @@ export function useChatState() {
   useEffect(() => {
     if (!selectedChatId) {
       setMessages([]);
-      setDraftResponse("");
-      setDraftThinking("");
+      setMessage(""); // Clear message when no chat selected
+      // Don't clear drafts for chats that are still streaming
+      if (!activeStreamIds.has(selectedChatId)) {
+        setDraftResponses(prev => { const next = new Map(prev); next.delete(selectedChatId); return next; });
+        setDraftThinkings(prev => { const next = new Map(prev); next.delete(selectedChatId); return next; });
+      }
       setActiveCollaborators([]);
       setCollaboratorPhase("idle");
       setStreamError(null);
       setLastAutoResult(null);
       return;
     }
+
+    // Load draft for this chat
+    const draft = loadDraft(selectedChatId);
+    setMessage(draft);
 
     // Merge any pending completions for this chat
     const pending = pendingCompletionsRef.current.get(selectedChatId);
@@ -494,7 +553,18 @@ export function useChatState() {
         toast.error(error instanceof Error ? error.message : "Failed to load chat");
       }
     })();
-  }, [selectedChatId]);
+  }, [selectedChatId, loadDraft]);
+
+  // Auto-save draft when message changes (debounced)
+  useEffect(() => {
+    if (!selectedChatId) return;
+    
+    const timeout = setTimeout(() => {
+      saveDraft(selectedChatId, message);
+    }, 500); // Debounce 500ms
+    
+    return () => clearTimeout(timeout);
+  }, [message, selectedChatId, saveDraft]);
 
   useEffect(() => {
     const activeKeys = new Set(fileList.map((file) => fileKey(file)));
@@ -541,8 +611,7 @@ export function useChatState() {
       setSelectedChatId("");
       setMessages([]);
       setMessage("");
-      setDraftResponse("");
-      setDraftThinking("");
+      // No need to clear per-chat drafts when starting new chat
       setFileList([]);
       setFileUploadState({});
       setStreamError(null);
@@ -583,9 +652,28 @@ export function useChatState() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const isMod = event.metaKey || event.ctrlKey;
+
       if (isMod && event.shiftKey && event.key.toLowerCase() === "s") {
         event.preventDefault();
         setSidebarOpen((prev) => !prev);
+      }
+
+      // Cmd/Ctrl+K → quick mode picker
+      if (isMod && !event.shiftKey && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        window.dispatchEvent(new Event("ai-school:toggle-mode-picker"));
+      }
+
+      // Cmd/Ctrl+N → new chat
+      if (isMod && !event.shiftKey && event.key.toLowerCase() === "n") {
+        event.preventDefault();
+        startNewChat(selectedAgentId);
+      }
+
+      // Cmd/Ctrl+/ → focus search
+      if (isMod && event.key === "/") {
+        event.preventDefault();
+        document.querySelector<HTMLInputElement>("[data-search-input]")?.focus();
       }
 
       if (event.key === "Escape") {
@@ -596,7 +684,7 @@ export function useChatState() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [setSidebarOpen]);
+  }, [setSidebarOpen, startNewChat, selectedAgentId]);
 
   const updateExistingChatSettings = useCallback(
     async (next: {
@@ -620,6 +708,29 @@ export function useChatState() {
     [selectedChatId],
   );
 
+  // Helper to update settings for a specific chat (used in stream handlers)
+  const updateChatSettingsById = useCallback(
+    async (chatId: string, next: {
+      mode?: StudyMode;
+      routerMode?: RouterMode;
+      manualModel?: string;
+      thinkingLevel?: ThinkingLevel;
+      usePersonalResources?: boolean;
+      title?: string;
+    }) => {
+      if (!chatId) return;
+      const response = await fetch(`/api/chats/${chatId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(next),
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
     const handleNewChat = () => startNewChat(selectedAgentId);
     const handleSettings = () => setSettingsOpen((prev) => !prev);
@@ -627,6 +738,9 @@ export function useChatState() {
       const custom = event as CustomEvent<StudyMode>;
       const nextMode = custom.detail;
       if (!nextMode) return;
+      if (sending) {
+        stopGeneration();
+      }
       setMode(nextMode);
       void updateExistingChatSettings({ mode: nextMode }).catch(() => {});
     };
@@ -729,7 +843,12 @@ export function useChatState() {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
-      setSending(false);
+      // Clear active stream for current chat
+      const currentStreamChat = streamChatIdRef.current;
+      if (currentStreamChat) {
+        activeStreamsRef.current.delete(currentStreamChat);
+        setActiveStreamIds(prev => { const next = new Set(prev); next.delete(currentStreamChat); return next; });
+      }
       toast.info("Generation stopped");
     }
   }
@@ -746,7 +865,9 @@ export function useChatState() {
   async function sendMessage(override?: string, options?: SendMessageOptions) {
     const text = (override ?? message).trim();
     const retryAttempt = options?.retryAttempt ?? 0;
-    if (!text || (sending && retryAttempt === 0)) return;
+    if (!text) return;
+    const targetChatId = options?.chatIdOverride || selectedChatIdRef.current || "";
+    if (activeStreamIds.has(targetChatId) && retryAttempt === 0) return;
     const preservedText = options?.preservedText ?? text;
     const preservedFiles = options?.preservedFiles ?? [...fileList];
     const outgoingFiles = retryAttempt > 0 && options?.preservedFiles ? options.preservedFiles : [...fileList];
@@ -760,19 +881,23 @@ export function useChatState() {
     const effectiveRouterMode = requestedRouterMode;
     const effectiveManualModel = requestedManualModel;
 
-    setSending(true);
-    setDraftResponse("");
-    setDraftThinking("");
+    // Capture which chat this stream belongs to
+    const streamChatId = selectedChatIdRef.current || options?.chatIdOverride || "";
+    streamChatIdRef.current = streamChatId;
+    // Per-chat streaming state is managed via activeStreamIds
+    setDraftResponses(prev => { const next = new Map(prev); next.delete(streamChatId || ""); return next; });
+    setDraftThinkings(prev => { const next = new Map(prev); next.delete(streamChatId || ""); return next; });
     setHasRealThinking(false);
     setActiveCollaborators([]);
     setCollaboratorPhase("idle");
     setStreamError(null);
     setSearch("");
-    // Capture which chat this stream belongs to
-    const streamChatId = selectedChatIdRef.current || options?.chatIdOverride || "";
-    streamChatIdRef.current = streamChatId;
     if (retryAttempt === 0) {
       setMessage("");
+      // Clear draft from localStorage when message is sent
+      if (targetChatId) {
+        clearDraft(targetChatId);
+      }
       if (!options?.regenerate) {
         setFileList([]);
         setFileUploadState({});
@@ -809,6 +934,7 @@ export function useChatState() {
       activeChatId = chatId;
       streamChatIdRef.current = chatId;
       activeStreamsRef.current.add(chatId);
+      setActiveStreamIds(prev => { const next = new Set(prev); next.add(chatId); return next; });
       setChats((prev) =>
         prev.map((chat) =>
           chat._id === chatId && chat.title === "New chat"
@@ -894,6 +1020,7 @@ export function useChatState() {
           thinkingLevel,
           routerMode: effectiveRouterMode,
           manualModel: effectiveRouterMode === "manual" ? effectiveManualModel : undefined,
+          imageModel: mode === "image" ? imageModel : undefined,
           usePersonalResources,
           regenerate: isRegenerate,
           retryAttempt,
@@ -1001,13 +1128,16 @@ export function useChatState() {
 
           if (payload.type === "delta" && payload.content) {
             assistantBuffer += payload.content;
-            if (isViewingStreamChat) {
-              if (bufferState.mode !== "none") {
-                bufferState = appendToBuffer(bufferState, assistantBuffer);
-                setDraftResponse(bufferState.safeContent);
-              } else {
-                setDraftResponse((prev) => prev + payload.content);
-              }
+            const targetChatId = chatId;
+            if (bufferState.mode !== "none") {
+              bufferState = appendToBuffer(bufferState, assistantBuffer);
+              setDraftResponses(prev => { const next = new Map(prev); next.set(targetChatId, bufferState.safeContent); return next; });
+            } else {
+              setDraftResponses(prev => {
+                const next = new Map(prev);
+                next.set(targetChatId, (next.get(targetChatId) ?? "") + payload.content);
+                return next;
+              });
             }
           }
 
@@ -1018,10 +1148,8 @@ export function useChatState() {
             } else {
               thinkingBuffer += payload.content;
             }
-            if (isViewingStreamChat) {
-              setHasRealThinking(true);
-              setDraftThinking(thinkingBuffer);
-            }
+            setHasRealThinking(true);
+            setDraftThinkings(prev => { const next = new Map(prev); next.set(chatId, thinkingBuffer); return next; });
           }
 
           if (payload.type === "collab_start") {
@@ -1100,9 +1228,9 @@ export function useChatState() {
               assistantBuffer = payload.content;
               if (bufferState.mode !== "none") {
                 bufferState = appendToBuffer(bufferState, assistantBuffer);
-                setDraftResponse(bufferState.safeContent);
+                setDraftResponses(prev => { const next = new Map(prev); next.set(chatId, bufferState.safeContent); return next; });
               } else {
-                setDraftResponse(payload.content);
+                setDraftResponses(prev => { const next = new Map(prev); next.set(chatId, payload.content!); return next; });
               }
             }
             const actualModel =
@@ -1151,8 +1279,9 @@ export function useChatState() {
             }
             if (payload.suggestedMode && payload.suggestedMode !== mode) {
               setMode(payload.suggestedMode as StudyMode);
-              void updateExistingChatSettings({ mode: payload.suggestedMode as StudyMode }).catch(() => {});
-              toast.info(`Auto-switched to ${payload.suggestedMode} mode`);
+              // Use the stream's chatId, not selectedChatId, to avoid updating wrong chat
+              void updateChatSettingsById(chatId, { mode: payload.suggestedMode as StudyMode }).catch(() => {});
+              toast.info(`Mode switched to ${payload.suggestedMode} mode`, { duration: 3000 });
             }
             setCollaboratorPhase("idle");
           }
@@ -1213,8 +1342,8 @@ export function useChatState() {
         }
       }
 
-      setDraftResponse("");
-      setDraftThinking("");
+      setDraftResponses(prev => { const next = new Map(prev); next.delete(chatId); return next; });
+      setDraftThinkings(prev => { const next = new Map(prev); next.delete(chatId); return next; });
       setHasRealThinking(false);
       setLastFailedMessage(null);
       setChats((prev) =>
@@ -1293,16 +1422,18 @@ export function useChatState() {
       setFileList(preservedFiles);
       setFileUploadState({});
       setStreamError(message);
-      setDraftResponse("");
-      setDraftThinking("");
+      setDraftResponses(prev => { const next = new Map(prev); next.delete(activeChatId ?? ""); return next; });
+      setDraftThinkings(prev => { const next = new Map(prev); next.delete(activeChatId ?? ""); return next; });
       setHasRealThinking(false);
       setLastFailedMessage(preservedText);
     } finally {
-      if (activeChatId) activeStreamsRef.current.delete(activeChatId);
+      if (activeChatId) {
+        activeStreamsRef.current.delete(activeChatId);
+        setActiveStreamIds(prev => { const next = new Set(prev); next.delete(activeChatId!); return next; });
+      }
       setActiveCollaborators([]);
       setCollaboratorPhase("idle");
       setHasRealThinking(false);
-      setSending(false);
       abortControllerRef.current = null;
     }
   }
@@ -1571,6 +1702,7 @@ export function useChatState() {
     hasRealThinking,
     activeCollaborators,
     collaboratorPhase,
+    activeStreamIds,
     fileList,
     fileUploadState,
     streamError,
@@ -1591,6 +1723,8 @@ export function useChatState() {
     setAutoModel,
     setAutoThinking,
     setAutoSearch,
+    imageModel,
+    setImageModel,
     setMessage,
     setFileList,
     setSearch,
@@ -1615,5 +1749,6 @@ export function useChatState() {
     updateExistingChatSettings,
     stopGeneration,
     pinChat,
+    hasDraft,
   };
 }

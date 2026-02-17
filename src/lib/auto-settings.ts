@@ -66,6 +66,7 @@ export type AutoSettingsInput = {
   thinkingMode?: "auto" | "on" | "off";
   searchMode?: "auto" | "on" | "off";
   skipModelCalls?: boolean;
+  conversationHistory?: ConversationHistoryEntry[];
 };
 
 export type AutoSettingsResult = {
@@ -191,28 +192,135 @@ function classifyPromptCategory(
   return "general";
 }
 
+export type ConversationHistoryEntry = {
+  role: string;
+  content: string;
+  mode?: string;
+};
+
+/**
+ * Detects a suggested study mode from the message text alone (no history).
+ * Returns null if no confident mode signal is found.
+ */
 export function detectSuggestedMode(message: string): string | null {
   const normalized = message.toLowerCase().trim();
+  // Image generation - check first as it's most distinct
+  if (/\b(create|generate|draw|make|design)\s+(an?\s+)?(image|picture|photo|illustration|art|artwork)\b/i.test(message)) {
+    return "image";
+  }
+  // Simple draw/generate pattern (e.g., "draw a cat", "generate a sunset")
+  if (/\b(draw|generate|make)\s+(a|an|some)\s+\w+/i.test(message) && !/\b(draw|generate|make)\s+(a|an)\s+(conclusion|summary|distinction|comparison|list|table|chart|diagram)\b/i.test(message)) {
+    return "image";
+  }
   // Quiz detection
-  if (/\b(quiz me|test me|test my knowledge|give me a quiz|pop quiz)\b/i.test(normalized)) {
+  if (/\b(quiz me|test me|test my knowledge|give me a quiz|pop quiz|practice questions|multiple choice)\b/i.test(normalized)) {
     return "quiz";
   }
   // Flashcard detection
-  if (/\b(make flashcards?|create cards?|flashcard|study cards?)\b/i.test(normalized)) {
+  if (/\b(make flashcards?|create cards?|flashcard|flash card|study cards?|memorize|review cards)\b/i.test(normalized)) {
     return "flashcard";
   }
   // Research detection
-  if (/\b(research|find sources|cite sources|literature review|find papers)\b/i.test(normalized)) {
+  if (/\b(research|find sources|cite sources|literature review|find papers|evidence|bibliography)\b/i.test(normalized)) {
     return "research";
   }
-  // Explain detection - require explicit teaching/explanation intent, not simple factual questions
+  // Explain detection - require explicit teaching/explanation intent
+  // "what is" alone is too broad, needs context like "explain what is" or "teach me what is"
   if (/\b(explain (?:how|why|the)|teach me|break down|eli5|help me understand)\b/i.test(normalized) && normalized.length < 200) {
     return "explain";
   }
-  // Image detection
-  if (/\b(generate (?:an? )?image|draw|create (?:an? )?(?:image|picture|illustration))\b/i.test(normalized)) {
-    return "image";
+  // "what is" only triggers explain if followed by technical/complex terms
+  if (/\b(what is|what are)\s+(?:the |a |an )?(?:process|mechanism|algorithm|theory|concept|principle|difference between|relationship|significance)/i.test(normalized) && normalized.length < 200) {
+    return "explain";
   }
+  // Review/Mark detection
+  if (/\b(review|grade|mark|feedback on|rubric|evaluate my)\b/i.test(normalized)) {
+    return "marker";
+  }
+  // Draft coaching detection
+  if (/\b(write|essay|draft|composition|improve my writing)\b/i.test(normalized) && normalized.length > 30) {
+    return "draft_coach";
+  }
+  // Exam detection
+  if (/\b(exam|final test|comprehensive test|assessment)\b/i.test(normalized)) {
+    return "exam";
+  }
+  return null;
+}
+
+/**
+ * Conversation-aware mode suggestion.
+ * Considers the current message AND recent conversation history to pick the best mode.
+ * Returns null if no confident switch is warranted.
+ */
+export function suggestMode(
+  message: string,
+  conversationHistory?: ConversationHistoryEntry[],
+): string | null {
+  // First get the message-only signal
+  const messageMode = detectSuggestedMode(message);
+
+  // If no history, fall back to message-only detection
+  if (!conversationHistory || conversationHistory.length === 0) {
+    return messageMode;
+  }
+
+  const lower = message.toLowerCase().trim();
+  const wordCount = lower.split(/\s+/).length;
+
+  // Look at the last assistant message for context
+  const lastAssistant = [...conversationHistory].reverse().find((entry) => entry.role === "assistant");
+  const lastAssistantMode = lastAssistant?.mode ?? null;
+  const lastAssistantContent = (lastAssistant?.content ?? "").toLowerCase();
+
+  // If last message was a quiz and user responds with "explain" or "teach me", switch to tutor
+  if (
+    lastAssistantMode === "quiz" &&
+    /\b(explain|teach me|i don't understand|help me understand|what does|why is|how does)\b/i.test(lower)
+  ) {
+    return "tutor";
+  }
+
+  // If last message was a quiz result with a low score signal, suggest tutor
+  if (
+    lastAssistantMode === "quiz" &&
+    /(score|result|got.*wrong|incorrect|failed|try again)/i.test(lastAssistantContent) &&
+    wordCount < 10 &&
+    !/\b(quiz|another|more questions|again)\b/i.test(lower)
+  ) {
+    return "tutor";
+  }
+
+  // If user has been in tutor mode for 6+ messages, suggest quiz to test understanding
+  // (Only when message is short and doesn't ask for more explanation)
+  const tutorMessageCount = conversationHistory.filter((entry) => entry.mode === "tutor").length;
+  if (
+    tutorMessageCount >= 6 &&
+    lastAssistantMode === "tutor" &&
+    wordCount < 6 &&
+    /\b(ok|okay|got it|i see|i understand|makes sense|thanks|thank you|cool|got that)\b/i.test(lower)
+  ) {
+    return "quiz";
+  }
+
+  // After flashcard review, if user says they're ready or finished, suggest quiz
+  if (
+    lastAssistantMode === "flashcard" &&
+    /\b(ready|done|finished|test me|quiz me now|all done|studied)\b/i.test(lower)
+  ) {
+    return "quiz";
+  }
+
+  // If the message itself has a confident signal, return it
+  if (messageMode) {
+    return messageMode;
+  }
+
+  // Short follow-up in quiz context - stay in quiz
+  if (lastAssistantMode === "quiz" && wordCount < 4) {
+    return "quiz";
+  }
+
   return null;
 }
 
@@ -348,7 +456,7 @@ export async function runAutoSettingsPipeline(input: AutoSettingsInput): Promise
     promptEnhanced = true;
   }
 
-  const suggestedMode = detectSuggestedMode(input.message);
+  const suggestedMode = suggestMode(input.message, input.conversationHistory);
 
   return {
     message,

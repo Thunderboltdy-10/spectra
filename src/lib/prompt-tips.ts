@@ -1,6 +1,12 @@
 import type { StudyMode } from "@/types";
 
 export const PROMPT_TIPS: Record<StudyMode, string[]> = {
+  auto: [
+    "Just type naturally — the AI picks the best mode",
+    "Try: 'Quiz me on photosynthesis' or 'Explain quantum mechanics'",
+    "Attach files and images — the AI adapts automatically",
+    "Be specific for better results",
+  ],
   tutor: [
     "Show your attempt first for better guidance",
     "Ask about a specific concept you're struggling with",

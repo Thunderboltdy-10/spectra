@@ -34,6 +34,14 @@ export const saveQuizResult = mutation({
       throw new Error("Message not found");
     }
 
+    // Verify score server-side to prevent spoofing
+    const verifiedScore = args.questions.reduce((acc, q) => {
+      if (q.correct && q.selected && q.selected.toUpperCase() === q.correct.toUpperCase()) {
+        return acc + 1;
+      }
+      return acc;
+    }, 0);
+
     const submittedAt = Date.now();
     const resultId = await ctx.db.insert("quizResults", {
       userId: actor._id,
@@ -41,7 +49,7 @@ export const saveQuizResult = mutation({
       chatId: chat._id,
       messageId: message._id,
       questions: args.questions,
-      score: Math.max(0, Math.round(args.score)),
+      score: verifiedScore,
       total: Math.max(0, Math.round(args.total)),
       submittedAt,
     });

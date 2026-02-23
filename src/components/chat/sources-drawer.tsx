@@ -22,7 +22,7 @@ function hrefForCitation(citation: Citation) {
 
 export function SourcesDrawer({ open, onClose, citations }: SourcesDrawerProps) {
   const compact = useCompactSheet(860);
-  const docked = useRightPanelDock({ id: "sources-drawer", open, compact, maxWidthPx: 576 });
+  const { docked, isOverlay, panelWidth } = useRightPanelDock({ id: "sources-drawer", open, compact, maxWidthPx: 576 });
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -39,11 +39,11 @@ export function SourcesDrawer({ open, onClose, citations }: SourcesDrawerProps) 
   if (!open) return null;
 
   return (
-    <div className={`fixed z-50 ${docked ? "inset-y-0 right-0 pointer-events-none" : "inset-0"}`} style={docked ? { width: "var(--right-panel-space, 576px)" } : undefined}>
+    <div className={`fixed z-50 ${docked ? "inset-y-0 right-0 pointer-events-none" : "inset-0"}`} style={docked ? { width: `${panelWidth}px` } : undefined}>
       {!docked ? (
         <button
           type="button"
-          className="absolute inset-0 bg-transparent"
+          className={`absolute inset-0 transition ${isOverlay ? "bg-black/45 backdrop-blur-sm" : "bg-transparent"}`}
           onClick={onClose}
           aria-label="Close sources drawer"
         />
@@ -88,6 +88,7 @@ export function SourcesDrawer({ open, onClose, citations }: SourcesDrawerProps) 
             citations.map((citation, index) => {
               const href = hrefForCitation(citation);
               const isSearch = citation.sourceType === "search";
+              const label = citation.title || citation.filename;
 
               return (
                 <article
@@ -99,7 +100,10 @@ export function SourcesDrawer({ open, onClose, citations }: SourcesDrawerProps) 
                     <span className="uppercase tracking-[0.08em]">[{index + 1}] {citation.sourceType}</span>
                   </div>
 
-                  <p className="font-medium text-[var(--text-primary)]">{citation.filename}</p>
+                  <p className="font-medium text-[var(--text-primary)]">{label}</p>
+                  {isSearch && citation.domain ? (
+                    <p className="mt-1 text-xs text-[var(--text-secondary)]">{citation.domain}</p>
+                  ) : null}
                   {citation.page ? (
                     <p className="mt-1 text-xs text-[var(--text-secondary)]">Page {citation.page}</p>
                   ) : null}

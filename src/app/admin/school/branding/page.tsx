@@ -274,14 +274,14 @@ export default function SchoolBrandingPage() {
               }}
             >
               {/* Simulated sidebar header */}
-              <div className="flex items-center gap-3 border-b border-[var(--border-default)] bg-white/30 px-4 py-3">
+              <div className="flex items-center gap-3 border-b border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_74%,transparent)] px-4 py-3">
                 {logoUrl ? (
                   <Image
                     src={logoUrl}
                     alt="Logo preview"
                     width={32}
                     height={32}
-                    className="h-8 w-8 rounded-xl border border-white/30 object-cover"
+                    className="h-8 w-8 rounded-xl border border-[var(--border-default)] object-cover"
                   />
                 ) : (
                   <div
@@ -307,7 +307,7 @@ export default function SchoolBrandingPage() {
                   </p>
                 </div>
                 {/* Fake composer */}
-                <div className="rounded-xl border border-[var(--border-default)] bg-white/50 px-4 py-3">
+                <div className="rounded-xl border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_85%,transparent)] px-4 py-3">
                   <p className="text-xs text-[var(--text-secondary)]">Ask anything...</p>
                 </div>
               </div>

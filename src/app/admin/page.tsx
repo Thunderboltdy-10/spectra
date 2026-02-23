@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Users2, WalletCards } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
+import { AdminOnboarding } from "@/components/onboarding/admin-onboarding";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -30,6 +31,11 @@ type UsageRow = {
 export default function AdminPage() {
   const router = useRouter();
   const { role: userRole, loading: sidebarLoading } = useSidebar();
+  const [adminDataLoaded, setAdminDataLoaded] = useState(false);
+  const [adminOnboardingComplete, setAdminOnboardingComplete] = useState(true);
+  const [orgName, setOrgName] = useState("AI School");
+  const [monthlyBudgetCentsPerUser, setMonthlyBudgetCentsPerUser] = useState<number | null>(null);
+  const [budgetMarginPercent, setBudgetMarginPercent] = useState<number | null>(null);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [usage, setUsage] = useState<UsageRow[]>([]);
   const [verify, setVerify] = useState(false);
@@ -44,11 +50,14 @@ export default function AdminPage() {
     const bootstrapResponse = await fetch("/api/bootstrap");
     if (!bootstrapResponse.ok) throw new Error(await bootstrapResponse.text());
     const bootstrap = (await bootstrapResponse.json()) as {
-      actor: { role: "student" | "teacher" | "admin" };
+      actor: { role: "student" | "teacher" | "admin"; onboardingComplete?: boolean };
       orgSettings: {
         org: {
+          name?: string;
           verifyMarkerPassEnabled: boolean;
           tokenBudgetDaily: number;
+          monthlyBudgetCentsPerUser?: number;
+          budgetMarginPercent?: number;
           orchestratorV2Enabled?: boolean;
           soulEnabled?: boolean;
           agentModelBoostEnabled?: boolean;
@@ -58,6 +67,18 @@ export default function AdminPage() {
       };
     };
 
+    setAdminOnboardingComplete(Boolean(bootstrap.actor.onboardingComplete));
+    setOrgName(bootstrap.orgSettings.org.name ?? "AI School");
+    setMonthlyBudgetCentsPerUser(
+      typeof bootstrap.orgSettings.org.monthlyBudgetCentsPerUser === "number"
+        ? bootstrap.orgSettings.org.monthlyBudgetCentsPerUser
+        : null,
+    );
+    setBudgetMarginPercent(
+      typeof bootstrap.orgSettings.org.budgetMarginPercent === "number"
+        ? bootstrap.orgSettings.org.budgetMarginPercent
+        : null,
+    );
     setVerify(Boolean(bootstrap.orgSettings.org.verifyMarkerPassEnabled));
     setBudget(String(bootstrap.orgSettings.org.tokenBudgetDaily));
     setOrchestratorV2Enabled(Boolean(bootstrap.orgSettings.org.orchestratorV2Enabled));
@@ -77,6 +98,18 @@ export default function AdminPage() {
     setUsage(usersData.usage);
   }
 
+  async function markAdminOnboardingComplete() {
+    const response = await fetch("/api/personal-soul", {
+      method: "PATCH",
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+
+    setAdminOnboardingComplete(true);
+    await loadAll();
+  }
+
   useEffect(() => {
     if (!sidebarLoading && userRole !== "admin") {
       router.replace("/");
@@ -85,7 +118,10 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (sidebarLoading || userRole !== "admin") return;
-    void loadAll().catch((error) => toast.error(error instanceof Error ? error.message : "Failed to load admin data"));
+    setAdminDataLoaded(false);
+    void loadAll()
+      .catch((error) => toast.error(error instanceof Error ? error.message : "Failed to load admin data"))
+      .finally(() => setAdminDataLoaded(true));
   }, [sidebarLoading, userRole]);
 
   const usageSum = useMemo(() => usage.reduce((sum, row) => sum + row.totalTokens, 0), [usage]);
@@ -125,12 +161,26 @@ export default function AdminPage() {
     await loadAll();
   }
 
-  if (sidebarLoading || userRole !== "admin") {
+  if (sidebarLoading || userRole !== "admin" || !adminDataLoaded) {
     return (
       <AppShell>
         <div className="flex items-center justify-center p-8">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--border-default)] border-t-[var(--accent-cyan)]" />
         </div>
+      </AppShell>
+    );
+  }
+
+  if (!adminOnboardingComplete) {
+    return (
+      <AppShell>
+        <AdminOnboarding
+          orgName={orgName}
+          monthlyBudgetCentsPerUser={monthlyBudgetCentsPerUser}
+          budgetMarginPercent={budgetMarginPercent}
+          onComplete={markAdminOnboardingComplete}
+          onSkip={markAdminOnboardingComplete}
+        />
       </AppShell>
     );
   }

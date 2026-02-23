@@ -10,6 +10,8 @@ import {
   vScope,
   vCitation,
   vRouteTrace,
+  vFeedbackCategory,
+  vFeedbackStatus,
 } from "./shared";
 
 export default defineSchema({
@@ -20,6 +22,9 @@ export default defineSchema({
     verifyMarkerPassEnabled: v.boolean(),
     allowPaidModels: v.optional(v.boolean()),
     orchestratorV2Enabled: v.optional(v.boolean()),
+    monthlyBudgetCentsPerUser: v.optional(v.number()),
+    budgetMarginPercent: v.optional(v.number()),
+    maxResourceFileSizeBytes: v.optional(v.number()),
     soulEnabled: v.optional(v.boolean()),
     agentModelBoostEnabled: v.optional(v.boolean()),
     adaptiveQuizEnabled: v.optional(v.boolean()),
@@ -125,6 +130,7 @@ export default defineSchema({
     description: v.string(),
     systemPrompt: v.string(),
     avatarEmoji: v.string(),
+    avatarIcon: v.optional(v.string()),
     category: v.string(),
     preferredModel: v.optional(v.string()),
     preferredMode: v.optional(vStudyMode),
@@ -134,6 +140,7 @@ export default defineSchema({
     allowedTools: v.optional(v.array(v.string())),
     modelAllowlist: v.optional(v.array(v.string())),
     modelDenylist: v.optional(v.array(v.string())),
+    collaborators: v.optional(v.array(v.id("users"))),
     attachmentPolicy: v.optional(v.string()),
     visibility: v.union(v.literal("public"), v.literal("private")),
     usageCount: v.number(),
@@ -307,6 +314,75 @@ export default defineSchema({
     .index("by_user", ["userId"])
     .index("by_org", ["orgId"]),
 
+  achievements: defineTable({
+    userId: v.id("users"),
+    orgId: v.id("orgs"),
+    type: v.string(),
+    name: v.string(),
+    description: v.string(),
+    xpEarned: v.number(),
+    earnedAt: v.number(),
+  }).index("by_user", ["userId"]),
+
+  userStreaks: defineTable({
+    userId: v.id("users"),
+    orgId: v.id("orgs"),
+    currentStreak: v.number(),
+    longestStreak: v.number(),
+    lastActiveDate: v.string(),
+    totalXp: v.number(),
+  }).index("by_user", ["userId"]),
+
+  studyTimers: defineTable({
+    userId: v.id("users"),
+    orgId: v.id("orgs"),
+    chatId: v.optional(v.id("chats")),
+    startedAt: v.number(),
+    endedAt: v.optional(v.number()),
+    totalSeconds: v.number(),
+    sessionType: v.union(v.literal("pomodoro"), v.literal("free")),
+  }).index("by_user", ["userId"]),
+
+  messageBookmarks: defineTable({
+    userId: v.id("users"),
+    chatId: v.id("chats"),
+    messageId: v.id("messages"),
+    note: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_chat", ["chatId"]),
+
+  chatBranches: defineTable({
+    originalChatId: v.id("chats"),
+    parentMessageId: v.id("messages"),
+    branchChatId: v.id("chats"),
+    createdAt: v.number(),
+  }).index("by_original", ["originalChatId"]),
+
+  notifications: defineTable({
+    userId: v.id("users"),
+    orgId: v.id("orgs"),
+    type: v.string(),
+    title: v.string(),
+    body: v.string(),
+    actionUrl: v.optional(v.string()),
+    read: v.boolean(),
+    createdAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_user_unread", ["userId", "read"]),
+
+  conversationTemplates: defineTable({
+    orgId: v.id("orgs"),
+    mode: v.string(),
+    title: v.string(),
+    description: v.string(),
+    starterPrompts: v.array(v.string()),
+    isDefault: v.boolean(),
+    createdAt: v.number(),
+  }).index("by_org_mode", ["orgId", "mode"]),
+
   flashcardProgress: defineTable({
     userId: v.id("users"),
     orgId: v.id("orgs"),
@@ -411,6 +487,37 @@ export default defineSchema({
     .index("by_chat", ["chatId"])
     .index("by_expires", ["expiresAt"])
     .index("by_pinned", ["userId", "pinned"]),
+
+  feedback: defineTable({
+    userId: v.optional(v.string()),
+    orgId: v.optional(v.id("orgs")),
+    category: vFeedbackCategory,
+    message: v.string(),
+    screenshotStorageId: v.optional(v.id("_storage")),
+    context: v.object({
+      mode: v.optional(v.string()),
+      page: v.optional(v.string()),
+      device: v.optional(v.string()),
+      traceId: v.optional(v.string()),
+    }),
+    status: vFeedbackStatus,
+    adminReply: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.optional(v.number()),
+  })
+    .index("by_status", ["status"])
+    .index("by_created", ["createdAt"]),
+
+  auditLog: defineTable({
+    actorUserId: v.id("users"),
+    action: v.string(),
+    targetType: v.string(),
+    targetId: v.string(),
+    details: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_actor", ["actorUserId"])
+    .index("by_created", ["createdAt"]),
 
   modelCatalog: defineTable({
     orgId: v.id("orgs"),

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AgentAvatar } from "@/components/agents/agent-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { Agent } from "@/types";
@@ -12,8 +13,9 @@ export function AgentCard({ agent }: AgentCardProps) {
     <Link href={`/agents/${agent._id}`}>
       <Card className="h-full transition hover:-translate-y-0.5 hover:bg-[var(--bg-secondary)]">
         <CardHeader>
-          <CardTitle className="text-base">
-            {agent.avatarEmoji} {agent.name}
+          <CardTitle className="flex items-center gap-2 text-base">
+            <AgentAvatar avatarIcon={agent.avatarIcon} avatarEmoji={agent.avatarEmoji} category={agent.category} />
+            <span className="truncate">{agent.name}</span>
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">

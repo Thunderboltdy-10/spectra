@@ -17,6 +17,7 @@ export type SessionActor = {
   role: Role;
   orgId: string;
   userId: string;
+  onboardingComplete: boolean;
 };
 
 export function isSuperAdminEmail(email: string) {
@@ -50,6 +51,7 @@ async function bootstrapActor(params: {
       orgId: string;
       email: string;
       name: string;
+      onboardingComplete?: boolean;
     } | null
   >("users:me", {
     clerkId: params.clerkId,
@@ -66,6 +68,7 @@ async function bootstrapActor(params: {
     role: me.role,
     orgId: me.orgId,
     userId: me._id,
+    onboardingComplete: Boolean(me.onboardingComplete),
   };
 }
 
@@ -102,19 +105,49 @@ export async function requireActor(): Promise<SessionActor> {
       orgId: string;
       email: string;
       name: string;
+      onboardingComplete?: boolean;
     } | null
   >("users:me", {
     clerkId: userId,
   });
 
   if (existing) {
+    let current = existing;
+    if (existing.role !== "admin" && isSuperAdminEmail(existing.email)) {
+      await convexMutation("users:ensureUser", {
+        clerkId: userId,
+        email: existing.email,
+        name: existing.name,
+        requestedRole: existing.role,
+        bootstrapAdmin: true,
+      });
+
+      const refreshed = await convexQuery<
+        { clerkId: string },
+        {
+          _id: string;
+          role: Role;
+          orgId: string;
+          email: string;
+          name: string;
+          onboardingComplete?: boolean;
+        } | null
+      >("users:me", {
+        clerkId: userId,
+      });
+      if (refreshed) {
+        current = refreshed;
+      }
+    }
+
     return {
       clerkId: userId,
-      email: existing.email,
-      name: existing.name,
-      role: existing.role,
-      orgId: existing.orgId,
-      userId: existing._id,
+      email: current.email,
+      name: current.name,
+      role: current.role,
+      orgId: current.orgId,
+      userId: current._id,
+      onboardingComplete: Boolean(current.onboardingComplete),
     };
   }
 
@@ -127,7 +160,7 @@ export async function requireActor(): Promise<SessionActor> {
 
   const email = user.emailAddresses[0]?.emailAddress ?? "unknown@example.com";
   const name = user.fullName ?? user.firstName ?? "Student";
-  const bootstrapAdmin = getAdminEmails().has(email.toLowerCase());
+  const bootstrapAdmin = getAdminEmails().has(email.toLowerCase()) || isSuperAdminEmail(email);
 
   return bootstrapActor({
     clerkId: userId,

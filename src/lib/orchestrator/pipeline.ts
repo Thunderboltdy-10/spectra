@@ -14,6 +14,8 @@ import {
 } from "@/lib/orchestrator/compose";
 import { IMAGE_GEN_FALLBACKS, MODEL_CONFIG } from "@/lib/model-config";
 import { classifyExplainDepth, runAutoSettingsPipeline, suggestMode } from "@/lib/auto-settings";
+import { matchAgentToMessage } from "@/lib/agent-matching";
+import { countFlashcardPairs, isFlashcardDeckStructured, normalizeFlashcardDeck } from "@/lib/flashcard-format";
 import { safeStudyMode } from "@/lib/contracts/studyModes";
 import { createRequestLogger } from "@/lib/logging";
 import { normalizeAttachments } from "@/lib/attachments/normalizer";
@@ -65,9 +67,11 @@ type ChatRequestBody = {
 type AgentSnapshot = {
   _id: string;
   name: string;
+  category: string;
   description: string;
   systemPrompt: string;
   avatarEmoji: string;
+  avatarIcon?: string;
   preferredModel?: string;
   preferredMode?: StudyMode;
   guidelinesSummary?: string;
@@ -95,13 +99,51 @@ const MODE_MAX_TOKENS: Record<StudyMode, number> = {
 };
 const MIN_QUIZ_QUESTIONS = 2;
 const MIN_FLASHCARD_PAIRS = 4;
+type QuizDifficultyLabel = "easy" | "medium" | "hard";
+
+type UnlockedAchievement = {
+  type: string;
+  name: string;
+  description: string;
+  xpEarned: number;
+  earnedAt: number;
+};
+
+function gamificationActivityType(mode: StudyMode) {
+  if (mode === "quiz" || mode === "exam") return "quiz";
+  if (mode === "flashcard") return "flashcard";
+  if (mode === "research") return "research";
+  return "chat";
+}
+
+function mergeUnlockedAchievements(
+  ...groups: Array<UnlockedAchievement[] | null | undefined>
+) {
+  const byKey = new Map<string, UnlockedAchievement>();
+  for (const group of groups) {
+    if (!group) continue;
+    for (const achievement of group) {
+      const key = `${achievement.type}:${achievement.earnedAt}`;
+      if (!byKey.has(key)) {
+        byKey.set(key, achievement);
+      }
+    }
+  }
+  return [...byKey.values()].sort((a, b) => a.earnedAt - b.earnedAt);
+}
+
+function clampQuizDifficultyLevel(value: number) {
+  return Math.min(3, Math.max(1, Math.round(value)));
+}
+
+function toQuizDifficultyLabel(level: number): QuizDifficultyLabel {
+  if (level <= 1) return "easy";
+  if (level >= 3) return "hard";
+  return "medium";
+}
 
 function isQuizStructured(value: string) {
   return countQuizQuestions(value) >= 2;
-}
-
-function isFlashcardStructured(value: string) {
-  return countFlashcards(value) >= 2;
 }
 
 function countQuizQuestions(value: string) {
@@ -117,29 +159,6 @@ function countQuizQuestions(value: string) {
   if (byCount === 0) return 0;
   if (options.length < byCount * 2) return 0;
   return byCount;
-}
-
-function countFlashcards(value: string) {
-  const normalized = value.replace(/\r/g, "");
-  const inlinePairs = normalized.match(/(?:^|\n|\s)FRONT\s*:\s*[\s\S]*?\s+BACK\s*:\s*[\s\S]*?(?=(?:\s+FRONT\s*:)|$)/gi) ?? [];
-  if (inlinePairs.length > 0) return inlinePairs.length;
-
-  const lines = normalized.split("\n");
-  let frontOpen = false;
-  let pairs = 0;
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line) continue;
-    if (/^(?:[-*]\s*)?(?:Card\s*\d+\s*[:.)-]\s*)?FRONT\s*:\s*.+/i.test(line)) {
-      frontOpen = true;
-      continue;
-    }
-    if (/^(?:[-*]\s*)?BACK\s*:\s*.+/i.test(line) && frontOpen) {
-      pairs += 1;
-      frontOpen = false;
-    }
-  }
-  return pairs;
 }
 
 function extractImageReferences(value: string) {
@@ -233,7 +252,7 @@ export async function runChatPipeline(request: NextRequest) {
     actorClerkId: actor.clerkId,
   })) as {
     totalSpentEur: number;
-    tier: "normal" | "cheap_only" | "free_only";
+    tier: "normal" | "expensive_blocked" | "cheap_only" | "free_only";
     softLimitReached: boolean;
     hardLimitReached: boolean;
   };
@@ -445,6 +464,33 @@ export async function runChatPipeline(request: NextRequest) {
     normalizedMessage.split(/\s+/).length < 4 &&
     !/\b(about|on|for|regarding|the|topic)\b/i.test(normalizedMessage);
 
+  let agentSuggestion:
+    | {
+        id: string;
+        name: string;
+        score: number;
+        reason: string;
+      }
+    | undefined;
+  if (!selectedAgent && (safeMode === "auto" || body.routerMode === "auto")) {
+    const availableAgents = (await convexQuery("agents:listAgents", {
+      actorClerkId: actor.clerkId,
+    })) as AgentSnapshot[];
+    const matched = matchAgentToMessage(auto.message, availableAgents);
+    if (matched) {
+      agentSuggestion = {
+        id: matched.agentId,
+        name: matched.agentName,
+        score: Number(matched.score.toFixed(2)),
+        reason: matched.reason,
+      };
+      logger.info("agent suggestion generated", {
+        agentId: matched.agentId,
+        score: matched.score,
+      });
+    }
+  }
+
   const existingSummary =
     typeof chatData.chat.contextSummary === "string" && chatData.chat.contextSummary.trim().length > 0
       ? String(chatData.chat.contextSummary)
@@ -485,8 +531,16 @@ export async function runChatPipeline(request: NextRequest) {
   });
 
   const searchPromise = auto.searchEnabled
-    ? maybeSearchWeb(auto.message, auto.thinkingLevel).catch(() => ({ text: "", urls: [] as string[] }))
-    : Promise.resolve({ text: "", urls: [] as string[] });
+    ? maybeSearchWeb(auto.message, auto.thinkingLevel).catch(() => ({
+      text: "",
+      urls: [] as string[],
+      sources: [] as Array<{ url: string; title: string; domain: string }>,
+    }))
+    : Promise.resolve({
+      text: "",
+      urls: [] as string[],
+      sources: [] as Array<{ url: string; title: string; domain: string }>,
+    });
 
   const soulPromise: Promise<{ bullets: string[] }> = orgSettings.org?.soulEnabled
     ? convexAction("soul:retrieveSoulGuidance", {
@@ -501,38 +555,91 @@ export async function runChatPipeline(request: NextRequest) {
         .catch(() => ({ bullets: [] as string[] }))
     : Promise.resolve({ bullets: [] as string[] });
 
-  const quizPerfPromise: Promise<{ recommendedDifficulty: number }> =
+  const adaptiveQuizPromise: Promise<{
+    currentLevel: number;
+    level: number;
+    label: QuizDifficultyLabel;
+  }> =
     effectiveMode === "quiz" && orgSettings.org?.adaptiveQuizEnabled
-      ? convexQuery("analytics:getRecentQuizPerformance", {
-          actorClerkId: actor.clerkId,
-          days: 30,
-        })
-          .then((result) => {
-            const payload = result as { recommendedDifficulty?: number } | null;
-            return { recommendedDifficulty: payload?.recommendedDifficulty ?? 3 };
+      ? Promise.all([
+          convexQuery("analytics:getQuizDifficultySignal", {
+            actorClerkId: actor.clerkId,
+          }).catch(() => ({ difficultyLevel: 2 })),
+          convexQuery("quizzes:getQuizHistory", {
+            actorClerkId: actor.clerkId,
+            limit: 1,
+          }).catch(() => [] as Array<{ score: number; total: number }>),
+          convexQuery("analytics:getRecentQuizPerformance", {
+            actorClerkId: actor.clerkId,
+            days: 30,
+          }).catch(() => ({ recommendedDifficulty: 3 })),
+        ])
+          .then(([signal, history, performance]) => {
+            const signalLevel = Number((signal as { difficultyLevel?: number } | null)?.difficultyLevel);
+            const recommendedDifficulty = Number(
+              (performance as { recommendedDifficulty?: number } | null)?.recommendedDifficulty ?? 3,
+            );
+            const fallbackLevel =
+              recommendedDifficulty >= 4
+                ? 3
+                : recommendedDifficulty <= 2
+                  ? 1
+                  : 2;
+            const currentLevel = clampQuizDifficultyLevel(
+              Number.isFinite(signalLevel) ? signalLevel : fallbackLevel,
+            );
+
+            let nextLevel = currentLevel;
+            const latestResult = (history as Array<{ score: number; total: number }>)[0];
+            if (
+              latestResult &&
+              Number.isFinite(latestResult.score) &&
+              Number.isFinite(latestResult.total) &&
+              latestResult.total > 0
+            ) {
+              const scoreRatio = latestResult.score / latestResult.total;
+              if (scoreRatio >= 0.8 && currentLevel < 3) {
+                nextLevel = currentLevel + 1;
+              } else if (scoreRatio <= 0.4 && currentLevel > 1) {
+                nextLevel = currentLevel - 1;
+              }
+            }
+
+            return {
+              currentLevel,
+              level: nextLevel,
+              label: toQuizDifficultyLabel(nextLevel),
+            };
           })
-          .catch(() => ({ recommendedDifficulty: 3 }))
-      : Promise.resolve({ recommendedDifficulty: 3 });
+          .catch(() => ({
+            currentLevel: 2,
+            level: 2,
+            label: "medium" as QuizDifficultyLabel,
+          }))
+      : Promise.resolve({ currentLevel: 2, level: 2, label: "medium" as QuizDifficultyLabel });
 
   const explainDepth = effectiveMode === "explain"
     ? classifyExplainDepth(auto.message, userMemory.rawMemoryText)
     : undefined;
 
-  const [retrieval, webResult, soulResult, quizPerf] = await Promise.all([
+  const [retrieval, webResult, soulResult, quizAdaptive] = await Promise.all([
     retrievalPromise,
     searchPromise,
     soulPromise,
-    quizPerfPromise,
+    adaptiveQuizPromise,
   ]);
 
   const searchBlock = webResult.text ?? "";
   const searchUrls = webResult.urls ?? [];
+  const searchSources = webResult.sources ?? [];
   if (auto.searchEnabled) {
     logger.info("web search complete", { urlCount: searchUrls.length });
   }
 
   const soulBullets = (soulResult.bullets ?? []).slice(0, 10);
-  const quizDifficultyLevel = Math.min(5, Math.max(1, Math.round(quizPerf.recommendedDifficulty ?? 3)));
+  const quizDifficultyLevel = clampQuizDifficultyLevel(quizAdaptive.level);
+  const quizDifficultyLabel = quizAdaptive.label;
+  const quizDifficultyAdjusted = quizAdaptive.level !== quizAdaptive.currentLevel;
   if (effectiveMode === "quiz" && orgSettings.org?.adaptiveQuizEnabled) {
     void convexMutation("analytics:setQuizDifficultySignal", {
       actorClerkId: actor.clerkId,
@@ -544,7 +651,7 @@ export async function runChatPipeline(request: NextRequest) {
     effectiveMode === "research"
       ? buildResearchEvidenceBlock({
           citations: retrieval.citations,
-          searchUrls,
+          searchSources,
         })
       : "";
 
@@ -628,8 +735,19 @@ export async function runChatPipeline(request: NextRequest) {
 
   if (retrieval.citations.length > 0) route.trace.toolchain.push("rag_retrieval");
   if (auto.searchEnabled) route.trace.toolchain.push("web_search");
+  if (agentSuggestion) route.trace.toolchain.push("agent_suggestion");
   if (explainDepth) route.trace.toolchain.push("explain_depth_detection");
-  if (effectiveMode === "quiz" && orgSettings.org?.adaptiveQuizEnabled) route.trace.toolchain.push("adaptive_quiz");
+  if (effectiveMode === "quiz" && orgSettings.org?.adaptiveQuizEnabled) {
+    route.trace.toolchain.push("adaptive_quiz");
+    route.trace.toolchain.push(`quiz_difficulty_${quizDifficultyLabel}`);
+    if (quizDifficultyAdjusted) {
+      route.trace.toolchain.push(
+        quizDifficultyLevel > quizAdaptive.currentLevel
+          ? "quiz_difficulty_increased"
+          : "quiz_difficulty_decreased",
+      );
+    }
+  }
   if (researchEvidenceBlock) {
     route.trace.toolchain.push("source_reliability");
     route.trace.toolchain.push("cross_reference");
@@ -746,6 +864,7 @@ export async function runChatPipeline(request: NextRequest) {
     searchBlock,
     explainDepth,
     quizDifficultyLevel,
+    quizDifficultyLabel,
   })];
 
   if (attachments.quickExtractBlock) {
@@ -963,7 +1082,7 @@ export async function runChatPipeline(request: NextRequest) {
         })) as {
           totalSpentEur: number;
           totalCostCents: number;
-          tier: "normal" | "cheap_only" | "free_only";
+          tier: "normal" | "expensive_blocked" | "cheap_only" | "free_only";
           softLimitReached: boolean;
           hardLimitReached: boolean;
         };
@@ -975,6 +1094,42 @@ export async function runChatPipeline(request: NextRequest) {
           tokensUsed: usageIn + usageOut,
           topic: normalizedMessage.slice(0, 60),
         }).catch(() => {});
+
+        const streakUpdate = await convexMutation<
+          { actorClerkId: string },
+          {
+            currentStreak: number;
+            longestStreak: number;
+            lastActiveDate: string;
+            unlockedAchievements?: UnlockedAchievement[];
+          }
+        >("gamification:checkAndUpdateStreak", {
+          actorClerkId: actor.clerkId,
+        }).catch(() => null);
+
+        const xpUpdate = await convexMutation<
+          {
+            actorClerkId: string;
+            activityType: string;
+            modeUsed: StudyMode;
+            currentStreak?: number;
+          },
+          {
+            xpAwarded: number;
+            totalXp: number;
+            unlockedAchievements?: UnlockedAchievement[];
+          }
+        >("gamification:awardXp", {
+          actorClerkId: actor.clerkId,
+          activityType: gamificationActivityType(effectiveMode),
+          modeUsed: effectiveMode,
+          currentStreak: streakUpdate?.currentStreak,
+        }).catch(() => null);
+
+        const unlockedAchievements = mergeUnlockedAchievements(
+          streakUpdate?.unlockedAchievements,
+          xpUpdate?.unlockedAchievements,
+        );
 
         if (selectedAgent) {
           await convexMutation("agents:incrementUsageCount", {
@@ -1027,6 +1182,8 @@ export async function runChatPipeline(request: NextRequest) {
           effectiveMode,
           suggestedMode: safeMode !== effectiveMode ? effectiveMode : undefined,
           userSelectedMode: safeMode,
+          unlockedAchievements,
+          agentSuggestion,
           agent:
             selectedAgent && selectedAgent._id
               ? {
@@ -1090,8 +1247,16 @@ export async function runChatPipeline(request: NextRequest) {
       // isVagueRequest is computed in the outer scope before streaming begins.
       // When true, skip format-repair so the model's clarification question is preserved.
 
+      if (!isVagueRequest && effectiveMode === "flashcard") {
+        const normalizedFlashcardResponse = normalizeFlashcardDeck(correctedResponse);
+        if (normalizedFlashcardResponse && normalizedFlashcardResponse !== correctedResponse.trim()) {
+          correctedResponse = normalizedFlashcardResponse;
+          route.trace.toolchain.push("flashcard_structure_normalized");
+        }
+      }
+
       const quizCount = countQuizQuestions(correctedResponse);
-      const flashcardCount = countFlashcards(correctedResponse);
+      const flashcardCount = countFlashcardPairs(correctedResponse);
       const needsQuizRepair =
         !isVagueRequest &&
         effectiveMode === "quiz" &&
@@ -1099,7 +1264,7 @@ export async function runChatPipeline(request: NextRequest) {
       const needsFlashcardRepair =
         !isVagueRequest &&
         effectiveMode === "flashcard" &&
-        (!isFlashcardStructured(correctedResponse) || flashcardCount < MIN_FLASHCARD_PAIRS);
+        (!isFlashcardDeckStructured(correctedResponse) || flashcardCount < MIN_FLASHCARD_PAIRS);
       if (needsQuizRepair || needsFlashcardRepair) {
         const repaired = await openRouterChatCompletion({
           model: MODEL_CONFIG.tutorFast,
@@ -1110,7 +1275,15 @@ export async function runChatPipeline(request: NextRequest) {
               content:
                 needsQuizRepair
                   ? `The student asked: "${normalizedMessage}". Reformat the following response into strict quiz syntax about EXACTLY this topic. Do NOT change the subject. Output at least ${MIN_QUIZ_QUESTIONS} questions with A-D options, a "Correct: [letter]" line per question, then "## Answers & Explanations".`
-                  : `The student asked: "${normalizedMessage}". Reformat into strict flashcard syntax about EXACTLY this topic. Do NOT change the subject. Output at least ${MIN_FLASHCARD_PAIRS} FRONT/BACK pairs. Format exactly: FRONT: ... then BACK: ...`,
+                  : `The student asked: "${normalizedMessage}". Reformat into strict flashcard syntax about EXACTLY this topic. Do NOT change the subject.
+STRICT RULES:
+- At least ${MIN_FLASHCARD_PAIRS} cards.
+- No intro text.
+- No markdown table.
+- No JSON.
+- Output only repeated FRONT/BACK blocks:
+FRONT: ...
+BACK: ...`,
             },
             { role: "user", content: correctedResponse },
           ],
@@ -1123,14 +1296,22 @@ export async function runChatPipeline(request: NextRequest) {
             correctedResponse = candidate;
             route.trace.toolchain.push("quiz_format_repair");
           }
-          if (
-            needsFlashcardRepair &&
-            isFlashcardStructured(candidate) &&
-            countFlashcards(candidate) >= MIN_FLASHCARD_PAIRS
-          ) {
-            correctedResponse = candidate;
-            route.trace.toolchain.push("flashcard_format_repair");
+          const normalizedFlashcardCandidate = normalizeFlashcardDeck(candidate);
+          if (needsFlashcardRepair && normalizedFlashcardCandidate) {
+            const candidateCount = countFlashcardPairs(normalizedFlashcardCandidate);
+            if (candidateCount >= MIN_FLASHCARD_PAIRS) {
+              correctedResponse = normalizedFlashcardCandidate;
+              route.trace.toolchain.push("flashcard_format_repair");
+            }
           }
+        }
+      }
+
+      if (!isVagueRequest && effectiveMode === "flashcard") {
+        const normalizedFlashcardResponse = normalizeFlashcardDeck(correctedResponse);
+        if (normalizedFlashcardResponse && normalizedFlashcardResponse !== correctedResponse.trim()) {
+          correctedResponse = normalizedFlashcardResponse;
+          route.trace.toolchain.push("flashcard_structure_normalized");
         }
       }
 
@@ -1141,7 +1322,7 @@ export async function runChatPipeline(request: NextRequest) {
       const stillNeedsFlashcardRepair =
         !isVagueRequest &&
         effectiveMode === "flashcard" &&
-        (!isFlashcardStructured(correctedResponse) || countFlashcards(correctedResponse) < MIN_FLASHCARD_PAIRS);
+        (!isFlashcardDeckStructured(correctedResponse) || countFlashcardPairs(correctedResponse) < MIN_FLASHCARD_PAIRS);
 
       if (stillNeedsQuizRepair || stillNeedsFlashcardRepair) {
         const regenerated = await openRouterChatCompletion({
@@ -1152,7 +1333,16 @@ export async function runChatPipeline(request: NextRequest) {
               role: "system",
               content: stillNeedsQuizRepair
                 ? `The student wants a quiz about: "${normalizedMessage}". Generate a complete quiz about EXACTLY this topic. Output strict quiz format with at least ${MIN_QUIZ_QUESTIONS} questions, A-D options, Correct line for each, and a final section "## Answers & Explanations".`
-                : `The student wants flashcards about: "${normalizedMessage}". Generate flashcard pairs about EXACTLY this topic. Output ONLY FRONT/BACK pairs with at least ${MIN_FLASHCARD_PAIRS} cards. One FRONT line then one BACK line per card.`,
+                : `The student wants flashcards about: "${normalizedMessage}". Generate a complete deck about EXACTLY this topic.
+STRICT RULES:
+- Output only FRONT/BACK blocks.
+- At least ${MIN_FLASHCARD_PAIRS} cards.
+- No intro text.
+- No markdown table.
+- No JSON.
+- Format:
+FRONT: ...
+BACK: ...`,
             },
             { role: "user", content: auto.message },
           ],
@@ -1169,14 +1359,89 @@ export async function runChatPipeline(request: NextRequest) {
             correctedResponse = regeneratedCandidate;
             route.trace.toolchain.push("quiz_regenerate_repair");
           }
-          if (
-            stillNeedsFlashcardRepair &&
-            isFlashcardStructured(regeneratedCandidate) &&
-            countFlashcards(regeneratedCandidate) >= MIN_FLASHCARD_PAIRS
-          ) {
-            correctedResponse = regeneratedCandidate;
-            route.trace.toolchain.push("flashcard_regenerate_repair");
+          const normalizedRegeneratedFlashcards = normalizeFlashcardDeck(regeneratedCandidate);
+          if (stillNeedsFlashcardRepair && normalizedRegeneratedFlashcards) {
+            const regeneratedCount = countFlashcardPairs(normalizedRegeneratedFlashcards);
+            if (regeneratedCount >= MIN_FLASHCARD_PAIRS) {
+              correctedResponse = normalizedRegeneratedFlashcards;
+              route.trace.toolchain.push("flashcard_regenerate_repair");
+            }
           }
+        }
+      }
+
+      const finalQuizRepairNeeded =
+        !isVagueRequest &&
+        effectiveMode === "quiz" &&
+        (!isQuizStructured(correctedResponse) || countQuizQuestions(correctedResponse) < MIN_QUIZ_QUESTIONS);
+      if (finalQuizRepairNeeded) {
+        const finalRepair = await openRouterChatCompletion({
+          model: MODEL_CONFIG.tutorFast,
+          fallbackModels: [route.primaryModel, ...route.fallbackModels].slice(0, 3),
+          messages: [
+            {
+              role: "system",
+              content: `Output a plain-text quiz about: "${normalizedMessage}".
+STRICT RULES:
+- No intro text.
+- No markdown table.
+- No JSON.
+- At least ${MIN_QUIZ_QUESTIONS} questions.
+- Exactly this structure per question:
+Q1. ...
+A) ...
+B) ...
+C) ...
+D) ...
+Correct: [A|B|C|D]
+- End with:
+## Answers & Explanations
+1) [letter] - [one sentence]
+2) [letter] - [one sentence]`,
+            },
+            { role: "user", content: auto.message },
+          ],
+          maxTokens: MODE_MAX_TOKENS[effectiveMode],
+          temperature: 0,
+        });
+        const finalCandidate = finalRepair.choices?.[0]?.message?.content?.trim() ?? "";
+        if (finalCandidate && isQuizStructured(finalCandidate) && countQuizQuestions(finalCandidate) >= MIN_QUIZ_QUESTIONS) {
+          correctedResponse = finalCandidate;
+          route.trace.toolchain.push("quiz_final_repair");
+        }
+      }
+
+      const finalFlashcardRepairNeeded =
+        !isVagueRequest &&
+        effectiveMode === "flashcard" &&
+        (!isFlashcardDeckStructured(correctedResponse) || countFlashcardPairs(correctedResponse) < MIN_FLASHCARD_PAIRS);
+      if (finalFlashcardRepairNeeded) {
+        const finalFlashcardRepair = await openRouterChatCompletion({
+          model: MODEL_CONFIG.tutorFast,
+          fallbackModels: [route.primaryModel, ...route.fallbackModels].slice(0, 3),
+          messages: [
+            {
+              role: "system",
+              content: `Output a plain-text flashcard deck about: "${normalizedMessage}".
+STRICT RULES:
+- No intro text.
+- No markdown table.
+- No JSON.
+- At least ${MIN_FLASHCARD_PAIRS} cards.
+- Output exactly this repeated structure:
+FRONT: [term or question]
+BACK: [answer or definition]`,
+            },
+            { role: "user", content: auto.message },
+          ],
+          maxTokens: MODE_MAX_TOKENS[effectiveMode],
+          temperature: 0,
+        });
+        const finalFlashcardCandidate = finalFlashcardRepair.choices?.[0]?.message?.content?.trim() ?? "";
+        const normalizedFinalFlashcards = normalizeFlashcardDeck(finalFlashcardCandidate);
+        if (normalizedFinalFlashcards && countFlashcardPairs(normalizedFinalFlashcards) >= MIN_FLASHCARD_PAIRS) {
+          correctedResponse = normalizedFinalFlashcards;
+          route.trace.toolchain.push("flashcard_final_repair");
         }
       }
 
@@ -1185,7 +1450,7 @@ export async function runChatPipeline(request: NextRequest) {
       const citations = inferCitations(
         correctedResponse,
         retrieval.citations,
-        searchUrls,
+        searchSources,
         attachmentCitations,
       );
       const rewrittenResponse = rewriteCitationMarkers(correctedResponse, citations);
@@ -1241,7 +1506,7 @@ export async function runChatPipeline(request: NextRequest) {
       })) as {
         totalSpentEur: number;
         totalCostCents: number;
-        tier: "normal" | "cheap_only" | "free_only";
+        tier: "normal" | "expensive_blocked" | "cheap_only" | "free_only";
         softLimitReached: boolean;
         hardLimitReached: boolean;
       };
@@ -1253,6 +1518,42 @@ export async function runChatPipeline(request: NextRequest) {
         tokensUsed: usageIn + usageOut,
         topic: normalizedMessage.slice(0, 60),
       }).catch(() => {});
+
+      const streakUpdate = await convexMutation<
+        { actorClerkId: string },
+        {
+          currentStreak: number;
+          longestStreak: number;
+          lastActiveDate: string;
+          unlockedAchievements?: UnlockedAchievement[];
+        }
+      >("gamification:checkAndUpdateStreak", {
+        actorClerkId: actor.clerkId,
+      }).catch(() => null);
+
+      const xpUpdate = await convexMutation<
+        {
+          actorClerkId: string;
+          activityType: string;
+          modeUsed: StudyMode;
+          currentStreak?: number;
+        },
+        {
+          xpAwarded: number;
+          totalXp: number;
+          unlockedAchievements?: UnlockedAchievement[];
+        }
+      >("gamification:awardXp", {
+        actorClerkId: actor.clerkId,
+        activityType: gamificationActivityType(effectiveMode),
+        modeUsed: effectiveMode,
+        currentStreak: streakUpdate?.currentStreak,
+      }).catch(() => null);
+
+      const unlockedAchievements = mergeUnlockedAchievements(
+        streakUpdate?.unlockedAchievements,
+        xpUpdate?.unlockedAchievements,
+      );
 
       if (selectedAgent) {
         await convexMutation("agents:incrementUsageCount", {
@@ -1312,6 +1613,8 @@ export async function runChatPipeline(request: NextRequest) {
         effectiveMode,
         suggestedMode: effectiveMode !== safeMode ? effectiveMode : undefined,
         userSelectedMode: safeMode,
+        unlockedAchievements,
+        agentSuggestion,
         agent:
           selectedAgent && selectedAgent._id
             ? {

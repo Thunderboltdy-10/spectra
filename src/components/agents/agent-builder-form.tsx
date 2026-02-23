@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ChevronLeft, ChevronRight, Loader2, Sparkles, CheckCircle2, ChevronDown, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
+import { defaultAvatarIconForCategory } from "@/components/agents/agent-avatar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -68,6 +69,7 @@ export type AgentBuilderValues = {
   category: string;
   systemPrompt: string;
   avatarEmoji?: string;
+  avatarIcon?: string;
   visibility: "public" | "private";
   preferredMode?: string;
 };
@@ -155,43 +157,6 @@ function LabeledSlider({
 }
 
 // ---------------------------------------------------------------------------
-// Progress bar
-// ---------------------------------------------------------------------------
-
-function ProgressBar({ currentStepIndex }: { currentStepIndex: number }) {
-  return (
-    <div className="mb-8">
-      <div className="flex gap-2 mb-3">
-        {STEP_ORDER.map((step, i) => (
-          <div
-            key={step}
-            className={`flex-1 h-1.5 rounded-full transition-all duration-300 ${
-              i <= currentStepIndex ? "bg-[var(--accent-cyan)]" : "bg-[var(--border-default)]"
-            }`}
-          />
-        ))}
-      </div>
-      <div className="flex justify-between">
-        {STEP_ORDER.map((step, i) => (
-          <span
-            key={step}
-            className={`text-xs font-medium transition-colors duration-150 ${
-              i === currentStepIndex
-                ? "text-[var(--accent-cyan)]"
-                : i < currentStepIndex
-                ? "text-[var(--text-secondary)]"
-                : "text-[var(--text-secondary)] opacity-40"
-            }`}
-          >
-            {STEP_LABELS[step]}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Step: Audience
 // ---------------------------------------------------------------------------
 
@@ -243,7 +208,7 @@ function StepPurpose({
       <div>
         <h2 className="text-xl font-bold text-[var(--text-primary)]">What should this agent help students with?</h2>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">
-          Describe the agent's primary teaching goal in plain language.
+          Describe the agent&apos;s primary teaching goal in plain language.
         </p>
       </div>
       <div className="space-y-2">
@@ -289,7 +254,7 @@ function StepPersonality({
       <div>
         <h2 className="text-xl font-bold text-[var(--text-primary)]">How should it communicate?</h2>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">
-          Shape the agent's voice and teaching approach.
+          Shape the agent&apos;s voice and teaching approach.
         </p>
       </div>
 
@@ -512,7 +477,7 @@ function StepReview({
       <div>
         <h2 className="text-xl font-bold text-[var(--text-primary)]">Review & Generate</h2>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">
-          Review your choices then generate your agent's full configuration with AI.
+          Review your choices then generate your agent&apos;s full configuration with AI.
         </p>
       </div>
 
@@ -820,6 +785,7 @@ export function AgentBuilderForm({ onSubmit, onCancelHref = "/agents" }: AgentBu
         category: generated.suggestedCategory,
         systemPrompt: editedSystemPrompt.trim() || generated.systemPrompt,
         avatarEmoji: generated.avatarEmoji || avatarEmoji,
+        avatarIcon: defaultAvatarIconForCategory(generated.suggestedCategory),
         visibility: "public",
         preferredMode: generated.suggestedMode,
       });

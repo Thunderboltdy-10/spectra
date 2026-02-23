@@ -185,7 +185,7 @@ export function PersonalPreferences() {
       <section>
         <h3 className="mb-1 text-base font-semibold text-[var(--text-primary)]">Interests</h3>
         <p className="mb-4 text-sm text-[var(--text-secondary)]">
-          Topics you're studying or passionate about. The AI will use these for context.
+          Topics you&apos;re studying or passionate about. The AI will use these for context.
         </p>
         <SectionLabel>Your Interests</SectionLabel>
         <ChipInput

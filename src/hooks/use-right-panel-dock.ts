@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 const panelWidths = new Map<string, number>();
+const MIN_DOCK_WIDTH = 360;
 
 function applyDockSpace() {
   if (typeof document === "undefined") return;
@@ -16,10 +17,11 @@ function applyDockSpace() {
   }
 }
 
-function shouldDock(open: boolean, compact: boolean) {
+function shouldDock(params: { open: boolean; compact: boolean; width: number }) {
+  const { open, compact, width } = params;
   if (!open || compact) return false;
   if (typeof window === "undefined") return false;
-  return window.innerWidth >= 1280 && window.innerHeight >= 760;
+  return width >= MIN_DOCK_WIDTH && window.innerHeight >= 760;
 }
 
 export function useRightPanelDock(params: {
@@ -27,21 +29,34 @@ export function useRightPanelDock(params: {
   open: boolean;
   compact: boolean;
   maxWidthPx: number;
+  minMainWidthPx?: number;
+  reserveLeftPx?: number;
 }) {
-  const { id, open, compact, maxWidthPx } = params;
+  const { id, open, compact, maxWidthPx, minMainWidthPx = 760, reserveLeftPx = 320 } = params;
   const [docked, setDocked] = useState(false);
+  const [panelWidth, setPanelWidth] = useState(maxWidthPx);
 
   const computeWidth = useMemo(
-    () => () => Math.min(window.innerWidth * 0.92, maxWidthPx),
-    [maxWidthPx],
+    () => () => {
+      const maxByViewport = Math.floor(window.innerWidth * 0.44);
+      const availableAfterGuards = window.innerWidth - minMainWidthPx - reserveLeftPx;
+      return Math.max(0, Math.min(maxWidthPx, maxByViewport, availableAfterGuards));
+    },
+    [maxWidthPx, minMainWidthPx, reserveLeftPx],
   );
 
   useEffect(() => {
     const update = () => {
-      const nextDocked = shouldDock(open, compact);
+      const width = computeWidth();
+      const nextDocked = shouldDock({ open, compact, width });
       setDocked(nextDocked);
+      setPanelWidth(
+        nextDocked
+          ? Math.max(MIN_DOCK_WIDTH, width)
+          : Math.min(maxWidthPx, Math.floor(window.innerWidth * 0.92)),
+      );
       if (nextDocked) {
-        panelWidths.set(id, computeWidth());
+        panelWidths.set(id, width);
       } else {
         panelWidths.delete(id);
       }
@@ -55,7 +70,11 @@ export function useRightPanelDock(params: {
       panelWidths.delete(id);
       applyDockSpace();
     };
-  }, [compact, computeWidth, id, open]);
+  }, [compact, computeWidth, id, maxWidthPx, open]);
 
-  return docked;
+  return {
+    docked,
+    isOverlay: open && !docked,
+    panelWidth,
+  };
 }

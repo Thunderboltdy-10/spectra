@@ -28,6 +28,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       description?: string;
       systemPrompt?: string;
       avatarEmoji?: string;
+      avatarIcon?: string;
       category?: string;
       preferredModel?: string;
       preferredMode?: StudyMode;

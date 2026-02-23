@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { getUserByClerkId } from "./helpers";
 import { vRole } from "./shared";
 import type { Id } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
 
 const SUPER_ADMIN_EMAILS = new Set(
   (process.env.SUPER_ADMIN_EMAILS ?? "pablo.martinez.dovale@gmail.com")
@@ -11,10 +12,24 @@ const SUPER_ADMIN_EMAILS = new Set(
     .filter(Boolean),
 );
 
+const DEFAULT_MAX_RESOURCE_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+const MIN_RESOURCE_FILE_SIZE_BYTES = 1 * 1024 * 1024;
+const MAX_RESOURCE_FILE_SIZE_BYTES = 100 * 1024 * 1024;
+
+function normalizeMaxResourceFileSizeBytes(value: number | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_MAX_RESOURCE_FILE_SIZE_BYTES;
+  }
+  return Math.min(
+    MAX_RESOURCE_FILE_SIZE_BYTES,
+    Math.max(MIN_RESOURCE_FILE_SIZE_BYTES, Math.round(value)),
+  );
+}
+
 async function requireSuperAdmin(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string) {
   const actor = await getUserByClerkId(ctx, actorClerkId);
   if (!actor) throw new Error("Unauthorized");
-  if (!SUPER_ADMIN_EMAILS.has(actor.email.toLowerCase())) {
+  if (!SUPER_ADMIN_EMAILS.has(actor.email.trim().toLowerCase())) {
     throw new Error("Super admin access required");
   }
   return actor;
@@ -103,6 +118,83 @@ export const getGlobalStats = query({
 });
 
 /**
+ * Get storage statistics across the platform.
+ * Note: file size tracking comes from `resources.size` metadata.
+ */
+export const getStorageStats = query({
+  args: { actorClerkId: v.string() },
+  handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx, args.actorClerkId);
+
+    const now = Date.now();
+    const [resources, orgs, images] = await Promise.all([
+      ctx.db.query("resources").collect(),
+      ctx.db.query("orgs").collect(),
+      ctx.db.query("generatedImages").collect(),
+    ]);
+
+    const orgNameById = new Map(orgs.map((org) => [org._id, org.name]));
+    const totalSizeBytes = resources.reduce((sum, resource) => sum + Math.max(0, resource.size ?? 0), 0);
+
+    const byOrg = new Map<
+      string,
+      { orgId: string; orgName: string; fileCount: number; totalSizeBytes: number }
+    >();
+    for (const resource of resources) {
+      const current = byOrg.get(resource.orgId) ?? {
+        orgId: resource.orgId,
+        orgName: orgNameById.get(resource.orgId) ?? "Unknown school",
+        fileCount: 0,
+        totalSizeBytes: 0,
+      };
+      current.fileCount += 1;
+      current.totalSizeBytes += Math.max(0, resource.size ?? 0);
+      byOrg.set(resource.orgId, current);
+    }
+
+    const sizeByOrg = [...byOrg.values()]
+      .sort((a, b) => b.totalSizeBytes - a.totalSizeBytes || b.fileCount - a.fileCount)
+      .map((row) => ({
+        ...row,
+        totalSizeMegabytes: Math.round((row.totalSizeBytes / (1024 * 1024)) * 100) / 100,
+      }));
+
+    const largestFiles = resources
+      .slice()
+      .sort((a, b) => b.size - a.size || b.createdAt - a.createdAt)
+      .slice(0, 25)
+      .map((resource) => ({
+        resourceId: resource._id,
+        orgId: resource.orgId,
+        orgName: orgNameById.get(resource.orgId) ?? "Unknown school",
+        filename: resource.filename,
+        scope: resource.scope,
+        sizeBytes: resource.size,
+        sizeMegabytes: Math.round((resource.size / (1024 * 1024)) * 100) / 100,
+        createdAt: resource.createdAt,
+      }));
+
+    const pinnedImages = images.filter((image) => image.pinned).length;
+    const expiringIn3Days = images.filter((image) => {
+      if (image.pinned) return false;
+      return typeof image.expiresAt === "number" && image.expiresAt < now + 3 * 24 * 60 * 60 * 1000;
+    }).length;
+
+    return {
+      totalFiles: resources.length + images.length,
+      resourceFileCount: resources.length,
+      generatedImageCount: images.length,
+      totalSizeBytes,
+      totalSizeMegabytes: Math.round((totalSizeBytes / (1024 * 1024)) * 100) / 100,
+      pinnedImageCount: pinnedImages,
+      expiringImageCountIn3Days: expiringIn3Days,
+      sizeByOrg,
+      largestFiles,
+    };
+  },
+});
+
+/**
  * List all admin users across schools.
  */
 export const listAllAdmins = query({
@@ -139,6 +231,7 @@ export const createOrg = mutation({
     timezone: v.optional(v.string()),
     maxStudents: v.optional(v.number()),
     tokenBudgetDaily: v.optional(v.number()),
+    maxResourceFileSizeBytes: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const actor = await requireSuperAdmin(ctx, args.actorClerkId);
@@ -159,11 +252,20 @@ export const createOrg = mutation({
       timezone: args.timezone,
       maxStudents: args.maxStudents,
       tokenBudgetDaily: args.tokenBudgetDaily ?? 500000,
+      maxResourceFileSizeBytes: normalizeMaxResourceFileSizeBytes(args.maxResourceFileSizeBytes),
       verifyMarkerPassEnabled: false,
       isActive: true,
       createdBy: actor.email,
       createdAt: now,
       updatedAt: now,
+    });
+
+    await ctx.runMutation(internal.auditLog.logAction, {
+      actorUserId: actor._id as Id<"users">,
+      action: "super_admin.create_org",
+      targetType: "org",
+      targetId: orgId,
+      details: `name=${args.name};slug=${args.slug}`,
     });
 
     return { orgId };
@@ -184,6 +286,7 @@ export const updateOrg = mutation({
     timezone: v.optional(v.string()),
     maxStudents: v.optional(v.number()),
     tokenBudgetDaily: v.optional(v.number()),
+    maxResourceFileSizeBytes: v.optional(v.number()),
     isActive: v.optional(v.boolean()),
     allowPaidModels: v.optional(v.boolean()),
     soulEnabled: v.optional(v.boolean()),
@@ -191,12 +294,24 @@ export const updateOrg = mutation({
     spacedRepetitionEnabled: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx, args.actorClerkId);
+    const actor = await requireSuperAdmin(ctx, args.actorClerkId);
 
     const org = await ctx.db.get(args.orgId);
     if (!org) throw new Error("Org not found");
 
-    const { actorClerkId: _clerkId, orgId: _orgId, ...updates } = args;
+    const updates = Object.fromEntries(
+      Object.entries(args).filter(
+        ([key, value]) => key !== "actorClerkId" && key !== "orgId" && value !== undefined,
+      ),
+    );
+
+    if ("maxResourceFileSizeBytes" in updates) {
+      updates.maxResourceFileSizeBytes = normalizeMaxResourceFileSizeBytes(
+        typeof updates.maxResourceFileSizeBytes === "number"
+          ? updates.maxResourceFileSizeBytes
+          : undefined,
+      );
+    }
     const patch: Record<string, unknown> = { updatedAt: Date.now() };
 
     for (const [key, value] of Object.entries(updates)) {
@@ -206,7 +321,58 @@ export const updateOrg = mutation({
     }
 
     await ctx.db.patch(args.orgId, patch);
+    await ctx.runMutation(internal.auditLog.logAction, {
+      actorUserId: actor._id as Id<"users">,
+      action: "super_admin.update_org",
+      targetType: "org",
+      targetId: args.orgId,
+      details: `fields=${Object.keys(updates).join(",") || "none"}`,
+    });
     return { ok: true };
+  },
+});
+
+export const updateOrgBudget = mutation({
+  args: {
+    actorClerkId: v.string(),
+    orgId: v.id("orgs"),
+    monthlyBudgetCentsPerUser: v.number(),
+    budgetMarginPercent: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireSuperAdmin(ctx, args.actorClerkId);
+
+    const org = await ctx.db.get(args.orgId);
+    if (!org) throw new Error("Org not found");
+
+    const monthlyBudgetCentsPerUser = Math.max(100, Math.round(args.monthlyBudgetCentsPerUser));
+    const budgetMarginPercent = Math.min(40, Math.max(5, Math.round(args.budgetMarginPercent)));
+    const softLimitCents = Math.max(0, Math.floor(monthlyBudgetCentsPerUser * (1 - budgetMarginPercent / 100)));
+    const cheapOnlyLimitCents = Math.max(0, Math.floor(monthlyBudgetCentsPerUser * 0.9));
+    const now = Date.now();
+
+    await ctx.db.patch(args.orgId, {
+      monthlyBudgetCentsPerUser,
+      budgetMarginPercent,
+      updatedAt: now,
+    });
+
+    await ctx.runMutation(internal.auditLog.logAction, {
+      actorUserId: actor._id as Id<"users">,
+      action: "super_admin.update_org_budget",
+      targetType: "org",
+      targetId: args.orgId,
+      details: `monthlyBudgetCentsPerUser=${monthlyBudgetCentsPerUser};budgetMarginPercent=${budgetMarginPercent};softLimitCents=${softLimitCents};cheapOnlyLimitCents=${cheapOnlyLimitCents}`,
+    });
+
+    return {
+      ok: true,
+      monthlyBudgetCentsPerUser,
+      budgetMarginPercent,
+      softLimitCents,
+      cheapOnlyLimitCents,
+      hardLimitCents: monthlyBudgetCentsPerUser,
+    };
   },
 });
 
@@ -219,7 +385,7 @@ export const deactivateOrg = mutation({
     orgId: v.id("orgs"),
   },
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx, args.actorClerkId);
+    const actor = await requireSuperAdmin(ctx, args.actorClerkId);
 
     const org = await ctx.db.get(args.orgId);
     if (!org) throw new Error("Org not found");
@@ -227,6 +393,14 @@ export const deactivateOrg = mutation({
     await ctx.db.patch(args.orgId, {
       isActive: false,
       updatedAt: Date.now(),
+    });
+
+    await ctx.runMutation(internal.auditLog.logAction, {
+      actorUserId: actor._id as Id<"users">,
+      action: "super_admin.deactivate_org",
+      targetType: "org",
+      targetId: args.orgId,
+      details: "isActive=false",
     });
 
     return { ok: true };
@@ -262,6 +436,13 @@ export const assignOrgAdmin = mutation({
         role: "admin",
         updatedAt: Date.now(),
       });
+      await ctx.runMutation(internal.auditLog.logAction, {
+        actorUserId: actor._id as Id<"users">,
+        action: "super_admin.assign_org_admin",
+        targetType: "user",
+        targetId: existingInOrg._id,
+        details: `orgId=${args.orgId};email=${normalizedEmail};path=existing_in_org`,
+      });
       return { userId: existingInOrg._id, updated: true };
     }
 
@@ -274,6 +455,13 @@ export const assignOrgAdmin = mutation({
         orgId: args.orgId,
         role: "admin",
         updatedAt: Date.now(),
+      });
+      await ctx.runMutation(internal.auditLog.logAction, {
+        actorUserId: actor._id as Id<"users">,
+        action: "super_admin.assign_org_admin",
+        targetType: "user",
+        targetId: existingAnywhere._id,
+        details: `orgId=${args.orgId};email=${normalizedEmail};path=transfer_existing_user`,
       });
       return { userId: existingAnywhere._id, transferred: true };
     }
@@ -292,6 +480,13 @@ export const assignOrgAdmin = mutation({
       await ctx.db.patch(pendingForOrg._id, {
         role: "admin",
         expiresAt: now + 7 * 24 * 60 * 60 * 1000,
+      });
+      await ctx.runMutation(internal.auditLog.logAction, {
+        actorUserId: actor._id as Id<"users">,
+        action: "super_admin.assign_org_admin",
+        targetType: "invitation",
+        targetId: pendingForOrg._id,
+        details: `orgId=${args.orgId};email=${normalizedEmail};path=update_pending_invitation`,
       });
       return { invitationId: pendingForOrg._id, invitationUpdated: true };
     }
@@ -319,6 +514,14 @@ export const assignOrgAdmin = mutation({
       expiresAt: now + 7 * 24 * 60 * 60 * 1000,
     });
 
+    await ctx.runMutation(internal.auditLog.logAction, {
+      actorUserId: actor._id as Id<"users">,
+      action: "super_admin.assign_org_admin",
+      targetType: "invitation",
+      targetId: invitationId,
+      details: `orgId=${args.orgId};email=${normalizedEmail};path=create_invitation`,
+    });
+
     return { invitationId, invitationCreated: true };
   },
 });
@@ -334,7 +537,7 @@ export const updateOrgMemberRole = mutation({
     role: vRole,
   },
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx, args.actorClerkId);
+    const actor = await requireSuperAdmin(ctx, args.actorClerkId);
     const user = await ctx.db.get(args.userId);
     if (!user) throw new Error("User not found");
     if (user.orgId !== args.orgId) throw new Error("User is not in this school");
@@ -353,6 +556,13 @@ export const updateOrgMemberRole = mutation({
       role: args.role,
       updatedAt: Date.now(),
     });
+    await ctx.runMutation(internal.auditLog.logAction, {
+      actorUserId: actor._id as Id<"users">,
+      action: "super_admin.update_org_member_role",
+      targetType: "user",
+      targetId: args.userId,
+      details: `orgId=${args.orgId};from=${user.role};to=${args.role}`,
+    });
     return { ok: true };
   },
 });
@@ -367,7 +577,7 @@ export const removeOrgMember = mutation({
     userId: v.id("users"),
   },
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx, args.actorClerkId);
+    const actor = await requireSuperAdmin(ctx, args.actorClerkId);
     const user = await ctx.db.get(args.userId);
     if (!user) throw new Error("User not found");
     if (user.orgId !== args.orgId) throw new Error("User is not in this school");
@@ -383,6 +593,13 @@ export const removeOrgMember = mutation({
     }
 
     await ctx.db.delete(args.userId);
+    await ctx.runMutation(internal.auditLog.logAction, {
+      actorUserId: actor._id as Id<"users">,
+      action: "super_admin.remove_org_member",
+      targetType: "user",
+      targetId: args.userId,
+      details: `orgId=${args.orgId};role=${user.role};email=${user.email}`,
+    });
     return { ok: true };
   },
 });
@@ -398,7 +615,7 @@ export const transferUser = mutation({
     role: v.optional(vRole),
   },
   handler: async (ctx, args) => {
-    await requireSuperAdmin(ctx, args.actorClerkId);
+    const actor = await requireSuperAdmin(ctx, args.actorClerkId);
 
     const user = await ctx.db.get(args.userId);
     if (!user) throw new Error("User not found");
@@ -410,6 +627,14 @@ export const transferUser = mutation({
       orgId: args.targetOrgId,
       role: args.role ?? user.role,
       updatedAt: Date.now(),
+    });
+
+    await ctx.runMutation(internal.auditLog.logAction, {
+      actorUserId: actor._id as Id<"users">,
+      action: "super_admin.transfer_user",
+      targetType: "user",
+      targetId: args.userId,
+      details: `fromOrgId=${user.orgId};toOrgId=${args.targetOrgId};role=${args.role ?? user.role}`,
     });
 
     return { ok: true, fromOrgId: user.orgId, toOrgId: args.targetOrgId };

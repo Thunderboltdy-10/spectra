@@ -45,6 +45,27 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   });
 }
 
+export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  return withRouteErrorHandling(async () => {
+    const actor = await requireActor();
+    const { id } = await params;
+    const body = (await request.json().catch(() => ({}))) as {
+      keepLatestMessages?: number;
+    };
+
+    const result = await convexMutation("chats:manualCompact", {
+      actorClerkId: actor.clerkId,
+      chatId: id,
+      keepLatestMessages:
+        typeof body.keepLatestMessages === "number" && Number.isFinite(body.keepLatestMessages)
+          ? body.keepLatestMessages
+          : undefined,
+    });
+
+    return ok(result);
+  });
+}
+
 export async function DELETE(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();

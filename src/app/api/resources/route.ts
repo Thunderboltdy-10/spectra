@@ -4,6 +4,12 @@ import { requireActor } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
 import { FILE_LIMITS } from "@/lib/file-limits";
+import {
+  formatMegabytes,
+  normalizedResourceMimeType,
+  resolveMaxResourceFileSizeBytes,
+  validateResourceUploadFile,
+} from "@/lib/resource-upload-validation";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 
 export const runtime = "nodejs";
@@ -29,11 +35,11 @@ export async function GET(request: NextRequest) {
   });
 }
 
-async function uploadToConvexStorage(uploadUrl: string, file: File) {
+async function uploadToConvexStorage(uploadUrl: string, file: File, contentType: string) {
   const response = await fetch(uploadUrl, {
     method: "POST",
     headers: {
-      "Content-Type": file.type || "application/octet-stream",
+      "Content-Type": contentType,
     },
     body: file,
   });
@@ -72,6 +78,17 @@ export async function POST(request: NextRequest) {
       return badRequest("agentId is required for agent uploads");
     }
 
+    const orgSettings = (await convexQuery("admin:getOrgSettings", {
+      actorClerkId: actor.clerkId,
+    })) as {
+      org?: {
+        maxResourceFileSizeBytes?: number;
+      };
+    };
+    const maxResourceFileSizeBytes = resolveMaxResourceFileSizeBytes(
+      orgSettings.org?.maxResourceFileSizeBytes,
+    );
+
     const results: Array<{
       file: string;
       resourceId?: string;
@@ -80,12 +97,32 @@ export async function POST(request: NextRequest) {
       savedToLibrary?: boolean;
     }> = [];
     let currentPersonalCount = 0;
+    const acceptedFiles: File[] = [];
     const localHashToResourceId = new Map<string, string>();
     const hashByKey = new Map<string, string>();
 
     for (const file of files) {
+      const fileTypeError = validateResourceUploadFile(file);
+      if (fileTypeError) {
+        results.push({
+          file: file.name,
+          status: "failed",
+          error: fileTypeError,
+        });
+        continue;
+      }
+
+      if (file.size > maxResourceFileSizeBytes) {
+        results.push({
+          file: file.name,
+          status: "failed",
+          error: `File too large. Max ${formatMegabytes(maxResourceFileSizeBytes)} per file.`,
+        });
+        continue;
+      }
       const hash = await sha256OfFile(file);
       hashByKey.set(`${file.name}:${file.size}:${file.lastModified}`, hash);
+      acceptedFiles.push(file);
     }
 
     const reusableByHash = new Map<string, string>();
@@ -107,7 +144,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    for (const file of files) {
+    for (const file of acceptedFiles) {
       const hashKey = `${file.name}:${file.size}:${file.lastModified}`;
       const contentHash = hashByKey.get(hashKey);
 
@@ -125,6 +162,7 @@ export async function POST(request: NextRequest) {
       }
 
       try {
+        const mimeType = normalizedResourceMimeType(file);
         const saveToLibrary = scope !== "personal" || currentPersonalCount < FILE_LIMITS.maxPersonalLibraryFiles;
 
         const uploadUrl = (await convexMutation("resources:createUploadUrl", {
@@ -135,7 +173,7 @@ export async function POST(request: NextRequest) {
           ignorePersonalLimit: scope === "personal" ? !saveToLibrary : undefined,
         })) as string;
 
-        const storageId = await uploadToConvexStorage(uploadUrl, file);
+        const storageId = await uploadToConvexStorage(uploadUrl, file, mimeType);
 
         const registered = (await convexMutation("resources:registerResource", {
           actorClerkId: actor.clerkId,
@@ -143,7 +181,7 @@ export async function POST(request: NextRequest) {
           packId,
           agentId,
           filename: file.name,
-          mimeType: file.type || "application/octet-stream",
+          mimeType,
           size: file.size,
           contentHash,
           storageId,

@@ -54,6 +54,19 @@ const authMiddleware = clerkMiddleware(async (auth, req) => {
   const { userId, sessionClaims } = await auth();
   
   if (!userId) {
+    if (req.nextUrl.pathname.startsWith("/api/") || req.nextUrl.pathname.startsWith("/trpc")) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: {
+            code: "AUTH_NOT_SIGNED_IN",
+            message: "You must sign in to access this API route.",
+            status: 401,
+          },
+        },
+        { status: 401 },
+      );
+    }
     const signInUrl = new URL("/sign-in", req.url);
     signInUrl.searchParams.set("redirect_url", req.url);
     return NextResponse.redirect(signInUrl);

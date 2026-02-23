@@ -1,17 +1,55 @@
 import mammoth from "mammoth";
-import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 import { MODEL_CONFIG } from "@/lib/model-config";
 import { openRouterEmbedding } from "@/lib/openrouter";
-
-pdfjs.GlobalWorkerOptions.workerSrc = "pdfjs-dist/legacy/build/pdf.worker.mjs";
 
 export type ParsedFile = {
   text: string;
   pages: Array<{ page?: number; text: string }>;
 };
 
+type PdfJsModule = typeof import("pdfjs-dist");
+
 const CHUNK_SIZE = 900;
 const CHUNK_OVERLAP = 160;
+
+let pdfjsModulePromise: Promise<PdfJsModule> | null = null;
+
+async function getPdfjsModule() {
+  if (!pdfjsModulePromise) {
+    pdfjsModulePromise = import("pdfjs-dist");
+  }
+  return pdfjsModulePromise;
+}
+
+async function parsePdf(bytes: ArrayBuffer): Promise<ParsedFile> {
+  const pdfjs = await getPdfjsModule();
+  const loadingTask = pdfjs.getDocument({
+    data: new Uint8Array(bytes),
+    isEvalSupported: false,
+  });
+
+  const pdf = await loadingTask.promise;
+  const pages: Array<{ page?: number; text: string }> = [];
+
+  try {
+    for (let i = 1; i <= pdf.numPages; i += 1) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      const text = textContent.items
+        .map((item) => ("str" in item ? item.str : ""))
+        .join(" ")
+        .trim();
+      pages.push({ page: i, text });
+    }
+  } finally {
+    await pdf.destroy();
+  }
+
+  return {
+    text: pages.map((page) => page.text).join("\n"),
+    pages,
+  };
+}
 
 export async function parseUploadedFile(file: File): Promise<ParsedFile> {
   const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
@@ -28,21 +66,7 @@ export async function parseUploadedFile(file: File): Promise<ParsedFile> {
   }
 
   if (ext === "pdf") {
-    const pdf = await pdfjs.getDocument({ data: bytes }).promise;
-    const pages: Array<{ page?: number; text: string }> = [];
-    for (let i = 1; i <= pdf.numPages; i += 1) {
-      const page = await pdf.getPage(i);
-      const textContent = await page.getTextContent();
-      const text = textContent.items
-        .map((item) => ("str" in item ? item.str : ""))
-        .join(" ")
-        .trim();
-      pages.push({ page: i, text });
-    }
-    return {
-      text: pages.map((page) => page.text).join("\n"),
-      pages,
-    };
+    return parsePdf(bytes);
   }
 
   throw new Error(`Unsupported file type: ${ext}`);

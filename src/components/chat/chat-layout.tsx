@@ -1,22 +1,37 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
+import { CircleHelp } from "lucide-react";
 import { toast } from "sonner";
 import { ChatComposer } from "@/components/chat/chat-composer";
 import { CodeCanvas } from "@/components/chat/code-canvas";
 import { ChatHeader } from "@/components/chat/chat-header";
 import { ChatMessages } from "@/components/chat/chat-messages";
+import { QuickActions } from "@/components/chat/quick-actions";
 import { UnifiedPanel } from "@/components/chat/unified-panel";
 import { ChatSidebar } from "@/components/chat/chat-sidebar";
 import { ChatWelcome } from "@/components/chat/chat-welcome";
+import { KeyboardShortcutsRegistrar } from "@/components/keyboard-shortcuts";
+import type { GuidedTourStep } from "@/components/ui/guided-tour";
+import { Button } from "@/components/ui/button";
 import { useChatState } from "@/hooks/use-chat-state";
 import { usePanel } from "@/context/panel-context";
 import type { StudyMode } from "@/types";
-import { downloadTextFile, exportConversationMarkdown } from "@/lib/export/markdown-export";
+import {
+  downloadTextFile,
+  exportConversationMarkdown,
+  exportConversationPlainText,
+} from "@/lib/export/markdown-export";
 import { exportElementToPrintPdf } from "@/lib/export/pdf-export";
 import { parseSlashCommand, normalizeModeArg, SLASH_COMMANDS } from "@/lib/slash-commands";
 import { useCanvasState } from "@/hooks/use-canvas-state";
 import { FILE_LIMITS } from "@/lib/file-limits";
+
+const GuidedTour = dynamic(
+  () => import("@/components/ui/guided-tour").then((module) => module.GuidedTour),
+  { ssr: false },
+);
 
 function SidebarSkeleton() {
   return (
@@ -31,15 +46,111 @@ function SidebarSkeleton() {
   );
 }
 
+const TOUR_COMPLETED_KEY = "ai-school-guided-tour-v1";
+const QUICK_ACTION_MODE_CYCLE: StudyMode[] = [
+  "tutor",
+  "quiz",
+  "flashcard",
+  "research",
+  "explain",
+  "general",
+  "exam",
+  "draft_coach",
+  "marker",
+  "image",
+];
+
+function nextQuickActionMode(current: StudyMode): StudyMode {
+  const index = QUICK_ACTION_MODE_CYCLE.indexOf(current);
+  if (index < 0) return QUICK_ACTION_MODE_CYCLE[0];
+  return QUICK_ACTION_MODE_CYCLE[(index + 1) % QUICK_ACTION_MODE_CYCLE.length];
+}
+
+const TOUR_STEPS: GuidedTourStep[] = [
+  {
+    selector: '[data-tour="sidebar"]',
+    title: "Sidebar",
+    description: "Navigate pages, find recent chats, and jump back into prior sessions quickly.",
+    position: "right",
+  },
+  {
+    selector: '[data-tour="mode-selector"]',
+    title: "Mode selector",
+    description: "Choose how you study: Tutor, Quiz, Flashcards, Research, and more.",
+    position: "top",
+  },
+  {
+    selector: '[data-tour="model-selector"]',
+    title: "Model selector",
+    description: "Keep auto-routing on or manually choose a model for this conversation.",
+    position: "top",
+  },
+  {
+    selector: '[data-tour="settings-trigger"]',
+    title: "Settings panel",
+    description: "Open session settings for reasoning depth, search behavior, and resources.",
+    position: "bottom",
+  },
+  {
+    selector: '[data-tour="composer"]',
+    title: "Composer",
+    description: "Type your prompt here, attach files, and send when ready.",
+    position: "top",
+  },
+];
+
 export function ChatLayout() {
   const chat = useChatState();
   const canvas = useCanvasState();
   const panel = usePanel();
+  const [tourOpen, setTourOpen] = useState(false);
+  const [isZenMode, setIsZenMode] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        const completed = window.localStorage.getItem(TOUR_COMPLETED_KEY);
+        if (completed !== "1") {
+          setTourOpen(true);
+        }
+      } catch {
+        setTourOpen(true);
+      }
+    }, 450);
+
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  function markTourSeen() {
+    try {
+      window.localStorage.setItem(TOUR_COMPLETED_KEY, "1");
+    } catch {
+      // Ignore storage failures.
+    }
+  }
+
+  useEffect(() => {
+    document.body.classList.toggle("zen-mode", isZenMode);
+    return () => {
+      document.body.classList.remove("zen-mode");
+    };
+  }, [isZenMode]);
+
+  useEffect(() => {
+    if (!isZenMode) return;
+    chat.setMobileSidebarOpen(false);
+    panel.closePanel();
+    setTourOpen(false);
+  }, [chat, isZenMode, panel]);
 
   const lastModelUsed = useMemo(() => {
     const lastAssistant = [...chat.messages].reverse().find((item) => item.role === "assistant");
     return lastAssistant?.modelUsed ?? chat.lastAutoResult?.modelUsed;
   }, [chat.lastAutoResult?.modelUsed, chat.messages]);
+  const latestRouteTrace = useMemo(() => {
+    const lastAssistant = [...chat.messages].reverse().find((item) => item.role === "assistant" && item.routeTrace);
+    return lastAssistant?.routeTrace;
+  }, [chat.messages]);
   const regenModels = useMemo(
     () =>
       chat.models.slice(0, 5).map((model) => ({
@@ -63,6 +174,17 @@ export function ChatLayout() {
 
   function handleRegenerateWithModel(modelId: string) {
     void chat.regenerateWithModel(modelId);
+  }
+
+  function handleCycleMode() {
+    const nextMode = nextQuickActionMode(chat.mode);
+    handleModeChange(nextMode);
+  }
+
+  function handleToggleSearchQuickAction() {
+    const nextAutoSearch = chat.autoSearch === "off" ? "on" : "off";
+    chat.setAutoSearch(nextAutoSearch);
+    toast.success(`Web search ${nextAutoSearch === "off" ? "off" : "on"}`);
   }
 
   function handlePinChat(chatId: string) {
@@ -126,6 +248,12 @@ export function ChatLayout() {
         if (node instanceof HTMLElement) {
           exportElementToPrintPdf(node, chat.selectedChat?.title ?? "Conversation");
         }
+      } else if (format === "text" || format === "txt" || format === "plain") {
+        const plainText = exportConversationPlainText({
+          title: chat.selectedChat?.title ?? "Conversation",
+          messages: chat.messages,
+        });
+        downloadTextFile("conversation.txt", plainText);
       } else {
         const markdown = exportConversationMarkdown({
           title: chat.selectedChat?.title ?? "Conversation",
@@ -186,16 +314,26 @@ export function ChatLayout() {
   };
 
   return (
-    <div className="flex h-screen bg-[var(--bg-primary)] text-[var(--text-primary)]">
-      <aside
+    <div className={`flex h-screen min-w-0 overflow-hidden bg-[var(--bg-primary)] text-[var(--text-primary)] ${isZenMode ? "zen-layout" : ""}`}>
+      <KeyboardShortcutsRegistrar
+        onToggleZen={() => setIsZenMode((prev) => !prev)}
+        onEscape={() => {
+          if (isZenMode) setIsZenMode(false);
+        }}
+      />
+
+      {!isZenMode ? (
+        <aside
+        data-tour="sidebar"
         className={`hidden transition-all duration-300 md:block ${
           chat.sidebarOpen ? "w-[320px]" : "w-[76px]"
         }`}
       >
         <ChatSidebar {...sidebarProps} />
-      </aside>
+        </aside>
+      ) : null}
 
-      {chat.mobileSidebarOpen && (
+      {!isZenMode && chat.mobileSidebarOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
           <button
             type="button"
@@ -213,28 +351,43 @@ export function ChatLayout() {
         </div>
       )}
 
-      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <main className={`flex min-w-0 flex-1 flex-col overflow-hidden ${isZenMode ? "mx-auto w-full max-w-5xl zen-main" : ""}`}>
         <ChatHeader
           title={chat.selectedChat?.title ?? "New chat"}
+          chatId={chat.selectedChatId || undefined}
           agentLabel={chat.selectedAgent ? `${chat.selectedAgent.avatarEmoji} ${chat.selectedAgent.name}` : undefined}
           lastModelUsed={lastModelUsed}
           sending={chat.sending}
+          messageCount={chat.messages.length}
+          compacting={chat.compactingConversation}
+          isZenMode={isZenMode}
           onStop={chat.stopGeneration}
+          onCompact={() => void chat.compactConversation()}
+          onToggleZen={() => setIsZenMode((prev) => !prev)}
           onToggleMobileSidebar={() => chat.setMobileSidebarOpen(true)}
           onOpenSettings={() => panel.openPanel("settings")}
           onNewChat={() => chat.startNewChat(chat.selectedAgentId)}
-          onExportMarkdown={() => {
+          onExport={(format) => {
+            if (format === "pdf") {
+              const node = document.querySelector("main");
+              if (node instanceof HTMLElement) {
+                exportElementToPrintPdf(node, chat.selectedChat?.title ?? "Conversation");
+              }
+              return;
+            }
+            if (format === "text") {
+              const plainText = exportConversationPlainText({
+                title: chat.selectedChat?.title ?? "Conversation",
+                messages: chat.messages,
+              });
+              downloadTextFile("conversation.txt", plainText);
+              return;
+            }
             const markdown = exportConversationMarkdown({
               title: chat.selectedChat?.title ?? "Conversation",
               messages: chat.messages,
             });
             downloadTextFile("conversation.md", markdown);
-          }}
-          onExportPdf={() => {
-            const node = document.querySelector("main");
-            if (node instanceof HTMLElement) {
-              exportElementToPrintPdf(node, chat.selectedChat?.title ?? "Conversation");
-            }
           }}
         />
 
@@ -286,6 +439,11 @@ export function ChatLayout() {
               toast.error(error instanceof Error ? error.message : "Failed to create branch");
             }
           }}
+          onToggleBookmarkMessage={async (messageId) => {
+            await chat.toggleBookmark(messageId);
+          }}
+          bookmarkedMessageIds={chat.bookmarkedMessageIds}
+          bookmarkingMessageId={chat.bookmarkingMessageId}
           onAssistantFeedback={(positive, modelId) => {
             void chat.recordAssistantFeedback(modelId, positive);
           }}
@@ -308,10 +466,34 @@ export function ChatLayout() {
               agents={chat.agents}
               onSelectAgent={(agentId) => chat.startNewChat(agentId)}
               onSelectMode={handleModeChange}
+              onResumeChat={(chatId) => chat.setSelectedChatId(chatId)}
+              onUsePrompt={(prompt, mode) => {
+                if (mode) {
+                  handleModeChange(mode);
+                }
+                chat.setMessage(prompt);
+              }}
+              activeMode={chat.mode}
+              recentChats={chat.chats}
               welcomeMessage={chat.orgWelcomeMessage}
             />
           }
         />
+
+        {!isZenMode ? (
+          <QuickActions
+            mode={chat.mode}
+            nextMode={nextQuickActionMode(chat.mode)}
+            autoSearch={chat.autoSearch}
+            compacting={chat.compactingConversation}
+            compactDisabled={!chat.selectedChatId || chat.sending}
+            onCycleMode={handleCycleMode}
+            onToggleSearch={handleToggleSearchQuickAction}
+            onCompact={() => void chat.compactConversation()}
+            onNewChat={() => chat.startNewChat(chat.selectedAgentId)}
+            onToggleZen={() => setIsZenMode((prev) => !prev)}
+          />
+        ) : null}
 
         <ChatComposer
           message={chat.message}
@@ -351,10 +533,19 @@ export function ChatLayout() {
           onModeChange={handleModeChange}
           agents={chat.agents}
           selectedAgentId={chat.selectedAgentId}
+          agentSuggestion={chat.agentSuggestion}
+          onApplyAgentSuggestion={() => {
+            if (!chat.agentSuggestion) return;
+            chat.setSelectedAgentId(chat.agentSuggestion.id);
+            chat.setAgentSuggestion(null);
+            toast.success(`Using suggested agent: ${chat.agentSuggestion.name}`);
+          }}
           onSelectAgent={(agentId) => {
             chat.setSelectedAgentId(agentId);
+            chat.setAgentSuggestion(null);
           }}
           models={chat.models}
+          userSpending={chat.userSpending}
           routerMode={chat.routerMode}
           manualModel={chat.manualModel}
           onSelectAuto={() => {
@@ -415,6 +606,7 @@ export function ChatLayout() {
         }}
       />
 
+      {!isZenMode ? (
       <UnifiedPanel
         settingsProps={{
           models: chat.models,
@@ -458,6 +650,37 @@ export function ChatLayout() {
             );
           },
         }}
+        orchestrationProps={{
+          sending: chat.sending,
+          collaboratorPhase: chat.collaboratorPhase,
+          activeCollaborators: chat.activeCollaborators,
+          routeTrace: latestRouteTrace,
+          lastModelUsed,
+          searchEnabled: chat.lastAutoResult?.searchEnabled,
+        }}
+      />
+      ) : null}
+
+      {!isZenMode ? (
+      <Button
+        type="button"
+        variant="secondary"
+        className="fixed bottom-5 right-5 z-30 h-9 rounded-full px-3"
+        onClick={() => setTourOpen(true)}
+      >
+        <CircleHelp className="mr-1.5 h-4 w-4" />
+        Tour
+      </Button>
+      ) : null}
+
+      <GuidedTour
+        open={tourOpen && !isZenMode}
+        steps={TOUR_STEPS}
+        onClose={() => {
+          markTourSeen();
+          setTourOpen(false);
+        }}
+        onComplete={markTourSeen}
       />
     </div>
   );

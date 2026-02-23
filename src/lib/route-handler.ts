@@ -60,6 +60,7 @@ export async function withRouteErrorHandling<T>(
     const rawMessage = error instanceof Error ? error.message : "Unexpected server error";
     const status = normalizeErrorStatus(rawMessage);
     const { code, message } = parseCodeAndMessage(rawMessage);
+    const safeMessage = status >= 500 ? "Unexpected server error" : message;
     const requestId = logger.context.requestId || randomUUID().slice(0, 8);
 
     // Log the error with structured logger
@@ -75,7 +76,7 @@ export async function withRouteErrorHandling<T>(
         ok: false,
         error: {
           code,
-          message,
+          message: safeMessage,
           status,
           requestId,
         },

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ArrowLeft, ArrowRight, Check, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { extractFlashcardPairs } from "@/lib/flashcard-format";
 
 type Flashcard = {
   front: string;
@@ -10,43 +11,13 @@ type Flashcard = {
 };
 
 function parseFlashcardsFromContent(content: string): Flashcard[] | null {
-  const cards: Flashcard[] = [];
-  const lines = content.split("\n");
-
-  let currentFront = "";
-  let currentBack = "";
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-
-    const frontMatch = trimmed.match(/^FRONT:\s*(.+)/i);
-    if (frontMatch) {
-      if (currentFront && currentBack) {
-        cards.push({ front: currentFront, back: currentBack });
-      }
-      currentFront = frontMatch[1];
-      currentBack = "";
-      continue;
-    }
-
-    const backMatch = trimmed.match(/^BACK:\s*(.+)/i);
-    if (backMatch) {
-      currentBack = backMatch[1];
-      continue;
-    }
-  }
-
-  if (currentFront && currentBack) {
-    cards.push({ front: currentFront, back: currentBack });
-  }
+  const cards = extractFlashcardPairs(content).map((pair) => ({ front: pair.front, back: pair.back }));
 
   return cards.length >= 2 ? cards : null;
 }
 
 export function isFlashcardContent(content: string): boolean {
-  const hasFront = /^FRONT:\s*.+/im.test(content);
-  const hasBack = /^BACK:\s*.+/im.test(content);
-  return hasFront && hasBack;
+  return extractFlashcardPairs(content).length >= 1;
 }
 
 type FlashcardViewProps = {

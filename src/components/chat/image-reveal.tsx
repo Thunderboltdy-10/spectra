@@ -12,6 +12,26 @@ type ImageRevealProps = {
   prompt?: string;
 };
 
+function sanitizeImageSource(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.startsWith("/")) return trimmed;
+  if (/^data:image\/(?:png|jpe?g|webp|gif|avif);base64,[a-z0-9+/=\s]+$/i.test(trimmed)) {
+    return trimmed;
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return trimmed;
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+}
+
 async function copyImageToClipboard(url: string) {
   try {
     const res = await fetch(url);
@@ -60,8 +80,9 @@ async function shareImage(url: string) {
 
 export function ImageReveal({ src, alt, prompt }: ImageRevealProps) {
   const [expanded, setExpanded] = useState(false);
+  const safeSrc = sanitizeImageSource(src);
 
-  if (!src) return null;
+  if (!safeSrc) return null;
 
   return (
     <>
@@ -72,9 +93,21 @@ export function ImageReveal({ src, alt, prompt }: ImageRevealProps) {
             <p className="mt-0.5 text-xs text-[var(--text-secondary)]">{prompt}</p>
           </div>
         ) : null}
-        <div className="relative cursor-pointer" onClick={() => setExpanded(true)}>
+        <div
+          className="relative cursor-pointer"
+          onClick={() => setExpanded(true)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setExpanded(true);
+            }
+          }}
+          role="button"
+          tabIndex={0}
+          aria-label="Open image preview"
+        >
           <Image
-            src={src}
+            src={safeSrc}
             alt={alt ?? "Generated image"}
             width={768}
             height={768}
@@ -88,7 +121,7 @@ export function ImageReveal({ src, alt, prompt }: ImageRevealProps) {
               variant="secondary"
               size="icon"
               className="h-8 w-8 rounded-lg bg-black/60 text-white backdrop-blur-md hover:bg-black/80"
-              onClick={(e) => { e.stopPropagation(); void copyImageToClipboard(src); }}
+              onClick={(e) => { e.stopPropagation(); void copyImageToClipboard(safeSrc); }}
               title="Copy image"
             >
               <Copy className="h-3.5 w-3.5" />
@@ -98,7 +131,7 @@ export function ImageReveal({ src, alt, prompt }: ImageRevealProps) {
               variant="secondary"
               size="icon"
               className="h-8 w-8 rounded-lg bg-black/60 text-white backdrop-blur-md hover:bg-black/80"
-              onClick={(e) => { e.stopPropagation(); void downloadImage(src); }}
+              onClick={(e) => { e.stopPropagation(); void downloadImage(safeSrc); }}
               title="Download"
             >
               <Download className="h-3.5 w-3.5" />
@@ -108,7 +141,7 @@ export function ImageReveal({ src, alt, prompt }: ImageRevealProps) {
               variant="secondary"
               size="icon"
               className="h-8 w-8 rounded-lg bg-black/60 text-white backdrop-blur-md hover:bg-black/80"
-              onClick={(e) => { e.stopPropagation(); void shareImage(src); }}
+              onClick={(e) => { e.stopPropagation(); void shareImage(safeSrc); }}
               title="Share"
             >
               <Share2 className="h-3.5 w-3.5" />
@@ -136,7 +169,7 @@ export function ImageReveal({ src, alt, prompt }: ImageRevealProps) {
             <button
               type="button"
               className="inline-flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-3 text-sm text-white transition hover:bg-white/20"
-              onClick={(e) => { e.stopPropagation(); void copyImageToClipboard(src); }}
+              onClick={(e) => { e.stopPropagation(); void copyImageToClipboard(safeSrc); }}
             >
               <Copy className="h-3.5 w-3.5" />
               Copy
@@ -144,7 +177,7 @@ export function ImageReveal({ src, alt, prompt }: ImageRevealProps) {
             <button
               type="button"
               className="inline-flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-3 text-sm text-white transition hover:bg-white/20"
-              onClick={(e) => { e.stopPropagation(); void downloadImage(src); }}
+              onClick={(e) => { e.stopPropagation(); void downloadImage(safeSrc); }}
             >
               <Download className="h-3.5 w-3.5" />
               Download
@@ -153,12 +186,13 @@ export function ImageReveal({ src, alt, prompt }: ImageRevealProps) {
               type="button"
               className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
               onClick={() => setExpanded(false)}
+              aria-label="Close image preview"
             >
               <X className="h-5 w-5" />
             </button>
           </div>
           <Image
-            src={src}
+            src={safeSrc}
             alt={alt ?? "Generated image"}
             width={1536}
             height={1536}

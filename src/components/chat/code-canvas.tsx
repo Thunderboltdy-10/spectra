@@ -178,7 +178,7 @@ export function CodeCanvas({
                   title="Artifact preview"
                   sandbox="allow-scripts"
                   srcDoc={previewDoc}
-                  className="h-full w-full rounded-xl border border-[var(--border-default)] bg-white"
+                  className="h-full w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)]"
                 />
               ) : (
                 <div className="flex h-full items-center justify-center rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] text-sm text-[var(--text-secondary)]">

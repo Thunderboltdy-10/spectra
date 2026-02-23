@@ -22,6 +22,29 @@ type PromptSignals = {
   preferredModelCount: number;
 };
 
+type EnhancedAnalytics = {
+  timeSpentDaily: Array<{
+    day: string;
+    timerSeconds: number;
+    estimatedSeconds: number;
+    totalSeconds: number;
+    messages: number;
+  }>;
+  modeMessageCounts: Record<string, number>;
+  quizTrend: Array<{
+    day: string;
+    attempts: number;
+    averageScore: number;
+  }>;
+  productivity: {
+    totalStudySeconds: number;
+    estimatedSessions: number;
+    messagesPerSession: number;
+    topicDepth: number;
+    activeDays: number;
+  };
+};
+
 export async function GET() {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();
@@ -36,6 +59,10 @@ export async function GET() {
       actorClerkId: actor.clerkId,
       days: 30,
     })) as PromptSignals;
+    const enhanced = (await convexQuery("analytics:getStudentEnhancedAnalytics", {
+      actorClerkId: actor.clerkId,
+      days: 30,
+    })) as EnhancedAnalytics;
 
     let classRows: AnalyticsRow[] = [];
     if (isTeacherOrAdmin) {
@@ -49,6 +76,7 @@ export async function GET() {
       role: actor.role,
       student: studentRows,
       studentSignals,
+      enhanced,
       class: classRows,
     });
   });

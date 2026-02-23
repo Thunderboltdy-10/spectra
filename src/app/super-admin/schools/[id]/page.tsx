@@ -8,6 +8,7 @@ import {
   Building2,
   BarChart3,
   BookOpen,
+  Coins,
   MailPlus,
   Settings,
   Trash2,
@@ -49,6 +50,9 @@ type OrgDetail = {
     adaptiveQuizEnabled?: boolean;
     spacedRepetitionEnabled?: boolean;
     allowPaidModels?: boolean;
+    monthlyBudgetCentsPerUser?: number;
+    budgetMarginPercent?: number;
+    maxResourceFileSizeBytes?: number;
     createdAt: number;
     logoUrl?: string;
   };
@@ -108,6 +112,9 @@ function OverviewTab({ data }: { data: OrgDetail }) {
             { label: "Timezone", value: org.timezone ?? "—" },
             { label: "Max Students", value: org.maxStudents?.toLocaleString() ?? "Unlimited" },
             { label: "Daily Token Budget", value: org.tokenBudgetDaily.toLocaleString() },
+            { label: "Monthly/User Budget", value: (org.monthlyBudgetCentsPerUser ?? 900).toLocaleString() },
+            { label: "Budget Margin", value: `${org.budgetMarginPercent ?? 20}%` },
+            { label: "Max Resource File", value: `${Math.round(((org.maxResourceFileSizeBytes ?? (10 * 1024 * 1024)) / (1024 * 1024)) * 10) / 10} MB` },
             { label: "Created", value: formatDate(org.createdAt) },
           ].map((row) => (
             <div key={row.label} className="flex items-baseline gap-2">
@@ -297,7 +304,23 @@ function SettingsTab({ data, orgId, onSaved }: { data: OrgDetail; orgId: string;
   const [adaptiveQuiz, setAdaptiveQuiz] = useState(org.adaptiveQuizEnabled ?? false);
   const [spacedRep, setSpacedRep] = useState(org.spacedRepetitionEnabled ?? false);
   const [allowPaid, setAllowPaid] = useState(org.allowPaidModels ?? false);
+  const [maxResourceFileSizeMb, setMaxResourceFileSizeMb] = useState(
+    String(Math.round(((org.maxResourceFileSizeBytes ?? (10 * 1024 * 1024)) / (1024 * 1024)) * 10) / 10),
+  );
   const [saving, setSaving] = useState(false);
+  const [monthlyBudget, setMonthlyBudget] = useState(String(org.monthlyBudgetCentsPerUser ?? 900));
+  const [budgetMargin, setBudgetMargin] = useState(String(org.budgetMarginPercent ?? 20));
+  const [savingBudget, setSavingBudget] = useState(false);
+
+  const hardLimitCents = Math.max(100, Number.isFinite(Number(monthlyBudget)) ? Math.round(Number(monthlyBudget)) : 900);
+  const marginPercent = Math.min(40, Math.max(5, Number.isFinite(Number(budgetMargin)) ? Number(budgetMargin) : 20));
+  const expensiveBlockedThresholdCents = Math.max(0, Math.floor(hardLimitCents * (1 - marginPercent / 100)));
+  const cheapOnlyThresholdCents = Math.max(0, Math.floor(hardLimitCents * 0.9));
+
+  const normalizedMaxResourceFileSizeMb = Number.isFinite(Number(maxResourceFileSizeMb))
+    ? Math.min(100, Math.max(1, Number(maxResourceFileSizeMb)))
+    : 10;
+  const normalizedMaxResourceFileSizeBytes = Math.round(normalizedMaxResourceFileSizeMb * 1024 * 1024);
 
   async function handleSave() {
     setSaving(true);
@@ -314,6 +337,7 @@ function SettingsTab({ data, orgId, onSaved }: { data: OrgDetail; orgId: string;
           adaptiveQuizEnabled: adaptiveQuiz,
           spacedRepetitionEnabled: spacedRep,
           allowPaidModels: allowPaid,
+          maxResourceFileSizeBytes: normalizedMaxResourceFileSizeBytes,
         }),
       });
       if (!response.ok) throw new Error(await response.text());
@@ -323,6 +347,28 @@ function SettingsTab({ data, orgId, onSaved }: { data: OrgDetail; orgId: string;
       toast.error(error instanceof Error ? error.message : "Failed to save settings");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleSaveBudget() {
+    setSavingBudget(true);
+    try {
+      const response = await fetch(`/api/super-admin/schools/${orgId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "updateBudget",
+          monthlyBudgetCentsPerUser: hardLimitCents,
+          budgetMarginPercent: marginPercent,
+        }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      toast.success("Budget saved");
+      onSaved();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save budget");
+    } finally {
+      setSavingBudget(false);
     }
   }
 
@@ -349,6 +395,76 @@ function SettingsTab({ data, orgId, onSaved }: { data: OrgDetail; orgId: string;
             <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">Daily Token Budget</label>
             <input className={inputClass} type="number" min="1000" value={tokenBudget} onChange={(e) => setTokenBudget(e.target.value)} />
           </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">Max Resource File Size (MB)</label>
+            <input
+              className={inputClass}
+              type="number"
+              min="1"
+              max="100"
+              step="0.5"
+              value={maxResourceFileSizeMb}
+              onChange={(e) => setMaxResourceFileSizeMb(e.target.value)}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-5">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-[var(--text-primary)]">Budget</h3>
+            <p className="text-xs text-[var(--text-secondary)]">
+              Progressive model gates: expensive block at margin threshold, cheap-only at 90%, free-only at 100%.
+            </p>
+          </div>
+          <Coins className="h-4 w-4 text-[var(--text-secondary)]" />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">
+              Monthly budget per user (cents)
+            </label>
+            <input
+              className={inputClass}
+              type="number"
+              min="100"
+              value={monthlyBudget}
+              onChange={(e) => setMonthlyBudget(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">
+              Margin %
+            </label>
+            <input
+              className={inputClass}
+              type="number"
+              min="5"
+              max="40"
+              value={budgetMargin}
+              onChange={(e) => setBudgetMargin(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="mt-4 grid gap-2 sm:grid-cols-3">
+          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
+            <p className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">Expensive block</p>
+            <p className="text-sm font-medium text-[var(--text-primary)]">{expensiveBlockedThresholdCents.toLocaleString()} cents</p>
+          </div>
+          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
+            <p className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">Cheap only</p>
+            <p className="text-sm font-medium text-[var(--text-primary)]">{cheapOnlyThresholdCents.toLocaleString()} cents</p>
+          </div>
+          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
+            <p className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">Hard limit</p>
+            <p className="text-sm font-medium text-[var(--text-primary)]">{hardLimitCents.toLocaleString()} cents</p>
+          </div>
+        </div>
+        <div className="mt-4 flex justify-end">
+          <Button onClick={() => void handleSaveBudget()} disabled={savingBudget} variant="secondary" className="cursor-pointer">
+            {savingBudget ? "Saving..." : "Save Budget"}
+          </Button>
         </div>
       </div>
 

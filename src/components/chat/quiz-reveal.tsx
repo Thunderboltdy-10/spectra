@@ -25,10 +25,12 @@ export type QuizSubmitResult = {
 export type ParsedQuizQuestion = QuizPanelQuestion & {
   number: number;
 };
+type QuizDifficulty = "easy" | "medium" | "hard";
 
 type QuizRevealProps = {
   content: string;
   chatId?: string;
+  difficulty?: QuizDifficulty;
   onSubmitAnswers?: (result: QuizSubmitResult) => void;
   onFollowUp?: (message: string) => void;
   onModeChange?: (mode: string) => void;
@@ -148,7 +150,14 @@ function buildSubmission(questions: ParsedQuizQuestion[], answers: Record<string
   };
 }
 
-export function QuizReveal({ content, chatId, onSubmitAnswers, onFollowUp, onModeChange }: QuizRevealProps) {
+export function QuizReveal({
+  content,
+  chatId,
+  difficulty = "medium",
+  onSubmitAnswers,
+  onFollowUp,
+  onModeChange,
+}: QuizRevealProps) {
   const questions = useMemo(() => parseQuiz(content), [content]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState(false);
@@ -225,7 +234,7 @@ export function QuizReveal({ content, chatId, onSubmitAnswers, onFollowUp, onMod
     } catch { /* ignore */ } finally {
       setLoadingExplanations(false);
     }
-  }, []);
+  }, [chatId]);
 
   useEffect(() => {
     setActiveIndex(0);
@@ -292,6 +301,13 @@ export function QuizReveal({ content, chatId, onSubmitAnswers, onFollowUp, onMod
   const isPerfect = score === questions.length;
   const isGood = scorePct > 0.7;
   const isLow = scorePct > 0.3 && !isGood;
+  const difficultyLabel = difficulty.charAt(0).toUpperCase() + difficulty.slice(1);
+  const difficultyBadgeClass =
+    difficulty === "easy"
+      ? "border-[color-mix(in_oklab,var(--success)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_15%,var(--bg-secondary))] text-[color-mix(in_oklab,var(--success)_85%,var(--text-primary))]"
+      : difficulty === "hard"
+        ? "border-[color-mix(in_oklab,var(--danger)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_12%,var(--bg-secondary))] text-[color-mix(in_oklab,var(--danger)_80%,var(--text-primary))]"
+        : "border-[color-mix(in_oklab,var(--warning)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_15%,var(--bg-secondary))] text-[color-mix(in_oklab,var(--warning)_85%,var(--text-primary))]";
   // else: very low / zero
 
   if (longQuiz) {
@@ -299,9 +315,14 @@ export function QuizReveal({ content, chatId, onSubmitAnswers, onFollowUp, onMod
       <>
         <div className="space-y-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
           <div className="flex items-center justify-between gap-2">
-            <span className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] bg-[var(--mode-quiz)] px-2.5 py-1 text-xs font-medium text-white">
-              Quiz - {questions.length} questions
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] bg-[var(--mode-quiz)] px-2.5 py-1 text-xs font-medium text-white">
+                Quiz - {questions.length} questions
+              </span>
+              <span className={`inline-flex items-center rounded-[var(--radius-pill)] border px-2.5 py-1 text-xs font-medium ${difficultyBadgeClass}`}>
+                Difficulty: {difficultyLabel}
+              </span>
+            </div>
             {submitted ? (
               <span className="text-sm font-medium text-[var(--text-primary)]">
                 {score}/{questions.length}
@@ -343,6 +364,9 @@ export function QuizReveal({ content, chatId, onSubmitAnswers, onFollowUp, onMod
       <div className="flex items-center gap-2">
         <span className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] bg-[var(--mode-quiz)] px-2.5 py-1 text-xs font-medium text-white">
           Quiz - {questions.length} questions
+        </span>
+        <span className={`inline-flex items-center rounded-[var(--radius-pill)] border px-2.5 py-1 text-xs font-medium ${difficultyBadgeClass}`}>
+          Difficulty: {difficultyLabel}
         </span>
         {submitted ? (
           <span className="text-sm font-medium">

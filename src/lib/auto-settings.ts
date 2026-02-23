@@ -221,6 +221,18 @@ function classifyPromptCategory(
   return "general";
 }
 
+function isLowSignalChitChat(message: string) {
+  const trimmed = message.trim();
+  if (!trimmed) return true;
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (words.length > 4) return false;
+  const normalized = trimmed.toLowerCase().replace(/[!?.\s]+/g, " ").trim();
+  if (!normalized) return true;
+  return /^(hi|hello|hey|yo|sup|thanks|thank you|ok|okay|cool|nice|gm|gn|good morning|good afternoon|good evening)$/.test(
+    normalized,
+  );
+}
+
 export type ConversationHistoryEntry = {
   role: string;
   content: string;
@@ -468,6 +480,7 @@ export async function runAutoSettingsPipeline(input: AutoSettingsInput): Promise
 
   let message = input.message;
   let promptEnhanced = false;
+  const allowAutoEnhancement = !isLowSignalChitChat(input.message);
 
   const forceLocalEnhancement = (raw: string) => {
     const clean = raw.trim();
@@ -482,7 +495,7 @@ export async function runAutoSettingsPipeline(input: AutoSettingsInput): Promise
     ].join("\n");
   };
 
-  if (input.autoEnhancePrompt && enhanceMode !== "off" && !input.skipModelCalls) {
+  if (input.autoEnhancePrompt && enhanceMode !== "off" && !input.skipModelCalls && (enhanceMode === "on" || allowAutoEnhancement)) {
     const enhanced = await maybeEnhancePrompt(input.message);
     if (enhanced.prompt.trim() && enhanced.prompt.trim() !== input.message.trim()) {
       message = enhanced.prompt.trim();

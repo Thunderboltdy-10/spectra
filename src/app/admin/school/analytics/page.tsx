@@ -101,15 +101,16 @@ function DonutChart({ slices }: { slices: DonutSlice[] }) {
   const cy = 90;
   const circumference = 2 * Math.PI * radius;
 
-  let offset = 0;
-  const segments = slices.map((slice) => {
-    const pct = slice.count / total;
-    const dash = pct * circumference;
-    const gap = circumference - dash;
-    const seg = { ...slice, dash, gap, offset, pct };
-    offset += dash;
-    return seg;
-  });
+  const segments = slices.reduce<Array<DonutSlice & { dash: number; gap: number; offset: number; pct: number }>>(
+    (acc, slice) => {
+      const pct = slice.count / total;
+      const dash = pct * circumference;
+      const gap = circumference - dash;
+      const offset = acc.length > 0 ? acc[acc.length - 1]!.offset + acc[acc.length - 1]!.dash : 0;
+      return [...acc, { ...slice, dash, gap, offset, pct }];
+    },
+    [],
+  );
 
   return (
     <div className="flex flex-col items-center gap-6 lg:flex-row lg:items-start">
@@ -322,23 +323,31 @@ export default function SchoolAnalyticsPage() {
 }
 
 // ---- Heatmap Placeholder ----
+function seededUnitFloat(seed: string) {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash << 5) - hash + seed.charCodeAt(i);
+    hash |= 0;
+  }
+  const x = Math.sin(hash * 12.9898) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+function sampleHeatActivity(day: string, hour: number) {
+  const isWeekday = !["Sat", "Sun"].includes(day);
+  const isPrime = hour >= 9 && hour <= 16;
+  const baseline = isWeekday && isPrime ? 0.2 : 0;
+  const amplitude = isWeekday && isPrime ? 0.8 : 0.25;
+  return baseline + seededUnitFloat(`${day}-${hour}`) * amplitude;
+}
+
 function HeatmapPlaceholder() {
   const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
-  // Simulate some data for visual purposes
-  const activity: Record<string, number> = {};
-  for (const day of DAYS) {
-    for (const h of HOURS) {
-      // Higher activity on weekday mornings/afternoons
-      const isWeekday = !["Sat", "Sun"].includes(day);
-      const isPrime = h >= 9 && h <= 16;
-      const raw = isWeekday && isPrime
-        ? Math.random() * 0.8 + 0.2
-        : Math.random() * 0.25;
-      activity[`${day}-${h}`] = raw;
-    }
-  }
+  const activity = Object.fromEntries(
+    DAYS.flatMap((day) => HOURS.map((h) => [`${day}-${h}`, sampleHeatActivity(day, h)])),
+  ) as Record<string, number>;
 
   return (
     <div className="overflow-x-auto">

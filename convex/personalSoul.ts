@@ -39,7 +39,8 @@ export const savePreferences = mutation({
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
     if (!actor) throw new Error("Unauthorized");
 
-    const { actorClerkId: _id, ...fields } = args;
+    const { actorClerkId, ...fields } = args;
+    void actorClerkId;
     const now = Date.now();
 
     const existing = await ctx.db

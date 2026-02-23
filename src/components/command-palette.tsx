@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
   KBarAnimator,
@@ -9,6 +9,7 @@ import {
   KBarProvider,
   KBarResults,
   KBarSearch,
+  useKBar,
   useMatches,
 } from "kbar";
 import { ALL_MODES, getModeConfig } from "@/lib/modes";
@@ -68,6 +69,37 @@ function CommandResults() {
       }
     />
   );
+}
+
+function CommandPaletteHotkeys() {
+  const { query, visualState } = useKBar((state) => ({
+    visualState: state.visualState,
+  }));
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const isModK = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k";
+      if (isModK) {
+        event.preventDefault();
+        event.stopPropagation();
+        query.toggle();
+        return;
+      }
+
+      if (
+        event.key === "Escape" &&
+        (visualState === "showing" || visualState === "animating-in")
+      ) {
+        event.preventDefault();
+        query.toggle();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [query, visualState]);
+
+  return null;
 }
 
 export function CommandPaletteProvider({ children }: { children: React.ReactNode }) {
@@ -157,13 +189,19 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
   );
 
   return (
-    <KBarProvider actions={actions}>
+    <KBarProvider
+      actions={actions}
+      options={{
+        toggleShortcut: "$mod+shift+k",
+      }}
+    >
       {children}
+      <CommandPaletteHotkeys />
       <KBarPortal>
         <KBarPositioner className="z-[100] bg-[var(--bg-overlay)] backdrop-blur-sm">
           <KBarAnimator className="w-full max-w-xl rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-soft)]">
             <KBarSearch className="h-11 w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)]" />
-            <div className="mt-2 max-h-[420px] overflow-y-auto">
+            <div className="mt-2 max-h-[400px] overflow-y-auto overscroll-contain">
               <CommandResults />
             </div>
           </KBarAnimator>

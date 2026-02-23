@@ -3,6 +3,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { Manrope, IBM_Plex_Mono, Fraunces } from "next/font/google";
 import "katex/dist/katex.min.css";
 import "./globals.css";
+import { FeedbackWidgetHost } from "@/components/feedback-widget-host";
 import { Providers } from "@/components/providers";
 
 const manrope = Manrope({
@@ -33,7 +34,9 @@ const themeInitScript = `
 (function () {
   try {
     var key = 'ai-school-theme';
+    var contrastKey = 'ai-school-high-contrast';
     var persisted = window.localStorage.getItem(key);
+    var contrast = window.localStorage.getItem(contrastKey) === '1';
     var theme = persisted === 'dark' || persisted === 'light'
       ? persisted
       : 'light';
@@ -42,8 +45,14 @@ const themeInitScript = `
     } else {
       document.documentElement.classList.remove('dark');
     }
+    if (contrast) {
+      document.documentElement.classList.add('high-contrast');
+    } else {
+      document.documentElement.classList.remove('high-contrast');
+    }
   } catch (e) {
     document.documentElement.classList.remove('dark');
+    document.documentElement.classList.remove('high-contrast');
   }
 })();`;
 
@@ -57,7 +66,16 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className={`${manrope.variable} ${fraunces.variable} ${plexMono.variable} antialiased`}>
-        <Providers>{children}</Providers>
+        <a
+          href="#main-content"
+          className="skip-link sr-only focus:not-sr-only"
+        >
+          Skip to content
+        </a>
+        <div id="main-content" tabIndex={-1}>
+          <Providers>{children}</Providers>
+        </div>
+        <FeedbackWidgetHost />
       </body>
     </html>
   );

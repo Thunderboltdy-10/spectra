@@ -1,8 +1,22 @@
-import { mutation, query, action } from "./_generated/server";
+import { mutation, query, action, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
+import type { GenericActionCtx } from "convex/server";
 import { getUserByClerkId } from "./helpers";
-import { Id } from "./_generated/dataModel";
+import type { DataModel, Id } from "./_generated/dataModel";
 import { api } from "./_generated/api";
+
+async function ensureActorExists(
+  ctx: Pick<GenericActionCtx<DataModel>, "runQuery">,
+  actorClerkId: string,
+) {
+  const actor = await ctx.runQuery(api.users.me, {
+    clerkId: actorClerkId,
+  });
+  if (!actor) {
+    throw new Error("Unauthorized");
+  }
+  return actor;
+}
 
 /**
  * Action to decode base64 image data, store it as a blob in Convex _storage,
@@ -15,6 +29,8 @@ export const storeImageFromBase64 = action({
     mimeType: v.string(),
   },
   handler: async (ctx, args): Promise<{ storageId: Id<"_storage">; servingUrl: string }> => {
+    await ensureActorExists(ctx, args.actorClerkId);
+
     // Strip data URL prefix if present (e.g. "data:image/png;base64,")
     const base64Clean = args.base64Data.replace(/^data:[^;]+;base64,/, "");
 
@@ -94,6 +110,8 @@ export const storeImageBlob = action({
     size: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<{ imageId: Id<"generatedImages">; servingUrl: string; thumbnailUrl: string }> => {
+    await ensureActorExists(ctx, args.actorClerkId);
+
     // Decode base64 to Uint8Array
     const base64Clean = args.base64Data.replace(/^data:image\/\w+;base64,/, "");
     const binaryString = atob(base64Clean);
@@ -144,7 +162,7 @@ export const saveGeneratedImage = mutation({
     imageUrl: v.string(),
     model: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
+  handler: async () => {
     // This is a legacy endpoint - new code should use the API route
     // that calls storeImageBlob action directly
     // For now, return a placeholder
@@ -259,39 +277,54 @@ export const deleteGeneratedImage = mutation({
  * Cleanup expired images (unpinned images older than retention period)
  * Run this via scheduler daily
  */
-export const cleanupExpiredImages = mutation({
+export const cleanupExpiredImages = internalMutation({
   args: {},
   handler: async (ctx) => {
     const now = Date.now();
-
-    // Find expired unpinned images (batch of 50)
-    const expired = await ctx.db
-      .query("generatedImages")
-      .withIndex("by_expires", (q) => q.lt("expiresAt", now))
-      .filter((q) =>
-        q.or(q.eq(q.field("pinned"), false), q.eq(q.field("pinned"), undefined))
-      )
-      .take(50);
-
     let deletedCount = 0;
-    for (const image of expired) {
-      try {
-        // Delete from storage (storageId may be absent on legacy documents)
-        if (image.storageId) {
-          await ctx.storage.delete(image.storageId);
-          if (image.thumbnailStorageId && image.thumbnailStorageId !== image.storageId) {
-            await ctx.storage.delete(image.thumbnailStorageId);
+    let batchCount = 0;
+    const batchSize = 50;
+    const maxBatches = 20;
+
+    while (batchCount < maxBatches) {
+      const expired = await ctx.db
+        .query("generatedImages")
+        .withIndex("by_expires", (q) => q.lt("expiresAt", now))
+        .filter((q) =>
+          q.or(q.eq(q.field("pinned"), false), q.eq(q.field("pinned"), undefined))
+        )
+        .take(batchSize);
+
+      if (expired.length === 0) {
+        break;
+      }
+
+      batchCount += 1;
+      for (const image of expired) {
+        try {
+          if (image.storageId) {
+            await ctx.storage.delete(image.storageId);
+            if (image.thumbnailStorageId && image.thumbnailStorageId !== image.storageId) {
+              await ctx.storage.delete(image.thumbnailStorageId);
+            }
           }
+          await ctx.db.delete(image._id);
+          deletedCount++;
+        } catch {
+          // Continue with next on error
         }
-        // Delete record
-        await ctx.db.delete(image._id);
-        deletedCount++;
-      } catch {
-        // Continue with next on error
+      }
+
+      if (expired.length < batchSize) {
+        break;
       }
     }
 
-    return { deletedCount, hasMore: expired.length === 50 };
+    return {
+      deletedCount,
+      batchCount,
+      hasMore: batchCount >= maxBatches,
+    };
   },
 });
 

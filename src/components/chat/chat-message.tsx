@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Image from "next/image";
-import { Code2, Copy, FileText, GitBranch, Globe, Info, Paperclip, Pencil, RefreshCw, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Bookmark, BookmarkCheck, Code2, Copy, FileText, GitBranch, Globe, Info, Paperclip, Pencil, RefreshCw, ThumbsDown, ThumbsUp } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
@@ -46,17 +46,66 @@ type ChatMessageProps = {
   onOpenCanvas?: (params: { code: string; language: string }) => void;
   onSubmitQuizAnswers?: (result: QuizSubmitResult) => void;
   onBranch?: () => void;
+  onToggleBookmark?: () => void;
+  isBookmarked?: boolean;
+  bookmarking?: boolean;
   children?: React.ReactNode;
 };
 
+function sanitizeNavigationHref(value: string | undefined) {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.startsWith("/")) return trimmed;
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return trimmed;
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+}
+
 function CitationCards({ citations, onOpen }: { citations: Citation[]; onOpen: () => void }) {
   if (citations.length === 0) return null;
+  const ragFiles = Array.from(
+    new Set(
+      citations
+        .filter((citation) => citation.sourceType === "pack" || citation.sourceType === "personal")
+        .map((citation) => citation.filename)
+        .filter(Boolean),
+    ),
+  ).slice(0, 5);
 
   return (
-    <div className="mt-3 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+    <section className="mt-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2.5">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Sources</p>
+        <button
+          type="button"
+          onClick={onOpen}
+          className="cursor-pointer rounded-full border border-[var(--border-default)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+        >
+          Open all
+        </button>
+      </div>
+      {ragFiles.length > 0 ? (
+        <p className="mb-2 text-[11px] text-[var(--text-secondary)]">
+          Files used: {ragFiles.join(", ")}
+        </p>
+      ) : null}
+      <div className="flex flex-wrap gap-1.5">
       {citations.map((citation, idx) => {
         const isSearch = citation.sourceType === "search";
-        const href = citation.url ?? (citation.resourceId ? `/api/resources/${citation.resourceId}/download` : undefined);
+        const href = sanitizeNavigationHref(
+          citation.url ?? (citation.resourceId ? `/api/resources/${citation.resourceId}/download` : undefined),
+        );
+        const label = citation.title || citation.filename || citation.domain || citation.url || "Source";
+        const domain = citation.domain;
         return (
           <a
             key={`${citation.filename}-${idx}`}
@@ -69,7 +118,7 @@ function CitationCards({ citations, onOpen }: { citations: Citation[]; onOpen: (
             }}
             target={href ? "_blank" : undefined}
             rel={href ? "noreferrer" : undefined}
-            className={`cursor-pointer rounded-md border px-2 py-1.5 text-left text-[11px] transition hover:bg-[var(--bg-hover)] ${
+            className={`cursor-pointer rounded-full border px-2.5 py-1 text-left text-[11px] transition hover:bg-[var(--bg-hover)] ${
               isSearch
                 ? "border-[color-mix(in_oklab,var(--accent-cyan)_38%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_10%,transparent)]"
                 : "border-[var(--border-default)] bg-[var(--bg-secondary)]"
@@ -79,11 +128,13 @@ function CitationCards({ citations, onOpen }: { citations: Citation[]; onOpen: (
               {isSearch ? <Globe className="h-2.5 w-2.5" /> : <Code2 className="h-2.5 w-2.5" />}
               <span className="uppercase tracking-[0.06em]">[{idx + 1}]</span>
             </div>
-            <p className="truncate font-medium text-[var(--text-primary)]">{citation.filename}</p>
+            <p className="truncate font-medium text-[var(--text-primary)]">{label}</p>
+            {isSearch && domain ? <p className="truncate text-[10px] text-[var(--text-secondary)]">{domain}</p> : null}
           </a>
         );
       })}
-    </div>
+      </div>
+    </section>
   );
 }
 
@@ -111,6 +162,9 @@ export function ChatMessage({
   onOpenCanvas,
   onSubmitQuizAnswers,
   onBranch,
+  onToggleBookmark,
+  isBookmarked = false,
+  bookmarking = false,
   children,
 }: ChatMessageProps) {
   const isUser = role === "user";
@@ -165,7 +219,10 @@ export function ChatMessage({
   }
 
   return (
-    <article className={cn("chat-fade-in flex", isUser ? "justify-end" : "justify-start")}>
+    <article
+      className={cn("chat-fade-in flex", isUser ? "justify-end" : "justify-start")}
+      aria-label={isUser ? "Your message" : "Assistant response"}
+    >
       <div className={cn("w-full", isUser ? "max-w-3xl" : "max-w-5xl")}>
         {isUser ? (
           <div className="ml-auto rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3 shadow-[var(--shadow-soft)]">
@@ -286,7 +343,7 @@ export function ChatMessage({
             ) : null}
           </div>
         ) : (
-          <div className="flex min-w-0 items-start gap-3 border-t border-[var(--border-default)] pt-4">
+          <div className="message-journal flex min-w-0 items-start gap-3 rounded-2xl border border-[color-mix(in_oklab,var(--border-default)_86%,var(--accent-orange)_14%)] px-4 py-4 shadow-[var(--shadow-soft)]">
             <ProviderLogo
               provider={activeProvider}
               modelId={activeModelId}
@@ -326,22 +383,14 @@ export function ChatMessage({
                           target="_blank"
                           rel="noreferrer"
                           className="cursor-pointer rounded-full border border-[var(--border-default)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                          title={citation.domain ?? citation.filename}
                         >
-                          [{index + 1}] {citation.filename}
+                          [{index + 1}] {citation.title || citation.filename}
                         </a>
                       );
                     })}
                   </div>
                 </div>
-              )}
-              {validCitations.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => openPanel("sources", { sources: validCitations })}
-                  className="mt-4 cursor-pointer rounded-full border border-[var(--border-default)] px-2.5 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
-                >
-                  View sources ({validCitations.length})
-                </button>
               )}
               {validCitations.length > 0 && <CitationCards citations={validCitations} onOpen={() => openPanel("sources", { sources: validCitations })} />}
 
@@ -356,6 +405,31 @@ export function ChatMessage({
                   <Copy className="h-3.5 w-3.5" />
                   Copy
                 </Button>
+                {onBranch ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 cursor-pointer gap-1.5 text-xs"
+                    onClick={onBranch}
+                  >
+                    <GitBranch className="h-3.5 w-3.5" />
+                    Branch
+                  </Button>
+                ) : null}
+                {onToggleBookmark ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 cursor-pointer gap-1.5 text-xs"
+                    onClick={onToggleBookmark}
+                    disabled={bookmarking}
+                  >
+                    {isBookmarked ? <BookmarkCheck className="h-3.5 w-3.5" /> : <Bookmark className="h-3.5 w-3.5" />}
+                    {bookmarking ? "Saving..." : isBookmarked ? "Saved" : "Save"}
+                  </Button>
+                ) : null}
                 {isLastAssistant && onRegenerate && (
                   <>
                     <Button

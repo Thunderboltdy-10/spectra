@@ -73,7 +73,8 @@ describe("normalizeAttachments", () => {
   it("normalizes image and document resources", async () => {
     const imageBytes = Buffer.from([137, 80, 78, 71]).buffer;
 
-    const convexQuery = vi.fn(async (name: string) => {
+    const convexQuery = (vi.fn(async (name: string, args: Record<string, unknown>) => {
+      void args;
       if (name === "resources:getResourcesByIds") {
         return [
           {
@@ -101,7 +102,7 @@ describe("normalizeAttachments", () => {
       }
 
       throw new Error(`Unexpected query ${name}`);
-    });
+    }) as unknown) as <T>(name: string, args: Record<string, unknown>) => Promise<T>;
 
     vi.stubGlobal(
       "fetch",

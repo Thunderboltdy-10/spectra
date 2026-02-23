@@ -26,7 +26,7 @@ export default function NewAgentPage() {
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-[var(--text-primary)]">Create a new agent</h1>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            Answer a few questions and we'll generate a fully configured AI tutor for your students.
+            Answer a few questions and we&apos;ll generate a fully configured AI tutor for your students.
           </p>
         </div>
 

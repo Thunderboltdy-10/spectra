@@ -92,6 +92,21 @@ export const vCitation = v.object({
 /** Route trace JSON blob validator */
 export const vRouteTrace = v.optional(v.any());
 
+/** Convex v.union validator for feedback category */
+export const vFeedbackCategory = v.union(
+  v.literal("bug"),
+  v.literal("confusing"),
+  v.literal("feature"),
+  v.literal("safety"),
+);
+
+/** Convex v.union validator for feedback status */
+export const vFeedbackStatus = v.union(
+  v.literal("new"),
+  v.literal("in_progress"),
+  v.literal("shipped"),
+);
+
 /** Safely coerce to StudyMode, defaulting to "general" */
 export function safeStudyMode(value: string): StudyMode {
   const set = new Set<string>(STUDY_MODES);

@@ -79,6 +79,37 @@ export function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<
   });
 }
 
+function compactText(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function fallbackCompactSummary(history: ChatMessage[]) {
+  const compacted = history.slice(-14);
+  const userLines = compacted
+    .filter((message) => message.role === "user")
+    .map((message) => compactText(message.content).slice(0, 160))
+    .filter(Boolean);
+  const assistantLines = compacted
+    .filter((message) => message.role === "assistant")
+    .map((message) => compactText(message.content).slice(0, 160))
+    .filter(Boolean);
+
+  const lines = [
+    "Goals",
+    ...userLines.slice(0, 3).map((line) => `- ${line}`),
+    "Attempts",
+    ...userLines.slice(3, 6).map((line) => `- ${line}`),
+    "Key Guidance",
+    ...assistantLines.slice(0, 4).map((line) => `- ${line}`),
+    "Outstanding Questions",
+    userLines.length > 0 ? `- ${userLines[userLines.length - 1]}` : "- None captured.",
+    "Next Steps",
+    "- Continue from latest chat turns and verify against rubric/resources.",
+  ];
+
+  return lines.join("\n").slice(0, 2000);
+}
+
 export async function maybeCompactHistory(params: {
   actorClerkId: string;
   chatId: string;
@@ -86,9 +117,9 @@ export async function maybeCompactHistory(params: {
 }) {
   if (params.history.length <= 20) return;
 
-  const source = params.history
-    .slice(0, Math.max(0, params.history.length - 6))
-    .map((message) => `${message.role.toUpperCase()}: ${message.content.slice(0, 380)}`)
+  const olderHistory = params.history.slice(0, Math.max(0, params.history.length - 6));
+  const source = olderHistory
+    .map((message) => `${message.role.toUpperCase()} [${message.mode}]: ${compactText(message.content).slice(0, 300)}`)
     .join("\n\n")
     .slice(0, 12000);
 
@@ -100,7 +131,7 @@ export async function maybeCompactHistory(params: {
         {
           role: "system",
           content:
-            "Summarize this conversation for future context compaction. Keep key goals, constraints, misconceptions, and progress in <180 words.",
+            "Summarize this study conversation for memory compaction. Output plain text with headings: Goals, Attempts, Key Guidance, Outstanding Questions, Next Steps. Use concise bullet points and keep total length between 120 and 220 words.",
         },
         {
           role: "user",
@@ -112,7 +143,7 @@ export async function maybeCompactHistory(params: {
     5000,
   );
 
-  const summary = completion?.choices?.[0]?.message?.content?.trim();
+  const summary = completion?.choices?.[0]?.message?.content?.trim() ?? fallbackCompactSummary(olderHistory);
   if (!summary) return;
 
   await convexMutation("chats:setContextSummary", {

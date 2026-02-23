@@ -3,20 +3,25 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useClerk, useUser } from "@clerk/nextjs";
 import { formatDistanceToNow } from "date-fns";
 import {
   BarChart3,
+  Bookmark,
   BookOpen,
   Bot,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Compass,
   FileText,
+  Flame,
   ImagePlus,
   LayoutDashboard,
   Loader2,
+  MessageSquare,
+  MoreHorizontal,
   Pencil,
   Pin,
   Plus,
@@ -25,7 +30,9 @@ import {
   Settings2,
   Shield,
   Sparkles,
+  Star,
   Trash2,
+  Trophy,
   UserRound,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -113,6 +120,7 @@ function initials(name: string) {
 function spendingTierLabel(tier?: UserSpending["tier"]) {
   if (tier === "free_only") return "Budget only";
   if (tier === "cheap_only") return "Cheap only";
+  if (tier === "expensive_blocked") return "Guarded";
   return "Normal";
 }
 
@@ -155,30 +163,121 @@ export function ChatSidebar({
   const { signOut, openUserProfile } = useClerk();
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
+  const [showMoreNav, setShowMoreNav] = useState(false);
+  const [visibleChatCount, setVisibleChatCount] = useState(5);
+  const [gamification, setGamification] = useState<{
+    currentStreak: number;
+    totalXp: number;
+    longestStreak: number;
+    lastActiveDate: string | null;
+  }>({
+    currentStreak: 0,
+    totalXp: 0,
+    longestStreak: 0,
+    lastActiveDate: null,
+  });
   const pinnedSet = pinnedChatIds ?? EMPTY_PINNED_IDS;
 
-  const pinned = useMemo(() => chats.filter((chat) => pinnedSet.has(chat._id)), [chats, pinnedSet]);
-  const grouped = useMemo(
-    () => groupChats(chats.filter((chat) => !pinnedSet.has(chat._id))),
-    [chats, pinnedSet],
-  );
   const spentCents = userSpending?.totalCostCents ?? 0;
-  const spendRatio = Math.min(spentCents / MONTHLY_HARD_LIMIT_CENTS, 1);
+  const hardLimitCents = Math.max(1, userSpending?.hardLimitCents ?? MONTHLY_HARD_LIMIT_CENTS);
+  const spendRatio = Math.min(spentCents / hardLimitCents, 1);
+  const usagePercent = Math.max(0, Math.min(100, Math.round(spendRatio * 100)));
   const spendingTier = spendingTierLabel(userSpending?.tier);
   const canAccessSchoolAdmin = role === "admin" && !isSuperAdmin;
   const canAccessAdminConsole = role === "admin" && !isSuperAdmin;
 
-  const navItems = [
+  const primaryNavItems = [
     { href: "/", label: "Chat", icon: Sparkles },
     { href: "/flashcards", label: "Flashcards", icon: BookOpen },
+    { href: "/bookmarks", label: "Bookmarks", icon: Bookmark },
+    { href: "/achievements", label: "Achievements", icon: Trophy },
     { href: "/agents", label: "Agents", icon: Bot },
+  ];
+  const secondaryNavItems = [
     { href: "/models", label: "Models", icon: Compass },
     { href: "/images", label: "Images", icon: ImagePlus },
     { href: "/analytics", label: "Analytics", icon: BarChart3 },
     ...(canAccessAdminConsole ? [{ href: "/admin", label: "Admin", icon: LayoutDashboard }] : []),
     ...(canAccessSchoolAdmin ? [{ href: "/admin/school", label: "School Admin", icon: School }] : []),
-    ...(isSuperAdmin ? [{ href: "/super-admin", label: "Super Admin", icon: Shield }] : []),
+    ...(isSuperAdmin
+      ? [
+          { href: "/super-admin", label: "Super Admin", icon: Shield },
+          { href: "/super-admin/feedback", label: "Feedback", icon: MessageSquare },
+        ]
+      : []),
   ];
+  const secondaryActive = secondaryNavItems.some((item) => isNavActive(pathname, item.href));
+
+  useEffect(() => {
+    if (secondaryActive) {
+      setShowMoreNav(true);
+    }
+  }, [secondaryActive]);
+
+  useEffect(() => {
+    setVisibleChatCount(5);
+  }, [search]);
+
+  const refreshGamification = useCallback(async () => {
+    try {
+      const response = await fetch("/api/gamification");
+      if (!response.ok) return;
+      const payload = (await response.json()) as {
+        currentStreak: number;
+        totalXp: number;
+        longestStreak: number;
+        lastActiveDate: string | null;
+      };
+      setGamification({
+        currentStreak: payload.currentStreak ?? 0,
+        totalXp: payload.totalXp ?? 0,
+        longestStreak: payload.longestStreak ?? 0,
+        lastActiveDate: payload.lastActiveDate ?? null,
+      });
+    } catch {
+      // Ignore transient gamification fetch failures.
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshGamification();
+
+    const handleRefresh = () => {
+      void refreshGamification();
+    };
+
+    window.addEventListener("ai-school:refresh-gamification", handleRefresh);
+    return () => window.removeEventListener("ai-school:refresh-gamification", handleRefresh);
+  }, [refreshGamification]);
+
+  const pinned = useMemo(() => chats.filter((chat) => pinnedSet.has(chat._id)), [chats, pinnedSet]);
+  const nonPinnedChats = useMemo(() => chats.filter((chat) => !pinnedSet.has(chat._id)), [chats, pinnedSet]);
+  const selectedNonPinnedIndex = useMemo(
+    () => nonPinnedChats.findIndex((chat) => chat._id === selectedChatId),
+    [nonPinnedChats, selectedChatId],
+  );
+  const effectiveVisibleCount = selectedNonPinnedIndex >= 0
+    ? Math.max(visibleChatCount, selectedNonPinnedIndex + 1)
+    : visibleChatCount;
+  const grouped = useMemo(() => groupChats(nonPinnedChats), [nonPinnedChats]);
+  const visibleGrouped = useMemo(() => {
+    let remaining = effectiveVisibleCount;
+    const limited: GroupedChats[] = [];
+    for (const group of grouped) {
+      if (remaining <= 0) break;
+      const chatsForGroup = group.chats.slice(0, remaining);
+      if (chatsForGroup.length > 0) {
+        limited.push({
+          heading: group.heading,
+          chats: chatsForGroup,
+        });
+        remaining -= chatsForGroup.length;
+      }
+    }
+    return limited;
+  }, [effectiveVisibleCount, grouped]);
+  const totalUnpinnedChats = nonPinnedChats.length;
+  const hasMoreChats = effectiveVisibleCount < totalUnpinnedChats;
 
   if (collapsed) {
     return (
@@ -197,7 +296,7 @@ export function ChatSidebar({
         </div>
 
         <div className="flex flex-col gap-1">
-          {navItems.map((item) => {
+          {primaryNavItems.map((item) => {
             const Icon = item.icon;
             const active = isNavActive(pathname, item.href);
             return (
@@ -215,9 +314,54 @@ export function ChatSidebar({
               </Link>
             );
           })}
+          {secondaryNavItems.length > 0 ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowMoreNav((prev) => !prev)}
+                className={`inline-flex h-9 w-9 items-center justify-center rounded-lg transition ${
+                  secondaryActive || showMoreNav
+                    ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]"
+                    : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                }`}
+                aria-label="Toggle more navigation"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+              {(showMoreNav || secondaryActive) &&
+                secondaryNavItems.map((item) => {
+                  const Icon = item.icon;
+                  const active = isNavActive(pathname, item.href);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      title={item.label}
+                      className={`inline-flex h-9 w-9 items-center justify-center rounded-lg transition ${
+                        active
+                          ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]"
+                          : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                    </Link>
+                  );
+                })}
+            </>
+          ) : null}
         </div>
 
         <div className="mt-auto flex flex-col items-center gap-2">
+          <div className="mb-1 flex flex-col items-center gap-1 text-[10px] text-[var(--text-secondary)]">
+            <span className="inline-flex items-center gap-1" title="Current streak">
+              <Flame className="h-3 w-3 text-[var(--accent-coral)]" />
+              {gamification.currentStreak}
+            </span>
+            <span className="inline-flex items-center gap-1" title="Total XP">
+              <Star className="h-3 w-3 text-[var(--warning)]" />
+              {gamification.totalXp}
+            </span>
+          </div>
           <Button type="button" variant="secondary" size="icon" onClick={onNewChat} aria-label="New chat">
             <Plus className="h-4 w-4" />
           </Button>
@@ -236,7 +380,7 @@ export function ChatSidebar({
             alt={orgName ?? "Org"}
             width={32}
             height={32}
-            className="h-8 w-8 rounded-xl border border-[var(--border-default)] bg-white/70 object-cover shadow-[var(--shadow-soft)]"
+            className="h-8 w-8 rounded-xl border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_82%,transparent)] object-cover shadow-[var(--shadow-soft)]"
           />
         ) : (
           <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--gradient-brand)] text-white shadow-[var(--shadow-soft)]">
@@ -253,7 +397,7 @@ export function ChatSidebar({
       </div>
 
       <div className="mb-3 space-y-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5">
-                {navItems.map((item) => {
+        {primaryNavItems.map((item) => {
           const Icon = item.icon;
           const active = isNavActive(pathname, item.href);
           return (
@@ -275,6 +419,45 @@ export function ChatSidebar({
             </Link>
           );
         })}
+        {secondaryNavItems.length > 0 ? (
+          <>
+            <button
+              type="button"
+              onClick={() => setShowMoreNav((prev) => !prev)}
+              className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-sm transition ${
+                secondaryActive || showMoreNav
+                  ? "bg-[var(--bg-primary)] text-[var(--text-primary)]"
+                  : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+              }`}
+            >
+              <span className="inline-flex items-center gap-2">
+                <MoreHorizontal className="h-4 w-4" />
+                More
+              </span>
+              <ChevronDown className={`h-4 w-4 transition ${showMoreNav || secondaryActive ? "rotate-180" : ""}`} />
+            </button>
+            {(showMoreNav || secondaryActive) &&
+              secondaryNavItems.map((item) => {
+                const Icon = item.icon;
+                const active = isNavActive(pathname, item.href);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    title={item.label}
+                    className={`ml-2 flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition ${
+                      active
+                        ? "bg-[var(--bg-primary)] text-[var(--text-primary)]"
+                        : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                    }`}
+                  >
+                    <Icon className="h-4 w-4" />
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              })}
+          </>
+        ) : null}
       </div>
 
       <Button className="mb-3 w-full justify-start gap-2 rounded-xl" onClick={onNewChat}>
@@ -283,13 +466,13 @@ export function ChatSidebar({
       </Button>
 
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-        <div className="mb-3 relative">
-          <Search className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 text-[var(--text-secondary)]" />
+        <div className="mb-2 relative">
+          <Search className="pointer-events-none absolute left-2.5 top-2 h-3.5 w-3.5 text-[var(--text-secondary)]" />
           <input
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search chats"
-            className="h-9 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] pl-9 pr-3 text-sm outline-none transition focus:ring-2 focus:ring-[var(--accent-cyan)]"
+            className="h-8 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] pl-8 pr-2.5 text-xs outline-none transition focus:ring-2 focus:ring-[var(--accent-cyan)]"
           />
         </div>
 
@@ -339,7 +522,7 @@ export function ChatSidebar({
           </p>
         )}
         <div className="space-y-4">
-          {grouped.map((group) => (
+          {visibleGrouped.map((group) => (
             <div key={group.heading}>
               <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--text-secondary)]">
                 {group.heading}
@@ -358,7 +541,7 @@ export function ChatSidebar({
                       <button
                         type="button"
                         onClick={() => onSelectChat(chat._id)}
-                        className={`w-full rounded-xl border px-3 py-2 text-left transition ${
+                        className={`w-full rounded-xl border px-2.5 py-1.5 text-left transition ${
                           active
                             ? "border-[color-mix(in_oklab,var(--accent-cyan)_35%,var(--border-default))] bg-[var(--bg-primary)]"
                             : "border-transparent hover:border-[var(--border-default)] hover:bg-[var(--bg-primary)]"
@@ -391,10 +574,10 @@ export function ChatSidebar({
                                   style={{ background: chatModeConfig.color }}
                                 />
                               )}
-                              <p className="truncate text-sm font-medium">{promptPreview}</p>
+                              <p className="truncate text-[13px] font-medium">{promptPreview}</p>
                               {hasDraftIndicator && !isStreaming && <FileText className="h-3 w-3 shrink-0 text-[var(--text-tertiary)]" />}
                             </div>
-                            <p className="truncate pl-3.5 text-xs text-[var(--text-secondary)]">
+                            <p className="truncate pl-3.5 text-[11px] text-[var(--text-secondary)]">
                               {isStreaming ? (
                                 <span className="text-[var(--accent-cyan)]">Generating...</span>
                               ) : (
@@ -445,6 +628,17 @@ export function ChatSidebar({
             </div>
           ))}
         </div>
+        {hasMoreChats ? (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="mt-3 h-8 w-full text-xs"
+            onClick={() => setVisibleChatCount((prev) => prev + 10)}
+          >
+            Show more chats
+          </Button>
+        ) : null}
       </div>
 
       <div className="mt-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-soft)]">
@@ -454,23 +648,42 @@ export function ChatSidebar({
           </p>
         )}
 
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2">
+            <p className="inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">
+              <Flame className="h-3.5 w-3.5 text-[var(--accent-coral)]" />
+              Streak
+            </p>
+            <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
+              {gamification.currentStreak.toLocaleString()} day{gamification.currentStreak === 1 ? "" : "s"}
+            </p>
+          </div>
+          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2">
+            <p className="inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">
+              <Star className="h-3.5 w-3.5 text-[var(--warning)]" />
+              XP
+            </p>
+            <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
+              {gamification.totalXp.toLocaleString()}
+            </p>
+          </div>
+        </div>
+
         <div className="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
           <span>Usage</span>
-          <span>{spentCents > 0 ? `$${(spentCents / 100).toFixed(2)}` : spendingTier}</span>
+          <span>{usagePercent}%</span>
         </div>
         <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
           <div
             className="h-full min-w-[3px] rounded-full transition-all"
             style={{
-              width: `${Math.max(spentCents > 0 ? 3 : 0, spendRatio * 100)}%`,
+              width: `${Math.max(spentCents > 0 ? 3 : 0, usagePercent)}%`,
               background: "var(--gradient-brand)",
             }}
           />
         </div>
         <p className="mb-3 text-[11px] text-[var(--text-secondary)]">
-          {spentCents > 0
-            ? `$${(spentCents / 100).toFixed(2)} of $${(MONTHLY_HARD_LIMIT_CENTS / 100).toFixed(0)} monthly`
-            : "Monthly budget indicator"}
+          {spendingTier} tier active
         </p>
 
         <div className="flex items-center gap-2.5">

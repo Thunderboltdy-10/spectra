@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronDown, X, Settings2, FileText, Milestone } from "lucide-react";
+import { Bot, ChevronDown, Settings2, X, FileText, Milestone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { ChatModeSelector } from "@/components/chat/chat-mode-selector";
+import type { ActiveCollaborator } from "@/components/chat/collaborators-live";
 import { RichText } from "@/components/chat/rich-text";
 import { usePanel } from "@/context/panel-context";
 import { useCompactSheet } from "@/hooks/use-compact-sheet";
@@ -48,11 +49,6 @@ function AutoChoice({
   );
 }
 
-function formatMs(value?: number) {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
-  return `${Math.max(0, Math.round(value))} ms`;
-}
-
 function formatScore(value?: number) {
   if (typeof value !== "number" || !Number.isFinite(value)) return "—";
   return value.toFixed(2);
@@ -77,6 +73,7 @@ function sanitizeModelLabel(value: string) {
 function spendingTierLabel(tier?: UserSpending["tier"]) {
   if (tier === "free_only") return "Budget only";
   if (tier === "cheap_only") return "Cheap only";
+  if (tier === "expensive_blocked") return "Guarded";
   return "Normal";
 }
 
@@ -133,7 +130,9 @@ function SettingsView({
 }: SettingsViewProps) {
   const [showManual, setShowManual] = useState(false);
   const spentCents = userSpending?.totalCostCents ?? 0;
-  const ratio = Math.min(Math.max(spentCents / MONTHLY_HARD_LIMIT_CENTS, 0), 1);
+  const hardLimitCents = Math.max(1, userSpending?.hardLimitCents ?? MONTHLY_HARD_LIMIT_CENTS);
+  const ratio = Math.min(Math.max(spentCents / hardLimitCents, 0), 1);
+  const percentUsed = Math.max(0, Math.min(100, Math.round(ratio * 100)));
   const spendingTier = spendingTierLabel(userSpending?.tier);
   const selectedModel = models.find((model) => model.modelId === manualModel);
 
@@ -296,7 +295,10 @@ function SettingsView({
           />
         </div>
         <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
-          €{(spentCents / 100).toFixed(2)} / €{(MONTHLY_HARD_LIMIT_CENTS / 100).toFixed(2)} monthly soft cap
+          {percentUsed}% used this month
+        </p>
+        <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+          Expensive block at {userSpending?.softLimitCents ?? Math.floor(hardLimitCents * 0.8)}c, cheap-only at {userSpending?.cheapOnlyLimitCents ?? Math.floor(hardLimitCents * 0.9)}c.
         </p>
       </section>
     </div>
@@ -389,6 +391,141 @@ function RouteTraceView({ trace }: { trace?: RouteTrace }) {
   );
 }
 
+type OrchestrationViewProps = {
+  sending: boolean;
+  collaboratorPhase: "idle" | "running" | "synthesizing";
+  activeCollaborators: ActiveCollaborator[];
+  routeTrace?: RouteTrace;
+  lastModelUsed?: string;
+  searchEnabled?: boolean;
+};
+
+function orchestrationStage(params: {
+  sending: boolean;
+  collaboratorPhase: "idle" | "running" | "synthesizing";
+  activeCollaborators: ActiveCollaborator[];
+  searchEnabled?: boolean;
+}) {
+  if (!params.sending) return "verifying";
+  if (params.collaboratorPhase === "synthesizing") return "generating";
+  if (params.activeCollaborators.length > 0 && params.searchEnabled) return "searching";
+  if (params.activeCollaborators.length > 0) return "generating";
+  return "thinking";
+}
+
+function OrchestrationView({
+  sending,
+  collaboratorPhase,
+  activeCollaborators,
+  routeTrace,
+  lastModelUsed,
+  searchEnabled,
+}: OrchestrationViewProps) {
+  const stage = orchestrationStage({
+    sending,
+    collaboratorPhase,
+    activeCollaborators,
+    searchEnabled,
+  });
+  const steps = ["thinking", "searching", "generating", "verifying"] as const;
+  const stageIndex = steps.indexOf(stage);
+  const selectedModel = routeTrace?.selected.modelId || lastModelUsed;
+  const selectedReason =
+    routeTrace?.selected.reason ||
+    (sending
+      ? "Final model reason will appear when this response finishes."
+      : "No route trace captured yet for this chat.");
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Current phase</p>
+          <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+            {sending ? "Live" : "Idle"}
+          </span>
+        </div>
+        <p className="mt-1 text-sm font-medium capitalize text-[var(--text-primary)]">{stage}</p>
+      </section>
+
+      <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+        <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Progress</p>
+        <ol className="space-y-1.5">
+          {steps.map((item, index) => {
+            const done = !sending || index < stageIndex;
+            const active = sending && index === stageIndex;
+            return (
+              <li key={item} className="flex items-center gap-2">
+                <span
+                  className={`h-2.5 w-2.5 rounded-full ${
+                    done
+                      ? "bg-[var(--success)]"
+                      : active
+                        ? "bg-[var(--accent-cyan)]"
+                        : "bg-[var(--border-default)]"
+                  }`}
+                />
+                <span className={`text-xs capitalize ${active ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
+                  {item}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+      </section>
+
+      <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+        <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Active agents</p>
+        {activeCollaborators.length === 0 ? (
+          <p className="text-xs text-[var(--text-secondary)]">No specialist agents active right now.</p>
+        ) : (
+          <div className="space-y-2">
+            {activeCollaborators.map((agent) => (
+              <div
+                key={agent.role}
+                className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-medium capitalize text-[var(--text-primary)]">{agent.role.replace(/_/g, " ")}</p>
+                  <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">{agent.status}</span>
+                </div>
+                {agent.model ? (
+                  <p className="mt-1 font-mono text-[10px] text-[var(--text-secondary)]">
+                    {sanitizeModelId(agent.model)}
+                  </p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+        <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Model decision</p>
+        <div className="flex items-start gap-2">
+          <Bot className="mt-0.5 h-4 w-4 text-[var(--accent-cyan)]" />
+          <div>
+            <p className="font-mono text-xs text-[var(--text-primary)]">{selectedModel ? sanitizeModelId(selectedModel) : "Pending"}</p>
+            <p className="mt-1 text-xs text-[var(--text-secondary)]">{selectedReason}</p>
+          </div>
+        </div>
+        {routeTrace?.toolchain && routeTrace.toolchain.length > 0 ? (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {routeTrace.toolchain.slice(0, 8).map((tool) => (
+              <span
+                key={tool}
+                className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]"
+              >
+                {tool}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
 function hrefForCitation(citation: Citation) {
   if (citation.url) return citation.url;
   if (citation.resourceId) return `/api/resources/${citation.resourceId}/download`;
@@ -405,6 +542,7 @@ function SourcesView({ citations }: { citations: Citation[] }) {
       {citations.map((citation, index) => {
         const href = hrefForCitation(citation);
         const isSearch = citation.sourceType === "search";
+        const label = citation.title || citation.filename;
 
         return (
           <article
@@ -416,7 +554,8 @@ function SourcesView({ citations }: { citations: Citation[] }) {
               <span className="uppercase tracking-[0.08em]">[{index + 1}] {citation.sourceType}</span>
             </div>
 
-            <p className="font-medium text-[var(--text-primary)]">{citation.filename}</p>
+            <p className="font-medium text-[var(--text-primary)]">{label}</p>
+            {isSearch && citation.domain ? <p className="mt-1 text-xs text-[var(--text-secondary)]">{citation.domain}</p> : null}
             {citation.page ? <p className="mt-1 text-xs text-[var(--text-secondary)]">Page {citation.page}</p> : null}
 
             {citation.snippet ? (
@@ -444,12 +583,18 @@ function SourcesView({ citations }: { citations: Citation[] }) {
 
 type UnifiedPanelProps = {
   settingsProps?: SettingsViewProps;
+  orchestrationProps?: OrchestrationViewProps;
 };
 
-export function UnifiedPanel({ settingsProps }: UnifiedPanelProps) {
+export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanelProps) {
   const { activeView, panelData, closePanel } = usePanel();
   const compact = useCompactSheet(860);
-  const docked = useRightPanelDock({ id: "unified-panel", open: !!activeView, compact, maxWidthPx: 576 });
+  const { docked, isOverlay, panelWidth } = useRightPanelDock({
+    id: "unified-panel",
+    open: !!activeView,
+    compact,
+    maxWidthPx: 520,
+  });
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -466,6 +611,7 @@ export function UnifiedPanel({ settingsProps }: UnifiedPanelProps) {
     settings: { subtitle: "Configuration", title: "Chat Settings" },
     "route-trace": { subtitle: "Route Trace", title: "Model Decision Timeline" },
     sources: { subtitle: "Sources", title: "Citation Details" },
+    orchestration: { subtitle: "Orchestrator", title: "Live Progress" },
   };
 
   const current = titles[activeView] ?? { subtitle: "Panel", title: "Details" };
@@ -473,12 +619,12 @@ export function UnifiedPanel({ settingsProps }: UnifiedPanelProps) {
   return (
     <div
       className={`fixed z-50 ${docked ? "inset-y-0 right-0 pointer-events-none" : "inset-0"}`}
-      style={docked ? { width: "var(--right-panel-space, 576px)" } : undefined}
+      style={docked ? { width: `${panelWidth}px` } : undefined}
     >
       {!docked ? (
         <button
           type="button"
-          className="absolute inset-0 cursor-pointer bg-transparent"
+          className={`absolute inset-0 cursor-pointer transition ${isOverlay ? "bg-black/45 backdrop-blur-sm" : "bg-transparent"}`}
           onClick={closePanel}
           aria-label="Close panel"
         />
@@ -536,8 +682,13 @@ export function UnifiedPanel({ settingsProps }: UnifiedPanelProps) {
         {!collapsed ? (
           <div className="right-panel-content min-h-0 flex-1 overflow-y-auto pr-1">
             {activeView === "settings" && settingsProps && <SettingsView {...settingsProps} />}
-            {activeView === "route-trace" && <RouteTraceView trace={panelData.routeTrace} />}
+            {activeView === "route-trace" && <RouteTraceView trace={panelData.routeTrace ?? orchestrationProps?.routeTrace} />}
             {activeView === "sources" && <SourcesView citations={panelData.sources ?? []} />}
+            {activeView === "orchestration" && (
+              orchestrationProps
+                ? <OrchestrationView {...orchestrationProps} />
+                : <p className="text-sm text-[var(--text-secondary)]">No live orchestration data available.</p>
+            )}
           </div>
         ) : null}
       </aside>

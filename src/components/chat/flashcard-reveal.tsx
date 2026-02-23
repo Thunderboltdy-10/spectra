@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RichText } from "@/components/chat/rich-text";
+import { extractFlashcardPairs } from "@/lib/flashcard-format";
 
 export type FlashcardCard = {
   front: string;
@@ -47,41 +48,11 @@ function hashCard(front: string, back: string) {
 function parseFlashcards(content: string): FlashcardCard[] {
   const cards: FlashcardCard[] = [];
   const seen = new Set<string>();
-  const normalized = content.replace(/\r/g, "");
-
-  const inlinePairRegex = /(?:^|\n|\s)FRONT\s*:\s*([\s\S]*?)\s+BACK\s*:\s*([\s\S]*?)(?=(?:\s+FRONT\s*:)|$)/gi;
-  for (const match of normalized.matchAll(inlinePairRegex)) {
-    const front = (match[1] ?? "").replace(/\n{3,}/g, "\n\n").trim();
-    const back = (match[2] ?? "").replace(/\n{3,}/g, "\n\n").trim();
-    if (!front || !back) continue;
-    const cardHash = hashCard(front, back);
+  for (const pair of extractFlashcardPairs(content)) {
+    const cardHash = hashCard(pair.front, pair.back);
     if (seen.has(cardHash)) continue;
     seen.add(cardHash);
-    cards.push({ front, back, cardHash });
-  }
-
-  const lines = normalized.split("\n");
-  let front: string | null = null;
-
-  for (const raw of lines) {
-    const line = raw.trim();
-    const frontMatch = line.match(/^(?:[-*]\s*)?(?:Card\s*\d+\s*[:.)-]\s*)?FRONT\s*:\s*(.+)$/i);
-    if (frontMatch) {
-      front = frontMatch[1]?.trim() ?? null;
-      continue;
-    }
-    const backMatch = line.match(/^(?:[-*]\s*)?BACK\s*:\s*(.+)$/i);
-    if (backMatch && front) {
-      const back = backMatch[1]?.trim() ?? "";
-      if (front && back) {
-        const cardHash = hashCard(front, back);
-        if (!seen.has(cardHash)) {
-          seen.add(cardHash);
-          cards.push({ front, back, cardHash });
-        }
-      }
-      front = null;
-    }
+    cards.push({ front: pair.front, back: pair.back, cardHash });
   }
 
   return cards;

@@ -12,6 +12,7 @@ interface Shortcut {
 
 const SHORTCUTS: Shortcut[] = [
   { keys: ["⌘", "K"], description: "Open command palette", context: "global" },
+  { keys: ["⌘", "Shift", "Z"], description: "Toggle Zen mode", context: "global" },
   { keys: ["⌘", "Enter"], description: "Send message", context: "composer" },
   { keys: ["Shift", "Enter"], description: "New line", context: "composer" },
   { keys: ["Escape"], description: "Close modals/sidebar", context: "global" },
@@ -134,4 +135,35 @@ export function KeyboardShortcutsHelp() {
 
 export function ShortcutsButton() {
   return <KeyboardShortcutsHelp />;
+}
+
+type KeyboardShortcutsRegistrarProps = {
+  onToggleZen?: () => void;
+  onEscape?: () => void;
+};
+
+export function KeyboardShortcutsRegistrar({ onToggleZen, onEscape }: KeyboardShortcutsRegistrarProps) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const isZenShortcut =
+        (event.metaKey || event.ctrlKey) &&
+        event.shiftKey &&
+        event.key.toLowerCase() === "z";
+
+      if (isZenShortcut) {
+        event.preventDefault();
+        onToggleZen?.();
+        return;
+      }
+
+      if (event.key === "Escape") {
+        onEscape?.();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onEscape, onToggleZen]);
+
+  return null;
 }

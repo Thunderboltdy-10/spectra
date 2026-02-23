@@ -4,5 +4,12 @@ import { internal } from "./_generated/api";
 const crons = cronJobs();
 
 crons.daily("refresh-model-catalog", { hourUTC: 3, minuteUTC: 30 }, internal.catalogSync.refreshCatalog, {});
+crons.daily("cleanup-expired-images", { hourUTC: 4, minuteUTC: 5 }, internal.images.cleanupExpiredImages, {});
+crons.daily(
+  "generate-study-reminders",
+  { hourUTC: 5, minuteUTC: 10 },
+  internal.notifications.generateDailyStudyReminders,
+  {},
+);
 
 export default crons;

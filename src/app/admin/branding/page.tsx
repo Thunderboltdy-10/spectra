@@ -161,10 +161,10 @@ export default function BrandingAdminPage() {
                     alt="Org logo"
                     width={36}
                     height={36}
-                    className="h-9 w-9 rounded-lg border border-white/30 object-cover"
+                    className="h-9 w-9 rounded-lg border border-[var(--border-default)] object-cover"
                   />
                 ) : (
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border-default)] bg-white/70 text-xs font-semibold">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] text-xs font-semibold text-[var(--text-primary)]">
                     LOGO
                   </div>
                 )}
@@ -173,7 +173,7 @@ export default function BrandingAdminPage() {
                   <p className="text-xs text-[var(--text-secondary)]">Branded assistant</p>
                 </div>
               </div>
-              <div className="rounded-lg border border-[var(--border-default)] bg-white/75 px-3 py-2 text-sm text-slate-800">
+              <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-sm text-[var(--text-primary)]">
                 {welcomeMessage}
               </div>
             </div>

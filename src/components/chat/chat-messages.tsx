@@ -10,6 +10,8 @@ import { FlashcardReveal, isFlashcardContent, type FlashcardCard } from "@/compo
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { ThinkingBlock } from "@/components/chat/thinking-block";
 import { ThinkingMessages } from "@/components/loading-states";
+import { ContextualTip } from "@/components/ui/contextual-tip";
+import { usePanel } from "@/context/panel-context";
 import { autoCloseMarkdown } from "@/lib/stream-markdown";
 import { getModeConfig } from "@/lib/modes";
 import type { Message } from "@/hooks/use-chat-state";
@@ -32,6 +34,9 @@ type ChatMessagesProps = {
   onAssistantFeedback?: (positive: boolean, modelId?: string) => void;
   onEditMessage?: (messageId: string, newContent: string) => Promise<void>;
   onBranchMessage?: (messageId: string) => Promise<void> | void;
+  onToggleBookmarkMessage?: (messageId: string) => Promise<void> | void;
+  bookmarkedMessageIds?: Set<string>;
+  bookmarkingMessageId?: string | null;
   onFollowUp?: (message: string) => void;
   onModeChange?: (mode: string) => void;
   regenModels?: Array<{ modelId: string; name: string }>;
@@ -67,6 +72,9 @@ export function ChatMessages({
   onAssistantFeedback,
   onEditMessage,
   onBranchMessage,
+  onToggleBookmarkMessage,
+  bookmarkedMessageIds = new Set<string>(),
+  bookmarkingMessageId = null,
   onFollowUp,
   onModeChange,
   regenModels = [],
@@ -79,6 +87,7 @@ export function ChatMessages({
   collaboratorPhase = "idle",
   onOpenCanvas,
 }: ChatMessagesProps) {
+  const panel = usePanel();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const [showJumpButton, setShowJumpButton] = useState(false);
@@ -165,11 +174,30 @@ export function ChatMessages({
     return { preamble: "", structuredContent: content };
   }
 
+  function inferQuizDifficulty(toolchain?: string[]) {
+    if (toolchain?.includes("quiz_difficulty_easy")) return "easy" as const;
+    if (toolchain?.includes("quiz_difficulty_hard")) return "hard" as const;
+    return "medium" as const;
+  }
+
   return (
-    <section className="relative flex min-h-0 flex-1">
-      <div ref={scrollRef} className="h-full w-full overflow-y-auto px-3 pb-40 pt-6 sm:px-6 lg:px-10">
+    <section className="relative flex min-h-0 flex-1" aria-label="Conversation">
+      <div
+        ref={scrollRef}
+        className="h-full w-full overflow-y-auto px-3 pb-40 pt-6 sm:px-6 lg:px-10"
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions text"
+      >
         <div className="mx-auto w-full max-w-6xl space-y-8">
           {!hasContent && emptyState}
+
+          {messages.length > 30 ? (
+            <ContextualTip
+              tipId="long-conversation-new-chat"
+              message="Start a new conversation for best results."
+            />
+          ) : null}
 
           {messages.map((msg, index) => {
             const isLastAssistant = msg.role === "assistant" && index === messages.length - 1;
@@ -179,6 +207,9 @@ export function ChatMessages({
               index > 0 &&
               prevMsg?.mode !== msg.mode &&
               msg.mode !== undefined;
+            const assistantIsBookmarked = bookmarkedMessageIds.has(msg._id);
+            const assistantBookmarking = bookmarkingMessageId === msg._id;
+            const quizDifficulty = inferQuizDifficulty(msg.routeTrace?.toolchain);
 
             if (msg.role === "assistant" && (msgMode === "quiz" || msgMode === "exam")) {
               if (isQuizContent(msg.content)) {
@@ -211,6 +242,10 @@ export function ChatMessages({
                       onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
                       regenModels={regenModels}
                       onEdit={undefined}
+                      onBranch={onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
+                      onToggleBookmark={onToggleBookmarkMessage ? () => void onToggleBookmarkMessage(msg._id) : undefined}
+                      isBookmarked={assistantIsBookmarked}
+                      bookmarking={assistantBookmarking}
                       usageIn={msg.usageIn}
                       usageOut={msg.usageOut}
                       createdAt={msg.createdAt}
@@ -224,6 +259,7 @@ export function ChatMessages({
                       <QuizReveal
                         content={structuredContent}
                         chatId={chatId}
+                        difficulty={quizDifficulty}
                         onSubmitAnswers={(result) => {
                           onSubmitQuizAnswers?.({ messageId: msg._id, result });
                         }}
@@ -263,6 +299,10 @@ export function ChatMessages({
                       onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
                       regenModels={regenModels}
                       onEdit={undefined}
+                      onBranch={onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
+                      onToggleBookmark={onToggleBookmarkMessage ? () => void onToggleBookmarkMessage(msg._id) : undefined}
+                      isBookmarked={assistantIsBookmarked}
+                      bookmarking={assistantBookmarking}
                       usageIn={msg.usageIn}
                       usageOut={msg.usageOut}
                       createdAt={msg.createdAt}
@@ -303,6 +343,10 @@ export function ChatMessages({
                     onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
                     regenModels={regenModels}
                     onEdit={undefined}
+                    onBranch={onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
+                    onToggleBookmark={onToggleBookmarkMessage ? () => void onToggleBookmarkMessage(msg._id) : undefined}
+                    isBookmarked={assistantIsBookmarked}
+                    bookmarking={assistantBookmarking}
                     usageIn={msg.usageIn}
                     usageOut={msg.usageOut}
                     createdAt={msg.createdAt}
@@ -347,6 +391,10 @@ export function ChatMessages({
                       onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
                       regenModels={regenModels}
                       onEdit={undefined}
+                      onBranch={onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
+                      onToggleBookmark={onToggleBookmarkMessage ? () => void onToggleBookmarkMessage(msg._id) : undefined}
+                      isBookmarked={assistantIsBookmarked}
+                      bookmarking={assistantBookmarking}
                       usageIn={msg.usageIn}
                       usageOut={msg.usageOut}
                       createdAt={msg.createdAt}
@@ -404,6 +452,10 @@ export function ChatMessages({
                     onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
                     regenModels={regenModels}
                     onEdit={undefined}
+                    onBranch={onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
+                    onToggleBookmark={onToggleBookmarkMessage ? () => void onToggleBookmarkMessage(msg._id) : undefined}
+                    isBookmarked={assistantIsBookmarked}
+                    bookmarking={assistantBookmarking}
                     usageIn={msg.usageIn}
                     usageOut={msg.usageOut}
                     createdAt={msg.createdAt}
@@ -442,7 +494,10 @@ export function ChatMessages({
                   onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
                   regenModels={regenModels}
                   onEdit={msg.role === "user" && onEditMessage ? (value) => void onEditMessage(msg._id, value) : undefined}
-                  onBranch={msg.role === "user" && onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
+                  onBranch={msg.role === "assistant" && onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
+                  onToggleBookmark={msg.role === "assistant" && onToggleBookmarkMessage ? () => void onToggleBookmarkMessage(msg._id) : undefined}
+                  isBookmarked={msg.role === "assistant" ? assistantIsBookmarked : undefined}
+                  bookmarking={msg.role === "assistant" ? assistantBookmarking : undefined}
                   usageIn={msg.usageIn}
                   usageOut={msg.usageOut}
                   createdAt={msg.createdAt}
@@ -458,6 +513,18 @@ export function ChatMessages({
 
           {sending && activeCollaborators.length > 0 ? (
             <CollaboratorsLive collaborators={activeCollaborators} phase={collaboratorPhase} />
+          ) : null}
+
+          {sending ? (
+            <div className="flex justify-start">
+              <button
+                type="button"
+                onClick={() => panel.openPanel("orchestration")}
+                className="cursor-pointer rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+              >
+                View orchestration
+              </button>
+            </div>
           ) : null}
 
           {draftResponse && (mode === "quiz" || mode === "exam" || mode === "flashcard") ? (

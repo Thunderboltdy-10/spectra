@@ -85,6 +85,7 @@ function row(label: string, description: string, checked: boolean, onChange: (va
 function spendingTierLabel(tier?: UserSpending["tier"]) {
   if (tier === "free_only") return "Budget only";
   if (tier === "cheap_only") return "Cheap only";
+  if (tier === "expensive_blocked") return "Guarded";
   return "Normal";
 }
 
@@ -121,7 +122,12 @@ export function ChatSettingsDrawer({
   onDeleteResource,
 }: ChatSettingsDrawerProps) {
   const compact = useCompactSheet(860);
-  const docked = useRightPanelDock({ id: "chat-settings-drawer", open, compact, maxWidthPx: 448 });
+  const { docked, isOverlay, panelWidth } = useRightPanelDock({
+    id: "chat-settings-drawer",
+    open,
+    compact,
+    maxWidthPx: 448,
+  });
   const [collapsed, setCollapsed] = useState(false);
   const [showManual, setShowManual] = useState(false);
 
@@ -139,23 +145,27 @@ export function ChatSettingsDrawer({
   if (!open) return null;
 
   const spentCents = userSpending?.totalCostCents ?? 0;
-  const ratio = Math.min(spentCents / MONTHLY_HARD_LIMIT_CENTS, 1);
+  const hardLimitCents = Math.max(1, userSpending?.hardLimitCents ?? MONTHLY_HARD_LIMIT_CENTS);
+  const ratio = Math.min(spentCents / hardLimitCents, 1);
   const spendingTier = spendingTierLabel(userSpending?.tier);
   const selectedModel = models.find((model) => model.modelId === manualModel);
 
   return (
-    <div className="fixed inset-0 z-40">
+    <div
+      className={`fixed z-40 ${docked ? "inset-y-0 right-0 pointer-events-none" : "inset-0"}`}
+      style={docked ? { width: `${panelWidth}px` } : undefined}
+    >
       {!docked ? (
         <button
           type="button"
-          className="absolute inset-0 bg-transparent"
+          className={`absolute inset-0 transition ${isOverlay ? "bg-black/45 backdrop-blur-sm" : "bg-transparent"}`}
           aria-label="Close settings"
           onClick={onClose}
         />
       ) : null}
 
       <aside
-        className={`right-panel-shell absolute border-[var(--border-default)] bg-[var(--bg-sidebar)] p-4 shadow-[var(--shadow-soft)] sm:p-5 ${
+        className={`right-panel-shell pointer-events-auto absolute border-[var(--border-default)] bg-[var(--bg-sidebar)] p-4 shadow-[var(--shadow-soft)] sm:p-5 ${
           docked ? "right-panel-shell--docked" : "right-panel-shell--sheet"
         } ${
           compact

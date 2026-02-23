@@ -137,6 +137,29 @@ export const getRecentQuizPerformance = query({
   },
 });
 
+export const getQuizDifficultySignal = query({
+  args: {
+    actorClerkId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) throw new Error("Actor not found");
+
+    const rows = await ctx.db
+      .query("studentAnalytics")
+      .withIndex("by_user_day", (q) => q.eq("userId", actor._id))
+      .collect();
+
+    const withDifficulty = rows
+      .filter((row) => typeof row.quizDifficultyLevel === "number")
+      .sort((a, b) => b.day.localeCompare(a.day));
+
+    return {
+      difficultyLevel: withDifficulty[0]?.quizDifficultyLevel ?? 2,
+    };
+  },
+});
+
 export const setQuizDifficultySignal = mutation({
   args: {
     actorClerkId: v.string(),
@@ -282,6 +305,120 @@ export const getStudentPromptSignals = query({
       dailyPeakHours,
       preferredModel,
       preferredModelCount,
+    };
+  },
+});
+
+export const getStudentEnhancedAnalytics = query({
+  args: {
+    actorClerkId: v.string(),
+    days: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) throw new Error("Actor not found");
+
+    const daysBack = Math.min(Math.max(args.days ?? 30, 7), 120);
+    const cutoffTs = Date.now() - daysBack * 24 * 60 * 60 * 1000;
+    const cutoffDay = new Date(cutoffTs).toISOString().slice(0, 10);
+
+    const [messages, timers, quizzes, studentRows] = await Promise.all([
+      ctx.db
+        .query("messages")
+        .withIndex("by_user_created", (q) => q.eq("userId", actor._id))
+        .collect(),
+      ctx.db
+        .query("studyTimers")
+        .withIndex("by_user", (q) => q.eq("userId", actor._id))
+        .collect(),
+      ctx.db
+        .query("quizResults")
+        .withIndex("by_user_submitted", (q) => q.eq("userId", actor._id))
+        .collect(),
+      ctx.db
+        .query("studentAnalytics")
+        .withIndex("by_user_day", (q) => q.eq("userId", actor._id))
+        .collect(),
+    ]);
+
+    const modeMessageCounts: Record<string, number> = {};
+    const messageCountsByDay = new Map<string, number>();
+
+    for (const message of messages) {
+      if (message.createdAt < cutoffTs) continue;
+      modeMessageCounts[message.mode] = (modeMessageCounts[message.mode] ?? 0) + 1;
+      const day = new Date(message.createdAt).toISOString().slice(0, 10);
+      messageCountsByDay.set(day, (messageCountsByDay.get(day) ?? 0) + 1);
+    }
+
+    const timerSecondsByDay = new Map<string, number>();
+    for (const timer of timers) {
+      const anchorTs = timer.endedAt ?? timer.startedAt;
+      if (anchorTs < cutoffTs) continue;
+      const day = new Date(anchorTs).toISOString().slice(0, 10);
+      timerSecondsByDay.set(day, (timerSecondsByDay.get(day) ?? 0) + Math.max(0, timer.totalSeconds));
+    }
+
+    const allDays = new Set<string>([
+      ...messageCountsByDay.keys(),
+      ...timerSecondsByDay.keys(),
+    ]);
+    const timeSpentDaily = [...allDays]
+      .sort((a, b) => a.localeCompare(b))
+      .map((day) => {
+        const timerSeconds = timerSecondsByDay.get(day) ?? 0;
+        const estimatedSeconds = Math.max(0, Math.round((messageCountsByDay.get(day) ?? 0) * 45));
+        return {
+          day,
+          timerSeconds,
+          estimatedSeconds,
+          totalSeconds: Math.max(timerSeconds, estimatedSeconds),
+          messages: messageCountsByDay.get(day) ?? 0,
+        };
+      });
+
+    const quizTrendMap = new Map<string, { totalPercent: number; attempts: number }>();
+    for (const quiz of quizzes) {
+      if (quiz.submittedAt < cutoffTs) continue;
+      const day = new Date(quiz.submittedAt).toISOString().slice(0, 10);
+      const total = Math.max(1, quiz.total);
+      const scorePercent = (quiz.score / total) * 100;
+      const existing = quizTrendMap.get(day) ?? { totalPercent: 0, attempts: 0 };
+      existing.totalPercent += scorePercent;
+      existing.attempts += 1;
+      quizTrendMap.set(day, existing);
+    }
+    const quizTrend = [...quizTrendMap.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([day, stats]) => ({
+        day,
+        attempts: stats.attempts,
+        averageScore: Math.round(stats.totalPercent / Math.max(1, stats.attempts)),
+      }));
+
+    const filteredRows = studentRows.filter((row) => row.day >= cutoffDay);
+    const activeDays = new Set(timeSpentDaily.map((item) => item.day)).size || 1;
+    const totalMessages = Object.values(modeMessageCounts).reduce((sum, value) => sum + value, 0);
+    const totalStudySeconds = timeSpentDaily.reduce((sum, item) => sum + item.totalSeconds, 0);
+    const uniqueTopics = new Set(
+      filteredRows
+        .flatMap((row) => row.topicsExplored)
+        .map((topic) => topic.trim().toLowerCase())
+        .filter(Boolean),
+    ).size;
+    const estimatedSessions = Math.max(1, Math.round(totalStudySeconds / (25 * 60)));
+
+    return {
+      timeSpentDaily,
+      modeMessageCounts,
+      quizTrend,
+      productivity: {
+        totalStudySeconds,
+        estimatedSessions,
+        messagesPerSession: Number((totalMessages / estimatedSessions).toFixed(1)),
+        topicDepth: Number((uniqueTopics / activeDays).toFixed(1)),
+        activeDays,
+      },
     };
   },
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Layers, RotateCcw, Shuffle, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/layout/app-shell";
@@ -58,8 +58,10 @@ export default function FlashcardsPage() {
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [shuffle, setShuffle] = useState(false);
+  const reviewSectionRef = useRef<HTMLElement | null>(null);
 
   const reviewScopeLabel = selectedDeckId ? "Selected deck" : "Due across all decks";
+  const activeCards = selectedDeckId ? deckCards : dueCards;
 
   async function loadData() {
     setLoading(true);
@@ -99,12 +101,11 @@ export default function FlashcardsPage() {
   }, []);
 
   useEffect(() => {
-    const base = selectedDeckId ? deckCards : dueCards;
-    const nextQueue = shuffle ? shuffleCards(base) : [...base];
+    const nextQueue = shuffle ? shuffleCards(activeCards) : [...activeCards];
     setReviewQueue(nextQueue);
     setIndex(0);
     setFlipped(false);
-  }, [deckCards, dueCards, selectedDeckId, shuffle]);
+  }, [activeCards, selectedDeckId, shuffle]);
 
   const current = reviewQueue[index];
   const completed = reviewQueue.length === 0 || index >= reviewQueue.length;
@@ -112,6 +113,14 @@ export default function FlashcardsPage() {
   const selectedDeck = useMemo(
     () => decks.find((deck) => deck._id === selectedDeckId) ?? null,
     [decks, selectedDeckId],
+  );
+  const dueNowCount = useMemo(
+    () =>
+      dueCards.filter((card) => {
+        const nextReviewAt = card.progress?.nextReviewAt ?? 0;
+        return nextReviewAt <= Date.now();
+      }).length,
+    [dueCards],
   );
 
   const projectedDates = useMemo(() => {
@@ -133,6 +142,7 @@ export default function FlashcardsPage() {
 
   async function rateCurrent(quality: number) {
     if (!current || savingRating) return;
+    const ratedCardHash = current.cardHash;
     setSavingRating(true);
     try {
       const response = await fetch("/api/flashcards", {
@@ -153,10 +163,10 @@ export default function FlashcardsPage() {
         setIndex(nextIndex);
         return next;
       });
-      await loadData();
       if (selectedDeckId) {
-        await loadDeckCards(selectedDeckId);
+        setDeckCards((prev) => prev.filter((card) => card.cardHash !== ratedCardHash));
       }
+      await loadData();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to rate card");
     } finally {
@@ -183,6 +193,14 @@ export default function FlashcardsPage() {
     }
   }
 
+  function startDueReview() {
+    setSelectedDeckId(null);
+    setDeckCards([]);
+    setIndex(0);
+    setFlipped(false);
+    reviewSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   return (
     <AppShell fullBleed contentClassName="2xl:px-14">
       <section className="space-y-6">
@@ -204,6 +222,29 @@ export default function FlashcardsPage() {
             </Button>
           </div>
         </div>
+
+        <section className="relative overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 sm:p-5">
+          <div
+            className="pointer-events-none absolute -right-20 -top-20 h-52 w-52 rounded-full blur-3xl"
+            style={{ background: "radial-gradient(circle at center, color-mix(in oklab, var(--mode-flashcard) 50%, transparent), transparent 68%)" }}
+          />
+          <div className="relative flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.14em] text-[var(--text-secondary)]">Due for review</p>
+              <h2 className="mt-1 text-xl font-semibold text-[var(--text-primary)]">
+                {dueNowCount > 0 ? `${dueNowCount} card${dueNowCount === 1 ? "" : "s"} ready now` : "You are caught up for now"}
+              </h2>
+              <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                {dueNowCount > 0
+                  ? "Start a due-card session to reinforce retention with SM-2 spacing."
+                  : "No cards are currently due. Rate more cards to schedule the next reviews."}
+              </p>
+            </div>
+            <Button type="button" onClick={startDueReview} disabled={dueNowCount === 0}>
+              Start Review
+            </Button>
+          </div>
+        </section>
 
         <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
           <aside className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
@@ -268,7 +309,7 @@ export default function FlashcardsPage() {
             </div>
           </aside>
 
-          <article className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 sm:p-6">
+          <article ref={reviewSectionRef} className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 sm:p-6">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-base font-semibold">{selectedDeck?.title ?? "Due Review"}</h2>
               <p className="text-xs text-[var(--text-secondary)]">{reviewScopeLabel}</p>

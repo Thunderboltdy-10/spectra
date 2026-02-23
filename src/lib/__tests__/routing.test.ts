@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { chooseModelRoute } from "@/lib/routing/heuristic";
-import { MODEL_CONFIG, ROUTER_FALLBACKS } from "@/lib/model-config";
+import { CHEAP_MODEL_DEFAULTS, MODEL_CONFIG, MODEL_COST_BLOCK_LIST, ROUTER_FALLBACKS } from "@/lib/model-config";
 import { STUDY_MODES, isValidStudyMode, safeStudyMode } from "@/lib/contracts/studyModes";
 
 describe("chooseModelRoute", () => {
@@ -151,6 +151,48 @@ describe("chooseModelRoute", () => {
     expect(route.trace.inputs.spendingTier).toBe("free_only");
   });
 
+  it("enforces cheap-only budget routing", () => {
+    const route = chooseModelRoute({
+      mode: "research",
+      thinkingLevel: "high",
+      hasAttachments: false,
+      attachmentTypes: [],
+      messageLength: 620,
+      teacherStrictness: "medium",
+      routerMode: "auto",
+      studentSeemsStuck: false,
+      spendingTier: "cheap_only",
+      needsSearch: true,
+      promptCategory: "research",
+    });
+
+    expect(route.primaryModel).not.toBe(MODEL_CONFIG.autoRouter);
+    expect(
+      route.primaryModel.includes(":free") || CHEAP_MODEL_DEFAULTS.has(route.primaryModel),
+    ).toBe(true);
+    expect(route.trace.inputs.spendingTier).toBe("cheap_only");
+  });
+
+  it("blocks expensive models when expensive_blocked tier is active", () => {
+    const route = chooseModelRoute({
+      mode: "tutor",
+      thinkingLevel: "medium",
+      hasAttachments: false,
+      attachmentTypes: [],
+      messageLength: 280,
+      teacherStrictness: "medium",
+      routerMode: "auto",
+      studentSeemsStuck: false,
+      spendingTier: "expensive_blocked",
+      needsSearch: false,
+      promptCategory: "general",
+    });
+
+    expect(route.primaryModel).not.toBe(MODEL_CONFIG.autoRouter);
+    expect(MODEL_COST_BLOCK_LIST.has(route.primaryModel)).toBe(false);
+    expect(route.trace.inputs.spendingTier).toBe("expensive_blocked");
+  });
+
   it("marks multimodal need in trace inputs", () => {
     const route = chooseModelRoute({
       mode: "tutor",
@@ -269,10 +311,12 @@ describe("StudyMode validation", () => {
   });
 
   it("safeStudyMode coerces invalid to general", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect(safeStudyMode("invalid")).toBe("general");
     expect(safeStudyMode("")).toBe("general");
     expect(safeStudyMode(null)).toBe("general");
     expect(safeStudyMode(undefined)).toBe("general");
+    warnSpy.mockRestore();
   });
 
   it("safeStudyMode passes through valid modes", () => {

@@ -74,6 +74,12 @@ export async function POST(request: NextRequest) {
     if (!(file instanceof File)) {
       return badRequest("logo file is required");
     }
+    if (!file.type.startsWith("image/")) {
+      return badRequest("logo must be an image");
+    }
+    if (file.size > 4 * 1024 * 1024) {
+      return badRequest("logo must be 4MB or less");
+    }
 
     const uploadUrl = (await convexMutation("admin:createOrgLogoUploadUrl", {
       actorClerkId: actor.clerkId,

@@ -5,6 +5,57 @@ import { getUserByClerkId } from "./helpers";
 import { vScope } from "./shared";
 import { internal } from "./_generated/api";
 
+const DEFAULT_MAX_RESOURCE_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+const MIN_RESOURCE_FILE_SIZE_BYTES = 1 * 1024 * 1024;
+const MAX_RESOURCE_FILE_SIZE_BYTES = 100 * 1024 * 1024;
+
+function resolveMaxResourceFileSizeBytes(value: number | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_MAX_RESOURCE_FILE_SIZE_BYTES;
+  }
+  return Math.min(
+    MAX_RESOURCE_FILE_SIZE_BYTES,
+    Math.max(MIN_RESOURCE_FILE_SIZE_BYTES, Math.round(value)),
+  );
+}
+
+function maxFileSizeError(maxBytes: number) {
+  const mb = Math.round((maxBytes / (1024 * 1024)) * 10) / 10;
+  return `File exceeds maximum size (${mb}MB)`;
+}
+
+const SUPPORTED_RESOURCE_EXTENSIONS = new Set(["pdf", "docx", "txt", "md"]);
+const SUPPORTED_MIME_BY_EXTENSION: Record<string, string[]> = {
+  pdf: ["application/pdf"],
+  docx: ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+  txt: ["text/plain"],
+  md: ["text/markdown", "text/plain"],
+};
+
+function fileExtension(filename: string) {
+  const ext = filename.split(".").pop()?.trim().toLowerCase() ?? "";
+  return ext;
+}
+
+function invalidResourceTypeError(filename: string, mimeType: string) {
+  const ext = fileExtension(filename);
+  if (!SUPPORTED_RESOURCE_EXTENSIONS.has(ext)) {
+    return `Unsupported file type: .${ext || "unknown"}. Allowed: .pdf, .docx, .txt, .md`;
+  }
+
+  const normalizedMime = mimeType.trim().toLowerCase();
+  if (!normalizedMime || normalizedMime === "application/octet-stream") {
+    return undefined;
+  }
+
+  const allowed = SUPPORTED_MIME_BY_EXTENSION[ext] ?? [];
+  if (!allowed.includes(normalizedMime)) {
+    return `MIME type ${mimeType} is not valid for .${ext}`;
+  }
+
+  return undefined;
+}
+
 export const createUploadUrl = mutation({
   args: {
     actorClerkId: v.string(),
@@ -95,6 +146,24 @@ export const registerResource = mutation({
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
     if (!actor) {
       throw new Error("Unauthorized");
+    }
+
+    const org = await ctx.db.get(actor.orgId);
+    if (!org) {
+      throw new Error("Org not found");
+    }
+
+    const maxResourceFileSizeBytes = resolveMaxResourceFileSizeBytes(org.maxResourceFileSizeBytes);
+    if (!Number.isFinite(args.size) || args.size <= 0) {
+      throw new Error("File size must be greater than zero");
+    }
+    if (args.size > maxResourceFileSizeBytes) {
+      throw new Error(maxFileSizeError(maxResourceFileSizeBytes));
+    }
+
+    const typeError = invalidResourceTypeError(args.filename, args.mimeType);
+    if (typeError) {
+      throw new Error(typeError);
     }
 
     if (args.scope === "pack" && !args.packId) {
@@ -197,7 +266,7 @@ export const completeResourceIngestion = mutation({
       if (!canModify) {
         throw new Error("No permission for this agent resource");
       }
-    } else if (resource.ownerUserId !== actor._id && actor.role !== "admin") {
+    } else if (resource.ownerUserId !== actor._id) {
       throw new Error("No permission for personal resource");
     }
 
@@ -334,17 +403,17 @@ export const enqueueResourceProcessing = mutation({
       throw new Error("Resource not found");
     }
 
-    let allowed = actor.role === "admin";
+    let allowed = false;
     if (resource.scope === "personal" && resource.ownerUserId === actor._id) allowed = true;
     if (resource.scope === "pack" && resource.packId) {
       const pack = await ctx.db.get(resource.packId);
-      if (pack && (pack.ownerUserId === actor._id || actor.role === "teacher")) {
+      if (pack && (pack.ownerUserId === actor._id || actor.role === "teacher" || actor.role === "admin")) {
         allowed = true;
       }
     }
     if (resource.scope === "agent" && resource.agentId) {
       const agent = await ctx.db.get(resource.agentId);
-      if (agent && (agent.creatorUserId === actor._id || actor.role === "teacher")) {
+      if (agent && (agent.creatorUserId === actor._id || actor.role === "teacher" || actor.role === "admin")) {
         allowed = true;
       }
     }
@@ -444,19 +513,19 @@ export const deleteResource = mutation({
       throw new Error("Resource not found");
     }
 
-    let allowed = actor.role === "admin";
+    let allowed = false;
     if (resource.scope === "personal" && resource.ownerUserId === actor._id) {
       allowed = true;
     }
     if (resource.scope === "pack" && resource.packId) {
       const pack = await ctx.db.get(resource.packId);
-      if (pack && pack.ownerUserId === actor._id) {
+      if (pack && (pack.ownerUserId === actor._id || actor.role === "admin")) {
         allowed = true;
       }
     }
     if (resource.scope === "agent" && resource.agentId) {
       const agent = await ctx.db.get(resource.agentId);
-      if (agent && agent.creatorUserId === actor._id) {
+      if (agent && (agent.creatorUserId === actor._id || actor.role === "admin")) {
         allowed = true;
       }
     }
@@ -509,19 +578,19 @@ export const getResourceDownloadUrl = query({
       throw new Error("Resource not found");
     }
 
-    let allowed = actor.role === "admin";
+    let allowed = false;
     if (resource.scope === "personal" && resource.ownerUserId === actor._id) {
       allowed = true;
     }
     if (resource.scope === "pack" && resource.packId) {
       const pack = await ctx.db.get(resource.packId);
-      if (pack && pack.ownerUserId === actor._id) {
+      if (pack && (pack.ownerUserId === actor._id || actor.role === "admin")) {
         allowed = true;
       }
     }
     if (resource.scope === "agent" && resource.agentId) {
       const agent = await ctx.db.get(resource.agentId);
-      if (agent && (agent.visibility === "public" || agent.creatorUserId === actor._id)) {
+      if (agent && (agent.visibility === "public" || agent.creatorUserId === actor._id || actor.role === "admin")) {
         allowed = true;
       }
     }
@@ -576,19 +645,25 @@ export const getResourcesByIds = query({
       const resource = await ctx.db.get(resourceId);
       if (!resource || resource.orgId !== actor.orgId) continue;
 
-      let allowed = actor.role === "admin";
+      let allowed = false;
       if (resource.scope === "personal" && resource.ownerUserId === actor._id) {
         allowed = true;
       }
       if (resource.scope === "pack" && resource.packId) {
         const pack = await ctx.db.get(resource.packId);
-        if (pack && (pack.ownerUserId === actor._id || actor.role === "teacher")) {
+        if (pack && (pack.ownerUserId === actor._id || actor.role === "teacher" || actor.role === "admin")) {
           allowed = true;
         }
       }
       if (resource.scope === "agent" && resource.agentId) {
         const agent = await ctx.db.get(resource.agentId);
-        if (agent && (agent.visibility === "public" || agent.creatorUserId === actor._id || actor.role === "teacher")) {
+        if (
+          agent &&
+          (agent.visibility === "public" ||
+            agent.creatorUserId === actor._id ||
+            actor.role === "teacher" ||
+            actor.role === "admin")
+        ) {
           allowed = true;
         }
       }
@@ -648,15 +723,21 @@ export const getResourceNamesByIds = query({
       const resource = await ctx.db.get(resourceId);
       if (!resource || resource.orgId !== actor.orgId) continue;
 
-      let allowed = actor.role === "admin";
+      let allowed = false;
       if (resource.scope === "personal" && resource.ownerUserId === actor._id) allowed = true;
       if (resource.scope === "pack" && resource.packId) {
         const pack = await ctx.db.get(resource.packId);
-        if (pack && (pack.ownerUserId === actor._id || actor.role === "teacher")) allowed = true;
+        if (pack && (pack.ownerUserId === actor._id || actor.role === "teacher" || actor.role === "admin")) allowed = true;
       }
       if (resource.scope === "agent" && resource.agentId) {
         const agent = await ctx.db.get(resource.agentId);
-        if (agent && (agent.visibility === "public" || agent.creatorUserId === actor._id || actor.role === "teacher")) {
+        if (
+          agent &&
+          (agent.visibility === "public" ||
+            agent.creatorUserId === actor._id ||
+            actor.role === "teacher" ||
+            actor.role === "admin")
+        ) {
           allowed = true;
         }
       }

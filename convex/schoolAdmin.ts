@@ -1,6 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { getUserByClerkId } from "./helpers";
+import { dayKey, getUserByClerkId } from "./helpers";
 import { vRole } from "./shared";
 
 function randomToken(): string {
@@ -26,17 +26,18 @@ export const getSchoolDashboard = query({
   args: { actorClerkId: v.string() },
   handler: async (ctx, args) => {
     const actor = await requireAdmin(ctx, args.actorClerkId);
+    const today = dayKey();
 
-    const [members, messagesToday, invitations, org] = await Promise.all([
+    const [members, analyticsToday, invitations, org] = await Promise.all([
       ctx.db
         .query("users")
         .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
         .collect(),
       ctx.db
-        .query("messages")
-        .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
+        .query("studentAnalytics")
+        .withIndex("by_org_day", (q) => q.eq("orgId", actor.orgId))
         .collect()
-        .then((msgs) => msgs.filter((m) => m.createdAt >= Date.now() - 86400000)),
+        .then((rows) => rows.filter((row) => row.day === today)),
       ctx.db
         .query("schoolInvitations")
         .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
@@ -54,7 +55,7 @@ export const getSchoolDashboard = query({
       studentCount,
       teacherCount,
       adminCount,
-      messagesToday: messagesToday.length,
+      messagesToday: analyticsToday.reduce((sum, row) => sum + row.messagesCount, 0),
       pendingInvitations: invitations.length,
       orgName: org?.name,
       orgSlug: org?.slug,

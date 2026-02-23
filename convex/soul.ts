@@ -105,6 +105,11 @@ export const replaceDocChunks = internalMutation({
     publishedAt: v.number(),
   },
   handler: async (ctx, args) => {
+    const doc = await ctx.db.get(args.docId);
+    if (!doc || doc.orgId !== args.orgId) {
+      throw new Error("Soul document org mismatch");
+    }
+
     const existing = await ctx.db
       .query("orgSoulChunks")
       .withIndex("by_doc", (q) => q.eq("docId", args.docId))
@@ -215,6 +220,9 @@ export const publishSoul: ReturnType<typeof action> = action({
     const now = Date.now();
     let chunkCount = 0;
     for (const doc of docs) {
+      if (doc.orgId !== actor.orgId) {
+        throw new Error("Unauthorized org scope");
+      }
       const pieces = chunkText(doc.content).slice(0, 24);
       const embedded: Array<{ text: string; embedding: number[] }> = [];
       for (const piece of pieces) {

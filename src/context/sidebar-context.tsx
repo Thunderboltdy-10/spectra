@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 import { toast } from "sonner";
 import type { Agent, StudyMode } from "@/types";
 
@@ -30,9 +31,14 @@ export type SidebarModel = {
 export type SidebarSpending = {
   totalSpentEur: number;
   totalCostCents: number;
-  tier: "normal" | "cheap_only" | "free_only";
+  tier: "normal" | "expensive_blocked" | "cheap_only" | "free_only";
   softLimitReached: boolean;
   hardLimitReached: boolean;
+  softLimitCents?: number;
+  cheapOnlyLimitCents?: number;
+  hardLimitCents?: number;
+  budgetUsagePercent?: number;
+  marginPercent?: number;
 };
 
 type BootstrapResponse = {
@@ -91,6 +97,7 @@ const SidebarContext = createContext<SidebarContextValue | null>(null);
 const PINNED_KEY = "ai-school:pinned-chats";
 
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
   const [loading, setLoading] = useState(true);
   const [role, setRole] = useState<"student" | "teacher" | "admin">("student");
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
@@ -105,12 +112,30 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [orgWelcomeMessage, setOrgWelcomeMessage] = useState("");
   const [search, setSearch] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const breakpointTierRef = useRef<"mobile" | "tablet" | "desktop">("desktop");
   const [pinnedChatIds, setPinnedChatIds] = useState<Set<string>>(new Set());
 
   const refreshBootstrap = useCallback(async () => {
-    const response = await fetch("/api/bootstrap");
+    const response = await fetch("/api/bootstrap", {
+      headers: { Accept: "application/json" },
+    });
+    const contentType = response.headers.get("content-type") ?? "";
+    const isJson = contentType.includes("application/json");
+
+    if (response.status === 401) {
+      throw new Error("AUTH_NOT_SIGNED_IN: Please sign in.");
+    }
     if (!response.ok) {
-      throw new Error(await response.text());
+      if (isJson) {
+        const payload = (await response.json().catch(() => null)) as
+          | { error?: { message?: string }; message?: string }
+          | null;
+        throw new Error(payload?.error?.message ?? payload?.message ?? "Failed to load sidebar data");
+      }
+      throw new Error((await response.text()) || "Failed to load sidebar data");
+    }
+    if (!isJson) {
+      throw new Error("Unexpected non-JSON response from /api/bootstrap");
     }
 
     const data = (await response.json()) as BootstrapResponse;
@@ -138,16 +163,47 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const tierForWidth = (width: number): "mobile" | "tablet" | "desktop" => {
+      if (width < 640) return "mobile";
+      if (width < 1024) return "tablet";
+      return "desktop";
+    };
+
+    const applyResponsiveSidebar = () => {
+      const tier = tierForWidth(window.innerWidth);
+      if (tier !== breakpointTierRef.current) {
+        breakpointTierRef.current = tier;
+        setSidebarOpen(tier === "desktop");
+      }
+    };
+
+    breakpointTierRef.current = tierForWidth(window.innerWidth);
+    setSidebarOpen(breakpointTierRef.current === "desktop");
+
+    window.addEventListener("resize", applyResponsiveSidebar);
+    return () => window.removeEventListener("resize", applyResponsiveSidebar);
+  }, []);
+
+  useEffect(() => {
+    const isAuthRoute =
+      pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up") || pathname.startsWith("/join");
+    if (isAuthRoute) {
+      setLoading(false);
+      return;
+    }
     void (async () => {
       try {
         await refreshBootstrap();
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Failed to load sidebar data");
+        const message = error instanceof Error ? error.message : "Failed to load sidebar data";
+        if (!message.startsWith("AUTH_NOT_SIGNED_IN")) {
+          toast.error(message);
+        }
       } finally {
         setLoading(false);
       }
     })();
-  }, [refreshBootstrap]);
+  }, [pathname, refreshBootstrap]);
 
   useEffect(() => {
     try {

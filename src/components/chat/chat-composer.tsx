@@ -12,18 +12,23 @@ import {
   FileText,
   Loader2,
   Mic,
+  MoreHorizontal,
   Paperclip,
   Search,
   Sparkles,
   Square,
   X,
 } from "lucide-react";
+import { ProviderLogo } from "@/components/provider-logo";
+import { ContextualTip } from "@/components/ui/contextual-tip";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { SlashCommandMenu } from "@/components/chat/slash-command-menu";
 import { ALL_MODES, getModeConfig } from "@/lib/modes";
-import { getRecommendedModelsForMode } from "@/lib/model-config";
+import { getRecommendedModelsForMode, MODEL_COST_BLOCK_LIST } from "@/lib/model-config";
+import { getStarterPromptsForMode } from "@/lib/starter-prompts";
 import type { Agent } from "@/types";
-import type { AutoPreference, FileStatus, ModelOption } from "@/hooks/use-chat-state";
+import type { AutoPreference, FileStatus, ModelOption, UserSpending } from "@/hooks/use-chat-state";
 import type { RouterMode, StudyMode } from "@/types";
 import { fuzzyScore } from "@/lib/fuzzy-model-search";
 import { cn } from "@/lib/utils";
@@ -45,7 +50,10 @@ type ChatComposerProps = {
   agents: Agent[];
   selectedAgentId?: string;
   onSelectAgent: (agentId?: string) => void;
+  agentSuggestion?: { id: string; name: string; score: number; reason: string } | null;
+  onApplyAgentSuggestion?: () => void;
   models: ModelOption[];
+  userSpending: UserSpending | null;
   routerMode: RouterMode;
   manualModel: string;
   imageModel?: string;
@@ -84,19 +92,6 @@ function formatModelLabel(modelId: string) {
     .join(" ");
 }
 
-function formatNumberCompact(value?: number) {
-  if (!value || value <= 0) return "—";
-  return Intl.NumberFormat("en", { notation: "compact" }).format(value);
-}
-
-function formatModelCost(value?: number, isFree?: boolean) {
-  if (isFree) return "--";
-  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
-  if (value <= 0) return "--";
-  if (value < 0.01) return `$${value.toFixed(4)}/M`;
-  return `$${value.toFixed(2)}/M`;
-}
-
 function normalizeModelSearch(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 }
@@ -108,6 +103,35 @@ function cleanModelDisplayText(value: string) {
     .replace(/\s*&\s*$/g, "")
     .replace(/\s{2,}/g, " ")
     .trim();
+}
+
+function isBudgetSafeModel(model: ModelOption) {
+  if (model.isFree) return true;
+  if (model.modelId.includes(":free")) return true;
+  const inCost = typeof model.inputCostPerM === "number" ? model.inputCostPerM : undefined;
+  const outCost = typeof model.outputCostPerM === "number" ? model.outputCostPerM : undefined;
+  return (inCost ?? 0) === 0 && (outCost ?? 0) === 0;
+}
+
+function isCheapModel(model: ModelOption) {
+  if (isBudgetSafeModel(model)) return true;
+  const inputCost = typeof model.inputCostPerM === "number" ? model.inputCostPerM : Number.POSITIVE_INFINITY;
+  return inputCost <= 3;
+}
+
+function restrictionReasonForTier(model: ModelOption, tier?: UserSpending["tier"]) {
+  if (!tier || tier === "normal") return null;
+  if (tier === "expensive_blocked") {
+    if (model.modelId === "openrouter/auto") return "Auto routing is disabled while guardrails are active.";
+    if (MODEL_COST_BLOCK_LIST.has(model.modelId)) return "Blocked while budget guard is active.";
+    return null;
+  }
+  if (tier === "cheap_only") {
+    if (model.modelId === "openrouter/auto") return "Auto routing is disabled while in cheap-only mode.";
+    return isCheapModel(model) ? null : "Unavailable until spending drops below the cheap-only threshold.";
+  }
+  if (model.modelId === "openrouter/auto") return "Auto routing is disabled at hard budget limit.";
+  return isBudgetSafeModel(model) ? null : "Only budget-safe models are available at hard limit.";
 }
 
 function dataTransferHasFiles(dataTransfer: DataTransfer | null) {
@@ -170,65 +194,39 @@ function estimateTokens(message: string): number {
   return Math.ceil(message.length / 4);
 }
 
-// Get models categorized for display in dropdown
-function getCategorizedModels(
-  models: ModelOption[],
-  mode: StudyMode,
-  modelSearch: string,
-  hasImages: boolean,
-  estimatedTokens: number,
-): {
-  recommended: ModelOption[];
-  others: ModelOption[];
-  notRecommended: Array<{ model: ModelOption; reason: string }>;
-} {
-  const sorted = sortedByPopularity(models);
-  
-  // If searching, return all matching models without categorization
-  const clean = modelSearch.trim();
-  if (clean) {
-    const normalized = normalizeModelSearch(clean);
-    const filtered = sorted.filter((model) => {
-      const haystack = normalizeModelSearch(`${model.name} ${model.modelId} ${model.provider}`);
-      const score = fuzzyScore(normalized, {
-        name: model.name,
-        modelId: model.modelId,
-        provider: model.provider,
-        description: model.description,
-      });
-      return haystack.includes(normalized) || score > 0.35;
-    });
-    return { recommended: filtered, others: [], notRecommended: [] };
-  }
-  
-  // Get recommended model IDs for this mode
-  const recommendedIds = new Set(getRecommendedModelsForMode(mode));
-  
-  const recommended: ModelOption[] = [];
-  const others: ModelOption[] = [];
-  const notRecommended: Array<{ model: ModelOption; reason: string }> = [];
-  
-  for (const model of sorted) {
-    const reasons: string[] = [];
-    
-    if (hasImages && !hasVisionSupport(model)) {
-      reasons.push("No image support");
-    }
-    
-    if (model.contextLength && estimatedTokens > model.contextLength) {
-      reasons.push("Context too small");
-    }
-    
-    if (reasons.length > 0) {
-      notRecommended.push({ model, reason: reasons.join(" · ") });
-    } else if (recommendedIds.has(model.modelId)) {
-      recommended.push(model);
-    } else {
-      others.push(model);
-    }
-  }
-  
-  return { recommended, others, notRecommended };
+function isResearchLikeDraft(value: string) {
+  const text = value.toLowerCase().trim();
+  if (text.length < 24) return false;
+
+  const researchSignals = [
+    "latest",
+    "recent",
+    "today",
+    "news",
+    "study",
+    "studies",
+    "research",
+    "paper",
+    "papers",
+    "source",
+    "sources",
+    "evidence",
+    "statistics",
+    "stat",
+    "cite",
+    "citations",
+    "journal",
+    "meta-analysis",
+    "systematic review",
+  ];
+  const signalCount = researchSignals.reduce(
+    (count, signal) => (text.includes(signal) ? count + 1 : count),
+    0,
+  );
+  const hasYear = /\b(19|20)\d{2}\b/.test(text);
+  const hasResearchQuestionVerb = /\b(find|compare|verify|summarize|analyze|investigate|review)\b/.test(text);
+
+  return signalCount >= 2 || (signalCount >= 1 && (hasYear || hasResearchQuestionVerb));
 }
 
 function SettingPill({
@@ -257,48 +255,52 @@ function SettingPill({
   );
 }
 
-export function ChatComposer({
-  message,
-  onMessageChange,
-  fileList,
-  fileUploadState,
-  onFilesAdd,
-  onRemoveFile,
-  onSend,
-  onStop,
-  sending,
-  mode,
-  onModeChange,
-  agents,
-  selectedAgentId,
-  onSelectAgent,
-  models,
-  routerMode,
-  manualModel,
-  imageModel,
-  onSelectAuto,
-  onSelectModel,
-  onSelectImageModel,
-  autoEnhancePrompt,
-  autoThinking,
-  autoSearch,
-  onAutoEnhancePromptChange,
-  onAutoThinkingChange,
-  onAutoSearchChange,
-  onSlashCommand,
-  lastAutoResult,
-}: ChatComposerProps) {
+export function ChatComposer(props: ChatComposerProps) {
+  const {
+    message,
+    onMessageChange,
+    fileList,
+    fileUploadState,
+    onFilesAdd,
+    onRemoveFile,
+    onSend,
+    onStop,
+    sending,
+    mode,
+    onModeChange,
+    agents,
+    selectedAgentId,
+    onSelectAgent,
+    agentSuggestion,
+    onApplyAgentSuggestion,
+    models,
+    userSpending,
+    routerMode,
+    manualModel,
+    onSelectAuto,
+    onSelectModel,
+    autoEnhancePrompt,
+    autoThinking,
+    autoSearch,
+    onAutoEnhancePromptChange,
+    onAutoThinkingChange,
+    onAutoSearchChange,
+    onSlashCommand,
+    lastAutoResult,
+  } = props;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const modelSearchRef = useRef<HTMLInputElement | null>(null);
   const dragDepthRef = useRef(0);
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
   const modelMenuRef = useRef<HTMLDivElement | null>(null);
   const agentMenuRef = useRef<HTMLDivElement | null>(null);
+  const mobileFileInputRef = useRef<HTMLInputElement | null>(null);
   const [showModeSelector, setShowModeSelector] = useState(false);
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [showAgentSelector, setShowAgentSelector] = useState(false);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
+  const [collapsedProviders, setCollapsedProviders] = useState<Set<string>>(new Set());
   const modeConfig = getModeConfig(mode);
   const selectedModel = useMemo(
     () => models.find((item) => item.modelId === manualModel),
@@ -313,22 +315,116 @@ export function ChatComposer({
     () => fileList.some((f) => f.type.startsWith("image/")),
     [fileList]
   );
-  
+
   const estimatedTokens = useMemo(
     () => estimateTokens(message),
     [message]
   );
-  
-  // Get categorized models for dropdown
-  const { recommended, others, notRecommended } = useMemo(
-    () => getCategorizedModels(models, mode, modelSearch, hasImages, estimatedTokens),
-    [models, mode, modelSearch, hasImages, estimatedTokens]
+
+  const recommendedModelIds = useMemo(
+    () => new Set(getRecommendedModelsForMode(mode)),
+    [mode],
+  );
+
+  const modelRows = useMemo(() => {
+    const sorted = sortedByPopularity(models);
+    const clean = modelSearch.trim();
+    const normalized = normalizeModelSearch(clean);
+
+    return sorted
+      .filter((model) => {
+        if (!clean) return true;
+        const haystack = normalizeModelSearch(`${model.name} ${model.modelId} ${model.provider}`);
+        const score = fuzzyScore(normalized, {
+          name: model.name,
+          modelId: model.modelId,
+          provider: model.provider,
+          description: model.description,
+        });
+        return haystack.includes(normalized) || score > 0.35;
+      })
+      .map((model) => {
+        const cautions: string[] = [];
+        if (hasImages && !hasVisionSupport(model)) {
+          cautions.push("No image support");
+        }
+        if (model.contextLength && estimatedTokens > model.contextLength) {
+          cautions.push("Context too small");
+        }
+        const restrictionReason = restrictionReasonForTier(model, userSpending?.tier);
+        return {
+          model,
+          recommended: recommendedModelIds.has(model.modelId),
+          cautionReason: cautions.join(" · "),
+          restrictionReason,
+        };
+      });
+  }, [estimatedTokens, hasImages, modelSearch, models, recommendedModelIds, userSpending?.tier]);
+
+  const modelGroups = useMemo(() => {
+    const map = new Map<string, typeof modelRows>();
+    for (const row of modelRows) {
+      const provider = row.model.provider || "Unknown";
+      const list = map.get(provider) ?? [];
+      list.push(row);
+      map.set(provider, list);
+    }
+
+    return [...map.entries()]
+      .map(([provider, rows]) => ({
+        provider,
+        rows: rows.sort((a, b) => {
+          if (a.recommended !== b.recommended) return a.recommended ? -1 : 1;
+          return a.model.name.localeCompare(b.model.name);
+        }),
+      }))
+      .sort((a, b) => b.rows.length - a.rows.length || a.provider.localeCompare(b.provider));
+  }, [modelRows]);
+
+  const hasBudgetSafeModel = useMemo(
+    () => models.some((model) => restrictionReasonForTier(model, "free_only") === null),
+    [models],
+  );
+  const selectedManualRestriction = useMemo(() => {
+    if (routerMode !== "manual") return null;
+    const selected = models.find((model) => model.modelId === manualModel);
+    if (!selected) return null;
+    return restrictionReasonForTier(selected, userSpending?.tier);
+  }, [manualModel, models, routerMode, userSpending?.tier]);
+  const hardLimitNoModel = userSpending?.tier === "free_only" && !hasBudgetSafeModel;
+  const sendDisabledReason = hardLimitNoModel
+    ? "No budget-safe model is currently available. Sending is paused."
+    : selectedManualRestriction;
+  const autoRoutingRestriction = useMemo(
+    () =>
+      restrictionReasonForTier(
+        {
+          _id: "openrouter/auto",
+          modelId: "openrouter/auto",
+          name: "Auto Routing",
+          provider: "OpenRouter",
+          tags: [],
+        },
+        userSpending?.tier,
+      ),
+    [userSpending?.tier],
   );
   
   const selectorTriggerClass =
     "inline-flex cursor-pointer items-center gap-2 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]";
   const slashActive = message.trimStart().startsWith("/");
   const speech = useSpeechToText();
+  const shouldShowResearchTip = useMemo(() => {
+    if (!onModeChange) return false;
+    if (mode === "research") return false;
+    if (mode !== "general" && mode !== "explain") return false;
+    return isResearchLikeDraft(message);
+  }, [message, mode, onModeChange]);
+  const starterTemplates = useMemo(
+    () => getStarterPromptsForMode(mode, { limit: 4 }),
+    [mode],
+  );
+  const showStarterTemplates = !sending && !slashActive && !message.trim() && fileList.length === 0;
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -339,7 +435,11 @@ export function ChatComposer({
   }, [message]);
 
   useEffect(() => {
-    if (!showModelSelector) return;
+    if (!showModelSelector) {
+      setModelSearch("");
+      setCollapsedProviders(new Set());
+      return;
+    }
     const timer = window.setTimeout(() => modelSearchRef.current?.focus(), 10);
     return () => window.clearTimeout(timer);
   }, [showModelSelector]);
@@ -386,6 +486,7 @@ export function ChatComposer({
   }, [showAgentSelector, showModeSelector, showModelSelector]);
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (sendDisabledReason) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       const maybeSlash = parseSlashCommand(message.trim());
@@ -468,6 +569,11 @@ export function ChatComposer({
     speech.start();
   }
 
+  function handleSelectStarterTemplate(prompt: string) {
+    onMessageChange(prompt);
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
+  }
+
   function renderStatus(status: FileStatus, warning?: string) {
     if (status === "uploading") {
       return (
@@ -510,12 +616,24 @@ export function ChatComposer({
         "bg-[var(--bg-primary)] px-3 pb-[calc(0.9rem+env(safe-area-inset-bottom))] pt-3 sm:px-6 lg:px-10",
         draggingFiles && "bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-primary))]",
       )}
+      aria-label="Message composer"
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
       <div className="mx-auto w-full max-w-5xl">
+        {shouldShowResearchTip ? (
+          <div className="mb-2">
+            <ContextualTip
+              tipId="composer-research-mode-tip"
+              message="Try Research mode for factual questions."
+              actionLabel="Switch to Research"
+              onAction={() => onModeChange?.("research")}
+            />
+          </div>
+        ) : null}
+
         {slashActive ? (
           <SlashCommandMenu
             query={message.trim()}
@@ -592,6 +710,7 @@ export function ChatComposer({
                   type="button"
                   onClick={() => setShowModeSelector((prev) => !prev)}
                   title={modeConfig.description}
+                  data-tour="mode-selector"
                   className={selectorTriggerClass}
                 >
                   <span className="inline-flex h-2.5 w-2.5 rounded-full" style={{ background: modeConfig.color }} />
@@ -632,6 +751,7 @@ export function ChatComposer({
                   type="button"
                   onClick={() => setShowModelSelector((prev) => !prev)}
                   title="Choose model manually or keep auto-routing"
+                  data-tour="model-selector"
                   className={selectorTriggerClass}
                 >
                   <Bot className="h-4 w-4" />
@@ -671,175 +791,129 @@ export function ChatComposer({
                     </div>
 
                     <div className="max-h-[360px] overflow-y-auto pr-1">
-                      {/* Auto Router Option */}
-                      {!modelSearch.trim() && (
-                        <>
-                          <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
-                            Auto Routing
+                      <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+                        Auto Routing
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (autoRoutingRestriction) return;
+                          onSelectAuto();
+                          setShowModelSelector(false);
+                        }}
+                        disabled={Boolean(autoRoutingRestriction)}
+                        title={autoRoutingRestriction ?? "Let routing choose the best model for this prompt."}
+                        className={`mb-2 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${
+                          autoRoutingRestriction
+                            ? "cursor-not-allowed opacity-55"
+                            : "cursor-pointer hover:bg-[var(--bg-hover)]"
+                        } ${
+                          routerMode !== "manual"
+                            ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
+                            : ""
+                        }`}
+                      >
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--bg-secondary))]">
+                          <Sparkles className="h-4 w-4 text-[var(--accent-cyan)]" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-[var(--text-primary)]">Auto Routing</p>
+                          <p className="truncate text-[10px] text-[var(--text-secondary)]">
+                            Smart model selection based on your prompt
                           </p>
-                          
-                          {/* OpenRouter Premium Auto */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              onSelectModel("openrouter/auto");
-                              setShowModelSelector(false);
-                            }}
-                            className={`mb-2 flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${
-                              routerMode === "manual" && manualModel === "openrouter/auto"
-                                ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
-                                : routerMode === "auto"
-                                  ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
-                                  : "hover:bg-[var(--bg-hover)]"
-                            }`}
-                          >
-                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--bg-secondary))]">
-                              <Sparkles className="h-4 w-4 text-[var(--accent-cyan)]" />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-sm font-medium text-[var(--text-primary)]">Auto Routing</p>
-                              <p className="truncate text-[10px] text-[var(--text-secondary)]">Smart model selection based on your prompt</p>
-                            </div>
-                            {(routerMode === "auto" || (routerMode === "manual" && manualModel === "openrouter/auto")) && (
-                              <span className="shrink-0 rounded-full bg-[var(--accent-cyan)] px-1.5 py-0.5 text-[10px] font-medium text-white">
-                                Active
-                              </span>
-                            )}
-                          </button>
-                        </>
-                      )}
+                          {autoRoutingRestriction ? (
+                            <p className="truncate text-[10px] text-[var(--warning)]">{autoRoutingRestriction}</p>
+                          ) : null}
+                        </div>
+                        {routerMode !== "manual" ? (
+                          <span className="shrink-0 rounded-full bg-[var(--accent-cyan)] px-1.5 py-0.5 text-[10px] font-medium text-white">
+                            Active
+                          </span>
+                        ) : null}
+                      </button>
 
-                      {/* Recommended Models */}
-                      {!modelSearch.trim() && recommended.length > 0 && (
-                        <>
-                          <p className="mb-1 mt-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
-                            Recommended for {modeConfig.label}
-                          </p>
-                          {recommended.map((model) => {
-                            const displayName = cleanModelDisplayText(model.name) || formatModelLabel(model.modelId);
-                            const isSelected = routerMode === "manual" && manualModel === model.modelId;
-
-                            return (
+                      {modelGroups.length === 0 ? (
+                        <p className="px-3 py-4 text-center text-sm text-[var(--text-secondary)]">No models found</p>
+                      ) : (
+                        modelGroups.map((group) => {
+                          const providerCollapsed = !modelSearch.trim() && collapsedProviders.has(group.provider);
+                          return (
+                            <div key={group.provider} className="mb-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)]">
                               <button
-                                key={model.modelId}
                                 type="button"
                                 onClick={() => {
-                                  onSelectModel(model.modelId);
-                                  setShowModelSelector(false);
+                                  setCollapsedProviders((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(group.provider)) {
+                                      next.delete(group.provider);
+                                    } else {
+                                      next.add(group.provider);
+                                    }
+                                    return next;
+                                  });
                                 }}
-                                className={`mb-0.5 flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-left transition ${
-                                  isSelected
-                                    ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
-                                    : "hover:bg-[var(--bg-hover)]"
-                                }`}
+                                className="flex w-full cursor-pointer items-center justify-between gap-2 px-2.5 py-2 text-left"
                               >
-                                <div className="min-w-0 flex-1">
-                                  <p className="truncate text-sm font-medium text-[var(--text-primary)]">{displayName}</p>
-                                  <p className="truncate text-[10px] text-[var(--text-secondary)]">
-                                    {model.provider}
-                                    {model.contextLength ? ` · ${Math.round((model.contextLength ?? 0) / 1000)}k ctx` : ""}
-                                    {model.isFree
-                                      ? " · Free"
-                                      : model.inputCostPerM != null
-                                        ? ` · $${model.inputCostPerM.toFixed(2)}/$${(model.outputCostPerM ?? 0).toFixed(2)}`
-                                        : ""}
-                                  </p>
-                                </div>
+                                <span className="inline-flex min-w-0 items-center gap-2">
+                                  <ProviderLogo provider={group.provider} size={16} className="h-7 w-7" />
+                                  <span className="truncate text-xs font-semibold text-[var(--text-primary)]">{group.provider}</span>
+                                  <span className="rounded-full border border-[var(--border-default)] px-1.5 py-0.5 text-[10px] text-[var(--text-secondary)]">
+                                    {group.rows.length}
+                                  </span>
+                                </span>
+                                <ChevronDown className={`h-3.5 w-3.5 text-[var(--text-secondary)] transition ${providerCollapsed ? "-rotate-90" : ""}`} />
                               </button>
-                            );
-                          })}
-                        </>
-                      )}
 
-                      {/* All Other Models */}
-                      {!modelSearch.trim() && (
-                        <p className="mb-1 mt-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
-                          All Models
-                        </p>
-                      )}
-                      
-                      {others.map((model) => {
-                        const displayName = cleanModelDisplayText(model.name) || formatModelLabel(model.modelId);
-                        const isSelected = routerMode === "manual" && manualModel === model.modelId;
+                              {!providerCollapsed ? (
+                                <div className="border-t border-[var(--border-default)] p-1.5">
+                                  {group.rows.map((row) => {
+                                    const model = row.model;
+                                    const isSelected = routerMode === "manual" && manualModel === model.modelId;
+                                    const displayName = cleanModelDisplayText(model.name) || formatModelLabel(model.modelId);
+                                    const disabled = Boolean(row.restrictionReason);
 
-                        return (
-                          <button
-                            key={model.modelId}
-                            type="button"
-                            onClick={() => {
-                              onSelectModel(model.modelId);
-                              setShowModelSelector(false);
-                            }}
-                            className={`mb-0.5 flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-left transition ${
-                              isSelected
-                                ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
-                                : "hover:bg-[var(--bg-hover)]"
-                            }`}
-                          >
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-sm font-medium text-[var(--text-primary)]">{displayName}</p>
-                              <p className="truncate text-[10px] text-[var(--text-secondary)]">
-                                {model.provider}
-                                {model.contextLength ? ` · ${Math.round((model.contextLength ?? 0) / 1000)}k ctx` : ""}
-                                {model.isFree
-                                  ? " · Free"
-                                  : model.inputCostPerM != null
-                                    ? ` · $${model.inputCostPerM.toFixed(2)}/$${(model.outputCostPerM ?? 0).toFixed(2)}`
-                                    : ""}
-                              </p>
+                                    return (
+                                      <button
+                                        key={model.modelId}
+                                        type="button"
+                                        onClick={() => {
+                                          if (disabled) return;
+                                          onSelectModel(model.modelId);
+                                          setShowModelSelector(false);
+                                        }}
+                                        title={row.restrictionReason ?? undefined}
+                                        className={`mb-0.5 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition ${
+                                          disabled
+                                            ? "cursor-not-allowed opacity-55"
+                                            : "cursor-pointer hover:bg-[var(--bg-hover)]"
+                                        } ${
+                                          isSelected
+                                            ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
+                                            : ""
+                                        }`}
+                                      >
+                                        <ProviderLogo provider={model.provider} modelId={model.modelId} size={14} className="h-6 w-6 rounded-md" />
+                                        <div className="min-w-0 flex-1">
+                                          <p className="truncate text-sm font-medium text-[var(--text-primary)]">{displayName}</p>
+                                          <p className="truncate text-[10px] text-[var(--text-secondary)]">
+                                            {model.contextLength ? `${Math.round((model.contextLength ?? 0) / 1000)}k ctx` : "Context unknown"}
+                                            {row.recommended ? " · Recommended" : ""}
+                                          </p>
+                                          {row.cautionReason ? (
+                                            <p className="truncate text-[10px] text-[var(--warning)]">{row.cautionReason}</p>
+                                          ) : null}
+                                          {row.restrictionReason ? (
+                                            <p className="truncate text-[10px] text-[var(--warning)]">{row.restrictionReason}</p>
+                                          ) : null}
+                                        </div>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              ) : null}
                             </div>
-                          </button>
-                        );
-                      })}
-
-                      {/* Not Recommended Models */}
-                      {!modelSearch.trim() && notRecommended.length > 0 && (
-                        <>
-                          <p className="mb-1 mt-3 px-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--warning)]">
-                            Not Recommended
-                          </p>
-                          {notRecommended.map(({ model, reason }) => {
-                            const displayName = cleanModelDisplayText(model.name) || formatModelLabel(model.modelId);
-                            const isSelected = routerMode === "manual" && manualModel === model.modelId;
-
-                            return (
-                              <button
-                                key={model.modelId}
-                                type="button"
-                                onClick={() => {
-                                  onSelectModel(model.modelId);
-                                  setShowModelSelector(false);
-                                }}
-                                className={`mb-0.5 flex w-full cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-left transition opacity-60 hover:opacity-80 ${
-                                  isSelected
-                                    ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
-                                    : "hover:bg-[var(--bg-hover)]"
-                                }`}
-                              >
-                                <div className="min-w-0 flex-1">
-                                  <p className="truncate text-sm font-medium text-[var(--text-primary)]">{displayName}</p>
-                                  <p className="truncate text-[10px] text-[var(--text-secondary)]">
-                                    <span className="text-[var(--warning)]">{reason}</span>
-                                    {" · "}
-                                    {model.provider}
-                                    {model.contextLength ? ` · ${Math.round((model.contextLength ?? 0) / 1000)}k ctx` : ""}
-                                  </p>
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </>
-                      )}
-
-                      {/* Search Results */}
-                      {modelSearch.trim() && (
-                        <>
-                          {recommended.length === 0 && others.length === 0 && (
-                            <p className="px-3 py-4 text-center text-sm text-[var(--text-secondary)]">
-                              No models found
-                            </p>
-                          )}
-                        </>
+                          );
+                        })
                       )}
                     </div>
                   </div>
@@ -898,40 +972,79 @@ export function ChatComposer({
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-1.5">
-              <SettingPill
-                label="Enhance"
-                value={autoEnhancePrompt}
-                onChange={onAutoEnhancePromptChange}
-                title="Auto chooses when to refine prompts. Yes forces refinement. No disables."
-                icon={<Sparkles className="h-3.5 w-3.5" />}
-              />
-              <SettingPill
-                label="Thinking"
-                value={autoThinking}
-                onChange={onAutoThinkingChange}
-                title="Auto adapts reasoning depth. Yes forces deeper reasoning. No keeps it lightweight."
-                icon={<Brain className="h-3.5 w-3.5" />}
-              />
-              <SettingPill
-                label="Search"
-                value={autoSearch}
-                onChange={onAutoSearchChange}
-                title="Auto enables web research for time-sensitive prompts. Yes always enables. No disables."
-                icon={<Search className="h-3.5 w-3.5" />}
-              />
+            <div className="flex items-center gap-1.5">
+              <div className="hidden flex-wrap items-center gap-1.5 sm:flex">
+                <SettingPill
+                  label="Enhance"
+                  value={autoEnhancePrompt}
+                  onChange={onAutoEnhancePromptChange}
+                  title="Auto chooses when to refine prompts. Yes forces refinement. No disables."
+                  icon={<Sparkles className="h-3.5 w-3.5" />}
+                />
+                <SettingPill
+                  label="Thinking"
+                  value={autoThinking}
+                  onChange={onAutoThinkingChange}
+                  title="Auto adapts reasoning depth. Yes forces deeper reasoning. No keeps it lightweight."
+                  icon={<Brain className="h-3.5 w-3.5" />}
+                />
+                <SettingPill
+                  label="Search"
+                  value={autoSearch}
+                  onChange={onAutoSearchChange}
+                  title="Auto enables web research for time-sensitive prompts. Yes always enables. No disables."
+                  icon={<Search className="h-3.5 w-3.5" />}
+                />
 
-              {lastAutoResult?.promptEnhanced && (
-                <span className="inline-flex items-center gap-1 rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_14%,transparent)] px-2 py-1 text-[11px] text-[var(--accent-cyan)]">
-                  <Sparkles className="h-3 w-3" />
-                  Enhanced
-                </span>
-              )}
+                {lastAutoResult?.promptEnhanced && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_14%,transparent)] px-2 py-1 text-[11px] text-[var(--accent-cyan)]">
+                    <Sparkles className="h-3 w-3" />
+                    Enhanced
+                  </span>
+                )}
 
-              <label className="flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]">
-                <Paperclip className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Attach</span>
+                <label className="flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]">
+                  <Paperclip className="h-3.5 w-3.5" />
+                  <span>Attach</span>
+                  <input
+                    type="file"
+                    className="hidden"
+                    multiple
+                    onChange={(event) => {
+                      const files = Array.from(event.target.files ?? []);
+                      if (files.length > 0) {
+                        onFilesAdd(files);
+                      }
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+
+              <div className="sm:hidden">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button type="button" variant="secondary" size="icon" className="h-8 w-8 rounded-full" aria-label="More controls">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onSelect={() => onAutoEnhancePromptChange(nextPreference(autoEnhancePrompt))}>
+                      Enhance: {preferenceLabel(autoEnhancePrompt)}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onAutoThinkingChange(nextPreference(autoThinking))}>
+                      Thinking: {preferenceLabel(autoThinking)}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onAutoSearchChange(nextPreference(autoSearch))}>
+                      Search: {preferenceLabel(autoSearch)}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => mobileFileInputRef.current?.click()}>
+                      Attach files
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 <input
+                  ref={mobileFileInputRef}
                   type="file"
                   className="hidden"
                   multiple
@@ -943,9 +1056,47 @@ export function ChatComposer({
                     event.currentTarget.value = "";
                   }}
                 />
-              </label>
+              </div>
             </div>
           </div>
+
+          {!selectedAgentId && agentSuggestion ? (
+            <div className="border-b border-[var(--border-default)] px-3 py-2">
+              <button
+                type="button"
+                onClick={onApplyAgentSuggestion}
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)] px-3 py-1 text-xs text-[var(--accent-cyan)] transition hover:bg-[color-mix(in_oklab,var(--accent-cyan)_16%,transparent)]"
+                title={agentSuggestion.reason}
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                Suggested agent: {agentSuggestion.name}
+              </button>
+            </div>
+          ) : null}
+
+          {showStarterTemplates ? (
+            <div className="border-b border-[var(--border-default)] px-3 py-2.5">
+              <p className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.11em] text-[var(--text-secondary)]">
+                {modeConfig.label} starter templates
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {starterTemplates.map((template) => (
+                  <button
+                    key={template.prompt}
+                    type="button"
+                    onClick={() => handleSelectStarterTemplate(template.prompt)}
+                    className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-1 text-xs text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
+                    style={{
+                      borderColor: `color-mix(in oklab, ${modeConfig.color} 40%, var(--border-default))`,
+                      background: `color-mix(in oklab, ${modeConfig.color} 12%, var(--bg-secondary))`,
+                    }}
+                  >
+                    {template.prompt}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           <div className="flex items-end gap-2 px-3 py-2.5">
             <div className="flex-1">
@@ -955,13 +1106,18 @@ export function ChatComposer({
                 onChange={(event) => onMessageChange(event.target.value)}
                 onPaste={handlePaste}
                 placeholder="Ask anything. For best results, include your context and goal."
+                data-tour="composer"
+                aria-label="Message input"
                 className="max-h-[220px] min-h-[70px] w-full resize-none bg-transparent px-2 py-1 text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] outline-none"
                 onKeyDown={handleKeyDown}
               />
               {speech.isListening ? (
-                <p className="px-2 pb-1 text-xs text-[var(--danger)]">
+                <p className="px-2 pb-1 text-xs text-[var(--danger)]" aria-live="polite">
                   Recording... {speech.transcript || "Listening"}
                 </p>
+              ) : null}
+              {sendDisabledReason ? (
+                <p className="px-2 pb-1 text-xs text-[var(--warning)]" aria-live="polite">{sendDisabledReason}</p>
               ) : null}
             </div>
 
@@ -990,10 +1146,11 @@ export function ChatComposer({
             ) : (
               <Button
                 onClick={onSend}
-                disabled={sending || !message.trim()}
+                disabled={sending || !message.trim() || Boolean(sendDisabledReason)}
                 size="icon"
                 className="h-10 w-10 rounded-full"
                 aria-label="Send message"
+                title={sendDisabledReason ?? "Send message"}
               >
                 <ArrowUp className="h-4 w-4" />
               </Button>

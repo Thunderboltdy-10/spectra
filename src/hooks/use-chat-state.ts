@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { AchievementToast, type AchievementToastData } from "@/components/achievement-toast";
 import type { Agent, Citation, RouteTrace, RouterMode, StudyMode, ThinkingLevel } from "@/types";
 import { appendToBuffer, createBufferState } from "@/lib/structured-stream-buffer";
 import { useSidebar } from "@/context/sidebar-context";
-import { IMAGE_GEN_MODELS } from "@/lib/model-config";
+import { IMAGE_GEN_MODELS, MODEL_COST_BLOCK_LIST } from "@/lib/model-config";
 
 export type Chat = {
   _id: string;
@@ -31,6 +32,13 @@ type ActiveCollaboratorState = {
   model?: string;
   preview?: string;
   tokensUsed?: number;
+};
+
+type AgentSuggestion = {
+  id: string;
+  name: string;
+  score: number;
+  reason: string;
 };
 
 export type Message = {
@@ -86,9 +94,14 @@ export type PersonalResource = {
 export type UserSpending = {
   totalSpentEur: number;
   totalCostCents: number;
-  tier: "normal" | "cheap_only" | "free_only";
+  tier: "normal" | "expensive_blocked" | "cheap_only" | "free_only";
   softLimitReached: boolean;
   hardLimitReached: boolean;
+  softLimitCents?: number;
+  cheapOnlyLimitCents?: number;
+  hardLimitCents?: number;
+  budgetUsagePercent?: number;
+  marginPercent?: number;
 };
 
 export type AutoPreference = "auto" | "on" | "off";
@@ -126,6 +139,7 @@ type SendMessageOptions = {
   skipServerUserPersist?: boolean;
   retryAttempt?: number;
   chatIdOverride?: string;
+  modeOverride?: StudyMode;
   routerModeOverride?: RouterMode;
   manualModelOverride?: string;
   forcedModelOverride?: string;
@@ -334,6 +348,7 @@ export function useChatState() {
     thinkingLevel: ThinkingLevel;
     promptEnhanced: boolean;
   } | null>(null);
+  const [agentSuggestion, setAgentSuggestion] = useState<AgentSuggestion | null>(null);
 
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -352,6 +367,9 @@ export function useChatState() {
   >({});
   const [streamError, setStreamError] = useState<string | null>(null);
   const [lastFailedMessage, setLastFailedMessage] = useState<string | null>(null);
+  const [compactingConversation, setCompactingConversation] = useState(false);
+  const [bookmarkedMessageIds, setBookmarkedMessageIds] = useState<Set<string>>(new Set());
+  const [bookmarkingMessageId, setBookmarkingMessageId] = useState<string | null>(null);
 
   const search = sidebar.search;
   const setSearch = sidebar.setSearch;
@@ -370,6 +388,32 @@ export function useChatState() {
   const pendingCompletionsRef = useRef<Map<string, Message[]>>(new Map());
   const streamChatIdRef = useRef<string | null>(null);
   const activeStreamsRef = useRef<Set<string>>(new Set());
+  const activeStreamIdsRef = useRef<Set<string>>(new Set());
+  const sendingRef = useRef(false);
+  const shownAchievementToastsRef = useRef<Set<string>>(new Set());
+
+  const refreshBookmarks = useCallback(async (chatId = selectedChatIdRef.current) => {
+    if (!chatId) {
+      setBookmarkedMessageIds(new Set());
+      return;
+    }
+
+    const response = await fetch(`/api/bookmarks?chatId=${encodeURIComponent(chatId)}`);
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+
+    const payload = (await response.json()) as { bookmarks?: Array<{ messageId?: string }> };
+    const ids = new Set(
+      (payload.bookmarks ?? [])
+        .map((bookmark) => bookmark.messageId)
+        .filter((value): value is string => Boolean(value)),
+    );
+
+    if (selectedChatIdRef.current === chatId) {
+      setBookmarkedMessageIds(ids);
+    }
+  }, []);
 
   // Draft persistence helpers
   const getDraftKey = (chatId: string) => `ai-school:draft:${chatId}`;
@@ -513,11 +557,19 @@ export function useChatState() {
   }, [selectedChatId]);
 
   useEffect(() => {
+    activeStreamIdsRef.current = activeStreamIds;
+  }, [activeStreamIds]);
+
+  useEffect(() => {
+    sendingRef.current = sending;
+  }, [sending]);
+
+  useEffect(() => {
     if (!selectedChatId) {
       setMessages([]);
       setMessage(""); // Clear message when no chat selected
       // Don't clear drafts for chats that are still streaming
-      if (!activeStreamIds.has(selectedChatId)) {
+      if (!activeStreamIdsRef.current.has(selectedChatId)) {
         setDraftResponses(prev => { const next = new Map(prev); next.delete(selectedChatId); return next; });
         setDraftThinkings(prev => { const next = new Map(prev); next.delete(selectedChatId); return next; });
       }
@@ -525,6 +577,9 @@ export function useChatState() {
       setCollaboratorPhase("idle");
       setStreamError(null);
       setLastAutoResult(null);
+      setAgentSuggestion(null);
+      setBookmarkedMessageIds(new Set());
+      setBookmarkingMessageId(null);
       return;
     }
 
@@ -540,6 +595,8 @@ export function useChatState() {
     }
 
     setLastAutoResult(null);
+    setAgentSuggestion(null);
+    void refreshBookmarks(selectedChatId).catch(() => {});
 
     void (async () => {
       try {
@@ -570,7 +627,7 @@ export function useChatState() {
         toast.error(error instanceof Error ? error.message : "Failed to load chat");
       }
     })();
-  }, [selectedChatId, loadDraft]);
+  }, [selectedChatId, loadDraft, refreshBookmarks]);
 
   // Auto-save draft when message changes (debounced)
   useEffect(() => {
@@ -634,6 +691,7 @@ export function useChatState() {
       setStreamError(null);
       setLastFailedMessage(null);
       setLastAutoResult(null);
+      setAgentSuggestion(null);
       setMobileSidebarOpen(false);
 
       if (agentId) {
@@ -755,7 +813,7 @@ export function useChatState() {
       const custom = event as CustomEvent<StudyMode>;
       const nextMode = custom.detail;
       if (!nextMode) return;
-      if (sending) {
+      if (sendingRef.current) {
         stopGeneration();
       }
       setMode(nextMode);
@@ -784,6 +842,8 @@ export function useChatState() {
           ? Boolean(model.isFree || model.modelId.includes(":free"))
           : spendingTier === "cheap_only"
             ? Boolean(model.isFree || (typeof model.inputCostPerM === "number" && model.inputCostPerM <= 3))
+            : spendingTier === "expensive_blocked"
+              ? !MODEL_COST_BLOCK_LIST.has(model.modelId) && model.modelId !== "openrouter/auto"
             : true,
       )
       .sort((a, b) => {
@@ -799,18 +859,19 @@ export function useChatState() {
     return eligible[0]?.modelId;
   }
 
-  async function createChatIfNeeded(chatIdOverride?: string) {
+  async function createChatIfNeeded(chatIdOverride?: string, modeOverride?: StudyMode) {
     if (chatIdOverride) return chatIdOverride;
 
     const currentChatId = selectedChatIdRef.current;
     if (currentChatId) return currentChatId;
+    const requestedMode = modeOverride ?? mode;
 
     const response = await fetch("/api/chats", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         agentId: selectedAgentId,
-        mode,
+        mode: requestedMode,
         thinkingLevel,
         routerMode,
         manualModel: routerMode === "manual" ? manualModel : undefined,
@@ -823,7 +884,7 @@ export function useChatState() {
     const newChat: Chat = {
       _id: data.chatId,
       title: "New chat",
-      mode,
+      mode: requestedMode,
       agentId: selectedAgentId,
       updatedAt: Date.now(),
     };
@@ -888,6 +949,7 @@ export function useChatState() {
     const preservedText = options?.preservedText ?? text;
     const preservedFiles = options?.preservedFiles ?? [...fileList];
     const outgoingFiles = retryAttempt > 0 && options?.preservedFiles ? options.preservedFiles : [...fileList];
+    const requestedMode = options?.modeOverride ?? mode;
     const requestedRouterMode = options?.routerModeOverride ?? routerMode;
     const requestedManualModel = options?.manualModelOverride ?? manualModel;
     const localUserMessageId = options?.localUserMessageId ?? `local-${Date.now()}`;
@@ -948,7 +1010,7 @@ export function useChatState() {
         setMessages((prev) => [...prev, userMessage]);
       }
 
-      const chatId = await createChatIfNeeded(options?.chatIdOverride);
+      const chatId = await createChatIfNeeded(options?.chatIdOverride, requestedMode);
       activeChatId = chatId;
       streamChatIdRef.current = chatId;
       activeStreamsRef.current.add(chatId);
@@ -1044,12 +1106,12 @@ export function useChatState() {
         body: JSON.stringify({
           chatId,
           agentId: selectedAgentId,
-          mode,
+          mode: requestedMode,
           message: text,
           thinkingLevel,
           routerMode: effectiveRouterMode,
           manualModel: effectiveRouterMode === "manual" ? effectiveManualModel : undefined,
-          imageModel: mode === "image" ? imageModel : undefined,
+          imageModel: requestedMode === "image" ? imageModel : undefined,
           usePersonalResources,
           regenerate: isRegenerate,
           retryAttempt,
@@ -1098,7 +1160,7 @@ export function useChatState() {
         thinkingContent?: string;
       } = {};
       let enhancedPrompt: string | undefined;
-      let bufferState = createBufferState(mode);
+      let bufferState = createBufferState(requestedMode);
       let thinkingBuffer = "";
       let hasModelThinking = false;
 
@@ -1150,6 +1212,8 @@ export function useChatState() {
             preview?: string;
             tokensUsed?: number;
             model?: string;
+            agentSuggestion?: AgentSuggestion;
+            unlockedAchievements?: AchievementToastData[];
           };
 
           // Guard: only update visual draft state if user is still viewing this chat
@@ -1306,13 +1370,34 @@ export function useChatState() {
                 prev.map((chat) => (chat._id === chatId ? { ...chat, title: nextTitle } : chat)),
               );
             }
-            if (payload.suggestedMode && payload.suggestedMode !== mode) {
+            if (payload.agentSuggestion && !selectedAgentId) {
+              setAgentSuggestion(payload.agentSuggestion);
+            } else if (!selectedAgentId) {
+              setAgentSuggestion(null);
+            }
+            if (payload.suggestedMode && payload.suggestedMode !== requestedMode) {
               setMode(payload.suggestedMode as StudyMode);
               // Use the stream's chatId, not selectedChatId, to avoid updating wrong chat
               void updateChatSettingsById(chatId, { mode: payload.suggestedMode as StudyMode }).catch(() => {});
               toast.info(`Mode switched to ${payload.suggestedMode} mode`, { duration: 3000 });
             }
+            if (payload.unlockedAchievements?.length) {
+              for (const achievement of payload.unlockedAchievements) {
+                const toastKey = `${achievement.type}:${achievement.earnedAt}`;
+                if (shownAchievementToastsRef.current.has(toastKey)) continue;
+                shownAchievementToastsRef.current.add(toastKey);
+                toast.custom((toastId) => createElement(AchievementToast, {
+                  achievement,
+                  onDismiss: () => toast.dismiss(toastId),
+                }), {
+                  duration: 7000,
+                });
+              }
+            }
             setCollaboratorPhase("idle");
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new Event("ai-school:refresh-gamification"));
+            }
           }
 
           if (payload.type === "chat_title" && typeof payload.chatTitle === "string" && payload.chatTitle.trim()) {
@@ -1382,7 +1467,7 @@ export function useChatState() {
                 ...chat,
                 updatedAt: Date.now(),
                 title: chat.title === "New chat" ? text.slice(0, 60) : chat.title,
-                mode,
+                mode: requestedMode,
                 agentId: selectedAgentId,
               }
             : chat,
@@ -1436,6 +1521,7 @@ export function useChatState() {
             skipServerUserPersist: true,
             retryAttempt: retryAttempt + 1,
             chatIdOverride: activeChatId,
+            modeOverride: requestedMode,
             routerModeOverride: requestedRouterMode,
             manualModelOverride: requestedManualModel,
             forcedModelOverride: backupModel,
@@ -1456,21 +1542,6 @@ export function useChatState() {
       setHasRealThinking(false);
       setLastFailedMessage(preservedText);
     } finally {
-      if (chatOnlyResourceIds.length > 0) {
-        await Promise.all(
-          chatOnlyResourceIds.map(async (resourceId) => {
-            try {
-              await fetch("/api/resources", {
-                method: "DELETE",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ resourceId }),
-              });
-            } catch {
-              // Best-effort cleanup for chat-only uploads.
-            }
-          }),
-        );
-      }
       if (activeChatId) {
         activeStreamsRef.current.delete(activeChatId);
         setActiveStreamIds(prev => { const next = new Set(prev); next.delete(activeChatId!); return next; });
@@ -1580,6 +1651,7 @@ export function useChatState() {
 
       await sendMessage(followUpPrompt, {
         chatIdOverride: selectedChatId,
+        modeOverride: nextMode,
         skipLocalUser: true,
         skipServerUserPersist: true,
         retryAttempt: 0,
@@ -1659,6 +1731,47 @@ export function useChatState() {
     await refreshPersonalResources();
   }
 
+  async function compactConversation() {
+    if (!selectedChatId || sending || compactingConversation) return;
+    setCompactingConversation(true);
+    try {
+      const response = await fetch(`/api/chats/${selectedChatId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      const result = (await response.json()) as {
+        ok?: boolean;
+        reason?: string;
+        compactedMessages?: number;
+      };
+
+      if (!result.ok) {
+        if (result.reason === "not_enough_messages") {
+          toast.info("Compaction is available after around 20 messages.");
+        } else {
+          toast.info("Nothing to compact yet.");
+        }
+        return;
+      }
+
+      const reload = await fetch(`/api/chats/${selectedChatId}`);
+      if (reload.ok) {
+        const data = (await reload.json()) as ChatDetailResponse;
+        setMessages(data.messages);
+      }
+      toast.success(`Conversation compacted (${result.compactedMessages ?? 0} messages summarized).`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to compact conversation");
+    } finally {
+      setCompactingConversation(false);
+    }
+  }
+
   async function regenerateWithModel(modelId: string) {
     const lastUser = [...messages].reverse().find((item) => item.role === "user");
     if (!lastUser || sending) return;
@@ -1728,6 +1841,51 @@ export function useChatState() {
     setSelectedChatId(branchChatId);
   }
 
+  async function toggleBookmark(messageId: string) {
+    const chatId = selectedChatIdRef.current;
+    if (!chatId || !messageId || bookmarkingMessageId) return;
+
+    const currentlyBookmarked = bookmarkedMessageIds.has(messageId);
+    setBookmarkingMessageId(messageId);
+    setBookmarkedMessageIds((prev) => {
+      const next = new Set(prev);
+      if (currentlyBookmarked) next.delete(messageId);
+      else next.add(messageId);
+      return next;
+    });
+
+    try {
+      const response = await fetch("/api/bookmarks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatId, messageId }),
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      const result = (await response.json()) as { bookmarked?: boolean };
+      const isBookmarked = Boolean(result.bookmarked);
+      setBookmarkedMessageIds((prev) => {
+        const next = new Set(prev);
+        if (isBookmarked) next.add(messageId);
+        else next.delete(messageId);
+        return next;
+      });
+      toast.success(isBookmarked ? "Message bookmarked" : "Bookmark removed");
+    } catch (error) {
+      setBookmarkedMessageIds((prev) => {
+        const next = new Set(prev);
+        if (currentlyBookmarked) next.add(messageId);
+        else next.delete(messageId);
+        return next;
+      });
+      toast.error(error instanceof Error ? error.message : "Failed to update bookmark");
+    } finally {
+      setBookmarkingMessageId(null);
+    }
+  }
+
   async function recordAssistantFeedback(modelId: string | undefined, positive: boolean) {
     if (!selectedAgentId || !modelId) return;
     await fetch("/api/agents/model-feedback", {
@@ -1770,6 +1928,7 @@ export function useChatState() {
     orgLogoUrl,
     orgName,
     lastAutoResult,
+    agentSuggestion,
     message,
     messages,
     draftResponse,
@@ -1781,6 +1940,9 @@ export function useChatState() {
     fileList,
     fileUploadState,
     streamError,
+    compactingConversation,
+    bookmarkedMessageIds,
+    bookmarkingMessageId,
     search,
     filteredChats,
     sidebarOpen,
@@ -1798,6 +1960,7 @@ export function useChatState() {
     setAutoModel,
     setAutoThinking,
     setAutoSearch,
+    setAgentSuggestion,
     imageModel,
     setImageModel,
     setMessage,
@@ -1818,9 +1981,12 @@ export function useChatState() {
     regenerateWithModel,
     editAndResend,
     branchFromMessage,
+    toggleBookmark,
     recordAssistantFeedback,
+    refreshBookmarks,
     refreshPersonalResources,
     deletePersonalResource,
+    compactConversation,
     updateExistingChatSettings,
     stopGeneration,
     pinChat,

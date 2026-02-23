@@ -44,8 +44,20 @@ function isFreeModel(modelId: string) {
   return modelId.includes(":free");
 }
 
+function isBudgetGuardedTier(tier: ModelRouteInput["spendingTier"]) {
+  return tier === "expensive_blocked" || tier === "cheap_only" || tier === "free_only";
+}
+
+function allowsPaidTier(tier: ModelRouteInput["spendingTier"]) {
+  return tier === "normal" || tier === "expensive_blocked";
+}
+
 function eliminationReason(modelId: string, tier: ModelRouteInput["spendingTier"]) {
-  if (tier !== "normal" && MODEL_COST_BLOCK_LIST.has(modelId)) {
+  if (isBudgetGuardedTier(tier) && modelId === MODEL_CONFIG.autoRouter) {
+    return "openrouter_auto disabled under budget guard";
+  }
+
+  if (isBudgetGuardedTier(tier) && MODEL_COST_BLOCK_LIST.has(modelId)) {
     return "blocked by MODEL_COST_BLOCK_LIST";
   }
 
@@ -73,6 +85,7 @@ function enforceTier(model: string, tier: ModelRouteInput["spendingTier"]) {
   if (canUseInTier(model, tier)) return model;
   if (tier === "free_only") return MODEL_CONFIG.tutorFast;
   if (tier === "cheap_only") return MODEL_CONFIG.smartCheap;
+  if (tier === "expensive_blocked") return MODEL_CONFIG.smartCheap;
   return MODEL_CONFIG.tutorFast;
 }
 
@@ -372,6 +385,7 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
   const complexPrompt = longMessage || input.thinkingLevel === "high" || input.studentSeemsStuck || tabularNeeded;
   const promptCategory = input.promptCategory ?? "general";
   const searchAuxModel = input.thinkingLevel === "high" ? MODEL_CONFIG.searchDeep : MODEL_CONFIG.searchFast;
+  const paidTier = allowsPaidTier(input.spendingTier);
 
   if (input.routerMode === "manual" && input.manualModel) {
     pushCandidate(candidates, input.manualModel, input.spendingTier, 1, "User manually selected this model");
@@ -563,45 +577,45 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
     baseModel = complexPrompt || input.teacherStrictness === "hard" ? MODEL_CONFIG.markerHard : MODEL_CONFIG.marker;
     reason = "Marker mode high-accuracy route";
   } else if (input.mode === "research") {
-    baseModel = input.spendingTier === "normal" && complexPrompt ? MODEL_CONFIG.reasoningPaid : MODEL_CONFIG.tutorHigh;
+    baseModel = paidTier && complexPrompt ? MODEL_CONFIG.reasoningPaid : MODEL_CONFIG.tutorHigh;
     reason = "Research mode deep reasoning route";
   } else if (input.mode === "tutor") {
     if (promptCategory === "code") {
-      baseModel = input.spendingTier === "normal" ? MODEL_CONFIG.smartCheap : MODEL_CONFIG.tutorFast;
+      baseModel = paidTier ? MODEL_CONFIG.smartCheap : MODEL_CONFIG.tutorFast;
       reason = "Tutor route optimized for code-oriented prompts";
     } else if (promptCategory === "comparison" || promptCategory === "synthesis" || promptCategory === "debate") {
-      baseModel = input.spendingTier === "normal" ? MODEL_CONFIG.reasoningPaid : MODEL_CONFIG.tutorHigh;
+      baseModel = paidTier ? MODEL_CONFIG.reasoningPaid : MODEL_CONFIG.tutorHigh;
       reason = "Tutor route optimized for comparative and synthesis reasoning";
     } else if (promptCategory === "practical_application") {
-      baseModel = input.spendingTier === "normal" ? MODEL_CONFIG.smartPaid : MODEL_CONFIG.smartCheap;
+      baseModel = paidTier ? MODEL_CONFIG.smartPaid : MODEL_CONFIG.smartCheap;
       reason = "Tutor route optimized for applied planning and implementation";
     } else if (promptCategory === "math_science") {
-      baseModel = input.spendingTier === "normal" ? MODEL_CONFIG.reasoningPaid : MODEL_CONFIG.tutorHigh;
+      baseModel = paidTier ? MODEL_CONFIG.reasoningPaid : MODEL_CONFIG.tutorHigh;
       reason = "Tutor route optimized for math/science reasoning depth";
     } else if (promptCategory === "creative") {
-      baseModel = input.spendingTier === "normal" ? MODEL_CONFIG.smartPaid : MODEL_CONFIG.smartCheap;
+      baseModel = paidTier ? MODEL_CONFIG.smartPaid : MODEL_CONFIG.smartCheap;
       reason = "Tutor route optimized for creative generation quality";
-    } else if (complexPrompt && input.spendingTier === "normal") {
+    } else if (complexPrompt && paidTier) {
       baseModel = MODEL_CONFIG.smartPaid;
       reason = "Tutor route for complex prompts";
     } else if (complexPrompt && input.spendingTier === "cheap_only") {
       baseModel = MODEL_CONFIG.smartCheap;
       reason = "Tutor route for complex prompts within cheap tier";
     } else {
-      baseModel = input.spendingTier === "normal" ? MODEL_CONFIG.smartCheap : MODEL_CONFIG.tutorFast;
+      baseModel = paidTier ? MODEL_CONFIG.smartCheap : MODEL_CONFIG.tutorFast;
       reason = "Tutor mode adaptive route";
     }
   } else if (input.mode === "exam") {
-    baseModel = input.spendingTier === "normal" ? MODEL_CONFIG.smartCheap : MODEL_CONFIG.marker;
+    baseModel = paidTier ? MODEL_CONFIG.smartCheap : MODEL_CONFIG.marker;
     reason = "Exam scaffold route with concise evaluation bias";
   } else if (input.mode === "draft_coach") {
-    baseModel = input.spendingTier === "normal" ? MODEL_CONFIG.smartPaid : MODEL_CONFIG.smartCheap;
+    baseModel = paidTier ? MODEL_CONFIG.smartPaid : MODEL_CONFIG.smartCheap;
     reason = "Draft coach route with stronger editorial fluency";
   } else if (input.mode === "quiz" || input.mode === "flashcard") {
     baseModel = MODEL_CONFIG.tutorFast;
     reason = `${input.mode === "quiz" ? "Quiz" : "Flashcard"} generation route`;
   } else if (input.mode === "explain") {
-    baseModel = input.spendingTier === "normal" ? MODEL_CONFIG.smartCheap : MODEL_CONFIG.tutorFast;
+    baseModel = paidTier ? MODEL_CONFIG.smartCheap : MODEL_CONFIG.tutorFast;
     reason = "Explain mode with simplified pedagogy emphasis";
   } else if (input.mode === "image") {
     baseModel = MODEL_CONFIG.tutorFast;
@@ -612,7 +626,7 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
     baseModel = MODEL_CONFIG.multimodal;
     reason = `${reason} with multimodal attachments`;
   } else if (tabularNeeded) {
-    baseModel = input.spendingTier === "normal" ? MODEL_CONFIG.reasoningPaid : MODEL_CONFIG.smartCheap;
+    baseModel = paidTier ? MODEL_CONFIG.reasoningPaid : MODEL_CONFIG.smartCheap;
     reason = `${reason} with tabular attachment analysis`;
   }
 

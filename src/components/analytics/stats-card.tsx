@@ -12,17 +12,19 @@ type StatsCardProps = {
 
 export function StatsCard({ icon: Icon, label, value, subtitle, color }: StatsCardProps) {
   return (
-    <div className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-card)]">
+    <div className="journal-card p-4">
       <div className="mb-2 flex items-center gap-2">
         <span
-          className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--radius-input)] text-white"
-          style={{ backgroundColor: color ?? "var(--accent)" }}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--radius-input)] border border-[var(--border-default)] text-[var(--text-primary)]"
+          style={{
+            background: `color-mix(in oklab, ${color ?? "var(--accent)"} 18%, var(--bg-secondary))`,
+          }}
         >
           <Icon className="h-4 w-4" />
         </span>
-        <span className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">{label}</span>
+        <span className="text-[11px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">{label}</span>
       </div>
-      <p className="text-2xl font-bold">{value}</p>
+      <p className="font-display text-2xl font-semibold">{value}</p>
       {subtitle && <p className="mt-0.5 text-xs text-[var(--text-secondary)]">{subtitle}</p>}
     </div>
   );

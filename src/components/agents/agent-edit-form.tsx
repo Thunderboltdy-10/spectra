@@ -17,6 +17,7 @@ export type AgentEditValues = {
   category: string;
   systemPrompt: string;
   avatarEmoji?: string;
+  avatarIcon?: string;
   visibility: Visibility;
 };
 
@@ -73,6 +74,7 @@ export function AgentEditForm({
   const [category, setCategory] = useState(initialValues?.category ?? "");
   const [systemPrompt, setSystemPrompt] = useState(initialValues?.systemPrompt ?? "");
   const [avatarEmoji, setAvatarEmoji] = useState(initialValues?.avatarEmoji ?? "");
+  const [avatarIcon] = useState(initialValues?.avatarIcon ?? "");
   const [visibility, setVisibility] = useState<Visibility>(initialValues?.visibility ?? "public");
 
   const [purpose, setPurpose] = useState("");
@@ -167,6 +169,7 @@ export function AgentEditForm({
         category: cleanCategory,
         systemPrompt: finalPrompt,
         avatarEmoji: cleanEmoji || undefined,
+        avatarIcon: avatarIcon.trim() || undefined,
         visibility,
       });
     } catch (error) {

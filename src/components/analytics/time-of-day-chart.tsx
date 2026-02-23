@@ -23,7 +23,7 @@ export function TimeOfDayChart({ hourlyCounts, dailyPeaks }: TimeOfDayChartProps
   const recentPeaks = [...dailyPeaks].slice(-7).reverse();
 
   return (
-    <div className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-card)]">
+    <div className="journal-card journal-scribble p-4">
       <p className="mb-3 text-xs uppercase tracking-wide text-[var(--text-secondary)]">
         Prompt activity by time (UTC)
       </p>

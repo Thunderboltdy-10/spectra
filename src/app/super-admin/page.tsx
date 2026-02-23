@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
+  Database,
   Building2,
+  HardDrive,
   MessageSquare,
   Plus,
   Shield,
@@ -19,6 +21,23 @@ type GlobalStats = {
   totalUsers: number;
   totalMessages: number;
   totalAdmins: number;
+};
+
+type StorageStats = {
+  totalFiles: number;
+  resourceFileCount: number;
+  generatedImageCount: number;
+  totalSizeBytes: number;
+  totalSizeMegabytes: number;
+  pinnedImageCount: number;
+  expiringImageCountIn3Days: number;
+  largestFiles: Array<{
+    resourceId: string;
+    orgName: string;
+    filename: string;
+    scope: "pack" | "personal" | "agent";
+    sizeMegabytes: number;
+  }>;
 };
 
 type AdminRow = {
@@ -58,6 +77,7 @@ function StatCard({ label, value, icon, sub }: StatCardProps) {
 
 const QUICK_ACTIONS = [
   { label: "View All Schools", href: "/super-admin/schools", icon: Building2, variant: "secondary" as const },
+  { label: "Feedback Inbox", href: "/super-admin/feedback", icon: MessageSquare, variant: "secondary" as const },
   { label: "Create School", href: "/super-admin/schools/new", icon: Plus, variant: "default" as const },
 ];
 
@@ -71,6 +91,7 @@ const MOCK_RECENT_ACTIVITY = [
 
 export default function SuperAdminDashboard() {
   const [stats, setStats] = useState<GlobalStats | null>(null);
+  const [storageStats, setStorageStats] = useState<StorageStats | null>(null);
   const [admins, setAdmins] = useState<AdminRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
@@ -78,7 +99,11 @@ export default function SuperAdminDashboard() {
   useEffect(() => {
     void (async () => {
       try {
-        const response = await fetch("/api/super-admin/stats");
+        const [response, storageResponse] = await Promise.all([
+          fetch("/api/super-admin/stats"),
+          fetch("/api/super-admin/storage"),
+        ]);
+
         if (response.status === 403 || response.status === 401) {
           setAccessDenied(true);
           return;
@@ -86,6 +111,11 @@ export default function SuperAdminDashboard() {
         if (!response.ok) throw new Error(await response.text());
         const data = (await response.json()) as GlobalStats;
         setStats(data);
+
+        if (storageResponse.ok) {
+          const storageData = (await storageResponse.json()) as StorageStats;
+          setStorageStats(storageData);
+        }
 
         const adminsResponse = await fetch("/api/super-admin/admins");
         if (adminsResponse.ok) {
@@ -182,6 +212,77 @@ export default function SuperAdminDashboard() {
             sub="Users with admin role"
           />
         </div>
+
+        {storageStats && (
+          <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 shadow-[var(--shadow-soft)]">
+            <div className="mb-5 flex items-center justify-between">
+              <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+                Storage Insights
+              </h2>
+              <HardDrive className="h-4 w-4 text-[var(--text-secondary)]" />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+                <p className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Tracked Storage</p>
+                <p className="mt-1 text-xl font-semibold text-[var(--text-primary)]">
+                  {storageStats.totalSizeMegabytes.toLocaleString()} MB
+                </p>
+                <p className="text-xs text-[var(--text-secondary)]">From uploaded resources</p>
+              </div>
+              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+                <p className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Resource Files</p>
+                <p className="mt-1 text-xl font-semibold text-[var(--text-primary)]">
+                  {storageStats.resourceFileCount.toLocaleString()}
+                </p>
+                <p className="text-xs text-[var(--text-secondary)]">Documents in storage</p>
+              </div>
+              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+                <p className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Generated Images</p>
+                <p className="mt-1 text-xl font-semibold text-[var(--text-primary)]">
+                  {storageStats.generatedImageCount.toLocaleString()}
+                </p>
+                <p className="text-xs text-[var(--text-secondary)]">
+                  {storageStats.pinnedImageCount.toLocaleString()} pinned
+                </p>
+              </div>
+              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+                <p className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Expiring Images</p>
+                <p className="mt-1 text-xl font-semibold text-[var(--text-primary)]">
+                  {storageStats.expiringImageCountIn3Days.toLocaleString()}
+                </p>
+                <p className="text-xs text-[var(--text-secondary)]">Within next 3 days</p>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+              <p className="mb-3 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">
+                <Database className="h-3.5 w-3.5" />
+                Largest Uploaded Files
+              </p>
+              <div className="space-y-2">
+                {storageStats.largestFiles.slice(0, 6).map((file) => (
+                  <div
+                    key={file.resourceId}
+                    className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-[var(--text-primary)]">{file.filename}</p>
+                      <p className="truncate text-xs text-[var(--text-secondary)]">
+                        {file.orgName} · {file.scope}
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-xs font-semibold text-[var(--text-primary)]">
+                      {file.sizeMegabytes.toLocaleString()} MB
+                    </span>
+                  </div>
+                ))}
+                {storageStats.largestFiles.length === 0 && (
+                  <p className="text-sm text-[var(--text-secondary)]">No files uploaded yet.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Quick Navigation + Activity Feed */}
         <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">

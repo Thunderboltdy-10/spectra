@@ -6,14 +6,20 @@ import { withRouteErrorHandling } from "@/lib/route-handler";
 import { chunkTextWithPages, embedChunks, parseUploadedFile } from "@/lib/ingest";
 import { openRouterChatCompletion } from "@/lib/openrouter";
 import { MODEL_CONFIG } from "@/lib/model-config";
+import {
+  formatMegabytes,
+  normalizedResourceMimeType,
+  resolveMaxResourceFileSizeBytes,
+  validateResourceUploadFile,
+} from "@/lib/resource-upload-validation";
 
 export const runtime = "nodejs";
 
-async function uploadToConvexStorage(uploadUrl: string, file: File) {
+async function uploadToConvexStorage(uploadUrl: string, file: File, contentType: string) {
   const response = await fetch(uploadUrl, {
     method: "POST",
     headers: {
-      "Content-Type": file.type || "application/octet-stream",
+      "Content-Type": contentType,
     },
     body: file,
   });
@@ -88,24 +94,55 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return badRequest("No files uploaded");
     }
 
+    const orgSettings = (await convexQuery("admin:getOrgSettings", {
+      actorClerkId: actor.clerkId,
+    })) as {
+      org?: {
+        maxResourceFileSizeBytes?: number;
+      };
+    };
+    const maxResourceFileSizeBytes = resolveMaxResourceFileSizeBytes(
+      orgSettings.org?.maxResourceFileSizeBytes,
+    );
+
     const results: Array<{ file: string; resourceId?: string; status: string; error?: string }> = [];
 
     for (const file of files) {
       try {
+        const fileTypeError = validateResourceUploadFile(file);
+        if (fileTypeError) {
+          results.push({
+            file: file.name,
+            status: "failed",
+            error: fileTypeError,
+          });
+          continue;
+        }
+
+        if (file.size > maxResourceFileSizeBytes) {
+          results.push({
+            file: file.name,
+            status: "failed",
+            error: `File too large. Max ${formatMegabytes(maxResourceFileSizeBytes)} per file.`,
+          });
+          continue;
+        }
+
+        const mimeType = normalizedResourceMimeType(file);
         const uploadUrl = (await convexMutation("resources:createUploadUrl", {
           actorClerkId: actor.clerkId,
           scope,
           packId: scope === "pack" ? packId : undefined,
         })) as string;
 
-        const storageId = await uploadToConvexStorage(uploadUrl, file);
+        const storageId = await uploadToConvexStorage(uploadUrl, file, mimeType);
 
         const registered = (await convexMutation("resources:registerResource", {
           actorClerkId: actor.clerkId,
           scope,
           packId: scope === "pack" ? packId : undefined,
           filename: file.name,
-          mimeType: file.type || "application/octet-stream",
+          mimeType,
           size: file.size,
           storageId,
         })) as { resourceId: string };

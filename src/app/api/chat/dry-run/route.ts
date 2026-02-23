@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
 
     const budget = (await convexQuery("usage:checkUserBudget", {
       actorClerkId: actor.clerkId,
-    })) as { tier: "normal" | "cheap_only" | "free_only" };
+    })) as { tier: "normal" | "expensive_blocked" | "cheap_only" | "free_only" };
 
     const autoSettings = {
       enhancePrompt: body.autoSettings?.enhancePrompt ?? true,

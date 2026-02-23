@@ -92,6 +92,44 @@
   --gradient-surface: linear-gradient(145deg, rgba(24, 35, 52, 0.95), rgba(20, 28, 42, 0.94));
 }
 
+.high-contrast {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f5f7fa;
+  --bg-tertiary: #e9eef4;
+  --bg-sidebar: #f2f5fa;
+  --bg-user-bubble: #dce9ff;
+  --bg-elevated: #ffffff;
+  --bg-hover: #e7edf5;
+  --text-primary: #000000;
+  --text-secondary: #1b1f2a;
+  --border-default: #000000;
+  --accent-cyan: #0047ff;
+  --accent-coral: #b00020;
+  --success: #0a7a3f;
+  --warning: #8a4f00;
+}
+
+.dark.high-contrast {
+  --bg-primary: #000000;
+  --bg-secondary: #0b0f14;
+  --bg-tertiary: #121720;
+  --bg-sidebar: #0a0e14;
+  --bg-user-bubble: #10233f;
+  --bg-elevated: #05080d;
+  --bg-hover: #121821;
+  --text-primary: #ffffff;
+  --text-secondary: #d7e2f7;
+  --border-default: #ffffff;
+  --accent-cyan: #7fc7ff;
+  --accent-coral: #ff8b72;
+  --success: #63ffa5;
+  --warning: #ffd27a;
+}
+
+.high-contrast a {
+  text-decoration-thickness: 2px;
+}
+
 * {
   border-color: var(--border-default);
 }
@@ -112,6 +150,71 @@ body {
   font-size: 15px;
   line-height: 1.6;
   letter-spacing: 0.01em;
+}
+
+body.zen-mode {
+  background:
+    radial-gradient(circle at 50% 0%, color-mix(in oklab, var(--accent-cyan) 12%, transparent), transparent 48%),
+    var(--bg-primary);
+}
+
+.zen-layout {
+  position: relative;
+}
+
+.zen-main {
+  backdrop-filter: blur(2px);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+.skip-link:focus-visible {
+  position: fixed;
+  left: 1rem;
+  top: 1rem;
+  z-index: 220;
+  border-radius: 0.5rem;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  padding: 0.5rem 0.75rem;
+  box-shadow: var(--shadow-soft);
+}
+
+/* Theme-aware scrollbar styling across Chromium/WebKit and Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--border-default) 90%, var(--bg-secondary)) var(--bg-secondary);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 8px;
+  border: 2px solid var(--bg-secondary);
+  background: color-mix(in oklab, var(--border-default) 88%, var(--bg-primary));
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklab, var(--accent-cyan) 34%, var(--border-default));
+}
+
+.dark * {
+  scrollbar-color: color-mix(in oklab, var(--border-default) 88%, var(--bg-tertiary)) var(--bg-secondary);
+}
+
+.dark ::-webkit-scrollbar {
+  background: var(--bg-secondary);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--border-default) 92%, var(--bg-tertiary));
 }
 
 .font-display {
@@ -598,6 +701,187 @@ body.right-panel-docked {
   .chat-sidebar {
     box-shadow: var(--shadow-soft);
   }
+}
+
+@keyframes achievement-toast-pop {
+  0% {
+    transform: translateY(6px) scale(0.98);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes achievement-toast-spark {
+  0% {
+    transform: translateY(10px) scale(0.7);
+    opacity: 0;
+  }
+  35% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateY(-24px) scale(1.15);
+    opacity: 0;
+  }
+}
+
+.achievement-toast {
+  animation: achievement-toast-pop 220ms var(--ease-standard);
+  background:
+    radial-gradient(100px 70px at 20% -20%, color-mix(in oklab, var(--warning) 20%, transparent), transparent 70%),
+    radial-gradient(110px 80px at 96% -16%, color-mix(in oklab, var(--accent-cyan) 16%, transparent), transparent 72%),
+    linear-gradient(
+      120deg,
+      color-mix(in oklab, var(--bg-elevated) 92%, var(--warning) 8%),
+      color-mix(in oklab, var(--bg-elevated) 95%, var(--accent-cyan) 5%)
+    );
+}
+
+.achievement-toast__spark {
+  pointer-events: none;
+  position: absolute;
+  border-radius: 9999px;
+  opacity: 0;
+  animation: achievement-toast-spark 920ms ease-out forwards;
+}
+
+.achievement-toast__spark--a {
+  left: 16px;
+  bottom: 8px;
+  height: 10px;
+  width: 10px;
+  background: color-mix(in oklab, var(--warning) 80%, white 20%);
+  animation-delay: 120ms;
+}
+
+.achievement-toast__spark--b {
+  left: 40px;
+  bottom: 3px;
+  height: 7px;
+  width: 7px;
+  background: color-mix(in oklab, var(--accent-cyan) 72%, white 28%);
+  animation-delay: 210ms;
+}
+
+.achievement-toast__spark--c {
+  left: 66px;
+  bottom: 10px;
+  height: 6px;
+  width: 6px;
+  background: color-mix(in oklab, var(--success) 74%, white 26%);
+  animation-delay: 280ms;
+}
+
+.journal-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 22px;
+  border: 1px solid color-mix(in oklab, var(--border-default) 82%, var(--accent-orange) 18%);
+  background:
+    radial-gradient(120px 80px at 8% 2%, color-mix(in oklab, var(--accent-orange) 14%, transparent), transparent 72%),
+    radial-gradient(140px 100px at 98% 0%, color-mix(in oklab, var(--accent-cyan) 12%, transparent), transparent 74%),
+    linear-gradient(
+      160deg,
+      color-mix(in oklab, var(--bg-elevated) 90%, #fff6e8 10%),
+      color-mix(in oklab, var(--bg-elevated) 92%, #fef4dc 8%)
+    );
+  box-shadow: 0 18px 34px color-mix(in oklab, #a26e2a 7%, transparent);
+}
+
+.dark .journal-card {
+  background:
+    radial-gradient(120px 80px at 8% 2%, color-mix(in oklab, var(--accent-orange) 16%, transparent), transparent 72%),
+    radial-gradient(140px 100px at 98% 0%, color-mix(in oklab, var(--accent-cyan) 13%, transparent), transparent 74%),
+    linear-gradient(
+      160deg,
+      color-mix(in oklab, var(--bg-elevated) 94%, #0f161f 6%),
+      color-mix(in oklab, var(--bg-elevated) 96%, #0c1219 4%)
+    );
+}
+
+.journal-card::before {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(0deg, color-mix(in oklab, #8b6234 6%, transparent) 0 1px, transparent 1px 5px),
+    repeating-linear-gradient(90deg, color-mix(in oklab, #9b7446 3%, transparent) 0 1px, transparent 1px 12px);
+  opacity: 0.18;
+}
+
+.journal-heading {
+  font-family: var(--font-fraunces), Georgia, serif;
+  letter-spacing: -0.015em;
+}
+
+.journal-scribble {
+  position: relative;
+}
+
+.journal-scribble::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 10px;
+  height: 2px;
+  border-radius: 9999px;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in oklab, var(--accent-cyan) 55%, transparent),
+      color-mix(in oklab, var(--accent-orange) 68%, transparent),
+      color-mix(in oklab, var(--accent-cyan) 48%, transparent)
+    );
+  opacity: 0.75;
+  transform: rotate(-1.1deg);
+}
+
+.message-journal {
+  background:
+    radial-gradient(140px 90px at 8% 0%, color-mix(in oklab, var(--accent-orange) 11%, transparent), transparent 72%),
+    linear-gradient(
+      170deg,
+      color-mix(in oklab, var(--bg-elevated) 93%, #fff6e9 7%),
+      color-mix(in oklab, var(--bg-elevated) 96%, #fff2df 4%)
+    );
+  color: color-mix(in oklab, var(--text-primary) 88%, #6b4b2f 12%);
+}
+
+.dark .message-journal {
+  background:
+    radial-gradient(140px 90px at 8% 0%, color-mix(in oklab, var(--accent-orange) 12%, transparent), transparent 72%),
+    linear-gradient(
+      170deg,
+      color-mix(in oklab, var(--bg-elevated) 95%, #111822 5%),
+      color-mix(in oklab, var(--bg-elevated) 97%, #0f151d 3%)
+    );
+}
+
+.message-journal .chat-markdown,
+.message-journal .chat-rich {
+  color: color-mix(in oklab, var(--text-primary) 90%, #7a5a3f 10%);
+  line-height: 1.82;
+}
+
+.message-journal .chat-markdown h1,
+.message-journal .chat-markdown h2,
+.message-journal .chat-markdown h3,
+.message-journal .chat-markdown h4 {
+  font-family: var(--font-fraunces), Georgia, serif;
+  line-height: 1.35;
+  letter-spacing: -0.012em;
+  color: color-mix(in oklab, var(--text-primary) 92%, #5d4129 8%);
+}
+
+.message-journal .chat-markdown p,
+.message-journal .chat-markdown li {
+  line-height: 1.9;
 }
 
 ::selection {

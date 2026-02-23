@@ -7,7 +7,7 @@ export function useCompactSheet(threshold = 820) {
 
   useEffect(() => {
     const update = () => {
-      setCompact(window.innerHeight <= threshold);
+      setCompact(window.innerWidth <= threshold || window.innerHeight <= 720);
     };
     update();
     window.addEventListener("resize", update);
@@ -16,4 +16,3 @@ export function useCompactSheet(threshold = 820) {
 
   return compact;
 }
-

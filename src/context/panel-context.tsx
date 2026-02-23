@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useState } from "react";
 import type { Citation, RouteTrace } from "@/types";
 
-export type PanelView = "settings" | "route-trace" | "sources" | null;
+export type PanelView = "settings" | "route-trace" | "sources" | "orchestration" | null;
 
 export type PanelData = {
   routeTrace?: RouteTrace;
@@ -33,6 +33,7 @@ export function PanelProvider({ children }: { children: React.ReactNode }) {
 
   const closePanel = useCallback(() => {
     setActiveView(null);
+    setPanelData({});
   }, []);
 
   const hasData = useCallback((data: PanelData) => {
@@ -48,6 +49,7 @@ export function PanelProvider({ children }: { children: React.ReactNode }) {
         setPanelData((prev) => ({ ...prev, ...data }));
       } else {
         setActiveView(null);
+        setPanelData({});
       }
     } else {
       setActiveView(view);

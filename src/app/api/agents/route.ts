@@ -36,6 +36,7 @@ export async function POST(request: NextRequest) {
       description?: string;
       systemPrompt?: string;
       avatarEmoji?: string;
+      avatarIcon?: string;
       category?: string;
       preferredModel?: string;
       preferredMode?: StudyMode;
@@ -54,6 +55,7 @@ export async function POST(request: NextRequest) {
       description: body.description,
       systemPrompt: body.systemPrompt,
       avatarEmoji: body.avatarEmoji,
+      avatarIcon: body.avatarIcon,
       category: body.category,
       preferredModel: body.preferredModel,
       preferredMode: validMode,

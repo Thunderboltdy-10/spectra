@@ -28,7 +28,7 @@ function formatTokens(value: number) {
 
 export function ModelLeaderboardDrawer({ open, onClose }: ModelLeaderboardDrawerProps) {
   const compact = useCompactSheet(860);
-  const docked = useRightPanelDock({ id: "model-leaderboard", open, compact, maxWidthPx: 420 });
+  const { docked, isOverlay, panelWidth } = useRightPanelDock({ id: "model-leaderboard", open, compact, maxWidthPx: 420 });
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -52,11 +52,11 @@ export function ModelLeaderboardDrawer({ open, onClose }: ModelLeaderboardDrawer
   if (!open) return null;
 
   return (
-    <div className={`fixed z-40 ${docked ? "inset-y-0 right-0 pointer-events-none" : "inset-0"}`} style={docked ? { width: "var(--right-panel-space, 420px)" } : undefined}>
+    <div className={`fixed z-40 ${docked ? "inset-y-0 right-0 pointer-events-none" : "inset-0"}`} style={docked ? { width: `${panelWidth}px` } : undefined}>
       {!docked ? (
         <button
           type="button"
-          className="absolute inset-0 cursor-pointer bg-transparent"
+          className={`absolute inset-0 cursor-pointer transition ${isOverlay ? "bg-black/45 backdrop-blur-sm" : "bg-transparent"}`}
           aria-label="Close leaderboard"
           onClick={onClose}
         />

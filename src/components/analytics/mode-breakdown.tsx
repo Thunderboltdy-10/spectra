@@ -13,14 +13,14 @@ export function ModeBreakdown({ modeCounts }: ModeBreakdownProps) {
 
   if (entries.length === 0) {
     return (
-      <div className="rounded-[var(--radius-container)] border border-dashed border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 text-center text-sm text-[var(--text-secondary)]">
+      <div className="journal-card border-dashed p-4 text-center text-sm text-[var(--text-secondary)]">
         No mode usage data yet
       </div>
     );
   }
 
   return (
-    <div className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-card)]">
+    <div className="journal-card journal-scribble p-4">
       <p className="mb-3 text-xs uppercase tracking-wide text-[var(--text-secondary)]">Mode usage</p>
       <div className="space-y-2">
         {entries.map(([mode, count]) => {

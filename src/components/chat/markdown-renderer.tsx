@@ -94,6 +94,35 @@ function citationHref(citation: Citation) {
   return undefined;
 }
 
+function sanitizeLinkHref(value: string | undefined) {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.startsWith("/")) return trimmed;
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return trimmed;
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+}
+
+function sanitizeImageSrc(value: string | undefined) {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.startsWith("/")) return trimmed;
+  if (/^data:image\/(?:png|jpe?g|webp|gif|avif);base64,[a-z0-9+/=\s]+$/i.test(trimmed)) {
+    return trimmed;
+  }
+  return sanitizeLinkHref(trimmed);
+}
+
 function normalizeCitationToken(value: string) {
   return value
     .toLowerCase()
@@ -149,7 +178,7 @@ export function MarkdownRenderer({ content, citations = [], mode, chatId, onOpen
         const index = Number(rawIdx) - 1;
         const citation = citations[index];
         if (!citation) return token;
-        const href = citationHref(citation) ?? `#source-${rawIdx}`;
+        const href = sanitizeLinkHref(citationHref(citation)) ?? `#source-${rawIdx}`;
         return `[${rawIdx}](${href})`;
       });
       return processed;
@@ -220,7 +249,7 @@ export function MarkdownRenderer({ content, citations = [], mode, chatId, onOpen
             const isCitationRef = /^\[\d+\]$/.test(textValue.trim());
             if (isCitationRef) {
               const citationIndex = Number.parseInt(textValue.replace(/[[\]]/g, ""), 10) - 1;
-              const href = props.href ?? "";
+              const href = sanitizeLinkHref(props.href) ?? "";
               const isDeadAnchor = !href || href.startsWith("#source-");
               const handleClick = (e: React.MouseEvent) => {
                 if (isDeadAnchor && onCitationClick) {
@@ -243,9 +272,14 @@ export function MarkdownRenderer({ content, citations = [], mode, chatId, onOpen
                 </sup>
               );
             }
+            const safeHref = sanitizeLinkHref(props.href);
+            if (!safeHref) {
+              return <span className="text-[var(--text-secondary)]">{children}</span>;
+            }
             return (
               <a
                 {...props}
+                href={safeHref}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex cursor-pointer items-center gap-1 text-[var(--accent-cyan)] underline decoration-[var(--accent-cyan)]/30 underline-offset-2 transition hover:decoration-[var(--accent-cyan)]"
@@ -261,9 +295,8 @@ export function MarkdownRenderer({ content, citations = [], mode, chatId, onOpen
             </div>
           ),
           img: ({ src: imgSrc, alt: imgAlt }) => {
-            const srcStr = typeof imgSrc === "string" ? imgSrc : "";
-            if (!srcStr || srcStr.trim() === "") return null;
-            if (srcStr.startsWith("http") || srcStr.startsWith("data:")) {
+            const srcStr = typeof imgSrc === "string" ? sanitizeImageSrc(imgSrc) : undefined;
+            if (srcStr) {
               return <ImageReveal src={srcStr} alt={typeof imgAlt === "string" ? imgAlt : undefined} />;
             }
             return null;

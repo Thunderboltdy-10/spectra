@@ -205,19 +205,48 @@ export const checkUserBudget = query({
     const totalCostCents = month?.totalCostCents ?? 0;
     const totalSpentEur = totalCostCents / 100;
 
+    const org = await ctx.db.get(actor.orgId);
+    if (!org) {
+      throw new Error("Org not found");
+    }
+
+    const defaultHardLimitCents = 900;
+
+    const configuredBudget = org.monthlyBudgetCentsPerUser;
+    const configuredMargin = org.budgetMarginPercent;
+
+    const hardLimitCents =
+      typeof configuredBudget === "number" && Number.isFinite(configuredBudget) && configuredBudget > 0
+        ? Math.round(configuredBudget)
+        : defaultHardLimitCents;
+
+    const marginPercent = Math.min(
+      40,
+      Math.max(5, typeof configuredMargin === "number" && Number.isFinite(configuredMargin) ? configuredMargin : 20),
+    );
+    const softLimitCents = Math.max(0, Math.floor(hardLimitCents * (1 - marginPercent / 100)));
+    const cheapOnlyLimitCents = Math.max(0, Math.floor(hardLimitCents * 0.9));
+
     const tier =
-      totalSpentEur >= 9
+      totalCostCents >= hardLimitCents
         ? "free_only"
-        : totalSpentEur >= 7
+        : totalCostCents >= cheapOnlyLimitCents
           ? "cheap_only"
-          : "normal";
+          : totalCostCents >= softLimitCents
+            ? "expensive_blocked"
+            : "normal";
 
     return {
       totalSpentEur,
       totalCostCents,
       tier,
-      softLimitReached: totalSpentEur >= 7,
-      hardLimitReached: totalSpentEur >= 9,
+      softLimitReached: totalCostCents >= softLimitCents,
+      hardLimitReached: totalCostCents >= hardLimitCents,
+      softLimitCents,
+      cheapOnlyLimitCents,
+      hardLimitCents,
+      budgetUsagePercent: hardLimitCents > 0 ? (totalCostCents / hardLimitCents) * 100 : 0,
+      marginPercent,
       monthKey: key,
     } as const;
   },

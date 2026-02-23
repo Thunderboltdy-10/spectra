@@ -264,34 +264,53 @@ const SHOWCASE_MODES: ModeCard[] = [
 
 export function ModeShowcase() {
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {SHOWCASE_MODES.map((mode, index) => (
-        <div
-          key={mode.label}
-          style={
-            {
-              animationDelay: `${mode.delay}ms`,
-              "--mode-color": mode.color,
-            } as React.CSSProperties
-          }
-          className={cn(
-            "card-entrance rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4",
-            "hover:shadow-[var(--shadow-hover)] hover:-translate-y-0.5 transition-all duration-200",
-            index === 4 && "sm:col-span-2 lg:col-span-1",
-          )}
-        >
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {SHOWCASE_MODES.map((mode, index) => (
           <div
-            className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl"
-            style={{ background: `color-mix(in oklab, ${mode.color} 18%, var(--bg-secondary))` }}
+            key={mode.label}
+            style={
+              {
+                animationDelay: `${mode.delay}ms`,
+                "--mode-color": mode.color,
+              } as React.CSSProperties
+            }
+            className={cn(
+              "card-entrance rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4",
+              "hover:shadow-[var(--shadow-hover)] hover:-translate-y-0.5 transition-all duration-200",
+              index === 4 && "sm:col-span-2 lg:col-span-1",
+            )}
           >
-            <span style={{ color: mode.color }}>{mode.icon}</span>
+            <div
+              className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl"
+              style={{ background: `color-mix(in oklab, ${mode.color} 18%, var(--bg-secondary))` }}
+            >
+              <span style={{ color: mode.color }}>{mode.icon}</span>
+            </div>
+            <h3 className="text-sm font-semibold text-[var(--text-primary)]">{mode.label}</h3>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--text-secondary)]">
+              {mode.description}
+            </p>
           </div>
-          <h3 className="text-sm font-semibold text-[var(--text-primary)]">{mode.label}</h3>
-          <p className="mt-1 text-xs leading-relaxed text-[var(--text-secondary)]">
-            {mode.description}
-          </p>
-        </div>
-      ))}
+        ))}
+      </div>
+
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+          Quick Command Palette
+        </p>
+        <p className="mt-1 text-sm text-[var(--text-primary)]">
+          Open global search and actions anytime with{" "}
+          <kbd className="rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-xs">
+            Cmd + K
+          </kbd>{" "}
+          or{" "}
+          <kbd className="rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-xs">
+            Ctrl + K
+          </kbd>
+          .
+        </p>
+      </div>
     </div>
   );
 }

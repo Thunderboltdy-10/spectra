@@ -33,6 +33,11 @@ const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
 
 const MIN_LOG_LEVEL: LogLevel = (process.env.LOG_LEVEL as LogLevel) || "info";
 
+function writeLine(value: string, stream: "stdout" | "stderr" = "stdout") {
+  const target = stream === "stderr" ? process.stderr : process.stdout;
+  target.write(`${value}\n`);
+}
+
 function shouldLog(level: LogLevel): boolean {
   return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[MIN_LOG_LEVEL];
 }
@@ -80,7 +85,7 @@ export class StructuredLogger {
     // In production, you'd send this to a logging service
     if (process.env.NODE_ENV === "production") {
       // Send to logging service
-      console.log(JSON.stringify(entry));
+      writeLine(JSON.stringify(entry));
     } else {
       // Pretty print for development
       const colors: Record<LogLevel, string> = {
@@ -91,16 +96,16 @@ export class StructuredLogger {
       };
       const reset = "\x1b[0m";
       
-      console.log(
+      writeLine(
         `${colors[level]}[${level.toUpperCase()}]${reset} ${entry.timestamp} ${entry.context.requestId} ${message}`
       );
       
-      if (metadata && Object.keys(metadata).length > 0) {
-        console.log("  Metadata:", JSON.stringify(metadata, null, 2));
+      if (entry.metadata && Object.keys(entry.metadata).length > 0) {
+        writeLine(`  Metadata: ${JSON.stringify(entry.metadata, null, 2)}`);
       }
       
       if (error) {
-        console.log("  Error:", error.message);
+        writeLine(`  Error: ${error.message}`, "stderr");
       }
     }
   }

@@ -25,6 +25,8 @@ export type Citation = {
   page?: number;
   sourceType: "pack" | "personal" | "general" | "search";
   url?: string;
+  title?: string;
+  domain?: string;
   resourceId?: string;
   snippet?: string;
 };
@@ -35,6 +37,7 @@ export type Agent = {
   description: string;
   systemPrompt: string;
   avatarEmoji: string;
+  avatarIcon?: string;
   category: string;
   preferredModel?: string;
   preferredMode?: import("@/lib/contracts/studyModes").StudyMode;
@@ -45,6 +48,7 @@ export type Agent = {
   guidelinesSummary?: string;
   guidelinesTopicMap?: string[];
   resourceCount?: number;
+  collaborators?: string[];
   createdAt: number;
   updatedAt: number;
 };
@@ -69,7 +73,7 @@ export type ChatMessage = {
   createdAt: number;
 };
 
-export type SpendingTier = "normal" | "cheap_only" | "free_only";
+export type SpendingTier = "normal" | "expensive_blocked" | "cheap_only" | "free_only";
 
 export type ModelRouteInput = {
   mode: import("@/lib/contracts/studyModes").StudyMode;

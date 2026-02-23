@@ -1,0 +1,212 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
+
+export type GuidedTourStep = {
+  selector: string;
+  title: string;
+  description: string;
+  position?: "top" | "bottom" | "left" | "right";
+};
+
+type GuidedTourProps = {
+  open: boolean;
+  steps: GuidedTourStep[];
+  onClose: () => void;
+  onComplete?: () => void;
+};
+
+const PANEL_WIDTH = 340;
+const EDGE_GAP = 12;
+const TARGET_PADDING = 8;
+const CALLOUT_GAP = 14;
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function resolveTooltipPosition(
+  rect: DOMRect,
+  position: GuidedTourStep["position"],
+  viewport: { width: number; height: number },
+) {
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+  const maxLeft = Math.max(EDGE_GAP, viewport.width - PANEL_WIDTH - EDGE_GAP);
+  const defaultLeft = clamp(centerX - PANEL_WIDTH / 2, EDGE_GAP, maxLeft);
+
+  if (position === "top") {
+    return {
+      left: defaultLeft,
+      top: clamp(rect.top - CALLOUT_GAP - 220, EDGE_GAP, viewport.height - 220 - EDGE_GAP),
+    };
+  }
+  if (position === "left") {
+    return {
+      left: clamp(rect.left - PANEL_WIDTH - CALLOUT_GAP, EDGE_GAP, maxLeft),
+      top: clamp(centerY - 110, EDGE_GAP, viewport.height - 220 - EDGE_GAP),
+    };
+  }
+  if (position === "right") {
+    return {
+      left: clamp(rect.right + CALLOUT_GAP, EDGE_GAP, maxLeft),
+      top: clamp(centerY - 110, EDGE_GAP, viewport.height - 220 - EDGE_GAP),
+    };
+  }
+  return {
+    left: defaultLeft,
+    top: clamp(rect.bottom + CALLOUT_GAP, EDGE_GAP, viewport.height - 220 - EDGE_GAP),
+  };
+}
+
+export function GuidedTour({ open, steps, onClose, onComplete }: GuidedTourProps) {
+  const [stepIndex, setStepIndex] = useState(0);
+  const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
+  const [viewport, setViewport] = useState({ width: 0, height: 0 });
+
+  const step = steps[stepIndex];
+  const isLastStep = stepIndex >= steps.length - 1;
+
+  useEffect(() => {
+    if (!open) return;
+    setStepIndex(0);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const updateViewport = () => {
+      setViewport({
+        width: window.innerWidth,
+        height: window.innerHeight,
+      });
+    };
+
+    const updateTarget = () => {
+      const element = document.querySelector(step.selector) as HTMLElement | null;
+      if (!element) {
+        setTargetRect(null);
+        return;
+      }
+      element.scrollIntoView({ block: "center", behavior: "smooth" });
+      setTargetRect(element.getBoundingClientRect());
+    };
+
+    updateViewport();
+    updateTarget();
+
+    const handler = () => {
+      updateViewport();
+      updateTarget();
+    };
+
+    window.addEventListener("resize", handler);
+    window.addEventListener("scroll", handler, true);
+    return () => {
+      window.removeEventListener("resize", handler);
+      window.removeEventListener("scroll", handler, true);
+    };
+  }, [open, step.selector]);
+
+  const highlightedRect = useMemo(() => {
+    if (!targetRect) return null;
+    return {
+      left: Math.max(EDGE_GAP, targetRect.left - TARGET_PADDING),
+      top: Math.max(EDGE_GAP, targetRect.top - TARGET_PADDING),
+      width: targetRect.width + TARGET_PADDING * 2,
+      height: targetRect.height + TARGET_PADDING * 2,
+    };
+  }, [targetRect]);
+
+  const cardPosition = useMemo(() => {
+    if (!highlightedRect || viewport.width <= 0 || viewport.height <= 0) {
+      return {
+        left: EDGE_GAP,
+        top: EDGE_GAP,
+      };
+    }
+
+    const syntheticRect = new DOMRect(
+      highlightedRect.left,
+      highlightedRect.top,
+      highlightedRect.width,
+      highlightedRect.height,
+    );
+
+    return resolveTooltipPosition(syntheticRect, step.position, viewport);
+  }, [highlightedRect, step.position, viewport]);
+
+  if (!open || !step) return null;
+
+  return (
+    <div className="fixed inset-0 z-[120]">
+      {highlightedRect ? (
+        <div
+          className="pointer-events-none fixed rounded-xl border border-[color-mix(in_oklab,var(--accent-cyan)_58%,white)]"
+          style={{
+            left: highlightedRect.left,
+            top: highlightedRect.top,
+            width: highlightedRect.width,
+            height: highlightedRect.height,
+            boxShadow: "0 0 0 9999px rgba(2, 6, 23, 0.62)",
+          }}
+        />
+      ) : (
+        <div className="fixed inset-0 bg-black/60" />
+      )}
+
+      <div
+        className="fixed w-[min(90vw,340px)] rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)]"
+        style={{ left: cardPosition.left, top: cardPosition.top }}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Guided tour"
+      >
+        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+          Step {stepIndex + 1} of {steps.length}
+        </p>
+        <h3 className="mt-1 text-base font-semibold text-[var(--text-primary)]">{step.title}</h3>
+        <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">{step.description}</p>
+        {!highlightedRect ? (
+          <p className="mt-2 text-xs text-[var(--warning)]">Target is currently off-screen or unavailable.</p>
+        ) : null}
+
+        <div className="mt-4 flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="cursor-pointer text-xs text-[var(--text-secondary)] underline underline-offset-2 hover:text-[var(--text-primary)]"
+          >
+            Skip tour
+          </button>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setStepIndex((prev) => Math.max(0, prev - 1))}
+              disabled={stepIndex === 0}
+            >
+              Back
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => {
+                if (isLastStep) {
+                  onComplete?.();
+                  onClose();
+                  return;
+                }
+                setStepIndex((prev) => Math.min(steps.length - 1, prev + 1));
+              }}
+            >
+              {isLastStep ? "Finish" : "Next"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

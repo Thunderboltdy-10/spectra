@@ -45,6 +45,7 @@ export function buildSystemPrompt(params: {
   searchBlock?: string;
   explainDepth?: "introductory" | "intermediate" | "advanced";
   quizDifficultyLevel?: number;
+  quizDifficultyLabel?: "easy" | "medium" | "hard";
 }) {
   const tutorRules =
     params.mode === "tutor"
@@ -84,31 +85,50 @@ export function buildSystemPrompt(params: {
 - If the student's request is vague (e.g., just 'quiz me' or 'make flashcards' without a topic), ask a clarifying question: 'What topic would you like me to quiz you on? How many questions? What difficulty level?' Do NOT generate content for an ambiguous request.
 - If the student request is vague for quiz generation, ask clarifying questions first about scope, level, and number of items.
 - If the student asks a follow-up that is NOT asking for a new quiz, answer in plain text instead of quiz format.
-- When producing a quiz, output MUST follow this structure exactly:
-  1) Numbered questions with 4 options each (A-D)
-  2) A "Correct: [letter]" line per question
-  3) A final section titled "## Answers & Explanations"
 - Generate quiz questions with 4 options (A, B, C, D) each.
-- Format each question as: "Q1. [question text]\\nA) [option]\\nB) [option]\\nC) [option]\\nD) [option]\\nCorrect: [letter]"
-- Include one-line feedback per answer to reinforce retrieval practice.
-- After listing all questions, provide a section "## Answers & Explanations" with the correct answer and brief explanation for each.
+- REQUIRED OUTPUT TEMPLATE (no extra prose before or after):
+Q1. [question text]
+A) [option]
+B) [option]
+C) [option]
+D) [option]
+Correct: [letter]
+
+Q2. [question text]
+A) [option]
+B) [option]
+C) [option]
+D) [option]
+Correct: [letter]
+
+## Answers & Explanations
+1) [letter] - [brief explanation]
+2) [letter] - [brief explanation]
+- Never output markdown tables, JSON, or bullet-list options for quiz mode.
+- Every question must include exactly one Correct line using A/B/C/D.
 - Generate 5 questions by default unless the student specifies a number.
-- Adaptive difficulty level: ${Math.max(1, Math.min(5, params.quizDifficultyLevel ?? 3))}.
+- Adaptive difficulty level: ${(params.quizDifficultyLabel ?? "medium").toUpperCase()} (level ${Math.max(1, Math.min(3, params.quizDifficultyLevel ?? 2))}).
 - Difficulty guide:
-  - Level 1-2: recall and recognition.
-  - Level 3: application questions.
-  - Level 4-5: analysis and evaluation.`
+  - Easy (Level 1): recall, recognition, and direct concept checks.
+  - Medium (Level 2): short application and explanation.
+  - Hard (Level 3): analysis, synthesis, and transfer to new contexts.`
       : "";
 
   const flashcardRules =
     params.mode === "flashcard"
       ? `Flashcard mode policy:
-- If the student's request is vague (e.g., just 'make flashcards' or 'quiz me' without a topic), ask a clarifying question: 'What topic would you like me to quiz you on? How many questions? What difficulty level?' Do NOT generate content for an ambiguous request.
+- If the student's request is vague (e.g., just 'make flashcards' without a topic), ask a clarifying question: 'What topic would you like flashcards for? How many cards? What level of detail?' Do NOT generate content for an ambiguous request.
 - If the topic is too broad, ask the student to narrow the scope before generating cards.
 - If the student asks a follow-up question not requesting a new deck, respond in plain text.
 - When generating a deck, output ONLY flashcards as FRONT/BACK pairs.
-- Never output prose before or after the cards.
-- Format each card as: "FRONT: [question or term]\\nBACK: [answer or definition]"
+- REQUIRED OUTPUT TEMPLATE (no extra prose before or after):
+FRONT: [term or question]
+BACK: [answer or definition]
+
+FRONT: [term or question]
+BACK: [answer or definition]
+- Every card must include exactly one FRONT line and exactly one BACK line.
+- Never output markdown tables, JSON, or unlabeled numbered definitions.
 - Do not place FRONT and BACK on the same line.
 - Keep each BACK concise (<55 words) and include one memory cue.
 - Choose card count dynamically by complexity:
@@ -178,11 +198,9 @@ export function buildSystemPrompt(params: {
       : "";
 
   const preambleInstruction =
-    (params.mode === "quiz" || params.mode === "exam")
-      ? "Before the quiz questions, include 1-2 sentences of context about the topic and what the quiz covers. Then output the questions."
-      : params.mode === "flashcard"
-        ? "Before the flashcard pairs, include 1-2 sentences of context about the topic. Then output the cards."
-        : "";
+    params.mode === "exam"
+      ? "Before the exam questions, include 1-2 sentences of context about the topic and what the mini-paper covers."
+      : "";
 
   const agentRules = params.agent
     ? `Agent profile:

@@ -15,7 +15,7 @@ export function ThinkingBlock({ content, streaming = false }: ThinkingBlockProps
   const [open, setOpen] = useState(true);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
-  const startTimeRef = useRef<number>(Date.now());
+  const startTimeRef = useRef<number>(0);
   const [elapsed, setElapsed] = useState(0);
   const clean = content.trim();
 

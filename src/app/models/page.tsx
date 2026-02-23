@@ -3,15 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Brain,
-  Code2,
-  Eye,
-  PenLine,
+  ArrowUpRight,
+  Check,
+  Filter,
   Search,
   SlidersHorizontal,
-  Sparkles,
-  Tag,
-  Timer,
   Trophy,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -21,20 +17,10 @@ import { ModelLeaderboardDrawer } from "@/components/chat/model-leaderboard-draw
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { fuzzyScore } from "@/lib/fuzzy-model-search";
+import { MODEL_COST_BLOCK_LIST } from "@/lib/model-config";
 
-const TASK_CHIPS = [
-  { label: "Physics", query: "physics equations derivation problem solving" },
-  { label: "Essay", query: "essay writing thesis argument revision" },
-  { label: "Coding", query: "coding debugging algorithm implementation" },
-  { label: "Vision", query: "image diagram OCR visual analysis" },
-  { label: "Fast & Cheap", query: "fast cheap free low latency" },
-  { label: "Research", query: "research synthesis evidence citation" },
-];
-
-type SpendingTier = "normal" | "cheap_only" | "free_only";
-type CapabilityFilter = "all" | "reasoning" | "code" | "vision" | "speed" | "creative";
-type PriceFilter = "all" | "free" | "cheap" | "premium" | "unknown";
-type SortMode = "recommended" | "context" | "input_price" | "popular";
+type SpendingTier = "normal" | "expensive_blocked" | "cheap_only" | "free_only";
+type SortMode = "recommended" | "popular" | "context";
 
 type CapabilityScores = {
   reasoning: number;
@@ -60,10 +46,6 @@ type CatalogModel = {
   capabilities?: CapabilityScores;
   releaseDate?: string;
   knowledgeCutoff?: string;
-  curatedNotes?: string;
-  benchmarkMMLU?: number;
-  benchmarkHumanEval?: number;
-  arenaElo?: number;
   openRouterRank?: number;
 };
 
@@ -88,6 +70,12 @@ type ExplorerModel = CatalogModel & {
   usageCount: number;
 };
 
+type ProviderStat = {
+  name: string;
+  count: number;
+  usageScore: number;
+};
+
 function sanitizeName(value: string) {
   return value
     .replace(/:free$/i, "")
@@ -98,31 +86,40 @@ function sanitizeName(value: string) {
 }
 
 function formatContext(value?: number) {
-  if (!value || value <= 0) return "—";
+  if (!value || value <= 0) return "Unknown";
   return Intl.NumberFormat("en", { notation: "compact" }).format(value);
 }
 
-function formatCost(value: number | undefined, isFree?: boolean) {
-  if (isFree) return "—";
-  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
-  if (value <= 0) return "—";
-  if (value < 0.01) return `$${value.toFixed(4)}/M`;
-  return `$${value.toFixed(2)}/M`;
+function isBudgetSafe(model: ExplorerModel) {
+  if (model.isFree) return true;
+  if (model.modelId.includes(":free")) return true;
+  const inCost = typeof model.inputCostPerM === "number" ? model.inputCostPerM : undefined;
+  const outCost = typeof model.outputCostPerM === "number" ? model.outputCostPerM : undefined;
+  return (inCost ?? 0) === 0 && (outCost ?? 0) === 0;
 }
 
-function primaryCost(model: ExplorerModel) {
-  if (typeof model.inputCostPerM === "number" && Number.isFinite(model.inputCostPerM)) {
-    return model.inputCostPerM;
-  }
-  if (typeof model.outputCostPerM === "number" && Number.isFinite(model.outputCostPerM)) {
-    return model.outputCostPerM;
-  }
-  return undefined;
+function isCheapModel(model: ExplorerModel) {
+  if (isBudgetSafe(model)) return true;
+  const inCost = typeof model.inputCostPerM === "number" ? model.inputCostPerM : Number.POSITIVE_INFINITY;
+  return inCost <= 3;
 }
 
-function isIncludedModel(model: ExplorerModel) {
-  const inCost = primaryCost(model);
-  return Boolean(model.isFree || model.modelId.includes(":free") || (typeof inCost === "number" && inCost <= 0));
+function blockedByTier(model: ExplorerModel, tier: SpendingTier) {
+  if (tier === "normal") return false;
+  if (tier === "expensive_blocked") {
+    return MODEL_COST_BLOCK_LIST.has(model.modelId) || model.modelId === "openrouter/auto";
+  }
+  if (tier === "cheap_only") {
+    return !isCheapModel(model) || model.modelId === "openrouter/auto";
+  }
+  return !isBudgetSafe(model) || model.modelId === "openrouter/auto";
+}
+
+function blockedReason(model: ExplorerModel, tier: SpendingTier) {
+  if (!blockedByTier(model, tier)) return null;
+  if (tier === "expensive_blocked") return "Blocked while budget guard is active";
+  if (tier === "cheap_only") return "Limited to low-cost models until budget recovers";
+  return "Budget limit reached, only budget-safe models are allowed";
 }
 
 function computeCapabilities(model: Pick<ExplorerModel, "capabilities" | "tags" | "modelId">): CapabilityScores {
@@ -138,102 +135,44 @@ function computeCapabilities(model: Pick<ExplorerModel, "capabilities" | "tags" 
   };
 }
 
-function hasCapability(model: ExplorerModel, capability: CapabilityFilter) {
-  if (capability === "all") return true;
+function capabilityLabels(model: ExplorerModel) {
   const caps = computeCapabilities(model);
-  if (capability === "vision") return caps.vision >= 5;
-  if (capability === "speed") return caps.speed >= 8;
-  if (capability === "reasoning") return caps.reasoning >= 7;
-  if (capability === "code") return caps.code >= 7;
-  return caps.creative >= 7;
-}
-
-function matchesPrice(model: ExplorerModel, price: PriceFilter) {
-  if (price === "all") return true;
-  const cost = primaryCost(model);
-  if (price === "free") return isIncludedModel(model);
-  if (price === "unknown") return typeof cost !== "number";
-  if (typeof cost !== "number") return false;
-  if (price === "cheap") return cost <= 3;
-  return cost > 3;
-}
-
-function blockedByTier(model: ExplorerModel, tier: SpendingTier) {
-  if (tier === "normal") return false;
-  if (tier === "free_only") return !isIncludedModel(model);
-  if (isIncludedModel(model)) return false;
-  return (primaryCost(model) ?? Number.MAX_SAFE_INTEGER) > 3;
+  const labels: string[] = [];
+  if (caps.reasoning >= 7) labels.push("Reasoning");
+  if (caps.code >= 7) labels.push("Code");
+  if (caps.vision >= 5) labels.push("Vision");
+  if (caps.speed >= 8) labels.push("Fast");
+  if (caps.creative >= 7) labels.push("Creative");
+  return labels.slice(0, 3);
 }
 
 function scoreModel(model: ExplorerModel, tier: SpendingTier) {
   const caps = computeCapabilities(model);
   let score = 0;
 
-  score += model.isFeatured ? 40 : 0;
-  score += Math.min(24, model.usageCount * 2);
-  score += caps.reasoning * 1.4;
-  score += caps.code * 1.0;
-  score += caps.speed * 0.8;
-  score += caps.vision * 0.6;
-  score += caps.creative * 0.6;
+  score += model.isFeatured ? 35 : 0;
+  score += Math.min(22, model.usageCount * 2);
+  score += caps.reasoning * 1.5;
+  score += caps.code * 1.1;
+  score += caps.speed * 0.7;
+  score += caps.vision * 0.5;
 
   if (model.contextLength) {
-    if (model.contextLength >= 200_000) score += 14;
-    else if (model.contextLength >= 64_000) score += 8;
-    else if (model.contextLength >= 16_000) score += 3;
+    if (model.contextLength >= 200_000) score += 10;
+    else if (model.contextLength >= 64_000) score += 6;
+    else if (model.contextLength >= 16_000) score += 2;
   }
 
-  const inputCost = primaryCost(model);
-  if (isIncludedModel(model)) score += 12;
-  else if (typeof inputCost === "number") {
-    if (inputCost <= 1) score += 8;
-    else if (inputCost <= 3) score += 4;
-    else if (inputCost > 12) score -= 5;
-  }
-
-  if (model.releaseDate) {
-    const releaseTs = Date.parse(model.releaseDate);
-    if (Number.isFinite(releaseTs)) {
-      const ageDays = (Date.now() - releaseTs) / 86_400_000;
-      if (ageDays > 720) score -= 2;
-      if (ageDays > 1200) score -= 4;
-    }
-  }
-
-  if (tier === "free_only" && !isIncludedModel(model)) score -= 100;
-  if (tier === "cheap_only" && !isIncludedModel(model) && (inputCost ?? Number.MAX_SAFE_INTEGER) > 3) score -= 60;
+  if (isBudgetSafe(model)) score += 8;
+  if (blockedByTier(model, tier)) score -= 80;
 
   return score;
-}
-
-function diversifyByProvider(models: ExplorerModel[], maxPerProvider: number) {
-  const byProvider = new Map<string, number>();
-  const out: ExplorerModel[] = [];
-  for (const model of models) {
-    const key = (model.provider || "unknown").toLowerCase();
-    const count = byProvider.get(key) ?? 0;
-    if (count >= maxPerProvider) continue;
-    byProvider.set(key, count + 1);
-    out.push(model);
-  }
-  return out;
-}
-
-function capabilityPills(model: ExplorerModel) {
-  const caps = computeCapabilities(model);
-  const pills: Array<{ key: string; label: string; icon: React.ReactNode }> = [];
-  if (caps.reasoning >= 7) pills.push({ key: "reasoning", label: "Reasoning", icon: <Brain className="h-3 w-3" /> });
-  if (caps.code >= 7) pills.push({ key: "code", label: "Code", icon: <Code2 className="h-3 w-3" /> });
-  if (caps.vision >= 5) pills.push({ key: "vision", label: "Vision", icon: <Eye className="h-3 w-3" /> });
-  if (caps.speed >= 8) pills.push({ key: "speed", label: "Fast", icon: <Timer className="h-3 w-3" /> });
-  if (caps.creative >= 7) pills.push({ key: "creative", label: "Creative", icon: <PenLine className="h-3 w-3" /> });
-  if (isIncludedModel(model)) pills.push({ key: "included", label: "Included", icon: <Tag className="h-3 w-3" /> });
-  return pills.slice(0, 5);
 }
 
 function tierLabel(tier: SpendingTier) {
   if (tier === "free_only") return "Budget only";
   if (tier === "cheap_only") return "Cheap only";
+  if (tier === "expensive_blocked") return "Guarded";
   return "Normal";
 }
 
@@ -247,10 +186,11 @@ function ModelCard({
   onTry: (modelId: string) => void;
 }) {
   const restricted = blockedByTier(model, tier);
+  const restrictionReason = blockedReason(model, tier);
 
   return (
     <article
-      className={`rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 ${
+      className={`relative rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 ${
         restricted ? "opacity-55" : "transition hover:-translate-y-0.5 hover:shadow-[var(--shadow-soft)]"
       }`}
     >
@@ -262,67 +202,33 @@ function ModelCard({
         </div>
       </div>
 
-      <p className="line-clamp-3 min-h-[54px] text-xs leading-relaxed text-[var(--text-secondary)]">{model.description || "No description available."}</p>
+      <p className="line-clamp-3 min-h-[54px] text-xs leading-relaxed text-[var(--text-secondary)]">
+        {model.description || "No description available."}
+      </p>
 
       <div className="mt-3 flex flex-wrap gap-1">
-        {capabilityPills(model).map((badge) => (
+        {capabilityLabels(model).map((label) => (
           <span
-            key={`${model.modelId}-${badge.key}`}
-            className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]"
+            key={`${model.modelId}-${label}`}
+            className="inline-flex items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]"
           >
-            {badge.icon}
-            {badge.label}
+            {label}
           </span>
         ))}
       </div>
 
-      <div className="mt-3 grid grid-cols-3 gap-1.5 text-[11px] text-[var(--text-secondary)]">
-        <div
-          title="Context window: how much text the model can consider in one request."
-          className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1.5"
-        >
-          <p className="uppercase tracking-wide">Context</p>
-          <p className="mt-0.5 text-[var(--text-primary)]">{formatContext(model.contextLength)}</p>
-        </div>
-        <div
-          title="Input price: estimated cost per 1M prompt tokens."
-          className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1.5"
-        >
-          <p className="uppercase tracking-wide">Input</p>
-          <p className="mt-0.5 text-[var(--text-primary)]">{formatCost(model.inputCostPerM, model.isFree)}</p>
-        </div>
-        <div
-          title="Output price: estimated cost per 1M generated tokens."
-          className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1.5"
-        >
-          <p className="uppercase tracking-wide">Output</p>
-          <p className="mt-0.5 text-[var(--text-primary)]">{formatCost(model.outputCostPerM, model.isFree)}</p>
-        </div>
+      <div className="mt-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1.5 text-[11px] text-[var(--text-secondary)]">
+        <p className="uppercase tracking-wide">Context window</p>
+        <p className="mt-0.5 text-[var(--text-primary)]">{formatContext(model.contextLength)}</p>
       </div>
-
-      <div className="mt-2 grid grid-cols-2 gap-1.5 text-[11px] text-[var(--text-secondary)]">
-        <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1.5">
-          <p className="uppercase tracking-wide">Released</p>
-          <p className="mt-0.5 text-[var(--text-primary)]">{model.releaseDate ?? "Unknown"}</p>
-        </div>
-        <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1.5">
-          <p className="uppercase tracking-wide">Knowledge</p>
-          <p className="mt-0.5 text-[var(--text-primary)]">{model.knowledgeCutoff ?? "Unknown"}</p>
-        </div>
-      </div>
-
-      {(typeof model.benchmarkMMLU === "number" || typeof model.benchmarkHumanEval === "number" || typeof model.arenaElo === "number") ? (
-        <div className="mt-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1.5 text-[11px] text-[var(--text-secondary)]">
-          <p className="uppercase tracking-wide">Benchmarks</p>
-          <p className="mt-0.5 text-[var(--text-primary)]">
-            MMLU {typeof model.benchmarkMMLU === "number" ? model.benchmarkMMLU.toFixed(1) : "—"} • HumanEval {typeof model.benchmarkHumanEval === "number" ? model.benchmarkHumanEval.toFixed(1) : "—"} • Elo {typeof model.arenaElo === "number" ? Math.round(model.arenaElo) : "—"}
-          </p>
-        </div>
-      ) : null}
 
       {model.usageCount > 0 && (
         <p className="mt-2 text-[11px] text-[var(--text-secondary)]">Used {model.usageCount}x in your school</p>
       )}
+
+      {restrictionReason ? (
+        <p className="mt-2 text-[11px] text-[var(--warning)]">{restrictionReason}</p>
+      ) : null}
 
       <div className="mt-4 flex items-center justify-between gap-2">
         <span className="truncate text-[10px] text-[var(--text-secondary)]" title={sanitizeName(model.modelId)}>{sanitizeName(model.modelId)}</span>
@@ -339,18 +245,14 @@ export default function ModelsPage() {
   const [catalogModels, setCatalogModels] = useState<CatalogModel[]>([]);
   const [featuredModels, setFeaturedModels] = useState<CatalogModel[]>([]);
   const [mostUsed, setMostUsed] = useState<MostUsedModel[]>([]);
-  const [mostUsedByUser, setMostUsedByUser] = useState<MostUsedModel[]>([]);
   const [liveModels, setLiveModels] = useState<LiveModel[]>([]);
   const [loading, setLoading] = useState(true);
-  const [semanticLoading, setSemanticLoading] = useState(false);
-  const [semanticIds, setSemanticIds] = useState<string[] | null>(null);
 
   const [tier, setTier] = useState<SpendingTier>("normal");
-  const [query, setQuery] = useState("");
-  const [providerFilter, setProviderFilter] = useState("");
-  const [capability, setCapability] = useState<CapabilityFilter>("all");
-  const [price, setPrice] = useState<PriceFilter>("all");
-  const [sortMode, setSortMode] = useState<SortMode>("popular");
+  const [providerSearch, setProviderSearch] = useState("");
+  const [modelSearch, setModelSearch] = useState("");
+  const [selectedProviders, setSelectedProviders] = useState<string[]>([]);
+  const [sortMode, setSortMode] = useState<SortMode>("recommended");
   const [leaderboardOpen, setLeaderboardOpen] = useState(false);
 
   useEffect(() => {
@@ -368,13 +270,11 @@ export default function ModelsPage() {
           models: CatalogModel[];
           featured?: CatalogModel[];
           mostUsed?: MostUsedModel[];
-          mostUsedByUser?: MostUsedModel[];
         };
 
         setCatalogModels(catalogPayload.models ?? []);
         setFeaturedModels(catalogPayload.featured ?? []);
         setMostUsed(catalogPayload.mostUsed ?? []);
-        setMostUsedByUser(catalogPayload.mostUsedByUser ?? []);
 
         if (bootstrapRes.ok) {
           const bootstrap = (await bootstrapRes.json()) as { userSpending?: { tier?: SpendingTier } };
@@ -437,149 +337,24 @@ export default function ModelsPage() {
       .filter((model) => (model.contextLength ?? 0) > 0 || Boolean(model.description));
   }, [catalogModels, liveModels, mostUsed]);
 
-  const providers = useMemo(() => {
-    const scores = new Map<string, number>();
+  const providerStats = useMemo(() => {
+    const aggregate = new Map<string, ProviderStat>();
     for (const model of models) {
-      const providerName = model.provider?.trim();
-      if (!providerName) continue;
-      const base = scores.get(providerName) ?? 0;
-      const usageBoost = Math.max(1, model.usageCount);
-      const featuredBoost = model.isFeatured ? 8 : 0;
-      const costBoost = isIncludedModel(model) ? 2 : 0;
-      scores.set(providerName, base + usageBoost + featuredBoost + costBoost);
+      const providerName = model.provider?.trim() || "Unknown";
+      const current = aggregate.get(providerName) ?? { name: providerName, count: 0, usageScore: 0 };
+      current.count += 1;
+      current.usageScore += Math.max(1, model.usageCount) + (model.isFeatured ? 4 : 0);
+      aggregate.set(providerName, current);
     }
 
-    return ["all", ...Array.from(scores.entries())
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .map(([providerName]) => providerName)];
+    return [...aggregate.values()].sort((a, b) => b.usageScore - a.usageScore || a.name.localeCompare(b.name));
   }, [models]);
 
-  async function runSemanticSearch(value: string) {
-    const clean = value.trim();
-    if (!clean) {
-      setSemanticIds(null);
-      return;
-    }
-
-    setSemanticLoading(true);
-    try {
-      const response = await fetch("/api/models/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: clean }),
-      });
-
-      if (!response.ok) throw new Error(await response.text());
-      const payload = (await response.json()) as { results: Array<{ modelId: string }> };
-      setSemanticIds(payload.results.map((item) => item.modelId));
-    } catch {
-      setSemanticIds(null);
-    } finally {
-      setSemanticLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    const clean = query.trim();
-    if (!clean) {
-      setSemanticIds(null);
-      return;
-    }
-
-    const timeout = setTimeout(() => {
-      const localHits = models
-        .map((model) => ({ modelId: model.modelId, score: fuzzyScore(clean, model) }))
-        .filter((row) => row.score > 0)
-        .slice(0, 10);
-
-      if (localHits.length < 4) {
-        void runSemanticSearch(clean);
-      } else {
-        setSemanticIds(null);
-      }
-    }, 450);
-
-    return () => clearTimeout(timeout);
-  }, [models, query]);
-
-  const semanticSet = useMemo(() => new Set(semanticIds ?? []), [semanticIds]);
-
-  const allModels = useMemo(() => {
-    const clean = query.trim().toLowerCase();
-    const providerNeedle = providerFilter.trim().toLowerCase();
-
-    const scopedInitial = models
-      .filter((model) => (providerNeedle ? model.provider.toLowerCase().includes(providerNeedle) : true))
-      .filter((model) => hasCapability(model, capability));
-    const scoped = scopedInitial.length > 0 ? scopedInitial : models;
-
-    const priced = scoped.filter((model) => matchesPrice(model, price));
-    let filtered = priced.length > 0 ? priced : scoped;
-
-    if (price === "free" && filtered.length < 3) {
-      const supplemental = [...scoped]
-        .filter((model) => !filtered.some((picked) => picked.modelId === model.modelId))
-        .sort((a, b) => {
-          const aCost = primaryCost(a) ?? Number.MAX_SAFE_INTEGER;
-          const bCost = primaryCost(b) ?? Number.MAX_SAFE_INTEGER;
-          return aCost - bCost;
-        })
-        .slice(0, Math.max(0, 3 - filtered.length));
-      filtered = [...filtered, ...supplemental];
-    }
-
-    if (clean) {
-      const searched = filtered
-        .map((model) => ({ model, score: fuzzyScore(clean, model) }))
-        .filter((row) => row.score > 0 || semanticSet.has(row.model.modelId))
-        .sort((a, b) => {
-          const aSemantic = semanticSet.has(a.model.modelId) ? 1 : 0;
-          const bSemantic = semanticSet.has(b.model.modelId) ? 1 : 0;
-          if (aSemantic !== bSemantic) return bSemantic - aSemantic;
-          return b.score - a.score;
-        })
-        .map((row) => row.model)
-        .slice(0, Math.min(30, filtered.length));
-      if (searched.length > 0) {
-        filtered = searched;
-      } else {
-        filtered = [...filtered]
-          .sort((a, b) => scoreModel(b, tier) - scoreModel(a, tier))
-          .slice(0, Math.min(12, filtered.length));
-      }
-    }
-
-    if (filtered.length === 0) {
-      filtered = [...models]
-        .sort((a, b) => {
-          const aRank = typeof a.openRouterRank === "number" ? a.openRouterRank : Number.MAX_SAFE_INTEGER;
-          const bRank = typeof b.openRouterRank === "number" ? b.openRouterRank : Number.MAX_SAFE_INTEGER;
-          if (aRank !== bRank) return aRank - bRank;
-          return scoreModel(b, tier) - scoreModel(a, tier);
-        })
-        .slice(0, Math.min(12, models.length));
-    }
-
-    const sorted = [...filtered].sort((a, b) => {
-      if (sortMode === "context") return (b.contextLength ?? 0) - (a.contextLength ?? 0);
-      if (sortMode === "input_price") {
-        const aCost = typeof a.inputCostPerM === "number" ? a.inputCostPerM : Number.MAX_SAFE_INTEGER;
-        const bCost = typeof b.inputCostPerM === "number" ? b.inputCostPerM : Number.MAX_SAFE_INTEGER;
-        return aCost - bCost;
-      }
-      if (sortMode === "popular") {
-        const aRank = typeof a.openRouterRank === "number" ? a.openRouterRank : Number.MAX_SAFE_INTEGER;
-        const bRank = typeof b.openRouterRank === "number" ? b.openRouterRank : Number.MAX_SAFE_INTEGER;
-        if (aRank !== bRank) return aRank - bRank;
-        return b.usageCount - a.usageCount;
-      }
-      return scoreModel(b, tier) - scoreModel(a, tier);
-    });
-    if (sortMode === "recommended" && !clean) {
-      return diversifyByProvider(sorted, 2);
-    }
-    return sorted;
-  }, [capability, models, price, providerFilter, query, semanticSet, sortMode, tier]);
+  const visibleProviders = useMemo(() => {
+    const needle = providerSearch.trim().toLowerCase();
+    if (!needle) return providerStats;
+    return providerStats.filter((provider) => provider.name.toLowerCase().includes(needle));
+  }, [providerSearch, providerStats]);
 
   const featured = useMemo(() => {
     const source = featuredModels.length > 0 ? featuredModels : models.filter((model) => model.isFeatured);
@@ -588,36 +363,49 @@ export default function ModelsPage() {
       .sort((a, b) => (a.featuredOrder ?? 999) - (b.featuredOrder ?? 999));
   }, [featuredModels, models]);
 
-  const mostUsedCards = useMemo(() => {
-    return mostUsed
-      .map((item) => {
-        const existing = models.find((model) => model.modelId === item.modelId);
-        if (existing) return existing;
-        return {
-          ...item,
-          name: sanitizeName(item.name || item.modelId),
-          usageCount: item.usageCount ?? 0,
-        } as ExplorerModel;
-      })
-      .filter((model): model is ExplorerModel => Boolean(model));
-  }, [models, mostUsed]);
+  const filteredModels = useMemo(() => {
+    const selected = new Set(selectedProviders);
+    const cleanModelSearch = modelSearch.trim().toLowerCase();
 
-  const mostUsedByUserCards = useMemo(() => {
-    return mostUsedByUser
-      .map((item) => {
-        const existing = models.find((model) => model.modelId === item.modelId);
-        if (existing) return existing;
-        return {
-          ...item,
-          name: sanitizeName(item.name || item.modelId),
-          usageCount: item.usageCount ?? 0,
-        } as ExplorerModel;
-      })
-      .filter((model): model is ExplorerModel => Boolean(model));
-  }, [models, mostUsedByUser]);
+    let rows = models.filter((model) => {
+      if (selected.size > 0 && !selected.has(model.provider)) {
+        return false;
+      }
+      if (!cleanModelSearch) return true;
+      const localScore = fuzzyScore(cleanModelSearch, model);
+      const haystack = `${model.name} ${model.modelId} ${model.provider}`.toLowerCase();
+      return haystack.includes(cleanModelSearch) || localScore > 0.25;
+    });
+
+    rows = rows.sort((a, b) => {
+      if (sortMode === "context") return (b.contextLength ?? 0) - (a.contextLength ?? 0);
+      if (sortMode === "popular") {
+        const aRank = typeof a.openRouterRank === "number" ? a.openRouterRank : Number.MAX_SAFE_INTEGER;
+        const bRank = typeof b.openRouterRank === "number" ? b.openRouterRank : Number.MAX_SAFE_INTEGER;
+        if (aRank !== bRank) return aRank - bRank;
+        return b.usageCount - a.usageCount;
+      }
+      return scoreModel(b, tier) - scoreModel(a, tier);
+    });
+
+    return rows;
+  }, [modelSearch, models, selectedProviders, sortMode, tier]);
 
   function tryModel(modelId: string) {
     router.push(`/?model=${encodeURIComponent(modelId)}&mode=auto`);
+  }
+
+  function toggleProvider(name: string) {
+    setSelectedProviders((prev) => {
+      if (prev.includes(name)) {
+        return prev.filter((item) => item !== name);
+      }
+      return [...prev, name];
+    });
+  }
+
+  function clearProviderFilters() {
+    setSelectedProviders([]);
   }
 
   if (loading) {
@@ -634,157 +422,165 @@ export default function ModelsPage() {
 
   return (
     <AppShell>
-      <section className="mb-5 flex items-start justify-between">
-        <div>
-          <h1 className="font-display text-4xl tracking-tight">Model Explorer</h1>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            Strength-first browsing with real context length and pricing visibility.
-          </p>
-        </div>
-        <Button variant="secondary" className="gap-2" onClick={() => setLeaderboardOpen(true)}>
-          <Trophy className="h-4 w-4" />
-          Leaderboard
-        </Button>
-      </section>
+      <section className="relative overflow-hidden rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 sm:p-6">
+        <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full bg-[color-mix(in_oklab,var(--accent-cyan)_20%,transparent)] blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-20 left-10 h-56 w-56 rounded-full bg-[color-mix(in_oklab,var(--accent-gold)_25%,transparent)] blur-3xl" />
 
-      <section className="mb-5 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-secondary)]" />
-          <Input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search tasks or model names"
-            className="h-10 w-full pl-10 text-sm"
-          />
-        </div>
+        <div className="relative z-10">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h1 className="font-display text-4xl tracking-tight">Model Atlas</h1>
+              <p className="mt-1 max-w-2xl text-sm text-[var(--text-secondary)]">
+                Pick providers first, then compare model strengths. Budget guardrails are enforced live.
+              </p>
+            </div>
+            <Button variant="secondary" className="gap-2" onClick={() => setLeaderboardOpen(true)}>
+              <Trophy className="h-4 w-4" />
+              Leaderboard
+            </Button>
+          </div>
 
-        <div className="mt-3">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-secondary)]" />
-            <Input
-              list="provider-list"
-              value={providerFilter}
-              onChange={(event) => setProviderFilter(event.target.value)}
-              placeholder="Filter providers (type to search)"
-              className="h-9 pl-9 text-sm"
-            />
-            <datalist id="provider-list">
-              {providers
-                .filter((item) => item !== "all")
-                .map((item) => (
-                  <option key={item} value={item} />
-                ))}
-            </datalist>
+          <div className="mt-4 grid gap-2 lg:grid-cols-[1fr_1fr_auto]">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-secondary)]" />
+              <Input
+                value={providerSearch}
+                onChange={(event) => setProviderSearch(event.target.value)}
+                placeholder="Search providers"
+                className="h-10 w-full pl-10 text-sm"
+              />
+            </div>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-secondary)]" />
+              <Input
+                value={modelSearch}
+                onChange={(event) => setModelSearch(event.target.value)}
+                placeholder="Search models"
+                className="h-10 w-full pl-10 text-sm"
+              />
+            </div>
+            <div className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-xs text-[var(--text-secondary)]">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Tier: {tierLabel(tier)}
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs text-[var(--text-secondary)]">
+              <Filter className="h-3.5 w-3.5" />
+              Sort
+              <select
+                value={sortMode}
+                onChange={(event) => setSortMode(event.target.value as SortMode)}
+                className="bg-transparent text-xs text-[var(--text-primary)] outline-none"
+              >
+                <option value="recommended">Recommended</option>
+                <option value="popular">Popular</option>
+                <option value="context">Largest context</option>
+              </select>
+            </div>
+            {selectedProviders.length > 0 ? (
+              <button
+                type="button"
+                onClick={clearProviderFilters}
+                className="inline-flex items-center gap-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+              >
+                Clear providers
+              </button>
+            ) : null}
           </div>
         </div>
+      </section>
 
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <select
-            value={capability}
-            onChange={(event) => setCapability(event.target.value as CapabilityFilter)}
-            className="h-9 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-sm text-[var(--text-primary)]"
-          >
-            <option value="all">All capabilities</option>
-            <option value="reasoning">Reasoning</option>
-            <option value="code">Code</option>
-            <option value="vision">Vision</option>
-            <option value="speed">Speed</option>
-            <option value="creative">Creative</option>
-          </select>
+      <section className="mt-5 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-[var(--text-primary)]">Providers</h2>
+            <p className="text-xs text-[var(--text-secondary)]">Select one or more providers to filter models.</p>
+          </div>
+          <p className="text-xs text-[var(--text-secondary)]">{visibleProviders.length} shown</p>
+        </div>
 
-          <select
-            value={price}
-            onChange={(event) => setPrice(event.target.value as PriceFilter)}
-            className="h-9 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-sm text-[var(--text-primary)]"
-          >
-            <option value="all">All prices</option>
-            <option value="free">Included</option>
-            <option value="cheap">Cheap</option>
-            <option value="premium">Premium</option>
-            <option value="unknown">Unknown</option>
-          </select>
-
-          <select
-            value={sortMode}
-            onChange={(event) => setSortMode(event.target.value as SortMode)}
-            className="h-9 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-sm text-[var(--text-primary)]"
-          >
-            <option value="recommended">Recommended</option>
-            <option value="popular">OpenRouter popular</option>
-            <option value="context">Largest context</option>
-            <option value="input_price">Lowest input cost</option>
-          </select>
-
-          {TASK_CHIPS.map((chip) => (
-            <button
-              key={chip.label}
-              type="button"
-              onClick={() => {
-                setQuery(chip.query);
-                void runSemanticSearch(chip.query);
-              }}
-              className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1 text-xs text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
-            >
-              <Sparkles className="h-3 w-3" />
-              {chip.label}
-            </button>
-          ))}
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1 text-xs text-[var(--text-secondary)]">
-            <SlidersHorizontal className="h-3 w-3" />
-            Tier: {tierLabel(tier)}
-          </span>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          {visibleProviders.map((provider) => {
+            const selected = selectedProviders.includes(provider.name);
+            return (
+              <button
+                key={provider.name}
+                type="button"
+                onClick={() => toggleProvider(provider.name)}
+                className={`relative rounded-xl border p-3 text-left transition ${
+                  selected
+                    ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,var(--bg-primary))]"
+                    : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
+                }`}
+              >
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <ProviderLogo provider={provider.name} size={18} className="h-8 w-8" />
+                  <span className={`inline-flex h-4 w-4 items-center justify-center rounded-full border text-[10px] ${selected ? "border-[var(--accent-cyan)] text-[var(--accent-cyan)]" : "border-[var(--border-default)] text-[var(--text-secondary)]"}`}>
+                    {selected ? <Check className="h-3 w-3" /> : null}
+                  </span>
+                </div>
+                <p className="truncate text-xs font-medium text-[var(--text-primary)]">{provider.name}</p>
+                <p className="text-[10px] text-[var(--text-secondary)]">{provider.count} models</p>
+              </button>
+            );
+          })}
         </div>
       </section>
 
-      {featured.length > 0 && (
-        <section className="mb-6">
+      {featured.length > 0 ? (
+        <section className="mt-6">
           <h2 className="mb-3 text-lg font-semibold text-[var(--text-primary)]">Featured Models</h2>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {featured.slice(0, 6).map((model) => (
-              <ModelCard key={model.modelId} model={model} tier={tier} onTry={tryModel} />
+              <ModelCard key={`featured-${model.modelId}`} model={model} tier={tier} onTry={tryModel} />
             ))}
           </div>
         </section>
-      )}
+      ) : null}
 
-      {mostUsedCards.length > 0 && (
-        <section className="mb-6">
-          <h2 className="mb-3 text-lg font-semibold text-[var(--text-primary)]">Most Used In Your School</h2>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {mostUsedCards.slice(0, 6).map((model) => (
-              <ModelCard key={`popular-${model.modelId}`} model={model} tier={tier} onTry={tryModel} />
-            ))}
+      <section className="mt-6">
+        <div className="mb-3 flex items-end justify-between gap-2">
+          <div>
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Popular</h2>
+            <p className="text-xs text-[var(--text-secondary)]">Provider-filtered results for your school.</p>
           </div>
-        </section>
-      )}
-
-      {mostUsedByUserCards.length > 0 && !query.trim() && (
-        <section className="mb-6">
-          <h2 className="mb-3 text-lg font-semibold text-[var(--text-primary)]">Most Used By You</h2>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {mostUsedByUserCards.slice(0, 6).map((model) => (
-              <ModelCard key={`mine-${model.modelId}`} model={model} tier={tier} onTry={tryModel} />
-            ))}
-          </div>
-        </section>
-      )}
-
-      <section>
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-[var(--text-primary)]">All Models</h2>
-          <p className="text-xs text-[var(--text-secondary)]">
-            {semanticLoading ? "Semantic ranking in progress..." : `${allModels.length} models`}
-          </p>
+          <p className="text-xs text-[var(--text-secondary)]">{filteredModels.length} models</p>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {allModels.map((model) => (
-            <ModelCard key={model.modelId} model={model} tier={tier} onTry={tryModel} />
-          ))}
-        </div>
+        {filteredModels.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 text-center text-sm text-[var(--text-secondary)]">
+            No models match your current filters.
+          </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {filteredModels.map((model) => (
+              <ModelCard key={`all-${model.modelId}`} model={model} tier={tier} onTry={tryModel} />
+            ))}
+          </div>
+        )}
       </section>
 
-      <ModelLeaderboardDrawer open={leaderboardOpen} onClose={() => setLeaderboardOpen(false)} />
+      <ModelLeaderboardDrawer
+        open={leaderboardOpen}
+        onClose={() => setLeaderboardOpen(false)}
+      />
+
+      <section className="mt-8 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-[var(--text-primary)]">Selection tip</h3>
+            <p className="text-xs text-[var(--text-secondary)]">
+              Start with a focused provider filter, then compare 2-3 models on your exact coursework prompt.
+            </p>
+          </div>
+          <Button variant="secondary" size="sm" className="gap-1.5" onClick={() => router.push("/")}> 
+            Open Chat
+            <ArrowUpRight className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </section>
     </AppShell>
   );
 }

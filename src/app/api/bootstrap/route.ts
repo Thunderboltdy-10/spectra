@@ -17,9 +17,14 @@ export async function GET() {
       convexQuery("usage:checkUserBudget", { actorClerkId: actor.clerkId }) as Promise<{
         totalSpentEur: number;
         totalCostCents: number;
-        tier: "normal" | "cheap_only" | "free_only";
+        tier: "normal" | "expensive_blocked" | "cheap_only" | "free_only";
         softLimitReached: boolean;
         hardLimitReached: boolean;
+        softLimitCents: number;
+        cheapOnlyLimitCents: number;
+        hardLimitCents: number;
+        budgetUsagePercent: number;
+        marginPercent: number;
       }>,
       convexQuery("memory:getUserMemory", { actorClerkId: actor.clerkId }) as Promise<{
         rawMemoryText: string;

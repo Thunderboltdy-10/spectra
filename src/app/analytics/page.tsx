@@ -27,6 +27,28 @@ type AnalyticsResponse = {
     preferredModel?: string;
     preferredModelCount: number;
   };
+  enhanced: {
+    timeSpentDaily: Array<{
+      day: string;
+      timerSeconds: number;
+      estimatedSeconds: number;
+      totalSeconds: number;
+      messages: number;
+    }>;
+    modeMessageCounts: Record<string, number>;
+    quizTrend: Array<{
+      day: string;
+      attempts: number;
+      averageScore: number;
+    }>;
+    productivity: {
+      totalStudySeconds: number;
+      estimatedSessions: number;
+      messagesPerSession: number;
+      topicDepth: number;
+      activeDays: number;
+    };
+  };
   class: AnalyticsRow[];
 };
 
@@ -83,6 +105,7 @@ export default function AnalyticsPage() {
           role={data.role}
           studentData={data.student}
           studentSignals={data.studentSignals}
+          enhanced={data.enhanced}
           classData={data.class}
         />
       ) : (

@@ -36,7 +36,7 @@ export function QuizPanel({
 }: QuizPanelProps) {
   const [index, setIndex] = useState(0);
   const compact = useCompactSheet(860);
-  const docked = useRightPanelDock({ id: "quiz-panel", open, compact, maxWidthPx: 576 });
+  const { docked, isOverlay, panelWidth } = useRightPanelDock({ id: "quiz-panel", open, compact, maxWidthPx: 576 });
   const [collapsed, setCollapsed] = useState(false);
   const current = questions[index];
 
@@ -63,11 +63,11 @@ export function QuizPanel({
   const selected = current ? answers[current.id] : undefined;
 
   return (
-    <div className={`fixed z-50 ${docked ? "inset-y-0 right-0 pointer-events-none" : "inset-0"}`} style={docked ? { width: "var(--right-panel-space, 576px)" } : undefined}>
+    <div className={`fixed z-50 ${docked ? "inset-y-0 right-0 pointer-events-none" : "inset-0"}`} style={docked ? { width: `${panelWidth}px` } : undefined}>
       {!docked ? (
         <button
           type="button"
-          className="absolute inset-0 cursor-pointer bg-transparent"
+          className={`absolute inset-0 cursor-pointer transition ${isOverlay ? "bg-black/45 backdrop-blur-sm" : "bg-transparent"}`}
           aria-label="Close quiz panel"
           onClick={onClose}
         />

@@ -3,6 +3,37 @@ import { v } from "convex/values";
 import { getUserByClerkId } from "./helpers";
 import { vStudyMode, vThinkingLevel, vRouterMode, vCitation, vRouteTrace } from "./shared";
 
+function compactMessageText(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function buildManualCompactionSummary(messages: Array<{ role: "user" | "assistant" | "system"; content: string; mode: string }>) {
+  const userGoals = messages
+    .filter((message) => message.role === "user")
+    .map((message) => compactMessageText(message.content).slice(0, 150))
+    .filter(Boolean);
+
+  const assistantGuidance = messages
+    .filter((message) => message.role === "assistant")
+    .map((message) => compactMessageText(message.content).slice(0, 150))
+    .filter(Boolean);
+
+  const lines = [
+    "Goals",
+    ...userGoals.slice(0, 3).map((line) => `- ${line}`),
+    "Attempts",
+    ...userGoals.slice(3, 6).map((line) => `- ${line}`),
+    "Key Guidance",
+    ...assistantGuidance.slice(0, 4).map((line) => `- ${line}`),
+    "Outstanding Questions",
+    userGoals.length > 0 ? `- ${userGoals[userGoals.length - 1]}` : "- No unresolved question captured.",
+    "Next Steps",
+    "- Continue from recent messages and verify against cited sources/rubric.",
+  ];
+
+  return lines.join("\n").slice(0, 2000);
+}
+
 export const listChats = query({
   args: {
     actorClerkId: v.string(),
@@ -440,6 +471,74 @@ export const setContextSummary = mutation({
     });
 
     return { ok: true };
+  },
+});
+
+export const manualCompact = mutation({
+  args: {
+    actorClerkId: v.string(),
+    chatId: v.id("chats"),
+    keepLatestMessages: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const chat = await ctx.db.get(args.chatId);
+    if (!chat || chat.ownerUserId !== actor._id || chat.deletedAt) {
+      throw new Error("Chat not found");
+    }
+
+    const allMessages = await ctx.db
+      .query("messages")
+      .withIndex("by_chat", (q) => q.eq("chatId", args.chatId))
+      .collect();
+    const sorted = allMessages.sort((a, b) => a.createdAt - b.createdAt);
+
+    if (sorted.length < 20) {
+      return {
+        ok: false,
+        reason: "not_enough_messages",
+        compactedMessages: 0,
+      };
+    }
+
+    const keepLatest = Math.min(12, Math.max(4, args.keepLatestMessages ?? 6));
+    const toCompact = sorted.slice(0, Math.max(0, sorted.length - keepLatest));
+    if (toCompact.length === 0) {
+      return {
+        ok: false,
+        reason: "nothing_to_compact",
+        compactedMessages: 0,
+      };
+    }
+
+    const generatedSummary = buildManualCompactionSummary(
+      toCompact.map((message) => ({
+        role: message.role,
+        content: message.content,
+        mode: message.mode,
+      })),
+    );
+
+    const contextSummary = (chat.contextSummary?.trim()
+      ? `${chat.contextSummary.trim()}\n\n---\n${generatedSummary}`
+      : generatedSummary)
+      .slice(0, 2000);
+
+    await ctx.db.patch(chat._id, {
+      contextSummary,
+      updatedAt: Date.now(),
+    });
+
+    return {
+      ok: true,
+      compactedMessages: toCompact.length,
+      retainedMessages: sorted.length - toCompact.length,
+      contextSummary,
+    };
   },
 });
 

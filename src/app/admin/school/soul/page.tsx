@@ -314,7 +314,7 @@ export default function SchoolSoulPage() {
             </div>
             <p className="text-sm text-[var(--text-secondary)]">
               Institutional AI guidance — hidden from students, injected at runtime into every
-              interaction.
+              interaction. Changes apply only to your current school.
             </p>
           </div>
 

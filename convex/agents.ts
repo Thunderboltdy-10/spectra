@@ -3,6 +3,48 @@ import { v } from "convex/values";
 import { getUserByClerkId } from "./helpers";
 import { vStudyMode } from "./shared";
 
+type AgentDoc = {
+  orgId: string;
+  creatorUserId: string;
+  visibility: "public" | "private";
+  collaborators?: string[];
+};
+
+type ActorDoc = {
+  _id: string;
+  role: "student" | "teacher" | "admin";
+};
+
+function defaultIconForCategory(category: string) {
+  const value = category.trim().toLowerCase();
+  if (/math|calculus|algebra|statistics/.test(value)) return "Calculator";
+  if (/science|chemistry|biology|physics/.test(value)) return "FlaskConical";
+  if (/writing|english|language arts|essay/.test(value)) return "PenTool";
+  if (/history|politics|social studies/.test(value)) return "Landmark";
+  if (/coding|programming|cs|computer/.test(value)) return "Code2";
+  if (/language|linguistics/.test(value)) return "Languages";
+  if (/art|music|design/.test(value)) return "Palette";
+  if (/philosophy|logic/.test(value)) return "Sigma";
+  if (/geography|global|world/.test(value)) return "Globe2";
+  return "Bot";
+}
+
+function isAgentCollaborator(agent: AgentDoc, userId: string) {
+  return (agent.collaborators ?? []).includes(userId);
+}
+
+function canEditAgent(agent: AgentDoc, actor: ActorDoc) {
+  return actor.role === "admin" || agent.creatorUserId === actor._id || isAgentCollaborator(agent, actor._id);
+}
+
+function canManageCollaborators(agent: AgentDoc, actor: ActorDoc) {
+  return actor.role === "admin" || agent.creatorUserId === actor._id;
+}
+
+function canViewAgent(agent: AgentDoc, actor: ActorDoc) {
+  return agent.visibility === "public" || canEditAgent(agent, actor);
+}
+
 export const createAgent = mutation({
   args: {
     actorClerkId: v.string(),
@@ -10,6 +52,7 @@ export const createAgent = mutation({
     description: v.string(),
     systemPrompt: v.string(),
     avatarEmoji: v.optional(v.string()),
+    avatarIcon: v.optional(v.string()),
     category: v.string(),
     preferredModel: v.optional(v.string()),
     preferredMode: v.optional(vStudyMode),
@@ -36,6 +79,7 @@ export const createAgent = mutation({
       description: args.description,
       systemPrompt: args.systemPrompt,
       avatarEmoji: args.avatarEmoji || "🎓",
+      avatarIcon: args.avatarIcon ?? defaultIconForCategory(args.category),
       category: args.category,
       preferredModel: args.preferredModel,
       preferredMode: args.preferredMode,
@@ -45,6 +89,7 @@ export const createAgent = mutation({
       allowedTools: args.allowedTools,
       modelAllowlist: args.modelAllowlist,
       modelDenylist: args.modelDenylist,
+      collaborators: [],
       attachmentPolicy: args.attachmentPolicy,
       visibility: args.visibility,
       usageCount: 0,
@@ -67,6 +112,7 @@ export const updateAgent = mutation({
     description: v.optional(v.string()),
     systemPrompt: v.optional(v.string()),
     avatarEmoji: v.optional(v.string()),
+    avatarIcon: v.optional(v.string()),
     category: v.optional(v.string()),
     preferredModel: v.optional(v.string()),
     preferredMode: v.optional(vStudyMode),
@@ -90,8 +136,8 @@ export const updateAgent = mutation({
       throw new Error("Agent not found");
     }
 
-    if (agent.creatorUserId !== actor._id && actor.role !== "admin") {
-      throw new Error("Only creator or admin can update this agent");
+    if (!canEditAgent(agent, actor)) {
+      throw new Error("Only creator, collaborator, or admin can update this agent");
     }
 
     await ctx.db.patch(args.agentId, {
@@ -99,6 +145,10 @@ export const updateAgent = mutation({
       description: args.description ?? agent.description,
       systemPrompt: args.systemPrompt ?? agent.systemPrompt,
       avatarEmoji: args.avatarEmoji ?? agent.avatarEmoji,
+      avatarIcon:
+        args.avatarIcon ??
+        agent.avatarIcon ??
+        defaultIconForCategory(args.category ?? agent.category),
       category: args.category ?? agent.category,
       preferredModel: args.preferredModel ?? agent.preferredModel,
       preferredMode: args.preferredMode ?? agent.preferredMode,
@@ -135,8 +185,8 @@ export const updateAgentGuidelines = mutation({
       throw new Error("Agent not found");
     }
 
-    if (actor.role !== "admin" && agent.creatorUserId !== actor._id) {
-      throw new Error("Only creator or admin can update this agent");
+    if (!canEditAgent(agent, actor)) {
+      throw new Error("Only creator, collaborator, or admin can update this agent");
     }
 
     await ctx.db.patch(args.agentId, {
@@ -196,7 +246,7 @@ export const listAgents = query({
           .collect();
 
     return base
-      .filter((agent) => agent.visibility === "public" || agent.creatorUserId === actor._id)
+      .filter((agent) => canViewAgent(agent, actor))
       .sort((a, b) => b.usageCount - a.usageCount || b.updatedAt - a.updatedAt);
   },
 });
@@ -217,11 +267,159 @@ export const getAgent = query({
       throw new Error("Agent not found");
     }
 
-    if (agent.visibility === "private" && agent.creatorUserId !== actor._id && actor.role !== "admin") {
+    if (!canViewAgent(agent, actor)) {
       throw new Error("Not authorized for this agent");
     }
 
     return agent;
+  },
+});
+
+export const listCollaborators = query({
+  args: {
+    actorClerkId: v.string(),
+    agentId: v.id("agents"),
+    search: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const agent = await ctx.db.get(args.agentId);
+    if (!agent || agent.orgId !== actor.orgId) {
+      throw new Error("Agent not found");
+    }
+
+    if (!canViewAgent(agent, actor)) {
+      throw new Error("Not authorized for this agent");
+    }
+
+    const canManage = canManageCollaborators(agent, actor);
+    const searchQuery = args.search?.trim().toLowerCase() ?? "";
+    const collaboratorSet = new Set(agent.collaborators ?? []);
+
+    const users = await ctx.db
+      .query("users")
+      .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
+      .collect();
+
+    const collaborators = users
+      .filter((user) => collaboratorSet.has(user._id))
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((user) => ({
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      }));
+
+    const candidates = users
+      .filter((user) => user._id !== agent.creatorUserId && !collaboratorSet.has(user._id))
+      .filter((user) => {
+        if (!searchQuery) return true;
+        const haystack = `${user.name} ${user.email}`.toLowerCase();
+        return haystack.includes(searchQuery);
+      })
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .slice(0, 30)
+      .map((user) => ({
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      }));
+
+    return {
+      canManage,
+      collaborators,
+      candidates,
+    };
+  },
+});
+
+export const inviteCollaborator = mutation({
+  args: {
+    actorClerkId: v.string(),
+    agentId: v.id("agents"),
+    userId: v.id("users"),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const agent = await ctx.db.get(args.agentId);
+    if (!agent || agent.orgId !== actor.orgId) {
+      throw new Error("Agent not found");
+    }
+
+    if (!canManageCollaborators(agent, actor)) {
+      throw new Error("Only creator or admin can invite collaborators");
+    }
+
+    const targetUser = await ctx.db.get(args.userId);
+    if (!targetUser || targetUser.orgId !== actor.orgId) {
+      throw new Error("Collaborator must be in the same school");
+    }
+
+    if (targetUser._id === agent.creatorUserId) {
+      throw new Error("Agent owner is already an editor");
+    }
+
+    const existing = agent.collaborators ?? [];
+    if (existing.includes(targetUser._id)) {
+      return { ok: true };
+    }
+
+    await ctx.db.patch(agent._id, {
+      collaborators: [...existing, targetUser._id],
+      updatedAt: Date.now(),
+    });
+
+    return { ok: true };
+  },
+});
+
+export const removeCollaborator = mutation({
+  args: {
+    actorClerkId: v.string(),
+    agentId: v.id("agents"),
+    userId: v.id("users"),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const agent = await ctx.db.get(args.agentId);
+    if (!agent || agent.orgId !== actor.orgId) {
+      throw new Error("Agent not found");
+    }
+
+    if (!canManageCollaborators(agent, actor)) {
+      throw new Error("Only creator or admin can remove collaborators");
+    }
+
+    const targetUser = await ctx.db.get(args.userId);
+    if (!targetUser || targetUser.orgId !== actor.orgId) {
+      throw new Error("Collaborator must be in the same school");
+    }
+
+    const existing = agent.collaborators ?? [];
+    if (!existing.includes(targetUser._id)) {
+      return { ok: true };
+    }
+
+    await ctx.db.patch(agent._id, {
+      collaborators: existing.filter((id) => id !== targetUser._id),
+      updatedAt: Date.now(),
+    });
+
+    return { ok: true };
   },
 });
 
@@ -241,7 +439,7 @@ export const searchAgents = query({
       .withSearchIndex("search_name", (q) => q.search("name", args.query).eq("orgId", actor.orgId))
       .take(30);
 
-    return result.filter((agent) => agent.visibility === "public" || agent.creatorUserId === actor._id);
+    return result.filter((agent) => canViewAgent(agent, actor));
   },
 });
 

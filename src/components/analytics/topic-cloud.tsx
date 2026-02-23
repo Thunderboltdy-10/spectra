@@ -109,14 +109,14 @@ export function TopicCloud({ topics }: TopicCloudProps) {
 
   if (topics.length === 0) {
     return (
-      <div className="rounded-[var(--radius-container)] border border-dashed border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 text-center text-sm text-[var(--text-secondary)]">
+      <div className="journal-card border-dashed p-4 text-center text-sm text-[var(--text-secondary)]">
         No topics explored yet
       </div>
     );
   }
 
   return (
-    <div className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-card)]">
+    <div className="journal-card p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Topics explored by type</p>
         <input

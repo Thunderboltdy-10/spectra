@@ -12,7 +12,7 @@ import {
   useKBar,
   useMatches,
 } from "kbar";
-import { ALL_MODES, getModeConfig } from "@/lib/modes";
+import { ALL_MODES, getModeConfig, isModeAvailable } from "@/lib/modes";
 import { useSidebar } from "@/context/sidebar-context";
 
 function CommandResults() {
@@ -163,9 +163,10 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
         : []),
       ...ALL_MODES.map((mode) => ({
         id: `mode-${mode.key}`,
-        name: `Switch mode: ${getModeConfig(mode.key).label}`,
+        name: `Switch mode: ${getModeConfig(mode.key).label}${isModeAvailable(mode.key) ? "" : " (Coming Soon)"}`,
         section: "Modes",
         perform: () => {
+          if (!isModeAvailable(mode.key)) return;
           router.push("/");
           window.dispatchEvent(
             new CustomEvent("ai-school:set-mode", { detail: mode.key }),
@@ -186,10 +187,10 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
       {children}
       <CommandPaletteHotkeys />
       <KBarPortal>
-        <KBarPositioner className="z-[100] bg-[var(--bg-overlay)] backdrop-blur-sm">
+        <KBarPositioner className="z-[100] bg-[var(--bg-overlay)] backdrop-blur-none md:backdrop-blur-sm">
           <KBarAnimator className="w-full max-w-xl rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-soft)]">
             <KBarSearch className="h-11 w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)]" />
-            <div className="mt-2 max-h-[400px] overflow-y-auto overscroll-contain">
+            <div className="mt-2 max-h-[60vh] overflow-y-auto overscroll-contain pb-3">
               <CommandResults />
             </div>
           </KBarAnimator>

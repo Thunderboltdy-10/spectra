@@ -15,7 +15,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { ALL_MODES, getModeConfig } from "@/lib/modes";
+import { ALL_MODES, COMING_SOON_MODES, getModeConfig, isModeAvailable } from "@/lib/modes";
 import type { StudyMode } from "@/types";
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -72,6 +72,7 @@ export function ChatModeSelector({ mode, onChange, compact = false }: ChatModeSe
   }, [pickerOpen]);
 
   function handleSelect(newMode: StudyMode) {
+    if (!isModeAvailable(newMode)) return;
     onChange(newMode);
     setPickerOpen(false);
   }
@@ -84,13 +85,19 @@ export function ChatModeSelector({ mode, onChange, compact = false }: ChatModeSe
           const active = mode === m.key;
           const Icon = ICON_MAP[m.icon];
           const isAuto = m.key === "auto";
+          const available = isModeAvailable(m.key);
+          const comingSoon = COMING_SOON_MODES.has(m.key);
           return (
             <button
               key={m.key}
               type="button"
-              onClick={() => onChange(m.key)}
+              disabled={!available}
+              onClick={() => {
+                if (!available) return;
+                onChange(m.key);
+              }}
               title={m.description}
-              className={`inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-[var(--radius-pill)] border px-2.5 py-1 text-xs font-medium transition ${
+              className={`inline-flex shrink-0 items-center gap-1.5 rounded-[var(--radius-pill)] border px-2.5 py-1 text-xs font-medium transition ${
                 active && isAuto
                   ? "border-transparent text-white"
                   : active
@@ -98,7 +105,7 @@ export function ChatModeSelector({ mode, onChange, compact = false }: ChatModeSe
                     : isAuto
                       ? "border-[color-mix(in_oklab,var(--accent-cyan)_40%,var(--border-default))] bg-[var(--bg-primary)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
                       : "border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-              }`}
+              } ${available ? "cursor-pointer" : "cursor-not-allowed opacity-40 pointer-events-none"}`}
               style={
                 active && isAuto
                   ? { background: "linear-gradient(135deg, #3b82f6, #8b5cf6, #ec4899)" }
@@ -109,6 +116,11 @@ export function ChatModeSelector({ mode, onChange, compact = false }: ChatModeSe
             >
               {Icon && <Icon className="h-3.5 w-3.5" />}
               {!compact && <span>{m.label}</span>}
+              {comingSoon ? (
+                <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                  Soon
+                </span>
+              ) : null}
             </button>
           );
         })}
@@ -149,17 +161,20 @@ export function ChatModeSelector({ mode, onChange, compact = false }: ChatModeSe
                 const active = mode === m.key;
                 const Icon = ICON_MAP[m.icon];
                 const isAuto = m.key === "auto";
+                const available = isModeAvailable(m.key);
+                const comingSoon = COMING_SOON_MODES.has(m.key);
                 return (
                   <button
                     key={m.key}
                     type="button"
+                    disabled={!available}
                     onClick={() => handleSelect(m.key)}
                     title={m.description}
-                    className={`flex cursor-pointer items-center gap-2 rounded-[var(--radius-input)] border px-3 py-2.5 text-left text-sm transition ${
+                    className={`flex items-center gap-2 rounded-[var(--radius-input)] border px-3 py-2.5 text-left text-sm transition ${
                       active
                         ? "border-transparent text-white"
                         : "border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                    }`}
+                    } ${available ? "cursor-pointer" : "cursor-not-allowed opacity-40 pointer-events-none"}`}
                     style={
                       active && isAuto
                         ? { background: "linear-gradient(135deg, #3b82f6, #8b5cf6, #ec4899)" }
@@ -170,6 +185,11 @@ export function ChatModeSelector({ mode, onChange, compact = false }: ChatModeSe
                   >
                     {Icon && <Icon className="h-4 w-4 shrink-0" />}
                     <span className="font-medium">{m.label}</span>
+                    {comingSoon ? (
+                      <span className="ml-auto rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                        Coming soon
+                      </span>
+                    ) : null}
                   </button>
                 );
               })}

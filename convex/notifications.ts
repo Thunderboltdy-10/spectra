@@ -3,10 +3,21 @@ import { v } from "convex/values";
 import { getUserByClerkId } from "./helpers";
 import type { Doc } from "./_generated/dataModel";
 
+const SUPER_ADMIN_EMAILS = new Set(
+  (process.env.SUPER_ADMIN_EMAILS ?? "pablo.martinez.dovale@gmail.com")
+    .split(/[,\s;]+/)
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean),
+);
+
 async function requireActor(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string) {
   const actor = await getUserByClerkId(ctx, actorClerkId);
   if (!actor) throw new Error("Unauthorized");
   return actor;
+}
+
+function isSuperAdminEmail(email: string) {
+  return SUPER_ADMIN_EMAILS.has(email.trim().toLowerCase());
 }
 
 function dayKey(ts = Date.now()) {
@@ -49,8 +60,8 @@ export const sendSuperAdminAnnouncement = mutation({
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
-    if (actor.role !== "admin") {
-      throw new Error("Admin access required");
+    if (!isSuperAdminEmail(actor.email)) {
+      throw new Error("Super admin access required");
     }
 
     const title = args.title.trim();

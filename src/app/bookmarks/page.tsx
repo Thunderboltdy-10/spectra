@@ -129,7 +129,7 @@ export default function BookmarksPage() {
   return (
     <AppShell fullBleed contentClassName="2xl:px-14">
       <section className="space-y-6">
-        <header className="relative overflow-hidden rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-5 py-5 sm:px-7 sm:py-6">
+        <header data-tour="bookmarks-header" className="relative overflow-hidden rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-5 py-5 sm:px-7 sm:py-6">
           <div
             className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full opacity-35 blur-3xl"
             style={{ background: "radial-gradient(circle at center, var(--accent-cyan), transparent 68%)" }}
@@ -156,7 +156,7 @@ export default function BookmarksPage() {
           </div>
         </header>
 
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div data-tour="bookmarks-search" className="flex flex-wrap items-center justify-between gap-3">
           <div className="text-sm text-[var(--text-secondary)]">
             {bookmarks.length} saved message{bookmarks.length === 1 ? "" : "s"}
           </div>
@@ -189,7 +189,7 @@ export default function BookmarksPage() {
             </Link>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div data-tour="bookmarks-list" className="space-y-4">
             {grouped.map((group) => (
               <article key={group.chatId} className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 sm:p-5">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

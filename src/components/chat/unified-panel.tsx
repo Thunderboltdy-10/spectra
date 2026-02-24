@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bot, ChevronDown, Settings2, X, FileText, Milestone } from "lucide-react";
+import { Bot, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Settings2, X, XCircle, FileText, Milestone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { ChatModeSelector } from "@/components/chat/chat-mode-selector";
 import type { ActiveCollaborator } from "@/components/chat/collaborators-live";
 import { RichText } from "@/components/chat/rich-text";
-import { usePanel } from "@/context/panel-context";
+import { usePanel, type PanelQuizData } from "@/context/panel-context";
 import { useCompactSheet } from "@/hooks/use-compact-sheet";
 import { useRightPanelDock } from "@/hooks/use-right-panel-dock";
 import type { AutoPreference, ModelOption, PersonalResource, UserSpending } from "@/hooks/use-chat-state";
@@ -130,7 +130,7 @@ function SettingsView({
         ),
         1,
       )
-    : Math.min(personalResources.length / Math.max(1, FILE_LIMITS.maxPersonalLibraryFiles), 1);
+    : 0;
   const percentUsed = Math.max(0, Math.min(100, Math.round(ratio * 100)));
   const usageLabel =
     percentUsed >= 80
@@ -584,6 +584,165 @@ function SourcesView({ citations }: { citations: Citation[] }) {
   );
 }
 
+function QuizPanelView({ quiz }: { quiz?: PanelQuizData }) {
+  if (!quiz || quiz.questions.length === 0) {
+    return <p className="text-sm text-[var(--text-secondary)]">No quiz data available.</p>;
+  }
+
+  const current = quiz.questions[Math.min(quiz.activeIndex, Math.max(0, quiz.questions.length - 1))];
+  const score = quiz.questions.filter(
+    (question) => question.correct && quiz.answers[question.id] === question.correct,
+  ).length;
+  const isLast = quiz.activeIndex >= quiz.questions.length - 1;
+
+  if (!current) {
+    return <p className="text-sm text-[var(--text-secondary)]">No quiz data available.</p>;
+  }
+
+  return (
+    <div className="space-y-3">
+      <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+        <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Quiz</p>
+        <p className="mt-1 text-sm text-[var(--text-secondary)]">
+          Question {quiz.activeIndex + 1} / {quiz.questions.length}
+        </p>
+      </section>
+
+      <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+        <RichText content={current.prompt} className="mb-3 text-sm font-medium text-[var(--text-primary)]" />
+        <div className="space-y-2">
+          {current.options.map((option) => {
+            const selectedOption = quiz.answers[current.id] === option.letter;
+            const isCorrect = quiz.submitted && current.correct === option.letter;
+            const isWrongSelected =
+              quiz.submitted && selectedOption && current.correct && current.correct !== option.letter;
+            return (
+              <button
+                key={`${current.id}-${option.letter}`}
+                type="button"
+                disabled={quiz.submitted}
+                onClick={() => quiz.onSelectAnswer(current.id, option.letter)}
+                className={`flex w-full items-start gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition disabled:cursor-default ${
+                  isCorrect
+                    ? "border-[color-mix(in_oklab,var(--success)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_10%,transparent)]"
+                    : isWrongSelected
+                      ? "border-[color-mix(in_oklab,var(--danger)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_10%,transparent)]"
+                      : selectedOption
+                        ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_18%,var(--bg-secondary))] ring-1 ring-[var(--accent-cyan)]/50"
+                        : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
+                }`}
+              >
+                <span className="font-medium">{option.letter}.</span>
+                <RichText content={option.text} className="flex-1 text-sm" />
+                {!quiz.submitted && selectedOption ? (
+                  <CheckCircle2 className="h-4 w-4 text-[var(--accent-cyan)]" />
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          {quiz.activeIndex > 0 ? (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => quiz.onSetIndex(Math.max(0, quiz.activeIndex - 1))}
+              className="gap-1.5"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Back
+            </Button>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-2">
+          {quiz.submitted ? (
+            <>
+              {!isLast ? (
+                <Button
+                  type="button"
+                  onClick={() => quiz.onSetIndex(Math.min(quiz.questions.length - 1, quiz.activeIndex + 1))}
+                  className="gap-1.5"
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              ) : null}
+            </>
+          ) : (
+            <Button
+              type="button"
+              onClick={() => {
+                if (isLast) {
+                  quiz.onSubmit();
+                  return;
+                }
+                quiz.onSetIndex(Math.min(quiz.questions.length - 1, quiz.activeIndex + 1));
+              }}
+              className="gap-1.5"
+            >
+              {isLast ? "Check Answers" : "Next"}
+              {!isLast ? <ChevronRight className="h-4 w-4" /> : null}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {!quiz.submitted ? (
+        <p className="text-xs text-[var(--text-secondary)]">
+          Answered {Object.keys(quiz.answers).length}/{quiz.questions.length}
+        </p>
+      ) : (
+        <p className="text-sm font-medium text-[var(--text-primary)]">
+          Score: {score}/{quiz.questions.length}
+        </p>
+      )}
+
+      {quiz.submitted ? (
+        <div className="space-y-2">
+          {quiz.questions.map((question, index) => {
+            const userAnswer = quiz.answers[question.id];
+            const isCorrect = question.correct && userAnswer === question.correct;
+            return (
+              <div
+                key={question.id}
+                className={`rounded-xl border p-3 ${
+                  isCorrect
+                    ? "border-[color-mix(in_oklab,var(--success)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_6%,transparent)]"
+                    : "border-[color-mix(in_oklab,var(--danger)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_6%,transparent)]"
+                }`}
+              >
+                <div className="flex items-start gap-2 text-sm">
+                  <span className="mt-0.5 shrink-0">
+                    {isCorrect ? (
+                      <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />
+                    ) : (
+                      <XCircle className="h-4 w-4 text-[var(--danger)]" />
+                    )}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <RichText content={`**Q${index + 1}.** ${question.prompt}`} className="text-sm font-medium text-[var(--text-primary)]" />
+                    <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                      Your answer: {userAnswer ?? "none"} {question.correct ? `• Correct: ${question.correct}` : ""}
+                    </p>
+                    {question.explanation ? (
+                      <div className="mt-1.5 rounded-lg bg-[var(--bg-secondary)] p-2 text-xs text-[var(--text-secondary)]">
+                        <RichText content={question.explanation} className="text-xs" />
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 type UnifiedPanelProps = {
   settingsProps?: SettingsViewProps;
   orchestrationProps?: OrchestrationViewProps;
@@ -591,12 +750,13 @@ type UnifiedPanelProps = {
 
 export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanelProps) {
   const { activeView, panelData, closePanel } = usePanel();
-  const compact = useCompactSheet(860);
+  const compact = useCompactSheet(1024);
+  const maxWidthPx = activeView === "settings" ? 400 : activeView === "quiz" ? 460 : 520;
   const { docked, isOverlay, panelWidth } = useRightPanelDock({
     id: "unified-panel",
     open: !!activeView,
     compact,
-    maxWidthPx: 520,
+    maxWidthPx,
   });
   const [collapsed, setCollapsed] = useState(false);
 
@@ -615,32 +775,42 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
     "route-trace": { subtitle: "Route Trace", title: "Model Decision Timeline" },
     sources: { subtitle: "Sources", title: "Citation Details" },
     orchestration: { subtitle: "Orchestrator", title: "Live Progress" },
+    quiz: { subtitle: "Quiz", title: "Quiz Review" },
   };
 
   const current = titles[activeView] ?? { subtitle: "Panel", title: "Details" };
 
   return (
     <div
-      className={`fixed z-50 ${docked ? "inset-y-0 right-0 pointer-events-none" : "inset-0"}`}
+      className={docked ? "relative z-40 h-full shrink-0" : "fixed inset-0 z-50"}
       style={docked ? { width: `${panelWidth}px` } : undefined}
     >
       {!docked ? (
         <button
           type="button"
-          className={`absolute inset-0 cursor-pointer transition ${isOverlay ? "bg-black/45 backdrop-blur-sm" : "bg-transparent"}`}
+          className={`absolute inset-0 cursor-pointer transition ${isOverlay ? "bg-black/42 backdrop-blur-none md:backdrop-blur-sm" : "bg-transparent"}`}
           onClick={closePanel}
           aria-label="Close panel"
         />
       ) : null}
 
       <aside
-        className={`right-panel-shell pointer-events-auto absolute flex flex-col border-[var(--border-default)] bg-[var(--bg-sidebar)] p-4 shadow-[var(--shadow-soft)] ${
+        className={`right-panel-shell pointer-events-auto flex flex-col border-[color-mix(in_oklab,var(--border-default)_55%,transparent)] bg-[color-mix(in_oklab,var(--bg-primary)_94%,var(--bg-elevated))] p-4 ${
           docked ? "right-panel-shell--docked" : "right-panel-shell--sheet"
         } ${
-          compact
-            ? "bottom-3 left-3 right-3 max-h-[78vh] rounded-2xl border"
-            : "inset-y-0 right-0 w-[92vw] max-w-xl border-l"
+          docked
+            ? "relative h-full w-full border-l"
+            : compact
+              ? "absolute bottom-3 left-3 right-3 max-h-[78vh] rounded-2xl border"
+              : "absolute inset-y-0 right-0 w-[92vw] border-l"
         }`}
+        style={
+          docked
+            ? { width: "100%", height: "100%" }
+            : compact
+              ? undefined
+              : { maxWidth: `${maxWidthPx}px` }
+        }
       >
         <div className="mb-4 flex items-center justify-between">
           <div>
@@ -692,6 +862,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
                 ? <OrchestrationView {...orchestrationProps} />
                 : <p className="text-sm text-[var(--text-secondary)]">No live orchestration data available.</p>
             )}
+            {activeView === "quiz" && <QuizPanelView quiz={panelData.quiz} />}
           </div>
         ) : null}
       </aside>

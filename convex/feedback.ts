@@ -55,6 +55,23 @@ export const submitFeedback = mutation({
       updatedAt: now,
     });
 
+    const superAdmins = (await ctx.db.query("users").collect()).filter((user) =>
+      SUPER_ADMIN_EMAILS.has(user.email.trim().toLowerCase()),
+    );
+    const preview = trimmedMessage.length > 140 ? `${trimmedMessage.slice(0, 137).trimEnd()}...` : trimmedMessage;
+    for (const admin of superAdmins) {
+      await ctx.db.insert("notifications", {
+        userId: admin._id,
+        orgId: admin.orgId,
+        type: "feedback_submitted",
+        title: "New feedback submitted",
+        body: `${args.category.toUpperCase()}: ${preview}`,
+        actionUrl: "/super-admin/feedback",
+        read: false,
+        createdAt: now,
+      });
+    }
+
     return { ok: true, feedbackId };
   },
 });
@@ -204,6 +221,22 @@ export const replyToFeedback = mutation({
       status: feedback.status === "new" ? "in_progress" : feedback.status,
       updatedAt: Date.now(),
     });
+
+    if (feedback.userId) {
+      const targetUser = await getUserByClerkId(ctx, feedback.userId);
+      if (targetUser) {
+        await ctx.db.insert("notifications", {
+          userId: targetUser._id,
+          orgId: targetUser.orgId,
+          type: "feedback_responded",
+          title: "You received a feedback response",
+          body: args.adminReply.trim(),
+          actionUrl: "/super-admin/feedback",
+          read: false,
+          createdAt: Date.now(),
+        });
+      }
+    }
 
     return { ok: true };
   },

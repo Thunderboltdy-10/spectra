@@ -26,6 +26,20 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
+function firstVisibleTarget(selector: string) {
+  const candidates = Array.from(document.querySelectorAll<HTMLElement>(selector));
+  for (const element of candidates) {
+    const styles = window.getComputedStyle(element);
+    if (styles.display === "none" || styles.visibility === "hidden" || styles.opacity === "0") {
+      continue;
+    }
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) continue;
+    return element;
+  }
+  return null;
+}
+
 function resolveTooltipPosition(
   rect: DOMRect,
   position: GuidedTourStep["position"],
@@ -84,13 +98,15 @@ export function GuidedTour({ open, steps, onClose, onComplete }: GuidedTourProps
     };
 
     const updateTarget = () => {
-      const element = document.querySelector(step.selector) as HTMLElement | null;
+      const element = firstVisibleTarget(step.selector);
       if (!element) {
         setTargetRect(null);
         return;
       }
-      element.scrollIntoView({ block: "center", behavior: "smooth" });
-      setTargetRect(element.getBoundingClientRect());
+      element.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
+      requestAnimationFrame(() => {
+        setTargetRect(element.getBoundingClientRect());
+      });
     };
 
     updateViewport();
@@ -110,14 +126,18 @@ export function GuidedTour({ open, steps, onClose, onComplete }: GuidedTourProps
   }, [open, step.selector]);
 
   const highlightedRect = useMemo(() => {
-    if (!targetRect) return null;
+    if (!targetRect || viewport.width <= 0 || viewport.height <= 0) return null;
+    const left = clamp(targetRect.left - TARGET_PADDING, EDGE_GAP, viewport.width - EDGE_GAP);
+    const top = clamp(targetRect.top - TARGET_PADDING, EDGE_GAP, viewport.height - EDGE_GAP);
+    const right = clamp(targetRect.right + TARGET_PADDING, EDGE_GAP, viewport.width - EDGE_GAP);
+    const bottom = clamp(targetRect.bottom + TARGET_PADDING, EDGE_GAP, viewport.height - EDGE_GAP);
     return {
-      left: Math.max(EDGE_GAP, targetRect.left - TARGET_PADDING),
-      top: Math.max(EDGE_GAP, targetRect.top - TARGET_PADDING),
-      width: targetRect.width + TARGET_PADDING * 2,
-      height: targetRect.height + TARGET_PADDING * 2,
+      left,
+      top,
+      width: Math.max(20, right - left),
+      height: Math.max(20, bottom - top),
     };
-  }, [targetRect]);
+  }, [targetRect, viewport.height, viewport.width]);
 
   const cardPosition = useMemo(() => {
     if (!highlightedRect || viewport.width <= 0 || viewport.height <= 0) {

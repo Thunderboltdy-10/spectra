@@ -3,81 +3,11 @@
 import { useState } from "react";
 import { CheckCircle2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-
-type QuizQuestion = {
-  number: number;
-  question: string;
-  options: { letter: string; text: string }[];
-  correct: string;
-  explanation?: string;
-};
-
-function parseQuizFromContent(content: string): QuizQuestion[] | null {
-  const questions: QuizQuestion[] = [];
-  const lines = content.split("\n");
-
-  let current: Partial<QuizQuestion> | null = null;
-  let inAnswers = false;
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-
-    if (/^#{1,3}\s*(answers|explanations)/i.test(trimmed)) {
-      inAnswers = true;
-      continue;
-    }
-
-    const questionMatch = trimmed.match(/^(?:Q|Question\s*)?(\d+)[.)]\s*(.+)/i);
-    if (questionMatch && !inAnswers) {
-      if (current?.question && current.options && current.options.length >= 2) {
-        questions.push(current as QuizQuestion);
-      }
-      current = {
-        number: parseInt(questionMatch[1]),
-        question: questionMatch[2],
-        options: [],
-        correct: "",
-      };
-      continue;
-    }
-
-    const optionMatch = trimmed.match(/^([A-D])[.)]\s*(.+)/);
-    if (optionMatch && current && !inAnswers) {
-      current.options = current.options || [];
-      current.options.push({ letter: optionMatch[1], text: optionMatch[2] });
-      continue;
-    }
-
-    const correctMatch = trimmed.match(/^Correct:\s*([A-D])/i);
-    if (correctMatch && current) {
-      current.correct = correctMatch[1];
-      continue;
-    }
-
-    if (inAnswers) {
-      const answerMatch = trimmed.match(/^(?:Q|Question\s*)?(\d+)[.):\s]*(?:\*{0,2}([A-D])\*{0,2})?[.):\s]*(.*)/i);
-      if (answerMatch) {
-        const qNum = parseInt(answerMatch[1]);
-        const q = questions.find((q) => q.number === qNum) || (current?.number === qNum ? current : null);
-        if (q) {
-          if (answerMatch[2]) q.correct = answerMatch[2];
-          if (answerMatch[3]) q.explanation = answerMatch[3].trim();
-        }
-      }
-    }
-  }
-
-  if (current?.question && current.options && current.options.length >= 2) {
-    questions.push(current as QuizQuestion);
-  }
-
-  return questions.length >= 2 ? questions : null;
-}
+import { parseQuiz } from "@/lib/quiz-parser";
 
 export function isQuizContent(content: string): boolean {
-  const hasOptions = /[A-D][.)]\s*.+/m.test(content);
-  const hasQuestions = /(?:Q|Question\s*)\d+[.)]/i.test(content) || /^\d+[.)]\s*.+/m.test(content);
-  return hasOptions && hasQuestions;
+  const questions = parseQuiz(content);
+  return questions.length >= 2 && questions.every((q) => q.options.length >= 2);
 }
 
 type QuizViewProps = {
@@ -88,8 +18,8 @@ export function QuizView({ content }: QuizViewProps) {
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [submitted, setSubmitted] = useState(false);
 
-  const questions = parseQuizFromContent(content);
-  if (!questions) return null;
+  const questions = parseQuiz(content);
+  if (questions.length < 2) return null;
 
   const score = submitted
     ? questions.filter((q) => answers[q.number] === q.correct).length
@@ -123,7 +53,7 @@ export function QuizView({ content }: QuizViewProps) {
               <span className="mr-2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-[var(--mode-quiz)] text-xs text-white">
                 {q.number}
               </span>
-              {q.question}
+              {q.prompt}
             </p>
 
             <div className="space-y-2">

@@ -1,6 +1,7 @@
 import { MODEL_CONFIG } from "@/lib/model-config";
+import { isModeAvailable } from "@/lib/modes";
 import { openRouterChatCompletion } from "@/lib/openrouter";
-import type { SpendingTier, ThinkingLevel } from "@/types";
+import type { SpendingTier, StudyMode, ThinkingLevel } from "@/types";
 
 const SEARCH_KEYWORDS = [
   "latest",
@@ -239,6 +240,23 @@ export type ConversationHistoryEntry = {
   mode?: string;
 };
 
+function ensureAvailableSuggestedMode(mode: string | null): string | null {
+  if (!mode) return null;
+  if (isModeAvailable(mode as StudyMode)) return mode;
+
+  const fallbackByUnavailable: Partial<Record<StudyMode, StudyMode>> = {
+    explain: "tutor",
+    marker: "general",
+    exam: "quiz",
+    draft_coach: "tutor",
+  };
+  const fallback = fallbackByUnavailable[mode as StudyMode];
+  if (fallback && isModeAvailable(fallback)) {
+    return fallback;
+  }
+  return "general";
+}
+
 /**
  * Detects a suggested study mode from the message text alone (no history).
  * Returns null if no confident mode signal is found.
@@ -314,7 +332,7 @@ export function suggestMode(
 
   // If no history, fall back to message-only detection
   if (!conversationHistory || conversationHistory.length === 0) {
-    return messageMode;
+    return ensureAvailableSuggestedMode(messageMode);
   }
 
   const lower = message.toLowerCase().trim();
@@ -330,7 +348,7 @@ export function suggestMode(
     lastAssistantMode === "quiz" &&
     /\b(explain|teach me|i don't understand|help me understand|what does|why is|how does)\b/i.test(lower)
   ) {
-    return "tutor";
+    return ensureAvailableSuggestedMode("tutor");
   }
 
   // If last message was a quiz result with a low score signal, suggest tutor
@@ -340,7 +358,7 @@ export function suggestMode(
     wordCount < 10 &&
     !/\b(quiz|another|more questions|again)\b/i.test(lower)
   ) {
-    return "tutor";
+    return ensureAvailableSuggestedMode("tutor");
   }
 
   // If user has been in tutor mode for 6+ messages, suggest quiz to test understanding
@@ -352,7 +370,7 @@ export function suggestMode(
     wordCount < 6 &&
     /\b(ok|okay|got it|i see|i understand|makes sense|thanks|thank you|cool|got that)\b/i.test(lower)
   ) {
-    return "quiz";
+    return ensureAvailableSuggestedMode("quiz");
   }
 
   // After flashcard review, if user says they're ready or finished, suggest quiz
@@ -360,20 +378,20 @@ export function suggestMode(
     lastAssistantMode === "flashcard" &&
     /\b(ready|done|finished|test me|quiz me now|all done|studied)\b/i.test(lower)
   ) {
-    return "quiz";
+    return ensureAvailableSuggestedMode("quiz");
   }
 
   // If the message itself has a confident signal, return it
   if (messageMode) {
-    return messageMode;
+    return ensureAvailableSuggestedMode(messageMode);
   }
 
   // Short follow-up in quiz context - stay in quiz
   if (lastAssistantMode === "quiz" && wordCount < 4) {
-    return "quiz";
+    return ensureAvailableSuggestedMode("quiz");
   }
 
-  return null;
+  return ensureAvailableSuggestedMode(null);
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
@@ -509,7 +527,9 @@ export async function runAutoSettingsPipeline(input: AutoSettingsInput): Promise
     promptEnhanced = true;
   }
 
-  const suggestedMode = suggestMode(input.message, input.conversationHistory);
+  const suggestedMode = ensureAvailableSuggestedMode(
+    suggestMode(input.message, input.conversationHistory),
+  );
 
   return {
     message,

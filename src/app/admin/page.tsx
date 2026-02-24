@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { useSidebar } from "@/context/sidebar-context";
+import { cn } from "@/lib/utils";
 
 type UserRow = {
   _id: string;
@@ -193,6 +194,25 @@ export default function AdminPage() {
       <div className="mb-5">
         <h1 className="text-2xl font-semibold tracking-tight">Admin Console</h1>
         <p className="text-sm text-ink-400">Control roles, quality checks, and spending limits for your school workspace.</p>
+        <div className="mt-3 inline-flex items-center rounded-xl border border-app-border bg-app-muted p-1">
+          {[
+            { href: "/admin", label: "Personal Admin" },
+            { href: "/admin/school", label: "School Admin" },
+          ].map((tab) => (
+            <Link
+              key={tab.href}
+              href={tab.href}
+              className={cn(
+                "rounded-lg px-3 py-1.5 text-xs transition",
+                tab.href === "/admin"
+                  ? "bg-app text-ink-100"
+                  : "text-ink-400 hover:text-ink-200",
+              )}
+            >
+              {tab.label}
+            </Link>
+          ))}
+        </div>
         <div className="mt-3 flex flex-wrap gap-2">
           <Link href="/admin/school/soul" className="inline-flex items-center rounded-md border border-app-border bg-app-muted px-3 py-1.5 text-sm">
             Open School Soul

@@ -231,6 +231,12 @@ body {
   margin-left: 2px;
   animation: blink-caret 1s step-end infinite;
   color: var(--accent);
+  transition: opacity 180ms ease;
+}
+
+.stream-cursor--fade {
+  animation: none;
+  opacity: 0;
 }
 
 .thinking-copy {
@@ -414,6 +420,14 @@ body {
 
 .flashcard-container {
   perspective: 1200px;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  aspect-ratio: 3 / 2;
+}
+
+.flashcard-container--main {
+  min-height: 280px;
 }
 
 .flashcard-inner {
@@ -723,39 +737,18 @@ body {
 .journal-card {
   position: relative;
   overflow: hidden;
-  border-radius: 22px;
-  border: 1px solid color-mix(in oklab, var(--border-default) 82%, var(--accent-orange) 18%);
-  background:
-    radial-gradient(120px 80px at 8% 2%, color-mix(in oklab, var(--accent-orange) 14%, transparent), transparent 72%),
-    radial-gradient(140px 100px at 98% 0%, color-mix(in oklab, var(--accent-cyan) 12%, transparent), transparent 74%),
-    linear-gradient(
-      160deg,
-      color-mix(in oklab, var(--bg-elevated) 90%, #fff6e8 10%),
-      color-mix(in oklab, var(--bg-elevated) 92%, #fef4dc 8%)
-    );
-  box-shadow: 0 18px 34px color-mix(in oklab, #a26e2a 7%, transparent);
+  border-radius: var(--radius-container);
+  border: 1px solid var(--border-default);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-card);
 }
 
 .dark .journal-card {
-  background:
-    radial-gradient(120px 80px at 8% 2%, color-mix(in oklab, var(--accent-orange) 16%, transparent), transparent 72%),
-    radial-gradient(140px 100px at 98% 0%, color-mix(in oklab, var(--accent-cyan) 13%, transparent), transparent 74%),
-    linear-gradient(
-      160deg,
-      color-mix(in oklab, var(--bg-elevated) 94%, #0f161f 6%),
-      color-mix(in oklab, var(--bg-elevated) 96%, #0c1219 4%)
-    );
+  background: var(--bg-elevated);
 }
 
 .journal-card::before {
-  content: "";
-  pointer-events: none;
-  position: absolute;
-  inset: 0;
-  background-image:
-    repeating-linear-gradient(0deg, color-mix(in oklab, #8b6234 6%, transparent) 0 1px, transparent 1px 5px),
-    repeating-linear-gradient(90deg, color-mix(in oklab, #9b7446 3%, transparent) 0 1px, transparent 1px 12px);
-  opacity: 0.18;
+  content: none;
 }
 
 .journal-heading {
@@ -768,23 +761,7 @@ body {
 }
 
 .journal-scribble::after {
-  content: "";
-  pointer-events: none;
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 10px;
-  height: 2px;
-  border-radius: 9999px;
-  background:
-    linear-gradient(
-      90deg,
-      color-mix(in oklab, var(--accent-cyan) 55%, transparent),
-      color-mix(in oklab, var(--accent-orange) 68%, transparent),
-      color-mix(in oklab, var(--accent-cyan) 48%, transparent)
-    );
-  opacity: 0.75;
-  transform: rotate(-1.1deg);
+  content: none;
 }
 
 .message-journal {

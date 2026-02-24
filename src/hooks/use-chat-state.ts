@@ -7,6 +7,7 @@ import type { Agent, Citation, RouteTrace, RouterMode, StudyMode, ThinkingLevel 
 import { appendToBuffer, createBufferState } from "@/lib/structured-stream-buffer";
 import { useSidebar } from "@/context/sidebar-context";
 import { IMAGE_GEN_MODELS, MODEL_COST_BLOCK_LIST } from "@/lib/model-config";
+import { isModeAvailable } from "@/lib/modes";
 
 export type Chat = {
   _id: string;
@@ -866,6 +867,7 @@ export function useChatState() {
       const custom = event as CustomEvent<StudyMode>;
       const nextMode = custom.detail;
       if (!nextMode) return;
+      if (!isModeAvailable(nextMode)) return;
       if (sendingRef.current) {
         stopGeneration();
       }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { Activity, BookOpen, Brain, Clock3, MessageSquare, Trophy, Users } from "lucide-react";
+import { Activity, BookOpen, Brain, Clock3, MessageSquare, Trophy } from "lucide-react";
 import { MODE_REGISTRY } from "@/lib/modes";
 import type { StudyMode } from "@/types";
 import { StatsCard } from "@/components/analytics/stats-card";
@@ -388,22 +388,22 @@ function ProductivityInsights({
   return (
     <div className="journal-card p-4">
       <p className="mb-3 text-xs uppercase tracking-wide text-[var(--text-secondary)]">Productivity insights</p>
-      <div className="grid gap-2 sm:grid-cols-2">
-        <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
-          <p className="text-[11px] uppercase tracking-wide text-[var(--text-secondary)]">Messages / session</p>
-          <p className="mt-1 text-lg font-semibold">{productivity.messagesPerSession}</p>
+      <div className="overflow-hidden rounded-lg border border-[var(--border-default)]">
+        <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-xs">
+          <span className="text-[var(--text-secondary)]">Messages / session</span>
+          <span className="font-semibold text-[var(--text-primary)]">{productivity.messagesPerSession}</span>
         </div>
-        <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
-          <p className="text-[11px] uppercase tracking-wide text-[var(--text-secondary)]">Topic depth</p>
-          <p className="mt-1 text-lg font-semibold">{productivity.topicDepth}</p>
+        <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-[var(--border-default)] px-3 py-2 text-xs">
+          <span className="text-[var(--text-secondary)]">Topic depth</span>
+          <span className="font-semibold text-[var(--text-primary)]">{productivity.topicDepth}</span>
         </div>
-        <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
-          <p className="text-[11px] uppercase tracking-wide text-[var(--text-secondary)]">Estimated sessions</p>
-          <p className="mt-1 text-lg font-semibold">{productivity.estimatedSessions}</p>
+        <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-xs">
+          <span className="text-[var(--text-secondary)]">Estimated sessions</span>
+          <span className="font-semibold text-[var(--text-primary)]">{productivity.estimatedSessions}</span>
         </div>
-        <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
-          <p className="text-[11px] uppercase tracking-wide text-[var(--text-secondary)]">Avg study / active day</p>
-          <p className="mt-1 text-lg font-semibold">{formatDurationFromSeconds(avgStudyPerDay)}</p>
+        <div className="grid grid-cols-[1fr_auto] gap-3 px-3 py-2 text-xs">
+          <span className="text-[var(--text-secondary)]">Avg study / active day</span>
+          <span className="font-semibold text-[var(--text-primary)]">{formatDurationFromSeconds(avgStudyPerDay)}</span>
         </div>
       </div>
       <p className="mt-3 text-sm text-[var(--text-secondary)]">{insight}</p>
@@ -447,7 +447,7 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
 
   return (
     <div className="space-y-6">
-      <div>
+      <div data-tour="analytics-stats">
         <h2 className="journal-heading mb-3 text-xl font-semibold">Your Study Stats</h2>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
           <StatsCard
@@ -497,7 +497,7 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
         </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-3">
+      <div data-tour="analytics-charts" className="grid gap-4 xl:grid-cols-3">
         <ActivityChart data={dailyActivity} label="Daily activity (14 days)" />
         <StudyTimeChart data={dailyStudyTime} />
         <TimeOfDayChart hourlyCounts={studentSignals.hourlyPromptCounts} dailyPeaks={studentSignals.dailyPeakHours} />
@@ -515,32 +515,26 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
       {isTeacher && classData.length > 0 && (
         <div className="mt-8">
           <h2 className="journal-heading mb-3 text-xl font-semibold">Class Overview</h2>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <StatsCard
-              icon={Users}
-              label="Active students"
-              value={uniqueStudents || classAgg.daysActive}
-              color="#6366f1"
-            />
-            <StatsCard
-              icon={MessageSquare}
-              label="Total messages"
-              value={classAgg.totalMessages}
-              subtitle={`${classAgg.totalSessions} sessions`}
-              color="#3b82f6"
-            />
-            <StatsCard
-              icon={Brain}
-              label="Tokens used"
-              value={classAgg.totalTokens.toLocaleString()}
-              color="#ef4444"
-            />
-            <StatsCard
-              icon={Trophy}
-              label="Class avg quiz"
-              value={classAgg.avgScore !== null ? `${classAgg.avgScore}%` : "-"}
-              color="#f59e0b"
-            />
+          <div className="journal-card overflow-hidden">
+            <div className="grid divide-y divide-[var(--border-default)] text-sm sm:grid-cols-2 sm:divide-y-0 sm:divide-x">
+              <div className="px-4 py-3">
+                <p className="text-xs uppercase tracking-[0.08em] text-[var(--text-secondary)]">Active students</p>
+                <p className="mt-1 text-xl font-semibold text-[var(--text-primary)]">{uniqueStudents || classAgg.daysActive}</p>
+              </div>
+              <div className="px-4 py-3">
+                <p className="text-xs uppercase tracking-[0.08em] text-[var(--text-secondary)]">Total messages</p>
+                <p className="mt-1 text-xl font-semibold text-[var(--text-primary)]">{classAgg.totalMessages}</p>
+                <p className="text-xs text-[var(--text-secondary)]">{classAgg.totalSessions} sessions</p>
+              </div>
+              <div className="px-4 py-3">
+                <p className="text-xs uppercase tracking-[0.08em] text-[var(--text-secondary)]">Tokens used</p>
+                <p className="mt-1 text-xl font-semibold text-[var(--text-primary)]">{classAgg.totalTokens.toLocaleString()}</p>
+              </div>
+              <div className="px-4 py-3">
+                <p className="text-xs uppercase tracking-[0.08em] text-[var(--text-secondary)]">Class avg quiz</p>
+                <p className="mt-1 text-xl font-semibold text-[var(--text-primary)]">{classAgg.avgScore !== null ? `${classAgg.avgScore}%` : "-"}</p>
+              </div>
+            </div>
           </div>
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
             <ActivityChart data={classDailyActivity} label="Class daily activity (14 days)" />

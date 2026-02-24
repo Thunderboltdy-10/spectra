@@ -170,7 +170,12 @@ export async function executeGraph(
     }
 
     const ready = [...byId.values()].filter(
-      (node) => node.status === "pending" && node.dependsOn.every((id) => byId.get(id)?.status === "done"),
+      (node) =>
+        node.status === "pending" &&
+        node.dependsOn.every((id) => {
+          const dependencyStatus = byId.get(id)?.status;
+          return dependencyStatus === "done" || dependencyStatus === "failed";
+        }),
     );
     if (ready.length === 0) break;
     if (calls >= maxSubcalls) break;
@@ -197,6 +202,14 @@ export async function executeGraph(
         }
       }),
     );
+  }
+
+  // Mark unresolved nodes as failed when execution halts due to budgets/time.
+  for (const node of byId.values()) {
+    if (node.status === "pending" || node.status === "running") {
+      node.status = "failed";
+      node.tokens = 0;
+    }
   }
 
   return [...byId.values()];

@@ -48,8 +48,27 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   };
 
   const toggleTheme = () => {
-    setTheme(theme === "dark" ? "light" : "dark");
+    setThemeState((current) => {
+      const nextTheme: Theme = current === "dark" ? "light" : "dark";
+      window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+      applyThemeToDocument(nextTheme);
+      return nextTheme;
+    });
   };
+
+  useEffect(() => {
+    const handleToggleTheme = () => {
+      setThemeState((current) => {
+        const nextTheme: Theme = current === "dark" ? "light" : "dark";
+        window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+        applyThemeToDocument(nextTheme);
+        return nextTheme;
+      });
+    };
+
+    window.addEventListener("ai-school:toggle-theme", handleToggleTheme);
+    return () => window.removeEventListener("ai-school:toggle-theme", handleToggleTheme);
+  }, []);
 
   const value = {
     theme,

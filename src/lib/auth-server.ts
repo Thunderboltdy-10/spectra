@@ -5,7 +5,7 @@ import type { Role } from "@/types";
 
 const SUPER_ADMIN_EMAILS = new Set(
   (process.env.SUPER_ADMIN_EMAILS ?? "pablo.martinez.dovale@gmail.com")
-    .split(",")
+    .split(/[,\s;]+/)
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean),
 );
@@ -113,13 +113,34 @@ export async function requireActor(): Promise<SessionActor> {
 
   if (existing) {
     let current = existing;
-    if (existing.role !== "admin" && isSuperAdminEmail(existing.email)) {
+    let syncedEmail = existing.email;
+    let syncedName = existing.name;
+
+    // Clerk can update primary email after initial signup. When that happens,
+    // re-check super-admin eligibility against the live Clerk profile so
+    // super-admin routes do not fail due to stale email in Convex.
+    if (existing.role !== "admin" && !isSuperAdminEmail(existing.email)) {
+      const profile = await currentUser();
+      const profileEmail = profile?.emailAddresses[0]?.emailAddress;
+      const profileName = profile?.fullName ?? profile?.firstName;
+      if (profileEmail) {
+        syncedEmail = profileEmail;
+      }
+      if (profileName) {
+        syncedName = profileName;
+      }
+    }
+
+    const shouldBootstrapAdmin = existing.role !== "admin" && isSuperAdminEmail(syncedEmail);
+    const needsIdentitySync = syncedEmail !== existing.email || syncedName !== existing.name;
+
+    if (shouldBootstrapAdmin || needsIdentitySync) {
       await convexMutation("users:ensureUser", {
         clerkId: userId,
-        email: existing.email,
-        name: existing.name,
+        email: syncedEmail,
+        name: syncedName,
         requestedRole: existing.role,
-        bootstrapAdmin: true,
+        bootstrapAdmin: shouldBootstrapAdmin,
       });
 
       const refreshed = await convexQuery<

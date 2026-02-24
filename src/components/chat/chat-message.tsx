@@ -2,9 +2,10 @@
 
 import { useMemo, useState } from "react";
 import Image from "next/image";
-import { Bookmark, BookmarkCheck, Code2, Copy, FileText, GitBranch, Globe, Info, Paperclip, Pencil, RefreshCw, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Bookmark, BookmarkCheck, Code2, Copy, FileText, GitBranch, Globe, Info, MoreHorizontal, Paperclip, Pencil, RefreshCw, ThumbsDown, ThumbsUp } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { ModelRoutingBadge } from "@/components/chat/model-routing-badge";
 import { ProviderLogo } from "@/components/provider-logo";
@@ -175,7 +176,6 @@ export function ChatMessage({
   const { openPanel } = usePanel();
   const [editing, setEditing] = useState(false);
   const [editedContent, setEditedContent] = useState(content);
-  const [regenModel, setRegenModel] = useState(regenModels[0]?.modelId ?? "");
   const tts = useTextToSpeech();
   const validCitations = citations.filter((c) => c.url || c.resourceId || c.filename);
   const searchCitations = validCitations.filter((citation) => citation.sourceType === "search");
@@ -223,7 +223,7 @@ export function ChatMessage({
       className={cn("chat-fade-in flex", isUser ? "justify-end" : "justify-start")}
       aria-label={isUser ? "Your message" : "Assistant response"}
     >
-      <div className={cn("w-full", isUser ? "max-w-3xl" : "max-w-5xl")}>
+      <div className={cn("w-full", isUser ? "max-w-3xl" : "max-w-6xl")}>
         {isUser ? (
           <div className="ml-auto rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3 shadow-[var(--shadow-soft)]">
             <div className="mb-1 flex items-center gap-2">
@@ -343,7 +343,7 @@ export function ChatMessage({
             ) : null}
           </div>
         ) : (
-          <div className="message-journal flex min-w-0 items-start gap-3 rounded-2xl border border-[color-mix(in_oklab,var(--border-default)_86%,var(--accent-orange)_14%)] px-4 py-4 shadow-[var(--shadow-soft)]">
+          <div className="message-journal flex min-w-0 items-start gap-3 px-1 py-4">
             <ProviderLogo
               provider={activeProvider}
               modelId={activeModelId}
@@ -405,18 +405,44 @@ export function ChatMessage({
                   <Copy className="h-3.5 w-3.5" />
                   Copy
                 </Button>
-                {onBranch ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 cursor-pointer gap-1.5 text-xs"
-                    onClick={onBranch}
-                  >
-                    <GitBranch className="h-3.5 w-3.5" />
-                    Branch
-                  </Button>
+
+                {isLastAssistant && onRegenerate ? (
+                  onRegenerateWithModel && regenModels.length > 0 ? (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button type="button" variant="ghost" size="sm" className="h-8 cursor-pointer gap-1.5 text-xs">
+                          <RefreshCw className="h-3.5 w-3.5" />
+                          Retry model
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="max-h-72 overflow-y-auto">
+                        <DropdownMenuItem onSelect={() => onRegenerate()}>
+                          Use current route
+                        </DropdownMenuItem>
+                        {regenModels.map((model) => (
+                          <DropdownMenuItem
+                            key={model.modelId}
+                            onSelect={() => onRegenerateWithModel(model.modelId)}
+                          >
+                            {sanitizeModelLabel(model.name)}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={onRegenerate}
+                      className="h-8 cursor-pointer gap-1.5 text-xs"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      Regenerate
+                    </Button>
+                  )
                 ) : null}
+
                 {onToggleBookmark ? (
                   <Button
                     type="button"
@@ -430,91 +456,60 @@ export function ChatMessage({
                     {bookmarking ? "Saving..." : isBookmarked ? "Saved" : "Save"}
                   </Button>
                 ) : null}
-                {isLastAssistant && onRegenerate && (
-                  <>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={onRegenerate}
-                      className="h-8 cursor-pointer gap-1.5 text-xs"
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" />
-                      Regenerate
-                    </Button>
-                    {onRegenerateWithModel && regenModels.length > 0 ? (
-                      <div className="flex items-center gap-1 rounded-full border border-[var(--border-default)] px-2 py-0.5 text-xs">
-                        <select
-                          value={regenModel}
-                          onChange={(event) => setRegenModel(event.target.value)}
-                          className="max-w-[180px] cursor-pointer bg-transparent text-[11px] outline-none"
+
+                {(onBranch || onFeedback || tts.isSupported || whyThisResponse) ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button type="button" variant="ghost" size="sm" className="h-8 cursor-pointer gap-1.5 text-xs">
+                        <MoreHorizontal className="h-3.5 w-3.5" />
+                        More
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      {onBranch ? (
+                        <DropdownMenuItem onSelect={() => onBranch()}>
+                          <GitBranch className="mr-2 h-3.5 w-3.5" />
+                          Branch
+                        </DropdownMenuItem>
+                      ) : null}
+                      {whyThisResponse ? (
+                        <DropdownMenuItem onSelect={() => setShowWhy((prev) => !prev)}>
+                          <Info className="mr-2 h-3.5 w-3.5" />
+                          {showWhy ? "Hide reasoning trace" : "Why this response"}
+                        </DropdownMenuItem>
+                      ) : null}
+                      {onFeedback ? (
+                        <DropdownMenuItem
+                          className={feedback === "up" ? "text-[var(--success)]" : undefined}
+                          onSelect={() => {
+                            setFeedback("up");
+                            onFeedback?.(true, activeModelId);
+                          }}
                         >
-                          {regenModels.map((model) => (
-                            <option key={model.modelId} value={model.modelId}>
-                              {sanitizeModelLabel(model.name)}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          className="cursor-pointer text-[11px] text-[var(--accent-cyan)]"
-                          onClick={() => onRegenerateWithModel(regenModel)}
+                          <ThumbsUp className="mr-2 h-3.5 w-3.5" />
+                          Mark as helpful
+                        </DropdownMenuItem>
+                      ) : null}
+                      {onFeedback ? (
+                        <DropdownMenuItem
+                          className={feedback === "down" ? "text-[var(--danger)]" : undefined}
+                          onSelect={() => {
+                            setFeedback("down");
+                            onFeedback?.(false, activeModelId);
+                          }}
                         >
-                          Retry model
-                        </button>
-                      </div>
-                    ) : null}
-                  </>
-                )}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className={`h-8 cursor-pointer gap-1.5 text-xs ${feedback === "up" ? "text-[var(--success)]" : ""}`}
-                  onClick={() => {
-                    setFeedback("up");
-                    onFeedback?.(true, activeModelId);
-                  }}
-                >
-                  <ThumbsUp className="h-3.5 w-3.5" />
-                  Helpful
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className={`h-8 cursor-pointer gap-1.5 text-xs ${feedback === "down" ? "text-[var(--danger)]" : ""}`}
-                  onClick={() => {
-                    setFeedback("down");
-                    onFeedback?.(false, activeModelId);
-                  }}
-                >
-                  <ThumbsDown className="h-3.5 w-3.5" />
-                  Improve
-                </Button>
-                {tts.isSupported ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 cursor-pointer gap-1.5 text-xs"
-                    onClick={() => (tts.isSpeaking ? tts.stop() : tts.speak(content))}
-                  >
-                    {tts.isSpeaking ? "Stop audio" : "Read aloud"}
-                  </Button>
+                          <ThumbsDown className="mr-2 h-3.5 w-3.5" />
+                          Needs improvement
+                        </DropdownMenuItem>
+                      ) : null}
+                      {tts.isSupported ? (
+                        <DropdownMenuItem onSelect={() => (tts.isSpeaking ? tts.stop() : tts.speak(content))}>
+                          {tts.isSpeaking ? "Stop audio" : "Read aloud"}
+                        </DropdownMenuItem>
+                      ) : null}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 ) : null}
-                {whyThisResponse && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className={`h-8 cursor-pointer gap-1.5 text-xs ${showWhy ? "text-[var(--accent-cyan)]" : ""}`}
-                    onClick={() => setShowWhy(!showWhy)}
-                  >
-                    <Info className="h-3.5 w-3.5" />
-                    Why
-                  </Button>
-                )}
               </div>
               {showWhy && whyThisResponse && (
                 <div className="mt-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">

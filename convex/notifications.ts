@@ -1,6 +1,7 @@
 import { internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { getUserByClerkId } from "./helpers";
+import type { Doc } from "./_generated/dataModel";
 
 async function requireActor(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string) {
   const actor = await getUserByClerkId(ctx, actorClerkId);
@@ -33,6 +34,73 @@ export const createNotification = mutation({
       createdAt: Date.now(),
     });
     return { notificationId };
+  },
+});
+
+export const sendSuperAdminAnnouncement = mutation({
+  args: {
+    actorClerkId: v.string(),
+    audience: v.union(v.literal("all"), v.literal("org"), v.literal("email")),
+    title: v.string(),
+    body: v.string(),
+    actionUrl: v.optional(v.string()),
+    orgId: v.optional(v.id("orgs")),
+    userEmail: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    if (actor.role !== "admin") {
+      throw new Error("Admin access required");
+    }
+
+    const title = args.title.trim();
+    const body = args.body.trim();
+    const actionUrl = args.actionUrl?.trim() || undefined;
+    if (!title || !body) {
+      throw new Error("Title and body are required");
+    }
+
+    let recipients: Doc<"users">[] = [];
+    if (args.audience === "all") {
+      recipients = await ctx.db.query("users").collect();
+    } else if (args.audience === "org") {
+      if (!args.orgId) {
+        throw new Error("orgId is required for org audience");
+      }
+      recipients = await ctx.db
+        .query("users")
+        .withIndex("by_org", (q) => q.eq("orgId", args.orgId!))
+        .collect();
+    } else {
+      const email = args.userEmail?.trim().toLowerCase();
+      if (!email) {
+        throw new Error("userEmail is required for email audience");
+      }
+      const allUsers = await ctx.db.query("users").collect();
+      recipients = allUsers.filter((user) => user.email.trim().toLowerCase() === email);
+    }
+
+    const uniqueRecipients = Array.from(
+      new Map(recipients.map((user) => [user._id, user])).values(),
+    );
+    const createdAt = Date.now();
+
+    for (const recipient of uniqueRecipients) {
+      await ctx.db.insert("notifications", {
+        userId: recipient._id,
+        orgId: recipient.orgId,
+        type: "super_admin_announcement",
+        title,
+        body,
+        actionUrl,
+        read: false,
+        createdAt,
+      });
+    }
+
+    return {
+      sentCount: uniqueRecipients.length,
+    };
   },
 });
 

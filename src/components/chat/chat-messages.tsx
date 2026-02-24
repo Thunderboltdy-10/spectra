@@ -88,7 +88,7 @@ export function ChatMessages({
   onOpenCanvas,
 }: ChatMessagesProps) {
   const panel = usePanel();
-  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const scrollContainerRef = useRef<HTMLElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const [showJumpButton, setShowJumpButton] = useState(false);
   const shouldAutoScrollRef = useRef(true);
@@ -97,13 +97,16 @@ export function ChatMessages({
 
   useEffect(() => {
     if (shouldAutoScrollRef.current) {
-      endRef.current?.scrollIntoView({ behavior: "smooth" });
+      endRef.current?.scrollIntoView({
+        behavior: scrollContainerRef.current ? "smooth" : "auto",
+      });
     }
   }, [messages, draftResponse]);
 
   useEffect(() => {
-    const element = scrollRef.current;
+    const element = document.querySelector<HTMLElement>("[data-chat-scroll-root]");
     if (!element) return;
+    scrollContainerRef.current = element;
 
     const onScroll = () => {
       const delta = element.scrollHeight - element.scrollTop - element.clientHeight;
@@ -111,6 +114,7 @@ export function ChatMessages({
       shouldAutoScrollRef.current = delta < 180;
     };
 
+    onScroll();
     element.addEventListener("scroll", onScroll);
     return () => element.removeEventListener("scroll", onScroll);
   }, []);
@@ -181,10 +185,9 @@ export function ChatMessages({
   }
 
   return (
-    <section className="relative flex min-h-0 flex-1" aria-label="Conversation">
+    <section className="relative flex flex-1" aria-label="Conversation" data-conversation-export>
       <div
-        ref={scrollRef}
-        className="h-full w-full overflow-y-auto px-3 pb-40 pt-6 sm:px-6 lg:px-10"
+        className="w-full px-3 pb-56 pt-6 sm:px-6 lg:px-10"
         role="log"
         aria-live="polite"
         aria-relevant="additions text"
@@ -260,6 +263,7 @@ export function ChatMessages({
                         content={structuredContent}
                         chatId={chatId}
                         difficulty={quizDifficulty}
+                        autoOpen={isLastAssistant}
                         onSubmitAnswers={(result) => {
                           onSubmitQuizAnswers?.({ messageId: msg._id, result });
                         }}
@@ -636,8 +640,13 @@ export function ChatMessages({
         <Button
           type="button"
           size="icon"
-          className="absolute bottom-36 right-5 rounded-full shadow-[var(--shadow-soft)]"
-          onClick={() => endRef.current?.scrollIntoView({ behavior: "smooth" })}
+          className="fixed bottom-28 right-5 z-30 rounded-full shadow-[var(--shadow-soft)]"
+          onClick={() => {
+            shouldAutoScrollRef.current = true;
+            endRef.current?.scrollIntoView({
+              behavior: scrollContainerRef.current ? "smooth" : "auto",
+            });
+          }}
           aria-label="Scroll to bottom"
         >
           <ArrowDown className="h-4 w-4" />

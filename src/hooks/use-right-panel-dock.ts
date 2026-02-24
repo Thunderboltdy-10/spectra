@@ -2,20 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-const panelWidths = new Map<string, number>();
 const MIN_DOCK_WIDTH = 360;
-
-function applyDockSpace() {
-  if (typeof document === "undefined") return;
-  const maxWidth = Math.max(0, ...Array.from(panelWidths.values()));
-  if (maxWidth > 0) {
-    document.body.classList.add("right-panel-docked");
-    document.documentElement.style.setProperty("--right-panel-space", `${Math.round(maxWidth)}px`);
-  } else {
-    document.body.classList.remove("right-panel-docked");
-    document.documentElement.style.removeProperty("--right-panel-space");
-  }
-}
 
 function shouldDock(params: { open: boolean; compact: boolean; width: number }) {
   const { open, compact, width } = params;
@@ -32,7 +19,7 @@ export function useRightPanelDock(params: {
   minMainWidthPx?: number;
   reserveLeftPx?: number;
 }) {
-  const { id, open, compact, maxWidthPx, minMainWidthPx = 760, reserveLeftPx = 320 } = params;
+  const { open, compact, maxWidthPx, minMainWidthPx = 760, reserveLeftPx = 320 } = params;
   const [docked, setDocked] = useState(false);
   const [panelWidth, setPanelWidth] = useState(maxWidthPx);
 
@@ -55,22 +42,14 @@ export function useRightPanelDock(params: {
           ? Math.max(MIN_DOCK_WIDTH, width)
           : Math.min(maxWidthPx, Math.floor(window.innerWidth * 0.92)),
       );
-      if (nextDocked) {
-        panelWidths.set(id, width);
-      } else {
-        panelWidths.delete(id);
-      }
-      applyDockSpace();
     };
 
     update();
     window.addEventListener("resize", update);
     return () => {
       window.removeEventListener("resize", update);
-      panelWidths.delete(id);
-      applyDockSpace();
     };
-  }, [compact, computeWidth, id, maxWidthPx, open]);
+  }, [compact, computeWidth, maxWidthPx, open]);
 
   return {
     docked,

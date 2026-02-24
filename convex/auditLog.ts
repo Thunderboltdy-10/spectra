@@ -4,7 +4,7 @@ import { getUserByClerkId } from "./helpers";
 
 const SUPER_ADMIN_EMAILS = new Set(
   (process.env.SUPER_ADMIN_EMAILS ?? "pablo.martinez.dovale@gmail.com")
-    .split(",")
+    .split(/[,\s;]+/)
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean),
 );
@@ -55,8 +55,25 @@ export const listAuditLogs = query({
       .withIndex("by_created")
       .collect();
 
-    return rows
+    const recent = rows
       .sort((a, b) => b.createdAt - a.createdAt)
       .slice(0, limit);
+
+    const actorIds = [...new Set(recent.map((row) => row.actorUserId))];
+    const actors = await Promise.all(actorIds.map((id) => ctx.db.get(id)));
+    const actorById = new Map(
+      actors
+        .filter((actor) => Boolean(actor))
+        .map((actor) => [actor!._id, actor!]),
+    );
+
+    return recent.map((row) => {
+      const actor = actorById.get(row.actorUserId);
+      return {
+        ...row,
+        actorName: actor?.name ?? "Unknown user",
+        actorEmail: actor?.email ?? "",
+      };
+    });
   },
 });

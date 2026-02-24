@@ -3,15 +3,16 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useClerk, useUser } from "@clerk/nextjs";
 import { formatDistanceToNow } from "date-fns";
 import {
+  ArrowDown,
+  ArrowUp,
   BarChart3,
   Bookmark,
   BookOpen,
   Bot,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Compass,
@@ -53,7 +54,17 @@ type GroupedChats = {
 };
 
 const EMPTY_PINNED_IDS = new Set<string>();
-const MONTHLY_HARD_LIMIT_CENTS = 900;
+const CHAT_ROW_ESTIMATE_PX = 46;
+const CHAT_LIST_CHROME_PX = 360;
+const PRIMARY_NAV_ORDER_KEY = "ai-school-primary-nav-order";
+
+const BASE_PRIMARY_NAV_ITEMS = [
+  { href: "/", label: "Chat", icon: Sparkles },
+  { href: "/flashcards", label: "Flashcards", icon: BookOpen },
+  { href: "/bookmarks", label: "Bookmarks", icon: Bookmark },
+  { href: "/achievements", label: "Achievements", icon: Trophy },
+  { href: "/agents", label: "Agents", icon: Bot },
+];
 
 type ChatSidebarProps = {
   chats: Chat[];
@@ -108,6 +119,15 @@ function groupChats(chats: Chat[]): GroupedChats[] {
     .filter((g) => g.chats.length > 0);
 }
 
+function estimateVisibleChatCount(viewportHeight: number) {
+  const available = Math.max(300, viewportHeight - CHAT_LIST_CHROME_PX);
+  return Math.max(8, Math.ceil(available / CHAT_ROW_ESTIMATE_PX));
+}
+
+function estimatePrimaryNavCount(viewportHeight: number) {
+  return viewportHeight < 860 ? 4 : 5;
+}
+
 function initials(name: string) {
   return name
     .split(" ")
@@ -115,13 +135,6 @@ function initials(name: string) {
     .join("")
     .slice(0, 2)
     .toUpperCase();
-}
-
-function spendingTierLabel(tier?: UserSpending["tier"]) {
-  if (tier === "free_only") return "Budget only";
-  if (tier === "cheap_only") return "Cheap only";
-  if (tier === "expensive_blocked") return "Guarded";
-  return "Normal";
 }
 
 function isNavActive(pathname: string, href: string) {
@@ -163,8 +176,15 @@ export function ChatSidebar({
   const { signOut, openUserProfile } = useClerk();
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
-  const [showMoreNav, setShowMoreNav] = useState(false);
-  const [visibleChatCount, setVisibleChatCount] = useState(5);
+  const [navExpandedByHover, setNavExpandedByHover] = useState(false);
+  const [reorderPrimaryNav, setReorderPrimaryNav] = useState(false);
+  const [primaryNavOrder, setPrimaryNavOrder] = useState<string[]>([]);
+  const [primaryVisibleCount, setPrimaryVisibleCount] = useState(() =>
+    typeof window === "undefined" ? 5 : estimatePrimaryNavCount(window.innerHeight),
+  );
+  const [visibleChatCount, setVisibleChatCount] = useState(() =>
+    typeof window === "undefined" ? 10 : estimateVisibleChatCount(window.innerHeight),
+  );
   const [gamification, setGamification] = useState<{
     currentStreak: number;
     totalXp: number;
@@ -176,23 +196,34 @@ export function ChatSidebar({
     longestStreak: 0,
     lastActiveDate: null,
   });
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const chatLoadSentinelRef = useRef<HTMLDivElement>(null);
   const pinnedSet = pinnedChatIds ?? EMPTY_PINNED_IDS;
 
-  const spentCents = userSpending?.totalCostCents ?? 0;
-  const hardLimitCents = Math.max(1, userSpending?.hardLimitCents ?? MONTHLY_HARD_LIMIT_CENTS);
-  const spendRatio = Math.min(spentCents / hardLimitCents, 1);
-  const usagePercent = Math.max(0, Math.min(100, Math.round(spendRatio * 100)));
-  const spendingTier = spendingTierLabel(userSpending?.tier);
-  const canAccessSchoolAdmin = role === "admin" && !isSuperAdmin;
-  const canAccessAdminConsole = role === "admin" && !isSuperAdmin;
+  const usageRatio = userSpending
+    ? Math.min(
+        Math.max(
+          typeof userSpending.budgetUsagePercent === "number"
+            ? userSpending.budgetUsagePercent / 100
+            : (userSpending.totalCostCents ?? 0) / Math.max(1, userSpending.hardLimitCents ?? 1),
+          0,
+        ),
+        1,
+      )
+    : Math.min(chats.length / 40, 1);
+  const usagePercent = Math.max(0, Math.min(100, Math.round(usageRatio * 100)));
+  const usageStatus =
+    usagePercent >= 80
+      ? "High activity"
+      : usagePercent >= 40
+        ? "Steady activity"
+        : usagePercent > 0
+          ? "Getting started"
+          : "No activity yet";
+  const canAccessSchoolAdmin = role === "admin" || isSuperAdmin;
+  const canAccessAdminConsole = role === "admin" || isSuperAdmin;
 
-  const primaryNavItems = [
-    { href: "/", label: "Chat", icon: Sparkles },
-    { href: "/flashcards", label: "Flashcards", icon: BookOpen },
-    { href: "/bookmarks", label: "Bookmarks", icon: Bookmark },
-    { href: "/achievements", label: "Achievements", icon: Trophy },
-    { href: "/agents", label: "Agents", icon: Bot },
-  ];
+  const primaryNavItems = BASE_PRIMARY_NAV_ITEMS;
   const secondaryNavItems = [
     { href: "/models", label: "Models", icon: Compass },
     { href: "/images", label: "Images", icon: ImagePlus },
@@ -206,17 +237,87 @@ export function ChatSidebar({
         ]
       : []),
   ];
-  const secondaryActive = secondaryNavItems.some((item) => isNavActive(pathname, item.href));
-
   useEffect(() => {
-    if (secondaryActive) {
-      setShowMoreNav(true);
+    try {
+      const raw = window.localStorage.getItem(PRIMARY_NAV_ORDER_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as string[];
+      if (!Array.isArray(parsed)) return;
+      const valid = parsed.filter((href) =>
+        primaryNavItems.some((item) => item.href === href),
+      );
+      if (valid.length > 0) {
+        setPrimaryNavOrder(valid);
+      }
+    } catch {
+      // Ignore invalid nav order persistence.
     }
-  }, [secondaryActive]);
+  }, [primaryNavItems]);
 
   useEffect(() => {
-    setVisibleChatCount(5);
+    if (primaryNavOrder.length > 0) return;
+    setPrimaryNavOrder(primaryNavItems.map((item) => item.href));
+  }, [primaryNavItems, primaryNavOrder.length]);
+
+  useEffect(() => {
+    if (primaryNavOrder.length === 0) return;
+    try {
+      window.localStorage.setItem(PRIMARY_NAV_ORDER_KEY, JSON.stringify(primaryNavOrder));
+    } catch {
+      // Ignore storage errors.
+    }
+  }, [primaryNavOrder]);
+
+  const orderedPrimaryNavItems = useMemo(() => {
+    const rank = new Map(primaryNavOrder.map((href, index) => [href, index]));
+    return [...primaryNavItems].sort((a, b) => {
+      const aRank = rank.get(a.href) ?? Number.MAX_SAFE_INTEGER;
+      const bRank = rank.get(b.href) ?? Number.MAX_SAFE_INTEGER;
+      return aRank - bRank;
+    });
+  }, [primaryNavItems, primaryNavOrder]);
+
+  const movePrimaryNavItem = useCallback((href: string, direction: "up" | "down") => {
+    setPrimaryNavOrder((prev) => {
+      const order = prev.length > 0 ? [...prev] : primaryNavItems.map((item) => item.href);
+      const index = order.indexOf(href);
+      if (index < 0) return order;
+      const nextIndex = direction === "up" ? Math.max(0, index - 1) : Math.min(order.length - 1, index + 1);
+      if (nextIndex === index) return order;
+      const [item] = order.splice(index, 1);
+      if (!item) return order;
+      order.splice(nextIndex, 0, item);
+      return order;
+    });
+  }, [primaryNavItems]);
+
+  const secondaryActive = secondaryNavItems.some((item) => isNavActive(pathname, item.href));
+  const primaryOverflowActive = orderedPrimaryNavItems
+    .slice(primaryVisibleCount)
+    .some((item) => isNavActive(pathname, item.href));
+  const showPrimaryNav = navExpandedByHover || primaryOverflowActive || reorderPrimaryNav;
+  const showSecondaryNav = secondaryActive || navExpandedByHover || reorderPrimaryNav;
+  const primaryNavVisibleItems = showPrimaryNav
+    ? orderedPrimaryNavItems
+    : orderedPrimaryNavItems.slice(0, primaryVisibleCount);
+  const hiddenPrimaryCount = Math.max(0, orderedPrimaryNavItems.length - primaryVisibleCount);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setVisibleChatCount(estimateVisibleChatCount(window.innerHeight));
+    setPrimaryVisibleCount(estimatePrimaryNavCount(window.innerHeight));
   }, [search]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleResize = () => {
+      const next = estimateVisibleChatCount(window.innerHeight);
+      setVisibleChatCount((prev) => Math.max(prev, next));
+      setPrimaryVisibleCount(estimatePrimaryNavCount(window.innerHeight));
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   const refreshGamification = useCallback(async () => {
     try {
@@ -279,24 +380,49 @@ export function ChatSidebar({
   const totalUnpinnedChats = nonPinnedChats.length;
   const hasMoreChats = effectiveVisibleCount < totalUnpinnedChats;
 
+  useEffect(() => {
+    if (!hasMoreChats) return;
+    const root = chatScrollRef.current;
+    const target = chatLoadSentinelRef.current;
+    if (!root || !target) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        setVisibleChatCount((prev) => Math.min(totalUnpinnedChats, prev + 10));
+      },
+      {
+        root,
+        rootMargin: "180px 0px",
+      },
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [hasMoreChats, totalUnpinnedChats]);
+
   if (collapsed) {
     return (
-      <div className="chat-sidebar flex h-full flex-col border-r border-[var(--border-default)] px-2 py-3">
-        <div className="mb-4 flex items-center justify-between">
+      <div className="chat-sidebar flex h-full flex-col border-r border-[var(--border-default)] px-2.5 py-3">
+        <div className="mb-4 flex items-center justify-between gap-1">
           {orgLogoUrl && orgLogoUrl.trim() ? (
-            <Image src={orgLogoUrl} alt={orgName ?? "Org"} width={32} height={32} className="h-8 w-8 rounded-xl object-cover" />
+            <Image src={orgLogoUrl} alt={orgName ?? "Org"} width={34} height={34} className="h-8.5 w-8.5 rounded-xl object-cover" />
           ) : (
-            <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--gradient-brand)] text-white">
-              <Sparkles className="h-4 w-4" />
+            <div className="inline-flex h-8.5 w-8.5 items-center justify-center rounded-xl bg-[var(--gradient-brand)] text-white">
+              <Sparkles className="h-4.5 w-4.5" />
             </div>
           )}
-          <Button type="button" variant="ghost" size="icon" onClick={onToggleCollapse} aria-label="Expand sidebar">
+          <Button type="button" variant="ghost" size="icon" className="h-8.5 w-8.5" onClick={onToggleCollapse} aria-label="Expand sidebar">
             <ChevronRight className="h-4 w-4" />
           </Button>
         </div>
 
-        <div className="flex flex-col gap-1">
-          {primaryNavItems.map((item) => {
+        <div
+          className="mx-auto flex w-full flex-col items-center gap-1"
+          onMouseEnter={() => setNavExpandedByHover(true)}
+          onMouseLeave={() => setNavExpandedByHover(false)}
+        >
+          {primaryNavVisibleItems.map((item) => {
             const Icon = item.icon;
             const active = isNavActive(pathname, item.href);
             return (
@@ -304,7 +430,7 @@ export function ChatSidebar({
                 key={item.href}
                 href={item.href}
                 title={item.label}
-                className={`inline-flex h-9 w-9 items-center justify-center rounded-lg transition ${
+                className={`inline-flex h-9.5 w-9.5 items-center justify-center rounded-xl transition ${
                   active
                     ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]"
                     : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
@@ -314,21 +440,28 @@ export function ChatSidebar({
               </Link>
             );
           })}
+          {hiddenPrimaryCount > 0 && !showPrimaryNav ? (
+            <span
+              aria-hidden
+              className="inline-flex h-9.5 w-9.5 items-center justify-center rounded-xl text-[var(--text-secondary)]"
+              title={`Hover to show ${hiddenPrimaryCount} more pages`}
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </span>
+          ) : null}
           {secondaryNavItems.length > 0 ? (
             <>
-              <button
-                type="button"
-                onClick={() => setShowMoreNav((prev) => !prev)}
-                className={`inline-flex h-9 w-9 items-center justify-center rounded-lg transition ${
-                  secondaryActive || showMoreNav
+              <span
+                aria-hidden
+                className={`inline-flex h-9.5 w-9.5 items-center justify-center rounded-xl transition ${
+                  showSecondaryNav
                     ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]"
                     : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                 }`}
-                aria-label="Toggle more navigation"
               >
                 <MoreHorizontal className="h-4 w-4" />
-              </button>
-              {(showMoreNav || secondaryActive) &&
+              </span>
+              {showSecondaryNav &&
                 secondaryNavItems.map((item) => {
                   const Icon = item.icon;
                   const active = isNavActive(pathname, item.href);
@@ -337,7 +470,7 @@ export function ChatSidebar({
                       key={item.href}
                       href={item.href}
                       title={item.label}
-                      className={`inline-flex h-9 w-9 items-center justify-center rounded-lg transition ${
+                      className={`inline-flex h-9.5 w-9.5 items-center justify-center rounded-xl transition ${
                         active
                           ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]"
                           : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
@@ -362,9 +495,29 @@ export function ChatSidebar({
               {gamification.totalXp}
             </span>
           </div>
-          <Button type="button" variant="secondary" size="icon" onClick={onNewChat} aria-label="New chat">
+          <Button type="button" variant="secondary" size="icon" className="h-9.5 w-9.5" onClick={onNewChat} aria-label="New chat">
             <Plus className="h-4 w-4" />
           </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button type="button" className="cursor-pointer rounded-full">
+                <Avatar className="h-8.5 w-8.5">
+                  <AvatarImage src={user?.imageUrl} alt={user?.fullName ?? "User"} />
+                  <AvatarFallback>{initials(user?.fullName || user?.firstName || "User")}</AvatarFallback>
+                </Avatar>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onSelect={() => openUserProfile()}>
+                <UserRound className="mr-2 h-4 w-4" />
+                Manage account
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => signOut()}>
+                <Sparkles className="mr-2 h-4 w-4" />
+                Sign out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <ThemeToggle />
         </div>
       </div>
@@ -396,47 +549,85 @@ export function ChatSidebar({
         </Button>
       </div>
 
-      <div className="mb-3 space-y-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5">
-        {primaryNavItems.map((item) => {
+      <div
+        className="mb-3 space-y-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5"
+        onMouseEnter={() => setNavExpandedByHover(true)}
+        onMouseLeave={() => setNavExpandedByHover(false)}
+      >
+        <div className="mb-1 flex items-center justify-between px-2.5 pt-0.5">
+          <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Pages</p>
+          <button
+            type="button"
+            onClick={() => setReorderPrimaryNav((prev) => !prev)}
+            className={`inline-flex cursor-pointer items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] transition ${
+              reorderPrimaryNav
+                ? "border-[color-mix(in_oklab,var(--accent-cyan)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)] text-[var(--text-primary)]"
+                : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+            }`}
+            title="Reorder visible pages"
+            aria-label={reorderPrimaryNav ? "Finish page reorder" : "Reorder pages"}
+          >
+            {reorderPrimaryNav ? "Done" : "Reorder"}
+          </button>
+        </div>
+
+        {primaryNavVisibleItems.map((item) => {
           const Icon = item.icon;
           const active = isNavActive(pathname, item.href);
+          const index = orderedPrimaryNavItems.findIndex((navItem) => navItem.href === item.href);
           return (
-            <Link
-              key={item.href}
-              href={item.href}
-              title={item.label}
-              onClick={() => {
-                // navigation handled by Link
-              }}
-              className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition ${
-                active
-                  ? "bg-[var(--bg-primary)] text-[var(--text-primary)]"
-                  : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-              }`}
-            >
-              <Icon className="h-4 w-4" />
-              <span>{item.label}</span>
-            </Link>
+            <div key={item.href} className="flex items-center gap-1">
+              <Link
+                href={item.href}
+                title={item.label}
+                onClick={() => {
+                  // navigation handled by Link
+                }}
+                className={`flex flex-1 items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition ${
+                  active
+                    ? "bg-[var(--bg-primary)] text-[var(--text-primary)]"
+                    : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                <span>{item.label}</span>
+              </Link>
+              {reorderPrimaryNav ? (
+                <div className="mr-1 flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-45"
+                    onClick={() => movePrimaryNavItem(item.href, "up")}
+                    disabled={index <= 0}
+                    aria-label={`Move ${item.label} up`}
+                  >
+                    <ArrowUp className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-45"
+                    onClick={() => movePrimaryNavItem(item.href, "down")}
+                    disabled={index === -1 || index >= orderedPrimaryNavItems.length - 1}
+                    aria-label={`Move ${item.label} down`}
+                  >
+                    <ArrowDown className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : null}
+            </div>
           );
         })}
+        {hiddenPrimaryCount > 0 && !showPrimaryNav ? (
+          <div className="px-2.5 py-1 text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+            Hover for {hiddenPrimaryCount} more page{hiddenPrimaryCount === 1 ? "" : "s"}
+          </div>
+        ) : null}
         {secondaryNavItems.length > 0 ? (
-          <>
-            <button
-              type="button"
-              onClick={() => setShowMoreNav((prev) => !prev)}
-              className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-sm transition ${
-                secondaryActive || showMoreNav
-                  ? "bg-[var(--bg-primary)] text-[var(--text-primary)]"
-                  : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-              }`}
-            >
-              <span className="inline-flex items-center gap-2">
-                <MoreHorizontal className="h-4 w-4" />
-                More
-              </span>
-              <ChevronDown className={`h-4 w-4 transition ${showMoreNav || secondaryActive ? "rotate-180" : ""}`} />
-            </button>
-            {(showMoreNav || secondaryActive) &&
+          <div className="mt-1 border-t border-[var(--border-default)] pt-1">
+            <div className="px-2.5 py-1 text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+              {showSecondaryNav ? "More pages" : "Hover for more pages"}
+            </div>
+            {showSecondaryNav &&
               secondaryNavItems.map((item) => {
                 const Icon = item.icon;
                 const active = isNavActive(pathname, item.href);
@@ -456,7 +647,7 @@ export function ChatSidebar({
                   </Link>
                 );
               })}
-          </>
+          </div>
         ) : null}
       </div>
 
@@ -465,14 +656,14 @@ export function ChatSidebar({
         New chat
       </Button>
 
-      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+      <div ref={chatScrollRef} className="min-h-0 flex-1 overflow-y-auto pr-1">
         <div className="mb-2 relative">
           <Search className="pointer-events-none absolute left-2.5 top-2 h-3.5 w-3.5 text-[var(--text-secondary)]" />
           <input
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search chats"
-            className="h-8 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] pl-8 pr-2.5 text-xs outline-none transition focus:ring-2 focus:ring-[var(--accent-cyan)]"
+            className="h-8 w-full rounded-lg border border-transparent bg-[var(--bg-primary)] pl-8 pr-2.5 text-xs text-[var(--text-primary)] transition placeholder:text-[var(--text-secondary)] focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0"
           />
         </div>
 
@@ -628,17 +819,7 @@ export function ChatSidebar({
             </div>
           ))}
         </div>
-        {hasMoreChats ? (
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            className="mt-3 h-8 w-full text-xs"
-            onClick={() => setVisibleChatCount((prev) => prev + 10)}
-          >
-            Show more chats
-          </Button>
-        ) : null}
+        {hasMoreChats ? <div ref={chatLoadSentinelRef} className="h-8" aria-hidden /> : null}
       </div>
 
       <div className="mt-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-soft)]">
@@ -677,13 +858,13 @@ export function ChatSidebar({
           <div
             className="h-full min-w-[3px] rounded-full transition-all"
             style={{
-              width: `${Math.max(spentCents > 0 ? 3 : 0, usagePercent)}%`,
+              width: `${Math.max(usagePercent > 0 ? 3 : 0, usagePercent)}%`,
               background: "var(--gradient-brand)",
             }}
           />
         </div>
         <p className="mb-3 text-[11px] text-[var(--text-secondary)]">
-          {spendingTier} tier active
+          {usageStatus}
         </p>
 
         <div className="flex items-center gap-2.5">

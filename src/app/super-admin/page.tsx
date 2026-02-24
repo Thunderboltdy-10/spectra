@@ -4,11 +4,13 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
+  BellRing,
   Database,
   Building2,
   HardDrive,
   MessageSquare,
   Plus,
+  Send,
   Shield,
   Users,
   Zap,
@@ -47,6 +49,23 @@ type AdminRow = {
   orgName: string;
 };
 
+type OrgOption = {
+  _id: string;
+  name: string;
+  slug: string;
+};
+
+type AuditLogRow = {
+  _id: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  details?: string;
+  createdAt: number;
+  actorName?: string;
+  actorEmail?: string;
+};
+
 type StatCardProps = {
   label: string;
   value: number | string;
@@ -81,20 +100,38 @@ const QUICK_ACTIONS = [
   { label: "Create School", href: "/super-admin/schools/new", icon: Plus, variant: "default" as const },
 ];
 
-const MOCK_RECENT_ACTIVITY = [
-  { id: 1, event: "New school created", detail: "Greenfield Academy", time: "2 min ago" },
-  { id: 2, event: "User role updated", detail: "jane@example.com → admin", time: "14 min ago" },
-  { id: 3, event: "School deactivated", detail: "Old Demo Org", time: "1 hour ago" },
-  { id: 4, event: "New school created", detail: "Sunrise University", time: "3 hours ago" },
-  { id: 5, event: "Token budget updated", detail: "Metro High School — 2M/day", time: "5 hours ago" },
-];
+function formatRelativeTime(ts: number) {
+  const deltaSeconds = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (deltaSeconds < 60) return "just now";
+  if (deltaSeconds < 3600) return `${Math.floor(deltaSeconds / 60)}m ago`;
+  if (deltaSeconds < 86400) return `${Math.floor(deltaSeconds / 3600)}h ago`;
+  return `${Math.floor(deltaSeconds / 86400)}d ago`;
+}
+
+function humanizeAuditAction(action: string) {
+  return action
+    .replace(/^super_admin\./, "")
+    .split(/[._]/g)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
 
 export default function SuperAdminDashboard() {
   const [stats, setStats] = useState<GlobalStats | null>(null);
   const [storageStats, setStorageStats] = useState<StorageStats | null>(null);
   const [admins, setAdmins] = useState<AdminRow[]>([]);
+  const [orgs, setOrgs] = useState<OrgOption[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
+  const [announcementAudience, setAnnouncementAudience] = useState<"all" | "org" | "email">("all");
+  const [announcementOrgId, setAnnouncementOrgId] = useState("");
+  const [announcementEmail, setAnnouncementEmail] = useState("");
+  const [announcementTitle, setAnnouncementTitle] = useState("");
+  const [announcementBody, setAnnouncementBody] = useState("");
+  const [announcementActionUrl, setAnnouncementActionUrl] = useState("");
+  const [sendingAnnouncement, setSendingAnnouncement] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -122,6 +159,22 @@ export default function SuperAdminDashboard() {
           const adminsData = (await adminsResponse.json()) as { admins?: AdminRow[] };
           setAdmins((adminsData.admins ?? []).slice(0, 6));
         }
+
+        const orgsResponse = await fetch("/api/super-admin/schools");
+        if (orgsResponse.ok) {
+          const orgsData = (await orgsResponse.json()) as { orgs?: OrgOption[] };
+          setOrgs(
+            [...(orgsData.orgs ?? [])]
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((org) => ({ _id: org._id, name: org.name, slug: org.slug })),
+          );
+        }
+
+        const auditResponse = await fetch("/api/super-admin/audit-logs?limit=12");
+        if (auditResponse.ok) {
+          const auditData = (await auditResponse.json()) as { logs?: AuditLogRow[] };
+          setAuditLogs(auditData.logs ?? []);
+        }
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Failed to load stats");
       } finally {
@@ -129,6 +182,61 @@ export default function SuperAdminDashboard() {
       }
     })();
   }, []);
+
+  async function sendAnnouncement() {
+    const title = announcementTitle.trim();
+    const body = announcementBody.trim();
+    const actionUrl = announcementActionUrl.trim();
+    const email = announcementEmail.trim();
+
+    if (!title || !body) {
+      toast.error("Title and message are required.");
+      return;
+    }
+    if (announcementAudience === "org" && !announcementOrgId) {
+      toast.error("Choose a school target.");
+      return;
+    }
+    if (announcementAudience === "email" && !email) {
+      toast.error("Enter a recipient email.");
+      return;
+    }
+
+    setSendingAnnouncement(true);
+    try {
+      const response = await fetch("/api/super-admin/notifications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          audience: announcementAudience,
+          title,
+          body,
+          actionUrl: actionUrl || undefined,
+          orgId: announcementAudience === "org" ? announcementOrgId : undefined,
+          userEmail: announcementAudience === "email" ? email : undefined,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      const payload = (await response.json()) as { sentCount?: number };
+      toast.success(`Announcement sent to ${payload.sentCount ?? 0} user${payload.sentCount === 1 ? "" : "s"}.`);
+      setAnnouncementTitle("");
+      setAnnouncementBody("");
+      setAnnouncementActionUrl("");
+      if (announcementAudience !== "org") {
+        setAnnouncementOrgId("");
+      }
+      if (announcementAudience !== "email") {
+        setAnnouncementEmail("");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to send announcement");
+    } finally {
+      setSendingAnnouncement(false);
+    }
+  }
 
   if (accessDenied) {
     return (
@@ -212,6 +320,113 @@ export default function SuperAdminDashboard() {
             sub="Users with admin role"
           />
         </div>
+
+        <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 shadow-[var(--shadow-soft)]">
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+                Broadcast Notification
+              </h2>
+              <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                Send announcements to all users, one school, or a specific person.
+              </p>
+            </div>
+            <BellRing className="h-4 w-4 text-[var(--text-secondary)]" />
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-2">
+            <label className="space-y-1.5">
+              <span className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Audience</span>
+              <select
+                value={announcementAudience}
+                onChange={(event) => setAnnouncementAudience(event.target.value as "all" | "org" | "email")}
+                className="h-10 w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-sm text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-[color-mix(in_oklab,var(--accent-cyan)_32%,transparent)]"
+              >
+                <option value="all">All users</option>
+                <option value="org">One school</option>
+                <option value="email">Single user (email)</option>
+              </select>
+            </label>
+
+            {announcementAudience === "org" ? (
+              <label className="space-y-1.5">
+                <span className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">School</span>
+                <select
+                  value={announcementOrgId}
+                  onChange={(event) => setAnnouncementOrgId(event.target.value)}
+                  className="h-10 w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-sm text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-[color-mix(in_oklab,var(--accent-cyan)_32%,transparent)]"
+                >
+                  <option value="">Select school</option>
+                  {orgs.map((org) => (
+                    <option key={org._id} value={org._id}>
+                      {org.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : announcementAudience === "email" ? (
+              <label className="space-y-1.5">
+                <span className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Recipient email</span>
+                <input
+                  type="email"
+                  value={announcementEmail}
+                  onChange={(event) => setAnnouncementEmail(event.target.value)}
+                  placeholder="student@school.edu"
+                  className="h-10 w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)] focus:ring-2 focus:ring-[color-mix(in_oklab,var(--accent-cyan)_32%,transparent)]"
+                />
+              </label>
+            ) : (
+              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5 text-xs text-[var(--text-secondary)]">
+                Everyone on the platform will receive this message.
+              </div>
+            )}
+
+            <label className="space-y-1.5 lg:col-span-2">
+              <span className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Title</span>
+              <input
+                value={announcementTitle}
+                onChange={(event) => setAnnouncementTitle(event.target.value)}
+                maxLength={180}
+                placeholder="New feature update"
+                className="h-10 w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)] focus:ring-2 focus:ring-[color-mix(in_oklab,var(--accent-cyan)_32%,transparent)]"
+              />
+            </label>
+
+            <label className="space-y-1.5 lg:col-span-2">
+              <span className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Message</span>
+              <textarea
+                value={announcementBody}
+                onChange={(event) => setAnnouncementBody(event.target.value)}
+                rows={4}
+                maxLength={2000}
+                placeholder="Share rollout notes, reminders, or action items."
+                className="w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)] focus:ring-2 focus:ring-[color-mix(in_oklab,var(--accent-cyan)_32%,transparent)]"
+              />
+            </label>
+
+            <label className="space-y-1.5 lg:col-span-2">
+              <span className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Action URL (optional)</span>
+              <input
+                value={announcementActionUrl}
+                onChange={(event) => setAnnouncementActionUrl(event.target.value)}
+                placeholder="/achievements or https://..."
+                className="h-10 w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)] focus:ring-2 focus:ring-[color-mix(in_oklab,var(--accent-cyan)_32%,transparent)]"
+              />
+            </label>
+          </div>
+
+          <div className="mt-4 flex items-center justify-end">
+            <Button
+              type="button"
+              className="cursor-pointer gap-2"
+              onClick={() => void sendAnnouncement()}
+              disabled={sendingAnnouncement}
+            >
+              <Send className="h-4 w-4" />
+              {sendingAnnouncement ? "Sending..." : "Send notification"}
+            </Button>
+          </div>
+        </section>
 
         {storageStats && (
           <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 shadow-[var(--shadow-soft)]">
@@ -322,19 +537,29 @@ export default function SuperAdminDashboard() {
               Recent Activity
             </h2>
             <div className="space-y-3">
-              {MOCK_RECENT_ACTIVITY.map((item) => (
+              {auditLogs.map((item) => (
                 <div
-                  key={item.id}
+                  key={item._id}
                   className="flex items-start gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3"
                 >
                   <div className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-[var(--accent-cyan)]" />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-[var(--text-primary)]">{item.event}</p>
-                    <p className="truncate text-xs text-[var(--text-secondary)]">{item.detail}</p>
+                    <p className="text-sm font-medium text-[var(--text-primary)]">{humanizeAuditAction(item.action)}</p>
+                    <p className="truncate text-xs text-[var(--text-secondary)]">
+                      {item.details?.trim() || `${item.targetType}: ${item.targetId}`}{" "}
+                      <span className="text-[var(--text-muted)]">
+                        · {(item.actorName || item.actorEmail || "Unknown actor").trim()}
+                      </span>
+                    </p>
                   </div>
-                  <span className="shrink-0 text-[11px] text-[var(--text-secondary)]">{item.time}</span>
+                  <span className="shrink-0 text-[11px] text-[var(--text-secondary)]">
+                    {formatRelativeTime(item.createdAt)}
+                  </span>
                 </div>
               ))}
+              {auditLogs.length === 0 && (
+                <p className="text-sm text-[var(--text-secondary)]">No recent platform activity yet.</p>
+              )}
             </div>
           </div>
         </div>

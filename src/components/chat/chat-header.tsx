@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import dynamic from "next/dynamic";
-import { ChevronDown, Clock3, Download, Layers, LoaderCircle, Maximize2, Menu, Minimize2, Plus, Search, Settings2, Square } from "lucide-react";
+import { Clock3, Download, Layers, LoaderCircle, Menu, MoreHorizontal, Search, Settings2, Square } from "lucide-react";
 import { useKBar } from "kbar";
 import { NotificationBell } from "@/components/notification-bell";
 import { ContextualTip } from "@/components/ui/contextual-tip";
@@ -22,11 +22,9 @@ type ChatHeaderProps = {
   sending: boolean;
   messageCount: number;
   compacting?: boolean;
-  isZenMode?: boolean;
   onStop: () => void;
   onCompact?: () => void;
   onToggleMobileSidebar: () => void;
-  onToggleZen?: () => void;
   onOpenSettings: () => void;
   onNewChat: () => void;
   onExport: (format: "markdown" | "pdf" | "text") => void;
@@ -40,11 +38,9 @@ export function ChatHeader({
   sending,
   messageCount,
   compacting = false,
-  isZenMode = false,
   onStop,
   onCompact,
   onToggleMobileSidebar,
-  onToggleZen,
   onOpenSettings,
   onNewChat,
   onExport,
@@ -58,34 +54,6 @@ export function ChatHeader({
         .trim()
     : undefined;
   const showCompactTip = messageCount > 20;
-
-  if (isZenMode) {
-    return (
-      <header className="sticky top-0 z-20 border-b border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_94%,transparent)] backdrop-blur-xl">
-        <div className="px-3 py-2.5 sm:px-6 lg:px-10">
-          <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-2">
-            <h1
-              title={title}
-              className="line-clamp-1 min-w-0 flex-1 text-pretty font-display text-lg leading-tight sm:text-xl"
-            >
-              {title}
-            </h1>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={onToggleZen}
-              className="h-9 gap-1.5"
-              aria-label="Exit zen mode"
-            >
-              <Minimize2 className="h-3.5 w-3.5" />
-              Exit Zen
-            </Button>
-          </div>
-        </div>
-      </header>
-    );
-  }
 
   return (
     <header className="sticky top-0 z-20 border-b border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_92%,transparent)] backdrop-blur-xl">
@@ -141,13 +109,14 @@ export function ChatHeader({
               <Button
                 type="button"
                 variant="secondary"
-                size="sm"
-                className="h-9 gap-1.5"
+                size="icon"
+                className="h-9 w-9"
                 onClick={onOpenSettings}
                 data-tour="settings-trigger"
+                aria-label="Open settings"
+                title="Open settings"
               >
                 <Settings2 className="h-3.5 w-3.5" />
-                Settings
               </Button>
             )}
             {!sending && messageCount > 15 && onCompact ? (
@@ -163,57 +132,43 @@ export function ChatHeader({
                 {compacting ? "Compacting..." : "Compact"}
               </Button>
             ) : null}
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              className="h-9 gap-1.5"
-              onClick={() => setStudyTimerOpen((prev) => !prev)}
-              aria-label="Toggle study timer"
-              title="Pomodoro study timer"
-            >
-              <Clock3 className="h-3.5 w-3.5" />
-              Timer
-            </Button>
-            {onToggleZen ? (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="h-9 gap-1.5"
-                onClick={onToggleZen}
-                aria-label="Toggle zen mode"
-                title="Toggle zen mode (Ctrl/Cmd+Shift+Z)"
-              >
-                <Maximize2 className="h-3.5 w-3.5" />
-                Zen
-              </Button>
-            ) : null}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button type="button" variant="secondary" size="sm" className="h-9 gap-1.5">
-                  <Download className="h-3.5 w-3.5" />
-                  Export conversation
-                  <ChevronDown className="h-3.5 w-3.5" />
+                <Button type="button" variant="secondary" size="icon" className="h-9 w-9" aria-label="More actions">
+                  <MoreHorizontal className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => onExport("markdown")}>Markdown (.md)</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onExport("pdf")}>PDF</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onExport("text")}>Plain text (.txt)</DropdownMenuItem>
+                {!sending ? (
+                  <DropdownMenuItem onSelect={onNewChat}>
+                    New chat
+                  </DropdownMenuItem>
+                ) : null}
+                <DropdownMenuItem onSelect={() => setStudyTimerOpen((prev) => !prev)}>
+                  <Clock3 className="mr-2 h-3.5 w-3.5" />
+                  {studyTimerOpen ? "Hide timer" : "Show timer"}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onExport("markdown")}>
+                  <Download className="mr-2 h-3.5 w-3.5" />
+                  Export Markdown (.md)
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onExport("pdf")}>
+                  <Download className="mr-2 h-3.5 w-3.5" />
+                  Export PDF
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onExport("text")}>
+                  <Download className="mr-2 h-3.5 w-3.5" />
+                  Export Plain text (.txt)
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <Button type="button" variant="secondary" size="icon" onClick={onNewChat} aria-label="New chat">
-              <Plus className="h-4 w-4" />
-            </Button>
-
-            {studyTimerOpen ? (
-              <StudyTimer
-                chatId={chatId}
-                className="absolute right-0 top-12 z-40"
-                onClose={() => setStudyTimerOpen(false)}
-              />
-            ) : null}
+            <StudyTimer
+              chatId={chatId}
+              open={studyTimerOpen}
+              className="absolute right-0 top-12 z-40"
+              onClose={() => setStudyTimerOpen(false)}
+              onOpen={() => setStudyTimerOpen(true)}
+            />
           </div>
         </div>
 

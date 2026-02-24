@@ -6,21 +6,42 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-const WORK_SECONDS = 25 * 60;
-const BREAK_SECONDS = 5 * 60;
-const WORK_MS = WORK_SECONDS * 1000;
-const BREAK_MS = BREAK_SECONDS * 1000;
+const STORAGE_KEY = "ai-school-study-timer-v2";
+const DEFAULT_WORK_MINUTES = 25;
+const DEFAULT_BREAK_MINUTES = 5;
+const MIN_WORK_MINUTES = 5;
+const MAX_WORK_MINUTES = 120;
+const MIN_BREAK_MINUTES = 1;
+const MAX_BREAK_MINUTES = 45;
 
 type StudyTimerProps = {
   chatId?: string;
   className?: string;
+  open: boolean;
   onClose: () => void;
+  onOpen: () => void;
 };
 
 type TimerPhase = "work" | "break";
 
-function phaseDurationMs(phase: TimerPhase) {
-  return phase === "work" ? WORK_MS : BREAK_MS;
+type PersistedTimerState = {
+  phase: TimerPhase;
+  remainingMs: number;
+  isRunning: boolean;
+  phaseEndAt: number | null;
+  phaseStartedAt: number | null;
+  completedSessions: number;
+  workMinutes: number;
+  breakMinutes: number;
+};
+
+function clampMinutes(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+function phaseDurationMs(phase: TimerPhase, workMinutes: number, breakMinutes: number) {
+  return (phase === "work" ? workMinutes : breakMinutes) * 60 * 1000;
 }
 
 function formatRemaining(seconds: number) {
@@ -30,26 +51,128 @@ function formatRemaining(seconds: number) {
   return `${minutes.toString().padStart(2, "0")}:${remainder.toString().padStart(2, "0")}`;
 }
 
-export function StudyTimer({ chatId, className, onClose }: StudyTimerProps) {
+function nextPhase(phase: TimerPhase): TimerPhase {
+  return phase === "work" ? "break" : "work";
+}
+
+function readPersistedState(): PersistedTimerState | null {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PersistedTimerState>;
+    if (!parsed || typeof parsed !== "object") return null;
+
+    const phase: TimerPhase = parsed.phase === "break" ? "break" : "work";
+    const workMinutes = clampMinutes(parsed.workMinutes ?? DEFAULT_WORK_MINUTES, MIN_WORK_MINUTES, MAX_WORK_MINUTES);
+    const breakMinutes = clampMinutes(parsed.breakMinutes ?? DEFAULT_BREAK_MINUTES, MIN_BREAK_MINUTES, MAX_BREAK_MINUTES);
+    let completedSessions = Number.isFinite(parsed.completedSessions)
+      ? Math.max(0, Math.floor(parsed.completedSessions as number))
+      : 0;
+
+    const now = Date.now();
+    const durationFor = (candidatePhase: TimerPhase) => phaseDurationMs(candidatePhase, workMinutes, breakMinutes);
+
+    let restoredPhase: TimerPhase = phase;
+    let remainingMs = Number.isFinite(parsed.remainingMs) ? Math.max(0, Number(parsed.remainingMs)) : durationFor(phase);
+    let isRunning = Boolean(parsed.isRunning);
+    let phaseEndAt = Number.isFinite(parsed.phaseEndAt) ? Number(parsed.phaseEndAt) : null;
+
+    if (isRunning && phaseEndAt) {
+      let delta = phaseEndAt - now;
+      while (delta <= 0) {
+        if (restoredPhase === "work") {
+          completedSessions += 1;
+        }
+        restoredPhase = nextPhase(restoredPhase);
+        delta += durationFor(restoredPhase);
+      }
+      remainingMs = delta;
+      phaseEndAt = now + delta;
+    } else {
+      isRunning = false;
+      phaseEndAt = null;
+      remainingMs = Math.min(remainingMs, durationFor(restoredPhase));
+    }
+
+    const duration = durationFor(restoredPhase);
+    const phaseStartedAtFromStorage = Number.isFinite(parsed.phaseStartedAt) ? Number(parsed.phaseStartedAt) : null;
+    const phaseStartedAt = isRunning
+      ? now - Math.max(0, duration - remainingMs)
+      : phaseStartedAtFromStorage;
+
+    return {
+      phase: restoredPhase,
+      remainingMs,
+      isRunning,
+      phaseEndAt,
+      phaseStartedAt,
+      completedSessions,
+      workMinutes,
+      breakMinutes,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTimerProps) {
   const [phase, setPhase] = useState<TimerPhase>("work");
-  const [remainingMs, setRemainingMs] = useState<number>(WORK_MS);
+  const [workMinutes, setWorkMinutes] = useState(DEFAULT_WORK_MINUTES);
+  const [breakMinutes, setBreakMinutes] = useState(DEFAULT_BREAK_MINUTES);
+  const [remainingMs, setRemainingMs] = useState<number>(DEFAULT_WORK_MINUTES * 60 * 1000);
   const [isRunning, setIsRunning] = useState(false);
   const [phaseEndAt, setPhaseEndAt] = useState<number | null>(null);
+  const [phaseStartedAt, setPhaseStartedAt] = useState<number | null>(null);
   const [completedSessions, setCompletedSessions] = useState(0);
+  const hydratedRef = useRef(false);
   const transitionLockRef = useRef(false);
 
   const remainingSeconds = Math.max(0, Math.ceil(remainingMs / 1000));
   const display = formatRemaining(remainingSeconds);
-  const duration = phaseDurationMs(phase);
+  const duration = phaseDurationMs(phase, workMinutes, breakMinutes);
   const progress = Math.min(1, Math.max(0, 1 - (remainingMs / duration)));
   const radius = 44;
   const circumference = 2 * Math.PI * radius;
   const strokeOffset = circumference * (1 - progress);
-
   const phaseLabel = useMemo(
     () => (phase === "work" ? "Focus session" : "Break session"),
     [phase],
   );
+  const showMiniIndicator = !open && (isRunning || remainingMs < duration);
+
+  useEffect(() => {
+    const restored = readPersistedState();
+    if (restored) {
+      setPhase(restored.phase);
+      setWorkMinutes(restored.workMinutes);
+      setBreakMinutes(restored.breakMinutes);
+      setRemainingMs(restored.remainingMs);
+      setIsRunning(restored.isRunning);
+      setPhaseEndAt(restored.phaseEndAt);
+      setPhaseStartedAt(restored.phaseStartedAt);
+      setCompletedSessions(restored.completedSessions);
+    }
+    hydratedRef.current = true;
+  }, []);
+
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    const payload: PersistedTimerState = {
+      phase,
+      remainingMs,
+      isRunning,
+      phaseEndAt,
+      phaseStartedAt,
+      completedSessions,
+      workMinutes,
+      breakMinutes,
+    };
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+      // Storage can fail in private browsing contexts.
+    }
+  }, [phase, remainingMs, isRunning, phaseEndAt, phaseStartedAt, completedSessions, workMinutes, breakMinutes]);
 
   function playTransitionTone() {
     try {
@@ -101,35 +224,43 @@ export function StudyTimer({ chatId, className, onClose }: StudyTimerProps) {
     if (transitionLockRef.current) return;
     transitionLockRef.current = true;
 
-    const now = Date.now();
-    const endedPhase = phase;
+    try {
+      const now = Date.now();
+      const endedPhase = phase;
+      const endedDurationMs = phaseDurationMs(endedPhase, workMinutes, breakMinutes);
+      const endedStartedAt = phaseStartedAt ?? now - endedDurationMs;
 
-    playTransitionTone();
+      playTransitionTone();
 
-    if (endedPhase === "work") {
-      const totalSeconds = WORK_SECONDS;
-      await logCompletedSession({
-        startedAt: now - WORK_MS,
-        endedAt: now,
-        totalSeconds,
-      });
-      setCompletedSessions((prev) => prev + 1);
-      toast.success("Focus block complete. Starting a short break.");
-      setPhase("break");
-      setRemainingMs(BREAK_MS);
+      if (endedPhase === "work") {
+        const totalSeconds = Math.max(60, Math.round(endedDurationMs / 1000));
+        await logCompletedSession({
+          startedAt: endedStartedAt,
+          endedAt: now,
+          totalSeconds,
+        });
+        setCompletedSessions((prev) => prev + 1);
+        toast.success("Focus block complete. Starting a short break.");
+        const nextDuration = phaseDurationMs("break", workMinutes, breakMinutes);
+        setPhase("break");
+        setRemainingMs(nextDuration);
+        setIsRunning(true);
+        setPhaseStartedAt(now);
+        setPhaseEndAt(now + nextDuration);
+        return;
+      }
+
+      toast.message("Break complete. Starting the next focus block.");
+      const nextDuration = phaseDurationMs("work", workMinutes, breakMinutes);
+      setPhase("work");
+      setRemainingMs(nextDuration);
       setIsRunning(true);
-      setPhaseEndAt(now + BREAK_MS);
+      setPhaseStartedAt(now);
+      setPhaseEndAt(now + nextDuration);
+    } finally {
       transitionLockRef.current = false;
-      return;
     }
-
-    toast.message("Break complete. Starting the next focus block.");
-    setPhase("work");
-    setRemainingMs(WORK_MS);
-    setIsRunning(true);
-    setPhaseEndAt(now + WORK_MS);
-    transitionLockRef.current = false;
-  }, [logCompletedSession, phase]);
+  }, [breakMinutes, logCompletedSession, phase, phaseStartedAt, workMinutes]);
 
   function handleStartPause() {
     if (isRunning) {
@@ -144,13 +275,37 @@ export function StudyTimer({ chatId, className, onClose }: StudyTimerProps) {
     const now = Date.now();
     setIsRunning(true);
     setPhaseEndAt(now + remainingMs);
+    setPhaseStartedAt((prev) => prev ?? now - Math.max(0, duration - remainingMs));
   }
 
   function handleReset() {
-    const resetDuration = phaseDurationMs(phase);
+    const resetDuration = phaseDurationMs(phase, workMinutes, breakMinutes);
     setIsRunning(false);
     setRemainingMs(resetDuration);
     setPhaseEndAt(null);
+    setPhaseStartedAt(null);
+  }
+
+  function handleWorkMinutesChange(value: string) {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return;
+    const next = clampMinutes(parsed, MIN_WORK_MINUTES, MAX_WORK_MINUTES);
+    setWorkMinutes(next);
+    if (!isRunning && phase === "work") {
+      setRemainingMs(phaseDurationMs("work", next, breakMinutes));
+      setPhaseStartedAt(null);
+    }
+  }
+
+  function handleBreakMinutesChange(value: string) {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return;
+    const next = clampMinutes(parsed, MIN_BREAK_MINUTES, MAX_BREAK_MINUTES);
+    setBreakMinutes(next);
+    if (!isRunning && phase === "break") {
+      setRemainingMs(phaseDurationMs("break", workMinutes, next));
+      setPhaseStartedAt(null);
+    }
   }
 
   useEffect(() => {
@@ -169,10 +324,32 @@ export function StudyTimer({ chatId, className, onClose }: StudyTimerProps) {
     return () => window.clearInterval(interval);
   }, [advancePhase, isRunning, phaseEndAt]);
 
+  if (!open && !showMiniIndicator) {
+    return null;
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={onOpen}
+        className={cn(
+          "inline-flex h-10 items-center gap-2 rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-xs font-medium text-[var(--text-primary)] shadow-[var(--shadow-soft)] transition hover:bg-[var(--bg-hover)]",
+          className,
+        )}
+        aria-label="Open study timer"
+      >
+        <Clock3 className="h-3.5 w-3.5" />
+        <span>{phase === "work" ? "Focus" : "Break"}</span>
+        <span className="font-semibold">{display}</span>
+      </button>
+    );
+  }
+
   return (
     <div
       className={cn(
-        "w-[320px] rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)]",
+        "w-[328px] rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)]",
         className,
       )}
     >
@@ -231,6 +408,34 @@ export function StudyTimer({ chatId, className, onClose }: StudyTimerProps) {
           </p>
         </div>
       </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <label className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1.5">
+          <span className="mb-1 block text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Focus min</span>
+          <input
+            type="number"
+            min={MIN_WORK_MINUTES}
+            max={MAX_WORK_MINUTES}
+            value={workMinutes}
+            onChange={(event) => handleWorkMinutesChange(event.target.value)}
+            className="w-full bg-transparent text-sm font-semibold outline-none"
+          />
+        </label>
+        <label className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1.5">
+          <span className="mb-1 block text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Break min</span>
+          <input
+            type="number"
+            min={MIN_BREAK_MINUTES}
+            max={MAX_BREAK_MINUTES}
+            value={breakMinutes}
+            onChange={(event) => handleBreakMinutesChange(event.target.value)}
+            className="w-full bg-transparent text-sm font-semibold outline-none"
+          />
+        </label>
+      </div>
+      {isRunning ? (
+        <p className="mt-2 text-[10px] text-[var(--text-secondary)]">Duration updates apply after reset or the next phase change.</p>
+      ) : null}
 
       <div className="mt-4 grid grid-cols-3 gap-2">
         <Button type="button" variant="secondary" size="sm" className="gap-1.5" onClick={handleStartPause}>

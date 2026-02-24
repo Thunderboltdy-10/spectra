@@ -22,6 +22,7 @@
   --border-default: #cfd8e3;
   --accent: var(--brand-primary);
   --accent-cyan: var(--brand-primary);
+  --accent-orange: #f48a3d;
   --accent-coral: #ff6f45;
   --accent-mint: #0fa57a;
   --danger: #d33a4a;
@@ -73,12 +74,13 @@
   --bg-code: #0b1018;
 
   --text-primary: #e8f0fb;
-  --text-secondary: #91a4bd;
+  --text-secondary: #9eb1c8;
   --text-inverse: #0b1220;
 
   --border-default: #2b3950;
   --accent: var(--brand-primary);
   --accent-cyan: var(--brand-primary);
+  --accent-orange: #f4a158;
   --accent-coral: #ff8a65;
   --accent-mint: #25bc89;
   --danger: #ff6b78;
@@ -90,44 +92,6 @@
   --shadow-hover: 0 24px 40px -28px rgba(0, 0, 0, 0.72);
 
   --gradient-surface: linear-gradient(145deg, rgba(24, 35, 52, 0.95), rgba(20, 28, 42, 0.94));
-}
-
-.high-contrast {
-  --bg-primary: #ffffff;
-  --bg-secondary: #f5f7fa;
-  --bg-tertiary: #e9eef4;
-  --bg-sidebar: #f2f5fa;
-  --bg-user-bubble: #dce9ff;
-  --bg-elevated: #ffffff;
-  --bg-hover: #e7edf5;
-  --text-primary: #000000;
-  --text-secondary: #1b1f2a;
-  --border-default: #000000;
-  --accent-cyan: #0047ff;
-  --accent-coral: #b00020;
-  --success: #0a7a3f;
-  --warning: #8a4f00;
-}
-
-.dark.high-contrast {
-  --bg-primary: #000000;
-  --bg-secondary: #0b0f14;
-  --bg-tertiary: #121720;
-  --bg-sidebar: #0a0e14;
-  --bg-user-bubble: #10233f;
-  --bg-elevated: #05080d;
-  --bg-hover: #121821;
-  --text-primary: #ffffff;
-  --text-secondary: #d7e2f7;
-  --border-default: #ffffff;
-  --accent-cyan: #7fc7ff;
-  --accent-coral: #ff8b72;
-  --success: #63ffa5;
-  --warning: #ffd27a;
-}
-
-.high-contrast a {
-  text-decoration-thickness: 2px;
 }
 
 * {
@@ -150,20 +114,6 @@ body {
   font-size: 15px;
   line-height: 1.6;
   letter-spacing: 0.01em;
-}
-
-body.zen-mode {
-  background:
-    radial-gradient(circle at 50% 0%, color-mix(in oklab, var(--accent-cyan) 12%, transparent), transparent 48%),
-    var(--bg-primary);
-}
-
-.zen-layout {
-  position: relative;
-}
-
-.zen-main {
-  backdrop-filter: blur(2px);
 }
 
 :focus-visible {
@@ -308,11 +258,6 @@ body.zen-mode {
 
 .chat-settings-panel {
   animation: settings-slide-in 300ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-body.right-panel-docked {
-  padding-right: var(--right-panel-space, 0px);
-  transition: padding-right 280ms cubic-bezier(0.2, 0.9, 0.3, 1);
 }
 
 .right-panel-shell {
@@ -843,45 +788,34 @@ body.right-panel-docked {
 }
 
 .message-journal {
-  background:
-    radial-gradient(140px 90px at 8% 0%, color-mix(in oklab, var(--accent-orange) 11%, transparent), transparent 72%),
-    linear-gradient(
-      170deg,
-      color-mix(in oklab, var(--bg-elevated) 93%, #fff6e9 7%),
-      color-mix(in oklab, var(--bg-elevated) 96%, #fff2df 4%)
-    );
-  color: color-mix(in oklab, var(--text-primary) 88%, #6b4b2f 12%);
+  background: transparent;
+  color: var(--text-primary);
 }
 
 .dark .message-journal {
-  background:
-    radial-gradient(140px 90px at 8% 0%, color-mix(in oklab, var(--accent-orange) 12%, transparent), transparent 72%),
-    linear-gradient(
-      170deg,
-      color-mix(in oklab, var(--bg-elevated) 95%, #111822 5%),
-      color-mix(in oklab, var(--bg-elevated) 97%, #0f151d 3%)
-    );
+  background: transparent;
+  color: var(--text-primary);
 }
 
 .message-journal .chat-markdown,
 .message-journal .chat-rich {
-  color: color-mix(in oklab, var(--text-primary) 90%, #7a5a3f 10%);
-  line-height: 1.82;
+  color: var(--text-primary);
+  line-height: 1.66;
 }
 
 .message-journal .chat-markdown h1,
 .message-journal .chat-markdown h2,
 .message-journal .chat-markdown h3,
 .message-journal .chat-markdown h4 {
-  font-family: var(--font-fraunces), Georgia, serif;
-  line-height: 1.35;
-  letter-spacing: -0.012em;
-  color: color-mix(in oklab, var(--text-primary) 92%, #5d4129 8%);
+  font-family: inherit;
+  line-height: 1.45;
+  letter-spacing: -0.004em;
+  color: var(--text-primary);
 }
 
 .message-journal .chat-markdown p,
 .message-journal .chat-markdown li {
-  line-height: 1.9;
+  line-height: 1.7;
 }
 
 ::selection {

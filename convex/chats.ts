@@ -2,6 +2,7 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { getUserByClerkId } from "./helpers";
 import { vStudyMode, vThinkingLevel, vRouterMode, vCitation, vRouteTrace } from "./shared";
+import { computeCompactionWindow } from "./compaction";
 
 function compactMessageText(value: string) {
   return value.replace(/\s+/g, " ").trim();
@@ -32,6 +33,15 @@ function buildManualCompactionSummary(messages: Array<{ role: "user" | "assistan
   ];
 
   return lines.join("\n").slice(0, 2000);
+}
+
+function mergeContextSummary(existingSummary: string | undefined, generatedSummary: string) {
+  const next = generatedSummary.trim();
+  if (!next) return existingSummary?.trim() ?? "";
+  const existing = existingSummary?.trim();
+  const merged = existing ? `${existing}\n\n---\n${next}` : next;
+  if (merged.length <= 2000) return merged;
+  return merged.slice(-2000);
 }
 
 export const listChats = query({
@@ -164,6 +174,7 @@ export const appendMessage = mutation({
   args: {
     actorClerkId: v.string(),
     chatId: v.id("chats"),
+    clientMessageId: v.optional(v.string()),
     role: v.union(v.literal("user"), v.literal("assistant"), v.literal("system")),
     content: v.string(),
     attachments: v.optional(v.array(v.string())),
@@ -193,11 +204,32 @@ export const appendMessage = mutation({
     }
 
     const now = Date.now();
+    const normalizedClientMessageId =
+      typeof args.clientMessageId === "string" && args.clientMessageId.trim().length > 0
+        ? args.clientMessageId.trim()
+        : undefined;
+
+    if (args.role === "user" && normalizedClientMessageId) {
+      const existing = await ctx.db
+        .query("messages")
+        .withIndex("by_chat_client_message", (q) =>
+          q
+            .eq("chatId", chat._id)
+            .eq("clientMessageId", normalizedClientMessageId),
+        )
+        .unique();
+
+      if (existing && existing.userId === actor._id && existing.role === "user") {
+        return { messageId: existing._id, deduped: true };
+      }
+    }
+
     const messageId = await ctx.db.insert("messages", {
       orgId: actor.orgId,
       packId: args.packId ?? chat.packId,
       chatId: chat._id,
       userId: actor._id,
+      clientMessageId: args.role === "user" ? normalizedClientMessageId : undefined,
       role: args.role,
       mode: args.mode,
       content: args.content,
@@ -225,7 +257,7 @@ export const appendMessage = mutation({
       mode: args.mode,
     });
 
-    return { messageId };
+    return { messageId, deduped: false };
   },
 });
 
@@ -496,47 +528,51 @@ export const manualCompact = mutation({
       .withIndex("by_chat", (q) => q.eq("chatId", args.chatId))
       .collect();
     const sorted = allMessages.sort((a, b) => a.createdAt - b.createdAt);
+    const window = computeCompactionWindow({
+      messages: sorted.map((message) => ({
+        _id: message._id,
+        createdAt: message.createdAt,
+        role: message.role,
+        content: message.content,
+        mode: message.mode,
+      })),
+      keepLatestMessages: args.keepLatestMessages ?? 6,
+      compactedUntilMessageId: chat.compactedUntilMessageId,
+    });
 
-    if (sorted.length < 20) {
+    if (!window.ok) {
       return {
         ok: false,
-        reason: "not_enough_messages",
+        reason: window.reason,
         compactedMessages: 0,
-      };
-    }
-
-    const keepLatest = Math.min(12, Math.max(4, args.keepLatestMessages ?? 6));
-    const toCompact = sorted.slice(0, Math.max(0, sorted.length - keepLatest));
-    if (toCompact.length === 0) {
-      return {
-        ok: false,
-        reason: "nothing_to_compact",
-        compactedMessages: 0,
+        currentMessages: sorted.length,
+        minimumMessages: 20,
       };
     }
 
     const generatedSummary = buildManualCompactionSummary(
-      toCompact.map((message) => ({
+      window.toCompact.map((message) => ({
         role: message.role,
         content: message.content,
         mode: message.mode,
       })),
     );
-
-    const contextSummary = (chat.contextSummary?.trim()
-      ? `${chat.contextSummary.trim()}\n\n---\n${generatedSummary}`
-      : generatedSummary)
-      .slice(0, 2000);
+    const contextSummary = mergeContextSummary(chat.contextSummary, generatedSummary);
+    const compactedAt = Date.now();
 
     await ctx.db.patch(chat._id, {
       contextSummary,
-      updatedAt: Date.now(),
+      compactedUntilMessageId: window.compactedUntilMessageId,
+      compactedAt,
+      contextSummaryVersion: (chat.contextSummaryVersion ?? 0) + 1,
+      updatedAt: compactedAt,
     });
 
     return {
       ok: true,
-      compactedMessages: toCompact.length,
-      retainedMessages: sorted.length - toCompact.length,
+      compactedMessages: window.toCompact.length,
+      retainedMessages: window.retainedMessages,
+      compactedUntilMessageId: window.compactedUntilMessageId,
       contextSummary,
     };
   },
@@ -656,6 +692,7 @@ export const deleteLastUserMessage = mutation({
     actorClerkId: v.string(),
     chatId: v.id("chats"),
     expectedContent: v.optional(v.string()),
+    expectedClientMessageId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
@@ -666,6 +703,27 @@ export const deleteLastUserMessage = mutation({
     const chat = await ctx.db.get(args.chatId);
     if (!chat || chat.ownerUserId !== actor._id || chat.deletedAt) {
       throw new Error("Chat not found");
+    }
+
+    const expectedClientMessageId =
+      typeof args.expectedClientMessageId === "string" && args.expectedClientMessageId.trim().length > 0
+        ? args.expectedClientMessageId.trim()
+        : undefined;
+
+    if (expectedClientMessageId) {
+      const existing = await ctx.db
+        .query("messages")
+        .withIndex("by_chat_client_message", (q) =>
+          q
+            .eq("chatId", args.chatId)
+            .eq("clientMessageId", expectedClientMessageId),
+        )
+        .unique();
+      if (existing && existing.userId === actor._id && existing.role === "user") {
+        await ctx.db.delete(existing._id);
+        await ctx.db.patch(chat._id, { updatedAt: Date.now() });
+        return { deleted: true };
+      }
     }
 
     const messages = await ctx.db

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { QuizPanel, type QuizPanelQuestion } from "@/components/chat/quiz-panel";
@@ -31,6 +31,7 @@ type QuizRevealProps = {
   content: string;
   chatId?: string;
   difficulty?: QuizDifficulty;
+  autoOpen?: boolean;
   onSubmitAnswers?: (result: QuizSubmitResult) => void;
   onFollowUp?: (message: string) => void;
   onModeChange?: (mode: string) => void;
@@ -154,6 +155,7 @@ export function QuizReveal({
   content,
   chatId,
   difficulty = "medium",
+  autoOpen = false,
   onSubmitAnswers,
   onFollowUp,
   onModeChange,
@@ -162,6 +164,7 @@ export function QuizReveal({
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
+  const panelInstanceId = useId();
   const [activeIndex, setActiveIndex] = useState(0);
 
   const [aiExplanations, setAiExplanations] = useState<Record<string, string>>({});
@@ -243,12 +246,31 @@ export function QuizReveal({
     setAiExplanations({});
   }, [content]);
 
-  // Auto-open panel on mount for all quizzes
+  const openQuizPanel = useCallback(() => {
+    setPanelOpen(true);
+    window.dispatchEvent(
+      new CustomEvent("ai-school:quiz-panel-open", {
+        detail: { panelId: panelInstanceId },
+      }),
+    );
+  }, [panelInstanceId]);
+
   useEffect(() => {
-    if (questions.length > 0) {
-      setPanelOpen(true);
+    const handlePanelOpen = (event: Event) => {
+      const custom = event as CustomEvent<{ panelId?: string }>;
+      if (custom.detail?.panelId === panelInstanceId) return;
+      setPanelOpen(false);
+    };
+    window.addEventListener("ai-school:quiz-panel-open", handlePanelOpen);
+    return () => window.removeEventListener("ai-school:quiz-panel-open", handlePanelOpen);
+  }, [panelInstanceId]);
+
+  // Auto-open only for the latest quiz message to avoid stacked/flickering panels.
+  useEffect(() => {
+    if (autoOpen && questions.length > 0) {
+      openQuizPanel();
     }
-  }, [questions.length]);
+  }, [autoOpen, openQuizPanel, questions.length]);
 
   if (questions.length === 0) return null;
 
@@ -333,7 +355,7 @@ export function QuizReveal({
             This quiz opens in a panel with Back/Next navigation and final answer check.
           </p>
           <div className="flex items-center gap-2">
-            <Button type="button" onClick={() => setPanelOpen(true)}>
+            <Button type="button" onClick={openQuizPanel}>
               Open Quiz Panel
             </Button>
             {!submitted ? (

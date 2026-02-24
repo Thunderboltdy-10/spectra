@@ -27,6 +27,7 @@ type AchievementDefinition = {
   name: string;
   description: string;
   xpEarned: number;
+  difficulty?: "starter" | "bronze" | "silver" | "gold" | "legend";
 };
 
 type UnlockedAchievement = AchievementDefinition & {
@@ -52,6 +53,11 @@ function iconForAchievement(type: string) {
   if (type === "mode_explorer") return Compass;
   if (type === "bookworm") return Library;
   return Award;
+}
+
+function difficultyLabel(difficulty?: AchievementDefinition["difficulty"]) {
+  if (!difficulty) return "standard";
+  return difficulty;
 }
 
 export default function AchievementsPage() {
@@ -111,13 +117,18 @@ export default function AchievementsPage() {
 
   const orderedCatalog = useMemo(() => {
     const items = data?.catalog ?? [];
-    return [...items].sort((a, b) => a.xpEarned - b.xpEarned || a.name.localeCompare(b.name));
-  }, [data?.catalog]);
+    return [...items].sort((a, b) => {
+      const aUnlocked = unlockedByType.has(a.type);
+      const bUnlocked = unlockedByType.has(b.type);
+      if (aUnlocked !== bUnlocked) return aUnlocked ? -1 : 1;
+      return a.xpEarned - b.xpEarned || a.name.localeCompare(b.name);
+    });
+  }, [data?.catalog, unlockedByType]);
 
   return (
     <AppShell fullBleed contentClassName="2xl:px-14">
       <section className="space-y-6">
-        <header className="relative overflow-hidden px-1 py-3 sm:px-2">
+        <header data-tour="achievements-header" className="relative overflow-hidden px-1 py-3 sm:px-2">
           <div
             className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full opacity-35 blur-3xl"
             style={{ background: "radial-gradient(circle at center, var(--warning), transparent 68%)" }}
@@ -144,7 +155,7 @@ export default function AchievementsPage() {
           </div>
         </header>
 
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div data-tour="achievements-overview" className="grid gap-3 sm:grid-cols-3">
           <div className="rounded-2xl bg-[color-mix(in_oklab,var(--bg-elevated)_76%,transparent)] p-4 shadow-[var(--shadow-card)]">
             <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
               <Star className="h-3.5 w-3.5 text-[var(--warning)]" />
@@ -185,7 +196,7 @@ export default function AchievementsPage() {
             </p>
           </div>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div data-tour="achievements-grid" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {orderedCatalog.map((definition) => {
               const unlocked = unlockedByType.get(definition.type);
               const Icon = iconForAchievement(definition.type);
@@ -203,11 +214,11 @@ export default function AchievementsPage() {
                       <Icon className="h-5 w-5 text-[var(--text-primary)]" />
                     </div>
                     {unlocked ? (
-                      <Badge variant="success">Unlocked</Badge>
+                      <Badge variant="success">Completed</Badge>
                     ) : (
                       <Badge variant="secondary" className="inline-flex items-center gap-1">
                         <Lock className="h-3 w-3" />
-                        Locked
+                        Pending
                       </Badge>
                     )}
                   </div>
@@ -220,10 +231,13 @@ export default function AchievementsPage() {
                       <Star className="h-3.5 w-3.5 text-[var(--warning)]" />
                       +{definition.xpEarned} XP
                     </span>
+                    <span className="rounded-full border border-[var(--border-default)] px-2 py-0.5 text-[10px] uppercase tracking-[0.08em]">
+                      {difficultyLabel(definition.difficulty)}
+                    </span>
                     {unlocked ? (
-                      <span>Unlocked {new Date(unlocked.earnedAt).toLocaleDateString()}</span>
+                      <span>Completed {new Date(unlocked.earnedAt).toLocaleDateString()}</span>
                     ) : (
-                      <span>Complete criteria</span>
+                      <span>Pending criteria</span>
                     )}
                   </div>
                 </article>

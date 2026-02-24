@@ -34,6 +34,7 @@ export function NotificationBell() {
   const [markingAllRead, setMarkingAllRead] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [expandedById, setExpandedById] = useState<Record<string, boolean>>({});
 
   const refreshNotifications = useCallback(async (options?: { silent?: boolean }) => {
     if (!options?.silent) {
@@ -143,7 +144,7 @@ export function NotificationBell() {
           </Button>
         </div>
 
-        <div className="max-h-[340px] overflow-y-auto p-2">
+        <div className="max-h-[60vh] overflow-y-auto p-2">
           {loading ? (
             <div className="flex items-center justify-center py-8 text-sm text-[var(--text-secondary)]">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -179,7 +180,23 @@ export function NotificationBell() {
                       <span className="mt-1 inline-flex h-2 w-2 shrink-0 rounded-full bg-[var(--accent-cyan)]" />
                     ) : null}
                   </div>
-                  <p className="mt-1 text-xs text-[var(--text-secondary)]">{notification.body}</p>
+                  <p
+                    role="button"
+                    tabIndex={0}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setExpandedById((prev) => ({ ...prev, [notification._id]: !prev[notification._id] }));
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setExpandedById((prev) => ({ ...prev, [notification._id]: !prev[notification._id] }));
+                    }}
+                    className={`mt-1 w-full text-left text-xs text-[var(--text-secondary)] ${expandedById[notification._id] ? "" : "line-clamp-2"}`}
+                  >
+                    {notification.body}
+                  </p>
                   <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
                     {formatDistanceToNow(notification.createdAt, { addSuffix: true })}
                   </p>

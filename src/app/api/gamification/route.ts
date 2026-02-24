@@ -38,6 +38,7 @@ export async function GET() {
           name: string;
           description: string;
           xpEarned: number;
+          difficulty?: "starter" | "bronze" | "silver" | "gold" | "legend";
         }>
       >("gamification:getAchievementCatalog", {
         actorClerkId: actor.clerkId,

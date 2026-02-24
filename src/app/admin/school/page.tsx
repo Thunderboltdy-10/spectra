@@ -13,6 +13,7 @@ import {
   Zap,
 } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
+import { cn } from "@/lib/utils";
 
 type DashboardData = {
   memberCount: number;
@@ -149,6 +150,25 @@ export default function SchoolAdminDashboard() {
               </span>
             )}
           </p>
+          <div className="mt-3 inline-flex items-center rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-1">
+            {[
+              { href: "/admin", label: "Personal Admin" },
+              { href: "/admin/school", label: "School Admin" },
+            ].map((tab) => (
+              <Link
+                key={tab.href}
+                href={tab.href}
+                className={cn(
+                  "rounded-lg px-3 py-1.5 text-xs transition",
+                  tab.href === "/admin/school"
+                    ? "bg-[var(--bg-primary)] text-[var(--text-primary)]"
+                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+                )}
+              >
+                {tab.label}
+              </Link>
+            ))}
+          </div>
         </div>
 
         {/* Stats */}

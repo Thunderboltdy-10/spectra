@@ -4,6 +4,20 @@ import { convexAction, convexMutation, convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 
+function soulActionErrorResponse(error: unknown) {
+  const message = error instanceof Error ? error.message : "SOUL action failed.";
+  if (message.includes("OPENROUTER_API_KEY missing")) {
+    return badRequest(
+      "School SOUL publish/preview requires OPENROUTER_API_KEY to generate embeddings.",
+      503,
+    );
+  }
+  if (message.toLowerCase().includes("embedding failed")) {
+    return badRequest("School SOUL embedding request failed. Check OpenRouter connectivity and model access.", 503);
+  }
+  return badRequest(message || "SOUL action failed.", 500);
+}
+
 export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();
@@ -13,12 +27,16 @@ export async function GET(request: NextRequest) {
 
     const previewQuery = request.nextUrl.searchParams.get("preview");
     if (previewQuery && previewQuery.trim()) {
-      const guidance = await convexAction("soul:retrieveSoulGuidance", {
-        actorClerkId: actor.clerkId,
-        query: previewQuery,
-        limit: 8,
-      });
-      return ok({ preview: guidance });
+      try {
+        const guidance = await convexAction("soul:retrieveSoulGuidance", {
+          actorClerkId: actor.clerkId,
+          query: previewQuery,
+          limit: 8,
+        });
+        return ok({ preview: guidance });
+      } catch (error) {
+        return soulActionErrorResponse(error);
+      }
     }
 
     const docs = await convexQuery("soul:listSoulDocs", {
@@ -62,9 +80,13 @@ export async function PATCH() {
       return badRequest("Only teacher/admin", 403);
     }
 
-    const result = await convexAction("soul:publishSoul", {
-      actorClerkId: actor.clerkId,
-    });
-    return ok(result);
+    try {
+      const result = await convexAction("soul:publishSoul", {
+        actorClerkId: actor.clerkId,
+      });
+      return ok(result);
+    } catch (error) {
+      return soulActionErrorResponse(error);
+    }
   });
 }

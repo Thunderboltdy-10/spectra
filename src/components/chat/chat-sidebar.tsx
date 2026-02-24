@@ -26,7 +26,6 @@ import {
   Pencil,
   Pin,
   Plus,
-  School,
   Search,
   Settings2,
   Shield,
@@ -140,10 +139,13 @@ function initials(name: string) {
 function isNavActive(pathname: string, href: string) {
   if (href === "/") return pathname === "/";
   if (href === "/admin") {
-    return pathname === "/admin" || pathname === "/admin/branding" || pathname === "/admin/soul";
+    return pathname === "/admin" || pathname.startsWith("/admin/");
   }
-  if (href === "/admin/school") {
-    return pathname.startsWith("/admin/school");
+  if (href === "/super-admin") {
+    return pathname === "/super-admin";
+  }
+  if (href === "/super-admin/feedback") {
+    return pathname === "/super-admin/feedback" || pathname.startsWith("/super-admin/feedback/");
   }
   return pathname === href || pathname.startsWith(`${href}/`);
 }
@@ -179,6 +181,7 @@ export function ChatSidebar({
   const [navExpandedByHover, setNavExpandedByHover] = useState(false);
   const [reorderPrimaryNav, setReorderPrimaryNav] = useState(false);
   const [primaryNavOrder, setPrimaryNavOrder] = useState<string[]>([]);
+  const [logoLoadFailed, setLogoLoadFailed] = useState(false);
   const [primaryVisibleCount, setPrimaryVisibleCount] = useState(() =>
     typeof window === "undefined" ? 5 : estimatePrimaryNavCount(window.innerHeight),
   );
@@ -200,6 +203,10 @@ export function ChatSidebar({
   const chatLoadSentinelRef = useRef<HTMLDivElement>(null);
   const pinnedSet = pinnedChatIds ?? EMPTY_PINNED_IDS;
 
+  useEffect(() => {
+    setLogoLoadFailed(false);
+  }, [orgLogoUrl]);
+
   const usageRatio = userSpending
     ? Math.min(
         Math.max(
@@ -210,10 +217,11 @@ export function ChatSidebar({
         ),
         1,
       )
-    : Math.min(chats.length / 40, 1);
-  const usagePercent = Math.max(0, Math.min(100, Math.round(usageRatio * 100)));
-  const usageStatus =
-    usagePercent >= 80
+    : 0;
+  const usagePercent = userSpending ? Math.max(0, Math.min(100, Math.round(usageRatio * 100))) : 0;
+  const usageStatus = !userSpending
+    ? "N/A"
+    : usagePercent >= 80
       ? "High activity"
       : usagePercent >= 40
         ? "Steady activity"
@@ -228,8 +236,7 @@ export function ChatSidebar({
     { href: "/models", label: "Models", icon: Compass },
     { href: "/images", label: "Images", icon: ImagePlus },
     { href: "/analytics", label: "Analytics", icon: BarChart3 },
-    ...(canAccessAdminConsole ? [{ href: "/admin", label: "Admin", icon: LayoutDashboard }] : []),
-    ...(canAccessSchoolAdmin ? [{ href: "/admin/school", label: "School Admin", icon: School }] : []),
+    ...(canAccessAdminConsole || canAccessSchoolAdmin ? [{ href: "/admin", label: "Admin", icon: LayoutDashboard }] : []),
     ...(isSuperAdmin
       ? [
           { href: "/super-admin", label: "Super Admin", icon: Shield },
@@ -405,8 +412,16 @@ export function ChatSidebar({
     return (
       <div className="chat-sidebar flex h-full flex-col border-r border-[var(--border-default)] px-2.5 py-3">
         <div className="mb-4 flex items-center justify-between gap-1">
-          {orgLogoUrl && orgLogoUrl.trim() ? (
-            <Image src={orgLogoUrl} alt={orgName ?? "Org"} width={34} height={34} className="h-8.5 w-8.5 rounded-xl object-cover" />
+          {orgLogoUrl && orgLogoUrl.trim() && !logoLoadFailed ? (
+            <Image
+              src={orgLogoUrl}
+              alt={orgName ?? "Org"}
+              width={34}
+              height={34}
+              className="h-8.5 w-8.5 rounded-xl object-cover"
+              unoptimized
+              onError={() => setLogoLoadFailed(true)}
+            />
           ) : (
             <div className="inline-flex h-8.5 w-8.5 items-center justify-center rounded-xl bg-[var(--gradient-brand)] text-white">
               <Sparkles className="h-4.5 w-4.5" />
@@ -527,13 +542,15 @@ export function ChatSidebar({
   return (
     <div className="chat-sidebar flex h-full flex-col border-r border-[var(--border-default)] p-3">
       <div className="mb-3 flex items-center gap-2.5">
-        {orgLogoUrl && orgLogoUrl.trim() ? (
+        {orgLogoUrl && orgLogoUrl.trim() && !logoLoadFailed ? (
           <Image
             src={orgLogoUrl}
             alt={orgName ?? "Org"}
             width={32}
             height={32}
             className="h-8 w-8 rounded-xl border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_82%,transparent)] object-cover shadow-[var(--shadow-soft)]"
+            unoptimized
+            onError={() => setLogoLoadFailed(true)}
           />
         ) : (
           <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--gradient-brand)] text-white shadow-[var(--shadow-soft)]">
@@ -550,7 +567,7 @@ export function ChatSidebar({
       </div>
 
       <div
-        className="mb-3 space-y-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5"
+        className="mb-3 space-y-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 transition-[transform] duration-300 hover:scale-[1.02]"
         onMouseEnter={() => setNavExpandedByHover(true)}
         onMouseLeave={() => setNavExpandedByHover(false)}
       >
@@ -571,84 +588,86 @@ export function ChatSidebar({
           </button>
         </div>
 
-        {primaryNavVisibleItems.map((item) => {
-          const Icon = item.icon;
-          const active = isNavActive(pathname, item.href);
-          const index = orderedPrimaryNavItems.findIndex((navItem) => navItem.href === item.href);
-          return (
-            <div key={item.href} className="flex items-center gap-1">
-              <Link
-                href={item.href}
-                title={item.label}
-                onClick={() => {
-                  // navigation handled by Link
-                }}
-                className={`flex flex-1 items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition ${
-                  active
-                    ? "bg-[var(--bg-primary)] text-[var(--text-primary)]"
-                    : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                }`}
-              >
-                <Icon className="h-4 w-4" />
-                <span>{item.label}</span>
-              </Link>
-              {reorderPrimaryNav ? (
-                <div className="mr-1 flex items-center gap-0.5">
-                  <button
-                    type="button"
-                    className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-45"
-                    onClick={() => movePrimaryNavItem(item.href, "up")}
-                    disabled={index <= 0}
-                    aria-label={`Move ${item.label} up`}
-                  >
-                    <ArrowUp className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-45"
-                    onClick={() => movePrimaryNavItem(item.href, "down")}
-                    disabled={index === -1 || index >= orderedPrimaryNavItems.length - 1}
-                    aria-label={`Move ${item.label} down`}
-                  >
-                    <ArrowDown className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
-        {hiddenPrimaryCount > 0 && !showPrimaryNav ? (
-          <div className="px-2.5 py-1 text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-            Hover for {hiddenPrimaryCount} more page{hiddenPrimaryCount === 1 ? "" : "s"}
-          </div>
-        ) : null}
-        {secondaryNavItems.length > 0 ? (
-          <div className="mt-1 border-t border-[var(--border-default)] pt-1">
+        <div className="max-h-[40vh] overflow-y-auto pr-1 transition-[max-height,opacity] duration-300">
+          {primaryNavVisibleItems.map((item) => {
+            const Icon = item.icon;
+            const active = isNavActive(pathname, item.href);
+            const index = orderedPrimaryNavItems.findIndex((navItem) => navItem.href === item.href);
+            return (
+              <div key={item.href} className="flex items-center gap-1">
+                <Link
+                  href={item.href}
+                  title={item.label}
+                  onClick={() => {
+                    // navigation handled by Link
+                  }}
+                  className={`flex flex-1 items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition ${
+                    active
+                      ? "bg-[var(--bg-primary)] text-[var(--text-primary)]"
+                      : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  <span>{item.label}</span>
+                </Link>
+                {reorderPrimaryNav ? (
+                  <div className="mr-1 flex items-center gap-0.5">
+                    <button
+                      type="button"
+                      className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-45"
+                      onClick={() => movePrimaryNavItem(item.href, "up")}
+                      disabled={index <= 0}
+                      aria-label={`Move ${item.label} up`}
+                    >
+                      <ArrowUp className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-45"
+                      onClick={() => movePrimaryNavItem(item.href, "down")}
+                      disabled={index === -1 || index >= orderedPrimaryNavItems.length - 1}
+                      aria-label={`Move ${item.label} down`}
+                    >
+                      <ArrowDown className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+          {hiddenPrimaryCount > 0 && !showPrimaryNav ? (
             <div className="px-2.5 py-1 text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-              {showSecondaryNav ? "More pages" : "Hover for more pages"}
+              Hover for {hiddenPrimaryCount} more page{hiddenPrimaryCount === 1 ? "" : "s"}
             </div>
-            {showSecondaryNav &&
-              secondaryNavItems.map((item) => {
-                const Icon = item.icon;
-                const active = isNavActive(pathname, item.href);
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    title={item.label}
-                    className={`ml-2 flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition ${
-                      active
-                        ? "bg-[var(--bg-primary)] text-[var(--text-primary)]"
-                        : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                    }`}
-                  >
-                    <Icon className="h-4 w-4" />
-                    <span>{item.label}</span>
-                  </Link>
-                );
-              })}
-          </div>
-        ) : null}
+          ) : null}
+          {secondaryNavItems.length > 0 ? (
+            <div className="mt-1 border-t border-[var(--border-default)] pt-1">
+              <div className="px-2.5 py-1 text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+                {showSecondaryNav ? "More pages" : "Hover for more pages"}
+              </div>
+              {showSecondaryNav &&
+                secondaryNavItems.map((item) => {
+                  const Icon = item.icon;
+                  const active = isNavActive(pathname, item.href);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      title={item.label}
+                      className={`ml-2 flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition ${
+                        active
+                          ? "bg-[var(--bg-primary)] text-[var(--text-primary)]"
+                          : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                      <span>{item.label}</span>
+                    </Link>
+                  );
+                })}
+            </div>
+          ) : null}
+        </div>
       </div>
 
       <Button className="mb-3 w-full justify-start gap-2 rounded-xl" onClick={onNewChat}>
@@ -852,7 +871,7 @@ export function ChatSidebar({
 
         <div className="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
           <span>Usage</span>
-          <span>{usagePercent}%</span>
+          <span>{userSpending ? `${usagePercent}%` : "N/A"}</span>
         </div>
         <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
           <div

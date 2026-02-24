@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { QuizPanel, type QuizPanelQuestion } from "@/components/chat/quiz-panel";
 import { RichText } from "@/components/chat/rich-text";
+import { usePanel } from "@/context/panel-context";
+import { parseQuiz, type ParsedQuizQuestion } from "@/lib/quiz-parser";
 
 export type QuizQuestionResult = {
   id: string;
@@ -22,9 +23,6 @@ export type QuizSubmitResult = {
   incorrectDetails: string[];
 };
 
-export type ParsedQuizQuestion = QuizPanelQuestion & {
-  number: number;
-};
 type QuizDifficulty = "easy" | "medium" | "hard";
 
 type QuizRevealProps = {
@@ -37,85 +35,13 @@ type QuizRevealProps = {
   onModeChange?: (mode: string) => void;
 };
 
-function parseQuiz(content: string): ParsedQuizQuestion[] {
-  const lines = content.split("\n");
-  const questions: ParsedQuizQuestion[] = [];
-  const byNumber = new Map<number, ParsedQuizQuestion>();
-  let inAnswerSection = false;
-  let current: ParsedQuizQuestion | null = null;
-  let currentOptionIndex = -1;
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) continue;
-
-    if (/^#{1,4}\s*(answers?|explanations?)\b/i.test(line)) {
-      inAnswerSection = true;
-      current = null;
-      currentOptionIndex = -1;
-      continue;
-    }
-
-    const qMatch = line.match(/^(?:Q(?:uestion)?\s*)?(\d+)[.):-]\s*(.+)$/i);
-    if (qMatch && !inAnswerSection) {
-      const number = Number.parseInt(qMatch[1] ?? "0", 10);
-      const question: ParsedQuizQuestion = {
-        number,
-        id: String(number),
-        prompt: qMatch[2] ?? "",
-        options: [],
-      };
-      questions.push(question);
-      byNumber.set(number, question);
-      current = question;
-      currentOptionIndex = -1;
-      continue;
-    }
-
-    const optionMatch = line.match(/^[-*]?\s*([A-D])[.)]\s*(.+)$/i);
-    if (optionMatch && !inAnswerSection && current) {
-      current.options.push({
-        letter: optionMatch[1] ?? "",
-        text: optionMatch[2] ?? "",
-      });
-      currentOptionIndex = current.options.length - 1;
-      continue;
-    }
-
-    const directCorrectMatch = line.match(/^Correct\s*[:=-]\s*([A-D])\b/i);
-    if (directCorrectMatch && current) {
-      current.correct = (directCorrectMatch[1] ?? "").toUpperCase();
-      continue;
-    }
-
-    if (inAnswerSection) {
-      const answerMatch = line.match(
-        /^(?:Q(?:uestion)?\s*)?(\d+)[\s:.)-]*(?:correct\s*[:=-]\s*)?([A-D])\b(?:\s*[-:]\s*(.*))?$/i,
-      );
-      if (answerMatch) {
-        const number = Number.parseInt(answerMatch[1] ?? "0", 10);
-        const question = byNumber.get(number);
-        if (question) {
-          question.correct = (answerMatch[2] ?? "").toUpperCase();
-          const maybeExplanation = answerMatch[3]?.trim();
-          if (maybeExplanation) {
-            question.explanation = maybeExplanation;
-          }
-        }
-      }
-      continue;
-    }
-
-    if (current && !inAnswerSection) {
-      if (currentOptionIndex >= 0 && current.options[currentOptionIndex]) {
-        current.options[currentOptionIndex]!.text = `${current.options[currentOptionIndex]!.text}\n${line}`;
-      } else {
-        current.prompt = `${current.prompt}\n${line}`;
-      }
-    }
+function hashQuizContent(value: string) {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash << 5) - hash + value.charCodeAt(i);
+    hash |= 0;
   }
-
-  return questions.filter((q) => q.prompt && q.options.length >= 2);
+  return Math.abs(hash).toString(36);
 }
 
 export function isQuizContent(content: string): boolean {
@@ -163,12 +89,14 @@ export function QuizReveal({
   const questions = useMemo(() => parseQuiz(content), [content]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState(false);
-  const [panelOpen, setPanelOpen] = useState(false);
   const panelInstanceId = useId();
   const [activeIndex, setActiveIndex] = useState(0);
+  const { activeView, panelData, openPanel } = usePanel();
 
   const [aiExplanations, setAiExplanations] = useState<Record<string, string>>({});
   const [loadingExplanations, setLoadingExplanations] = useState(false);
+  const storageKey = useMemo(() => `ai-school:quiz-progress:${hashQuizContent(content)}`, [content]);
+  const panelOpen = activeView === "quiz" && panelData.quiz?.panelId === panelInstanceId;
 
   const score = useMemo(
     () =>
@@ -241,29 +169,74 @@ export function QuizReveal({
 
   useEffect(() => {
     setActiveIndex(0);
-    setSubmitted(false);
-    setAnswers({});
     setAiExplanations({});
-  }, [content]);
-
-  const openQuizPanel = useCallback(() => {
-    setPanelOpen(true);
-    window.dispatchEvent(
-      new CustomEvent("ai-school:quiz-panel-open", {
-        detail: { panelId: panelInstanceId },
-      }),
-    );
-  }, [panelInstanceId]);
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (!raw) {
+        setSubmitted(false);
+        setAnswers({});
+        return;
+      }
+      const parsed = JSON.parse(raw) as { answers?: Record<string, string>; submitted?: boolean };
+      setAnswers(parsed.answers ?? {});
+      setSubmitted(Boolean(parsed.submitted));
+    } catch {
+      setSubmitted(false);
+      setAnswers({});
+    }
+  }, [storageKey]);
 
   useEffect(() => {
-    const handlePanelOpen = (event: Event) => {
-      const custom = event as CustomEvent<{ panelId?: string }>;
-      if (custom.detail?.panelId === panelInstanceId) return;
-      setPanelOpen(false);
-    };
-    window.addEventListener("ai-school:quiz-panel-open", handlePanelOpen);
-    return () => window.removeEventListener("ai-school:quiz-panel-open", handlePanelOpen);
-  }, [panelInstanceId]);
+    if (questions.length === 0) return;
+    try {
+      window.localStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          answers,
+          submitted,
+        }),
+      );
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [answers, questions.length, storageKey, submitted]);
+
+  const openQuizPanel = useCallback(() => {
+    openPanel("quiz", {
+      quiz: {
+        panelId: panelInstanceId,
+        questions,
+        answers,
+        submitted,
+        activeIndex,
+        onSetIndex: setActiveIndex,
+        onSelectAnswer: (questionId, letter) => {
+          if (submitted) return;
+          setAnswers((prev) => ({ ...prev, [questionId]: letter }));
+        },
+        onSubmit: () => {
+          if (submitted) return;
+          setSubmitted(true);
+          onSubmitAnswers?.(buildSubmission(questions, answers));
+          void fetchExplanations(questions, answers);
+        },
+      },
+    });
+  }, [
+    activeIndex,
+    answers,
+    fetchExplanations,
+    onSubmitAnswers,
+    panelInstanceId,
+    questions,
+    submitted,
+    openPanel,
+  ]);
+
+  useEffect(() => {
+    if (!panelOpen) return;
+    openQuizPanel();
+  }, [openQuizPanel, panelOpen]);
 
   // Auto-open only for the latest quiz message to avoid stacked/flickering panels.
   useEffect(() => {
@@ -334,50 +307,36 @@ export function QuizReveal({
 
   if (longQuiz) {
     return (
-      <>
-        <div className="space-y-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] bg-[var(--mode-quiz)] px-2.5 py-1 text-xs font-medium text-white">
-                Quiz - {questions.length} questions
-              </span>
-              <span className={`inline-flex items-center rounded-[var(--radius-pill)] border px-2.5 py-1 text-xs font-medium ${difficultyBadgeClass}`}>
-                Difficulty: {difficultyLabel}
-              </span>
-            </div>
-            {submitted ? (
-              <span className="text-sm font-medium text-[var(--text-primary)]">
-                {score}/{questions.length}
-              </span>
-            ) : null}
-          </div>
-          <p className="text-sm text-[var(--text-secondary)]">
-            This quiz opens in a panel with Back/Next navigation and final answer check.
-          </p>
+      <div className="space-y-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+        <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <Button type="button" onClick={openQuizPanel}>
-              Open Quiz Panel
-            </Button>
-            {!submitted ? (
-              <p className="text-xs text-[var(--text-secondary)]">
-                Progress: {Object.keys(answers).length}/{questions.length}
-              </p>
-            ) : null}
+            <span className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] bg-[var(--mode-quiz)] px-2.5 py-1 text-xs font-medium text-white">
+              Quiz - {questions.length} questions
+            </span>
+            <span className={`inline-flex items-center rounded-[var(--radius-pill)] border px-2.5 py-1 text-xs font-medium ${difficultyBadgeClass}`}>
+              Difficulty: {difficultyLabel}
+            </span>
           </div>
+          {submitted ? (
+            <span className="text-sm font-medium text-[var(--text-primary)]">
+              {score}/{questions.length}
+            </span>
+          ) : null}
         </div>
-        <QuizPanel
-          open={panelOpen}
-          onClose={() => setPanelOpen(false)}
-          questions={questions}
-          answers={answers}
-          submitted={submitted}
-          onSelectAnswer={(questionId, letter) => {
-            if (submitted) return;
-            setAnswers((prev) => ({ ...prev, [questionId]: letter }));
-          }}
-          onSubmit={submitAnswers}
-        />
-      </>
+        <p className="text-sm text-[var(--text-secondary)]">
+          This quiz opens in the unified right panel.
+        </p>
+        <div className="flex items-center gap-2">
+          <Button type="button" onClick={openQuizPanel}>
+            {panelOpen ? "Quiz Panel Open" : "Open Quiz Panel"}
+          </Button>
+          {!submitted ? (
+            <p className="text-xs text-[var(--text-secondary)]">
+              Progress: {Object.keys(answers).length}/{questions.length}
+            </p>
+          ) : null}
+        </div>
+      </div>
     );
   }
 

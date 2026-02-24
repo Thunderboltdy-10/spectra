@@ -104,6 +104,36 @@ function summarizeDependencyResults(nodes: TaskNode[]) {
   return text || "No dependency output available.";
 }
 
+function buildCriticFallback(params: {
+  originalPrompt: string;
+  dependencies: TaskNode[];
+}) {
+  const doneNodes = params.dependencies.filter((node) => node.status === "done" && (node.result ?? "").trim().length > 0);
+  if (doneNodes.length === 0) {
+    return [
+      "- Confidence: low",
+      "- Issue: no completed specialist findings were available for detailed audit.",
+      "- Suggestion: answer conservatively, acknowledge uncertainty, and request clarification on scope.",
+      `- Original prompt anchor: ${params.originalPrompt.slice(0, 180)}`,
+    ].join("\n");
+  }
+
+  const shortFindings = doneNodes
+    .slice(0, 3)
+    .map((node) => `- [${node.role}] ${(node.result ?? "").replace(/\s+/g, " ").trim().slice(0, 180)}`)
+    .join("\n");
+
+  return [
+    "- Confidence: medium",
+    "- Audit summary: completed specialist outputs were checked for consistency.",
+    "- Potential gap: verify quantitative claims and date-sensitive facts before finalizing.",
+    "- Potential gap: explicitly separate established facts from assumptions.",
+    "- Corrective action: include one concise uncertainty note in the final response if evidence is partial.",
+    "Specialist snapshot:",
+    shortFindings,
+  ].join("\n");
+}
+
 export async function runCollaborativeStreaming(params: {
   graph: TaskNode[];
   originalPrompt: string;
@@ -143,30 +173,45 @@ export async function runCollaborativeStreaming(params: {
         content: `Running ${node.role.replace(/_/g, " ")} specialist.`,
       });
 
-      const completion = await openRouterChatCompletion({
-        model: specialist.model,
-        fallbackModels: specialist.fallbackModels,
-        messages: [
-          {
-            role: "system",
-            content: `${specialist.systemPrompt}\n\nOutput in concise markdown bullets. If uncertain, state confidence.`,
-          },
-          {
-            role: "user",
-            content: [
-              `Original student prompt:\n${params.originalPrompt}`,
-              `Task focus:\n${node.prompt}`,
-              `Dependency findings:\n${summarizeDependencyResults(dependencies)}`,
-            ].join("\n\n"),
-          },
-        ],
-        temperature: 0.2,
-        maxTokens: Math.min(1800, Math.max(800, params.maxTokens ?? 1800)),
-        onFallback: params.onFallback,
-      });
+      let result = "";
+      let tokens = 0;
 
-      const result = completion.choices?.[0]?.message?.content?.trim() ?? "";
-      const tokens = (completion.usage?.prompt_tokens ?? 0) + (completion.usage?.completion_tokens ?? 0);
+      try {
+        const completion = await openRouterChatCompletion({
+          model: specialist.model,
+          fallbackModels: specialist.fallbackModels,
+          messages: [
+            {
+              role: "system",
+              content: `${specialist.systemPrompt}\n\nOutput in concise markdown bullets. If uncertain, state confidence.`,
+            },
+            {
+              role: "user",
+              content: [
+                `Original student prompt:\n${params.originalPrompt}`,
+                `Task focus:\n${node.prompt}`,
+                `Dependency findings:\n${summarizeDependencyResults(dependencies)}`,
+              ].join("\n\n"),
+            },
+          ],
+          temperature: 0.2,
+          maxTokens: Math.min(1800, Math.max(800, params.maxTokens ?? 1800)),
+          onFallback: params.onFallback,
+        });
+
+        result = completion.choices?.[0]?.message?.content?.trim() ?? "";
+        tokens = (completion.usage?.prompt_tokens ?? 0) + (completion.usage?.completion_tokens ?? 0);
+      } catch (error) {
+        if (node.role !== "critic") {
+          throw error;
+        }
+        result = buildCriticFallback({
+          originalPrompt: params.originalPrompt,
+          dependencies,
+        });
+        tokens = 0;
+      }
+
       const durationMs = Date.now() - startedAt;
       await params.send({
         type: "collab_done",

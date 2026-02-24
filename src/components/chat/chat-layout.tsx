@@ -26,6 +26,7 @@ import { exportElementToPrintPdf } from "@/lib/export/pdf-export";
 import { parseSlashCommand, normalizeModeArg, SLASH_COMMANDS } from "@/lib/slash-commands";
 import { useCanvasState } from "@/hooks/use-canvas-state";
 import { FILE_LIMITS } from "@/lib/file-limits";
+import { isModeAvailable } from "@/lib/modes";
 
 const GuidedTour = dynamic(
   () => import("@/components/ui/guided-tour").then((module) => module.GuidedTour),
@@ -140,18 +141,40 @@ export function ChatLayout() {
   );
 
   useEffect(() => {
-    if (!chat.sending) {
-      openedOrchestrationForStreamRef.current = false;
+    const collaboratorsActive = chat.activeCollaborators.length > 1 || chat.collaboratorPhase !== "idle";
+    const likelySearchActive = chat.autoSearch === "on" || Boolean(chat.lastAutoResult?.searchEnabled && chat.sending);
+    const highThinking = chat.thinkingLevel === "high";
+    const shouldAutoOpen = chat.sending && (collaboratorsActive || likelySearchActive || highThinking);
+
+    if (shouldAutoOpen && panelActiveView !== "orchestration") {
+      openPanel("orchestration");
+      openedOrchestrationForStreamRef.current = true;
       return;
     }
-    if (openedOrchestrationForStreamRef.current) return;
-    openedOrchestrationForStreamRef.current = true;
-    if (panelActiveView !== "orchestration") {
-      openPanel("orchestration");
+
+    if (!chat.sending) {
+      if (openedOrchestrationForStreamRef.current && panelActiveView === "orchestration") {
+        closePanel();
+      }
+      openedOrchestrationForStreamRef.current = false;
     }
-  }, [chat.sending, panelActiveView, openPanel]);
+  }, [
+    chat.activeCollaborators.length,
+    chat.autoSearch,
+    chat.collaboratorPhase,
+    chat.lastAutoResult?.searchEnabled,
+    chat.sending,
+    chat.thinkingLevel,
+    closePanel,
+    openPanel,
+    panelActiveView,
+  ]);
 
   function handleModeChange(mode: StudyMode) {
+    if (!isModeAvailable(mode)) {
+      toast.info("This mode is coming soon.");
+      return;
+    }
     chat.setMode(mode);
     toast.success(`Mode changed to ${mode}`);
     void chat.updateExistingChatSettings({ mode }).catch((error: unknown) =>
@@ -318,7 +341,7 @@ export function ChatLayout() {
         <div className="fixed inset-0 z-40 md:hidden">
           <button
             type="button"
-            className="absolute inset-0 bg-black/45 backdrop-blur-sm"
+            className="absolute inset-0 bg-black/45 backdrop-blur-none md:backdrop-blur-sm"
             onClick={() => chat.setMobileSidebarOpen(false)}
             aria-label="Close sidebar"
           />

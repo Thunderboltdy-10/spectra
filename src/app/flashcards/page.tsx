@@ -32,10 +32,10 @@ type DueCard = {
 };
 
 const QUALITY_OPTIONS = [
-  { label: "Again", value: 0 },
-  { label: "Hard", value: 2 },
-  { label: "Good", value: 4 },
-  { label: "Easy", value: 5 },
+  { label: "Again (~1 day)", value: 0, className: "border-[var(--danger)] text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_10%,var(--bg-primary))]" },
+  { label: "Hard (~2 days)", value: 2, className: "border-[var(--warning)] text-[var(--warning)] hover:bg-[color-mix(in_oklab,var(--warning)_10%,var(--bg-primary))]" },
+  { label: "Good (~5 days)", value: 4, className: "bg-[var(--success)] text-white hover:bg-[color-mix(in_oklab,var(--success)_85%,black)]" },
+  { label: "Easy (~9 days)", value: 5, className: "border-[var(--accent-cyan)] text-[var(--accent-cyan)] hover:bg-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--bg-primary))]" },
 ] as const;
 
 function shuffleCards(items: DueCard[]) {
@@ -58,6 +58,7 @@ export default function FlashcardsPage() {
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [shuffle, setShuffle] = useState(false);
+  const [refreshSpinning, setRefreshSpinning] = useState(false);
   const reviewSectionRef = useRef<HTMLElement | null>(null);
 
   const reviewScopeLabel = selectedDeckId ? "Selected deck" : "Due across all decks";
@@ -201,10 +202,24 @@ export default function FlashcardsPage() {
     reviewSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  function toggleShuffle() {
+    setShuffle((prev) => {
+      const next = !prev;
+      toast.success(next ? "Shuffle enabled" : "Shuffle disabled");
+      return next;
+    });
+  }
+
+  async function refreshDecks() {
+    setRefreshSpinning(true);
+    await loadData();
+    window.setTimeout(() => setRefreshSpinning(false), 550);
+  }
+
   return (
     <AppShell fullBleed contentClassName="2xl:px-14">
       <section className="space-y-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div data-tour="flashcards-header" className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="font-display text-3xl">Flashcard Studio</h1>
             <p className="text-sm text-[var(--text-secondary)]">
@@ -212,12 +227,12 @@ export default function FlashcardsPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button type="button" variant="secondary" onClick={() => setShuffle((prev) => !prev)}>
+            <Button type="button" variant="secondary" onClick={toggleShuffle}>
               <Shuffle className="h-4 w-4" />
               {shuffle ? "Shuffle on" : "Shuffle off"}
             </Button>
-            <Button type="button" variant="secondary" onClick={() => void loadData()}>
-              <RotateCcw className="h-4 w-4" />
+            <Button type="button" variant="secondary" onClick={() => void refreshDecks()}>
+              <RotateCcw className={`h-4 w-4 ${refreshSpinning ? "animate-spin" : ""}`} />
               Refresh
             </Button>
           </div>
@@ -247,7 +262,7 @@ export default function FlashcardsPage() {
         </section>
 
         <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
-          <aside className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+          <aside data-tour="flashcards-decks" className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-sm font-semibold">Saved Decks</h2>
               <span className="text-xs text-[var(--text-secondary)]">{decks.length} total</span>
@@ -309,7 +324,7 @@ export default function FlashcardsPage() {
             </div>
           </aside>
 
-          <article ref={reviewSectionRef} className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 sm:p-6">
+          <article data-tour="flashcards-review" ref={reviewSectionRef} className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 sm:p-6">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-base font-semibold">{selectedDeck?.title ?? "Due Review"}</h2>
               <p className="text-xs text-[var(--text-secondary)]">{reviewScopeLabel}</p>
@@ -328,19 +343,75 @@ export default function FlashcardsPage() {
                   {current.deckTitle} • {index + 1}/{reviewQueue.length}
                 </p>
 
-                <button
-                  type="button"
-                  onClick={() => setFlipped((prev) => !prev)}
-                  className="min-h-[320px] w-full rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-6 text-left transition hover:border-[var(--accent-cyan)]"
-                >
-                  <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-                    {flipped ? "Back" : "Front"}
-                  </p>
-                  <p className="mt-5 text-xl font-semibold text-[var(--text-primary)]">
-                    {flipped ? current.back : current.front}
-                  </p>
-                  <p className="mt-6 text-xs text-[var(--text-secondary)]">Click to {flipped ? "hide" : "reveal"} answer</p>
-                </button>
+                <div className="flashcard-container flashcard-container--main" style={{ minHeight: 280 }}>
+                  <button
+                    type="button"
+                    onClick={() => setFlipped((prev) => !prev)}
+                    className={`flashcard-inner w-full text-left ${flipped ? "flipped" : ""}`}
+                    style={{ minHeight: 280 }}
+                    aria-label={flipped ? "Flip to front" : "Flip to back"}
+                  >
+                    <div className="flashcard-front flex flex-col justify-center rounded-2xl border-2 border-[var(--mode-flashcard)] bg-[var(--bg-elevated)] p-6 shadow-[var(--shadow-card)]">
+                      <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Front</p>
+                      <p className="mt-5 text-xl font-semibold text-[var(--text-primary)]">
+                        {current.front}
+                      </p>
+                      <p className="mt-6 text-xs text-[var(--text-secondary)]">Tap to reveal answer</p>
+                    </div>
+                    <div className="flashcard-back flex flex-col justify-center rounded-2xl border-2 border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-elevated))] p-6 shadow-[var(--shadow-card)]">
+                      <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Back</p>
+                      <p className="mt-5 text-xl font-semibold text-[var(--text-primary)]">
+                        {current.back}
+                      </p>
+                      <p className="mt-6 text-xs text-[var(--text-secondary)]">Tap to flip back</p>
+                    </div>
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={index <= 0}
+                    onClick={() => {
+                      setFlipped(false);
+                      setIndex((prev) => Math.max(0, prev - 1));
+                    }}
+                  >
+                    Previous
+                  </Button>
+                  <div className="flex min-w-0 flex-1 items-center justify-center gap-1.5 px-2">
+                    {reviewQueue.map((card, dotIndex) => (
+                      <button
+                        key={`${card.cardHash}-${dotIndex}`}
+                        type="button"
+                        onClick={() => {
+                          setFlipped(false);
+                          setIndex(dotIndex);
+                        }}
+                        className={`h-1.5 flex-1 rounded-full transition ${
+                          dotIndex === index
+                            ? "bg-[var(--mode-flashcard)]"
+                            : "bg-[var(--border-default)] hover:bg-[var(--text-secondary)]"
+                        }`}
+                        aria-label={`Go to card ${dotIndex + 1}`}
+                      />
+                    ))}
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={index >= reviewQueue.length - 1}
+                    onClick={() => {
+                      setFlipped(false);
+                      setIndex((prev) => Math.min(reviewQueue.length - 1, prev + 1));
+                    }}
+                  >
+                    Next
+                  </Button>
+                </div>
 
                 {flipped ? (
                   <div className="flex flex-wrap gap-2">
@@ -349,7 +420,8 @@ export default function FlashcardsPage() {
                         key={option.label}
                         type="button"
                         size="sm"
-                        variant={option.value >= 4 ? "default" : "secondary"}
+                        variant={option.value === 4 ? "default" : "secondary"}
+                        className={option.className}
                         disabled={savingRating}
                         onClick={() => void rateCurrent(option.value)}
                       >

@@ -191,9 +191,16 @@ function ModelCard({
   return (
     <article
       className={`relative rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 ${
-        restricted ? "opacity-55" : "transition hover:-translate-y-0.5 hover:shadow-[var(--shadow-soft)]"
+        restricted
+          ? "border-dashed opacity-60 grayscale saturate-0"
+          : "transition hover:-translate-y-0.5 hover:shadow-[var(--shadow-soft)]"
       }`}
     >
+      {restricted ? (
+        <span className="absolute right-3 top-3 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+          Unavailable
+        </span>
+      ) : null}
       <div className="mb-3 flex items-start gap-2.5">
         <ProviderLogo provider={model.provider} modelId={model.modelId} />
         <div className="min-w-0">
@@ -254,6 +261,8 @@ export default function ModelsPage() {
   const [selectedProviders, setSelectedProviders] = useState<string[]>([]);
   const [sortMode, setSortMode] = useState<SortMode>("recommended");
   const [leaderboardOpen, setLeaderboardOpen] = useState(false);
+  const [showRestricted, setShowRestricted] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(18);
 
   useEffect(() => {
     void (async () => {
@@ -391,6 +400,23 @@ export default function ModelsPage() {
     return rows;
   }, [modelSearch, models, selectedProviders, sortMode, tier]);
 
+  const [availableModels, restrictedModels] = useMemo(() => {
+    const available: ExplorerModel[] = [];
+    const restricted: ExplorerModel[] = [];
+    for (const model of filteredModels) {
+      if (blockedByTier(model, tier)) {
+        restricted.push(model);
+      } else {
+        available.push(model);
+      }
+    }
+    return [available, restricted];
+  }, [filteredModels, tier]);
+
+  useEffect(() => {
+    setVisibleCount(18);
+  }, [modelSearch, selectedProviders, sortMode, tier]);
+
   function tryModel(modelId: string) {
     router.push(`/?model=${encodeURIComponent(modelId)}&mode=auto`);
   }
@@ -422,73 +448,68 @@ export default function ModelsPage() {
 
   return (
     <AppShell>
-      <section className="relative overflow-hidden rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 sm:p-6">
-        <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full bg-[color-mix(in_oklab,var(--accent-cyan)_20%,transparent)] blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-20 left-10 h-56 w-56 rounded-full bg-[color-mix(in_oklab,var(--accent-gold)_25%,transparent)] blur-3xl" />
-
-        <div className="relative z-10">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h1 className="font-display text-4xl tracking-tight">Model Atlas</h1>
-              <p className="mt-1 max-w-2xl text-sm text-[var(--text-secondary)]">
-                Pick providers first, then compare model strengths. Budget guardrails are enforced live.
-              </p>
-            </div>
-            <Button variant="secondary" className="gap-2" onClick={() => setLeaderboardOpen(true)}>
-              <Trophy className="h-4 w-4" />
-              Leaderboard
-            </Button>
+      <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="text-center sm:text-left">
+            <h1 className="font-display text-4xl tracking-tight">Model Atlas</h1>
+            <p className="mt-1 max-w-2xl text-sm text-[var(--text-secondary)]">
+              Compare providers, isolate available models first, and keep budget constraints visible.
+            </p>
           </div>
+          <Button variant="secondary" className="gap-2" onClick={() => setLeaderboardOpen(true)}>
+            <Trophy className="h-4 w-4" />
+            Leaderboard
+          </Button>
+        </div>
 
-          <div className="mt-4 grid gap-2 lg:grid-cols-[1fr_1fr_auto]">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-secondary)]" />
-              <Input
-                value={providerSearch}
-                onChange={(event) => setProviderSearch(event.target.value)}
-                placeholder="Search providers"
-                className="h-10 w-full pl-10 text-sm"
-              />
-            </div>
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-secondary)]" />
-              <Input
-                value={modelSearch}
-                onChange={(event) => setModelSearch(event.target.value)}
-                placeholder="Search models"
-                className="h-10 w-full pl-10 text-sm"
-              />
-            </div>
-            <div className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-xs text-[var(--text-secondary)]">
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-              Tier: {tierLabel(tier)}
-            </div>
+        <div className="mt-4 grid gap-2 lg:grid-cols-[1fr_1fr_auto]">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-secondary)]" />
+            <Input
+              value={providerSearch}
+              onChange={(event) => setProviderSearch(event.target.value)}
+              placeholder="Search providers"
+              className="h-10 w-full pl-10 text-sm"
+            />
           </div>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-secondary)]" />
+            <Input
+              value={modelSearch}
+              onChange={(event) => setModelSearch(event.target.value)}
+              placeholder="Search models"
+              className="h-10 w-full pl-10 text-sm"
+            />
+          </div>
+          <div className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-xs text-[var(--text-secondary)]">
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            Tier: {tierLabel(tier)}
+          </div>
+        </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs text-[var(--text-secondary)]">
-              <Filter className="h-3.5 w-3.5" />
-              Sort
-              <select
-                value={sortMode}
-                onChange={(event) => setSortMode(event.target.value as SortMode)}
-                className="bg-transparent text-xs text-[var(--text-primary)] outline-none"
-              >
-                <option value="recommended">Recommended</option>
-                <option value="popular">Popular</option>
-                <option value="context">Largest context</option>
-              </select>
-            </div>
-            {selectedProviders.length > 0 ? (
-              <button
-                type="button"
-                onClick={clearProviderFilters}
-                className="inline-flex items-center gap-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
-              >
-                Clear providers
-              </button>
-            ) : null}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs text-[var(--text-secondary)]">
+            <Filter className="h-3.5 w-3.5" />
+            Sort
+            <select
+              value={sortMode}
+              onChange={(event) => setSortMode(event.target.value as SortMode)}
+              className="bg-transparent text-xs text-[var(--text-primary)] outline-none"
+            >
+              <option value="recommended">Recommended</option>
+              <option value="popular">Popular</option>
+              <option value="context">Largest context</option>
+            </select>
           </div>
+          {selectedProviders.length > 0 ? (
+            <button
+              type="button"
+              onClick={clearProviderFilters}
+              className="inline-flex items-center gap-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+            >
+              Clear providers
+            </button>
+          ) : null}
         </div>
       </section>
 
@@ -543,23 +564,53 @@ export default function ModelsPage() {
       <section className="mt-6">
         <div className="mb-3 flex items-end justify-between gap-2">
           <div>
-            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Popular</h2>
-            <p className="text-xs text-[var(--text-secondary)]">Provider-filtered results for your school.</p>
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Available now</h2>
+            <p className="text-xs text-[var(--text-secondary)]">Provider-filtered models you can use immediately.</p>
           </div>
-          <p className="text-xs text-[var(--text-secondary)]">{filteredModels.length} models</p>
+          <p className="text-xs text-[var(--text-secondary)]">{availableModels.length} models</p>
         </div>
 
-        {filteredModels.length === 0 ? (
+        {availableModels.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 text-center text-sm text-[var(--text-secondary)]">
             No models match your current filters.
           </div>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {filteredModels.map((model) => (
-              <ModelCard key={`all-${model.modelId}`} model={model} tier={tier} onTry={tryModel} />
-            ))}
-          </div>
+          <>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {availableModels.slice(0, visibleCount).map((model) => (
+                <ModelCard key={`available-${model.modelId}`} model={model} tier={tier} onTry={tryModel} />
+              ))}
+            </div>
+            {visibleCount < availableModels.length ? (
+              <div className="mt-4 text-center">
+                <Button type="button" variant="secondary" onClick={() => setVisibleCount((prev) => prev + 18)}>
+                  Show more models
+                </Button>
+              </div>
+            ) : null}
+          </>
         )}
+
+        {restrictedModels.length > 0 ? (
+          <div className="mt-6">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-base font-semibold text-[var(--text-primary)]">Temporarily restricted</h3>
+                <p className="text-xs text-[var(--text-secondary)]">Unavailable under the current spending tier.</p>
+              </div>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setShowRestricted((prev) => !prev)}>
+                {showRestricted ? "Hide restricted" : `Show restricted (${restrictedModels.length})`}
+              </Button>
+            </div>
+            {showRestricted ? (
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {restrictedModels.map((model) => (
+                  <ModelCard key={`restricted-${model.modelId}`} model={model} tier={tier} onTry={tryModel} />
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </section>
 
       <ModelLeaderboardDrawer

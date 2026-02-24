@@ -18,6 +18,7 @@ import { matchAgentToMessage } from "@/lib/agent-matching";
 import { countFlashcardPairs, isFlashcardDeckStructured, normalizeFlashcardDeck } from "@/lib/flashcard-format";
 import { safeStudyMode } from "@/lib/contracts/studyModes";
 import { createRequestLogger } from "@/lib/logging";
+import { isModeAvailable } from "@/lib/modes";
 import { normalizeAttachments } from "@/lib/attachments/normalizer";
 import { gateCapabilities } from "@/lib/attachments/capability-gate";
 import { runVisionPrepass } from "@/lib/attachments/vision-prepass";
@@ -176,6 +177,55 @@ function extractMarkdownImageUrls(value: string) {
   return urls;
 }
 
+function fallbackTitleFromUserMessage(message: string) {
+  const compact = message.replace(/\s+/g, " ").trim();
+  return compact.slice(0, 60) || "New chat";
+}
+
+async function resolveFirstTurnTitle(params: {
+  assistantCount: number;
+  chatId: string;
+  actorClerkId: string;
+  userMessage: string;
+  assistantMessage: string;
+  logger?: {
+    warn: (message: string, context?: Record<string, unknown>) => void;
+  };
+}) {
+  if (params.assistantCount !== 0) return undefined;
+
+  try {
+    const generated = await maybeGenerateTitle({
+      chatId: params.chatId,
+      actorClerkId: params.actorClerkId,
+      userMessage: params.userMessage,
+      assistantMessage: params.assistantMessage,
+    });
+    if (generated?.trim()) return generated.trim();
+  } catch (error) {
+    params.logger?.warn("chat title generation failed", {
+      chatId: params.chatId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  const fallbackTitle = fallbackTitleFromUserMessage(params.userMessage);
+  try {
+    await convexMutation("chats:setChatTitle", {
+      actorClerkId: params.actorClerkId,
+      chatId: params.chatId,
+      title: fallbackTitle,
+    });
+  } catch (error) {
+    params.logger?.warn("chat title fallback persist failed", {
+      chatId: params.chatId,
+      fallbackTitle,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return fallbackTitle;
+}
+
 function getReferencedHistoryImageBlocks(params: {
   message: string;
   history: Array<{ role: string; content: string }>;
@@ -226,7 +276,14 @@ export async function runChatPipeline(request: NextRequest) {
     });
   }
 
-  const safeMode = safeStudyMode(body.mode, "POST /api/chat");
+  const requestedMode = safeStudyMode(body.mode, "POST /api/chat");
+  const safeMode: StudyMode = isModeAvailable(requestedMode) ? requestedMode : "general";
+  if (safeMode !== requestedMode) {
+    logger.info("unavailable mode requested; falling back to general", {
+      requestedMode,
+      fallbackMode: safeMode,
+    });
+  }
 
   const normalizedMessage = body.message.trim();
   if (!normalizedMessage) {
@@ -326,6 +383,9 @@ export async function runChatPipeline(request: NextRequest) {
     }
     return safeMode;
   })();
+  if (!isModeAvailable(effectiveMode)) {
+    effectiveMode = "general";
+  }
 
   // Research mode always enables search
   if (effectiveMode === "research") {
@@ -449,7 +509,11 @@ export async function runChatPipeline(request: NextRequest) {
     }));
     const conversationSuggestedMode = suggestMode(normalizedMessage, conversationHistory);
     if (conversationSuggestedMode && conversationSuggestedMode !== effectiveMode) {
-      const refined = conversationSuggestedMode as StudyMode;
+      const refined = (
+        isModeAvailable(conversationSuggestedMode as StudyMode)
+          ? (conversationSuggestedMode as StudyMode)
+          : "general"
+      );
       logger.info("conversation-aware mode refinement", {
         from: effectiveMode,
         to: refined,
@@ -954,7 +1018,13 @@ export async function runChatPipeline(request: NextRequest) {
         chatId,
         actorClerkId: actor.clerkId,
         userMessage: normalizedMessage,
-      }).catch(() => undefined)
+      }).catch((error) => {
+        logger.warn("early chat title generation failed", {
+          chatId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return undefined;
+      })
     : Promise.resolve(undefined);
 
   const stream = new TransformStream();
@@ -1154,15 +1224,14 @@ export async function runChatPipeline(request: NextRequest) {
         }
 
         const assistantCount = history.filter((message) => message.role === "assistant").length;
-        let generatedTitle: string | undefined;
-        if (assistantCount === 0) {
-          generatedTitle = await maybeGenerateTitle({
-            chatId,
-            actorClerkId: actor.clerkId,
-            userMessage: normalizedMessage,
-            assistantMessage: finalizedResponse,
-          });
-        }
+        const generatedTitle = await resolveFirstTurnTitle({
+          assistantCount,
+          chatId,
+          actorClerkId: actor.clerkId,
+          userMessage: normalizedMessage,
+          assistantMessage: finalizedResponse,
+          logger,
+        });
 
         await send({
           type: "done",
@@ -1249,10 +1318,14 @@ export async function runChatPipeline(request: NextRequest) {
       }
 
       const policyPass = checkPromptPolicyResponse({ mode: effectiveMode, response: responseText });
-      let correctedResponse =
-        policyPass
-          ? responseText
-          : `${responseText}\n\nPolicy correction: citation and study-mode structure tightened to match requirements.`;
+      let correctedResponse = responseText;
+      if (!policyPass) {
+        if (effectiveMode === "quiz" || effectiveMode === "flashcard") {
+          route.trace.toolchain.push("structure_policy_guard");
+        } else {
+          correctedResponse = `${responseText}\n\nPolicy correction: citation and study-mode structure tightened to match requirements.`;
+        }
+      }
 
       // isVagueRequest is computed in the outer scope before streaming begins.
       // When true, skip format-repair so the model's clarification question is preserved.
@@ -1284,9 +1357,21 @@ export async function runChatPipeline(request: NextRequest) {
               role: "system",
               content:
                 needsQuizRepair
-                  ? `The student asked: "${normalizedMessage}". Reformat the following response into strict quiz syntax about EXACTLY this topic. Do NOT change the subject. Output at least ${MIN_QUIZ_QUESTIONS} questions with A-D options, a "Correct: [letter]" line per question, then "## Answers & Explanations".`
+                  ? `The student asked: "${normalizedMessage}". Reformat the following response into strict quiz syntax about EXACTLY this topic. Do NOT change the subject.
+STRICT RULES:
+- Output only:
+<<QUIZ_START>>
+[quiz body]
+<<QUIZ_END>>
+- At least ${MIN_QUIZ_QUESTIONS} questions, each with A-D options and a "Correct: [letter]" line.
+- Include "## Answers & Explanations" after the questions.
+- No JSON, no tables, no extra prose outside delimiters.`
                   : `The student asked: "${normalizedMessage}". Reformat into strict flashcard syntax about EXACTLY this topic. Do NOT change the subject.
 STRICT RULES:
+- Output only:
+<<FLASHCARDS_START>>
+[FRONT/BACK cards]
+<<FLASHCARDS_END>>
 - At least ${MIN_FLASHCARD_PAIRS} cards.
 - No intro text.
 - No markdown table.
@@ -1342,9 +1427,22 @@ BACK: ...`,
             {
               role: "system",
               content: stillNeedsQuizRepair
-                ? `The student wants a quiz about: "${normalizedMessage}". Generate a complete quiz about EXACTLY this topic. Output strict quiz format with at least ${MIN_QUIZ_QUESTIONS} questions, A-D options, Correct line for each, and a final section "## Answers & Explanations".`
+                ? `The student wants a quiz about: "${normalizedMessage}". Generate a complete quiz about EXACTLY this topic.
+STRICT RULES:
+- Output only:
+<<QUIZ_START>>
+[quiz body]
+<<QUIZ_END>>
+- At least ${MIN_QUIZ_QUESTIONS} questions.
+- A-D options and one Correct line per question.
+- Include final section "## Answers & Explanations".
+- No extra prose outside delimiters.`
                 : `The student wants flashcards about: "${normalizedMessage}". Generate a complete deck about EXACTLY this topic.
 STRICT RULES:
+- Output only:
+<<FLASHCARDS_START>>
+[FRONT/BACK cards]
+<<FLASHCARDS_END>>
 - Output only FRONT/BACK blocks.
 - At least ${MIN_FLASHCARD_PAIRS} cards.
 - No intro text.
@@ -1393,10 +1491,14 @@ BACK: ...`,
               role: "system",
               content: `Output a plain-text quiz about: "${normalizedMessage}".
 STRICT RULES:
-- No intro text.
+- No intro text outside delimiters.
 - No markdown table.
 - No JSON.
 - At least ${MIN_QUIZ_QUESTIONS} questions.
+- Wrap final output exactly as:
+<<QUIZ_START>>
+[quiz body]
+<<QUIZ_END>>
 - Exactly this structure per question:
 Q1. ...
 A) ...
@@ -1434,10 +1536,14 @@ Correct: [A|B|C|D]
               role: "system",
               content: `Output a plain-text flashcard deck about: "${normalizedMessage}".
 STRICT RULES:
-- No intro text.
+- No intro text outside delimiters.
 - No markdown table.
 - No JSON.
 - At least ${MIN_FLASHCARD_PAIRS} cards.
+- Wrap final output exactly as:
+<<FLASHCARDS_START>>
+[cards]
+<<FLASHCARDS_END>>
 - Output exactly this repeated structure:
 FRONT: [term or question]
 BACK: [answer or definition]`,
@@ -1452,6 +1558,21 @@ BACK: [answer or definition]`,
         if (normalizedFinalFlashcards && countFlashcardPairs(normalizedFinalFlashcards) >= MIN_FLASHCARD_PAIRS) {
           correctedResponse = normalizedFinalFlashcards;
           route.trace.toolchain.push("flashcard_final_repair");
+        }
+      }
+
+      if (!isVagueRequest && effectiveMode === "quiz" && isQuizStructured(correctedResponse) && !/<<\s*quiz_start\s*>>/i.test(correctedResponse)) {
+        correctedResponse = `<<QUIZ_START>>\n${correctedResponse.trim()}\n<<QUIZ_END>>`;
+        route.trace.toolchain.push("quiz_delimiter_enforced");
+      }
+
+      if (!isVagueRequest && effectiveMode === "flashcard" && isFlashcardDeckStructured(correctedResponse, MIN_FLASHCARD_PAIRS)) {
+        const normalizedDeck = normalizeFlashcardDeck(correctedResponse);
+        if (normalizedDeck) {
+          correctedResponse = /<<\s*flashcards_start\s*>>/i.test(correctedResponse)
+            ? correctedResponse
+            : `<<FLASHCARDS_START>>\n${normalizedDeck}\n<<FLASHCARDS_END>>`;
+          route.trace.toolchain.push("flashcard_delimiter_enforced");
         }
       }
 
@@ -1586,15 +1707,14 @@ BACK: [answer or definition]`,
       }).catch(() => {});
 
       const assistantCount = history.filter((message) => message.role === "assistant").length;
-      let generatedTitle: string | undefined;
-      if (assistantCount === 0) {
-        generatedTitle = await maybeGenerateTitle({
-          chatId,
-          actorClerkId: actor.clerkId,
-          userMessage: normalizedMessage,
-          assistantMessage: finalizedResponse,
-        });
-      }
+      const generatedTitle = await resolveFirstTurnTitle({
+        assistantCount,
+        chatId,
+        actorClerkId: actor.clerkId,
+        userMessage: normalizedMessage,
+        assistantMessage: finalizedResponse,
+        logger,
+      });
 
       await send({
         type: "done",

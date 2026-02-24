@@ -2,14 +2,27 @@
 
 import { createContext, useCallback, useContext, useState } from "react";
 import type { Citation, RouteTrace } from "@/types";
+import type { ParsedQuizQuestion } from "@/lib/quiz-parser";
 
-export type PanelView = "settings" | "route-trace" | "sources" | "orchestration" | null;
+export type PanelView = "settings" | "route-trace" | "sources" | "orchestration" | "quiz" | null;
+
+export type PanelQuizData = {
+  panelId: string;
+  questions: ParsedQuizQuestion[];
+  answers: Record<string, string>;
+  submitted: boolean;
+  activeIndex: number;
+  onSetIndex: (index: number) => void;
+  onSelectAnswer: (questionId: string, letter: string) => void;
+  onSubmit: () => void;
+};
 
 export type PanelData = {
   routeTrace?: RouteTrace;
   sources?: Citation[];
   whyThisResponse?: string;
   modelUsed?: string;
+  quiz?: PanelQuizData;
 };
 
 type PanelContextValue = {

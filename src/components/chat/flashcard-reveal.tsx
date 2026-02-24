@@ -34,6 +34,8 @@ type FlashcardRevealProps = {
   onFollowUp?: (message: string) => void;
 };
 
+const FLIP_DURATION_MS = 600;
+
 // ── helpers ────────────────────────────────────────────────────────────────
 
 function hashCard(front: string, back: string) {
@@ -156,11 +158,13 @@ function CardsView({ cards, onRateCard, onLearningCountChange }: CardsViewProps)
   const [order, setOrder] = useState<number[]>(() => cards.map((_, i) => i));
   const [currentPos, setCurrentPos] = useState(0);
   const [flipped, setFlipped] = useState(false);
+  const [pendingMove, setPendingMove] = useState<"next" | "prev" | null>(null);
   const [known, setKnown] = useState<Set<number>>(new Set());
   const [stillLearning, setStillLearning] = useState<Set<number>>(new Set());
   const [showSummary, setShowSummary] = useState(false);
   const [busyRating, setBusyRating] = useState(false);
   const [isShuffled, setIsShuffled] = useState(false);
+  const [shuffleNotice, setShuffleNotice] = useState(false);
 
   const currentIndex = order[currentPos] ?? 0;
   const current = cards[currentIndex];
@@ -171,24 +175,28 @@ function CardsView({ cards, onRateCard, onLearningCountChange }: CardsViewProps)
     onLearningCountChange?.(stillLearning.size);
   }, [onLearningCountChange, stillLearning.size]);
 
-  function goNext() {
-    setFlipped(false);
-    setTimeout(() => {
+  function performMove(direction: "next" | "prev") {
+    if (direction === "next") {
       if (currentPos < total - 1) {
         setCurrentPos((prev) => prev + 1);
       } else {
         setShowSummary(true);
       }
-    }, 150);
+      return;
+    }
+    if (currentPos > 0) {
+      setCurrentPos((prev) => prev - 1);
+    }
   }
 
-  function goPrev() {
+  function queueMove(direction: "next" | "prev") {
+    if (pendingMove) return;
+    if (!flipped) {
+      performMove(direction);
+      return;
+    }
+    setPendingMove(direction);
     setFlipped(false);
-    setTimeout(() => {
-      if (currentPos > 0) {
-        setCurrentPos((prev) => prev - 1);
-      }
-    }, 150);
   }
 
   function toggleShuffle() {
@@ -200,6 +208,8 @@ function CardsView({ cards, onRateCard, onLearningCountChange }: CardsViewProps)
     setCurrentPos(0);
     setFlipped(false);
     setIsShuffled((prev) => !prev);
+    setShuffleNotice(true);
+    window.setTimeout(() => setShuffleNotice(false), 900);
   }
 
   async function handleRate(quality: number, markKnown: boolean) {
@@ -225,7 +235,7 @@ function CardsView({ cards, onRateCard, onLearningCountChange }: CardsViewProps)
         }
         return next;
       });
-      goNext();
+      queueMove("next");
     } finally {
       setBusyRating(false);
     }
@@ -301,26 +311,39 @@ function CardsView({ cards, onRateCard, onLearningCountChange }: CardsViewProps)
         <span className="text-sm font-medium text-[var(--text-secondary)]">
           {currentPos + 1} <span className="text-[var(--text-tertiary)]">/ {total}</span>
         </span>
-        <button
-          type="button"
-          onClick={toggleShuffle}
-          className={`inline-flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-pill)] border px-2.5 py-1 text-xs transition ${
-            isShuffled
-              ? "border-[var(--mode-flashcard)] bg-[color-mix(in_oklab,var(--mode-flashcard)_12%,var(--bg-secondary))] text-[var(--mode-flashcard)]"
-              : "border-[var(--border-default)] text-[var(--text-secondary)] hover:border-[var(--border-strong)]"
-          }`}
-        >
-          <Shuffle className="h-3 w-3" />
-          Shuffle
-        </button>
+        <div className="flex items-center gap-2">
+          {shuffleNotice ? (
+            <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]">
+              Shuffled
+            </span>
+          ) : null}
+          <button
+            type="button"
+            onClick={toggleShuffle}
+            className={`inline-flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-pill)] border px-2.5 py-1 text-xs transition ${
+              isShuffled
+                ? "border-[var(--mode-flashcard)] bg-[color-mix(in_oklab,var(--mode-flashcard)_12%,var(--bg-secondary))] text-[var(--mode-flashcard)]"
+                : "border-[var(--border-default)] text-[var(--text-secondary)] hover:border-[var(--border-strong)]"
+            }`}
+          >
+            <Shuffle className="h-3 w-3" />
+            Shuffle
+          </button>
+        </div>
       </div>
 
       {/* The big flashcard */}
-      <div className="flashcard-container" style={{ minHeight: 320 }}>
+      <div className="flashcard-container flashcard-container--main" style={{ minHeight: 280 }}>
         <div
           className={`flashcard-inner cursor-pointer select-none ${flipped ? "flipped" : ""}`}
           onClick={() => setFlipped((prev) => !prev)}
-          style={{ minHeight: 320 }}
+          style={{ minHeight: 280, transitionDuration: `${FLIP_DURATION_MS}ms` }}
+          onTransitionEnd={() => {
+            if (!pendingMove) return;
+            const move = pendingMove;
+            setPendingMove(null);
+            performMove(move);
+          }}
           role="button"
           aria-label={flipped ? "Click to see front" : "Click to see back"}
           tabIndex={0}
@@ -352,7 +375,7 @@ function CardsView({ cards, onRateCard, onLearningCountChange }: CardsViewProps)
 
       {/* Navigation + rating */}
       <div className="flex items-center justify-between gap-2">
-        <Button variant="secondary" size="sm" onClick={goPrev} disabled={currentPos === 0} className="cursor-pointer">
+        <Button variant="secondary" size="sm" onClick={() => queueMove("prev")} disabled={currentPos === 0} className="cursor-pointer">
           <ArrowLeft className="h-4 w-4" />
         </Button>
 
@@ -361,21 +384,37 @@ function CardsView({ cards, onRateCard, onLearningCountChange }: CardsViewProps)
             <Button
               size="sm"
               variant="secondary"
+              onClick={() => void handleRate(0, false)}
+              disabled={busyRating}
+              className="cursor-pointer border-[var(--danger)] text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_10%,var(--bg-primary))]"
+            >
+              Again (~1 day)
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
               onClick={() => void handleRate(2, false)}
               disabled={busyRating}
               className="cursor-pointer border-[var(--warning)] text-[var(--warning)] hover:bg-[color-mix(in_oklab,var(--warning)_10%,var(--bg-primary))]"
             >
-              <RotateCcw className="h-3.5 w-3.5" />
-              Still learning
+              Hard (~2 days)
             </Button>
             <Button
               size="sm"
-              onClick={() => void handleRate(5, true)}
+              onClick={() => void handleRate(4, true)}
               disabled={busyRating}
               className="cursor-pointer bg-[var(--success)] hover:bg-[color-mix(in_oklab,var(--success)_85%,black)]"
             >
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              Know it
+              Good (~5 days)
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => void handleRate(5, true)}
+              disabled={busyRating}
+              className="cursor-pointer border-[var(--accent-cyan)] text-[var(--accent-cyan)] hover:bg-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--bg-primary))]"
+            >
+              Easy (~9 days)
             </Button>
           </div>
         ) : (
@@ -391,7 +430,7 @@ function CardsView({ cards, onRateCard, onLearningCountChange }: CardsViewProps)
         <Button
           variant="secondary"
           size="sm"
-          onClick={goNext}
+          onClick={() => queueMove("next")}
           disabled={currentPos >= total - 1}
           className="cursor-pointer"
         >
@@ -468,12 +507,12 @@ function GridView({ cards }: GridViewProps) {
           <div
             key={card.cardHash}
             className="flashcard-container cursor-pointer"
-            style={{ minHeight: 180 }}
+            style={{ minHeight: 200 }}
             onClick={() => toggleCard(idx)}
           >
             <div
               className={`flashcard-inner ${isFlipped ? "flipped" : ""}`}
-              style={{ minHeight: 180 }}
+              style={{ minHeight: 200, transitionDuration: `${FLIP_DURATION_MS}ms` }}
             >
               <div className="flashcard-front flex flex-col items-center justify-center rounded-[var(--radius-container)] border-2 border-[var(--mode-flashcard)] bg-[var(--bg-elevated)] p-5 shadow-[var(--shadow-card)]">
                 <p className="mb-2 text-[9px] font-semibold uppercase tracking-widest text-[var(--mode-flashcard)] opacity-70">

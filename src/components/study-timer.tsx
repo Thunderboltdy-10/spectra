@@ -76,10 +76,12 @@ function readPersistedState(): PersistedTimerState | null {
     let remainingMs = Number.isFinite(parsed.remainingMs) ? Math.max(0, Number(parsed.remainingMs)) : durationFor(phase);
     let isRunning = Boolean(parsed.isRunning);
     let phaseEndAt = Number.isFinite(parsed.phaseEndAt) ? Number(parsed.phaseEndAt) : null;
+    let phaseTransitionedDuringRestore = false;
 
     if (isRunning && phaseEndAt) {
       let delta = phaseEndAt - now;
       while (delta <= 0) {
+        phaseTransitionedDuringRestore = true;
         if (restoredPhase === "work") {
           completedSessions += 1;
         }
@@ -95,9 +97,15 @@ function readPersistedState(): PersistedTimerState | null {
     }
 
     const duration = durationFor(restoredPhase);
-    const phaseStartedAtFromStorage = Number.isFinite(parsed.phaseStartedAt) ? Number(parsed.phaseStartedAt) : null;
+    const phaseStartedAtFromStorage = Number.isFinite(parsed.phaseStartedAt)
+      ? Math.min(now, Math.max(0, Number(parsed.phaseStartedAt)))
+      : null;
     const phaseStartedAt = isRunning
-      ? now - Math.max(0, duration - remainingMs)
+      ? (
+        phaseStartedAtFromStorage !== null && !phaseTransitionedDuringRestore
+          ? phaseStartedAtFromStorage
+          : now - Math.max(0, duration - remainingMs)
+      )
       : phaseStartedAtFromStorage;
 
     return {
@@ -227,17 +235,20 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
     try {
       const now = Date.now();
       const endedPhase = phase;
-      const endedDurationMs = phaseDurationMs(endedPhase, workMinutes, breakMinutes);
-      const endedStartedAt = phaseStartedAt ?? now - endedDurationMs;
+      const fallbackStartedAt = now - phaseDurationMs(endedPhase, workMinutes, breakMinutes);
+      const measuredStartedAt = Math.min(
+        now,
+        Math.max(0, Math.round(phaseStartedAt ?? fallbackStartedAt)),
+      );
+      const measuredElapsedSeconds = Math.max(60, Math.round((now - measuredStartedAt) / 1000));
 
       playTransitionTone();
 
       if (endedPhase === "work") {
-        const totalSeconds = Math.max(60, Math.round(endedDurationMs / 1000));
         await logCompletedSession({
-          startedAt: endedStartedAt,
+          startedAt: measuredStartedAt,
           endedAt: now,
-          totalSeconds,
+          totalSeconds: measuredElapsedSeconds,
         });
         setCompletedSessions((prev) => prev + 1);
         toast.success("Focus block complete. Starting a short break.");

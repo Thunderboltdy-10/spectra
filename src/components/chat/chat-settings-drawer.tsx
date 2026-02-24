@@ -10,7 +10,6 @@ import type { AutoPreference, ModelOption, PersonalResource, UserSpending } from
 import type { RouterMode, StudyMode, ThinkingLevel } from "@/types";
 import { useCompactSheet } from "@/hooks/use-compact-sheet";
 import { useRightPanelDock } from "@/hooks/use-right-panel-dock";
-import { FILE_LIMITS } from "@/lib/file-limits";
 
 type ChatSettingsDrawerProps = {
   open: boolean;
@@ -113,7 +112,7 @@ export function ChatSettingsDrawer({
   onAutoSearchChange,
   onDeleteResource,
 }: ChatSettingsDrawerProps) {
-  const compact = useCompactSheet(860);
+  const compact = useCompactSheet(1024);
   const { docked, isOverlay, panelWidth } = useRightPanelDock({
     id: "chat-settings-drawer",
     open,
@@ -146,9 +145,11 @@ export function ChatSettingsDrawer({
         ),
         1,
       )
-    : Math.min(personalResources.length / Math.max(1, FILE_LIMITS.maxPersonalLibraryFiles), 1);
+    : 0;
   const usageLabel =
-    ratio >= 0.8
+    !userSpending
+      ? "N/A"
+      : ratio >= 0.8
       ? "High activity"
       : ratio >= 0.4
         ? "Steady activity"
@@ -165,7 +166,7 @@ export function ChatSettingsDrawer({
       {!docked ? (
         <button
           type="button"
-          className={`absolute inset-0 transition ${isOverlay ? "bg-black/45 backdrop-blur-sm" : "bg-transparent"}`}
+          className={`absolute inset-0 transition ${isOverlay ? "bg-black/45 backdrop-blur-none md:backdrop-blur-sm" : "bg-transparent"}`}
           aria-label="Close settings"
           onClick={onClose}
         />

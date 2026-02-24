@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { ArrowDown, Brain, RefreshCw, TriangleAlert, WifiOff } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, RefreshCw, TriangleAlert, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChatMessage } from "@/components/chat/chat-message";
 import { CollaboratorsLive, type ActiveCollaborator } from "@/components/chat/collaborators-live";
@@ -11,9 +11,12 @@ import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { ThinkingBlock } from "@/components/chat/thinking-block";
 import { ThinkingMessages } from "@/components/loading-states";
 import { ContextualTip } from "@/components/ui/contextual-tip";
+import { ProviderLogo } from "@/components/provider-logo";
 import { usePanel } from "@/context/panel-context";
+import { extractFlashcardPairs } from "@/lib/flashcard-format";
 import { autoCloseMarkdown } from "@/lib/stream-markdown";
 import { getModeConfig } from "@/lib/modes";
+import { parseQuiz } from "@/lib/quiz-parser";
 import type { Message } from "@/hooks/use-chat-state";
 import type { StudyMode } from "@/types";
 
@@ -91,6 +94,8 @@ export function ChatMessages({
   const scrollContainerRef = useRef<HTMLElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const [showJumpButton, setShowJumpButton] = useState(false);
+  const [draftQuizAnswers, setDraftQuizAnswers] = useState<Record<string, string>>({});
+  const [showStreamCursor, setShowStreamCursor] = useState(false);
   const shouldAutoScrollRef = useRef(true);
 
   const hasContent = messages.length > 0 || Boolean(draftResponse);
@@ -123,6 +128,54 @@ export function ChatMessages({
     if (!modelId) return "AI";
     return modelId.split("/").pop() ?? "AI";
   }
+
+  const draftQuizQuestions = useMemo(() => {
+    if (mode !== "quiz" && mode !== "exam") return [];
+    return parseQuiz(draftResponse);
+  }, [draftResponse, mode]);
+
+  const draftQuizTargetCount = useMemo(() => {
+    if (mode !== "quiz" && mode !== "exam") return 0;
+    const numbered = [...draftResponse.matchAll(/(?:^|\n)\s*(?:Q(?:uestion)?\s*)?(\d+)[.):-]\s+/gi)]
+      .map((match) => Number.parseInt(match[1] ?? "", 10))
+      .filter((value) => Number.isFinite(value));
+    const declaredMatch = draftResponse.match(/\b(\d+)\s+questions?\b/i);
+    const declared = declaredMatch ? Number.parseInt(declaredMatch[1] ?? "0", 10) : 0;
+    const maxSeen = numbered.length > 0 ? Math.max(...numbered) : 0;
+    const baseline = Math.max(maxSeen, declared, draftQuizQuestions.length);
+    if (!sending) return baseline;
+    return Math.max(baseline, draftQuizQuestions.length + 1);
+  }, [draftQuizQuestions.length, draftResponse, mode, sending]);
+
+  const draftFlashcards = useMemo(() => {
+    if (mode !== "flashcard") return [];
+    return extractFlashcardPairs(draftResponse);
+  }, [draftResponse, mode]);
+
+  useEffect(() => {
+    if (draftQuizQuestions.length === 0) {
+      setDraftQuizAnswers({});
+      return;
+    }
+    setDraftQuizAnswers((previous) => {
+      const next: Record<string, string> = {};
+      for (const question of draftQuizQuestions) {
+        if (previous[question.id]) {
+          next[question.id] = previous[question.id]!;
+        }
+      }
+      return next;
+    });
+  }, [draftQuizQuestions]);
+
+  useEffect(() => {
+    if (sending) {
+      setShowStreamCursor(true);
+      return;
+    }
+    const timeout = window.setTimeout(() => setShowStreamCursor(false), 220);
+    return () => window.clearTimeout(timeout);
+  }, [sending]);
 
   function renderErrorText(error: string) {
     const lower = error.toLowerCase();
@@ -184,10 +237,18 @@ export function ChatMessages({
     return "medium" as const;
   }
 
+  const streamingStatus =
+    lastAutoResult?.searchEnabled
+      ? "Searching..."
+      : activeCollaborators.length > 0 || thinkingLevel !== "low"
+        ? "Thinking..."
+        : "Drafting...";
+  const activeProvider = lastModelUsed?.split("/")[0] ?? "AI";
+
   return (
     <section className="relative flex flex-1" aria-label="Conversation" data-conversation-export>
       <div
-        className="w-full px-3 pb-56 pt-6 sm:px-6 lg:px-10"
+        className="w-full px-3 pb-32 pt-6 sm:px-6 md:pb-36 lg:px-10"
         role="log"
         aria-live="polite"
         aria-relevant="additions text"
@@ -531,51 +592,135 @@ export function ChatMessages({
             </div>
           ) : null}
 
-          {draftResponse && (mode === "quiz" || mode === "exam" || mode === "flashcard") ? (
+          {draftResponse && (mode === "quiz" || mode === "exam") ? (
             <article className="chat-fade-in flex justify-start">
               <div className="w-full max-w-5xl rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3">
-                <div className="mb-2 flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-                  <span>
-                    {modelLabel(lastModelUsed)} is generating {(mode === "quiz" || mode === "exam") ? "quiz" : "flashcards"}...
-                  </span>
+                <div className="mb-3 inline-flex items-center gap-2 text-xs text-[var(--text-secondary)]">
+                  <ProviderLogo provider={activeProvider} modelId={lastModelUsed} size={12} className="h-5 w-5 rounded-md" />
+                  <span>{modelLabel(lastModelUsed)} · {streamingStatus}</span>
                 </div>
-                <p className="text-sm text-[var(--text-secondary)]">
-                  {(mode === "quiz" || mode === "exam")
-                    ? "Generating quiz structure and answer key."
-                    : "Generating flashcard fronts and backs."}
-                </p>
-                <div className="mt-3 text-xs italic text-[var(--text-secondary)]">
-                  {(mode === "quiz" || mode === "exam")
-                    ? "Answers will appear after generation completes."
-                    : "Card backs will reveal after generation completes."}
+
+                {draftQuizQuestions.length > 0 ? (
+                  <div className="space-y-3">
+                    <p className="text-xs text-[var(--text-secondary)]">
+                      Quiz is still generating. You can already answer completed questions below.
+                    </p>
+                    {draftQuizQuestions.map((question) => (
+                      <div
+                        key={question.id}
+                        className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5"
+                      >
+                        <p className="mb-2 text-sm font-medium text-[var(--text-primary)]">
+                          Q{question.number}. {question.prompt}
+                        </p>
+                        <div className="space-y-1.5">
+                          {question.options.map((option) => {
+                            const selected = draftQuizAnswers[question.id] === option.letter;
+                            return (
+                              <button
+                                key={`${question.id}-${option.letter}`}
+                                type="button"
+                                onClick={() =>
+                                  setDraftQuizAnswers((prev) => ({ ...prev, [question.id]: option.letter }))
+                                }
+                                className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs transition ${
+                                  selected
+                                    ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,var(--bg-primary))]"
+                                    : "border-[var(--border-default)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)]"
+                                }`}
+                              >
+                                <span className="font-semibold">{option.letter}.</span>
+                                <span className="flex-1">{option.text}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                    {Array.from({
+                      length: Math.max(0, draftQuizTargetCount - draftQuizQuestions.length),
+                    }).map((_, index) => (
+                      <div
+                        key={`draft-quiz-skeleton-${index}`}
+                        className="rounded-xl border border-dashed border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-3"
+                      >
+                        <div className="h-3 w-2/3 animate-pulse rounded bg-[var(--bg-primary)]" />
+                        <div className="mt-2 h-2.5 w-full animate-pulse rounded bg-[var(--bg-primary)]" />
+                        <div className="mt-1.5 h-2.5 w-5/6 animate-pulse rounded bg-[var(--bg-primary)]" />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-sm text-[var(--text-secondary)]">
+                      Generating quiz structure and answer key.
+                    </p>
+                    <div className="mt-2 space-y-2">
+                      <div className="h-3 w-3/4 animate-pulse rounded bg-[var(--bg-secondary)]" />
+                      <div className="h-3 w-full animate-pulse rounded bg-[var(--bg-secondary)]" />
+                      <div className="h-3 w-5/6 animate-pulse rounded bg-[var(--bg-secondary)]" />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </article>
+          ) : draftResponse && mode === "flashcard" ? (
+            <article className="chat-fade-in flex justify-start">
+              <div className="w-full max-w-5xl rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3">
+                <div className="mb-2 inline-flex items-center gap-2 text-xs text-[var(--text-secondary)]">
+                  <ProviderLogo provider={activeProvider} modelId={lastModelUsed} size={12} className="h-5 w-5 rounded-md" />
+                  <span>{modelLabel(lastModelUsed)} · {streamingStatus}</span>
                 </div>
+                {draftFlashcards.length > 0 ? (
+                  <div className="space-y-2">
+                    <p className="text-xs text-[var(--text-secondary)]">
+                      Flashcards are generating. You can review ready cards as they appear.
+                    </p>
+                    {draftFlashcards.slice(0, 4).map((card, index) => (
+                      <div
+                        key={`${card.front}-${index}`}
+                        className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-xs"
+                      >
+                        <p className="font-medium text-[var(--text-primary)]">Front: {card.front}</p>
+                        <p className="mt-1 text-[var(--text-secondary)]">Back: {card.back}</p>
+                      </div>
+                    ))}
+                    {sending ? (
+                      <div className="rounded-lg border border-dashed border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-3">
+                        <div className="h-3 w-2/3 animate-pulse rounded bg-[var(--bg-primary)]" />
+                        <div className="mt-2 h-2.5 w-full animate-pulse rounded bg-[var(--bg-primary)]" />
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-sm text-[var(--text-secondary)]">
+                      Generating flashcard fronts and backs.
+                    </p>
+                    <div className="mt-3 text-xs italic text-[var(--text-secondary)]">
+                      Card backs and review controls appear automatically when ready.
+                    </div>
+                  </>
+                )}
               </div>
             </article>
           ) : draftResponse ? (
             <article className="chat-fade-in flex justify-start">
               <div className="w-full max-w-5xl px-1 py-1">
                 <div className="mb-2 inline-flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-                  <span>{modelLabel(lastModelUsed)} is drafting...</span>
-                  {lastAutoResult?.searchEnabled ? (
-                    <span className="rounded-full border border-[var(--border-default)] px-2 py-0.5 thinking-wave">
-                      Live search orchestration
-                    </span>
-                  ) : null}
+                  <ProviderLogo provider={activeProvider} modelId={lastModelUsed} size={12} className="h-5 w-5 rounded-md" />
+                  <span>{modelLabel(lastModelUsed)} · {streamingStatus}</span>
                 </div>
-                {!hasRealThinking && thinkingLevel !== "low" ? (
-                  <div className="mb-3 inline-flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-1 text-xs text-[var(--text-secondary)]">
-                    <Brain className="h-3.5 w-3.5" />
-                    Reasoning enabled. Some models keep reasoning private.
-                  </div>
-                ) : null}
-                <div>
+                <div className="transition-opacity duration-200 [will-change:contents,opacity]">
                   {hasRealThinking && draftThinking ? (
                     <ThinkingBlock content={draftThinking} streaming />
                   ) : null}
                   {renderDraftMarkdown(draftResponse)}
-                  <span className="stream-cursor" aria-hidden>
-                    |
-                  </span>
+                  {showStreamCursor ? (
+                    <span className={`stream-cursor ${sending ? "" : "stream-cursor--fade"}`} aria-hidden>
+                      |
+                    </span>
+                  ) : null}
                 </div>
               </div>
             </article>
@@ -586,12 +731,6 @@ export function ChatMessages({
               <div className="flex items-center gap-3">
                 <ThinkingMessages />
               </div>
-              {thinkingLevel !== "low" && !hasRealThinking ? (
-                <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-1 text-xs text-[var(--text-secondary)]">
-                  <Brain className="h-3.5 w-3.5 animate-pulse" />
-                  Reasoning...
-                </div>
-              ) : null}
               {hasRealThinking && draftThinking ? (
                 <div className="mt-3">
                   <ThinkingBlock content={draftThinking} streaming />

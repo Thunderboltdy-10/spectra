@@ -24,9 +24,8 @@ import { ContextualTip } from "@/components/ui/contextual-tip";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { SlashCommandMenu } from "@/components/chat/slash-command-menu";
-import { ALL_MODES, getModeConfig } from "@/lib/modes";
+import { ALL_MODES, COMING_SOON_MODES, getModeConfig, isModeAvailable } from "@/lib/modes";
 import { getRecommendedModelsForMode, MODEL_COST_BLOCK_LIST } from "@/lib/model-config";
-import { getStarterPromptsForMode } from "@/lib/starter-prompts";
 import type { Agent } from "@/types";
 import type { AutoPreference, FileStatus, ModelOption, UserSpending } from "@/hooks/use-chat-state";
 import type { RouterMode, StudyMode } from "@/types";
@@ -301,6 +300,7 @@ export function ChatComposer(props: ChatComposerProps) {
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
   const [providerFilter, setProviderFilter] = useState("all");
+  const [composerCompact, setComposerCompact] = useState(false);
   const modeConfig = getModeConfig(mode);
   const selectedModel = useMemo(
     () => models.find((item) => item.modelId === manualModel),
@@ -412,11 +412,14 @@ export function ChatComposer(props: ChatComposerProps) {
     if (mode !== "general" && mode !== "explain") return false;
     return isResearchLikeDraft(message);
   }, [message, mode, onModeChange]);
-  const starterTemplates = useMemo(
-    () => getStarterPromptsForMode(mode, { limit: 4 }),
-    [mode],
-  );
-  const showStarterTemplates = !sending && !slashActive && !message.trim() && fileList.length === 0;
+  useEffect(() => {
+    try {
+      const persisted = window.localStorage.getItem("ai-school-composer-compact");
+      setComposerCompact(persisted === "1");
+    } catch {
+      setComposerCompact(false);
+    }
+  }, []);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -495,6 +498,7 @@ export function ChatComposer(props: ChatComposerProps) {
   }
 
   function handleModeSelect(newMode: StudyMode) {
+    if (!isModeAvailable(newMode)) return;
     if (onModeChange) {
       onModeChange(newMode);
     }
@@ -561,9 +565,16 @@ export function ChatComposer(props: ChatComposerProps) {
     speech.start();
   }
 
-  function handleSelectStarterTemplate(prompt: string) {
-    onMessageChange(prompt);
-    window.requestAnimationFrame(() => textareaRef.current?.focus());
+  function toggleComposerCompact() {
+    setComposerCompact((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem("ai-school-composer-compact", next ? "1" : "0");
+      } catch {
+        // Ignore storage errors.
+      }
+      return next;
+    });
   }
 
   function renderStatus(status: FileStatus, warning?: string) {
@@ -715,20 +726,30 @@ export function ChatComposer(props: ChatComposerProps) {
                     {ALL_MODES.map((m) => {
                       const mc = getModeConfig(m.key);
                       const isActive = m.key === mode;
+                      const available = isModeAvailable(m.key);
+                      const comingSoon = COMING_SOON_MODES.has(m.key);
                       return (
                         <button
                           key={m.key}
                           type="button"
+                          disabled={!available}
                           onClick={() => handleModeSelect(m.key)}
-                          className={`flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm transition ${
+                          className={`flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm transition ${
                             isActive
                               ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
                               : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                          }`}
+                          } ${available ? "cursor-pointer" : "cursor-not-allowed opacity-45"}`}
                         >
                           <span className="h-2 w-2 rounded-full" style={{ backgroundColor: mc.color }} />
                           <div>
-                            <p>{mc.label}</p>
+                            <p className="inline-flex items-center gap-1.5">
+                              <span>{mc.label}</span>
+                              {comingSoon ? (
+                                <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em]">
+                                  Soon
+                                </span>
+                              ) : null}
+                            </p>
                             <p className="text-[11px] text-[var(--text-secondary)]">{mc.description}</p>
                           </div>
                         </button>
@@ -975,7 +996,16 @@ export function ChatComposer(props: ChatComposerProps) {
             </div>
 
             <div className="flex items-center gap-1.5">
-              <div data-tour="auto-controls" className="hidden flex-wrap items-center gap-1.5 sm:flex">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="h-8 rounded-full px-3 text-xs"
+                onClick={toggleComposerCompact}
+              >
+                {composerCompact ? "Expand" : "Compact"}
+              </Button>
+              <div data-tour="auto-controls" className={`hidden flex-wrap items-center gap-1.5 sm:flex ${composerCompact ? "opacity-0 pointer-events-none w-0 overflow-hidden" : ""}`}>
                 <SettingPill
                   label="Enhance"
                   value={autoEnhancePrompt}
@@ -1023,7 +1053,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 </label>
               </div>
 
-              <div className="sm:hidden">
+              <div className={`sm:hidden ${composerCompact ? "hidden" : ""}`}>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button type="button" variant="secondary" size="icon" className="h-8 w-8 rounded-full" aria-label="More controls">
@@ -1076,30 +1106,6 @@ export function ChatComposer(props: ChatComposerProps) {
             </div>
           ) : null}
 
-          {showStarterTemplates ? (
-            <div className="border-b border-[var(--border-default)] px-3 py-2.5">
-              <p className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.11em] text-[var(--text-secondary)]">
-                {modeConfig.label} starter templates
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {starterTemplates.map((template) => (
-                  <button
-                    key={template.prompt}
-                    type="button"
-                    onClick={() => handleSelectStarterTemplate(template.prompt)}
-                    className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-1 text-xs text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
-                    style={{
-                      borderColor: `color-mix(in oklab, ${modeConfig.color} 40%, var(--border-default))`,
-                      background: `color-mix(in oklab, ${modeConfig.color} 12%, var(--bg-secondary))`,
-                    }}
-                  >
-                    {template.prompt}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
           <div className="flex items-end gap-2 px-3 py-2.5">
             <div className="flex-1">
               <textarea
@@ -1110,11 +1116,14 @@ export function ChatComposer(props: ChatComposerProps) {
                 placeholder="Ask anything. For best results, include your context and goal."
                 data-tour="composer"
                 aria-label="Message input"
-                className="max-h-[220px] min-h-[70px] w-full resize-none bg-transparent px-2 py-1 text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] outline-none"
+                className={`max-h-[220px] w-full resize-none bg-transparent px-2 py-1 text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] outline-none ${
+                  composerCompact ? "min-h-[56px]" : "min-h-[70px]"
+                }`}
                 onKeyDown={handleKeyDown}
               />
               {speech.isListening ? (
-                <p className="px-2 pb-1 text-xs text-[var(--danger)]" aria-live="polite">
+                <p className="inline-flex items-center gap-1 px-2 pb-1 text-xs text-[var(--danger)]" aria-live="polite">
+                  <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-[var(--danger)]" />
                   Recording... {speech.transcript || "Listening"}
                 </p>
               ) : null}

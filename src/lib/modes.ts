@@ -102,6 +102,27 @@ export const MODE_REGISTRY: Record<StudyMode, ModeConfig> = {
 
 export const ALL_MODES = Object.values(MODE_REGISTRY);
 
+export const AVAILABLE_MODES = new Set<StudyMode>([
+  "auto",
+  "tutor",
+  "quiz",
+  "flashcard",
+  "research",
+  "general",
+  "image",
+]);
+
+export const COMING_SOON_MODES = new Set<StudyMode>([
+  "marker",
+  "exam",
+  "draft_coach",
+  "explain",
+]);
+
+export function isModeAvailable(mode: StudyMode): boolean {
+  return AVAILABLE_MODES.has(mode);
+}
+
 export function getModeConfig(mode: StudyMode): ModeConfig {
   return MODE_REGISTRY[mode];
 }

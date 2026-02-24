@@ -6,6 +6,18 @@ export type FlashcardPair = {
 const FRONT_LINE_PATTERN = /^(?:[-*]\s*)?(?:Card\s*\d+\s*[:.)-]\s*)?FRONT\s*:\s*(.*)$/i;
 const BACK_LINE_PATTERN = /^(?:[-*]\s*)?BACK\s*:\s*(.*)$/i;
 
+function extractDelimitedFlashcardBody(value: string) {
+  const start = value.match(/<<\s*flashcards_start\s*>>/i);
+  const end = value.match(/<<\s*flashcards_end\s*>>/i);
+  if (!start || !end || start.index === undefined || end.index === undefined) {
+    return value;
+  }
+  const from = start.index + start[0].length;
+  const to = end.index;
+  if (to <= from) return value;
+  return value.slice(from, to);
+}
+
 function normalizeField(value: string) {
   return value
     .replace(/\s+/g, " ")
@@ -35,6 +47,7 @@ function collectLabeledPairs(value: string): FlashcardPair[] {
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
+    if (/^<<\s*[^>]+\s*>>$/.test(line)) continue;
 
     const frontMatch = line.match(FRONT_LINE_PATTERN);
     if (frontMatch) {
@@ -144,7 +157,7 @@ function collectDefinitionPairs(value: string): FlashcardPair[] {
 }
 
 export function extractFlashcardPairs(value: string): FlashcardPair[] {
-  const normalized = value.replace(/\r/g, "").trim();
+  const normalized = extractDelimitedFlashcardBody(value.replace(/\r/g, "")).trim();
   if (!normalized) return [];
 
   const pairs: FlashcardPair[] = [];

@@ -91,9 +91,10 @@ export default function AnalyticsPage() {
 
   return (
     <AppShell fullBleed contentClassName="2xl:px-14">
-      <div className="mb-5">
-        <h1 className="text-2xl font-semibold tracking-tight">Analytics</h1>
-        <p className="text-sm text-[var(--text-secondary)]">
+      <div className="mb-6">
+        <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-secondary)]">Learning intelligence</p>
+        <h1 className="font-display text-3xl font-semibold tracking-tight sm:text-4xl">Analytics</h1>
+        <p className="mt-1 text-sm text-[var(--text-secondary)]">
           Track your study progress and learning patterns
         </p>
       </div>

@@ -10,6 +10,7 @@ import type { AutoPreference, ModelOption, PersonalResource, UserSpending } from
 import type { RouterMode, StudyMode, ThinkingLevel } from "@/types";
 import { useCompactSheet } from "@/hooks/use-compact-sheet";
 import { useRightPanelDock } from "@/hooks/use-right-panel-dock";
+import { FILE_LIMITS } from "@/lib/file-limits";
 
 type ChatSettingsDrawerProps = {
   open: boolean;
@@ -36,8 +37,6 @@ type ChatSettingsDrawerProps = {
   onDeleteResource: (resourceId: string) => void;
 };
 
-const MONTHLY_HARD_LIMIT_CENTS = 900;
-
 function AutoChoice({
   label,
   value,
@@ -48,9 +47,9 @@ function AutoChoice({
   onChange: (value: AutoPreference) => void;
 }) {
   return (
-    <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2">
-      <p className="mb-2 text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">{label}</p>
-      <div className="grid grid-cols-3 gap-1">
+    <div className="flex items-center justify-between gap-3 rounded-lg bg-[color-mix(in_oklab,var(--bg-secondary)_88%,transparent)] px-2.5 py-2">
+      <p className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">{label}</p>
+      <div className="grid min-w-[170px] grid-cols-3 gap-1">
         {(["auto", "on", "off"] as const).map((item) => (
           <button
             key={item}
@@ -58,7 +57,7 @@ function AutoChoice({
             onClick={() => onChange(item)}
             className={`rounded-md px-2 py-1 text-xs transition ${
               value === item
-                ? "bg-[var(--bg-primary)] text-[var(--text-primary)]"
+                ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[var(--shadow-card)]"
                 : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
             }`}
           >
@@ -80,13 +79,6 @@ function row(label: string, description: string, checked: boolean, onChange: (va
       <Switch checked={checked} onCheckedChange={onChange} />
     </div>
   );
-}
-
-function spendingTierLabel(tier?: UserSpending["tier"]) {
-  if (tier === "free_only") return "Budget only";
-  if (tier === "cheap_only") return "Cheap only";
-  if (tier === "expensive_blocked") return "Guarded";
-  return "Normal";
 }
 
 function sanitizeModelLabel(value: string) {
@@ -144,10 +136,25 @@ export function ChatSettingsDrawer({
 
   if (!open) return null;
 
-  const spentCents = userSpending?.totalCostCents ?? 0;
-  const hardLimitCents = Math.max(1, userSpending?.hardLimitCents ?? MONTHLY_HARD_LIMIT_CENTS);
-  const ratio = Math.min(spentCents / hardLimitCents, 1);
-  const spendingTier = spendingTierLabel(userSpending?.tier);
+  const ratio = userSpending
+    ? Math.min(
+        Math.max(
+          typeof userSpending.budgetUsagePercent === "number"
+            ? userSpending.budgetUsagePercent / 100
+            : (userSpending.totalCostCents ?? 0) / Math.max(1, userSpending.hardLimitCents ?? 1),
+          0,
+        ),
+        1,
+      )
+    : Math.min(personalResources.length / Math.max(1, FILE_LIMITS.maxPersonalLibraryFiles), 1);
+  const usageLabel =
+    ratio >= 0.8
+      ? "High activity"
+      : ratio >= 0.4
+        ? "Steady activity"
+        : ratio > 0
+          ? "Getting started"
+          : "No activity yet";
   const selectedModel = models.find((model) => model.modelId === manualModel);
 
   return (
@@ -197,12 +204,12 @@ export function ChatSettingsDrawer({
           <div className={`right-panel-content ${compact ? "max-h-[calc(78vh-4rem)]" : "max-h-[calc(100vh-6rem)]"} space-y-4 overflow-y-auto pr-1`}>
           <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
             <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Automation profile</h3>
-            <div className="mt-2 grid gap-2">
+            <div className="mt-2 grid gap-1.5">
               <AutoChoice label="Auto-enhance prompt" value={autoEnhancePrompt} onChange={onAutoEnhancePromptChange} />
               <AutoChoice label="Auto-thinking" value={autoThinking} onChange={onAutoThinkingChange} />
               <AutoChoice label="Auto-search" value={autoSearch} onChange={onAutoSearchChange} />
             </div>
-            <div className="mt-2 grid gap-2 text-xs text-[var(--text-secondary)]">
+            <div className="mt-3 grid gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2 text-xs text-[var(--text-secondary)]">
               <p>
                 Routing:{" "}
                 <span className="font-medium text-[var(--text-primary)]">
@@ -303,7 +310,7 @@ export function ChatSettingsDrawer({
 
           <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
             <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">My files</h3>
-            <div className="mt-3 max-h-48 space-y-2 overflow-y-auto pr-1">
+            <div className="mt-3 max-h-[min(56vh,34rem)] space-y-2 overflow-y-auto pr-1">
               {personalResources.length === 0 ? (
                 <p className="text-xs text-[var(--text-secondary)]">No personal files yet.</p>
               ) : (
@@ -334,10 +341,10 @@ export function ChatSettingsDrawer({
           </section>
 
           <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Usage indicator</h3>
-              <span className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">{spendingTier}</span>
-            </div>
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Usage indicator</h3>
+                <span className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">{usageLabel}</span>
+              </div>
             <div className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
               <div
                 className="h-full rounded-full bg-[var(--gradient-brand)]"

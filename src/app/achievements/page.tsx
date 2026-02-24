@@ -117,7 +117,7 @@ export default function AchievementsPage() {
   return (
     <AppShell fullBleed contentClassName="2xl:px-14">
       <section className="space-y-6">
-        <header className="relative overflow-hidden rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-5 py-6 sm:px-7">
+        <header className="relative overflow-hidden px-1 py-3 sm:px-2">
           <div
             className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full opacity-35 blur-3xl"
             style={{ background: "radial-gradient(circle at center, var(--warning), transparent 68%)" }}
@@ -128,7 +128,7 @@ export default function AchievementsPage() {
           />
           <div className="relative flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-[var(--text-secondary)]">
+              <p className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_78%,transparent)] px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-[var(--text-secondary)]">
                 <Sparkles className="h-3 w-3" />
                 Achievement Board
               </p>
@@ -145,21 +145,21 @@ export default function AchievementsPage() {
         </header>
 
         <div className="grid gap-3 sm:grid-cols-3">
-          <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+          <div className="rounded-2xl bg-[color-mix(in_oklab,var(--bg-elevated)_76%,transparent)] p-4 shadow-[var(--shadow-card)]">
             <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
               <Star className="h-3.5 w-3.5 text-[var(--warning)]" />
               Total XP
             </p>
             <p className="mt-1 text-2xl font-semibold">{(data?.totalXp ?? 0).toLocaleString()}</p>
           </div>
-          <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+          <div className="rounded-2xl bg-[color-mix(in_oklab,var(--bg-elevated)_76%,transparent)] p-4 shadow-[var(--shadow-card)]">
             <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
               <Flame className="h-3.5 w-3.5 text-[var(--accent-coral)]" />
               Current Streak
             </p>
             <p className="mt-1 text-2xl font-semibold">{(data?.currentStreak ?? 0).toLocaleString()} day{(data?.currentStreak ?? 0) === 1 ? "" : "s"}</p>
           </div>
-          <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+          <div className="rounded-2xl bg-[color-mix(in_oklab,var(--bg-elevated)_76%,transparent)] p-4 shadow-[var(--shadow-card)]">
             <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
               <Trophy className="h-3.5 w-3.5 text-[var(--success)]" />
               Completion

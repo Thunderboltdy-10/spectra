@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { CircleHelp } from "lucide-react";
 import { toast } from "sonner";
@@ -8,7 +8,6 @@ import { ChatComposer } from "@/components/chat/chat-composer";
 import { CodeCanvas } from "@/components/chat/code-canvas";
 import { ChatHeader } from "@/components/chat/chat-header";
 import { ChatMessages } from "@/components/chat/chat-messages";
-import { QuickActions } from "@/components/chat/quick-actions";
 import { UnifiedPanel } from "@/components/chat/unified-panel";
 import { ChatSidebar } from "@/components/chat/chat-sidebar";
 import { ChatWelcome } from "@/components/chat/chat-welcome";
@@ -47,24 +46,6 @@ function SidebarSkeleton() {
 }
 
 const TOUR_COMPLETED_KEY = "ai-school-guided-tour-v1";
-const QUICK_ACTION_MODE_CYCLE: StudyMode[] = [
-  "tutor",
-  "quiz",
-  "flashcard",
-  "research",
-  "explain",
-  "general",
-  "exam",
-  "draft_coach",
-  "marker",
-  "image",
-];
-
-function nextQuickActionMode(current: StudyMode): StudyMode {
-  const index = QUICK_ACTION_MODE_CYCLE.indexOf(current);
-  if (index < 0) return QUICK_ACTION_MODE_CYCLE[0];
-  return QUICK_ACTION_MODE_CYCLE[(index + 1) % QUICK_ACTION_MODE_CYCLE.length];
-}
 
 const TOUR_STEPS: GuidedTourStep[] = [
   {
@@ -86,6 +67,18 @@ const TOUR_STEPS: GuidedTourStep[] = [
     position: "top",
   },
   {
+    selector: '[data-tour="agent-selector"]',
+    title: "Agent selector",
+    description: "Attach a specialist agent for subject-specific prompting, files, and style.",
+    position: "top",
+  },
+  {
+    selector: '[data-tour="auto-controls"]',
+    title: "Auto controls",
+    description: "Tune automation for prompt enhancement, reasoning depth, and web search behavior.",
+    position: "top",
+  },
+  {
     selector: '[data-tour="settings-trigger"]',
     title: "Settings panel",
     description: "Open session settings for reasoning depth, search behavior, and resources.",
@@ -102,9 +95,9 @@ const TOUR_STEPS: GuidedTourStep[] = [
 export function ChatLayout() {
   const chat = useChatState();
   const canvas = useCanvasState();
-  const panel = usePanel();
+  const { activeView: panelActiveView, openPanel, closePanel } = usePanel();
   const [tourOpen, setTourOpen] = useState(false);
-  const [isZenMode, setIsZenMode] = useState(false);
+  const openedOrchestrationForStreamRef = useRef(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -129,20 +122,6 @@ export function ChatLayout() {
     }
   }
 
-  useEffect(() => {
-    document.body.classList.toggle("zen-mode", isZenMode);
-    return () => {
-      document.body.classList.remove("zen-mode");
-    };
-  }, [isZenMode]);
-
-  useEffect(() => {
-    if (!isZenMode) return;
-    chat.setMobileSidebarOpen(false);
-    panel.closePanel();
-    setTourOpen(false);
-  }, [chat, isZenMode, panel]);
-
   const lastModelUsed = useMemo(() => {
     const lastAssistant = [...chat.messages].reverse().find((item) => item.role === "assistant");
     return lastAssistant?.modelUsed ?? chat.lastAutoResult?.modelUsed;
@@ -160,6 +139,18 @@ export function ChatLayout() {
     [chat.models],
   );
 
+  useEffect(() => {
+    if (!chat.sending) {
+      openedOrchestrationForStreamRef.current = false;
+      return;
+    }
+    if (openedOrchestrationForStreamRef.current) return;
+    openedOrchestrationForStreamRef.current = true;
+    if (panelActiveView !== "orchestration") {
+      openPanel("orchestration");
+    }
+  }, [chat.sending, panelActiveView, openPanel]);
+
   function handleModeChange(mode: StudyMode) {
     chat.setMode(mode);
     toast.success(`Mode changed to ${mode}`);
@@ -174,17 +165,6 @@ export function ChatLayout() {
 
   function handleRegenerateWithModel(modelId: string) {
     void chat.regenerateWithModel(modelId);
-  }
-
-  function handleCycleMode() {
-    const nextMode = nextQuickActionMode(chat.mode);
-    handleModeChange(nextMode);
-  }
-
-  function handleToggleSearchQuickAction() {
-    const nextAutoSearch = chat.autoSearch === "off" ? "on" : "off";
-    chat.setAutoSearch(nextAutoSearch);
-    toast.success(`Web search ${nextAutoSearch === "off" ? "off" : "on"}`);
   }
 
   function handlePinChat(chatId: string) {
@@ -244,7 +224,7 @@ export function ChatLayout() {
     if (parsed.id === "export") {
       const format = parsed.args[0]?.toLowerCase() ?? "markdown";
       if (format === "pdf") {
-        const node = document.querySelector("main");
+        const node = document.querySelector("[data-conversation-export]") ?? document.querySelector("main");
         if (node instanceof HTMLElement) {
           exportElementToPrintPdf(node, chat.selectedChat?.title ?? "Conversation");
         }
@@ -298,7 +278,7 @@ export function ChatLayout() {
     onNewChat: () => chat.startNewChat(chat.selectedAgentId),
     onDeleteChat: (chatId: string) => void chat.handleDeleteChat(chatId),
     onRenameChat: (chatId: string, title: string) => void chat.renameChat(chatId, title),
-    onOpenSettings: () => panel.openPanel("settings"),
+    onOpenSettings: () => openPanel("settings"),
     onPinChat: handlePinChat,
     pinnedChatIds: chat.pinnedChatIds,
     role: chat.role,
@@ -314,26 +294,27 @@ export function ChatLayout() {
   };
 
   return (
-    <div className={`flex h-screen min-w-0 overflow-hidden bg-[var(--bg-primary)] text-[var(--text-primary)] ${isZenMode ? "zen-layout" : ""}`}>
+    <div className="flex h-screen min-w-0 overflow-hidden bg-[var(--bg-primary)] text-[var(--text-primary)]">
       <KeyboardShortcutsRegistrar
-        onToggleZen={() => setIsZenMode((prev) => !prev)}
         onEscape={() => {
-          if (isZenMode) setIsZenMode(false);
+          if (chat.mobileSidebarOpen) {
+            chat.setMobileSidebarOpen(false);
+          } else {
+            closePanel();
+          }
         }}
       />
 
-      {!isZenMode ? (
-        <aside
+      <aside
         data-tour="sidebar"
         className={`hidden transition-all duration-300 md:block ${
           chat.sidebarOpen ? "w-[320px]" : "w-[76px]"
         }`}
       >
         <ChatSidebar {...sidebarProps} />
-        </aside>
-      ) : null}
+      </aside>
 
-      {!isZenMode && chat.mobileSidebarOpen && (
+      {chat.mobileSidebarOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
           <button
             type="button"
@@ -351,7 +332,10 @@ export function ChatLayout() {
         </div>
       )}
 
-      <main className={`flex min-w-0 flex-1 flex-col overflow-hidden ${isZenMode ? "mx-auto w-full max-w-5xl zen-main" : ""}`}>
+      <main
+        className="flex min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto"
+        data-chat-scroll-root
+      >
         <ChatHeader
           title={chat.selectedChat?.title ?? "New chat"}
           chatId={chat.selectedChatId || undefined}
@@ -360,16 +344,14 @@ export function ChatLayout() {
           sending={chat.sending}
           messageCount={chat.messages.length}
           compacting={chat.compactingConversation}
-          isZenMode={isZenMode}
           onStop={chat.stopGeneration}
           onCompact={() => void chat.compactConversation()}
-          onToggleZen={() => setIsZenMode((prev) => !prev)}
           onToggleMobileSidebar={() => chat.setMobileSidebarOpen(true)}
-          onOpenSettings={() => panel.openPanel("settings")}
+          onOpenSettings={() => openPanel("settings")}
           onNewChat={() => chat.startNewChat(chat.selectedAgentId)}
           onExport={(format) => {
             if (format === "pdf") {
-              const node = document.querySelector("main");
+              const node = document.querySelector("[data-conversation-export]") ?? document.querySelector("main");
               if (node instanceof HTMLElement) {
                 exportElementToPrintPdf(node, chat.selectedChat?.title ?? "Conversation");
               }
@@ -479,21 +461,6 @@ export function ChatLayout() {
             />
           }
         />
-
-        {!isZenMode ? (
-          <QuickActions
-            mode={chat.mode}
-            nextMode={nextQuickActionMode(chat.mode)}
-            autoSearch={chat.autoSearch}
-            compacting={chat.compactingConversation}
-            compactDisabled={!chat.selectedChatId || chat.sending}
-            onCycleMode={handleCycleMode}
-            onToggleSearch={handleToggleSearchQuickAction}
-            onCompact={() => void chat.compactConversation()}
-            onNewChat={() => chat.startNewChat(chat.selectedAgentId)}
-            onToggleZen={() => setIsZenMode((prev) => !prev)}
-          />
-        ) : null}
 
         <ChatComposer
           message={chat.message}
@@ -606,7 +573,6 @@ export function ChatLayout() {
         }}
       />
 
-      {!isZenMode ? (
       <UnifiedPanel
         settingsProps={{
           models: chat.models,
@@ -659,9 +625,7 @@ export function ChatLayout() {
           searchEnabled: chat.lastAutoResult?.searchEnabled,
         }}
       />
-      ) : null}
 
-      {!isZenMode ? (
       <Button
         type="button"
         variant="secondary"
@@ -671,10 +635,9 @@ export function ChatLayout() {
         <CircleHelp className="mr-1.5 h-4 w-4" />
         Tour
       </Button>
-      ) : null}
 
       <GuidedTour
-        open={tourOpen && !isZenMode}
+        open={tourOpen}
         steps={TOUR_STEPS}
         onClose={() => {
           markTourSeen();

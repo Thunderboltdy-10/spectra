@@ -51,6 +51,7 @@ export default defineSchema({
     name: v.string(),
     role: vRole,
     orgId: v.id("orgs"),
+    userStreakId: v.optional(v.id("userStreaks")),
     invitedAt: v.optional(v.number()),
     lastActiveAt: v.optional(v.number()),
     onboardingComplete: v.optional(v.boolean()),
@@ -183,6 +184,9 @@ export default defineSchema({
     manualModel: v.optional(v.string()),
     usePersonalResources: v.boolean(),
     contextSummary: v.optional(v.string()),
+    compactedUntilMessageId: v.optional(v.id("messages")),
+    compactedAt: v.optional(v.number()),
+    contextSummaryVersion: v.optional(v.number()),
     deletedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -195,6 +199,7 @@ export default defineSchema({
     packId: v.optional(v.id("packs")),
     chatId: v.id("chats"),
     userId: v.id("users"),
+    clientMessageId: v.optional(v.string()),
     role: v.union(v.literal("user"), v.literal("assistant"), v.literal("system")),
     mode: vStudyMode,
     content: v.string(),
@@ -213,6 +218,7 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_chat", ["chatId"])
+    .index("by_chat_client_message", ["chatId", "clientMessageId"])
     .index("by_user_created", ["userId", "createdAt"])
     .index("by_org", ["orgId"])
     .searchIndex("search_content", {

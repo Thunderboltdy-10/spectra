@@ -40,6 +40,7 @@ type ChatRequestBody = {
   chatId?: string;
   packId?: string;
   agentId?: string;
+  clientMessageId?: string;
   mode: StudyMode;
   message: string;
   thinkingLevel: "low" | "medium" | "high";
@@ -357,12 +358,18 @@ export async function runChatPipeline(request: NextRequest) {
 
   const isRegenerate = Boolean(body.regenerate && body.chatId);
   const shouldPersistUserMessage = !isRegenerate && !body.skipUserMessagePersist;
+  const normalizedClientMessageId =
+    typeof body.clientMessageId === "string" && body.clientMessageId.trim().length > 0
+      ? body.clientMessageId.trim()
+      : undefined;
+  let persistedUserMessageId: string | undefined;
   const rollbackPersistedUserMessage = async () => {
     if (!shouldPersistUserMessage) return;
     await convexMutation("chats:deleteLastUserMessage", {
       actorClerkId: actor.clerkId,
       chatId,
       expectedContent: normalizedMessage,
+      expectedClientMessageId: normalizedClientMessageId,
     }).catch(() => {});
   };
 
@@ -372,9 +379,10 @@ export async function runChatPipeline(request: NextRequest) {
       chatId,
     });
   } else if (shouldPersistUserMessage) {
-    await convexMutation("chats:appendMessage", {
+    const appendedUser = (await convexMutation("chats:appendMessage", {
       actorClerkId: actor.clerkId,
       chatId,
+      clientMessageId: normalizedClientMessageId,
       role: "user",
       content: normalizedMessage,
       attachments: uploadedAttachmentNames,
@@ -391,7 +399,8 @@ export async function runChatPipeline(request: NextRequest) {
       verificationPassed: undefined,
       thinkingContent: undefined,
       routeTrace: undefined,
-    });
+    })) as { messageId: string };
+    persistedUserMessageId = appendedUser.messageId;
   }
 
   const [chatData, orgSettings, userMemory] = await Promise.all([
@@ -1159,6 +1168,7 @@ export async function runChatPipeline(request: NextRequest) {
           type: "done",
           content: finalizedResponse,
           chatId,
+          userMessageId: persistedUserMessageId,
           messageId: appended.messageId,
           modelUsed,
           modelRequested,
@@ -1590,6 +1600,7 @@ BACK: [answer or definition]`,
         type: "done",
         content: finalizedResponse,
         chatId,
+        userMessageId: persistedUserMessageId,
         messageId: appended.messageId,
         modelUsed,
         modelRequested,
@@ -1638,6 +1649,7 @@ BACK: [answer or definition]`,
           actorClerkId: actor.clerkId,
           chatId,
           expectedContent: normalizedMessage,
+          expectedClientMessageId: normalizedClientMessageId,
         }).catch(() => {});
       }
       await send({

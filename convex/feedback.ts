@@ -6,7 +6,7 @@ import type { Id } from "./_generated/dataModel";
 
 const SUPER_ADMIN_EMAILS = new Set(
   (process.env.SUPER_ADMIN_EMAILS ?? "pablo.martinez.dovale@gmail.com")
-    .split(",")
+    .split(/[,\s;]+/)
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean),
 );

@@ -150,23 +150,40 @@ type SendMessageOptions = {
 };
 
 function mergeFetchedMessages(fetched: Message[], local: Message[]) {
-  const pendingLocalUsers = local.filter((item) => item.role === "user" && item._id.startsWith("local-"));
-  if (pendingLocalUsers.length === 0) return fetched;
+  if (local.length === 0) return fetched;
 
+  const merged = [...fetched];
+  const fetchedById = new Set(fetched.map((item) => item._id));
   const existingUserPayloads = new Set(
     fetched
       .filter((item) => item.role === "user")
       .map((item) => item.content.trim()),
   );
 
-  const merged = [...fetched];
-  for (const pending of pendingLocalUsers) {
-    const key = pending.content.trim();
-    if (!key || existingUserPayloads.has(key)) continue;
-    merged.push(pending);
+  for (const pending of local) {
+    if (!pending || fetchedById.has(pending._id)) continue;
+
+    if (pending.role === "user" && pending._id.startsWith("local-")) {
+      const key = pending.content.trim();
+      if (!key || existingUserPayloads.has(key)) continue;
+      merged.push(pending);
+      continue;
+    }
+
+    if (pending.role === "assistant") {
+      const pendingCreatedAt = pending.createdAt ?? 0;
+      const duplicateAssistant = fetched.some(
+        (item) =>
+          item.role === "assistant" &&
+          item.content.trim() === pending.content.trim() &&
+          Math.abs((item.createdAt ?? pendingCreatedAt) - pendingCreatedAt) < 90_000,
+      );
+      if (duplicateAssistant) continue;
+      merged.push(pending);
+    }
   }
 
-  return merged;
+  return merged.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
 }
 
 function ext(name: string) {
@@ -258,12 +275,40 @@ function sanitizeModelName(name: string) {
     .trim();
 }
 
+function normalizeProviderName(provider: string) {
+  const clean = provider.trim();
+  if (!clean) return "Unknown";
+  const normalized = clean.toLowerCase();
+
+  if (normalized.includes("openai")) return "OpenAI";
+  if (normalized.includes("google") || normalized.includes("gemini")) return "Google";
+  if (normalized.includes("anthropic")) return "Anthropic";
+  if (normalized.includes("meta")) return "Meta";
+  if (normalized.includes("mistral")) return "Mistral";
+  if (normalized.includes("deepseek")) return "DeepSeek";
+  if (normalized.includes("perplexity")) return "Perplexity";
+  if (normalized.includes("x-ai") || normalized.includes("xai")) return "xAI";
+  if (normalized.includes("cohere")) return "Cohere";
+  if (normalized.includes("moonshot")) return "Moonshot";
+  if (normalized.includes("qwen")) return "Qwen";
+  if (normalized.includes("openrouter")) return "OpenRouter";
+
+  return clean
+    .split(/\s+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
 function mergeModels(catalog: ModelOption[], live: LiveModel[]) {
   const merged = new Map<string, ModelOption>();
 
   for (const model of catalog) {
     if (!model.modelId || isLocalProvider(model.provider) || isLocalProvider(model.modelId)) continue;
-    merged.set(model.modelId, { ...model, name: sanitizeModelName(model.name) });
+    merged.set(model.modelId, {
+      ...model,
+      name: sanitizeModelName(model.name),
+      provider: normalizeProviderName(model.provider),
+    });
   }
 
   for (const model of live) {
@@ -273,7 +318,7 @@ function mergeModels(catalog: ModelOption[], live: LiveModel[]) {
       _id: existing?._id ?? model.id,
       modelId: model.id,
       name: sanitizeModelName(model.name || existing?.name || model.id),
-      provider: model.provider || existing?.provider || "Unknown",
+      provider: normalizeProviderName(model.provider || existing?.provider || "Unknown"),
       description: model.description || existing?.description,
       contextLength: model.contextLength ?? existing?.contextLength,
       tags: Array.from(new Set([...(existing?.tags ?? []), ...(model.tags ?? [])])),
@@ -293,7 +338,7 @@ function mergeModels(catalog: ModelOption[], live: LiveModel[]) {
         _id: imgModel.id,
         modelId: imgModel.id,
         name: imgModel.name,
-        provider: imgModel.provider,
+        provider: normalizeProviderName(imgModel.provider),
         description: imgModel.recommended ? "Recommended for image generation" : "Image generation model",
         tags: ["image", "generation"],
         inputCostPerM: 0,
@@ -383,6 +428,7 @@ export function useChatState() {
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const selectedChatIdRef = useRef("");
+  const previousSelectedChatIdRef = useRef("");
   const initializedRef = useRef(false);
   const lastAttachmentPreviewsRef = useRef<Map<string, Message["attachmentPreviews"]>>(new Map());
   const pendingCompletionsRef = useRef<Map<string, Message[]>>(new Map());
@@ -566,6 +612,7 @@ export function useChatState() {
 
   useEffect(() => {
     if (!selectedChatId) {
+      previousSelectedChatIdRef.current = "";
       setMessages([]);
       setMessage(""); // Clear message when no chat selected
       // Don't clear drafts for chats that are still streaming
@@ -581,6 +628,12 @@ export function useChatState() {
       setBookmarkedMessageIds(new Set());
       setBookmarkingMessageId(null);
       return;
+    }
+
+    if (previousSelectedChatIdRef.current !== selectedChatId) {
+      // Clear stale messages from the previously viewed chat before merging pending/fetched state.
+      setMessages([]);
+      previousSelectedChatIdRef.current = selectedChatId;
     }
 
     // Load draft for this chat
@@ -1128,6 +1181,7 @@ export function useChatState() {
             thinkingMode: autoThinking,
             searchMode: autoSearch,
           },
+          clientMessageId: !isRegenerate ? localUserMessageId : undefined,
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -1150,6 +1204,7 @@ export function useChatState() {
       let assistantBuffer = "";
       let finalMeta: {
         messageId?: string;
+        userMessageId?: string;
         modelUsed?: string;
         modelRequested?: string;
         whyThisResponse?: string;
@@ -1192,6 +1247,7 @@ export function useChatState() {
             whyThisResponse?: string;
             citations?: Citation[];
             messageId?: string;
+            userMessageId?: string;
             usageIn?: number;
             usageOut?: number;
             thinkingContent?: string;
@@ -1345,6 +1401,7 @@ export function useChatState() {
 
             finalMeta = {
               messageId: payload.messageId,
+              userMessageId: payload.userMessageId,
               modelUsed: actualModel,
               modelRequested: payload.modelRequested,
               whyThisResponse: payload.whyThisResponse,
@@ -1415,13 +1472,38 @@ export function useChatState() {
         }
       }
 
+      const persistedUserMessageId = finalMeta.userMessageId;
+      if (persistedUserMessageId) {
+        setMessages((prev) => {
+          if (!prev.some((item) => item._id === localUserMessageId)) return prev;
+
+          let changed = false;
+          const next: Message[] = [];
+          for (const item of prev) {
+            if (item._id !== localUserMessageId) {
+              next.push(item);
+              continue;
+            }
+            changed = true;
+            if (next.some((existing) => existing._id === persistedUserMessageId)) continue;
+            next.push({
+              ...item,
+              _id: persistedUserMessageId,
+            });
+          }
+          return changed ? next : prev;
+        });
+      }
+
       if (assistantBuffer) {
+        const { userMessageId: _ignoredUserMessageId, ...assistantMeta } = finalMeta;
+        void _ignoredUserMessageId;
         const assistantMessage: Message = {
           _id: finalMeta.messageId ?? `assistant-${Date.now()}`,
           role: "assistant",
           content: assistantBuffer,
           createdAt: Date.now(),
-          ...finalMeta,
+          ...assistantMeta,
         };
 
         const stillViewingStreamChat = selectedChatIdRef.current === chatId;
@@ -1518,7 +1600,7 @@ export function useChatState() {
           return await sendMessage(override ?? text, {
             regenerate: options?.regenerate,
             skipLocalUser: true,
-            skipServerUserPersist: true,
+            skipServerUserPersist,
             retryAttempt: retryAttempt + 1,
             chatIdOverride: activeChatId,
             modeOverride: requestedMode,
@@ -1557,8 +1639,8 @@ export function useChatState() {
     if (!lastFailedMessage) return;
     await sendMessage(lastFailedMessage, {
       retryAttempt: 0,
-      skipLocalUser: true,
-      skipServerUserPersist: true,
+      skipLocalUser: false,
+      skipServerUserPersist: false,
     });
   }
 
@@ -1748,11 +1830,15 @@ export function useChatState() {
         ok?: boolean;
         reason?: string;
         compactedMessages?: number;
+        currentMessages?: number;
+        minimumMessages?: number;
       };
 
       if (!result.ok) {
         if (result.reason === "not_enough_messages") {
-          toast.info("Compaction is available after around 20 messages.");
+          const minimum = Math.max(4, Math.round(result.minimumMessages ?? 20));
+          const current = Math.max(0, Math.round(result.currentMessages ?? 0));
+          toast.info(`Compaction works best after about ${minimum} messages (currently ${current}).`);
         } else {
           toast.info("Nothing to compact yet.");
         }

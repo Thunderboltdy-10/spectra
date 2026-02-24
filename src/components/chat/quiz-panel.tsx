@@ -73,7 +73,7 @@ export function QuizPanel({
         />
       ) : null}
       <aside
-        className={`right-panel-shell pointer-events-auto absolute flex w-full flex-col border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)] ${
+        className={`right-panel-shell pointer-events-auto absolute flex w-full flex-col border-[var(--border-default)] bg-[var(--bg-sidebar)] p-4 shadow-[var(--shadow-soft)] ${
           docked ? "right-panel-shell--docked" : "right-panel-shell--sheet"
         } ${
           compact

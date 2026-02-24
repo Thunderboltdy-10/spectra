@@ -34,9 +34,7 @@ const themeInitScript = `
 (function () {
   try {
     var key = 'ai-school-theme';
-    var contrastKey = 'ai-school-high-contrast';
     var persisted = window.localStorage.getItem(key);
-    var contrast = window.localStorage.getItem(contrastKey) === '1';
     var theme = persisted === 'dark' || persisted === 'light'
       ? persisted
       : 'light';
@@ -45,14 +43,8 @@ const themeInitScript = `
     } else {
       document.documentElement.classList.remove('dark');
     }
-    if (contrast) {
-      document.documentElement.classList.add('high-contrast');
-    } else {
-      document.documentElement.classList.remove('high-contrast');
-    }
   } catch (e) {
     document.documentElement.classList.remove('dark');
-    document.documentElement.classList.remove('high-contrast');
   }
 })();`;
 

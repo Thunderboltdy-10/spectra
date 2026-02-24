@@ -7,7 +7,7 @@ import { internal } from "./_generated/api";
 
 const SUPER_ADMIN_EMAILS = new Set(
   (process.env.SUPER_ADMIN_EMAILS ?? "pablo.martinez.dovale@gmail.com")
-    .split(",")
+    .split(/[,\s;]+/)
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean),
 );

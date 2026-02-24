@@ -15,8 +15,6 @@ import type { AutoPreference, ModelOption, PersonalResource, UserSpending } from
 import type { RouterMode, StudyMode, ThinkingLevel, Citation, RouteTrace } from "@/types";
 import { FILE_LIMITS } from "@/lib/file-limits";
 
-const MONTHLY_HARD_LIMIT_CENTS = 900;
-
 function AutoChoice({
   label,
   value,
@@ -68,13 +66,6 @@ function sanitizeModelLabel(value: string) {
     .replace(/[\s(_-]*\bfree\b[\s)_-]*/gi, " ")
     .replace(/\s{2,}/g, " ")
     .trim();
-}
-
-function spendingTierLabel(tier?: UserSpending["tier"]) {
-  if (tier === "free_only") return "Budget only";
-  if (tier === "cheap_only") return "Cheap only";
-  if (tier === "expensive_blocked") return "Guarded";
-  return "Normal";
 }
 
 function resourceStatusLabel(status: PersonalResource["status"]) {
@@ -129,11 +120,26 @@ function SettingsView({
   onDeleteResource,
 }: SettingsViewProps) {
   const [showManual, setShowManual] = useState(false);
-  const spentCents = userSpending?.totalCostCents ?? 0;
-  const hardLimitCents = Math.max(1, userSpending?.hardLimitCents ?? MONTHLY_HARD_LIMIT_CENTS);
-  const ratio = Math.min(Math.max(spentCents / hardLimitCents, 0), 1);
+  const ratio = userSpending
+    ? Math.min(
+        Math.max(
+          typeof userSpending.budgetUsagePercent === "number"
+            ? userSpending.budgetUsagePercent / 100
+            : (userSpending.totalCostCents ?? 0) / Math.max(1, userSpending.hardLimitCents ?? 1),
+          0,
+        ),
+        1,
+      )
+    : Math.min(personalResources.length / Math.max(1, FILE_LIMITS.maxPersonalLibraryFiles), 1);
   const percentUsed = Math.max(0, Math.min(100, Math.round(ratio * 100)));
-  const spendingTier = spendingTierLabel(userSpending?.tier);
+  const usageLabel =
+    percentUsed >= 80
+      ? "High activity"
+      : percentUsed >= 40
+        ? "Steady activity"
+        : percentUsed > 0
+          ? "Getting started"
+          : "No activity yet";
   const selectedModel = models.find((model) => model.modelId === manualModel);
 
   return (
@@ -255,7 +261,7 @@ function SettingsView({
         <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
           Saved in personal library: {personalResources.length}/{FILE_LIMITS.maxPersonalLibraryFiles}
         </p>
-        <div className="mt-3 max-h-48 space-y-2 overflow-y-auto pr-1">
+        <div className="mt-3 max-h-[min(56vh,34rem)] space-y-2 overflow-y-auto pr-1">
           {personalResources.length === 0 ? (
             <p className="text-xs text-[var(--text-secondary)]">No personal files yet.</p>
           ) : (
@@ -286,7 +292,7 @@ function SettingsView({
       <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
         <div className="flex items-center justify-between">
           <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Usage indicator</h3>
-          <span className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">{spendingTier}</span>
+          <span className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">{usageLabel}</span>
         </div>
         <div className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
           <div
@@ -295,10 +301,7 @@ function SettingsView({
           />
         </div>
         <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
-          {percentUsed}% used this month
-        </p>
-        <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
-          Expensive block at {userSpending?.softLimitCents ?? Math.floor(hardLimitCents * 0.8)}c, cheap-only at {userSpending?.cheapOnlyLimitCents ?? Math.floor(hardLimitCents * 0.9)}c.
+          {percentUsed}% utilization
         </p>
       </section>
     </div>

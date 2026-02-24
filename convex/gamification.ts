@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { getUserByClerkId } from "./helpers";
 import type { Doc } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { computeStreakProgress, dayKey, parseIsoDate } from "./streakLogic";
 
 type AchievementDefinition = {
   type: string;
@@ -102,19 +103,20 @@ const MODE_EXPLORER_TARGET_MODES = [
   "image",
 ];
 
-function dayKey(ts = Date.now()) {
-  return new Date(ts).toISOString().slice(0, 10);
-}
-
-function parseIsoDate(value: string) {
-  const parsed = new Date(`${value}T00:00:00.000Z`).getTime();
-  return Number.isNaN(parsed) ? null : parsed;
-}
-
 async function requireActor(ctx: QueryCtx | MutationCtx, actorClerkId: string) {
   const actor = await getUserByClerkId(ctx, actorClerkId);
   if (!actor) throw new Error("Unauthorized");
   return actor;
+}
+
+function pickCanonicalStreakDoc(rows: Array<Doc<"userStreaks">>) {
+  return [...rows].sort((a, b) => {
+    if (a.totalXp !== b.totalXp) return b.totalXp - a.totalXp;
+    if (a.longestStreak !== b.longestStreak) return b.longestStreak - a.longestStreak;
+    if (a.currentStreak !== b.currentStreak) return b.currentStreak - a.currentStreak;
+    if (a.lastActiveDate !== b.lastActiveDate) return b.lastActiveDate.localeCompare(a.lastActiveDate);
+    return b._creationTime - a._creationTime;
+  })[0] ?? null;
 }
 
 async function getUserStreakDoc(
@@ -125,12 +127,86 @@ async function getUserStreakDoc(
     .query("userStreaks")
     .withIndex("by_user", (q) => q.eq("userId", userId))
     .collect();
-  return rows.sort((a, b) => b.lastActiveDate.localeCompare(a.lastActiveDate))[0] ?? null;
+  return pickCanonicalStreakDoc(rows);
+}
+
+async function reconcileDuplicateStreakDocs(
+  ctx: MutationCtx,
+  actor: Doc<"users">,
+  rows: Array<Doc<"userStreaks">>,
+) {
+  const actorStreakId = (actor as Doc<"users"> & { userStreakId?: Doc<"userStreaks">["_id"] }).userStreakId;
+  const canonical = pickCanonicalStreakDoc(rows);
+  if (!canonical) return null;
+
+  if (rows.length === 1) {
+    if (actorStreakId !== canonical._id) {
+      await ctx.db.patch(actor._id, {
+        userStreakId: canonical._id,
+        updatedAt: Date.now(),
+      });
+    }
+    return canonical;
+  }
+
+  const byLatestDate = [...rows].sort((a, b) => b.lastActiveDate.localeCompare(a.lastActiveDate))[0] ?? canonical;
+  const mergedCurrentStreak = Math.max(
+    byLatestDate.currentStreak,
+    ...rows
+      .filter((row) => row.lastActiveDate === byLatestDate.lastActiveDate)
+      .map((row) => row.currentStreak),
+  );
+  const mergedLongestStreak = Math.max(...rows.map((row) => row.longestStreak));
+  const mergedTotalXp = Math.max(...rows.map((row) => row.totalXp));
+
+  await ctx.db.patch(canonical._id, {
+    currentStreak: Math.max(0, mergedCurrentStreak),
+    longestStreak: Math.max(0, mergedLongestStreak),
+    totalXp: Math.max(0, mergedTotalXp),
+    lastActiveDate: byLatestDate.lastActiveDate,
+  });
+
+  const duplicateIds = rows
+    .filter((row) => row._id !== canonical._id)
+    .map((row) => row._id);
+  for (const duplicateId of duplicateIds) {
+    await ctx.db.delete(duplicateId);
+  }
+
+  await ctx.db.patch(actor._id, {
+    userStreakId: canonical._id,
+    updatedAt: Date.now(),
+  });
+
+  return ctx.db.get(canonical._id);
 }
 
 async function ensureUserStreakDoc(ctx: MutationCtx, actor: Doc<"users">) {
-  const existing = await getUserStreakDoc(ctx, actor._id);
-  if (existing) return existing;
+  const actorStreakId = (actor as Doc<"users"> & { userStreakId?: Doc<"userStreaks">["_id"] }).userStreakId;
+  if (actorStreakId) {
+    const linked = await ctx.db.get(actorStreakId);
+    if (linked && linked.userId === actor._id && linked.orgId === actor.orgId) {
+      const rows = await ctx.db
+        .query("userStreaks")
+        .withIndex("by_user", (q) => q.eq("userId", actor._id))
+        .collect();
+      if (rows.length > 1) {
+        const reconciled = await reconcileDuplicateStreakDocs(ctx, actor, rows);
+        if (reconciled) return reconciled;
+      }
+      return linked;
+    }
+  }
+
+  const rows = await ctx.db
+    .query("userStreaks")
+    .withIndex("by_user", (q) => q.eq("userId", actor._id))
+    .collect();
+
+  if (rows.length > 0) {
+    const existing = await reconcileDuplicateStreakDocs(ctx, actor, rows);
+    if (existing) return existing;
+  }
 
   const today = dayKey();
   const streakId = await ctx.db.insert("userStreaks", {
@@ -141,6 +217,15 @@ async function ensureUserStreakDoc(ctx: MutationCtx, actor: Doc<"users">) {
     lastActiveDate: today,
     totalXp: 0,
   });
+
+  // This write creates a deterministic owner pointer on the user document.
+  // Under concurrent first-time requests, Convex retries one transaction,
+  // preventing duplicate committed streak docs for the same user.
+  await ctx.db.patch(actor._id, {
+    userStreakId: streakId,
+    updatedAt: Date.now(),
+  });
+
   return ctx.db.get(streakId);
 }
 
@@ -373,8 +458,7 @@ export const checkAndUpdateStreak = mutation({
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
     const today = args.activityDate ?? dayKey();
-    const todayTs = parseIsoDate(today);
-    if (!todayTs) {
+    if (!parseIsoDate(today)) {
       throw new Error("activityDate must be YYYY-MM-DD");
     }
 
@@ -383,26 +467,24 @@ export const checkAndUpdateStreak = mutation({
     const existingAchievements = await listUserAchievements(ctx, actor._id);
     const existingTypes = new Set(existingAchievements.map((item) => item.type));
 
-    const lastTs = parseIsoDate(streakDoc.lastActiveDate);
-    const dayDiff = lastTs ? Math.round((todayTs - lastTs) / 86_400_000) : 0;
-
-    let currentStreak = streakDoc.currentStreak;
-    if (dayDiff <= 0) {
+    const progress = computeStreakProgress({
+      currentStreak: streakDoc.currentStreak,
+      longestStreak: streakDoc.longestStreak,
+      lastActiveDate: streakDoc.lastActiveDate,
+      activityDate: today,
+    });
+    if (!progress.changed) {
       return {
-        currentStreak,
-        longestStreak: streakDoc.longestStreak,
-        lastActiveDate: streakDoc.lastActiveDate,
+        currentStreak: progress.currentStreak,
+        longestStreak: progress.longestStreak,
+        lastActiveDate: progress.lastActiveDate,
+        totalXp: streakDoc.totalXp,
         unlockedAchievements: [] as AchievementPayload[],
       };
     }
 
-    if (dayDiff === 1) {
-      currentStreak += 1;
-    } else {
-      currentStreak = 1;
-    }
-
-    const longestStreak = Math.max(streakDoc.longestStreak, currentStreak);
+    const currentStreak = progress.currentStreak;
+    const longestStreak = progress.longestStreak;
     const streakUnlocks = await maybeAwardStreakAchievements(ctx, actor, currentStreak, existingTypes);
     const streakBonusXp = streakUnlocks.reduce((sum, item) => sum + item.xpEarned, 0);
     const totalXp = streakDoc.totalXp + streakBonusXp;
@@ -410,14 +492,14 @@ export const checkAndUpdateStreak = mutation({
     await ctx.db.patch(streakDoc._id, {
       currentStreak,
       longestStreak,
-      lastActiveDate: today,
+      lastActiveDate: progress.lastActiveDate,
       totalXp,
     });
 
     return {
       currentStreak,
       longestStreak,
-      lastActiveDate: today,
+      lastActiveDate: progress.lastActiveDate,
       totalXp,
       unlockedAchievements: streakUnlocks,
     };

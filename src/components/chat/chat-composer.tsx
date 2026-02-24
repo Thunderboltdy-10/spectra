@@ -300,7 +300,7 @@ export function ChatComposer(props: ChatComposerProps) {
   const [showAgentSelector, setShowAgentSelector] = useState(false);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
-  const [collapsedProviders, setCollapsedProviders] = useState<Set<string>>(new Set());
+  const [providerFilter, setProviderFilter] = useState("all");
   const modeConfig = getModeConfig(mode);
   const selectedModel = useMemo(
     () => models.find((item) => item.modelId === manualModel),
@@ -361,25 +361,17 @@ export function ChatComposer(props: ChatComposerProps) {
       });
   }, [estimatedTokens, hasImages, modelSearch, models, recommendedModelIds, userSpending?.tier]);
 
-  const modelGroups = useMemo(() => {
-    const map = new Map<string, typeof modelRows>();
-    for (const row of modelRows) {
-      const provider = row.model.provider || "Unknown";
-      const list = map.get(provider) ?? [];
-      list.push(row);
-      map.set(provider, list);
-    }
+  const providerOptions = useMemo(
+    () =>
+      [...new Set(modelRows.map((row) => row.model.provider).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b)),
+    [modelRows],
+  );
 
-    return [...map.entries()]
-      .map(([provider, rows]) => ({
-        provider,
-        rows: rows.sort((a, b) => {
-          if (a.recommended !== b.recommended) return a.recommended ? -1 : 1;
-          return a.model.name.localeCompare(b.model.name);
-        }),
-      }))
-      .sort((a, b) => b.rows.length - a.rows.length || a.provider.localeCompare(b.provider));
-  }, [modelRows]);
+  const filteredModelRows = useMemo(() => {
+    if (providerFilter === "all") return modelRows;
+    return modelRows.filter((row) => row.model.provider === providerFilter);
+  }, [modelRows, providerFilter]);
 
   const hasBudgetSafeModel = useMemo(
     () => models.some((model) => restrictionReasonForTier(model, "free_only") === null),
@@ -437,7 +429,7 @@ export function ChatComposer(props: ChatComposerProps) {
   useEffect(() => {
     if (!showModelSelector) {
       setModelSearch("");
-      setCollapsedProviders(new Set());
+      setProviderFilter("all");
       return;
     }
     const timer = window.setTimeout(() => modelSearchRef.current?.focus(), 10);
@@ -613,7 +605,7 @@ export function ChatComposer(props: ChatComposerProps) {
   return (
     <footer
       className={cn(
-        "bg-[var(--bg-primary)] px-3 pb-[calc(0.9rem+env(safe-area-inset-bottom))] pt-3 sm:px-6 lg:px-10",
+        "sticky bottom-0 z-20 bg-[color-mix(in_oklab,var(--bg-primary)_88%,transparent)] px-3 pb-[calc(0.9rem+env(safe-area-inset-bottom))] pt-4 backdrop-blur-md sm:px-6 lg:px-10",
         draggingFiles && "bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-primary))]",
       )}
       aria-label="Message composer"
@@ -622,7 +614,7 @@ export function ChatComposer(props: ChatComposerProps) {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div className="mx-auto w-full max-w-5xl">
+      <div className="mx-auto w-full max-w-6xl">
         {shouldShowResearchTip ? (
           <div className="mb-2">
             <ContextualTip
@@ -702,8 +694,8 @@ export function ChatComposer(props: ChatComposerProps) {
           </div>
         )}
 
-        <div className="relative rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-soft)]">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border-default)] px-3 py-2">
+        <div className="relative rounded-2xl bg-[color-mix(in_oklab,var(--bg-elevated)_94%,transparent)] shadow-[var(--shadow-soft)] backdrop-blur-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
             <div className="flex flex-wrap items-center gap-2">
               <div ref={modeMenuRef} className="relative">
                 <button
@@ -832,88 +824,97 @@ export function ChatComposer(props: ChatComposerProps) {
                         ) : null}
                       </button>
 
-                      {modelGroups.length === 0 ? (
+                      {modelSearch.trim().length > 0 && providerOptions.length > 1 ? (
+                        <div className="mb-2 flex flex-wrap gap-1.5 px-1">
+                          <button
+                            type="button"
+                            onClick={() => setProviderFilter("all")}
+                            className={`rounded-full border px-2 py-0.5 text-[10px] transition ${
+                              providerFilter === "all"
+                                ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_14%,transparent)] text-[var(--text-primary)]"
+                                : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                            }`}
+                          >
+                            All providers
+                          </button>
+                          {providerOptions.map((provider) => (
+                            <button
+                              key={provider}
+                              type="button"
+                              onClick={() => setProviderFilter(provider)}
+                              className={`rounded-full border px-2 py-0.5 text-[10px] transition ${
+                                providerFilter === provider
+                                  ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_14%,transparent)] text-[var(--text-primary)]"
+                                  : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                              }`}
+                            >
+                              {provider}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {filteredModelRows.length === 0 ? (
                         <p className="px-3 py-4 text-center text-sm text-[var(--text-secondary)]">No models found</p>
                       ) : (
-                        modelGroups.map((group) => {
-                          const providerCollapsed = !modelSearch.trim() && collapsedProviders.has(group.provider);
-                          return (
-                            <div key={group.provider} className="mb-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)]">
+                        <div className="space-y-1 px-1">
+                          {filteredModelRows.map((row, index) => {
+                            const model = row.model;
+                            const isSelected = routerMode === "manual" && manualModel === model.modelId;
+                            const displayName = cleanModelDisplayText(model.name) || formatModelLabel(model.modelId);
+                            const disabled = Boolean(row.restrictionReason);
+
+                            return (
                               <button
+                                key={model.modelId}
                                 type="button"
                                 onClick={() => {
-                                  setCollapsedProviders((prev) => {
-                                    const next = new Set(prev);
-                                    if (next.has(group.provider)) {
-                                      next.delete(group.provider);
-                                    } else {
-                                      next.add(group.provider);
-                                    }
-                                    return next;
-                                  });
+                                  if (disabled) return;
+                                  onSelectModel(model.modelId);
+                                  setShowModelSelector(false);
                                 }}
-                                className="flex w-full cursor-pointer items-center justify-between gap-2 px-2.5 py-2 text-left"
+                                title={row.restrictionReason ?? undefined}
+                                className={`w-full rounded-lg border px-2.5 py-2 text-left transition ${
+                                  disabled
+                                    ? "cursor-not-allowed opacity-55"
+                                    : "cursor-pointer hover:bg-[var(--bg-hover)]"
+                                } ${
+                                  isSelected
+                                    ? "border-[color-mix(in_oklab,var(--accent-cyan)_42%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
+                                    : "border-transparent"
+                                }`}
                               >
-                                <span className="inline-flex min-w-0 items-center gap-2">
-                                  <ProviderLogo provider={group.provider} size={16} className="h-7 w-7" />
-                                  <span className="truncate text-xs font-semibold text-[var(--text-primary)]">{group.provider}</span>
-                                  <span className="rounded-full border border-[var(--border-default)] px-1.5 py-0.5 text-[10px] text-[var(--text-secondary)]">
-                                    {group.rows.length}
-                                  </span>
-                                </span>
-                                <ChevronDown className={`h-3.5 w-3.5 text-[var(--text-secondary)] transition ${providerCollapsed ? "-rotate-90" : ""}`} />
-                              </button>
-
-                              {!providerCollapsed ? (
-                                <div className="border-t border-[var(--border-default)] p-1.5">
-                                  {group.rows.map((row) => {
-                                    const model = row.model;
-                                    const isSelected = routerMode === "manual" && manualModel === model.modelId;
-                                    const displayName = cleanModelDisplayText(model.name) || formatModelLabel(model.modelId);
-                                    const disabled = Boolean(row.restrictionReason);
-
-                                    return (
-                                      <button
-                                        key={model.modelId}
-                                        type="button"
-                                        onClick={() => {
-                                          if (disabled) return;
-                                          onSelectModel(model.modelId);
-                                          setShowModelSelector(false);
-                                        }}
-                                        title={row.restrictionReason ?? undefined}
-                                        className={`mb-0.5 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition ${
-                                          disabled
-                                            ? "cursor-not-allowed opacity-55"
-                                            : "cursor-pointer hover:bg-[var(--bg-hover)]"
-                                        } ${
-                                          isSelected
-                                            ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
-                                            : ""
-                                        }`}
-                                      >
-                                        <ProviderLogo provider={model.provider} modelId={model.modelId} size={14} className="h-6 w-6 rounded-md" />
-                                        <div className="min-w-0 flex-1">
-                                          <p className="truncate text-sm font-medium text-[var(--text-primary)]">{displayName}</p>
-                                          <p className="truncate text-[10px] text-[var(--text-secondary)]">
-                                            {model.contextLength ? `${Math.round((model.contextLength ?? 0) / 1000)}k ctx` : "Context unknown"}
-                                            {row.recommended ? " · Recommended" : ""}
-                                          </p>
-                                          {row.cautionReason ? (
-                                            <p className="truncate text-[10px] text-[var(--warning)]">{row.cautionReason}</p>
-                                          ) : null}
-                                          {row.restrictionReason ? (
-                                            <p className="truncate text-[10px] text-[var(--warning)]">{row.restrictionReason}</p>
-                                          ) : null}
-                                        </div>
-                                      </button>
-                                    );
-                                  })}
+                                <div className="flex items-start gap-2">
+                                  <ProviderLogo provider={model.provider} modelId={model.modelId} size={14} className="mt-0.5 h-6 w-6 rounded-md" />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-1.5">
+                                      {index < 5 && !modelSearch.trim() ? (
+                                        <span className="rounded-full border border-[var(--border-default)] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                                          Popular
+                                        </span>
+                                      ) : null}
+                                      {row.recommended ? (
+                                        <span className="rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em] text-[var(--accent-cyan)]">
+                                          Recommended
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                    <p className="truncate text-sm font-medium text-[var(--text-primary)]">{displayName}</p>
+                                    <p className="truncate text-[10px] text-[var(--text-secondary)]">
+                                      {model.provider} · {model.contextLength ? `${Math.round((model.contextLength ?? 0) / 1000)}k ctx` : "Context unknown"}
+                                    </p>
+                                    {row.cautionReason ? (
+                                      <p className="truncate text-[10px] text-[var(--warning)]">{row.cautionReason}</p>
+                                    ) : null}
+                                    {row.restrictionReason ? (
+                                      <p className="truncate text-[10px] text-[var(--warning)]">{row.restrictionReason}</p>
+                                    ) : null}
+                                  </div>
                                 </div>
-                              ) : null}
-                            </div>
-                          );
-                        })
+                              </button>
+                            );
+                          })}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -925,6 +926,7 @@ export function ChatComposer(props: ChatComposerProps) {
                   type="button"
                   onClick={() => setShowAgentSelector((prev) => !prev)}
                   title="Attach an agent persona and resources to this chat"
+                  data-tour="agent-selector"
                   className={selectorTriggerClass}
                 >
                   <span>{selectedAgent?.avatarEmoji ?? "🧠"}</span>
@@ -973,7 +975,7 @@ export function ChatComposer(props: ChatComposerProps) {
             </div>
 
             <div className="flex items-center gap-1.5">
-              <div className="hidden flex-wrap items-center gap-1.5 sm:flex">
+              <div data-tour="auto-controls" className="hidden flex-wrap items-center gap-1.5 sm:flex">
                 <SettingPill
                   label="Enhance"
                   value={autoEnhancePrompt}

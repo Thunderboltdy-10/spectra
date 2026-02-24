@@ -15,18 +15,6 @@ import {
 import { ALL_MODES, getModeConfig } from "@/lib/modes";
 import { useSidebar } from "@/context/sidebar-context";
 
-function toggleTheme() {
-  const root = document.documentElement;
-  const isDark = root.classList.contains("dark");
-  if (isDark) {
-    root.classList.remove("dark");
-    localStorage.setItem("ai-school-theme", "light");
-  } else {
-    root.classList.add("dark");
-    localStorage.setItem("ai-school-theme", "dark");
-  }
-}
-
 function CommandResults() {
   const { results } = useMatches();
   return (
@@ -127,7 +115,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
         name: "Toggle theme",
         section: "Preferences",
         shortcut: ["t"],
-        perform: () => toggleTheme(),
+        perform: () => window.dispatchEvent(new Event("ai-school:toggle-theme")),
       },
       {
         id: "open-chat",

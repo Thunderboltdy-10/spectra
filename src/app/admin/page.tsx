@@ -30,7 +30,7 @@ type UsageRow = {
 
 export default function AdminPage() {
   const router = useRouter();
-  const { role: userRole, loading: sidebarLoading } = useSidebar();
+  const { role: userRole, isSuperAdmin, loading: sidebarLoading } = useSidebar();
   const [adminDataLoaded, setAdminDataLoaded] = useState(false);
   const [adminOnboardingComplete, setAdminOnboardingComplete] = useState(true);
   const [orgName, setOrgName] = useState("AI School");
@@ -45,12 +45,14 @@ export default function AdminPage() {
   const [agentModelBoostEnabled, setAgentModelBoostEnabled] = useState(false);
   const [adaptiveQuizEnabled, setAdaptiveQuizEnabled] = useState(false);
   const [spacedRepetitionEnabled, setSpacedRepetitionEnabled] = useState(false);
+  const hasAdminAccess = userRole === "admin" || isSuperAdmin;
 
   async function loadAll() {
     const bootstrapResponse = await fetch("/api/bootstrap");
     if (!bootstrapResponse.ok) throw new Error(await bootstrapResponse.text());
     const bootstrap = (await bootstrapResponse.json()) as {
       actor: { role: "student" | "teacher" | "admin"; onboardingComplete?: boolean };
+      isSuperAdmin?: boolean;
       orgSettings: {
         org: {
           name?: string;
@@ -87,7 +89,8 @@ export default function AdminPage() {
     setAdaptiveQuizEnabled(Boolean(bootstrap.orgSettings.org.adaptiveQuizEnabled));
     setSpacedRepetitionEnabled(Boolean(bootstrap.orgSettings.org.spacedRepetitionEnabled));
 
-    if (bootstrap.actor.role !== "admin") {
+    const actorCanManageAdmin = bootstrap.actor.role === "admin" || Boolean(bootstrap.isSuperAdmin);
+    if (!actorCanManageAdmin) {
       return;
     }
 
@@ -111,18 +114,18 @@ export default function AdminPage() {
   }
 
   useEffect(() => {
-    if (!sidebarLoading && userRole !== "admin") {
+    if (!sidebarLoading && !hasAdminAccess) {
       router.replace("/");
     }
-  }, [sidebarLoading, userRole, router]);
+  }, [hasAdminAccess, sidebarLoading, router]);
 
   useEffect(() => {
-    if (sidebarLoading || userRole !== "admin") return;
+    if (sidebarLoading || !hasAdminAccess) return;
     setAdminDataLoaded(false);
     void loadAll()
       .catch((error) => toast.error(error instanceof Error ? error.message : "Failed to load admin data"))
       .finally(() => setAdminDataLoaded(true));
-  }, [sidebarLoading, userRole]);
+  }, [hasAdminAccess, sidebarLoading]);
 
   const usageSum = useMemo(() => usage.reduce((sum, row) => sum + row.totalTokens, 0), [usage]);
 
@@ -161,7 +164,7 @@ export default function AdminPage() {
     await loadAll();
   }
 
-  if (sidebarLoading || userRole !== "admin" || !adminDataLoaded) {
+  if (sidebarLoading || !hasAdminAccess || !adminDataLoaded) {
     return (
       <AppShell>
         <div className="flex items-center justify-center p-8">

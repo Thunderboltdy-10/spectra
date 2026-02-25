@@ -124,18 +124,6 @@ export function CookieConsentManager() {
         </section>
       ) : null}
 
-      {!showBanner ? (
-        <button
-          type="button"
-          onClick={openSettings}
-          className="fixed bottom-4 left-4 z-[73] rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs text-[var(--text-secondary)] shadow-[var(--shadow-soft)] transition hover:bg-[var(--bg-hover)]"
-          aria-label="Cookie settings"
-          title="Cookie settings"
-        >
-          Cookie settings
-        </button>
-      ) : null}
-
       {settingsOpen ? (
         <div className="fixed inset-0 z-[115]">
           <button

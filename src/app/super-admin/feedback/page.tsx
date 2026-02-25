@@ -187,7 +187,7 @@ export default function SuperAdminFeedbackInboxPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-4" data-tour="super-feedback-header">
           <div>
             <div className="mb-1 flex items-center gap-2">
               <Link
@@ -209,7 +209,7 @@ export default function SuperAdminFeedbackInboxPage() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-card)]">
+        <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-card)]" data-tour="super-feedback-filters">
           <div className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
             <Filter className="h-3.5 w-3.5" />
             Filters
@@ -308,7 +308,7 @@ export default function SuperAdminFeedbackInboxPage() {
           </div>
         </div>
 
-        <div className="space-y-3">
+        <div className="space-y-3" data-tour="super-feedback-list">
           {loading ? (
             <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 text-sm text-[var(--text-secondary)]">
               Loading feedback...

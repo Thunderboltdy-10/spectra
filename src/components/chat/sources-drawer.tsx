@@ -23,7 +23,7 @@ function hrefForCitation(citation: Citation) {
 
 export function SourcesDrawer({ open, onClose, citations }: SourcesDrawerProps) {
   const compact = useCompactSheet(1024);
-  const { docked, isOverlay, panelWidth } = useRightPanelDock({ id: "sources-drawer", open, compact, maxWidthPx: 576 });
+  const { docked, panelWidth } = useRightPanelDock({ id: "sources-drawer", open, compact, maxWidthPx: 576 });
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -44,7 +44,7 @@ export function SourcesDrawer({ open, onClose, citations }: SourcesDrawerProps) 
       {!docked ? (
         <button
           type="button"
-          className={`absolute inset-0 transition ${isOverlay ? "bg-black/45 backdrop-blur-none md:backdrop-blur-sm" : "bg-transparent"}`}
+          className={`absolute inset-0 transition bg-transparent`}
           onClick={onClose}
           aria-label="Close sources drawer"
         />

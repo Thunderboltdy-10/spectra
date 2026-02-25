@@ -1,10 +1,9 @@
 "use client";
 
 import { useMemo } from "react";
-import { Activity, BookOpen, Brain, Clock3, MessageSquare, Trophy } from "lucide-react";
+import { Activity, BookOpen, Brain, Clock3, MessageSquare, Trophy, LucideIcon } from "lucide-react";
 import { MODE_REGISTRY } from "@/lib/modes";
 import type { StudyMode } from "@/types";
-import { StatsCard } from "@/components/analytics/stats-card";
 import { ActivityChart } from "@/components/analytics/activity-chart";
 import { TopicCloud } from "@/components/analytics/topic-cloud";
 import { ModeBreakdown } from "@/components/analytics/mode-breakdown";
@@ -92,6 +91,29 @@ function formatModelName(modelId?: string) {
       return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
     })
     .join(" ");
+}
+
+function StatInline({
+  icon: Icon,
+  label,
+  value,
+  subtitle,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string | number;
+  subtitle?: string;
+}) {
+  return (
+    <article className="min-w-0 border-b border-[var(--border-default)] pb-3 pt-1 last:border-b-0">
+      <p className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-[0.11em] text-[var(--text-secondary)]">
+        <Icon className="h-3.5 w-3.5" />
+        {label}
+      </p>
+      <p className="mt-1 font-display text-2xl text-[var(--text-primary)]">{value}</p>
+      {subtitle ? <p className="mt-0.5 text-xs text-[var(--text-secondary)]">{subtitle}</p> : null}
+    </article>
+  );
 }
 
 function aggregateRows(rows: AnalyticsRow[]) {
@@ -216,7 +238,7 @@ function StudyTimeChart({
   const trackedSeconds = data.reduce((sum, item) => sum + item.timerSeconds, 0);
 
   return (
-    <div className="journal-card journal-scribble p-4">
+    <div className="p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
         <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Time spent per day</p>
         <p className="text-xs text-[var(--text-secondary)]">
@@ -257,7 +279,7 @@ function ModePieChart({ modeCounts }: { modeCounts: Record<string, number> }) {
 
   if (entries.length === 0) {
     return (
-      <div className="journal-card border-dashed p-4 text-center text-sm text-[var(--text-secondary)]">
+      <div className="border border-dashed border-[var(--border-default)] p-4 text-center text-sm text-[var(--text-secondary)]">
         No mode usage data yet
       </div>
     );
@@ -286,7 +308,7 @@ function ModePieChart({ modeCounts }: { modeCounts: Record<string, number> }) {
     .join(",")})`;
 
   return (
-    <div className="journal-card journal-scribble p-4">
+    <div className="p-4">
       <p className="mb-3 text-xs uppercase tracking-wide text-[var(--text-secondary)]">Messages per mode</p>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -317,7 +339,7 @@ function ModePieChart({ modeCounts }: { modeCounts: Record<string, number> }) {
 function QuizTrendChart({ trend }: { trend: EnhancedAnalytics["quizTrend"] }) {
   if (trend.length === 0) {
     return (
-      <div className="journal-card border-dashed p-4 text-center text-sm text-[var(--text-secondary)]">
+      <div className="border border-dashed border-[var(--border-default)] p-4 text-center text-sm text-[var(--text-secondary)]">
         No quiz trend data yet
       </div>
     );
@@ -332,7 +354,7 @@ function QuizTrendChart({ trend }: { trend: EnhancedAnalytics["quizTrend"] }) {
   const latest = trend[trend.length - 1];
 
   return (
-    <div className="journal-card journal-scribble p-4">
+    <div className="p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
         <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Quiz performance trend</p>
         <p className="text-xs text-[var(--text-secondary)]">
@@ -340,23 +362,21 @@ function QuizTrendChart({ trend }: { trend: EnhancedAnalytics["quizTrend"] }) {
         </p>
       </div>
 
-      <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
-        <svg viewBox="0 0 100 100" className="h-40 w-full" preserveAspectRatio="none" aria-label="Quiz score trend">
-          <line x1="0" y1="100" x2="100" y2="100" stroke="var(--border-default)" strokeWidth="1" />
-          <line x1="0" y1="0" x2="0" y2="100" stroke="var(--border-default)" strokeWidth="1" />
-          <polyline
-            points={polyline}
-            fill="none"
-            stroke="var(--accent-cyan)"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          {points.map((point) => (
-            <circle key={`${point.day}-${point.x}`} cx={point.x} cy={point.y} r="1.7" fill="var(--accent-cyan)" />
-          ))}
-        </svg>
-      </div>
+      <svg viewBox="0 0 100 100" className="h-40 w-full" preserveAspectRatio="none" aria-label="Quiz score trend">
+        <line x1="0" y1="100" x2="100" y2="100" stroke="var(--border-default)" strokeWidth="1" />
+        <line x1="0" y1="0" x2="0" y2="100" stroke="var(--border-default)" strokeWidth="1" />
+        <polyline
+          points={polyline}
+          fill="none"
+          stroke="var(--accent-cyan)"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        {points.map((point) => (
+          <circle key={`${point.day}-${point.x}`} cx={point.x} cy={point.y} r="1.7" fill="var(--accent-cyan)" />
+        ))}
+      </svg>
 
       <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-[var(--text-secondary)] sm:grid-cols-4">
         {trend.slice(-4).map((item) => (
@@ -386,22 +406,22 @@ function ProductivityInsights({
       : "Short sessions dominate. Try running one full Pomodoro for deeper retention.";
 
   return (
-    <div className="journal-card p-4">
+    <div className="p-4">
       <p className="mb-3 text-xs uppercase tracking-wide text-[var(--text-secondary)]">Productivity insights</p>
-      <div className="overflow-hidden rounded-lg border border-[var(--border-default)]">
-        <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-xs">
+      <div className="space-y-1">
+        <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-[var(--border-default)] px-1 py-2 text-xs">
           <span className="text-[var(--text-secondary)]">Messages / session</span>
           <span className="font-semibold text-[var(--text-primary)]">{productivity.messagesPerSession}</span>
         </div>
-        <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-[var(--border-default)] px-3 py-2 text-xs">
+        <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-[var(--border-default)] px-1 py-2 text-xs">
           <span className="text-[var(--text-secondary)]">Topic depth</span>
           <span className="font-semibold text-[var(--text-primary)]">{productivity.topicDepth}</span>
         </div>
-        <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-xs">
+        <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-[var(--border-default)] px-1 py-2 text-xs">
           <span className="text-[var(--text-secondary)]">Estimated sessions</span>
           <span className="font-semibold text-[var(--text-primary)]">{productivity.estimatedSessions}</span>
         </div>
-        <div className="grid grid-cols-[1fr_auto] gap-3 px-3 py-2 text-xs">
+        <div className="grid grid-cols-[1fr_auto] gap-3 px-1 py-2 text-xs">
           <span className="text-[var(--text-secondary)]">Avg study / active day</span>
           <span className="font-semibold text-[var(--text-primary)]">{formatDurationFromSeconds(avgStudyPerDay)}</span>
         </div>
@@ -449,41 +469,18 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
     <div className="space-y-6">
       <div data-tour="analytics-stats">
         <h2 className="journal-heading mb-3 text-xl font-semibold">Your Study Stats</h2>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-          <StatsCard
-            icon={Activity}
-            label="Study streak"
-            value={`${streak} day${streak !== 1 ? "s" : ""}`}
-            color="#10b981"
-          />
-          <StatsCard
-            icon={MessageSquare}
-            label="Total messages"
-            value={student.totalMessages}
-            subtitle={`${student.totalSessions} sessions`}
-            color="#3b82f6"
-          />
-          <StatsCard
-            icon={BookOpen}
-            label="Topics explored"
-            value={student.uniqueTopicCount}
-            color="#8b5cf6"
-          />
-          <StatsCard
+        <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2 xl:grid-cols-3">
+          <StatInline icon={Activity} label="Study streak" value={`${streak} day${streak !== 1 ? "s" : ""}`} />
+          <StatInline icon={MessageSquare} label="Total messages" value={student.totalMessages} subtitle={`${student.totalSessions} sessions`} />
+          <StatInline icon={BookOpen} label="Topics explored" value={student.uniqueTopicCount} />
+          <StatInline
             icon={Trophy}
             label="Avg quiz score"
             value={student.avgScore !== null ? `${student.avgScore}%` : "-"}
             subtitle={student.avgScore !== null ? "across all quizzes" : "No quizzes yet"}
-            color="#f59e0b"
           />
-          <StatsCard
-            icon={Clock3}
-            label="Avg study/day"
-            value={`${averageDailyStudyMinutes}m`}
-            subtitle="timers + message estimate"
-            color="#0ea5e9"
-          />
-          <StatsCard
+          <StatInline icon={Clock3} label="Avg study/day" value={`${averageDailyStudyMinutes}m`} subtitle="timers + message estimate" />
+          <StatInline
             icon={Brain}
             label="Preferred model"
             value={formatModelName(studentSignals.preferredModel)}
@@ -492,7 +489,6 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
                 ? `${studentSignals.preferredModelCount} routed responses`
                 : "No routed responses yet"
             }
-            color="#ef4444"
           />
         </div>
       </div>
@@ -513,9 +509,9 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
       <TopicCloud topics={student.topics} />
 
       {isTeacher && classData.length > 0 && (
-        <div className="mt-8">
+        <div className="mt-8 border-t border-[var(--border-default)] pt-6">
           <h2 className="journal-heading mb-3 text-xl font-semibold">Class Overview</h2>
-          <div className="journal-card overflow-hidden">
+          <div>
             <div className="grid divide-y divide-[var(--border-default)] text-sm sm:grid-cols-2 sm:divide-y-0 sm:divide-x">
               <div className="px-4 py-3">
                 <p className="text-xs uppercase tracking-[0.08em] text-[var(--text-secondary)]">Active students</p>
@@ -546,7 +542,7 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
         </div>
       )}
 
-      <div className="journal-card p-3 text-xs text-[var(--text-secondary)]">
+      <div className="p-2 text-xs text-[var(--text-secondary)]">
         Most active study window: <span className="font-medium text-[var(--text-primary)]">{formatHour(topHour)} UTC</span>
       </div>
     </div>

@@ -50,7 +50,7 @@ const FIRST_PROMPT_TEXT = "Help me build a focused 7-day study plan for my curre
 
 const TOUR_STEPS: GuidedTourStep[] = [
   {
-    selector: '[data-tour="sidebar"]',
+    selector: '[data-tour="sidebar-pages"]',
     title: "Sidebar",
     description: "Navigate pages, find recent chats, and jump back into prior sessions quickly.",
     position: "right",
@@ -153,6 +153,10 @@ export function ChatLayout() {
     const lastAssistant = [...chat.messages].reverse().find((item) => item.role === "assistant");
     return lastAssistant?.modelUsed ?? chat.lastAutoResult?.modelUsed;
   }, [chat.lastAutoResult?.modelUsed, chat.messages]);
+  const lastResponseAt = useMemo(() => {
+    const lastAssistant = [...chat.messages].reverse().find((item) => item.role === "assistant");
+    return lastAssistant?.createdAt;
+  }, [chat.messages]);
   const latestRouteTrace = useMemo(() => {
     const lastAssistant = [...chat.messages].reverse().find((item) => item.role === "assistant" && item.routeTrace);
     return lastAssistant?.routeTrace;
@@ -185,6 +189,17 @@ export function ChatLayout() {
     }
     previousPanelViewRef.current = panelActiveView;
   }, [chat.sending, panelActiveView]);
+
+  useEffect(() => {
+    const onPanelClosed = (event: Event) => {
+      const detail = (event as CustomEvent<{ view?: string }>).detail;
+      if (detail?.view === "orchestration" && chat.sending) {
+        orchestrationDismissedForStreamRef.current = true;
+      }
+    };
+    window.addEventListener("ai-school:panel-closed", onPanelClosed);
+    return () => window.removeEventListener("ai-school:panel-closed", onPanelClosed);
+  }, [chat.sending]);
   const regenModels = useMemo(
     () =>
       chat.models.slice(0, 5).map((model) => ({
@@ -387,7 +402,7 @@ export function ChatLayout() {
 
       <aside
         data-tour="sidebar"
-        className={`hidden transition-all duration-300 md:block ${
+        className={`hidden md:block ${
           chat.sidebarOpen ? "w-[320px]" : "w-[76px]"
         }`}
       >
@@ -419,12 +434,13 @@ export function ChatLayout() {
         <ChatHeader
           title={chat.selectedChat?.title ?? "New chat"}
           agentLabel={chat.selectedAgent ? `${chat.selectedAgent.avatarEmoji} ${chat.selectedAgent.name}` : undefined}
-          lastModelUsed={lastModelUsed}
+          lastResponseAt={lastResponseAt}
           sending={chat.sending}
           messageCount={chat.messages.length}
           compacting={chat.compactingConversation}
           onStop={chat.stopGeneration}
           onCompact={() => void chat.compactConversation()}
+          onCompactWithDepth={(keepLatestMessages) => void chat.compactConversation(keepLatestMessages)}
           onToggleMobileSidebar={() => chat.setMobileSidebarOpen(true)}
           onOpenSettings={() => openPanel("settings")}
           onNewChat={() => chat.startNewChat(chat.selectedAgentId)}

@@ -233,7 +233,7 @@ export function ChatMessages({
     const lower = error.toLowerCase();
 
     if (lower.includes("monthly limit") || lower.includes("no_free_model_available")) {
-      return "You've reached your monthly usage tier. Budget-safe models are still available.";
+      return "Current usage guardrails are active. Guardrail-safe models are still available.";
     }
     if (lower.includes("429") || lower.includes("rate")) {
       return "The model is busy. Backup models were attempted automatically.";

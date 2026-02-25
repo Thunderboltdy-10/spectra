@@ -141,7 +141,7 @@ export default function SchoolBrandingPage() {
     <AppShell>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-4" data-tour="branding-header">
           <div>
             <div className="mb-1 flex items-center gap-2">
               <Link href="/admin/school" className="flex items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition">
@@ -164,7 +164,7 @@ export default function SchoolBrandingPage() {
           {/* Settings Panel */}
           <div className="space-y-5">
             {/* Logo Upload */}
-            <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[var(--shadow-card)]">
+            <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[var(--shadow-card)]" data-tour="branding-logo">
               <h2 className="mb-4 text-sm font-semibold text-[var(--text-primary)]">School Logo</h2>
               <div
                 ref={dropRef}
@@ -221,7 +221,7 @@ export default function SchoolBrandingPage() {
             </div>
 
             {/* Colors */}
-            <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[var(--shadow-card)]">
+            <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[var(--shadow-card)]" data-tour="branding-colors">
               <h2 className="mb-4 text-sm font-semibold text-[var(--text-primary)]">Brand Colors</h2>
               <div className="space-y-4">
                 <div>
@@ -277,7 +277,7 @@ export default function SchoolBrandingPage() {
           </div>
 
           {/* Live Preview */}
-          <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[var(--shadow-card)]">
+          <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[var(--shadow-card)]" data-tour="branding-preview">
             <h2 className="mb-5 text-sm font-semibold text-[var(--text-primary)]">Live Preview</h2>
 
             {/* Sidebar preview */}

@@ -12,7 +12,7 @@ type StatsCardProps = {
 
 export function StatsCard({ icon: Icon, label, value, subtitle, color }: StatsCardProps) {
   return (
-    <div className="journal-card p-4">
+    <div className="p-3">
       <div className="mb-2 flex items-center gap-2">
         <span
           className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--radius-input)] border border-[var(--border-default)] text-[var(--text-primary)]"

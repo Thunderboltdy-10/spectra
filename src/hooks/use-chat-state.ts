@@ -1808,14 +1808,26 @@ export function useChatState() {
     await refreshPersonalResources();
   }
 
-  async function compactConversation() {
-    if (!selectedChatId || sending || compactingConversation) return;
+  async function compactConversation(keepLatestMessages?: number) {
+    if (!selectedChatId) {
+      toast.info("Start a chat before running compaction.");
+      return;
+    }
+    if (sending) {
+      toast.info("Wait for the current response to finish before compacting.");
+      return;
+    }
+    if (compactingConversation) return;
     setCompactingConversation(true);
     try {
       const response = await fetch(`/api/chats/${selectedChatId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify(
+          typeof keepLatestMessages === "number" && Number.isFinite(keepLatestMessages)
+            ? { keepLatestMessages: Math.max(2, Math.min(20, Math.round(keepLatestMessages))) }
+            : {},
+        ),
       });
       if (!response.ok) {
         throw new Error(await response.text());

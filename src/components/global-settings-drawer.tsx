@@ -25,7 +25,7 @@ export function GlobalSettingsDrawer() {
     <div className="fixed inset-0 z-[95]">
       <button
         type="button"
-        className="absolute inset-0 bg-black/35"
+        className="absolute inset-0 bg-transparent"
         aria-label="Close settings"
         onClick={() => setOpen(false)}
       />
@@ -72,17 +72,9 @@ export function GlobalSettingsDrawer() {
                   Open chat controls
                 </Button>
               )}
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => window.dispatchEvent(new Event("ai-school:open-cookie-settings"))}
-              >
-                Cookie settings
-              </Button>
             </div>
             <p className="mt-2 text-sm text-[var(--text-secondary)]">
-              Open this drawer from any page with the settings button or command palette.
+              Open this drawer from any page with the settings button or command palette. Cookie controls are available in the command palette.
             </p>
           </section>
         </div>

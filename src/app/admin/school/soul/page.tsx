@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   BookOpen,
@@ -144,6 +145,7 @@ const STARTER_TEMPLATES: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 export default function SchoolSoulPage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [seeding, setSeeding] = useState(false);
@@ -178,10 +180,6 @@ export default function SchoolSoulPage() {
 
   async function runTest(query: string) {
     if (!query.trim()) return;
-    if (!embeddingsConfigured) {
-      toast.error("Preview is unavailable until OPENROUTER_API_KEY is configured.");
-      return;
-    }
     setTesting(true);
     try {
       const response = await fetch(`/api/admin/soul?preview=${encodeURIComponent(query)}`);
@@ -299,10 +297,6 @@ export default function SchoolSoulPage() {
   }
 
   async function publishSoul() {
-    if (!embeddingsConfigured) {
-      toast.error("Publishing is disabled until OPENROUTER_API_KEY is configured.");
-      return;
-    }
     setPublishing(true);
     try {
       const response = await fetch("/api/admin/soul", { method: "PATCH" });
@@ -324,7 +318,7 @@ export default function SchoolSoulPage() {
     <AppShell>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-4" data-tour="soul-header">
           <div>
             <div className="mb-1 flex items-center gap-2">
               <div
@@ -341,13 +335,25 @@ export default function SchoolSoulPage() {
             </p>
             {!embeddingsConfigured ? (
               <p className="mt-2 rounded-lg border border-[color-mix(in_oklab,var(--warning)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_10%,transparent)] px-2.5 py-1.5 text-xs text-[var(--warning)]">
-                Publishing and preview require <code>OPENROUTER_API_KEY</code>. Configure the key in your environment,
-                then reload this page.
+                <code>OPENROUTER_API_KEY</code> is missing, so SOUL uses lexical fallback (no embeddings). Publish and
+                preview still work.
               </p>
             ) : null}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                if (window.history.length > 1) {
+                  router.back();
+                } else {
+                  router.push("/admin/school");
+                }
+              }}
+            >
+              Go back
+            </Button>
             <Button
               variant="secondary"
               onClick={() =>
@@ -379,7 +385,7 @@ export default function SchoolSoulPage() {
             </Button>
             <Button
               onClick={() => void publishSoul()}
-              disabled={publishing || loading || !embeddingsConfigured}
+              disabled={publishing || loading}
               className="cursor-pointer gap-1.5"
               style={{ background: "var(--gradient-brand)" }}
             >
@@ -390,7 +396,7 @@ export default function SchoolSoulPage() {
         </div>
 
         {/* Section Nav Pills */}
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2" data-tour="soul-sections">
           {SECTIONS.map((item) => {
             const hasContent = docs.some((d) => d.section === item.section && d.content.trim());
             const isActive = activeSection === item.section;
@@ -420,7 +426,7 @@ export default function SchoolSoulPage() {
         {/* Main grid */}
         <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
           {/* Left: Editor */}
-          <div className="space-y-4">
+          <div className="space-y-4" data-tour="soul-editor">
             {/* Section info card */}
             <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5">
               <div className="mb-4 flex items-start gap-3">
@@ -487,7 +493,7 @@ export default function SchoolSoulPage() {
           {/* Right: Test panel + Version history */}
           <div className="space-y-4">
             {/* Test SOUL panel */}
-            <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5">
+            <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5" data-tour="soul-test-panel">
               <div className="mb-3 flex items-center gap-2">
                 <FlaskConical className="h-4 w-4 text-[var(--accent-cyan)]" />
                 <h2 className="text-sm font-semibold text-[var(--text-primary)]">
@@ -515,7 +521,7 @@ export default function SchoolSoulPage() {
                   <Button
                     size="sm"
                     onClick={() => void runTest(testQuery)}
-                    disabled={testing || !testQuery.trim() || !embeddingsConfigured}
+                    disabled={testing || !testQuery.trim()}
                     className="cursor-pointer flex-shrink-0 gap-1"
                   >
                     {testing ? (
@@ -629,7 +635,7 @@ export default function SchoolSoulPage() {
               </p>
               <Button
                 onClick={() => void publishSoul()}
-                disabled={publishing || loading || docs.length === 0 || !embeddingsConfigured}
+                disabled={publishing || loading || docs.length === 0}
                 className="w-full cursor-pointer gap-1.5"
                 style={{ background: "var(--gradient-brand)" }}
               >

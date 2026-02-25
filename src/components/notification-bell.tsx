@@ -157,15 +157,26 @@ export function NotificationBell() {
           ) : (
             <div className="space-y-1.5">
               {notifications.map((notification) => (
-                <button
+                <div
                   key={notification._id}
-                  type="button"
+                  role="button"
+                  tabIndex={0}
                   className={`w-full rounded-xl border px-3 py-2 text-left transition ${
                     notification.read
                       ? "border-[var(--border-default)] bg-[var(--bg-elevated)]"
                       : "border-[color-mix(in_oklab,var(--accent-cyan)_30%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-elevated))]"
                   }`}
                   onClick={() => {
+                    if (!notification.read) {
+                      void markRead(notification._id);
+                    }
+                    if (notification.actionUrl) {
+                      window.location.href = notification.actionUrl;
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
                     if (!notification.read) {
                       void markRead(notification._id);
                     }
@@ -214,7 +225,7 @@ export function NotificationBell() {
                   <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
                     {formatDistanceToNow(notification.createdAt, { addSuffix: true })}
                   </p>
-                </button>
+                </div>
               ))}
             </div>
           )}

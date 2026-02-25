@@ -27,6 +27,49 @@ function chunkText(value: string, size = 750) {
   return out;
 }
 
+function tokenize(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((token) => token.length >= 3)
+    .slice(0, 24);
+}
+
+function buildLexicalGuidance(query: string, docs: SoulDocRow[], limit = 8) {
+  const queryTokens = tokenize(query);
+  const scored = docs.flatMap((doc) =>
+    chunkText(doc.content, 420)
+      .slice(0, 10)
+      .map((piece, index) => {
+        const haystack = `${doc.title} ${doc.section} ${piece}`.toLowerCase();
+        const score = queryTokens.length === 0
+          ? 1
+          : queryTokens.reduce((sum, token) => sum + (haystack.includes(token) ? 1 : 0), 0) / queryTokens.length;
+        return {
+          score,
+          index,
+          piece,
+          docTitle: doc.title,
+        };
+      }),
+  );
+
+  const selected = scored
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .filter((row) => row.score > 0)
+    .slice(0, Math.min(10, Math.max(4, limit)));
+
+  if (selected.length === 0) {
+    return docs
+      .flatMap((doc) => chunkText(doc.content, 420).slice(0, 1).map((piece) => ({ docTitle: doc.title, piece })))
+      .slice(0, Math.min(10, Math.max(4, limit)))
+      .map((row) => `- [${row.docTitle}] ${row.piece.slice(0, 220)}`);
+  }
+
+  return selected.map((row) => `- [${row.docTitle}] ${row.piece.slice(0, 220)}`);
+}
+
 async function embeddingFor(text: string) {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error("OPENROUTER_API_KEY missing");
@@ -137,6 +180,25 @@ export const replaceDocChunks = internalMutation({
   },
 });
 
+export const markDocsPublishedWithoutEmbeddings = internalMutation({
+  args: {
+    orgId: v.id("orgs"),
+    docIds: v.array(v.id("orgSoulDocs")),
+    publishedAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    for (const docId of args.docIds) {
+      const row = await ctx.db.get(docId);
+      if (!row || row.orgId !== args.orgId) continue;
+      await ctx.db.patch(docId, {
+        publishedAt: args.publishedAt,
+        updatedAt: args.publishedAt,
+      });
+    }
+    return { ok: true };
+  },
+});
+
 export const listSoulDocs = query({
   args: {
     actorClerkId: v.string(),
@@ -218,6 +280,15 @@ export const publishSoul: ReturnType<typeof action> = action({
     })) as SoulDocRow[];
 
     const now = Date.now();
+    if (!process.env.OPENROUTER_API_KEY) {
+      await ctx.runMutation(internal.soul.markDocsPublishedWithoutEmbeddings, {
+        orgId: actor.orgId,
+        docIds: docs.map((doc) => doc._id),
+        publishedAt: now,
+      });
+      return { ok: true, chunkCount: 0, fallback: "lexical" };
+    }
+
     let chunkCount = 0;
     for (const doc of docs) {
       if (doc.orgId !== actor.orgId) {
@@ -226,8 +297,12 @@ export const publishSoul: ReturnType<typeof action> = action({
       const pieces = chunkText(doc.content).slice(0, 24);
       const embedded: Array<{ text: string; embedding: number[] }> = [];
       for (const piece of pieces) {
-        const embedding = await embeddingFor(piece);
-        embedded.push({ text: piece, embedding });
+        try {
+          const embedding = await embeddingFor(piece);
+          embedded.push({ text: piece, embedding });
+        } catch {
+          // Skip failed chunk embeddings and keep publishing the rest.
+        }
       }
 
       await ctx.runMutation(internal.soul.replaceDocChunks, {
@@ -254,20 +329,38 @@ export const retrieveSoulGuidance: ReturnType<typeof action> = action({
       actorClerkId: args.actorClerkId,
     });
 
-    const vector = await embeddingFor(args.query);
-    const hits = await ctx.vectorSearch("orgSoulChunks", "by_embedding", {
-      vector,
-      limit: Math.min(16, Math.max(4, args.limit ?? 8)),
-      filter: (q) => q.eq("orgId", actor.orgId),
-    });
+    const docs = (await ctx.runQuery(internal.soul.listDocsForOrg, {
+      orgId: actor.orgId,
+    })) as SoulDocRow[];
 
-    const ids = hits.map((hit) => hit._id);
-    const rows = await ctx.runQuery(internal.soul.getChunksByIds, {
-      ids,
-    });
+    if (!process.env.OPENROUTER_API_KEY) {
+      return {
+        bullets: buildLexicalGuidance(args.query, docs, args.limit ?? 8),
+      };
+    }
+
+    try {
+      const vector = await embeddingFor(args.query);
+      const hits = await ctx.vectorSearch("orgSoulChunks", "by_embedding", {
+        vector,
+        limit: Math.min(16, Math.max(4, args.limit ?? 8)),
+        filter: (q) => q.eq("orgId", actor.orgId),
+      });
+
+      const ids = hits.map((hit) => hit._id);
+      const rows = await ctx.runQuery(internal.soul.getChunksByIds, {
+        ids,
+      });
+      const bullets = rows.slice(0, 10).map((row) => `- ${row.text.slice(0, 220)}`);
+      if (bullets.length > 0) {
+        return { bullets };
+      }
+    } catch {
+      // Fall through to lexical guidance.
+    }
 
     return {
-      bullets: rows.slice(0, 10).map((row) => `- ${row.text.slice(0, 220)}`),
+      bullets: buildLexicalGuidance(args.query, docs, args.limit ?? 8),
     };
   },
 });

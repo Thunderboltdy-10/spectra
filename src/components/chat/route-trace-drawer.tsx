@@ -60,7 +60,7 @@ function CandidateBar({ score }: { score?: number }) {
 
 export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps) {
   const compact = useCompactSheet(1024);
-  const { docked, isOverlay, panelWidth } = useRightPanelDock({ id: "route-trace-drawer", open, compact, maxWidthPx: 576 });
+  const { docked, panelWidth } = useRightPanelDock({ id: "route-trace-drawer", open, compact, maxWidthPx: 576 });
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -81,7 +81,7 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
       {!docked ? (
         <button
           type="button"
-          className={`absolute inset-0 cursor-pointer transition ${isOverlay ? "bg-black/45 backdrop-blur-none md:backdrop-blur-sm" : "bg-transparent"}`}
+          className={`absolute inset-0 cursor-pointer transition bg-transparent`}
           onClick={onClose}
           aria-label="Close route trace"
         />

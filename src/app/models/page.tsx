@@ -152,9 +152,9 @@ function blockedByTier(model: ExplorerModel, tier: SpendingTier) {
 
 function blockedReason(model: ExplorerModel, tier: SpendingTier) {
   if (!blockedByTier(model, tier)) return null;
-  if (tier === "expensive_blocked") return "Blocked while budget guard is active";
-  if (tier === "cheap_only") return "Limited to low-cost models until budget recovers";
-  return "Budget limit reached, only budget-safe models are allowed";
+  if (tier === "expensive_blocked") return "Temporarily blocked by current usage guardrails";
+  if (tier === "cheap_only") return "Limited to low-cost models until guardrails relax";
+  return "Only guardrail-safe models are available right now";
 }
 
 function computeCapabilities(model: Pick<ExplorerModel, "capabilities" | "tags" | "modelId">): CapabilityScores {
@@ -204,13 +204,6 @@ function scoreModel(model: ExplorerModel, tier: SpendingTier) {
   return score;
 }
 
-function tierLabel(tier: SpendingTier) {
-  if (tier === "free_only") return "Budget only";
-  if (tier === "cheap_only") return "Cheap only";
-  if (tier === "expensive_blocked") return "Guarded";
-  return "Normal";
-}
-
 function ModelCard({
   model,
   tier,
@@ -237,7 +230,7 @@ function ModelCard({
         </span>
       ) : null}
       <div className="mb-3 flex items-start gap-2.5">
-        <ProviderLogo provider={model.provider} modelId={model.modelId} />
+        <ProviderLogo provider={model.provider} modelId={model.modelId} size={22} className="h-11 w-11" />
         <div className="min-w-0">
           <p className="truncate text-[15px] font-semibold text-[var(--text-primary)]">{sanitizeName(model.name || model.modelId)}</p>
           <p className="truncate text-xs text-[var(--text-secondary)]">{model.provider}</p>
@@ -290,12 +283,11 @@ export default function ModelsPage() {
   const [liveModels, setLiveModels] = useState<LiveModel[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [tier, setTier] = useState<SpendingTier>("normal");
+  const tier: SpendingTier = "normal";
   const [providerSearch, setProviderSearch] = useState("");
   const [modelSearch, setModelSearch] = useState("");
   const [selectedProviders, setSelectedProviders] = useState<string[]>([]);
   const [sortMode, setSortMode] = useState<SortMode>("recommended");
-  const [rightPanelView, setRightPanelView] = useState<"providers" | "leaderboard">("providers");
   const [showRestricted, setShowRestricted] = useState(false);
   const [visibleCount, setVisibleCount] = useState(18);
   const [leaderboardEntries, setLeaderboardEntries] = useState<LeaderboardEntry[]>([]);
@@ -323,10 +315,7 @@ export default function ModelsPage() {
         setMostUsed(catalogPayload.mostUsed ?? []);
 
         if (bootstrapRes.ok) {
-          const bootstrap = (await bootstrapRes.json()) as { userSpending?: { tier?: SpendingTier } };
-          if (bootstrap.userSpending?.tier) {
-            setTier(bootstrap.userSpending.tier);
-          }
+          await bootstrapRes.json();
         }
 
         if (liveRes.ok) {
@@ -342,7 +331,6 @@ export default function ModelsPage() {
   }, []);
 
   useEffect(() => {
-    if (rightPanelView !== "leaderboard") return;
     setLeaderboardLoading(true);
     void (async () => {
       try {
@@ -356,7 +344,7 @@ export default function ModelsPage() {
         setLeaderboardLoading(false);
       }
     })();
-  }, [rightPanelView]);
+  }, []);
 
   const models = useMemo(() => {
     const usageMap = new Map(mostUsed.map((model) => [model.modelId, model.usageCount]));
@@ -507,17 +495,14 @@ export default function ModelsPage() {
   }
 
   return (
-    <AppShell>
+    <AppShell fullBleed contentClassName="2xl:px-14">
       <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 sm:p-6" data-tour="models-header">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="text-center sm:text-left">
             <h1 className="font-display text-4xl tracking-tight">Model Atlas</h1>
             <p className="mt-1 max-w-2xl text-sm text-[var(--text-secondary)]">
-              Compare providers, isolate available models first, and keep budget constraints visible.
+              Compare providers, keep model discovery fast, and switch to chat with one click.
             </p>
-          </div>
-          <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-xs text-[var(--text-secondary)]">
-            Budget profile: <span className="font-semibold text-[var(--text-primary)]">{tierLabel(tier)}</span>
           </div>
         </div>
 
@@ -528,7 +513,7 @@ export default function ModelsPage() {
               value={modelSearch}
               onChange={(event) => setModelSearch(event.target.value)}
               placeholder="Search models"
-              className="h-10 w-full pl-10 text-sm"
+              className="h-10 w-full pl-10 text-sm focus-visible:border-[var(--border-default)] focus-visible:ring-0"
               data-tour="models-search-models"
             />
           </div>
@@ -538,12 +523,12 @@ export default function ModelsPage() {
               value={providerSearch}
               onChange={(event) => setProviderSearch(event.target.value)}
               placeholder="Search providers"
-              className="h-10 w-full pl-10 text-sm"
+              className="h-10 w-full pl-10 text-sm focus-visible:border-[var(--border-default)] focus-visible:ring-0"
             />
           </div>
           <div className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-xs text-[var(--text-secondary)]">
             <SlidersHorizontal className="h-3.5 w-3.5" />
-            Tier from usage
+            Semantic model search
           </div>
         </div>
 
@@ -573,7 +558,7 @@ export default function ModelsPage() {
         </div>
       </section>
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(380px,0.85fr)]">
         <div className="space-y-6">
           {featured.length > 0 ? (
             <section>
@@ -621,7 +606,7 @@ export default function ModelsPage() {
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <h3 className="text-base font-semibold text-[var(--text-primary)]">Temporarily restricted</h3>
-                    <p className="text-xs text-[var(--text-secondary)]">Unavailable under the current spending tier.</p>
+                    <p className="text-xs text-[var(--text-secondary)]">Unavailable under current guardrails.</p>
                   </div>
                   <Button type="button" variant="ghost" size="sm" onClick={() => setShowRestricted((prev) => !prev)}>
                     {showRestricted ? "Hide restricted" : `Show restricted (${restrictedModels.length})`}
@@ -656,70 +641,48 @@ export default function ModelsPage() {
 
         <aside
           data-tour="models-provider-panel"
-          className={`${rightPanelSurfaceClassName("rounded-2xl p-4")} xl:sticky xl:top-6 xl:max-h-[82vh] xl:overflow-y-auto`}
+          className={`${rightPanelSurfaceClassName("rounded-2xl p-4")} xl:sticky xl:top-6 xl:max-h-[84vh] xl:overflow-y-auto`}
         >
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-[var(--text-primary)]">Right Panel</h2>
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-[var(--text-primary)]">Provider Filters</h2>
             <p className="text-xs text-[var(--text-secondary)]">{visibleProviders.length} providers</p>
           </div>
 
-          <div className="mb-3 grid grid-cols-2 gap-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-1">
-            <button
-              type="button"
-              onClick={() => setRightPanelView("providers")}
-              className={`rounded-lg px-2 py-1.5 text-xs transition ${
-                rightPanelView === "providers"
-                  ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]"
-                  : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-              }`}
-            >
-              Providers
-            </button>
-            <button
-              type="button"
-              onClick={() => setRightPanelView("leaderboard")}
-              className={`rounded-lg px-2 py-1.5 text-xs transition ${
-                rightPanelView === "leaderboard"
-                  ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]"
-                  : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-              }`}
-            >
-              Leaderboard
-            </button>
+          <div className="max-h-[44vh] space-y-2 overflow-y-auto pr-1">
+            {visibleProviders.map((provider) => {
+              const selected = selectedProviders.includes(provider.name);
+              return (
+                <button
+                  key={provider.name}
+                  type="button"
+                  onClick={() => {
+                    toggleProvider(provider.name);
+                  }}
+                  className={`flex w-full items-center gap-2 rounded-xl border p-2 text-left transition ${
+                    selected
+                      ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,var(--bg-primary))]"
+                      : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
+                  }`}
+                >
+                  <ProviderLogo provider={provider.name} size={22} className="h-10 w-10" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-medium text-[var(--text-primary)]">{provider.name}</p>
+                    <p className="text-[10px] text-[var(--text-secondary)]">{provider.count} models</p>
+                  </div>
+                  <span className={`inline-flex h-4 w-4 items-center justify-center rounded-full border text-[10px] ${selected ? "border-[var(--accent-cyan)] text-[var(--accent-cyan)]" : "border-[var(--border-default)] text-[var(--text-secondary)]"}`}>
+                    {selected ? <Check className="h-3 w-3" /> : null}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
-          {rightPanelView === "providers" ? (
-            <div className="space-y-2">
-              {visibleProviders.map((provider) => {
-                const selected = selectedProviders.includes(provider.name);
-                return (
-                  <button
-                    key={provider.name}
-                    type="button"
-                    onClick={() => {
-                      toggleProvider(provider.name);
-                      setRightPanelView("leaderboard");
-                    }}
-                    className={`flex w-full items-center gap-2 rounded-xl border p-2 text-left transition ${
-                      selected
-                        ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,var(--bg-primary))]"
-                        : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
-                    }`}
-                  >
-                    <ProviderLogo provider={provider.name} size={16} className="h-8 w-8" />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs font-medium text-[var(--text-primary)]">{provider.name}</p>
-                      <p className="text-[10px] text-[var(--text-secondary)]">{provider.count} models</p>
-                    </div>
-                    <span className={`inline-flex h-4 w-4 items-center justify-center rounded-full border text-[10px] ${selected ? "border-[var(--accent-cyan)] text-[var(--accent-cyan)]" : "border-[var(--border-default)] text-[var(--text-secondary)]"}`}>
-                      {selected ? <Check className="h-3 w-3" /> : null}
-                    </span>
-                  </button>
-                );
-              })}
+          <div className="mt-5 border-t border-[var(--border-default)] pt-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Live Leaderboard</h3>
+              <span className="text-[10px] text-[var(--text-secondary)]">Top 20</span>
             </div>
-          ) : (
-            <div className="space-y-2">
+            <div className="max-h-[30vh] space-y-2 overflow-y-auto pr-1">
               {leaderboardLoading ? (
                 Array.from({ length: 5 }).map((_, index) => (
                   <div key={index} className="h-14 animate-pulse rounded-xl bg-[var(--bg-secondary)]" />
@@ -745,7 +708,7 @@ export default function ModelsPage() {
                 ))
               )}
             </div>
-          )}
+          </div>
         </aside>
       </div>
     </AppShell>

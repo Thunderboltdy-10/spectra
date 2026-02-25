@@ -300,13 +300,10 @@ export function ChatComposer(props: ChatComposerProps) {
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
   const [providerFilter, setProviderFilter] = useState("all");
-  const [composerCompact, setComposerCompact] = useState(false);
   const [modeTransitioning, setModeTransitioning] = useState(false);
   const [agentTransitioning, setAgentTransitioning] = useState(false);
-  const [controlsTransitioning, setControlsTransitioning] = useState(false);
   const lastModeRef = useRef(mode);
   const lastAgentIdRef = useRef(selectedAgentId);
-  const lastCompactRef = useRef(composerCompact);
   const modeConfig = getModeConfig(mode);
   const selectedModel = useMemo(
     () => models.find((item) => item.modelId === manualModel),
@@ -419,15 +416,6 @@ export function ChatComposer(props: ChatComposerProps) {
     return isResearchLikeDraft(message);
   }, [message, mode, onModeChange]);
   useEffect(() => {
-    try {
-      const persisted = window.localStorage.getItem("ai-school-controls-collapsed");
-      setComposerCompact(persisted === "1");
-    } catch {
-      setComposerCompact(false);
-    }
-  }, []);
-
-  useEffect(() => {
     if (lastModeRef.current !== mode) {
       setModeTransitioning(true);
       const timer = window.setTimeout(() => setModeTransitioning(false), 340);
@@ -446,16 +434,6 @@ export function ChatComposer(props: ChatComposerProps) {
     }
     lastAgentIdRef.current = selectedAgentId;
   }, [selectedAgentId]);
-
-  useEffect(() => {
-    if (lastCompactRef.current !== composerCompact) {
-      setControlsTransitioning(true);
-      const timer = window.setTimeout(() => setControlsTransitioning(false), 320);
-      lastCompactRef.current = composerCompact;
-      return () => window.clearTimeout(timer);
-    }
-    lastCompactRef.current = composerCompact;
-  }, [composerCompact]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -599,18 +577,6 @@ export function ChatComposer(props: ChatComposerProps) {
       return;
     }
     speech.start();
-  }
-
-  function toggleComposerCompact() {
-    setComposerCompact((prev) => {
-      const next = !prev;
-      try {
-        window.localStorage.setItem("ai-school-controls-collapsed", next ? "1" : "0");
-      } catch {
-        // Ignore storage errors.
-      }
-      return next;
-    });
   }
 
   function renderStatus(status: FileStatus, warning?: string) {
@@ -834,7 +800,7 @@ export function ChatComposer(props: ChatComposerProps) {
                           value={modelSearch}
                           onChange={(event) => setModelSearch(event.target.value)}
                           placeholder="Search models..."
-                          className="h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] pl-8 pr-2 text-sm"
+                          className="h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] pl-8 pr-2 text-sm focus-visible:border-[var(--border-default)] focus-visible:outline-none focus-visible:ring-0"
                         />
                       </div>
                     </div>
@@ -1032,19 +998,9 @@ export function ChatComposer(props: ChatComposerProps) {
             </div>
 
             <div className="flex items-center gap-1.5">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="h-8 rounded-full px-3 text-xs"
-                onClick={toggleComposerCompact}
-                title={composerCompact ? "Show automation controls" : "Hide automation controls"}
-              >
-                {composerCompact ? "Show Controls" : "Hide Controls"}
-              </Button>
               <div
                 data-tour="auto-controls"
-                className={`hidden flex-wrap items-center gap-1.5 transition-all duration-200 sm:flex ${composerCompact ? "pointer-events-none w-0 overflow-hidden opacity-0" : "w-auto opacity-100"} ${controlsTransitioning ? "animate-subtle-pulse" : ""}`}
+                className="hidden flex-wrap items-center gap-1.5 transition-all duration-200 sm:flex"
               >
                 <SettingPill
                   label="Enhance"
@@ -1093,7 +1049,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 </label>
               </div>
 
-              <div className={`transition-all duration-200 sm:hidden ${composerCompact ? "hidden" : ""}`}>
+              <div className="transition-all duration-200 sm:hidden">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button type="button" variant="secondary" size="icon" className="h-8 w-8 rounded-full" aria-label="More controls">
@@ -1156,9 +1112,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 placeholder="Ask anything. For best results, include your context and goal."
                 data-tour="composer"
                 aria-label="Message input"
-                className={`max-h-[220px] w-full resize-none bg-transparent px-2 py-1 text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] outline-none ${
-                  composerCompact ? "min-h-[56px]" : "min-h-[70px]"
-                }`}
+                className="max-h-[220px] min-h-[70px] w-full resize-none bg-transparent px-2 py-1 text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] outline-none"
                 onKeyDown={handleKeyDown}
               />
               {speech.isListening ? (

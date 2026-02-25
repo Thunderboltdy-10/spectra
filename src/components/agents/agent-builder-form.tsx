@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, ChevronLeft, Loader2, MessageSquareText, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { defaultAvatarIconForCategory } from "@/components/agents/agent-avatar";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
 type BuilderStep =
@@ -129,6 +130,7 @@ function readableStepTitle(step: BuilderStep) {
 }
 
 export function AgentBuilderForm({ onSubmit, onCancelHref = "/agents" }: AgentBuilderFormProps) {
+  const [builderMode, setBuilderMode] = useState<"guided" | "manual">("guided");
   const [answers, setAnswers] = useState<Answers>({
     goal: "",
     audience: "Users",
@@ -145,6 +147,13 @@ export function AgentBuilderForm({ onSubmit, onCancelHref = "/agents" }: AgentBu
   const [freeText, setFreeText] = useState("");
   const [generated, setGenerated] = useState<GeneratedAgent | null>(null);
   const [editedSystemPrompt, setEditedSystemPrompt] = useState("");
+  const [manualValues, setManualValues] = useState({
+    name: "",
+    description: "",
+    category: "General",
+    preferredMode: "general",
+    systemPrompt: "",
+  });
   const [generating, setGenerating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -209,6 +218,31 @@ export function AgentBuilderForm({ onSubmit, onCancelHref = "/agents" }: AgentBu
     }
   }
 
+  function valueForStep(step: BuilderStep) {
+    if (step === "goal") return answers.goal;
+    if (step === "ib_focus") return answers.ibFocus;
+    if (step === "boundaries") return answers.boundaries;
+    if (step === "context") return answers.context;
+    if (step === "expertise") return answers.customExpertise;
+    return "";
+  }
+
+  useEffect(() => {
+    if (currentStep === "review") return;
+    const needsTextEntry =
+      currentStep === "goal" ||
+      currentStep === "ib_focus" ||
+      currentStep === "boundaries" ||
+      currentStep === "context" ||
+      currentStep === "expertise";
+    if (!needsTextEntry) {
+      setFreeText("");
+      return;
+    }
+    setFreeText(valueForStep(currentStep));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStep]);
+
   function persistCurrentStep() {
     const clean = freeText.trim();
     if (currentStep === "goal") {
@@ -245,8 +279,8 @@ export function AgentBuilderForm({ onSubmit, onCancelHref = "/agents" }: AgentBu
         toast.error("Select at least one expertise area or type your own.");
         return false;
       }
-      if (clean.length > 0) {
-        setAnswers((prev) => ({ ...prev, customExpertise: [prev.customExpertise, clean].filter(Boolean).join(", ") }));
+      if (clean.length > 0 && clean !== answers.customExpertise.trim()) {
+        setAnswers((prev) => ({ ...prev, customExpertise: clean }));
       }
       return true;
     }
@@ -255,13 +289,11 @@ export function AgentBuilderForm({ onSubmit, onCancelHref = "/agents" }: AgentBu
 
   function goNext() {
     if (!atReview && !persistCurrentStep()) return;
-    setFreeText("");
     setStepIndex((prev) => Math.min(prev + 1, steps.length - 1));
   }
 
   function goBack() {
     setStepIndex((prev) => Math.max(0, prev - 1));
-    setFreeText("");
   }
 
   function toggleExpertise(value: string) {
@@ -334,8 +366,127 @@ export function AgentBuilderForm({ onSubmit, onCancelHref = "/agents" }: AgentBu
     }
   }
 
+  async function createManualAgent() {
+    const name = manualValues.name.trim();
+    const description = manualValues.description.trim();
+    const systemPrompt = manualValues.systemPrompt.trim();
+    if (name.length < 3) {
+      toast.error("Name must be at least 3 characters.");
+      return;
+    }
+    if (description.length < 12) {
+      toast.error("Add a clearer description.");
+      return;
+    }
+    if (systemPrompt.length < 80) {
+      toast.error("Manual system prompt must be at least 80 characters.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await onSubmit({
+        name,
+        description,
+        category: manualValues.category.trim() || "General",
+        systemPrompt,
+        avatarEmoji: "🧠",
+        avatarIcon: defaultAvatarIconForCategory(manualValues.category.trim() || "General"),
+        visibility: "public",
+        preferredMode: manualValues.preferredMode,
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save agent");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <div className="space-y-5">
+      <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-primary)] p-4">
+        <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Build mode</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant={builderMode === "guided" ? "default" : "secondary"}
+            size="sm"
+            onClick={() => setBuilderMode("guided")}
+          >
+            Guided Builder (Recommended)
+          </Button>
+          <Button
+            type="button"
+            variant={builderMode === "manual" ? "default" : "secondary"}
+            size="sm"
+            onClick={() => setBuilderMode("manual")}
+          >
+            Manual system prompt
+          </Button>
+        </div>
+        {builderMode === "manual" ? (
+          <p className="mt-2 text-xs text-[var(--text-secondary)]">
+            Manual mode skips guidance and expects a complete prompt design.
+          </p>
+        ) : (
+          <p className="mt-2 text-xs text-[var(--text-secondary)]">
+            Guided mode asks adaptive questions and generates a structured prompt draft.
+          </p>
+        )}
+      </div>
+
+      {builderMode === "manual" ? (
+        <div className="space-y-3 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="space-y-1">
+              <span className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Name</span>
+              <Input
+                value={manualValues.name}
+                onChange={(event) => setManualValues((prev) => ({ ...prev, name: event.target.value }))}
+                placeholder="Agent name"
+                className="focus-visible:border-[var(--border-default)] focus-visible:ring-0"
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Category</span>
+              <Input
+                value={manualValues.category}
+                onChange={(event) => setManualValues((prev) => ({ ...prev, category: event.target.value }))}
+                placeholder="Category (e.g., IB Essay Coach)"
+                className="focus-visible:border-[var(--border-default)] focus-visible:ring-0"
+              />
+            </label>
+          </div>
+          <label className="space-y-1">
+            <span className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Description</span>
+            <Textarea
+              value={manualValues.description}
+              onChange={(event) => setManualValues((prev) => ({ ...prev, description: event.target.value }))}
+              className="min-h-[84px] max-h-[180px] resize-none overflow-y-auto"
+              placeholder="What this agent does and when it should be used."
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">System prompt</span>
+            <Textarea
+              value={manualValues.systemPrompt}
+              onChange={(event) => setManualValues((prev) => ({ ...prev, systemPrompt: event.target.value }))}
+              className="min-h-[220px] max-h-[520px] resize-y overflow-y-auto font-inherit leading-relaxed"
+              placeholder="Write a full system prompt with role, boundaries, behavior rules, and output format."
+            />
+          </label>
+          <div className="flex items-center justify-between border-t border-[var(--border-default)] pt-3">
+            <Button type="button" variant="ghost" asChild>
+              <a href={onCancelHref}>Cancel</a>
+            </Button>
+            <Button type="button" onClick={() => void createManualAgent()} disabled={submitting}>
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Create Agent
+            </Button>
+          </div>
+        </div>
+      ) : (
+      <>
       <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-primary)] p-4">
         <div className="mb-3 flex items-center justify-between gap-2">
           <p className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">
@@ -346,15 +497,24 @@ export function AgentBuilderForm({ onSubmit, onCancelHref = "/agents" }: AgentBu
             Step {Math.min(stepIndex + 1, steps.length)} / {steps.length}
           </span>
         </div>
+        <p className="mb-3 text-xs text-[var(--text-secondary)]">
+          Answer one question at a time. The builder uses your answers in the background and then generates a full system prompt draft for review.
+        </p>
 
         <div className="space-y-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
           <Bubble role="assistant" text={questionForStep(currentStep)} />
-          {answeredPairs.map((pair) => (
-            <div key={pair.step} className="space-y-1">
-              <Bubble role="assistant" text={pair.question} />
-              <Bubble role="user" text={pair.answer} />
+          {currentStep !== "goal" && answeredPairs.length > 0 ? (
+            <div className="pt-1">
+              <p className="mb-1 text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">Captured so far</p>
+              <div className="flex flex-wrap gap-1.5">
+                {answeredPairs.slice(0, 6).map((pair) => (
+                  <span key={pair.step} className="rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]">
+                    {readableStepTitle(pair.step)}
+                  </span>
+                ))}
+              </div>
             </div>
-          ))}
+          ) : null}
         </div>
 
         {!atReview ? (
@@ -474,6 +634,8 @@ export function AgentBuilderForm({ onSubmit, onCancelHref = "/agents" }: AgentBu
           </Button>
         ) : null}
       </div>
+      </>
+      )}
     </div>
   );
 }

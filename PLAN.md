@@ -320,3 +320,116 @@ If any of these risk delaying B01–B40, skip them.
 - [ ] Evidence exists for every bullet under `docs/evidence/`
 - [ ] Manual QA walkthrough is written
 - [ ] `RELEASE_NOTES.md` exists and is concise
+
+---
+
+## 8) Latest QA Delta (2026-02-25) — Must be completed
+
+This section tracks follow-up issues reported after the first implementation pass. These are additional acceptance checks for the same single PR.
+
+### 8.1 Immediate interaction fixes
+- [ ] Remove blue/default outlines from search inputs in chat, agent builder, and model/search surfaces; keep a deliberate non-blue accessible focus style.
+- [ ] Move persistent cookie settings entry out of intrusive floating placement; keep it reachable in a non-blocking location.
+- [ ] Remove broken "hide controls" entrypoint/UI until it can be restored safely.
+- [ ] Restore and deepen compaction behavior (not placeholder UI), including stable open/close and visible results.
+- [ ] Fix focus timer button wiring so it never opens feedback.
+- [ ] Ensure right panel can close, switch content, and reopen without stuck state.
+- [ ] Remove all background blur behavior when right panels open.
+
+### 8.2 Tours, utilities, and global controls
+- [ ] Tour works on every required page (not only chat), with valid on-screen targets.
+- [ ] Fix off-screen/unavailable tour targets by gating steps on visible elements.
+- [ ] Expand tour coverage, especially on agents and sidebar flows.
+- [ ] Keep notifications/tour/feedback/timer available globally without blocking core controls.
+- [ ] Replace intrusive bottom-right stack with a compact persistent global controls zone.
+- [ ] Fix notification bell markup error ("button cannot be a descendant of button").
+
+### 8.3 Agents creation and discovery
+- [ ] Add explicit option to provide manual system prompt in agent creation (available but not recommended).
+- [ ] Simplify conversational builder onboarding and sequence so users understand start-to-finish flow.
+- [ ] Make builder search input style consistent with the main search experience.
+- [ ] Add stronger search/filtering for agents with semantic/fuzzy behavior (similar spirit to models).
+
+### 8.4 Usage, models, and right-panel UX
+- [ ] Remove money spent label (`$0`/monthly money text) from usage display; keep progress-only semantics.
+- [ ] Fix usage progress computation so it no longer sticks at 0% when data exists.
+- [ ] Redesign model atlas layout for large screens so content is not compressed.
+- [ ] Show models and providers simultaneously in a clearer split layout.
+- [ ] Increase model provider icon prominence where currently too small.
+- [ ] Remove or relabel non-actionable "budget profile normal" / "tier" controls when users cannot change them.
+- [ ] Prevent provider click from unexpectedly switching to leaderboard.
+
+### 8.5 Analytics and admin restructuring
+- [ ] Redesign analytics with fewer card wrappers; charts/graphs should read as first-class page elements.
+- [ ] Rework "topics explored by type" presentation to match redesigned analytics language.
+- [ ] Organization settings defaults should be ON for new toggles unless explicitly disabled by user.
+- [ ] Remove daily token budget control.
+- [ ] Reorder admin sections for clarity; reduce oversized role-management block and expose usage context better.
+- [ ] Add role filtering/search where missing.
+
+### 8.6 SOUL, branding, and theme behavior
+- [ ] Add clear back navigation from School SOUL screens.
+- [ ] Replace raw SOUL publish error with actionable UI state/message and proper fallback.
+- [ ] Ensure accent color has visible effect across interface surfaces (not primary-only).
+- [ ] Extend branding-driven theming so changes are immediate and obvious.
+
+### 8.7 Sidebar/navigation behavior update
+- [ ] Remove page reordering capability.
+- [ ] Remove "more pages" divider behavior in all sidebar states.
+- [ ] Use fixed-width, scrollable page rail showing nearby pages around current location.
+- [ ] Remove disliked sidebar text animation behavior on collapse/expand.
+- [ ] Move sidebar toggle below school icon and increase school icon prominence.
+- [ ] Keep the surrounding-pages behavior natural when navigating deep pages (analytics/admin/super-admin/models/images context).
+
+### 8.8 Additional global UX requests
+- [ ] Add global command palette (kbar/Cmd+K) with cross-page actions and navigation.
+- [ ] Update conversation subheading metadata to "time ago" style instead of "model used".
+
+### 8.9 Execution protocol additions
+- [ ] Before each implementation batch, re-open this `PLAN.md` and confirm pending items.
+- [ ] After each compaction pass, re-open this `PLAN.md`, re-render pending scope, and continue.
+- [ ] After each major batch, run lint/build/tests and log pass/fail in checklist/release notes.
+
+## 9) Execution Log — 2026-02-25 (Pass 2)
+
+### Completed in this pass
+- [x] Search/focus style normalization:
+  - Removed blue/default-style focus rings from shared `Input` and `Textarea` components.
+  - Added explicit non-blue focus treatment to chat model search and command palette search.
+- [x] Cookie settings intrusion reduction:
+  - Removed cookie-settings shortcut from intrusive global settings drawer surface.
+  - Cookie settings remain accessible via command palette event.
+- [x] Compaction restoration/depth controls:
+  - Added in-depth compaction presets in chat header (`Compact now`, `Deep compact`, `Gentle compact`).
+  - `compactConversation()` now supports `keepLatestMessages` payload.
+- [x] Right panel stability hardening:
+  - Added panel close/open event dispatch in panel context.
+  - Added orchestration dismissal lock when user closes orchestration panel mid-stream.
+  - Increased dock width logic and guard behavior to reduce stuck/unstable panel behavior.
+- [x] Small-screen compaction/UI regression:
+  - Unified panel and settings drawer no longer open collapsed by default on compact layouts.
+- [x] Usage bar and wording cleanup:
+  - Removed budget-profile wording from sidebar/session usage labels.
+  - Added activity fallback signal (recent-chat based) so progress no longer appears stuck at 0 in no-cost telemetry paths.
+  - Reworded monthly tier error copy to guardrail language.
+- [x] Model Atlas redesign iteration:
+  - Upgraded to full-bleed layout for large screens.
+  - Increased provider icon prominence in model cards and provider panel.
+  - Reworked right panel to show providers and leaderboard simultaneously (no forced view swap).
+  - Removed spending-tier wording in visible model restrictions copy.
+- [x] Tour reliability/coverage:
+  - Improved guided-tour step skipping for missing/off-screen targets.
+  - Reordered base tour to utility-first targeting.
+  - Added additional tour steps for branding and super-admin feedback pages.
+  - Added `data-tour` anchors for branding + super-admin feedback surfaces.
+- [x] Agent builder clarity improvements:
+  - Improved guided builder onboarding copy.
+  - Reduced conversational clutter (single active question + captured-summary chips).
+  - Added step value hydration when revisiting text-entry steps.
+- [x] SOUL back-navigation behavior:
+  - Updated SOUL "Go back" to behave as actual navigation back (with safe fallback route).
+
+### Validation results for this pass
+- [x] `npm run lint` passed
+- [x] `npm test` passed
+- [x] `npm run build` passed

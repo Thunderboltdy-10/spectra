@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
-import { Bug, Loader2, MessageSquare, ShieldAlert, Sparkles, Upload, X, CircleHelp, Clock3 } from "lucide-react";
+import { Bug, Loader2, MessageSquare, ShieldAlert, Sparkles, Upload, X, CircleHelp, Timer } from "lucide-react";
 import { toast } from "sonner";
 import dynamic from "next/dynamic";
+import { NotificationBell } from "@/components/notification-bell";
 import { Button } from "@/components/ui/button";
 
 const StudyTimer = dynamic(
@@ -40,6 +41,7 @@ function formatFileSize(bytes: number) {
 
 export function GlobalUtilityDock() {
   const pathname = usePathname();
+  const isAuthRoute = pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up") || pathname.startsWith("/join");
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [timerOpen, setTimerOpen] = useState(false);
   const [category, setCategory] = useState<FeedbackCategory>("bug");
@@ -51,12 +53,25 @@ export function GlobalUtilityDock() {
     [],
   );
 
-  if (pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up") || pathname.startsWith("/join")) {
-    return null;
-  }
+  useEffect(() => {
+    const onOpenFeedback = () => {
+      setTimerOpen(false);
+      setFeedbackOpen(true);
+    };
+    const onOpenTimer = () => {
+      setFeedbackOpen(false);
+      setTimerOpen(true);
+    };
+    window.addEventListener("ai-school:open-feedback", onOpenFeedback);
+    window.addEventListener("ai-school:open-focus-timer", onOpenTimer);
+    return () => {
+      window.removeEventListener("ai-school:open-feedback", onOpenFeedback);
+      window.removeEventListener("ai-school:open-focus-timer", onOpenTimer);
+    };
+  }, []);
 
   const remaining = MAX_MESSAGE_LENGTH - message.length;
-  const floatingBottom = pathname === "/" ? "max(6rem, env(safe-area-inset-bottom) + 4.75rem)" : "max(1rem, env(safe-area-inset-bottom) + 0.75rem)";
+  const anchorTop = pathname === "/" ? "4.5rem" : "1rem";
 
   function resetFeedbackForm() {
     setCategory("bug");
@@ -130,43 +145,53 @@ export function GlobalUtilityDock() {
     }
   }
 
+  if (isAuthRoute) {
+    return null;
+  }
+
   return (
     <>
       <div
-        className="fixed right-4 z-[74] flex flex-col items-end gap-2 sm:right-5"
-        style={{ bottom: floatingBottom }}
-        aria-label="Utility actions"
+        className="fixed right-4 z-[74] flex items-center gap-2 rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1.5 shadow-[var(--shadow-soft)] sm:right-5"
+        style={{ top: anchorTop }}
+        aria-label="Global utility actions"
       >
+        <NotificationBell />
+
         <Button
           type="button"
           variant="secondary"
-          className="h-10 rounded-full px-3 shadow-[var(--shadow-soft)]"
-          onClick={() => setFeedbackOpen((prev) => !prev)}
-          data-tour="utility-feedback"
-          aria-label={feedbackOpen ? "Close feedback form" : "Open feedback form"}
-          title="Send feedback"
+          size="icon"
+          className="h-9 w-9 rounded-full"
+          onClick={() => {
+            setTimerOpen((prev) => !prev);
+            setFeedbackOpen(false);
+          }}
+          data-tour="utility-timer"
+          aria-label={timerOpen ? "Close focus timer" : "Open focus timer"}
+          title="Focus timer"
         >
-          <Clock3 className="mr-1.5 h-4 w-4" />
-          Focus Timer
+          <Timer className="h-4 w-4" />
         </Button>
 
         <Button
           type="button"
           variant="secondary"
-          className="h-10 rounded-full px-3 shadow-[var(--shadow-soft)]"
+          size="icon"
+          className="h-9 w-9 rounded-full"
           onClick={() => setFeedbackOpen((prev) => !prev)}
           data-tour="utility-feedback"
           aria-label={feedbackOpen ? "Close feedback form" : "Open feedback form"}
           title="Send feedback"
         >
-          <MessageSquare className="mr-1.5 h-4 w-4" />
-          Feedback
+          <MessageSquare className="h-4 w-4" />
         </Button>
 
         <Button
           type="button"
           variant="secondary"
-          className="h-10 rounded-full px-3 shadow-[var(--shadow-soft)]"
+          size="icon"
+          className="h-9 w-9 rounded-full"
           onClick={() => {
             window.dispatchEvent(new CustomEvent("ai-school:open-tour"));
           }}
@@ -174,15 +199,14 @@ export function GlobalUtilityDock() {
           aria-label="Open page tour"
           title="Take a guided tour"
         >
-          <CircleHelp className="mr-1.5 h-4 w-4" />
-          Tour
+          <CircleHelp className="h-4 w-4" />
         </Button>
       </div>
 
       {feedbackOpen ? (
         <aside
           className="fixed right-4 z-[78] w-[min(92vw,24rem)] rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)] sm:right-5"
-          style={{ bottom: `calc(${floatingBottom} + 4.25rem)` }}
+          style={{ top: `calc(${anchorTop} + 3.6rem)` }}
         >
           <div className="mb-3 flex items-center justify-between gap-2">
             <div>
@@ -288,7 +312,7 @@ export function GlobalUtilityDock() {
       {timerOpen ? (
         <div
           className="fixed right-4 z-[78] sm:right-5"
-          style={{ bottom: `calc(${floatingBottom} + 8.5rem)` }}
+          style={{ top: `calc(${anchorTop} + 3.6rem)` }}
         >
           <StudyTimer
             open={timerOpen}

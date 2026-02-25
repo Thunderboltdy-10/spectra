@@ -144,6 +144,11 @@ function toQuizDifficultyLabel(level: number): QuizDifficultyLabel {
   return "medium";
 }
 
+function featureEnabled(flag: boolean | undefined, defaultValue = true) {
+  if (flag === undefined) return defaultValue;
+  return flag;
+}
+
 function isQuizStructured(value: string) {
   return countQuizQuestions(value) >= 2;
 }
@@ -622,7 +627,7 @@ export async function runChatPipeline(request: NextRequest) {
       sources: [] as Array<{ url: string; title: string; domain: string }>,
     });
 
-  const soulPromise: Promise<{ bullets: string[] }> = orgSettings.org?.soulEnabled
+  const soulPromise: Promise<{ bullets: string[] }> = featureEnabled(orgSettings.org?.soulEnabled)
     ? convexAction("soul:retrieveSoulGuidance", {
         actorClerkId: actor.clerkId,
         query: auto.message,
@@ -640,7 +645,7 @@ export async function runChatPipeline(request: NextRequest) {
     level: number;
     label: QuizDifficultyLabel;
   }> =
-    effectiveMode === "quiz" && orgSettings.org?.adaptiveQuizEnabled
+    effectiveMode === "quiz" && featureEnabled(orgSettings.org?.adaptiveQuizEnabled)
       ? Promise.all([
           convexQuery("analytics:getQuizDifficultySignal", {
             actorClerkId: actor.clerkId,
@@ -720,7 +725,7 @@ export async function runChatPipeline(request: NextRequest) {
   const quizDifficultyLevel = clampQuizDifficultyLevel(quizAdaptive.level);
   const quizDifficultyLabel = quizAdaptive.label;
   const quizDifficultyAdjusted = quizAdaptive.level !== quizAdaptive.currentLevel;
-  if (effectiveMode === "quiz" && orgSettings.org?.adaptiveQuizEnabled) {
+  if (effectiveMode === "quiz" && featureEnabled(orgSettings.org?.adaptiveQuizEnabled)) {
     void convexMutation("analytics:setQuizDifficultySignal", {
       actorClerkId: actor.clerkId,
       difficulty: quizDifficultyLevel,
@@ -738,7 +743,7 @@ export async function runChatPipeline(request: NextRequest) {
   const previousAssistantModel = [...history]
     .reverse()
     .find((message) => message.role === "assistant" && message.modelUsed)?.modelUsed;
-  const agentTopModels = selectedAgent?._id && orgSettings.org?.agentModelBoostEnabled
+  const agentTopModels = selectedAgent?._id && featureEnabled(orgSettings.org?.agentModelBoostEnabled)
     ? ((await convexQuery("agents:getTopModelsForAgent", {
         actorClerkId: actor.clerkId,
         agentId: selectedAgent._id,
@@ -817,7 +822,7 @@ export async function runChatPipeline(request: NextRequest) {
   if (auto.searchEnabled) route.trace.toolchain.push("web_search");
   if (agentSuggestion) route.trace.toolchain.push("agent_suggestion");
   if (explainDepth) route.trace.toolchain.push("explain_depth_detection");
-  if (effectiveMode === "quiz" && orgSettings.org?.adaptiveQuizEnabled) {
+  if (effectiveMode === "quiz" && featureEnabled(orgSettings.org?.adaptiveQuizEnabled)) {
     route.trace.toolchain.push("adaptive_quiz");
     route.trace.toolchain.push(`quiz_difficulty_${quizDifficultyLabel}`);
     if (quizDifficultyAdjusted) {
@@ -966,7 +971,7 @@ export async function runChatPipeline(request: NextRequest) {
     effectiveMode === "research"
       ? auto.searchEnabled || retrieval.citations.length > 0 || auto.complexity !== "simple"
       : auto.searchEnabled ||
-        (Boolean(orgSettings.org?.orchestratorV2Enabled) &&
+        (featureEnabled(orgSettings.org?.orchestratorV2Enabled) &&
           shouldUseMultiAgent(auto.message, effectiveMode, auto.complexity))
     );
   if (multiAgentEnabled) {

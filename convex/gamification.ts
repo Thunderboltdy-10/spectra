@@ -564,19 +564,6 @@ async function hasUsedAllExplorerModes(
   return MODE_EXPLORER_TARGET_MODES.every((mode) => usedModes.has(mode));
 }
 
-async function countResearchSessionsWithSources(ctx: MutationCtx, userId: Doc<"users">["_id"]) {
-  const messages = await ctx.db
-    .query("messages")
-    .withIndex("by_user_created", (q) => q.eq("userId", userId))
-    .collect();
-
-  return messages.filter((message) =>
-    message.role === "assistant" &&
-    message.mode === "research" &&
-    message.citations.length > 0
-  ).length;
-}
-
 async function countFlashcardReviews(ctx: MutationCtx, userId: Doc<"users">["_id"]) {
   const progress = await ctx.db
     .query("flashcardProgress")
@@ -598,20 +585,6 @@ async function listUserMessages(ctx: MutationCtx, userId: Doc<"users">["_id"]) {
     .query("messages")
     .withIndex("by_user_created", (q) => q.eq("userId", userId))
     .collect();
-}
-
-async function countMessagesByMode(
-  ctx: MutationCtx,
-  userId: Doc<"users">["_id"],
-  mode: string,
-) {
-  const messages = await listUserMessages(ctx, userId);
-  return messages.filter((message) => message.role === "assistant" && message.mode === mode).length;
-}
-
-async function countUserMessageTurns(ctx: MutationCtx, userId: Doc<"users">["_id"]) {
-  const messages = await listUserMessages(ctx, userId);
-  return messages.filter((message) => message.role === "user").length;
 }
 
 async function countStudyTimerSeconds(ctx: MutationCtx, userId: Doc<"users">["_id"]) {
@@ -693,6 +666,10 @@ async function evaluateActivityAchievements(
   let tutorSessions: number | undefined;
   let imageResponses: number | undefined;
   let totalStudySeconds: number | undefined;
+  let userMessages: Array<Doc<"messages">> | undefined;
+
+  const hasAnyLockedAchievements = (...keys: Array<keyof typeof ACHIEVEMENTS>) =>
+    keys.some((key) => !existingTypes.has(ACHIEVEMENTS[key].type));
 
   const getPersonalResources = async () => {
     if (typeof personalResourceCount === "number") return personalResourceCount;
@@ -709,6 +686,12 @@ async function evaluateActivityAchievements(
     return quizResults;
   };
 
+  const getUserMessages = async () => {
+    if (userMessages) return userMessages;
+    userMessages = await listUserMessages(ctx, actor._id);
+    return userMessages;
+  };
+
   const getFlashcardReviews = async () => {
     if (typeof flashcardReviews === "number") return flashcardReviews;
     flashcardReviews = await countFlashcardReviews(ctx, actor._id);
@@ -717,25 +700,33 @@ async function evaluateActivityAchievements(
 
   const getResearchSessions = async () => {
     if (typeof researchSessionsWithSources === "number") return researchSessionsWithSources;
-    researchSessionsWithSources = await countResearchSessionsWithSources(ctx, actor._id);
+    const messages = await getUserMessages();
+    researchSessionsWithSources = messages.filter((message) =>
+      message.role === "assistant" &&
+      message.mode === "research" &&
+      message.citations.length > 0
+    ).length;
     return researchSessionsWithSources;
   };
 
   const getUserMessageTurns = async () => {
     if (typeof userMessageTurns === "number") return userMessageTurns;
-    userMessageTurns = await countUserMessageTurns(ctx, actor._id);
+    const messages = await getUserMessages();
+    userMessageTurns = messages.filter((message) => message.role === "user").length;
     return userMessageTurns;
   };
 
   const getTutorSessions = async () => {
     if (typeof tutorSessions === "number") return tutorSessions;
-    tutorSessions = await countMessagesByMode(ctx, actor._id, "tutor");
+    const messages = await getUserMessages();
+    tutorSessions = messages.filter((message) => message.role === "assistant" && message.mode === "tutor").length;
     return tutorSessions;
   };
 
   const getImageResponses = async () => {
     if (typeof imageResponses === "number") return imageResponses;
-    imageResponses = await countMessagesByMode(ctx, actor._id, "image");
+    const messages = await getUserMessages();
+    imageResponses = messages.filter((message) => message.role === "assistant" && message.mode === "image").length;
     return imageResponses;
   };
 
@@ -765,17 +756,23 @@ async function evaluateActivityAchievements(
     }
   }
 
-  const resources = await getPersonalResources();
-  if (resources >= 5 && !existingTypes.has(ACHIEVEMENTS.bookworm.type)) {
-    const bookworm = await maybeAwardAchievement(ctx, actor, existingTypes, "bookworm");
-    if (bookworm) unlocked.push(bookworm);
-  }
-  if (resources >= 15 && !existingTypes.has(ACHIEVEMENTS.resource_curator.type)) {
-    const curator = await maybeAwardAchievement(ctx, actor, existingTypes, "resource_curator");
-    if (curator) unlocked.push(curator);
+  const shouldCheckResourceAchievements = hasAnyLockedAchievements("bookworm", "resource_curator");
+  if (shouldCheckResourceAchievements) {
+    const resources = await getPersonalResources();
+    if (resources >= 5 && !existingTypes.has(ACHIEVEMENTS.bookworm.type)) {
+      const bookworm = await maybeAwardAchievement(ctx, actor, existingTypes, "bookworm");
+      if (bookworm) unlocked.push(bookworm);
+    }
+    if (resources >= 15 && !existingTypes.has(ACHIEVEMENTS.resource_curator.type)) {
+      const curator = await maybeAwardAchievement(ctx, actor, existingTypes, "resource_curator");
+      if (curator) unlocked.push(curator);
+    }
   }
 
-  if (modeUsed === "tutor" || activityType === "chat") {
+  const shouldCheckTutorAchievements = (
+    modeUsed === "tutor" || activityType === "chat"
+  ) && hasAnyLockedAchievements("first_tutor", "tutor_50", "tutor_200");
+  if (shouldCheckTutorAchievements) {
     const tutorCount = await getTutorSessions();
     if (tutorCount >= 1) {
       const firstTutor = await maybeAwardAchievement(ctx, actor, existingTypes, "first_tutor");
@@ -791,7 +788,10 @@ async function evaluateActivityAchievements(
     }
   }
 
-  if (modeUsed === "image" || activityType === "chat") {
+  const shouldCheckImageAchievements = (
+    modeUsed === "image" || activityType === "chat"
+  ) && hasAnyLockedAchievements("first_image", "image_10");
+  if (shouldCheckImageAchievements) {
     const imageCount = await getImageResponses();
     if (imageCount >= 1) {
       const firstImage = await maybeAwardAchievement(ctx, actor, existingTypes, "first_image");
@@ -803,7 +803,14 @@ async function evaluateActivityAchievements(
     }
   }
 
-  if (activityType === "chat") {
+  const shouldCheckChatAchievements = activityType === "chat" && hasAnyLockedAchievements(
+    "chat_50",
+    "chat_200",
+    "chat_500",
+    "speed_reader",
+    "marathon_learner",
+  );
+  if (shouldCheckChatAchievements) {
     const turns = await getUserMessageTurns();
     if (turns >= 50) {
       const chat50 = await maybeAwardAchievement(ctx, actor, existingTypes, "chat_50");
@@ -827,7 +834,19 @@ async function evaluateActivityAchievements(
     }
   }
 
-  if (activityType === "quiz" || modeUsed === "quiz") {
+  const shouldCheckQuizAchievements = (
+    activityType === "quiz" || modeUsed === "quiz"
+  ) && hasAnyLockedAchievements(
+    "first_quiz",
+    "quiz_master",
+    "quiz_50",
+    "quiz_100",
+    "quiz_250",
+    "quiz_perfect",
+    "quiz_streak_3",
+    "quiz_streak_7",
+  );
+  if (shouldCheckQuizAchievements) {
     const results = await getQuizResults();
     if (results.length >= 1) {
       const firstQuiz = await maybeAwardAchievement(ctx, actor, existingTypes, "first_quiz");
@@ -867,7 +886,10 @@ async function evaluateActivityAchievements(
     }
   }
 
-  if (activityType === "flashcard" || modeUsed === "flashcard") {
+  const shouldCheckFlashcardAchievements = (
+    activityType === "flashcard" || modeUsed === "flashcard"
+  ) && hasAnyLockedAchievements("first_flashcard", "flashcard_50", "flashcard_100", "flashcard_250");
+  if (shouldCheckFlashcardAchievements) {
     const reviews = await getFlashcardReviews();
     if (reviews >= 1) {
       const firstFlashcard = await maybeAwardAchievement(ctx, actor, existingTypes, "first_flashcard");
@@ -887,7 +909,10 @@ async function evaluateActivityAchievements(
     }
   }
 
-  if (activityType === "research" || modeUsed === "research") {
+  const shouldCheckResearchAchievements = (
+    activityType === "research" || modeUsed === "research"
+  ) && hasAnyLockedAchievements("first_research", "research_pro", "research_50", "research_100");
+  if (shouldCheckResearchAchievements) {
     const researchSessions = await getResearchSessions();
     if (researchSessions >= 1) {
       const firstResearch = await maybeAwardAchievement(ctx, actor, existingTypes, "first_research");
@@ -907,10 +932,12 @@ async function evaluateActivityAchievements(
     }
   }
 
-  const timerSeconds = await getTotalStudySeconds();
-  if (timerSeconds >= 5 * 60 * 60) {
-    const focus = await maybeAwardAchievement(ctx, actor, existingTypes, "focus_five_hours");
-    if (focus) unlocked.push(focus);
+  if (!existingTypes.has(ACHIEVEMENTS.focus_five_hours.type)) {
+    const timerSeconds = await getTotalStudySeconds();
+    if (timerSeconds >= 5 * 60 * 60) {
+      const focus = await maybeAwardAchievement(ctx, actor, existingTypes, "focus_five_hours");
+      if (focus) unlocked.push(focus);
+    }
   }
 
   const featurePrereqs = [
@@ -920,7 +947,7 @@ async function evaluateActivityAchievements(
     ACHIEVEMENTS.first_research.type,
   ];
   const hasFeaturePrereqs = featurePrereqs.every((type) => existingTypes.has(type));
-  if (hasFeaturePrereqs) {
+  if (hasFeaturePrereqs && !existingTypes.has(ACHIEVEMENTS.feature_explorer.type)) {
     const featureExplorer = await maybeAwardAchievement(ctx, actor, existingTypes, "feature_explorer");
     if (featureExplorer) unlocked.push(featureExplorer);
   }

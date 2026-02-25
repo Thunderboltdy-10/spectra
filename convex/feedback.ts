@@ -231,7 +231,6 @@ export const replyToFeedback = mutation({
           type: "feedback_responded",
           title: "You received a feedback response",
           body: args.adminReply.trim(),
-          actionUrl: "/super-admin/feedback",
           read: false,
           createdAt: Date.now(),
         });

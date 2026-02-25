@@ -179,7 +179,10 @@ export function GlobalUtilityDock() {
           variant="secondary"
           size="icon"
           className="h-9 w-9 rounded-full"
-          onClick={() => setFeedbackOpen((prev) => !prev)}
+          onClick={() => {
+            setFeedbackOpen((prev) => !prev);
+            setTimerOpen(false);
+          }}
           data-tour="utility-feedback"
           aria-label={feedbackOpen ? "Close feedback form" : "Open feedback form"}
           title="Send feedback"

@@ -15,6 +15,7 @@ import { ProviderLogo } from "@/components/provider-logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { rightPanelSurfaceClassName } from "@/components/ui/right-panel-surface";
+import { useSidebar } from "@/context/sidebar-context";
 import { fuzzyScore } from "@/lib/fuzzy-model-search";
 import { MODEL_COST_BLOCK_LIST } from "@/lib/model-config";
 
@@ -277,13 +278,14 @@ function ModelCard({
 
 export default function ModelsPage() {
   const router = useRouter();
+  const { userSpending } = useSidebar();
   const [catalogModels, setCatalogModels] = useState<CatalogModel[]>([]);
   const [featuredModels, setFeaturedModels] = useState<CatalogModel[]>([]);
   const [mostUsed, setMostUsed] = useState<MostUsedModel[]>([]);
   const [liveModels, setLiveModels] = useState<LiveModel[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const tier: SpendingTier = "normal";
+  const tier: SpendingTier = userSpending?.tier ?? "normal";
   const [providerSearch, setProviderSearch] = useState("");
   const [modelSearch, setModelSearch] = useState("");
   const [selectedProviders, setSelectedProviders] = useState<string[]>([]);

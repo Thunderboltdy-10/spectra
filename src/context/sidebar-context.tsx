@@ -206,6 +206,14 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   }, [pathname, refreshBootstrap]);
 
   useEffect(() => {
+    const onBrandingUpdated = () => {
+      void refreshBootstrap().catch(() => {});
+    };
+    window.addEventListener("ai-school:branding-updated", onBrandingUpdated);
+    return () => window.removeEventListener("ai-school:branding-updated", onBrandingUpdated);
+  }, [refreshBootstrap]);
+
+  useEffect(() => {
     try {
       const raw = window.localStorage.getItem(PINNED_KEY);
       if (!raw) return;

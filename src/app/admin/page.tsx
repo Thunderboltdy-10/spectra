@@ -13,7 +13,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { useSidebar } from "@/context/sidebar-context";
-import { cn } from "@/lib/utils";
 
 type UserRow = {
   _id: string;
@@ -40,7 +39,8 @@ export default function AdminPage() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [usage, setUsage] = useState<UsageRow[]>([]);
   const [verify, setVerify] = useState(false);
-  const [budget, setBudget] = useState("1500000");
+  const [roleSearch, setRoleSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState<"all" | "student" | "teacher" | "admin">("all");
   const [orchestratorV2Enabled, setOrchestratorV2Enabled] = useState(false);
   const [soulEnabled, setSoulEnabled] = useState(false);
   const [agentModelBoostEnabled, setAgentModelBoostEnabled] = useState(false);
@@ -83,12 +83,11 @@ export default function AdminPage() {
         : null,
     );
     setVerify(Boolean(bootstrap.orgSettings.org.verifyMarkerPassEnabled));
-    setBudget(String(bootstrap.orgSettings.org.tokenBudgetDaily));
-    setOrchestratorV2Enabled(Boolean(bootstrap.orgSettings.org.orchestratorV2Enabled));
-    setSoulEnabled(Boolean(bootstrap.orgSettings.org.soulEnabled));
-    setAgentModelBoostEnabled(Boolean(bootstrap.orgSettings.org.agentModelBoostEnabled));
-    setAdaptiveQuizEnabled(Boolean(bootstrap.orgSettings.org.adaptiveQuizEnabled));
-    setSpacedRepetitionEnabled(Boolean(bootstrap.orgSettings.org.spacedRepetitionEnabled));
+    setOrchestratorV2Enabled(bootstrap.orgSettings.org.orchestratorV2Enabled ?? true);
+    setSoulEnabled(bootstrap.orgSettings.org.soulEnabled ?? true);
+    setAgentModelBoostEnabled(bootstrap.orgSettings.org.agentModelBoostEnabled ?? true);
+    setAdaptiveQuizEnabled(bootstrap.orgSettings.org.adaptiveQuizEnabled ?? true);
+    setSpacedRepetitionEnabled(bootstrap.orgSettings.org.spacedRepetitionEnabled ?? true);
 
     const actorCanManageAdmin = bootstrap.actor.role === "admin" || Boolean(bootstrap.isSuperAdmin);
     if (!actorCanManageAdmin) {
@@ -129,6 +128,17 @@ export default function AdminPage() {
   }, [hasAdminAccess, sidebarLoading]);
 
   const usageSum = useMemo(() => usage.reduce((sum, row) => sum + row.totalTokens, 0), [usage]);
+  const filteredUsers = useMemo(() => {
+    const needle = roleSearch.trim().toLowerCase();
+    return users.filter((user) => {
+      if (roleFilter !== "all" && user.role !== roleFilter) return false;
+      if (!needle) return true;
+      return (
+        user.name.toLowerCase().includes(needle) ||
+        user.email.toLowerCase().includes(needle)
+      );
+    });
+  }, [roleFilter, roleSearch, users]);
 
   async function updateUserRole(targetUserId: string, nextRole: "student" | "teacher" | "admin") {
     const response = await fetch("/api/admin/users", {
@@ -149,7 +159,6 @@ export default function AdminPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         verifyMarkerPassEnabled: verify,
-        tokenBudgetDaily: Number(budget),
         orchestratorV2Enabled,
         soulEnabled,
         agentModelBoostEnabled,
@@ -191,47 +200,51 @@ export default function AdminPage() {
 
   return (
     <AppShell>
-      <div className="mb-5">
+      <div className="mb-5" data-tour="admin-header">
         <h1 className="text-2xl font-semibold tracking-tight">Admin Console</h1>
         <p className="text-sm text-ink-400">Control roles, quality checks, and spending limits for your school workspace.</p>
-        <div className="mt-3 inline-flex items-center rounded-xl border border-app-border bg-app-muted p-1">
-          {[
-            { href: "/admin", label: "Personal Admin" },
-            { href: "/admin/school", label: "School Admin" },
-          ].map((tab) => (
-            <Link
-              key={tab.href}
-              href={tab.href}
-              className={cn(
-                "rounded-lg px-3 py-1.5 text-xs transition",
-                tab.href === "/admin"
-                  ? "bg-app text-ink-100"
-                  : "text-ink-400 hover:text-ink-200",
-              )}
-            >
-              {tab.label}
-            </Link>
-          ))}
-        </div>
         <div className="mt-3 flex flex-wrap gap-2">
+          <Link href="/admin/school" className="inline-flex items-center rounded-md border border-app-border bg-app-muted px-3 py-1.5 text-sm">
+            School dashboard
+          </Link>
           <Link href="/admin/school/soul" className="inline-flex items-center rounded-md border border-app-border bg-app-muted px-3 py-1.5 text-sm">
             Open School Soul
           </Link>
-          <Link href="/admin/branding" className="inline-flex items-center rounded-md border border-app-border bg-app-muted px-3 py-1.5 text-sm">
+          <Link href="/admin/school/branding" className="inline-flex items-center rounded-md border border-app-border bg-app-muted px-3 py-1.5 text-sm">
             Open Branding
           </Link>
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]" data-tour="admin-controls">
         <Card>
           <CardHeader>
             <CardTitle className="inline-flex items-center gap-2">
               <Users2 className="h-4 w-4" /> Role Management
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2">
-            {users.map((user) => (
+          <CardContent className="max-h-[58vh] space-y-3 overflow-y-auto pr-1">
+            <div className="grid gap-2 md:grid-cols-[1fr_180px]">
+              <Input
+                value={roleSearch}
+                onChange={(event) => setRoleSearch(event.target.value)}
+                placeholder="Search by name or email"
+                className="focus-visible:border-[var(--border-default)] focus-visible:ring-0"
+              />
+              <Select value={roleFilter} onValueChange={(value) => setRoleFilter(value as "all" | "student" | "teacher" | "admin")}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All roles</SelectItem>
+                  <SelectItem value="student">Student</SelectItem>
+                  <SelectItem value="teacher">Teacher</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {filteredUsers.map((user) => (
               <div
                 key={user._id}
                 className="grid items-center gap-2 rounded-lg border border-app-border bg-app-muted p-2 md:grid-cols-[1fr_180px]"
@@ -255,10 +268,35 @@ export default function AdminPage() {
                 </Select>
               </div>
             ))}
+            {filteredUsers.length === 0 ? (
+              <p className="text-sm text-ink-500">No users match the current filters.</p>
+            ) : null}
           </CardContent>
         </Card>
 
         <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="inline-flex items-center gap-2">
+                <WalletCards className="h-4 w-4" /> Usage (14 days)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="rounded-md border border-app-border bg-app-muted p-2 text-sm">
+                Total: {usageSum.toLocaleString()} tokens
+              </div>
+              {usage.map((row) => (
+                <div key={row.day} className="rounded-md border border-app-border bg-app-muted p-2 text-sm">
+                  <div className="font-mono text-xs text-ink-500">{row.day}</div>
+                  <div>{row.totalTokens.toLocaleString()} total</div>
+                  <div className="text-xs text-ink-500">
+                    in: {row.inputTokens.toLocaleString()} / out: {row.outputTokens.toLocaleString()}
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>Organization Settings</CardTitle>
@@ -306,33 +344,7 @@ export default function AdminPage() {
                 </div>
                 <Switch checked={spacedRepetitionEnabled} onCheckedChange={setSpacedRepetitionEnabled} />
               </div>
-              <div>
-                <label className="mb-1 block text-xs uppercase tracking-wide text-ink-500">Daily token budget</label>
-                <Input value={budget} onChange={(event) => setBudget(event.target.value)} />
-              </div>
               <Button onClick={() => void saveSettings()}>Save settings</Button>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="inline-flex items-center gap-2">
-                <WalletCards className="h-4 w-4" /> Usage (14 days)
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div className="rounded-md border border-app-border bg-app-muted p-2 text-sm">
-                Total: {usageSum.toLocaleString()} tokens
-              </div>
-              {usage.map((row) => (
-                <div key={row.day} className="rounded-md border border-app-border bg-app-muted p-2 text-sm">
-                  <div className="font-mono text-xs text-ink-500">{row.day}</div>
-                  <div>{row.totalTokens.toLocaleString()} total</div>
-                  <div className="text-xs text-ink-500">
-                    in: {row.inputTokens.toLocaleString()} / out: {row.outputTokens.toLocaleString()}
-                  </div>
-                </div>
-              ))}
             </CardContent>
           </Card>
         </div>

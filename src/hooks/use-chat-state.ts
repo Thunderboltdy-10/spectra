@@ -1070,13 +1070,6 @@ export function useChatState() {
       streamChatIdRef.current = chatId;
       activeStreamsRef.current.add(chatId);
       setActiveStreamIds(prev => { const next = new Set(prev); next.add(chatId); return next; });
-      setChats((prev) =>
-        prev.map((chat) =>
-          chat._id === chatId && chat.title === "New chat"
-            ? { ...chat, title: text.slice(0, 60) }
-            : chat,
-        ),
-      );
       let uploadedResourceIds: string[] = [];
 
       const attachmentPreviews = await Promise.all(
@@ -1550,7 +1543,7 @@ export function useChatState() {
             ? {
                 ...chat,
                 updatedAt: Date.now(),
-                title: chat.title === "New chat" ? text.slice(0, 60) : chat.title,
+                title: chat.title,
                 mode: requestedMode,
                 agentId: selectedAgentId,
               }
@@ -1815,14 +1808,26 @@ export function useChatState() {
     await refreshPersonalResources();
   }
 
-  async function compactConversation() {
-    if (!selectedChatId || sending || compactingConversation) return;
+  async function compactConversation(keepLatestMessages?: number) {
+    if (!selectedChatId) {
+      toast.info("Start a chat before running compaction.");
+      return;
+    }
+    if (sending) {
+      toast.info("Wait for the current response to finish before compacting.");
+      return;
+    }
+    if (compactingConversation) return;
     setCompactingConversation(true);
     try {
       const response = await fetch(`/api/chats/${selectedChatId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify(
+          typeof keepLatestMessages === "number" && Number.isFinite(keepLatestMessages)
+            ? { keepLatestMessages: Math.max(2, Math.min(20, Math.round(keepLatestMessages))) }
+            : {},
+        ),
       });
       if (!response.ok) {
         throw new Error(await response.text());

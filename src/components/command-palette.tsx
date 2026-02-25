@@ -111,6 +111,30 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
         perform: () => window.dispatchEvent(new Event("ai-school:toggle-settings")),
       },
       {
+        id: "open-tour",
+        name: "Open page tour",
+        section: "Navigation",
+        perform: () => window.dispatchEvent(new Event("ai-school:open-tour")),
+      },
+      {
+        id: "open-feedback",
+        name: "Open feedback",
+        section: "Navigation",
+        perform: () => window.dispatchEvent(new Event("ai-school:open-feedback")),
+      },
+      {
+        id: "open-focus-timer",
+        name: "Open focus timer",
+        section: "Navigation",
+        perform: () => window.dispatchEvent(new Event("ai-school:open-focus-timer")),
+      },
+      {
+        id: "cookie-settings",
+        name: "Open cookie settings",
+        section: "Preferences",
+        perform: () => window.dispatchEvent(new Event("ai-school:open-cookie-settings")),
+      },
+      {
         id: "toggle-theme",
         name: "Toggle theme",
         section: "Preferences",
@@ -148,6 +172,24 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
               name: "Open admin",
               section: "Navigation",
               perform: () => router.push("/admin"),
+            },
+            {
+              id: "open-school-admin",
+              name: "Open school admin",
+              section: "Navigation",
+              perform: () => router.push("/admin/school"),
+            },
+            {
+              id: "open-school-soul",
+              name: "Open school SOUL",
+              section: "Navigation",
+              perform: () => router.push("/admin/school/soul"),
+            },
+            {
+              id: "open-school-branding",
+              name: "Open school branding",
+              section: "Navigation",
+              perform: () => router.push("/admin/school/branding"),
             },
           ]
         : []),
@@ -187,9 +229,9 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
       {children}
       <CommandPaletteHotkeys />
       <KBarPortal>
-        <KBarPositioner className="z-[100] bg-[var(--bg-overlay)] backdrop-blur-none md:backdrop-blur-sm">
+        <KBarPositioner className="z-[100] bg-[var(--bg-overlay)]">
           <KBarAnimator className="w-full max-w-xl rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-soft)]">
-            <KBarSearch className="h-11 w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)]" />
+            <KBarSearch className="h-11 w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)] focus-visible:border-[var(--border-default)] focus-visible:ring-0" />
             <div className="mt-2 max-h-[60vh] overflow-y-auto overscroll-contain pb-3">
               <CommandResults />
             </div>

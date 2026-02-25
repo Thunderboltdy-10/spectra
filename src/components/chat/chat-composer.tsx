@@ -300,7 +300,10 @@ export function ChatComposer(props: ChatComposerProps) {
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
   const [providerFilter, setProviderFilter] = useState("all");
-  const [composerCompact, setComposerCompact] = useState(false);
+  const [modeTransitioning, setModeTransitioning] = useState(false);
+  const [agentTransitioning, setAgentTransitioning] = useState(false);
+  const lastModeRef = useRef(mode);
+  const lastAgentIdRef = useRef(selectedAgentId);
   const modeConfig = getModeConfig(mode);
   const selectedModel = useMemo(
     () => models.find((item) => item.modelId === manualModel),
@@ -413,13 +416,24 @@ export function ChatComposer(props: ChatComposerProps) {
     return isResearchLikeDraft(message);
   }, [message, mode, onModeChange]);
   useEffect(() => {
-    try {
-      const persisted = window.localStorage.getItem("ai-school-composer-compact");
-      setComposerCompact(persisted === "1");
-    } catch {
-      setComposerCompact(false);
+    if (lastModeRef.current !== mode) {
+      setModeTransitioning(true);
+      const timer = window.setTimeout(() => setModeTransitioning(false), 340);
+      lastModeRef.current = mode;
+      return () => window.clearTimeout(timer);
     }
-  }, []);
+    lastModeRef.current = mode;
+  }, [mode]);
+
+  useEffect(() => {
+    if (lastAgentIdRef.current !== selectedAgentId) {
+      setAgentTransitioning(true);
+      const timer = window.setTimeout(() => setAgentTransitioning(false), 340);
+      lastAgentIdRef.current = selectedAgentId;
+      return () => window.clearTimeout(timer);
+    }
+    lastAgentIdRef.current = selectedAgentId;
+  }, [selectedAgentId]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -565,18 +579,6 @@ export function ChatComposer(props: ChatComposerProps) {
     speech.start();
   }
 
-  function toggleComposerCompact() {
-    setComposerCompact((prev) => {
-      const next = !prev;
-      try {
-        window.localStorage.setItem("ai-school-composer-compact", next ? "1" : "0");
-      } catch {
-        // Ignore storage errors.
-      }
-      return next;
-    });
-  }
-
   function renderStatus(status: FileStatus, warning?: string) {
     if (status === "uploading") {
       return (
@@ -714,7 +716,7 @@ export function ChatComposer(props: ChatComposerProps) {
                   onClick={() => setShowModeSelector((prev) => !prev)}
                   title={modeConfig.description}
                   data-tour="mode-selector"
-                  className={selectorTriggerClass}
+                  className={cn(selectorTriggerClass, modeTransitioning && "animate-subtle-pulse")}
                 >
                   <span className="inline-flex h-2.5 w-2.5 rounded-full" style={{ background: modeConfig.color }} />
                   <span>{modeConfig.label}</span>
@@ -722,7 +724,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 </button>
 
                 {showModeSelector && (
-                  <div className="absolute bottom-full left-0 z-20 mb-2 max-h-[320px] w-[min(92vw,22rem)] overflow-y-auto overscroll-contain rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[var(--shadow-soft)]">
+                  <div className="absolute bottom-full left-0 z-[72] mb-2 max-h-[320px] w-[min(92vw,22rem)] overflow-y-auto overscroll-contain rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[var(--shadow-soft)]">
                     {ALL_MODES.map((m) => {
                       const mc = getModeConfig(m.key);
                       const isActive = m.key === mode;
@@ -777,7 +779,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 </button>
 
                 {showModelSelector && (
-                  <div className="absolute bottom-full left-1/2 z-20 mb-2 max-h-[480px] w-[min(92vw,32rem)] -translate-x-1/2 overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-soft)]">
+                  <div className="absolute bottom-full left-1/2 z-[75] mb-2 max-h-[480px] w-[min(92vw,32rem)] -translate-x-[48%] overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-soft)]">
                     <div className="mb-2 flex items-center justify-between">
                       <p className="text-xs font-medium text-[var(--text-primary)]">Choose model</p>
                       <button
@@ -798,7 +800,7 @@ export function ChatComposer(props: ChatComposerProps) {
                           value={modelSearch}
                           onChange={(event) => setModelSearch(event.target.value)}
                           placeholder="Search models..."
-                          className="h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] pl-8 pr-2 text-sm"
+                          className="h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] pl-8 pr-2 text-sm focus-visible:border-[var(--border-default)] focus-visible:outline-none focus-visible:ring-0"
                         />
                       </div>
                     </div>
@@ -948,7 +950,7 @@ export function ChatComposer(props: ChatComposerProps) {
                   onClick={() => setShowAgentSelector((prev) => !prev)}
                   title="Attach an agent persona and resources to this chat"
                   data-tour="agent-selector"
-                  className={selectorTriggerClass}
+                  className={cn(selectorTriggerClass, agentTransitioning && "animate-subtle-pulse")}
                 >
                   <span>{selectedAgent?.avatarEmoji ?? "🧠"}</span>
                   <span className="max-w-[160px] truncate">{selectedAgent?.name ?? "No agent"}</span>
@@ -956,7 +958,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 </button>
 
                 {showAgentSelector && (
-                  <div className="absolute bottom-full left-0 z-20 mb-2 max-h-[360px] w-[min(92vw,22rem)] overflow-y-auto rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[var(--shadow-soft)]">
+                  <div className="absolute bottom-full left-0 z-[72] mb-2 max-h-[360px] w-[min(92vw,22rem)] overflow-y-auto rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[var(--shadow-soft)]">
                     <button
                       type="button"
                       onClick={() => {
@@ -996,16 +998,10 @@ export function ChatComposer(props: ChatComposerProps) {
             </div>
 
             <div className="flex items-center gap-1.5">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="h-8 rounded-full px-3 text-xs"
-                onClick={toggleComposerCompact}
+              <div
+                data-tour="auto-controls"
+                className="hidden flex-wrap items-center gap-1.5 transition-all duration-200 sm:flex"
               >
-                {composerCompact ? "Expand" : "Compact"}
-              </Button>
-              <div data-tour="auto-controls" className={`hidden flex-wrap items-center gap-1.5 sm:flex ${composerCompact ? "opacity-0 pointer-events-none w-0 overflow-hidden" : ""}`}>
                 <SettingPill
                   label="Enhance"
                   value={autoEnhancePrompt}
@@ -1053,7 +1049,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 </label>
               </div>
 
-              <div className={`sm:hidden ${composerCompact ? "hidden" : ""}`}>
+              <div className="transition-all duration-200 sm:hidden">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button type="button" variant="secondary" size="icon" className="h-8 w-8 rounded-full" aria-label="More controls">
@@ -1116,9 +1112,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 placeholder="Ask anything. For best results, include your context and goal."
                 data-tour="composer"
                 aria-label="Message input"
-                className={`max-h-[220px] w-full resize-none bg-transparent px-2 py-1 text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] outline-none ${
-                  composerCompact ? "min-h-[56px]" : "min-h-[70px]"
-                }`}
+                className="max-h-[220px] min-h-[70px] w-full resize-none bg-transparent px-2 py-1 text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] outline-none"
                 onKeyDown={handleKeyDown}
               />
               {speech.isListening ? (

@@ -24,7 +24,6 @@ export async function PATCH(request: NextRequest) {
 
     const body = (await request.json()) as {
       verifyMarkerPassEnabled?: boolean;
-      tokenBudgetDaily?: number;
       orchestratorV2Enabled?: boolean;
       soulEnabled?: boolean;
       agentModelBoostEnabled?: boolean;
@@ -35,7 +34,6 @@ export async function PATCH(request: NextRequest) {
     await convexMutation("admin:updateOrgSettings", {
       actorClerkId: actor.clerkId,
       verifyMarkerPassEnabled: body.verifyMarkerPassEnabled,
-      tokenBudgetDaily: body.tokenBudgetDaily,
       orchestratorV2Enabled: body.orchestratorV2Enabled,
       soulEnabled: body.soulEnabled,
       agentModelBoostEnabled: body.agentModelBoostEnabled,

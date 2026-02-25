@@ -5,6 +5,7 @@ import { Bot, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Settings2, X
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { rightPanelSurfaceClassName } from "@/components/ui/right-panel-surface";
 import { ChatModeSelector } from "@/components/chat/chat-mode-selector";
 import type { ActiveCollaborator } from "@/components/chat/collaborators-live";
 import { RichText } from "@/components/chat/rich-text";
@@ -120,24 +121,19 @@ function SettingsView({
   onDeleteResource,
 }: SettingsViewProps) {
   const [showManual, setShowManual] = useState(false);
-  const ratio = userSpending
-    ? Math.min(
-        Math.max(
-          typeof userSpending.budgetUsagePercent === "number"
-            ? userSpending.budgetUsagePercent / 100
-            : (userSpending.totalCostCents ?? 0) / Math.max(1, userSpending.hardLimitCents ?? 1),
-          0,
-        ),
-        1,
-      )
-    : 0;
-  const percentUsed = Math.max(0, Math.min(100, Math.round(ratio * 100)));
+  const ratio =
+    userSpending && typeof userSpending.budgetUsagePercent === "number" && userSpending.budgetUsagePercent > 0
+      ? Math.min(1, Math.max(0, userSpending.budgetUsagePercent / 100))
+      : null;
+  const percentUsed = typeof ratio === "number" ? Math.max(0, Math.min(100, Math.round(ratio * 100))) : null;
   const usageLabel =
-    percentUsed >= 80
+    percentUsed === null
+      ? "No activity yet"
+      : percentUsed >= 80
       ? "High activity"
       : percentUsed >= 40
         ? "Steady activity"
-        : percentUsed > 0
+      : percentUsed > 0
           ? "Getting started"
           : "No activity yet";
   const selectedModel = models.find((model) => model.modelId === manualModel);
@@ -291,18 +287,16 @@ function SettingsView({
 
       <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Usage indicator</h3>
+          <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Monthly activity</h3>
           <span className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">{usageLabel}</span>
         </div>
         <div className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
           <div
             className="h-full rounded-full bg-[var(--gradient-brand)]"
-            style={{ width: `${Math.max(0, ratio * 100)}%` }}
+            style={{ width: `${Math.max(0, (ratio ?? 0.16) * 100)}%` }}
           />
         </div>
-        <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
-          {percentUsed}% utilization
-        </p>
+        <p className="mt-1 text-[11px] text-[var(--text-secondary)]">{percentUsed === null ? "No tracked activity yet" : `${percentUsed}% utilization`}</p>
       </section>
     </div>
   );
@@ -752,7 +746,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
   const { activeView, panelData, closePanel } = usePanel();
   const compact = useCompactSheet(1024);
   const maxWidthPx = activeView === "settings" ? 400 : activeView === "quiz" ? 460 : 520;
-  const { docked, isOverlay, panelWidth } = useRightPanelDock({
+  const { docked, panelWidth } = useRightPanelDock({
     id: "unified-panel",
     open: !!activeView,
     compact,
@@ -761,12 +755,8 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
-    if (activeView) setCollapsed(compact);
-  }, [activeView, compact]);
-
-  useEffect(() => {
-    if (!compact) setCollapsed(false);
-  }, [compact]);
+    if (activeView) setCollapsed(false);
+  }, [activeView]);
 
   if (!activeView) return null;
 
@@ -788,18 +778,18 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
       {!docked ? (
         <button
           type="button"
-          className={`absolute inset-0 cursor-pointer transition ${isOverlay ? "bg-black/42 backdrop-blur-none md:backdrop-blur-sm" : "bg-transparent"}`}
+          className={`absolute inset-0 cursor-pointer transition bg-transparent`}
           onClick={closePanel}
           aria-label="Close panel"
         />
       ) : null}
 
       <aside
-        className={`right-panel-shell pointer-events-auto flex flex-col border-[color-mix(in_oklab,var(--border-default)_55%,transparent)] bg-[color-mix(in_oklab,var(--bg-primary)_94%,var(--bg-elevated))] p-4 ${
+        className={`right-panel-shell ${rightPanelSurfaceClassName()} pointer-events-auto flex flex-col p-4 ${
           docked ? "right-panel-shell--docked" : "right-panel-shell--sheet"
         } ${
           docked
-            ? "relative h-full w-full border-l"
+            ? "relative h-full w-full"
             : compact
               ? "absolute bottom-3 left-3 right-3 max-h-[78vh] rounded-2xl border"
               : "absolute inset-y-0 right-0 w-[92vw] border-l"

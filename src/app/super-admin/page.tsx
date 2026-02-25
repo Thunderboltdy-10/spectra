@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
@@ -132,6 +132,13 @@ export default function SuperAdminDashboard() {
   const [announcementBody, setAnnouncementBody] = useState("");
   const [announcementActionUrl, setAnnouncementActionUrl] = useState("");
   const [sendingAnnouncement, setSendingAnnouncement] = useState(false);
+  const knownEmails = useMemo(
+    () =>
+      Array.from(
+        new Set(admins.map((admin) => admin.email.trim()).filter((email) => email.includes("@"))),
+      ),
+    [admins],
+  );
 
   useEffect(() => {
     void (async () => {
@@ -369,11 +376,17 @@ export default function SuperAdminDashboard() {
                 <span className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Recipient email</span>
                 <input
                   type="email"
+                  list="super-admin-email-suggestions"
                   value={announcementEmail}
                   onChange={(event) => setAnnouncementEmail(event.target.value)}
                   placeholder="student@school.edu"
                   className="h-10 w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)] focus:ring-2 focus:ring-[color-mix(in_oklab,var(--accent-cyan)_32%,transparent)]"
                 />
+                <datalist id="super-admin-email-suggestions">
+                  {knownEmails.map((email) => (
+                    <option key={email} value={email} />
+                  ))}
+                </datalist>
               </label>
             ) : (
               <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5 text-xs text-[var(--text-secondary)]">

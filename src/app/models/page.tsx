@@ -8,14 +8,14 @@ import {
   Filter,
   Search,
   SlidersHorizontal,
-  Trophy,
 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/layout/app-shell";
 import { ProviderLogo } from "@/components/provider-logo";
-import { ModelLeaderboardDrawer } from "@/components/chat/model-leaderboard-drawer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { rightPanelSurfaceClassName } from "@/components/ui/right-panel-surface";
+import { useSidebar } from "@/context/sidebar-context";
 import { fuzzyScore } from "@/lib/fuzzy-model-search";
 import { MODEL_COST_BLOCK_LIST } from "@/lib/model-config";
 
@@ -76,6 +76,14 @@ type ProviderStat = {
   usageScore: number;
 };
 
+type LeaderboardEntry = {
+  modelId: string;
+  provider: string;
+  name: string;
+  totalTokens: number;
+  usageCount: number;
+};
+
 function sanitizeName(value: string) {
   return value
     .replace(/:free$/i, "")
@@ -83,6 +91,34 @@ function sanitizeName(value: string) {
     .replace(/\s*&\s*$/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function normalizeProviderName(provider: string) {
+  const clean = provider.trim();
+  if (!clean) return "Unknown";
+  const normalized = clean.toLowerCase();
+  if (normalized.includes("openai")) return "OpenAI";
+  if (normalized.includes("google") || normalized.includes("gemini")) return "Google";
+  if (normalized.includes("anthropic")) return "Anthropic";
+  if (normalized.includes("meta")) return "Meta";
+  if (normalized.includes("mistral")) return "Mistral";
+  if (normalized.includes("deepseek")) return "DeepSeek";
+  if (normalized.includes("perplexity")) return "Perplexity";
+  if (normalized.includes("x-ai") || normalized.includes("xai")) return "xAI";
+  if (normalized.includes("cohere")) return "Cohere";
+  if (normalized.includes("moonshot")) return "Moonshot";
+  if (normalized.includes("qwen")) return "Qwen";
+  if (normalized.includes("openrouter")) return "OpenRouter";
+  return clean
+    .split(/\s+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function formatTokens(value: number) {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return String(value);
 }
 
 function formatContext(value?: number) {
@@ -117,9 +153,9 @@ function blockedByTier(model: ExplorerModel, tier: SpendingTier) {
 
 function blockedReason(model: ExplorerModel, tier: SpendingTier) {
   if (!blockedByTier(model, tier)) return null;
-  if (tier === "expensive_blocked") return "Blocked while budget guard is active";
-  if (tier === "cheap_only") return "Limited to low-cost models until budget recovers";
-  return "Budget limit reached, only budget-safe models are allowed";
+  if (tier === "expensive_blocked") return "Temporarily blocked by current usage guardrails";
+  if (tier === "cheap_only") return "Limited to low-cost models until guardrails relax";
+  return "Only guardrail-safe models are available right now";
 }
 
 function computeCapabilities(model: Pick<ExplorerModel, "capabilities" | "tags" | "modelId">): CapabilityScores {
@@ -169,13 +205,6 @@ function scoreModel(model: ExplorerModel, tier: SpendingTier) {
   return score;
 }
 
-function tierLabel(tier: SpendingTier) {
-  if (tier === "free_only") return "Budget only";
-  if (tier === "cheap_only") return "Cheap only";
-  if (tier === "expensive_blocked") return "Guarded";
-  return "Normal";
-}
-
 function ModelCard({
   model,
   tier,
@@ -202,7 +231,7 @@ function ModelCard({
         </span>
       ) : null}
       <div className="mb-3 flex items-start gap-2.5">
-        <ProviderLogo provider={model.provider} modelId={model.modelId} />
+        <ProviderLogo provider={model.provider} modelId={model.modelId} size={22} className="h-11 w-11" />
         <div className="min-w-0">
           <p className="truncate text-[15px] font-semibold text-[var(--text-primary)]">{sanitizeName(model.name || model.modelId)}</p>
           <p className="truncate text-xs text-[var(--text-secondary)]">{model.provider}</p>
@@ -249,20 +278,22 @@ function ModelCard({
 
 export default function ModelsPage() {
   const router = useRouter();
+  const { userSpending } = useSidebar();
   const [catalogModels, setCatalogModels] = useState<CatalogModel[]>([]);
   const [featuredModels, setFeaturedModels] = useState<CatalogModel[]>([]);
   const [mostUsed, setMostUsed] = useState<MostUsedModel[]>([]);
   const [liveModels, setLiveModels] = useState<LiveModel[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [tier, setTier] = useState<SpendingTier>("normal");
+  const tier: SpendingTier = userSpending?.tier ?? "normal";
   const [providerSearch, setProviderSearch] = useState("");
   const [modelSearch, setModelSearch] = useState("");
   const [selectedProviders, setSelectedProviders] = useState<string[]>([]);
   const [sortMode, setSortMode] = useState<SortMode>("recommended");
-  const [leaderboardOpen, setLeaderboardOpen] = useState(false);
   const [showRestricted, setShowRestricted] = useState(false);
   const [visibleCount, setVisibleCount] = useState(18);
+  const [leaderboardEntries, setLeaderboardEntries] = useState<LeaderboardEntry[]>([]);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -286,10 +317,7 @@ export default function ModelsPage() {
         setMostUsed(catalogPayload.mostUsed ?? []);
 
         if (bootstrapRes.ok) {
-          const bootstrap = (await bootstrapRes.json()) as { userSpending?: { tier?: SpendingTier } };
-          if (bootstrap.userSpending?.tier) {
-            setTier(bootstrap.userSpending.tier);
-          }
+          await bootstrapRes.json();
         }
 
         if (liveRes.ok) {
@@ -304,6 +332,22 @@ export default function ModelsPage() {
     })();
   }, []);
 
+  useEffect(() => {
+    setLeaderboardLoading(true);
+    void (async () => {
+      try {
+        const response = await fetch("/api/analytics/model-leaderboard");
+        if (!response.ok) throw new Error(await response.text());
+        const payload = (await response.json()) as { models: LeaderboardEntry[] };
+        setLeaderboardEntries(payload.models ?? []);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to load leaderboard");
+      } finally {
+        setLeaderboardLoading(false);
+      }
+    })();
+  }, []);
+
   const models = useMemo(() => {
     const usageMap = new Map(mostUsed.map((model) => [model.modelId, model.usageCount]));
     const liveRankMap = new Map(liveModels.map((model, index) => [model.id, index]));
@@ -313,6 +357,7 @@ export default function ModelsPage() {
       merged.set(model.modelId, {
         ...model,
         name: sanitizeName(model.name || model.modelId),
+        provider: normalizeProviderName(model.provider),
         usageCount: usageMap.get(model.modelId) ?? 0,
         openRouterRank: model.openRouterRank ?? liveRankMap.get(model.modelId),
       });
@@ -324,7 +369,7 @@ export default function ModelsPage() {
         _id: existing?._id ?? live.id,
         modelId: live.id,
         name: sanitizeName(existing?.name || live.name || live.id),
-        provider: existing?.provider || live.provider || "Unknown",
+        provider: normalizeProviderName(existing?.provider || live.provider || "Unknown"),
         description: existing?.description || live.description || "",
         contextLength: existing?.contextLength ?? live.contextLength,
         inputCostPerM: existing?.inputCostPerM ?? live.pricing.prompt,
@@ -342,8 +387,7 @@ export default function ModelsPage() {
     }
 
     return [...merged.values()]
-      .filter((model) => !/whisper|tts|speech|transcribe/i.test(model.modelId))
-      .filter((model) => (model.contextLength ?? 0) > 0 || Boolean(model.description));
+      .filter((model) => !/whisper|tts|speech|transcribe/i.test(model.modelId));
   }, [catalogModels, liveModels, mostUsed]);
 
   const providerStats = useMemo(() => {
@@ -362,8 +406,14 @@ export default function ModelsPage() {
   const visibleProviders = useMemo(() => {
     const needle = providerSearch.trim().toLowerCase();
     if (!needle) return providerStats;
-    return providerStats.filter((provider) => provider.name.toLowerCase().includes(needle));
-  }, [providerSearch, providerStats]);
+    return providerStats.filter((provider) => {
+      if (provider.name.toLowerCase().includes(needle)) return true;
+      return models.some((model) =>
+        model.provider === provider.name &&
+        fuzzyScore(needle, model) > 0.24,
+      );
+    });
+  }, [models, providerSearch, providerStats]);
 
   const featured = useMemo(() => {
     const source = featuredModels.length > 0 ? featuredModels : models.filter((model) => model.isFeatured);
@@ -447,43 +497,40 @@ export default function ModelsPage() {
   }
 
   return (
-    <AppShell>
-      <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 sm:p-6">
+    <AppShell fullBleed contentClassName="2xl:px-14">
+      <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 sm:p-6" data-tour="models-header">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="text-center sm:text-left">
             <h1 className="font-display text-4xl tracking-tight">Model Atlas</h1>
             <p className="mt-1 max-w-2xl text-sm text-[var(--text-secondary)]">
-              Compare providers, isolate available models first, and keep budget constraints visible.
+              Compare providers, keep model discovery fast, and switch to chat with one click.
             </p>
           </div>
-          <Button variant="secondary" className="gap-2" onClick={() => setLeaderboardOpen(true)}>
-            <Trophy className="h-4 w-4" />
-            Leaderboard
-          </Button>
         </div>
 
         <div className="mt-4 grid gap-2 lg:grid-cols-[1fr_1fr_auto]">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-secondary)]" />
             <Input
-              value={providerSearch}
-              onChange={(event) => setProviderSearch(event.target.value)}
-              placeholder="Search providers"
-              className="h-10 w-full pl-10 text-sm"
+              value={modelSearch}
+              onChange={(event) => setModelSearch(event.target.value)}
+              placeholder="Search models"
+              className="h-10 w-full pl-10 text-sm focus-visible:border-[var(--border-default)] focus-visible:ring-0"
+              data-tour="models-search-models"
             />
           </div>
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-secondary)]" />
             <Input
-              value={modelSearch}
-              onChange={(event) => setModelSearch(event.target.value)}
-              placeholder="Search models"
-              className="h-10 w-full pl-10 text-sm"
+              value={providerSearch}
+              onChange={(event) => setProviderSearch(event.target.value)}
+              placeholder="Search providers"
+              className="h-10 w-full pl-10 text-sm focus-visible:border-[var(--border-default)] focus-visible:ring-0"
             />
           </div>
           <div className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-xs text-[var(--text-secondary)]">
             <SlidersHorizontal className="h-3.5 w-3.5" />
-            Tier: {tierLabel(tier)}
+            Semantic model search
           </div>
         </div>
 
@@ -494,7 +541,7 @@ export default function ModelsPage() {
             <select
               value={sortMode}
               onChange={(event) => setSortMode(event.target.value as SortMode)}
-              className="bg-transparent text-xs text-[var(--text-primary)] outline-none"
+              className="appearance-none rounded-md border border-transparent bg-transparent px-1.5 py-0.5 text-xs text-[var(--text-primary)] outline-none transition focus:border-[var(--border-default)]"
             >
               <option value="recommended">Recommended</option>
               <option value="popular">Popular</option>
@@ -513,125 +560,159 @@ export default function ModelsPage() {
         </div>
       </section>
 
-      <section className="mt-5 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <div>
-            <h2 className="text-sm font-semibold text-[var(--text-primary)]">Providers</h2>
-            <p className="text-xs text-[var(--text-secondary)]">Select one or more providers to filter models.</p>
-          </div>
-          <p className="text-xs text-[var(--text-secondary)]">{visibleProviders.length} shown</p>
+      <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(380px,0.85fr)]">
+        <div className="space-y-6">
+          {featured.length > 0 ? (
+            <section>
+              <h2 className="mb-3 text-lg font-semibold text-[var(--text-primary)]">Featured Models</h2>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {featured.slice(0, 6).map((model) => (
+                  <ModelCard key={`featured-${model.modelId}`} model={model} tier={tier} onTry={tryModel} />
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          <section>
+            <div className="mb-3 flex items-end justify-between gap-2">
+              <div>
+                <h2 className="text-lg font-semibold text-[var(--text-primary)]">Available now</h2>
+                <p className="text-xs text-[var(--text-secondary)]">Provider-filtered models you can use immediately.</p>
+              </div>
+              <p className="text-xs text-[var(--text-secondary)]">{availableModels.length} models</p>
+            </div>
+
+            {availableModels.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 text-center text-sm text-[var(--text-secondary)]">
+                No models match your current filters.
+              </div>
+            ) : (
+              <>
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {availableModels.slice(0, visibleCount).map((model) => (
+                    <ModelCard key={`available-${model.modelId}`} model={model} tier={tier} onTry={tryModel} />
+                  ))}
+                </div>
+                {visibleCount < availableModels.length ? (
+                  <div className="mt-4 text-center">
+                    <Button type="button" variant="secondary" onClick={() => setVisibleCount((prev) => prev + 18)}>
+                      Show more models
+                    </Button>
+                  </div>
+                ) : null}
+              </>
+            )}
+
+            {restrictedModels.length > 0 ? (
+              <div className="mt-6">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-base font-semibold text-[var(--text-primary)]">Temporarily restricted</h3>
+                    <p className="text-xs text-[var(--text-secondary)]">Unavailable under current guardrails.</p>
+                  </div>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setShowRestricted((prev) => !prev)}>
+                    {showRestricted ? "Hide restricted" : `Show restricted (${restrictedModels.length})`}
+                  </Button>
+                </div>
+                {showRestricted ? (
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    {restrictedModels.map((model) => (
+                      <ModelCard key={`restricted-${model.modelId}`} model={model} tier={tier} onTry={tryModel} />
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </section>
+
+          <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-semibold text-[var(--text-primary)]">Selection tip</h3>
+                <p className="text-xs text-[var(--text-secondary)]">
+                  Start with a focused provider filter, then compare 2-3 models on your exact coursework prompt.
+                </p>
+              </div>
+              <Button variant="secondary" size="sm" className="gap-1.5" onClick={() => router.push("/")}>
+                Open Chat
+                <ArrowUpRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </section>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-          {visibleProviders.map((provider) => {
-            const selected = selectedProviders.includes(provider.name);
-            return (
-              <button
-                key={provider.name}
-                type="button"
-                onClick={() => toggleProvider(provider.name)}
-                className={`relative rounded-xl border p-3 text-left transition ${
-                  selected
-                    ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,var(--bg-primary))]"
-                    : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
-                }`}
-              >
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <ProviderLogo provider={provider.name} size={18} className="h-8 w-8" />
+        <aside
+          data-tour="models-provider-panel"
+          className={`${rightPanelSurfaceClassName("rounded-2xl p-4")} xl:sticky xl:top-6 xl:max-h-[84vh] xl:overflow-y-auto`}
+        >
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-[var(--text-primary)]">Provider Filters</h2>
+            <p className="text-xs text-[var(--text-secondary)]">{visibleProviders.length} providers</p>
+          </div>
+
+          <div className="max-h-[44vh] space-y-2 overflow-y-auto pr-1">
+            {visibleProviders.map((provider) => {
+              const selected = selectedProviders.includes(provider.name);
+              return (
+                <button
+                  key={provider.name}
+                  type="button"
+                  onClick={() => {
+                    toggleProvider(provider.name);
+                  }}
+                  className={`flex w-full items-center gap-2 rounded-xl border p-2 text-left transition ${
+                    selected
+                      ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,var(--bg-primary))]"
+                      : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
+                  }`}
+                >
+                  <ProviderLogo provider={provider.name} size={22} className="h-10 w-10" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-medium text-[var(--text-primary)]">{provider.name}</p>
+                    <p className="text-[10px] text-[var(--text-secondary)]">{provider.count} models</p>
+                  </div>
                   <span className={`inline-flex h-4 w-4 items-center justify-center rounded-full border text-[10px] ${selected ? "border-[var(--accent-cyan)] text-[var(--accent-cyan)]" : "border-[var(--border-default)] text-[var(--text-secondary)]"}`}>
                     {selected ? <Check className="h-3 w-3" /> : null}
                   </span>
-                </div>
-                <p className="truncate text-xs font-medium text-[var(--text-primary)]">{provider.name}</p>
-                <p className="text-[10px] text-[var(--text-secondary)]">{provider.count} models</p>
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
-      {featured.length > 0 ? (
-        <section className="mt-6">
-          <h2 className="mb-3 text-lg font-semibold text-[var(--text-primary)]">Featured Models</h2>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {featured.slice(0, 6).map((model) => (
-              <ModelCard key={`featured-${model.modelId}`} model={model} tier={tier} onTry={tryModel} />
-            ))}
+                </button>
+              );
+            })}
           </div>
-        </section>
-      ) : null}
 
-      <section className="mt-6">
-        <div className="mb-3 flex items-end justify-between gap-2">
-          <div>
-            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Available now</h2>
-            <p className="text-xs text-[var(--text-secondary)]">Provider-filtered models you can use immediately.</p>
-          </div>
-          <p className="text-xs text-[var(--text-secondary)]">{availableModels.length} models</p>
-        </div>
-
-        {availableModels.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 text-center text-sm text-[var(--text-secondary)]">
-            No models match your current filters.
-          </div>
-        ) : (
-          <>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {availableModels.slice(0, visibleCount).map((model) => (
-                <ModelCard key={`available-${model.modelId}`} model={model} tier={tier} onTry={tryModel} />
-              ))}
+          <div className="mt-5 border-t border-[var(--border-default)] pt-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Live Leaderboard</h3>
+              <span className="text-[10px] text-[var(--text-secondary)]">Top 20</span>
             </div>
-            {visibleCount < availableModels.length ? (
-              <div className="mt-4 text-center">
-                <Button type="button" variant="secondary" onClick={() => setVisibleCount((prev) => prev + 18)}>
-                  Show more models
-                </Button>
-              </div>
-            ) : null}
-          </>
-        )}
-
-        {restrictedModels.length > 0 ? (
-          <div className="mt-6">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h3 className="text-base font-semibold text-[var(--text-primary)]">Temporarily restricted</h3>
-                <p className="text-xs text-[var(--text-secondary)]">Unavailable under the current spending tier.</p>
-              </div>
-              <Button type="button" variant="ghost" size="sm" onClick={() => setShowRestricted((prev) => !prev)}>
-                {showRestricted ? "Hide restricted" : `Show restricted (${restrictedModels.length})`}
-              </Button>
+            <div className="max-h-[30vh] space-y-2 overflow-y-auto pr-1">
+              {leaderboardLoading ? (
+                Array.from({ length: 5 }).map((_, index) => (
+                  <div key={index} className="h-14 animate-pulse rounded-xl bg-[var(--bg-secondary)]" />
+                ))
+              ) : leaderboardEntries.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-[var(--border-default)] p-4 text-center text-xs text-[var(--text-secondary)]">
+                  No model usage yet.
+                </p>
+              ) : (
+                leaderboardEntries.slice(0, 20).map((entry, index) => (
+                  <div key={entry.modelId} className="flex items-center gap-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2">
+                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[var(--bg-elevated)] text-[11px] font-semibold text-[var(--text-secondary)]">
+                      {index + 1}
+                    </span>
+                    <ProviderLogo provider={entry.provider} modelId={entry.modelId} size={14} className="h-7 w-7" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-medium text-[var(--text-primary)]">{sanitizeName(entry.name)}</p>
+                      <p className="text-[10px] text-[var(--text-secondary)]">
+                        {formatTokens(entry.totalTokens)} tokens · {entry.usageCount} uses
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
-            {showRestricted ? (
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {restrictedModels.map((model) => (
-                  <ModelCard key={`restricted-${model.modelId}`} model={model} tier={tier} onTry={tryModel} />
-                ))}
-              </div>
-            ) : null}
           </div>
-        ) : null}
-      </section>
-
-      <ModelLeaderboardDrawer
-        open={leaderboardOpen}
-        onClose={() => setLeaderboardOpen(false)}
-      />
-
-      <section className="mt-8 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-semibold text-[var(--text-primary)]">Selection tip</h3>
-            <p className="text-xs text-[var(--text-secondary)]">
-              Start with a focused provider filter, then compare 2-3 models on your exact coursework prompt.
-            </p>
-          </div>
-          <Button variant="secondary" size="sm" className="gap-1.5" onClick={() => router.push("/")}> 
-            Open Chat
-            <ArrowUpRight className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      </section>
+        </aside>
+      </div>
     </AppShell>
   );
 }

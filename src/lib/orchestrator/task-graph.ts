@@ -3,6 +3,10 @@ export type TaskRole =
   | "web_researcher"
   | "vision_interpreter"
   | "code_helper"
+  | "curriculum_planner"
+  | "fact_checker"
+  | "pedagogy_coach"
+  | "exam_strategist"
   | "critic"
   | "synthesizer";
 
@@ -61,6 +65,10 @@ function hasCodeIntent(prompt: string) {
   return /```|function|class|typescript|javascript|python|debug|refactor|compile|stack trace/i.test(prompt);
 }
 
+function hasPlanningIntent(prompt: string) {
+  return /\b(plan|roadmap|schedule|timeline|syllabus|strategy|study plan|weekly)\b/i.test(prompt);
+}
+
 export function buildTaskGraph(prompt: string, mode: string, context: BuildTaskGraphContext = {}): TaskNode[] {
   const graph: TaskNode[] = [];
   const packedPrompt = [
@@ -89,6 +97,14 @@ export function buildTaskGraph(prompt: string, mode: string, context: BuildTaskG
       dependsOn: [],
       status: "pending",
     });
+    graph.push({
+      id: "fact-check",
+      role: "fact_checker",
+      specialist: "fact_checker",
+      prompt: packedPrompt,
+      dependsOn: [],
+      status: "pending",
+    });
   }
 
   if (context.hasVision) {
@@ -113,8 +129,50 @@ export function buildTaskGraph(prompt: string, mode: string, context: BuildTaskG
     });
   }
 
-  const maxSpecialists = Math.max(1, context.maxSpecialists ?? 4);
-  const priority = ["retriever", "web_researcher", "vision_interpreter", "code_helper"] as const;
+  if (mode === "tutor" || mode === "explain" || mode === "draft_coach") {
+    graph.push({
+      id: "pedagogy",
+      role: "pedagogy_coach",
+      specialist: "pedagogy_coach",
+      prompt: packedPrompt,
+      dependsOn: [],
+      status: "pending",
+    });
+  }
+
+  if (mode === "quiz" || mode === "exam" || mode === "marker") {
+    graph.push({
+      id: "exam-strategy",
+      role: "exam_strategist",
+      specialist: "exam_strategist",
+      prompt: packedPrompt,
+      dependsOn: [],
+      status: "pending",
+    });
+  }
+
+  if (mode === "draft_coach" || hasPlanningIntent(prompt)) {
+    graph.push({
+      id: "curriculum-plan",
+      role: "curriculum_planner",
+      specialist: "curriculum_planner",
+      prompt: packedPrompt,
+      dependsOn: [],
+      status: "pending",
+    });
+  }
+
+  const maxSpecialists = Math.max(1, context.maxSpecialists ?? 5);
+  const priority = [
+    "retriever",
+    "web_researcher",
+    "fact_checker",
+    "vision_interpreter",
+    "code_helper",
+    "curriculum_planner",
+    "pedagogy_coach",
+    "exam_strategist",
+  ] as const;
   const rank = (role: TaskRole) => {
     const idx = priority.indexOf(role as (typeof priority)[number]);
     return idx === -1 ? 999 : idx;
@@ -133,7 +191,15 @@ export function buildTaskGraph(prompt: string, mode: string, context: BuildTaskG
       id: "critic",
       role: "critic",
       specialist: "critic",
-      prompt: `Review and critique the specialist findings below against the original question. Check for accuracy, completeness, contradictions, and missing perspectives. Flag any issues.\n\nOriginal question:\n${packedPrompt}`,
+      prompt: `Audit specialist findings against the original question.
+Return bullets with:
+- confidence (high/medium/low)
+- contradictions found
+- likely hallucinations or weak claims
+- corrective actions for synthesis
+
+Original question and context:
+${packedPrompt}`,
       dependsOn: specialistNodes.map((node) => node.id),
       status: "pending",
     });

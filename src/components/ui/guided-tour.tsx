@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 
 export type GuidedTourStep = {
@@ -79,13 +79,25 @@ export function GuidedTour({ open, steps, onClose, onComplete }: GuidedTourProps
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
 
+  const findAvailableStepIndex = useCallback((fromIndex: number, direction: 1 | -1 = 1) => {
+    for (
+      let index = fromIndex;
+      direction === 1 ? index < steps.length : index >= 0;
+      index += direction
+    ) {
+      if (firstVisibleTarget(steps[index]?.selector ?? "")) return index;
+    }
+    return -1;
+  }, [steps]);
+
   const step = steps[stepIndex];
   const isLastStep = stepIndex >= steps.length - 1;
 
   useEffect(() => {
     if (!open) return;
-    setStepIndex(0);
-  }, [open]);
+    const firstAvailable = findAvailableStepIndex(0, 1);
+    setStepIndex(firstAvailable >= 0 ? firstAvailable : 0);
+  }, [findAvailableStepIndex, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -101,6 +113,13 @@ export function GuidedTour({ open, steps, onClose, onComplete }: GuidedTourProps
       const element = firstVisibleTarget(step.selector);
       if (!element) {
         setTargetRect(null);
+        const forward = findAvailableStepIndex(stepIndex + 1, 1);
+        if (forward >= 0) {
+          setStepIndex(forward);
+          return;
+        }
+        const backward = findAvailableStepIndex(stepIndex - 1, -1);
+        if (backward >= 0) setStepIndex(backward);
         return;
       }
       element.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
@@ -123,7 +142,7 @@ export function GuidedTour({ open, steps, onClose, onComplete }: GuidedTourProps
       window.removeEventListener("resize", handler);
       window.removeEventListener("scroll", handler, true);
     };
-  }, [open, step.selector]);
+  }, [findAvailableStepIndex, open, step.selector, stepIndex]);
 
   const highlightedRect = useMemo(() => {
     if (!targetRect || viewport.width <= 0 || viewport.height <= 0) return null;
@@ -219,7 +238,13 @@ export function GuidedTour({ open, steps, onClose, onComplete }: GuidedTourProps
                   onClose();
                   return;
                 }
-                setStepIndex((prev) => Math.min(steps.length - 1, prev + 1));
+                const nextIndex = findAvailableStepIndex(stepIndex + 1, 1);
+                if (nextIndex >= 0) {
+                  setStepIndex(nextIndex);
+                  return;
+                }
+                onComplete?.();
+                onClose();
               }}
             >
               {isLastStep ? "Finish" : "Next"}

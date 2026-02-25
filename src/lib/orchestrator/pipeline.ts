@@ -144,6 +144,11 @@ function toQuizDifficultyLabel(level: number): QuizDifficultyLabel {
   return "medium";
 }
 
+function featureEnabled(flag: boolean | undefined, defaultValue = true) {
+  if (flag === undefined) return defaultValue;
+  return flag;
+}
+
 function isQuizStructured(value: string) {
   return countQuizQuestions(value) >= 2;
 }
@@ -178,8 +183,15 @@ function extractMarkdownImageUrls(value: string) {
 }
 
 function fallbackTitleFromUserMessage(message: string) {
-  const compact = message.replace(/\s+/g, " ").trim();
-  return compact.slice(0, 60) || "New chat";
+  const words = message
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .map((word) => word.trim())
+    .filter(Boolean);
+  if (words.length === 0) return "New chat";
+  if (words.length === 1) return `${words[0]} session`.slice(0, 80);
+  return words.slice(0, 5).join(" ").slice(0, 80);
 }
 
 async function resolveFirstTurnTitle(params: {
@@ -412,7 +424,7 @@ export async function runChatPipeline(request: NextRequest) {
           routerMode: body.routerMode,
           manualModel: body.manualModel,
           usePersonalResources: body.usePersonalResources,
-          title: normalizedMessage.slice(0, 60),
+          title: "New chat",
         })) as { chatId: string }
       ).chatId;
 
@@ -615,7 +627,7 @@ export async function runChatPipeline(request: NextRequest) {
       sources: [] as Array<{ url: string; title: string; domain: string }>,
     });
 
-  const soulPromise: Promise<{ bullets: string[] }> = orgSettings.org?.soulEnabled
+  const soulPromise: Promise<{ bullets: string[] }> = featureEnabled(orgSettings.org?.soulEnabled)
     ? convexAction("soul:retrieveSoulGuidance", {
         actorClerkId: actor.clerkId,
         query: auto.message,
@@ -633,7 +645,7 @@ export async function runChatPipeline(request: NextRequest) {
     level: number;
     label: QuizDifficultyLabel;
   }> =
-    effectiveMode === "quiz" && orgSettings.org?.adaptiveQuizEnabled
+    effectiveMode === "quiz" && featureEnabled(orgSettings.org?.adaptiveQuizEnabled)
       ? Promise.all([
           convexQuery("analytics:getQuizDifficultySignal", {
             actorClerkId: actor.clerkId,
@@ -704,7 +716,7 @@ export async function runChatPipeline(request: NextRequest) {
 
   const searchBlock = webResult.text ?? "";
   const searchUrls = webResult.urls ?? [];
-  const searchSources = webResult.sources ?? [];
+  let searchSources = webResult.sources ?? [];
   if (auto.searchEnabled) {
     logger.info("web search complete", { urlCount: searchUrls.length });
   }
@@ -713,7 +725,7 @@ export async function runChatPipeline(request: NextRequest) {
   const quizDifficultyLevel = clampQuizDifficultyLevel(quizAdaptive.level);
   const quizDifficultyLabel = quizAdaptive.label;
   const quizDifficultyAdjusted = quizAdaptive.level !== quizAdaptive.currentLevel;
-  if (effectiveMode === "quiz" && orgSettings.org?.adaptiveQuizEnabled) {
+  if (effectiveMode === "quiz" && featureEnabled(orgSettings.org?.adaptiveQuizEnabled)) {
     void convexMutation("analytics:setQuizDifficultySignal", {
       actorClerkId: actor.clerkId,
       difficulty: quizDifficultyLevel,
@@ -731,7 +743,7 @@ export async function runChatPipeline(request: NextRequest) {
   const previousAssistantModel = [...history]
     .reverse()
     .find((message) => message.role === "assistant" && message.modelUsed)?.modelUsed;
-  const agentTopModels = selectedAgent?._id && orgSettings.org?.agentModelBoostEnabled
+  const agentTopModels = selectedAgent?._id && featureEnabled(orgSettings.org?.agentModelBoostEnabled)
     ? ((await convexQuery("agents:getTopModelsForAgent", {
         actorClerkId: actor.clerkId,
         agentId: selectedAgent._id,
@@ -810,7 +822,7 @@ export async function runChatPipeline(request: NextRequest) {
   if (auto.searchEnabled) route.trace.toolchain.push("web_search");
   if (agentSuggestion) route.trace.toolchain.push("agent_suggestion");
   if (explainDepth) route.trace.toolchain.push("explain_depth_detection");
-  if (effectiveMode === "quiz" && orgSettings.org?.adaptiveQuizEnabled) {
+  if (effectiveMode === "quiz" && featureEnabled(orgSettings.org?.adaptiveQuizEnabled)) {
     route.trace.toolchain.push("adaptive_quiz");
     route.trace.toolchain.push(`quiz_difficulty_${quizDifficultyLabel}`);
     if (quizDifficultyAdjusted) {
@@ -959,7 +971,7 @@ export async function runChatPipeline(request: NextRequest) {
     effectiveMode === "research"
       ? auto.searchEnabled || retrieval.citations.length > 0 || auto.complexity !== "simple"
       : auto.searchEnabled ||
-        (Boolean(orgSettings.org?.orchestratorV2Enabled) &&
+        (featureEnabled(orgSettings.org?.orchestratorV2Enabled) &&
           shouldUseMultiAgent(auto.message, effectiveMode, auto.complexity))
     );
   if (multiAgentEnabled) {
@@ -970,8 +982,8 @@ export async function runChatPipeline(request: NextRequest) {
     budget.tier === "free_only"
       ? { maxSpecialists: 1, maxSubcalls: 2, maxTokensPerSpecialist: 600, includeCritic: false }
       : budget.tier === "cheap_only"
-        ? { maxSpecialists: 2, maxSubcalls: 3, maxTokensPerSpecialist: 900, includeCritic: false }
-        : { maxSpecialists: 3, maxSubcalls: 4, maxTokensPerSpecialist: 1200, includeCritic: true };
+        ? { maxSpecialists: 3, maxSubcalls: 3, maxTokensPerSpecialist: 900, includeCritic: false }
+        : { maxSpecialists: 5, maxSubcalls: 4, maxTokensPerSpecialist: 1200, includeCritic: true };
   if (!collabLimits.includeCritic) {
     route.trace.toolchain.push("critic_skipped_budget_guard");
   }
@@ -1305,6 +1317,23 @@ export async function runChatPipeline(request: NextRequest) {
             onFallback,
             logger,
           });
+
+      if (streamed.sourceHints?.length) {
+        const deduped = new Map<string, { url: string; title: string; domain: string }>();
+        for (const source of searchSources) {
+          if (!source?.url) continue;
+          deduped.set(source.url, source);
+        }
+        for (const hint of streamed.sourceHints) {
+          if (!hint?.url) continue;
+          deduped.set(hint.url, {
+            url: hint.url,
+            title: hint.title || hint.domain || hint.url,
+            domain: hint.domain || "",
+          });
+        }
+        searchSources = [...deduped.values()];
+      }
 
       const responseText = streamed.responseText;
       const modelUsed = streamed.modelUsed;

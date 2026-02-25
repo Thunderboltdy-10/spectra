@@ -3,7 +3,6 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { Manrope, IBM_Plex_Mono, Fraunces } from "next/font/google";
 import "katex/dist/katex.min.css";
 import "./globals.css";
-import { FeedbackWidgetHost } from "@/components/feedback-widget-host";
 import { Providers } from "@/components/providers";
 
 const manrope = Manrope({
@@ -33,8 +32,19 @@ export const metadata: Metadata = {
 const themeInitScript = `
 (function () {
   try {
+    var consentKey = 'ai-school-cookie-consent-v1';
     var key = 'ai-school-theme';
-    var persisted = window.localStorage.getItem(key);
+    var consentRaw = window.localStorage.getItem(consentKey);
+    var canUsePreferences = false;
+    if (consentRaw) {
+      try {
+        var consent = JSON.parse(consentRaw);
+        canUsePreferences = !!(consent && consent.preferences);
+      } catch (e) {
+        canUsePreferences = false;
+      }
+    }
+    var persisted = canUsePreferences ? window.localStorage.getItem(key) : null;
     var theme = persisted === 'dark' || persisted === 'light'
       ? persisted
       : 'light';
@@ -67,7 +77,6 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <div id="main-content" tabIndex={-1}>
           <Providers>{children}</Providers>
         </div>
-        <FeedbackWidgetHost />
       </body>
     </html>
   );

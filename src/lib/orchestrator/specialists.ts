@@ -13,6 +13,10 @@ const SPECIALIST_MODELS: Record<TaskRole, string> = {
   web_researcher: MODEL_CONFIG.searchFast,
   vision_interpreter: MODEL_CONFIG.multimodal,
   code_helper: MODEL_CONFIG.tutorFast,
+  curriculum_planner: MODEL_CONFIG.smartCheap,
+  fact_checker: MODEL_CONFIG.verify,
+  pedagogy_coach: MODEL_CONFIG.tutorFast,
+  exam_strategist: MODEL_CONFIG.marker,
   critic: MODEL_CONFIG.verify,
   synthesizer: MODEL_CONFIG.tutorFast,
 };
@@ -26,10 +30,18 @@ const SPECIALIST_PROMPTS: Record<TaskRole, string> = {
     "You describe and interpret visual inputs (charts, diagrams, screenshots) precisely for study support.",
   code_helper:
     "You review code and return concrete fixes, edge cases, and a corrected example when appropriate.",
+  curriculum_planner:
+    "You translate goals into a concrete learning plan with milestones, sequence, and workload pacing.",
+  fact_checker:
+    "You verify claims, dates, and numbers against available evidence and clearly mark uncertainty.",
+  pedagogy_coach:
+    "You optimize explanations for the user's level, identify misconceptions, and suggest better teaching flow.",
+  exam_strategist:
+    "You focus on exam constraints: rubric alignment, mark allocation, and time-efficient answer structure.",
   critic:
     "You audit claims for correctness and missing evidence. Flag uncertainty clearly and suggest corrections.",
   synthesizer:
-    "You merge specialist outputs into one coherent student-facing answer with structure and clear confidence notes.",
+    "You merge specialist outputs into one coherent user-facing answer with structure and clear confidence notes.",
 };
 
 export function getSpecialist(role: TaskRole): SpecialistDefinition {

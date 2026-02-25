@@ -20,7 +20,7 @@ export function ModeBreakdown({ modeCounts }: ModeBreakdownProps) {
   }
 
   return (
-    <div className="journal-card journal-scribble p-4">
+    <div className="p-4">
       <p className="mb-3 text-xs uppercase tracking-wide text-[var(--text-secondary)]">Mode usage</p>
       <div className="space-y-2">
         {entries.map(([mode, count]) => {

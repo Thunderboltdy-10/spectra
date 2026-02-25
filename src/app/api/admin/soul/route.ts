@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
           query: previewQuery,
           limit: 8,
         });
-        return ok({ preview: guidance });
+        return ok({ preview: guidance, embeddingsConfigured: Boolean(process.env.OPENROUTER_API_KEY) });
       } catch (error) {
         return soulActionErrorResponse(error);
       }
@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
     const docs = await convexQuery("soul:listSoulDocs", {
       actorClerkId: actor.clerkId,
     });
-    return ok({ docs });
+    return ok({ docs, embeddingsConfigured: Boolean(process.env.OPENROUTER_API_KEY) });
   });
 }
 

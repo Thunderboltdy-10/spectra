@@ -266,7 +266,7 @@ export function detectSuggestedMode(message: string): string | null {
   const abstractOutputPattern =
     /\b(plan|summary|conclusion|comparison|list|table|chart|diagram|outline|roadmap|analysis|report|essay|email)\b/i;
   const visualNounPattern =
-    /\b(image|picture|photo|illustration|art|artwork|logo|poster|icon|banner|wallpaper|render|portrait|scene|character|landscape|cover|thumbnail|concept art)\b/i;
+    /\b(image|picture|photo|illustration|art|artwork|logo|poster|icon|banner|wallpaper|portrait|scene|character|landscape|cover|thumbnail|concept art)\b/i;
 
   // Image generation - check first as it's most distinct.
   if (
@@ -276,8 +276,12 @@ export function detectSuggestedMode(message: string): string | null {
     return "image";
   }
   // Direct drawing commands (e.g., "draw a cat"), excluding abstract outputs.
+  if (/^\s*(draw|sketch|paint|illustrate)\b/i.test(message) && !abstractOutputPattern.test(message)) {
+    return "image";
+  }
   if (
-    /^\s*(draw|sketch|paint|illustrate|render)\b/i.test(message) &&
+    /^\s*render\b/i.test(message) &&
+    visualNounPattern.test(message) &&
     !abstractOutputPattern.test(message)
   ) {
     return "image";

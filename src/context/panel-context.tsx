@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { Citation, RouteTrace } from "@/types";
 import type { ParsedQuizQuestion } from "@/lib/quiz-parser";
 
@@ -38,13 +38,24 @@ const PanelContext = createContext<PanelContextValue | null>(null);
 export function PanelProvider({ children }: { children: React.ReactNode }) {
   const [activeView, setActiveView] = useState<PanelView>(null);
   const [panelData, setPanelData] = useState<PanelData>({});
+  const activeViewRef = useRef<PanelView>(null);
+
+  useEffect(() => {
+    activeViewRef.current = activeView;
+  }, [activeView]);
 
   const openPanel = useCallback((view: PanelView, data: PanelData = {}) => {
+    if (typeof window !== "undefined" && view) {
+      window.dispatchEvent(new CustomEvent("ai-school:panel-opened", { detail: { view } }));
+    }
     setActiveView(view);
-    setPanelData(data);
+    setPanelData((prev) => (view === activeViewRef.current ? { ...prev, ...data } : data));
   }, []);
 
   const closePanel = useCallback(() => {
+    if (typeof window !== "undefined" && activeViewRef.current) {
+      window.dispatchEvent(new CustomEvent("ai-school:panel-closed", { detail: { view: activeViewRef.current } }));
+    }
     setActiveView(null);
     setPanelData({});
   }, []);

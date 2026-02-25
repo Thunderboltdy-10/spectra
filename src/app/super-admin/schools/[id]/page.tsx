@@ -104,17 +104,16 @@ function OverviewTab({ data }: { data: OrgDetail }) {
       <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-5">
         <h3 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">School Info</h3>
         <div className="grid gap-3 sm:grid-cols-2">
-          {[
-            { label: "Name", value: org.name },
-            { label: "Slug", value: org.slug },
-            { label: "Type", value: org.schoolType ?? "—" },
-            { label: "Country", value: org.country ?? "—" },
-            { label: "Timezone", value: org.timezone ?? "—" },
-            { label: "Max Students", value: org.maxStudents?.toLocaleString() ?? "Unlimited" },
-            { label: "Daily Token Budget", value: org.tokenBudgetDaily.toLocaleString() },
-            { label: "Monthly/User Budget", value: (org.monthlyBudgetCentsPerUser ?? 900).toLocaleString() },
-            { label: "Budget Margin", value: `${org.budgetMarginPercent ?? 20}%` },
-            { label: "Max Resource File", value: `${Math.round(((org.maxResourceFileSizeBytes ?? (10 * 1024 * 1024)) / (1024 * 1024)) * 10) / 10} MB` },
+            {[
+              { label: "Name", value: org.name },
+              { label: "Slug", value: org.slug },
+              { label: "Type", value: org.schoolType ?? "—" },
+              { label: "Country", value: org.country ?? "—" },
+              { label: "Timezone", value: org.timezone ?? "—" },
+              { label: "Max Students", value: org.maxStudents?.toLocaleString() ?? "Unlimited" },
+              { label: "Monthly/User Budget", value: (org.monthlyBudgetCentsPerUser ?? 900).toLocaleString() },
+              { label: "Budget Margin", value: `${org.budgetMarginPercent ?? 20}%` },
+              { label: "Max Resource File", value: `${Math.round(((org.maxResourceFileSizeBytes ?? (10 * 1024 * 1024)) / (1024 * 1024)) * 10) / 10} MB` },
             { label: "Created", value: formatDate(org.createdAt) },
           ].map((row) => (
             <div key={row.label} className="flex items-baseline gap-2">
@@ -139,6 +138,9 @@ function MembersTab({ members, orgId, onChanged }: { members: Member[]; orgId: s
   const [adminEmail, setAdminEmail] = useState("");
   const [assigningAdmin, setAssigningAdmin] = useState(false);
   const [busyMemberId, setBusyMemberId] = useState<string | null>(null);
+  const memberEmails = Array.from(
+    new Set(members.map((member) => member.email.trim()).filter((email) => email.includes("@"))),
+  );
 
   async function assignAdmin() {
     const email = adminEmail.trim();
@@ -210,11 +212,17 @@ function MembersTab({ members, orgId, onChanged }: { members: Member[]; orgId: s
         </p>
         <div className="flex flex-wrap gap-2">
           <input
+            list="org-member-email-suggestions"
             value={adminEmail}
             onChange={(event) => setAdminEmail(event.target.value)}
             placeholder="admin@school.edu"
             className="h-10 flex-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-sm text-[var(--text-primary)]"
           />
+          <datalist id="org-member-email-suggestions">
+            {memberEmails.map((email) => (
+              <option key={email} value={email} />
+            ))}
+          </datalist>
           <Button onClick={() => void assignAdmin()} disabled={assigningAdmin} className="cursor-pointer gap-1.5">
             <MailPlus className="h-4 w-4" />
             {assigningAdmin ? "Assigning..." : "Assign Admin"}
@@ -298,11 +306,10 @@ function SettingsTab({ data, orgId, onSaved }: { data: OrgDetail; orgId: string;
   const { org } = data;
   const [name, setName] = useState(org.name);
   const [description, setDescription] = useState(org.description ?? "");
-  const [tokenBudget, setTokenBudget] = useState(String(org.tokenBudgetDaily));
   const [isActive, setIsActive] = useState(org.isActive !== false);
-  const [soulEnabled, setSoulEnabled] = useState(org.soulEnabled ?? false);
-  const [adaptiveQuiz, setAdaptiveQuiz] = useState(org.adaptiveQuizEnabled ?? false);
-  const [spacedRep, setSpacedRep] = useState(org.spacedRepetitionEnabled ?? false);
+  const [soulEnabled, setSoulEnabled] = useState(org.soulEnabled ?? true);
+  const [adaptiveQuiz, setAdaptiveQuiz] = useState(org.adaptiveQuizEnabled ?? true);
+  const [spacedRep, setSpacedRep] = useState(org.spacedRepetitionEnabled ?? true);
   const [allowPaid, setAllowPaid] = useState(org.allowPaidModels ?? false);
   const [maxResourceFileSizeMb, setMaxResourceFileSizeMb] = useState(
     String(Math.round(((org.maxResourceFileSizeBytes ?? (10 * 1024 * 1024)) / (1024 * 1024)) * 10) / 10),
@@ -331,7 +338,6 @@ function SettingsTab({ data, orgId, onSaved }: { data: OrgDetail; orgId: string;
         body: JSON.stringify({
           name: name.trim(),
           description: description.trim() || undefined,
-          tokenBudgetDaily: parseInt(tokenBudget, 10),
           isActive,
           soulEnabled,
           adaptiveQuizEnabled: adaptiveQuiz,
@@ -390,10 +396,6 @@ function SettingsTab({ data, orgId, onSaved }: { data: OrgDetail; orgId: string;
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">Daily Token Budget</label>
-            <input className={inputClass} type="number" min="1000" value={tokenBudget} onChange={(e) => setTokenBudget(e.target.value)} />
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">Max Resource File Size (MB)</label>

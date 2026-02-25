@@ -1,57 +1,57 @@
 "use client";
 
-import { useState } from "react";
-import dynamic from "next/dynamic";
-import { Clock3, Download, Layers, LoaderCircle, Menu, MoreHorizontal, Search, Settings2, Square } from "lucide-react";
+import { Download, Layers, LoaderCircle, Menu, MoreHorizontal, Search, Settings2, Square } from "lucide-react";
 import { useKBar } from "kbar";
-import { NotificationBell } from "@/components/notification-bell";
 import { ContextualTip } from "@/components/ui/contextual-tip";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
-const StudyTimer = dynamic(
-  () => import("@/components/study-timer").then((module) => module.StudyTimer),
-  { ssr: false },
-);
-
 type ChatHeaderProps = {
   title: string;
-  chatId?: string;
   agentLabel?: string;
-  lastModelUsed?: string;
+  lastResponseAt?: number;
   sending: boolean;
   messageCount: number;
   compacting?: boolean;
   onStop: () => void;
   onCompact?: () => void;
+  onCompactWithDepth?: (keepLatestMessages: number) => void;
   onToggleMobileSidebar: () => void;
   onOpenSettings: () => void;
   onNewChat: () => void;
   onExport: (format: "markdown" | "pdf" | "text") => void;
 };
 
+function formatRelativeTime(timestamp: number) {
+  const deltaMs = Date.now() - timestamp;
+  if (deltaMs < 60_000) return "just now";
+  const minutes = Math.floor(deltaMs / 60_000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 export function ChatHeader({
   title,
-  chatId,
   agentLabel,
-  lastModelUsed,
+  lastResponseAt,
   sending,
   messageCount,
   compacting = false,
   onStop,
   onCompact,
+  onCompactWithDepth,
   onToggleMobileSidebar,
   onOpenSettings,
   onNewChat,
   onExport,
 }: ChatHeaderProps) {
   const { query } = useKBar();
-  const [studyTimerOpen, setStudyTimerOpen] = useState(false);
-  const modelLabel = lastModelUsed
-    ? (lastModelUsed.split("/").pop() ?? lastModelUsed)
-        .replace(/:free$/i, "")
-        .replace(/[\s(_-]*\bfree\b[\s)_-]*/gi, " ")
-        .trim()
+  const responseAgo = lastResponseAt
+    ? formatRelativeTime(lastResponseAt)
     : undefined;
   const showCompactTip = messageCount > 20;
 
@@ -79,10 +79,10 @@ export function ChatHeader({
             </h1>
             <div className="mt-0.5 flex items-center gap-2 text-xs text-[var(--text-secondary)]">
               {agentLabel && <span className="truncate">{agentLabel}</span>}
-              {lastModelUsed && (
+              {responseAgo && (
                 <>
                   <span className="h-1 w-1 rounded-full bg-[var(--border-default)]" />
-                  <span className="truncate">{modelLabel}</span>
+                  <span className="truncate">Updated {responseAgo}</span>
                 </>
               )}
             </div>
@@ -99,7 +99,6 @@ export function ChatHeader({
             >
               <Search className="h-4 w-4" />
             </Button>
-            <NotificationBell />
             {sending ? (
               <Button type="button" variant="secondary" size="sm" className="h-9 gap-1.5" onClick={onStop}>
                 <Square className="h-3.5 w-3.5" />
@@ -144,10 +143,6 @@ export function ChatHeader({
                     New chat
                   </DropdownMenuItem>
                 ) : null}
-                <DropdownMenuItem onSelect={() => setStudyTimerOpen((prev) => !prev)}>
-                  <Clock3 className="mr-2 h-3.5 w-3.5" />
-                  {studyTimerOpen ? "Hide timer" : "Show timer"}
-                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => onExport("markdown")}>
                   <Download className="mr-2 h-3.5 w-3.5" />
                   Export Markdown (.md)
@@ -160,15 +155,24 @@ export function ChatHeader({
                   <Download className="mr-2 h-3.5 w-3.5" />
                   Export Plain text (.txt)
                 </DropdownMenuItem>
+                {!sending && onCompact ? (
+                  <DropdownMenuItem onSelect={onCompact} disabled={compacting}>
+                    <Layers className="mr-2 h-3.5 w-3.5" />
+                    Compact now
+                  </DropdownMenuItem>
+                ) : null}
+                {!sending && onCompactWithDepth ? (
+                  <DropdownMenuItem onSelect={() => onCompactWithDepth(4)} disabled={compacting}>
+                    Deep compact
+                  </DropdownMenuItem>
+                ) : null}
+                {!sending && onCompactWithDepth ? (
+                  <DropdownMenuItem onSelect={() => onCompactWithDepth(10)} disabled={compacting}>
+                    Gentle compact
+                  </DropdownMenuItem>
+                ) : null}
               </DropdownMenuContent>
             </DropdownMenu>
-            <StudyTimer
-              chatId={chatId}
-              open={studyTimerOpen}
-              className="absolute right-0 top-12 z-40"
-              onClose={() => setStudyTimerOpen(false)}
-              onOpen={() => setStudyTimerOpen(true)}
-            />
           </div>
         </div>
 

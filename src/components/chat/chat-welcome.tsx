@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import {
   CircleHelp,
@@ -47,6 +47,7 @@ type ChatWelcomeProps = {
   activeMode?: StudyMode;
   recentChats?: WelcomeChat[];
   welcomeMessage?: string;
+  orgName?: string;
 };
 
 const CORE_MODES: StudyMode[] = ["tutor", "quiz", "flashcard", "research"];
@@ -87,6 +88,12 @@ const DAILY_TIPS = [
   "Tip: Keep prompts specific: include topic, level, and goal in one sentence.",
 ];
 
+const STARTER_PROMPTS: Array<{ mode: StudyMode; prompt: string }> = [
+  { mode: "tutor", prompt: "Help me build a study plan for this week with 30-minute daily blocks." },
+  { mode: "quiz", prompt: "Quiz me on this topic with 5 medium questions and quick explanations." },
+  { mode: "research", prompt: "Find recent sources on this topic and summarize key evidence." },
+];
+
 function hashString(value: string) {
   let hash = 5381;
   for (let i = 0; i < value.length; i += 1) {
@@ -115,12 +122,27 @@ function getGreeting(hour: number, month: number, firstName: string, dayKey: str
   return pool[index] ?? "Welcome back";
 }
 
+function dynamicWelcomeLine(params: { hour: number; month: number; orgName?: string }) {
+  const { hour, month, orgName } = params;
+  const monthName = new Date(2024, month, 1).toLocaleString("en-US", { month: "long" });
+  const timeBlock =
+    hour < 12
+      ? "Start with one high-impact task and keep momentum."
+      : hour < 18
+        ? "Use a short sprint and checkpoint your understanding."
+        : "Wrap the day with a concise review and quick recall check.";
+  const schoolLabel = orgName?.trim() ? ` for ${orgName.trim()}` : "";
+  return `${monthName} focus${schoolLabel}: ${timeBlock}`;
+}
+
 export function ChatWelcome({
   onSelectAgent,
   onSelectMode,
   agents,
   activeMode,
+  onUsePrompt,
   welcomeMessage,
+  orgName,
 }: ChatWelcomeProps) {
   const { user } = useUser();
   const [selectedMode, setSelectedMode] = useState<StudyMode>(activeMode ?? "tutor");
@@ -163,10 +185,10 @@ export function ChatWelcome({
   const dayKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
   const greeting = getGreeting(now.getHours(), now.getMonth(), firstName, dayKey);
 
-  const dailyTip = useMemo(() => {
+  const dailyTip = (() => {
     const index = hashString(`${dayKey}:${firstName.toLowerCase()}:tip`) % DAILY_TIPS.length;
     return DAILY_TIPS[index] ?? DAILY_TIPS[0];
-  }, [dayKey, firstName]);
+  })();
 
   return (
     <div className="flex flex-col items-center justify-center px-4 py-10 sm:py-12">
@@ -191,7 +213,7 @@ export function ChatWelcome({
                 {greeting}, {firstName}
               </h1>
               <p className="mt-2 text-sm text-[var(--text-secondary)] sm:text-base">
-                {welcomeMessage?.trim() || "Pick a mode and start a focused session."}
+                {dynamicWelcomeLine({ hour: now.getHours(), month: now.getMonth(), orgName }) || welcomeMessage?.trim() || "Pick a mode and start a focused session."}
               </p>
             </div>
 
@@ -303,6 +325,29 @@ export function ChatWelcome({
             })}
           </div>
         </section>
+
+        {onUsePrompt ? (
+          <section>
+            <h2 className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+              Start Fast
+            </h2>
+            <div className="grid gap-2 sm:grid-cols-3">
+              {STARTER_PROMPTS.map((item) => (
+                <button
+                  key={item.prompt}
+                  type="button"
+                  className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2.5 text-left text-xs text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                  onClick={() => onUsePrompt(item.prompt, item.mode)}
+                >
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--text-primary)]">
+                    {getModeConfig(item.mode).label}
+                  </p>
+                  <p className="mt-1 line-clamp-3">{item.prompt}</p>
+                </button>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         {agents.length > 0 ? (
           <section>

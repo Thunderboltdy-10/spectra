@@ -92,13 +92,37 @@ export function ChatMessages({
 }: ChatMessagesProps) {
   const panel = usePanel();
   const scrollContainerRef = useRef<HTMLElement | null>(null);
+  const topLoadSentinelRef = useRef<HTMLDivElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
+  const previousChatIdRef = useRef<string | undefined>(chatId);
   const [showJumpButton, setShowJumpButton] = useState(false);
   const [draftQuizAnswers, setDraftQuizAnswers] = useState<Record<string, string>>({});
   const [showStreamCursor, setShowStreamCursor] = useState(false);
+  const [visibleStartIndex, setVisibleStartIndex] = useState(() => Math.max(0, messages.length - 36));
   const shouldAutoScrollRef = useRef(true);
 
   const hasContent = messages.length > 0 || Boolean(draftResponse);
+  const visibleMessages = useMemo(
+    () => messages.slice(visibleStartIndex),
+    [messages, visibleStartIndex],
+  );
+
+  useEffect(() => {
+    const chatChanged = previousChatIdRef.current !== chatId;
+    previousChatIdRef.current = chatId;
+
+    if (chatChanged) {
+      setVisibleStartIndex(Math.max(0, messages.length - 36));
+      return;
+    }
+
+    if (messages.length === 0) {
+      setVisibleStartIndex(0);
+      return;
+    }
+
+    setVisibleStartIndex((prev) => Math.min(prev, Math.max(0, messages.length - 1)));
+  }, [chatId, messages.length]);
 
   useEffect(() => {
     if (shouldAutoScrollRef.current) {
@@ -123,6 +147,34 @@ export function ChatMessages({
     element.addEventListener("scroll", onScroll);
     return () => element.removeEventListener("scroll", onScroll);
   }, []);
+
+  useEffect(() => {
+    const root = scrollContainerRef.current;
+    const target = topLoadSentinelRef.current;
+    if (!root || !target || visibleStartIndex <= 0) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        if (visibleStartIndex <= 0) return;
+
+        const previousHeight = root.scrollHeight;
+        const previousTop = root.scrollTop;
+        setVisibleStartIndex((prev) => Math.max(0, prev - 24));
+        requestAnimationFrame(() => {
+          const nextHeight = root.scrollHeight;
+          root.scrollTop = previousTop + (nextHeight - previousHeight);
+        });
+      },
+      {
+        root,
+        rootMargin: "220px 0px 0px 0px",
+      },
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [visibleStartIndex]);
 
   function modelLabel(modelId?: string) {
     if (!modelId) return "AI";
@@ -181,7 +233,7 @@ export function ChatMessages({
     const lower = error.toLowerCase();
 
     if (lower.includes("monthly limit") || lower.includes("no_free_model_available")) {
-      return "You've reached your monthly usage tier. Budget-safe models are still available.";
+      return "Current usage guardrails are active. Guardrail-safe models are still available.";
     }
     if (lower.includes("429") || lower.includes("rate")) {
       return "The model is busy. Backup models were attempted automatically.";
@@ -263,7 +315,18 @@ export function ChatMessages({
             />
           ) : null}
 
-          {messages.map((msg, index) => {
+          {visibleStartIndex > 0 ? (
+            <div
+              ref={topLoadSentinelRef}
+              className="mb-4 text-center text-[11px] uppercase tracking-[0.12em] text-[var(--text-secondary)]"
+              aria-label="Load older messages"
+            >
+              Loading earlier messages...
+            </div>
+          ) : null}
+
+          {visibleMessages.map((msg, localIndex) => {
+            const index = visibleStartIndex + localIndex;
             const isLastAssistant = msg.role === "assistant" && index === messages.length - 1;
             const msgMode = msg.mode ?? mode;
             const prevMsg = messages[index - 1];

@@ -187,7 +187,7 @@ export function FeedbackWidget() {
             value={message}
             onChange={(event) => setMessage(event.target.value.slice(0, MAX_MESSAGE_LENGTH))}
             placeholder="What happened, what did you expect, and how can we improve?"
-            className="min-h-[100px] w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
+            className="max-h-[190px] min-h-[100px] w-full resize-none overflow-y-auto rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
             required
             maxLength={MAX_MESSAGE_LENGTH}
           />

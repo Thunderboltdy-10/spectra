@@ -116,14 +116,14 @@ export function TopicCloud({ topics }: TopicCloudProps) {
   }
 
   return (
-    <div className="journal-card p-4">
+    <div className="p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Topics explored by type</p>
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Filter topics"
-          className="h-8 w-[220px] rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 text-xs"
+          className="h-8 w-[220px] rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 text-xs focus-visible:border-[var(--border-default)] focus-visible:ring-0"
         />
       </div>
 
@@ -160,7 +160,7 @@ export function TopicCloud({ topics }: TopicCloudProps) {
           <p className="text-sm text-[var(--text-secondary)]">No matching topics found.</p>
         ) : (
           grouped.map((group) => (
-            <div key={group.key} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
+            <div key={group.key} className="border-l-2 border-[color-mix(in_oklab,var(--accent-cyan)_40%,var(--border-default))] pl-3">
               <div className="mb-2 flex items-center justify-between">
                 <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-primary)]">
                   {group.label}

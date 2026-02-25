@@ -157,9 +157,10 @@ export function NotificationBell() {
           ) : (
             <div className="space-y-1.5">
               {notifications.map((notification) => (
-                <button
+                <div
                   key={notification._id}
-                  type="button"
+                  role="button"
+                  tabIndex={0}
                   className={`w-full rounded-xl border px-3 py-2 text-left transition ${
                     notification.read
                       ? "border-[var(--border-default)] bg-[var(--bg-elevated)]"
@@ -173,12 +174,36 @@ export function NotificationBell() {
                       window.location.href = notification.actionUrl;
                     }
                   }}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    if (!notification.read) {
+                      void markRead(notification._id);
+                    }
+                    if (notification.actionUrl) {
+                      window.location.href = notification.actionUrl;
+                    }
+                  }}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <p className="text-sm font-medium leading-tight">{notification.title}</p>
-                    {!notification.read ? (
-                      <span className="mt-1 inline-flex h-2 w-2 shrink-0 rounded-full bg-[var(--accent-cyan)]" />
-                    ) : null}
+                    <div className="flex items-center gap-1">
+                      {!notification.read ? (
+                        <button
+                          type="button"
+                          className="inline-flex rounded-full border border-[var(--border-default)] px-1.5 py-0.5 text-[10px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void markRead(notification._id);
+                          }}
+                        >
+                          Mark read
+                        </button>
+                      ) : null}
+                      {!notification.read ? (
+                        <span className="mt-1 inline-flex h-2 w-2 shrink-0 rounded-full bg-[var(--accent-cyan)]" />
+                      ) : null}
+                    </div>
                   </div>
                   <p
                     role="button"
@@ -200,7 +225,7 @@ export function NotificationBell() {
                   <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
                     {formatDistanceToNow(notification.createdAt, { addSuffix: true })}
                   </p>
-                </button>
+                </div>
               ))}
             </div>
           )}

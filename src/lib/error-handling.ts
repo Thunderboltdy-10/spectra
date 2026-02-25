@@ -49,7 +49,7 @@ export function useErrorHandling() {
     }
     
     if (errorMessage.includes("BUDGET_EXCEEDED")) {
-      toast.error("Daily token budget reached. Try again tomorrow.");
+      toast.error("Usage guardrails are active right now. Please try again later.");
       return;
     }
     
@@ -111,8 +111,8 @@ export function formatErrorForDisplay(error: unknown): { title: string; message:
     
     if (error.message.includes("BUDGET_EXCEEDED")) {
       return {
-        title: "Budget limit reached",
-        message: "Your organization has reached the daily token limit. Please try again tomorrow.",
+        title: "Usage guardrail reached",
+        message: "Your organization has reached an active usage guardrail. Please try again later.",
       };
     }
     

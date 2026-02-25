@@ -13,7 +13,6 @@ import {
   Zap,
 } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
-import { cn } from "@/lib/utils";
 
 type DashboardData = {
   memberCount: number;
@@ -124,7 +123,7 @@ export default function SchoolAdminDashboard() {
     <AppShell>
       <div className="space-y-8">
         {/* Header */}
-        <div>
+        <div data-tour="school-admin-header">
           <div className="mb-1 flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-[var(--accent-cyan)]" />
             <span className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
@@ -150,24 +149,16 @@ export default function SchoolAdminDashboard() {
               </span>
             )}
           </p>
-          <div className="mt-3 inline-flex items-center rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-1">
-            {[
-              { href: "/admin", label: "Personal Admin" },
-              { href: "/admin/school", label: "School Admin" },
-            ].map((tab) => (
-              <Link
-                key={tab.href}
-                href={tab.href}
-                className={cn(
-                  "rounded-lg px-3 py-1.5 text-xs transition",
-                  tab.href === "/admin/school"
-                    ? "bg-[var(--bg-primary)] text-[var(--text-primary)]"
-                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
-                )}
-              >
-                {tab.label}
-              </Link>
-            ))}
+          <div className="mt-3 flex flex-wrap gap-2 text-xs">
+            <Link href="/admin" className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]">
+              Role management
+            </Link>
+            <Link href="/admin/school/branding" className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]">
+              Branding
+            </Link>
+            <Link href="/admin/school/soul" className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]">
+              School SOUL
+            </Link>
           </div>
         </div>
 
@@ -216,7 +207,7 @@ export default function SchoolAdminDashboard() {
               href="/admin/school/branding"
               icon={<Palette className="h-5 w-5" />}
               label="Branding"
-              desc="Logo, colors and welcome message"
+              desc="Logo, colors, and dynamic greeting theme"
               accent="var(--accent-coral)"
             />
             <NavCard
@@ -236,22 +227,11 @@ export default function SchoolAdminDashboard() {
           </div>
         </div>
 
-        {/* Teacher quick-access */}
         <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[var(--shadow-soft)]">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Existing Admin Panel</h2>
-              <p className="text-xs text-[var(--text-secondary)]">
-                Access the full admin console with user roles and org settings.
-              </p>
-            </div>
-            <Link
-              href="/admin"
-              className="cursor-pointer rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]"
-            >
-              Open Admin Console
-            </Link>
-          </div>
+          <h2 className="text-sm font-semibold text-[var(--text-primary)]">Unified admin navigation</h2>
+          <p className="mt-1 text-xs text-[var(--text-secondary)]">
+            This dashboard links directly to every school admin function, with no dead-end options.
+          </p>
         </div>
       </div>
     </AppShell>

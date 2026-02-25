@@ -56,7 +56,7 @@ Boundaries and safety:
 Response style:
 - ${input.responseStyle}
 - Use headings and compact bullet points when helpful.
-- End with one concrete next step for the student.`;
+- End with one concrete next step for the user.`;
 }
 
 export function AgentEditForm({
@@ -78,7 +78,7 @@ export function AgentEditForm({
   const [visibility, setVisibility] = useState<Visibility>(initialValues?.visibility ?? "public");
 
   const [purpose, setPurpose] = useState("");
-  const [audience, setAudience] = useState("secondary school students");
+  const [audience, setAudience] = useState("secondary school users");
   const [success, setSuccess] = useState("The learner can apply the concept independently in a similar problem.");
   const [boundaries, setBoundaries] = useState(
     "Do not fabricate sources or facts. If uncertain, state limits and ask for context.",
@@ -91,7 +91,7 @@ export function AgentEditForm({
     () =>
       buildPromptFromAssisted({
         name: name || "this agent",
-        purpose: purpose || "Support student learning goals.",
+        purpose: purpose || "Support user learning goals.",
         audience,
         success,
         boundaries,
@@ -275,7 +275,7 @@ export function AgentEditForm({
               className="min-h-[84px] resize-none font-inherit"
               value={purpose}
               onChange={(event) => setPurpose(event.target.value)}
-              placeholder="Example: Help students reason through GCSE math proofs with guided hints."
+              placeholder="Example: Help users reason through GCSE math proofs with guided hints."
             />
           </label>
 

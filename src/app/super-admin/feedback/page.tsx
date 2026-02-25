@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 
 type FeedbackStatus = "new" | "in_progress" | "shipped";
 type FeedbackCategory = "bug" | "confusing" | "feature" | "safety";
+type FeedbackBucket = "UI / UX" | "Reliability" | "Data / Routing" | "Feature Request" | "Safety" | "Billing / Limits";
 
 type FeedbackItem = {
   _id: string;
@@ -29,6 +30,13 @@ type FeedbackItem = {
   adminReply?: string;
   createdAt: number;
   updatedAt?: number;
+  sender?: {
+    name?: string;
+    email?: string;
+    role?: string;
+    clerkId?: string;
+  } | null;
+  orgName?: string;
 };
 
 const STATUS_OPTIONS: Array<{ value: FeedbackStatus; label: string }> = [
@@ -42,6 +50,15 @@ const CATEGORY_OPTIONS: Array<{ value: FeedbackCategory; label: string }> = [
   { value: "confusing", label: "Confusing" },
   { value: "feature", label: "Feature" },
   { value: "safety", label: "Safety" },
+];
+
+const BUCKET_OPTIONS: FeedbackBucket[] = [
+  "UI / UX",
+  "Reliability",
+  "Data / Routing",
+  "Feature Request",
+  "Safety",
+  "Billing / Limits",
 ];
 
 function formatDate(timestamp: number) {
@@ -67,12 +84,23 @@ function categoryTone(category: FeedbackCategory) {
   return "text-[var(--warning)] bg-[color-mix(in_oklab,var(--warning)_16%,transparent)]";
 }
 
+function inferBucket(item: FeedbackItem): FeedbackBucket {
+  const text = `${item.category} ${item.message} ${item.context.page ?? ""} ${item.context.mode ?? ""}`.toLowerCase();
+  if (item.category === "safety" || /\bsafe|abuse|harm|toxic|policy|unsafe\b/.test(text)) return "Safety";
+  if (/\bbudget|limit|cost|pricing|tier|usage\b/.test(text)) return "Billing / Limits";
+  if (/\bsource|citation|render|router|mode|agent|classification|categor/i.test(text)) return "Data / Routing";
+  if (item.category === "feature" || /\bfeature|would like|please add|enhancement\b/.test(text)) return "Feature Request";
+  if (item.category === "bug" || /\berror|broken|crash|fail|doesn[’']?t work|not working\b/.test(text)) return "Reliability";
+  return "UI / UX";
+}
+
 export default function SuperAdminFeedbackInboxPage() {
   const [items, setItems] = useState<FeedbackItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [activeStatuses, setActiveStatuses] = useState<Set<FeedbackStatus>>(new Set());
   const [activeCategories, setActiveCategories] = useState<Set<FeedbackCategory>>(new Set());
+  const [activeBuckets, setActiveBuckets] = useState<Set<FeedbackBucket>>(new Set());
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [busyStatusId, setBusyStatusId] = useState<string | null>(null);
   const [busyReplyId, setBusyReplyId] = useState<string | null>(null);
@@ -96,9 +124,11 @@ export default function SuperAdminFeedbackInboxPage() {
     return items.filter((item) => {
       const statusOk = activeStatuses.size === 0 || activeStatuses.has(item.status);
       const categoryOk = activeCategories.size === 0 || activeCategories.has(item.category);
-      return statusOk && categoryOk;
+      const bucket = inferBucket(item);
+      const bucketOk = activeBuckets.size === 0 || activeBuckets.has(bucket);
+      return statusOk && categoryOk && bucketOk;
     });
-  }, [activeCategories, activeStatuses, items]);
+  }, [activeBuckets, activeCategories, activeStatuses, items]);
 
   async function updateStatus(feedbackId: string, status: FeedbackStatus) {
     setBusyStatusId(feedbackId);
@@ -157,7 +187,7 @@ export default function SuperAdminFeedbackInboxPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-4" data-tour="super-feedback-header">
           <div>
             <div className="mb-1 flex items-center gap-2">
               <Link
@@ -179,13 +209,13 @@ export default function SuperAdminFeedbackInboxPage() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-card)]">
+        <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-card)]" data-tour="super-feedback-filters">
           <div className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
             <Filter className="h-3.5 w-3.5" />
             Filters
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-3">
             <div>
               <p className="mb-2 text-xs font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)]">Status</p>
               <div className="flex flex-wrap gap-2">
@@ -245,10 +275,40 @@ export default function SuperAdminFeedbackInboxPage() {
                 })}
               </div>
             </div>
+
+            <div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)]">AI Buckets</p>
+              <div className="flex flex-wrap gap-2">
+                {BUCKET_OPTIONS.map((bucket) => {
+                  const active = activeBuckets.has(bucket);
+                  return (
+                    <button
+                      key={bucket}
+                      type="button"
+                      onClick={() =>
+                        setActiveBuckets((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(bucket)) next.delete(bucket);
+                          else next.add(bucket);
+                          return next;
+                        })
+                      }
+                      className={`cursor-pointer rounded-full border px-3 py-1 text-xs transition ${
+                        active
+                          ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)] text-[var(--text-primary)]"
+                          : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                      }`}
+                    >
+                      {bucket}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="space-y-3">
+        <div className="space-y-3" data-tour="super-feedback-list">
           {loading ? (
             <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 text-sm text-[var(--text-secondary)]">
               Loading feedback...
@@ -263,6 +323,7 @@ export default function SuperAdminFeedbackInboxPage() {
               const expanded = expandedId === item._id;
               const statusLabel = STATUS_OPTIONS.find((s) => s.value === item.status)?.label ?? item.status;
               const categoryLabel = CATEGORY_OPTIONS.find((c) => c.value === item.category)?.label ?? item.category;
+              const bucket = inferBucket(item);
 
               return (
                 <article key={item._id} className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-card)]">
@@ -271,6 +332,9 @@ export default function SuperAdminFeedbackInboxPage() {
                       <div className="mb-2 flex flex-wrap items-center gap-2">
                         <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${categoryTone(item.category)}`}>
                           {categoryLabel}
+                        </span>
+                        <span className="inline-flex rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-0.5 text-xs font-medium text-[var(--text-secondary)]">
+                          {bucket}
                         </span>
                         <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${statusTone(item.status)}`}>
                           {statusLabel}
@@ -296,6 +360,18 @@ export default function SuperAdminFeedbackInboxPage() {
                   {expanded ? (
                     <div className="mt-4 space-y-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
                       <div className="grid gap-2 text-xs text-[var(--text-secondary)] sm:grid-cols-2">
+                        <p>
+                          <span className="font-semibold text-[var(--text-primary)]">Sender:</span>{" "}
+                          {item.sender?.name ?? "Unknown"}
+                        </p>
+                        <p className="truncate">
+                          <span className="font-semibold text-[var(--text-primary)]">Sender email:</span>{" "}
+                          {item.sender?.email ?? "Unavailable"}
+                        </p>
+                        <p>
+                          <span className="font-semibold text-[var(--text-primary)]">School:</span>{" "}
+                          {item.orgName ?? "Unknown school"}
+                        </p>
                         <p>
                           <span className="font-semibold text-[var(--text-primary)]">Page:</span>{" "}
                           {item.context.page ?? "—"}
@@ -372,7 +448,7 @@ export default function SuperAdminFeedbackInboxPage() {
                             }))
                           }
                           placeholder="Write a reply..."
-                          className="min-h-[88px] w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
+                          className="max-h-[180px] min-h-[88px] w-full resize-none overflow-y-auto rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
                         />
                         <div className="mt-2 flex justify-end">
                           <Button

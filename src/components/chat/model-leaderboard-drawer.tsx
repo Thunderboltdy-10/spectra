@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ProviderLogo } from "@/components/provider-logo";
 import { useCompactSheet } from "@/hooks/use-compact-sheet";
 import { useRightPanelDock } from "@/hooks/use-right-panel-dock";
+import { rightPanelSurfaceClassName } from "@/components/ui/right-panel-surface";
 
 type LeaderboardEntry = {
   modelId: string;
@@ -28,7 +29,7 @@ function formatTokens(value: number) {
 
 export function ModelLeaderboardDrawer({ open, onClose }: ModelLeaderboardDrawerProps) {
   const compact = useCompactSheet(1024);
-  const { docked, isOverlay, panelWidth } = useRightPanelDock({ id: "model-leaderboard", open, compact, maxWidthPx: 420 });
+  const { docked, panelWidth } = useRightPanelDock({ id: "model-leaderboard", open, compact, maxWidthPx: 420 });
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -56,14 +57,14 @@ export function ModelLeaderboardDrawer({ open, onClose }: ModelLeaderboardDrawer
       {!docked ? (
         <button
           type="button"
-          className={`absolute inset-0 cursor-pointer transition ${isOverlay ? "bg-black/45 backdrop-blur-none md:backdrop-blur-sm" : "bg-transparent"}`}
+          className={`absolute inset-0 cursor-pointer transition bg-transparent`}
           aria-label="Close leaderboard"
           onClick={onClose}
         />
       ) : null}
 
       <aside
-        className={`right-panel-shell pointer-events-auto absolute border-[var(--border-default)] bg-[var(--bg-sidebar)] p-4 shadow-[var(--shadow-soft)] sm:p-5 ${
+        className={`right-panel-shell ${rightPanelSurfaceClassName()} pointer-events-auto absolute p-4 shadow-[var(--shadow-soft)] sm:p-5 ${
           docked ? "right-panel-shell--docked" : "right-panel-shell--sheet"
         } ${
           compact

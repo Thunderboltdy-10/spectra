@@ -10,6 +10,7 @@ import type { AutoPreference, ModelOption, PersonalResource, UserSpending } from
 import type { RouterMode, StudyMode, ThinkingLevel } from "@/types";
 import { useCompactSheet } from "@/hooks/use-compact-sheet";
 import { useRightPanelDock } from "@/hooks/use-right-panel-dock";
+import { rightPanelSurfaceClassName } from "@/components/ui/right-panel-surface";
 
 type ChatSettingsDrawerProps = {
   open: boolean;
@@ -113,7 +114,7 @@ export function ChatSettingsDrawer({
   onDeleteResource,
 }: ChatSettingsDrawerProps) {
   const compact = useCompactSheet(1024);
-  const { docked, isOverlay, panelWidth } = useRightPanelDock({
+  const { docked, panelWidth } = useRightPanelDock({
     id: "chat-settings-drawer",
     open,
     compact,
@@ -124,31 +125,18 @@ export function ChatSettingsDrawer({
 
   useEffect(() => {
     if (!open) return;
-    setCollapsed(compact);
-  }, [open, compact]);
-
-  useEffect(() => {
-    if (!compact) {
-      setCollapsed(false);
-    }
-  }, [compact]);
+    setCollapsed(false);
+  }, [open]);
 
   if (!open) return null;
 
-  const ratio = userSpending
-    ? Math.min(
-        Math.max(
-          typeof userSpending.budgetUsagePercent === "number"
-            ? userSpending.budgetUsagePercent / 100
-            : (userSpending.totalCostCents ?? 0) / Math.max(1, userSpending.hardLimitCents ?? 1),
-          0,
-        ),
-        1,
-      )
-    : 0;
+  const ratio =
+    userSpending && typeof userSpending.budgetUsagePercent === "number" && userSpending.budgetUsagePercent > 0
+      ? Math.min(1, Math.max(0, userSpending.budgetUsagePercent / 100))
+      : null;
   const usageLabel =
-    !userSpending
-      ? "N/A"
+    typeof ratio !== "number"
+      ? "No activity yet"
       : ratio >= 0.8
       ? "High activity"
       : ratio >= 0.4
@@ -166,14 +154,14 @@ export function ChatSettingsDrawer({
       {!docked ? (
         <button
           type="button"
-          className={`absolute inset-0 transition ${isOverlay ? "bg-black/45 backdrop-blur-none md:backdrop-blur-sm" : "bg-transparent"}`}
+          className={`absolute inset-0 transition bg-transparent`}
           aria-label="Close settings"
           onClick={onClose}
         />
       ) : null}
 
       <aside
-        className={`right-panel-shell pointer-events-auto absolute border-[var(--border-default)] bg-[var(--bg-sidebar)] p-4 shadow-[var(--shadow-soft)] sm:p-5 ${
+        className={`right-panel-shell ${rightPanelSurfaceClassName()} pointer-events-auto absolute p-4 shadow-[var(--shadow-soft)] sm:p-5 ${
           docked ? "right-panel-shell--docked" : "right-panel-shell--sheet"
         } ${
           compact
@@ -343,13 +331,13 @@ export function ChatSettingsDrawer({
 
           <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
               <div className="flex items-center justify-between">
-                <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Usage indicator</h3>
+                <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Monthly activity</h3>
                 <span className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">{usageLabel}</span>
               </div>
             <div className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
               <div
                 className="h-full rounded-full bg-[var(--gradient-brand)]"
-                style={{ width: `${Math.max(2, ratio * 100)}%` }}
+                style={{ width: `${Math.max(2, (ratio ?? 0.16) * 100)}%` }}
               />
             </div>
           </section>

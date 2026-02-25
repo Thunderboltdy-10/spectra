@@ -4,6 +4,7 @@ import { getUserByClerkId } from "./helpers";
 import type { Doc } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { computeStreakProgress, dayKey, parseIsoDate } from "./streakLogic";
+import { shouldCheckImageAchievements } from "../src/lib/achievement-rules";
 
 type AchievementDefinition = {
   type: string;
@@ -788,10 +789,11 @@ async function evaluateActivityAchievements(
     }
   }
 
-  const shouldCheckImageAchievements = (
-    modeUsed === "image" || activityType === "chat"
-  ) && hasAnyLockedAchievements("first_image", "image_10");
-  if (shouldCheckImageAchievements) {
+  const shouldCheckImageAchievementMilestones = shouldCheckImageAchievements({
+    modeUsed,
+    activityType,
+  }) && hasAnyLockedAchievements("first_image", "image_10");
+  if (shouldCheckImageAchievementMilestones) {
     const imageCount = await getImageResponses();
     if (imageCount >= 1) {
       const firstImage = await maybeAwardAchievement(ctx, actor, existingTypes, "first_image");

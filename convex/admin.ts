@@ -16,7 +16,17 @@ export const getOrgSettings = query({
         ? await ctx.storage.getUrl(org.logoStorageId).catch(() => null)
         : null;
     return {
-      org: org ? { ...org, logoUrl: logoUrl ?? undefined } : org,
+      org: org
+        ? {
+            ...org,
+            logoUrl: logoUrl ?? undefined,
+            orchestratorV2Enabled: org.orchestratorV2Enabled ?? true,
+            soulEnabled: org.soulEnabled ?? true,
+            agentModelBoostEnabled: org.agentModelBoostEnabled ?? true,
+            adaptiveQuizEnabled: org.adaptiveQuizEnabled ?? true,
+            spacedRepetitionEnabled: org.spacedRepetitionEnabled ?? true,
+          }
+        : org,
       actorRole: actor.role,
     };
   },
@@ -51,23 +61,23 @@ export const updateOrgSettings = mutation({
       orchestratorV2Enabled:
         args.orchestratorV2Enabled !== undefined
           ? args.orchestratorV2Enabled
-          : org.orchestratorV2Enabled,
+          : (org.orchestratorV2Enabled ?? true),
       soulEnabled:
         args.soulEnabled !== undefined
           ? args.soulEnabled
-          : org.soulEnabled,
+          : (org.soulEnabled ?? true),
       agentModelBoostEnabled:
         args.agentModelBoostEnabled !== undefined
           ? args.agentModelBoostEnabled
-          : org.agentModelBoostEnabled,
+          : (org.agentModelBoostEnabled ?? true),
       adaptiveQuizEnabled:
         args.adaptiveQuizEnabled !== undefined
           ? args.adaptiveQuizEnabled
-          : org.adaptiveQuizEnabled,
+          : (org.adaptiveQuizEnabled ?? true),
       spacedRepetitionEnabled:
         args.spacedRepetitionEnabled !== undefined
           ? args.spacedRepetitionEnabled
-          : org.spacedRepetitionEnabled,
+          : (org.spacedRepetitionEnabled ?? true),
       updatedAt: Date.now(),
     });
 

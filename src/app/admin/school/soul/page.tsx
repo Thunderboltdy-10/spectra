@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   BookOpen,
@@ -39,6 +40,18 @@ type SoulSection = {
   description: string;
   placeholder: string;
 };
+
+async function readApiError(response: Response, fallback: string) {
+  const text = await response.text();
+  if (!text) return fallback;
+  try {
+    const parsed = JSON.parse(text) as { error?: string };
+    if (typeof parsed.error === "string" && parsed.error.trim()) return parsed.error;
+  } catch {
+    // Ignore parse failures.
+  }
+  return fallback;
+}
 
 // ---------------------------------------------------------------------------
 // Sections configuration
@@ -132,11 +145,13 @@ const STARTER_TEMPLATES: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 export default function SchoolSoulPage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [seeding, setSeeding] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [docs, setDocs] = useState<SoulDoc[]>([]);
+  const [embeddingsConfigured, setEmbeddingsConfigured] = useState(true);
   const [activeSection, setActiveSection] = useState(SECTIONS[0]!.section);
   const [title, setTitle] = useState(SECTIONS[0]!.title);
   const [content, setContent] = useState("");
@@ -157,9 +172,10 @@ export default function SchoolSoulPage() {
 
   async function loadDocs() {
     const response = await fetch("/api/admin/soul");
-    if (!response.ok) throw new Error(await response.text());
-    const data = (await response.json()) as { docs: SoulDoc[] };
+    if (!response.ok) throw new Error(await readApiError(response, "Failed to load SOUL docs"));
+    const data = (await response.json()) as { docs: SoulDoc[]; embeddingsConfigured?: boolean };
     setDocs(data.docs ?? []);
+    setEmbeddingsConfigured(data.embeddingsConfigured !== false);
   }
 
   async function runTest(query: string) {
@@ -167,9 +183,10 @@ export default function SchoolSoulPage() {
     setTesting(true);
     try {
       const response = await fetch(`/api/admin/soul?preview=${encodeURIComponent(query)}`);
-      if (!response.ok) throw new Error(await response.text());
-      const data = (await response.json()) as { preview?: { bullets?: string[] } };
+      if (!response.ok) throw new Error(await readApiError(response, "Preview failed"));
+      const data = (await response.json()) as { preview?: { bullets?: string[] }; embeddingsConfigured?: boolean };
       setTestBullets((data.preview?.bullets ?? []).slice(0, 10));
+      setEmbeddingsConfigured(data.embeddingsConfigured !== false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Test failed");
     } finally {
@@ -225,7 +242,7 @@ export default function SchoolSoulPage() {
           content: content.trim(),
         }),
       });
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) throw new Error(await readApiError(response, "Failed to save section"));
       await loadDocs();
       toast.success(`"${title}" saved successfully`);
     } catch (error) {
@@ -283,7 +300,7 @@ export default function SchoolSoulPage() {
     setPublishing(true);
     try {
       const response = await fetch("/api/admin/soul", { method: "PATCH" });
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) throw new Error(await readApiError(response, "Failed to publish SOUL"));
       await loadDocs();
       toast.success("School SOUL published — AI will use these guidelines immediately");
     } catch (error) {
@@ -301,7 +318,7 @@ export default function SchoolSoulPage() {
     <AppShell>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-4" data-tour="soul-header">
           <div>
             <div className="mb-1 flex items-center gap-2">
               <div
@@ -316,9 +333,27 @@ export default function SchoolSoulPage() {
               Institutional AI guidance — hidden from students, injected at runtime into every
               interaction. Changes apply only to your current school.
             </p>
+            {!embeddingsConfigured ? (
+              <p className="mt-2 rounded-lg border border-[color-mix(in_oklab,var(--warning)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_10%,transparent)] px-2.5 py-1.5 text-xs text-[var(--warning)]">
+                <code>OPENROUTER_API_KEY</code> is missing, so SOUL uses lexical fallback (no embeddings). Publish and
+                preview still work.
+              </p>
+            ) : null}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                if (window.history.length > 1) {
+                  router.back();
+                } else {
+                  router.push("/admin/school");
+                }
+              }}
+            >
+              Go back
+            </Button>
             <Button
               variant="secondary"
               onClick={() =>
@@ -361,7 +396,7 @@ export default function SchoolSoulPage() {
         </div>
 
         {/* Section Nav Pills */}
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2" data-tour="soul-sections">
           {SECTIONS.map((item) => {
             const hasContent = docs.some((d) => d.section === item.section && d.content.trim());
             const isActive = activeSection === item.section;
@@ -391,7 +426,7 @@ export default function SchoolSoulPage() {
         {/* Main grid */}
         <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
           {/* Left: Editor */}
-          <div className="space-y-4">
+          <div className="space-y-4" data-tour="soul-editor">
             {/* Section info card */}
             <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5">
               <div className="mb-4 flex items-start gap-3">
@@ -458,7 +493,7 @@ export default function SchoolSoulPage() {
           {/* Right: Test panel + Version history */}
           <div className="space-y-4">
             {/* Test SOUL panel */}
-            <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5">
+            <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5" data-tour="soul-test-panel">
               <div className="mb-3 flex items-center gap-2">
                 <FlaskConical className="h-4 w-4 text-[var(--accent-cyan)]" />
                 <h2 className="text-sm font-semibold text-[var(--text-primary)]">

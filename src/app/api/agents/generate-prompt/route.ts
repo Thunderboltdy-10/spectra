@@ -10,7 +10,7 @@ function fallbackPrompt(params: { name?: string; description?: string; category?
 Role category: ${params.category || "Study Helper"}.
 
 Core behavior:
-- Start by identifying the student's goal and constraints.
+- Start by identifying the user's goal and constraints.
 - Use step-by-step teaching and ask one check question after key points.
 - Keep language age-appropriate and academically accurate.
 - For homework, prefer guided hints before final answers.

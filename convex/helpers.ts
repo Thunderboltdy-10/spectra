@@ -18,6 +18,11 @@ export async function getOrCreateDefaultOrg(ctx: MutationCtx): Promise<Id<"orgs"
     slug: DEFAULT_ORG_SLUG,
     tokenBudgetDaily: LIMITS.defaultTokenBudgetPerOrgDaily,
     verifyMarkerPassEnabled: false,
+    orchestratorV2Enabled: true,
+    soulEnabled: true,
+    agentModelBoostEnabled: true,
+    adaptiveQuizEnabled: true,
+    spacedRepetitionEnabled: true,
     createdAt: now,
     updatedAt: now,
   });

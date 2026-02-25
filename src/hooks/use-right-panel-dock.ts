@@ -27,7 +27,7 @@ export function useRightPanelDock(params: {
   const computeWidth = useMemo(
     () => () => {
       const vw = window.innerWidth;
-      const ratio = vw <= 1440 ? 0.28 : vw <= 1920 ? 0.30 : 0.36;
+      const ratio = vw <= 1440 ? 0.3 : vw <= 1920 ? 0.34 : 0.4;
       const maxByViewport = Math.floor(vw * ratio);
       const availableAfterGuards = window.innerWidth - minMainWidthPx - reserveLeftPx;
       return Math.max(0, Math.min(maxWidthPx, maxByViewport, availableAfterGuards));
@@ -37,14 +37,19 @@ export function useRightPanelDock(params: {
 
   useEffect(() => {
     const update = () => {
+      if (!open) {
+        setDocked(false);
+        setPanelWidth(maxWidthPx);
+        return;
+      }
       const width = computeWidth();
       const nextDocked = shouldDock({ open, compact, width });
-      setDocked(nextDocked);
-      setPanelWidth(
-        nextDocked
-          ? Math.max(MIN_DOCK_WIDTH, width)
-          : Math.min(maxWidthPx, Math.floor(window.innerWidth * 0.92)),
-      );
+      const nextWidth = nextDocked
+        ? Math.max(MIN_DOCK_WIDTH, width)
+        : Math.min(maxWidthPx, Math.floor(window.innerWidth * 0.92));
+
+      setDocked((prev) => (prev === nextDocked ? prev : nextDocked));
+      setPanelWidth((prev) => (prev === nextWidth ? prev : nextWidth));
     };
 
     update();

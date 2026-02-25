@@ -21,7 +21,7 @@ export function ActivityChart({ data, label }: ActivityChartProps) {
   const activeDays = data.filter((day) => day.count > 0).length;
 
   return (
-    <div className="journal-card journal-scribble p-4">
+    <div className="p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
         <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">
           {label ?? "Daily activity"}

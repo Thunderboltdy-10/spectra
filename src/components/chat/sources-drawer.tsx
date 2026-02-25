@@ -7,6 +7,7 @@ import type { Citation } from "@/types";
 import { useCompactSheet } from "@/hooks/use-compact-sheet";
 import { RichText } from "@/components/chat/rich-text";
 import { useRightPanelDock } from "@/hooks/use-right-panel-dock";
+import { rightPanelSurfaceClassName } from "@/components/ui/right-panel-surface";
 
 type SourcesDrawerProps = {
   open: boolean;
@@ -22,7 +23,7 @@ function hrefForCitation(citation: Citation) {
 
 export function SourcesDrawer({ open, onClose, citations }: SourcesDrawerProps) {
   const compact = useCompactSheet(1024);
-  const { docked, isOverlay, panelWidth } = useRightPanelDock({ id: "sources-drawer", open, compact, maxWidthPx: 576 });
+  const { docked, panelWidth } = useRightPanelDock({ id: "sources-drawer", open, compact, maxWidthPx: 576 });
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -43,13 +44,13 @@ export function SourcesDrawer({ open, onClose, citations }: SourcesDrawerProps) 
       {!docked ? (
         <button
           type="button"
-          className={`absolute inset-0 transition ${isOverlay ? "bg-black/45 backdrop-blur-none md:backdrop-blur-sm" : "bg-transparent"}`}
+          className={`absolute inset-0 transition bg-transparent`}
           onClick={onClose}
           aria-label="Close sources drawer"
         />
       ) : null}
       <aside
-        className={`right-panel-shell pointer-events-auto absolute border-[var(--border-default)] bg-[var(--bg-sidebar)] p-4 shadow-[var(--shadow-soft)] ${
+        className={`right-panel-shell ${rightPanelSurfaceClassName()} pointer-events-auto absolute p-4 shadow-[var(--shadow-soft)] ${
           docked ? "right-panel-shell--docked" : "right-panel-shell--sheet"
         } ${
           compact

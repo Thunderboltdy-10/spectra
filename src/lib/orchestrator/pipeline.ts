@@ -178,8 +178,15 @@ function extractMarkdownImageUrls(value: string) {
 }
 
 function fallbackTitleFromUserMessage(message: string) {
-  const compact = message.replace(/\s+/g, " ").trim();
-  return compact.slice(0, 60) || "New chat";
+  const words = message
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .map((word) => word.trim())
+    .filter(Boolean);
+  if (words.length === 0) return "New chat";
+  if (words.length === 1) return `${words[0]} session`.slice(0, 80);
+  return words.slice(0, 5).join(" ").slice(0, 80);
 }
 
 async function resolveFirstTurnTitle(params: {
@@ -412,7 +419,7 @@ export async function runChatPipeline(request: NextRequest) {
           routerMode: body.routerMode,
           manualModel: body.manualModel,
           usePersonalResources: body.usePersonalResources,
-          title: normalizedMessage.slice(0, 60),
+          title: "New chat",
         })) as { chatId: string }
       ).chatId;
 
@@ -704,7 +711,7 @@ export async function runChatPipeline(request: NextRequest) {
 
   const searchBlock = webResult.text ?? "";
   const searchUrls = webResult.urls ?? [];
-  const searchSources = webResult.sources ?? [];
+  let searchSources = webResult.sources ?? [];
   if (auto.searchEnabled) {
     logger.info("web search complete", { urlCount: searchUrls.length });
   }
@@ -970,8 +977,8 @@ export async function runChatPipeline(request: NextRequest) {
     budget.tier === "free_only"
       ? { maxSpecialists: 1, maxSubcalls: 2, maxTokensPerSpecialist: 600, includeCritic: false }
       : budget.tier === "cheap_only"
-        ? { maxSpecialists: 2, maxSubcalls: 3, maxTokensPerSpecialist: 900, includeCritic: false }
-        : { maxSpecialists: 3, maxSubcalls: 4, maxTokensPerSpecialist: 1200, includeCritic: true };
+        ? { maxSpecialists: 3, maxSubcalls: 3, maxTokensPerSpecialist: 900, includeCritic: false }
+        : { maxSpecialists: 5, maxSubcalls: 4, maxTokensPerSpecialist: 1200, includeCritic: true };
   if (!collabLimits.includeCritic) {
     route.trace.toolchain.push("critic_skipped_budget_guard");
   }
@@ -1305,6 +1312,23 @@ export async function runChatPipeline(request: NextRequest) {
             onFallback,
             logger,
           });
+
+      if (streamed.sourceHints?.length) {
+        const deduped = new Map<string, { url: string; title: string; domain: string }>();
+        for (const source of searchSources) {
+          if (!source?.url) continue;
+          deduped.set(source.url, source);
+        }
+        for (const hint of streamed.sourceHints) {
+          if (!hint?.url) continue;
+          deduped.set(hint.url, {
+            url: hint.url,
+            title: hint.title || hint.domain || hint.url,
+            domain: hint.domain || "",
+          });
+        }
+        searchSources = [...deduped.values()];
+      }
 
       const responseText = streamed.responseText;
       const modelUsed = streamed.modelUsed;

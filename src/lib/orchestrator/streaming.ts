@@ -83,6 +83,7 @@ export async function runAssistantStreaming(params: {
     usageOut,
     verificationPassed,
     thinkingContent,
+    sourceHints: [] as SearchSourceHint[],
     collaborators: undefined as
       | Array<{ role: string; model: string; tokensUsed: number; durationMs: number }>
       | undefined,
@@ -96,12 +97,59 @@ type CollaboratorTrace = {
   durationMs: number;
 };
 
+type SearchSourceHint = {
+  url: string;
+  title: string;
+  domain: string;
+};
+
 function summarizeDependencyResults(nodes: TaskNode[]) {
   const text = nodes
     .map((node) => `${node.role}: ${(node.result ?? "").slice(0, 700)}`)
     .join("\n\n")
     .trim();
   return text || "No dependency output available.";
+}
+
+function cleanUrlToken(raw: string) {
+  return raw.replace(/[),.;]+$/g, "").trim();
+}
+
+function domainFromUrl(url: string) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+function extractSourceHintsFromResult(result: string) {
+  const byUrl = new Map<string, SearchSourceHint>();
+  const text = result || "";
+
+  for (const match of text.matchAll(/\[([^\]]{2,120})\]\((https?:\/\/[^\s)]+)\)/g)) {
+    const title = (match[1] ?? "").trim();
+    const url = cleanUrlToken(match[2] ?? "");
+    if (!url) continue;
+    byUrl.set(url, {
+      url,
+      title: title || domainFromUrl(url) || "Source",
+      domain: domainFromUrl(url),
+    });
+  }
+
+  for (const match of text.matchAll(/https?:\/\/[^\s)\]]+/g)) {
+    const url = cleanUrlToken(match[0] ?? "");
+    if (!url || byUrl.has(url)) continue;
+    const domain = domainFromUrl(url);
+    byUrl.set(url, {
+      url,
+      title: domain || "Source",
+      domain,
+    });
+  }
+
+  return [...byUrl.values()].slice(0, 8);
 }
 
 function buildCriticFallback(params: {
@@ -149,6 +197,7 @@ export async function runCollaborativeStreaming(params: {
     info: (message: string, context?: Record<string, unknown>) => void;
   };
 }) {
+  const sourceHintsByUrl = new Map<string, SearchSourceHint>();
   const collaboratorNodes = params.graph.filter((node) => node.role !== "synthesizer");
   await params.send({ type: "collab_start", agents: collaboratorNodes.map((node) => node.role) });
   await params.send({
@@ -188,7 +237,7 @@ export async function runCollaborativeStreaming(params: {
             {
               role: "user",
               content: [
-                `Original student prompt:\n${params.originalPrompt}`,
+                `Original user prompt:\n${params.originalPrompt}`,
                 `Task focus:\n${node.prompt}`,
                 `Dependency findings:\n${summarizeDependencyResults(dependencies)}`,
               ].join("\n\n"),
@@ -213,6 +262,11 @@ export async function runCollaborativeStreaming(params: {
       }
 
       const durationMs = Date.now() - startedAt;
+      if (node.role === "web_researcher" || node.role === "fact_checker") {
+        for (const hint of extractSourceHintsFromResult(result)) {
+          sourceHintsByUrl.set(hint.url, hint);
+        }
+      }
       await params.send({
         type: "collab_done",
         agent: node.role,
@@ -264,7 +318,7 @@ export async function runCollaborativeStreaming(params: {
       {
         role: "user",
         content: [
-          "Merge these specialist findings into a coherent answer for the student.",
+          "Merge these specialist findings into a coherent answer for the user.",
           "Keep evidence grounded and include confidence notes if there were disagreements.",
           combinedFindings,
         ].join("\n\n"),
@@ -321,6 +375,7 @@ export async function runCollaborativeStreaming(params: {
     usageIn,
     usageOut,
     thinkingContent: "",
+    sourceHints: [...sourceHintsByUrl.values()].slice(0, 12),
     verificationPassed: undefined,
     collaborators,
   };

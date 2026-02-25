@@ -1,22 +1,14 @@
 "use client";
 
-import { useState } from "react";
-import dynamic from "next/dynamic";
-import { Clock3, Download, Layers, LoaderCircle, Menu, MoreHorizontal, Search, Settings2, Square } from "lucide-react";
+import { Download, Layers, LoaderCircle, Menu, MoreHorizontal, Search, Settings2, Square } from "lucide-react";
 import { useKBar } from "kbar";
 import { NotificationBell } from "@/components/notification-bell";
 import { ContextualTip } from "@/components/ui/contextual-tip";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
-const StudyTimer = dynamic(
-  () => import("@/components/study-timer").then((module) => module.StudyTimer),
-  { ssr: false },
-);
-
 type ChatHeaderProps = {
   title: string;
-  chatId?: string;
   agentLabel?: string;
   lastModelUsed?: string;
   sending: boolean;
@@ -32,7 +24,6 @@ type ChatHeaderProps = {
 
 export function ChatHeader({
   title,
-  chatId,
   agentLabel,
   lastModelUsed,
   sending,
@@ -46,7 +37,6 @@ export function ChatHeader({
   onExport,
 }: ChatHeaderProps) {
   const { query } = useKBar();
-  const [studyTimerOpen, setStudyTimerOpen] = useState(false);
   const modelLabel = lastModelUsed
     ? (lastModelUsed.split("/").pop() ?? lastModelUsed)
         .replace(/:free$/i, "")
@@ -144,10 +134,6 @@ export function ChatHeader({
                     New chat
                   </DropdownMenuItem>
                 ) : null}
-                <DropdownMenuItem onSelect={() => setStudyTimerOpen((prev) => !prev)}>
-                  <Clock3 className="mr-2 h-3.5 w-3.5" />
-                  {studyTimerOpen ? "Hide timer" : "Show timer"}
-                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => onExport("markdown")}>
                   <Download className="mr-2 h-3.5 w-3.5" />
                   Export Markdown (.md)
@@ -162,13 +148,6 @@ export function ChatHeader({
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <StudyTimer
-              chatId={chatId}
-              open={studyTimerOpen}
-              className="absolute right-0 top-12 z-40"
-              onClose={() => setStudyTimerOpen(false)}
-              onOpen={() => setStudyTimerOpen(true)}
-            />
           </div>
         </div>
 

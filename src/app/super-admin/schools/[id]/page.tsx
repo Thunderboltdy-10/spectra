@@ -139,6 +139,9 @@ function MembersTab({ members, orgId, onChanged }: { members: Member[]; orgId: s
   const [adminEmail, setAdminEmail] = useState("");
   const [assigningAdmin, setAssigningAdmin] = useState(false);
   const [busyMemberId, setBusyMemberId] = useState<string | null>(null);
+  const memberEmails = Array.from(
+    new Set(members.map((member) => member.email.trim()).filter((email) => email.includes("@"))),
+  );
 
   async function assignAdmin() {
     const email = adminEmail.trim();
@@ -210,11 +213,17 @@ function MembersTab({ members, orgId, onChanged }: { members: Member[]; orgId: s
         </p>
         <div className="flex flex-wrap gap-2">
           <input
+            list="org-member-email-suggestions"
             value={adminEmail}
             onChange={(event) => setAdminEmail(event.target.value)}
             placeholder="admin@school.edu"
             className="h-10 flex-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-sm text-[var(--text-primary)]"
           />
+          <datalist id="org-member-email-suggestions">
+            {memberEmails.map((email) => (
+              <option key={email} value={email} />
+            ))}
+          </datalist>
           <Button onClick={() => void assignAdmin()} disabled={assigningAdmin} className="cursor-pointer gap-1.5">
             <MailPlus className="h-4 w-4" />
             {assigningAdmin ? "Assigning..." : "Assign Admin"}

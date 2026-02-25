@@ -97,6 +97,62 @@ const PAGE_TOUR_STEPS: Record<string, GuidedTourStep[]> = {
       position: "top",
     },
   ],
+  "/models": [
+    {
+      selector: '[data-tour="models-header"]',
+      title: "Model atlas",
+      description: "Use this page to compare models by capability, context size, and budget fit.",
+      position: "bottom",
+    },
+    {
+      selector: '[data-tour="models-search-models"]',
+      title: "Model-first search",
+      description: "Search models first, then narrow by provider when needed.",
+      position: "bottom",
+    },
+    {
+      selector: '[data-tour="models-provider-panel"]',
+      title: "Provider panel",
+      description: "Filter by provider and open leaderboard insights without leaving this screen.",
+      position: "left",
+    },
+  ],
+  "/agents": [
+    {
+      selector: '[data-tour="agents-header"]',
+      title: "Agents workspace",
+      description: "Create and manage specialist agents tailored to your workflows.",
+      position: "bottom",
+    },
+    {
+      selector: '[data-tour="agents-grid"]',
+      title: "Agent catalog",
+      description: "Open an agent to edit prompts, resources, and preferred modes.",
+      position: "top",
+    },
+  ],
+  "/admin": [
+    {
+      selector: '[data-tour="admin-header"]',
+      title: "Admin workspace",
+      description: "Manage school controls, permissions, and operational settings in one place.",
+      position: "bottom",
+    },
+    {
+      selector: '[data-tour="admin-controls"]',
+      title: "Control center",
+      description: "Update user roles and core admin toggles from this section.",
+      position: "top",
+    },
+  ],
+  "/admin/school": [
+    {
+      selector: '[data-tour="school-admin-header"]',
+      title: "School dashboard",
+      description: "Use this overview to jump into members, branding, SOUL, and analytics.",
+      position: "bottom",
+    },
+  ],
 };
 
 export function AppShell({
@@ -139,6 +195,16 @@ export function AppShell({
     }, 420);
     return () => window.clearTimeout(timer);
   }, [pageTourKey]);
+
+  useEffect(() => {
+    const onOpenTour = () => {
+      if (pageTourSteps.length > 0) {
+        setTourOpen(true);
+      }
+    };
+    window.addEventListener("ai-school:open-tour", onOpenTour);
+    return () => window.removeEventListener("ai-school:open-tour", onOpenTour);
+  }, [pageTourSteps.length]);
 
   function markPageTourSeen() {
     if (!pageTourKey) return;

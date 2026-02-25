@@ -13,7 +13,6 @@ type BrandingData = {
     name?: string;
     primaryColor?: string;
     accentColor?: string;
-    welcomeMessage?: string;
     logoUrl?: string;
   };
 };
@@ -38,7 +37,7 @@ export default function SchoolBrandingPage() {
 
   const [primaryColor, setPrimaryColor] = useState("#0e8ee8");
   const [accentColor, setAccentColor] = useState("#20b8b2");
-  const [welcomeMessage, setWelcomeMessage] = useState("Welcome back. What should we work on today?");
+  const [orgName, setOrgName] = useState("Your School");
   const [logoUrl, setLogoUrl] = useState<string | undefined>(undefined);
 
   const dropRef = useRef<HTMLDivElement>(null);
@@ -50,7 +49,7 @@ export default function SchoolBrandingPage() {
     const data = (await response.json()) as BrandingData;
     setPrimaryColor(data.org?.primaryColor ?? "#0e8ee8");
     setAccentColor(data.org?.accentColor ?? "#20b8b2");
-    setWelcomeMessage(data.org?.welcomeMessage ?? "Welcome back. What should we work on today?");
+    setOrgName(data.org?.name ?? "Your School");
     setLogoUrl(data.org?.logoUrl);
   }
 
@@ -66,16 +65,33 @@ export default function SchoolBrandingPage() {
     })();
   }, []);
 
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const root = document.documentElement;
+    root.style.setProperty("--brand-primary", primaryColor);
+    root.style.setProperty("--brand-accent", accentColor);
+  }, [accentColor, primaryColor]);
+
+  function previewGreeting() {
+    const now = new Date();
+    const month = now.toLocaleString("en-US", { month: "long" });
+    const hour = now.getHours();
+    if (hour < 12) return `${month} morning plan ready`;
+    if (hour < 18) return `${month} focus sprint active`;
+    return `${month} evening review mode`;
+  }
+
   async function saveBranding() {
     setSaving(true);
     try {
       const response = await fetch("/api/admin/branding", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ primaryColor, accentColor, welcomeMessage }),
+        body: JSON.stringify({ primaryColor, accentColor }),
       });
       if (!response.ok) throw new Error(await response.text());
       await loadSettings();
+      window.dispatchEvent(new Event("ai-school:branding-updated"));
       toast.success("Branding saved");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save branding");
@@ -93,6 +109,7 @@ export default function SchoolBrandingPage() {
       const response = await fetch("/api/admin/branding", { method: "POST", body: formData });
       if (!response.ok) throw new Error(await response.text());
       await loadSettings();
+      window.dispatchEvent(new Event("ai-school:branding-updated"));
       toast.success("Logo uploaded");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to upload logo");
@@ -135,7 +152,7 @@ export default function SchoolBrandingPage() {
             </div>
             <h1 className="font-display text-3xl text-[var(--text-primary)]">Branding</h1>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">
-              Customize your school&apos;s visual identity and welcome message.
+              Customize your school&apos;s visual identity with live theme preview.
             </p>
           </div>
           <Button onClick={() => void saveBranding()} disabled={saving || loading} className="cursor-pointer">
@@ -172,6 +189,7 @@ export default function SchoolBrandingPage() {
                       height={64}
                       className="h-16 w-16 rounded-xl border border-[var(--border-default)] object-cover"
                     />
+                    <p className="text-xs font-medium text-[var(--text-primary)]">Current logo loaded</p>
                     <p className="text-xs text-[var(--text-secondary)]">
                       Click or drag to replace
                     </p>
@@ -247,17 +265,13 @@ export default function SchoolBrandingPage() {
               </div>
             </div>
 
-            {/* Welcome Message */}
             <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[var(--shadow-card)]">
-              <h2 className="mb-4 text-sm font-semibold text-[var(--text-primary)]">Welcome Message</h2>
-              <textarea
-                value={welcomeMessage}
-                onChange={(e) => setWelcomeMessage(e.target.value)}
-                className="min-h-[100px] w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2.5 text-sm text-[var(--text-primary)] outline-none transition focus:ring-2 focus:ring-[var(--accent-cyan)]"
-                placeholder="Welcome back! What shall we explore today?"
-              />
+              <h2 className="mb-4 text-sm font-semibold text-[var(--text-primary)]">Dynamic Greeting</h2>
+              <p className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2.5 text-sm text-[var(--text-primary)]">
+                {previewGreeting()}
+              </p>
               <p className="mt-1.5 text-xs text-[var(--text-secondary)]">
-                Shown to students on the chat home screen.
+                Greeting is generated by local time and month automatically.
               </p>
             </div>
           </div>
@@ -294,7 +308,7 @@ export default function SchoolBrandingPage() {
                   </div>
                 )}
                 <div>
-                  <p className="text-sm font-semibold text-[var(--text-primary)]">Your School</p>
+                  <p className="text-sm font-semibold text-[var(--text-primary)]">{orgName}</p>
                   <p className="text-[10px] uppercase tracking-widest text-[var(--text-secondary)]">studio</p>
                 </div>
               </div>
@@ -303,7 +317,7 @@ export default function SchoolBrandingPage() {
               <div className="p-4">
                 <div className="mb-3 text-center">
                   <p className="font-display text-base text-[var(--text-primary)]">
-                    {welcomeMessage || "Welcome back!"}
+                    {previewGreeting()}
                   </p>
                 </div>
                 {/* Fake composer */}

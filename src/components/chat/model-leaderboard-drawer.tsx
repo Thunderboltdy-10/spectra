@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ProviderLogo } from "@/components/provider-logo";
 import { useCompactSheet } from "@/hooks/use-compact-sheet";
 import { useRightPanelDock } from "@/hooks/use-right-panel-dock";
+import { rightPanelSurfaceClassName } from "@/components/ui/right-panel-surface";
 
 type LeaderboardEntry = {
   modelId: string;
@@ -63,7 +64,7 @@ export function ModelLeaderboardDrawer({ open, onClose }: ModelLeaderboardDrawer
       ) : null}
 
       <aside
-        className={`right-panel-shell pointer-events-auto absolute border-[var(--border-default)] bg-[var(--bg-sidebar)] p-4 shadow-[var(--shadow-soft)] sm:p-5 ${
+        className={`right-panel-shell ${rightPanelSurfaceClassName()} pointer-events-auto absolute p-4 shadow-[var(--shadow-soft)] sm:p-5 ${
           docked ? "right-panel-shell--docked" : "right-panel-shell--sheet"
         } ${
           compact

@@ -26,54 +26,63 @@ function pickAvatarEmoji(subjects: string[]): string {
 
 function buildFallbackResult(body: {
   audience?: string;
+  goal?: string;
   purpose?: string;
+  curriculum?: string;
   subjects?: string[];
+  expertise?: string[];
+  ibFocus?: string;
   level?: string;
+  tone?: string;
   personality?: string;
   teachingStyle?: string;
-  patience?: number;
-  boundaries?: string[];
-  strictness?: number;
+  boundaries?: string[] | string;
+  contextNotes?: string;
 }) {
-  const subjects = body.subjects ?? ["general"];
+  const subjects = (body.expertise ?? body.subjects ?? ["general"]).filter(Boolean);
   const level = body.level ?? "Secondary";
-  const personality = body.personality ?? "Friendly";
+  const tone = body.tone ?? body.personality ?? "Friendly coach";
   const teachingStyle = body.teachingStyle ?? "Step-by-step";
-  const purpose = body.purpose ?? "Support student learning";
-  const audience = body.audience ?? "Students";
-  const strictness = body.strictness ?? 3;
-
-  const strictLabel = strictness >= 4 ? "strict" : strictness <= 2 ? "lenient" : "balanced";
+  const goal = body.goal ?? body.purpose ?? "Support user learning outcomes";
+  const audience = body.audience ?? "Users";
+  const boundaryList = Array.isArray(body.boundaries)
+    ? body.boundaries
+    : body.boundaries?.trim()
+      ? [body.boundaries.trim()]
+      : ["Do not fabricate facts or citations."];
+  const curriculum = body.curriculum ?? "General Academic";
   const subjectLabel = subjects.join(", ");
+  const ibLine = body.ibFocus?.trim() ? `\nIB focus: ${body.ibFocus.trim()}` : "";
+  const contextLine = body.contextNotes?.trim() ? `\nAdditional context: ${body.contextNotes.trim()}` : "";
 
-  const name = `${subjectLabel.split(",")[0]?.trim()} Tutor`;
-  const description = `An AI tutor for ${audience.toLowerCase()}, specialising in ${subjectLabel} at ${level}-level. ${purpose.slice(0, 80)}.`;
+  const name = `${subjectLabel.split(",")[0]?.trim()} Learning Coach`;
+  const description = `An AI learning agent for ${audience.toLowerCase()}, focused on ${subjectLabel} at ${level} level. ${goal.slice(0, 110)}.`;
 
-  const systemPrompt = `You are an educational AI tutor designed for ${audience.toLowerCase()}, specialising in ${subjectLabel} at ${level}-level.
+  const systemPrompt = `You are an educational AI assistant designed for ${audience.toLowerCase()}, specializing in ${subjectLabel} at ${level} level.
 
 Primary purpose:
-${purpose}
+${goal}
 
 Target audience: ${audience}
+Curriculum: ${curriculum}${ibLine}${contextLine}
 
 Communication style:
-- Tone: ${personality}
+- Tone: ${tone}
 - Teaching approach: ${teachingStyle}
-- Patience level: ${body.patience ?? 3} out of 5
 
 Instructional behaviour:
-- Always clarify the student's question before answering.
+- Clarify the user's intent when the question is ambiguous.
 - Use the "${teachingStyle}" approach in every response.
-- Ask one check-for-understanding question after each key point.
+- Ask one check-for-understanding question after each key point when useful.
 - Adapt your language to ${level}-level learners.
 
-Boundaries (${strictLabel} enforcement):
-${(body.boundaries ?? ["Don't fabricate facts"]).map((b) => `- ${b}`).join("\n")}
+Boundaries:
+${boundaryList.map((b) => `- ${b}`).join("\n")}
 
 Formatting:
 - Use headings and short bullet points where helpful.
 - Include worked examples relevant to ${subjectLabel}.
-- End every response with one concrete next step for the student.`;
+- End every response with one concrete next step for the user.`;
 
   return {
     name,
@@ -93,33 +102,43 @@ export async function POST(request: NextRequest) {
 
     const body = (await request.json().catch(() => null)) as {
       audience?: string;
+      goal?: string;
+      curriculum?: string;
+      ibFocus?: string;
+      expertise?: string[];
+      tone?: string;
+      contextNotes?: string;
       purpose?: string;
       personality?: string;
       teachingStyle?: string;
-      patience?: number;
       subjects?: string[];
       level?: string;
-      boundaries?: string[];
-      strictness?: number;
+      boundaries?: string[] | string;
+      builderStyle?: string;
     } | null;
 
-    if (!body?.purpose?.trim()) {
-      return badRequest("purpose is required");
+    const goal = body?.goal?.trim() || body?.purpose?.trim();
+    if (!goal) {
+      return badRequest("goal is required");
     }
 
-    const fallback = buildFallbackResult(body);
+    const fallback = buildFallbackResult({
+      ...body,
+      goal,
+    });
 
     if (!process.env.OPENROUTER_API_KEY) {
       return ok(fallback);
     }
 
     const systemInstruction = `You are an expert AI agent designer for an educational platform called AI School.
-Given specifications from a teacher or curriculum designer, generate a complete agent configuration.
+Given specifications from a user, generate a complete agent configuration that must stay faithful to the provided intent.
+Do not invent a different storyline or domain than what is requested.
 Output ONLY valid JSON with these exact keys:
 {
   "name": "short creative agent name (2-4 words)",
   "description": "1-2 sentences describing what this agent does and for whom",
-  "systemPrompt": "detailed multi-paragraph system prompt (300-600 words) covering persona, teaching style, boundaries, and formatting expectations",
+  "systemPrompt": "detailed multi-paragraph system prompt (220-420 words) covering persona, teaching style, boundaries, and formatting expectations",
   "suggestedMode": "one of: tutor, marker, exam, draft_coach, quiz, flashcard, research, explain, general",
   "suggestedCategory": "primary subject category string",
   "avatarEmoji": "single emoji that best represents this agent"
@@ -127,22 +146,24 @@ Output ONLY valid JSON with these exact keys:
 Do not include markdown fences, prose, or any text outside the JSON object.`;
 
     const userMessage = JSON.stringify({
-      audience: body.audience ?? "Students",
-      purpose: body.purpose,
-      personality: body.personality ?? "Friendly",
-      teachingStyle: body.teachingStyle ?? "Step-by-step",
-      patienceLevel: body.patience ?? 3,
-      subjects: body.subjects ?? [],
-      educationLevel: body.level ?? "Secondary",
-      boundaries: body.boundaries ?? [],
-      strictnessLevel: body.strictness ?? 3,
+      audience: body?.audience ?? "Users",
+      goal,
+      curriculum: body?.curriculum ?? "General Academic",
+      ibFocus: body?.ibFocus ?? "",
+      expertise: body?.expertise ?? body?.subjects ?? [],
+      level: body?.level ?? "Secondary",
+      tone: body?.tone ?? body?.personality ?? "Friendly coach",
+      teachingStyle: body?.teachingStyle ?? "Step-by-step",
+      boundaries: body?.boundaries ?? [],
+      contextNotes: body?.contextNotes ?? "",
+      builderStyle: body?.builderStyle ?? "conversation",
     });
 
     try {
       const completion = await openRouterChatCompletion({
-        model: MODEL_CONFIG.tutorFast,
-        fallbackModels: [MODEL_CONFIG.marker, MODEL_CONFIG.gptOss],
-        temperature: 0.5,
+        model: MODEL_CONFIG.smartCheap,
+        fallbackModels: [MODEL_CONFIG.tutorFast, MODEL_CONFIG.marker],
+        temperature: 0.3,
         maxTokens: 1200,
         messages: [
           { role: "system", content: systemInstruction },

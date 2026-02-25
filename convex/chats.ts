@@ -8,6 +8,13 @@ function compactMessageText(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function summarizeChatTitle(value: string) {
+  const words = compactMessageText(value).split(" ").filter(Boolean);
+  if (words.length === 0) return "New chat";
+  if (words.length === 1) return `${words[0]} session`.slice(0, 80);
+  return words.slice(0, 5).join(" ").slice(0, 80);
+}
+
 function buildManualCompactionSummary(messages: Array<{ role: "user" | "assistant" | "system"; content: string; mode: string }>) {
   const userGoals = messages
     .filter((message) => message.role === "user")
@@ -252,7 +259,7 @@ export const appendMessage = mutation({
       updatedAt: now,
       title:
         chat.title === "New chat" && args.role === "user"
-          ? args.content.slice(0, 60)
+          ? summarizeChatTitle(args.content)
           : chat.title,
       mode: args.mode,
     });
@@ -310,7 +317,7 @@ export const editMessageAndPrune = mutation({
 
     await ctx.db.patch(chat._id, {
       updatedAt: Date.now(),
-      title: clean.slice(0, 60) || chat.title,
+      title: summarizeChatTitle(clean) || chat.title,
     });
 
     return {

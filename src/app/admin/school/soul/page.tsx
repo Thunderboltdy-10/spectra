@@ -40,6 +40,18 @@ type SoulSection = {
   placeholder: string;
 };
 
+async function readApiError(response: Response, fallback: string) {
+  const text = await response.text();
+  if (!text) return fallback;
+  try {
+    const parsed = JSON.parse(text) as { error?: string };
+    if (typeof parsed.error === "string" && parsed.error.trim()) return parsed.error;
+  } catch {
+    // Ignore parse failures.
+  }
+  return fallback;
+}
+
 // ---------------------------------------------------------------------------
 // Sections configuration
 // ---------------------------------------------------------------------------
@@ -137,6 +149,7 @@ export default function SchoolSoulPage() {
   const [seeding, setSeeding] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [docs, setDocs] = useState<SoulDoc[]>([]);
+  const [embeddingsConfigured, setEmbeddingsConfigured] = useState(true);
   const [activeSection, setActiveSection] = useState(SECTIONS[0]!.section);
   const [title, setTitle] = useState(SECTIONS[0]!.title);
   const [content, setContent] = useState("");
@@ -157,19 +170,25 @@ export default function SchoolSoulPage() {
 
   async function loadDocs() {
     const response = await fetch("/api/admin/soul");
-    if (!response.ok) throw new Error(await response.text());
-    const data = (await response.json()) as { docs: SoulDoc[] };
+    if (!response.ok) throw new Error(await readApiError(response, "Failed to load SOUL docs"));
+    const data = (await response.json()) as { docs: SoulDoc[]; embeddingsConfigured?: boolean };
     setDocs(data.docs ?? []);
+    setEmbeddingsConfigured(data.embeddingsConfigured !== false);
   }
 
   async function runTest(query: string) {
     if (!query.trim()) return;
+    if (!embeddingsConfigured) {
+      toast.error("Preview is unavailable until OPENROUTER_API_KEY is configured.");
+      return;
+    }
     setTesting(true);
     try {
       const response = await fetch(`/api/admin/soul?preview=${encodeURIComponent(query)}`);
-      if (!response.ok) throw new Error(await response.text());
-      const data = (await response.json()) as { preview?: { bullets?: string[] } };
+      if (!response.ok) throw new Error(await readApiError(response, "Preview failed"));
+      const data = (await response.json()) as { preview?: { bullets?: string[] }; embeddingsConfigured?: boolean };
       setTestBullets((data.preview?.bullets ?? []).slice(0, 10));
+      setEmbeddingsConfigured(data.embeddingsConfigured !== false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Test failed");
     } finally {
@@ -225,7 +244,7 @@ export default function SchoolSoulPage() {
           content: content.trim(),
         }),
       });
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) throw new Error(await readApiError(response, "Failed to save section"));
       await loadDocs();
       toast.success(`"${title}" saved successfully`);
     } catch (error) {
@@ -280,10 +299,14 @@ export default function SchoolSoulPage() {
   }
 
   async function publishSoul() {
+    if (!embeddingsConfigured) {
+      toast.error("Publishing is disabled until OPENROUTER_API_KEY is configured.");
+      return;
+    }
     setPublishing(true);
     try {
       const response = await fetch("/api/admin/soul", { method: "PATCH" });
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) throw new Error(await readApiError(response, "Failed to publish SOUL"));
       await loadDocs();
       toast.success("School SOUL published — AI will use these guidelines immediately");
     } catch (error) {
@@ -316,6 +339,12 @@ export default function SchoolSoulPage() {
               Institutional AI guidance — hidden from students, injected at runtime into every
               interaction. Changes apply only to your current school.
             </p>
+            {!embeddingsConfigured ? (
+              <p className="mt-2 rounded-lg border border-[color-mix(in_oklab,var(--warning)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_10%,transparent)] px-2.5 py-1.5 text-xs text-[var(--warning)]">
+                Publishing and preview require <code>OPENROUTER_API_KEY</code>. Configure the key in your environment,
+                then reload this page.
+              </p>
+            ) : null}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -350,7 +379,7 @@ export default function SchoolSoulPage() {
             </Button>
             <Button
               onClick={() => void publishSoul()}
-              disabled={publishing || loading}
+              disabled={publishing || loading || !embeddingsConfigured}
               className="cursor-pointer gap-1.5"
               style={{ background: "var(--gradient-brand)" }}
             >
@@ -486,7 +515,7 @@ export default function SchoolSoulPage() {
                   <Button
                     size="sm"
                     onClick={() => void runTest(testQuery)}
-                    disabled={testing || !testQuery.trim()}
+                    disabled={testing || !testQuery.trim() || !embeddingsConfigured}
                     className="cursor-pointer flex-shrink-0 gap-1"
                   >
                     {testing ? (
@@ -600,7 +629,7 @@ export default function SchoolSoulPage() {
               </p>
               <Button
                 onClick={() => void publishSoul()}
-                disabled={publishing || loading || docs.length === 0}
+                disabled={publishing || loading || docs.length === 0 || !embeddingsConfigured}
                 className="w-full cursor-pointer gap-1.5"
                 style={{ background: "var(--gradient-brand)" }}
               >

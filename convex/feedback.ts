@@ -131,13 +131,32 @@ export const listFeedback = query({
     }
 
     const page = items.slice(startIndex, startIndex + limit);
+    const [users, orgs] = await Promise.all([
+      ctx.db.query("users").collect(),
+      ctx.db.query("orgs").collect(),
+    ]);
+    const userByClerkId = new Map(users.map((user) => [user.clerkId, user]));
+    const orgById = new Map(orgs.map((org) => [org._id, org]));
     const withScreenshotUrls = await Promise.all(
-      page.map(async (item) => ({
-        ...item,
-        screenshotUrl: item.screenshotStorageId
-          ? await ctx.storage.getUrl(item.screenshotStorageId).catch(() => null)
-          : null,
-      })),
+      page.map(async (item) => {
+        const orgId = item.orgId;
+        const sender = item.userId ? userByClerkId.get(item.userId) : null;
+        return {
+          ...item,
+          screenshotUrl: item.screenshotStorageId
+            ? await ctx.storage.getUrl(item.screenshotStorageId).catch(() => null)
+            : null,
+          sender: sender
+            ? {
+                name: sender.name,
+                email: sender.email,
+                role: sender.role,
+                clerkId: sender.clerkId,
+              }
+            : null,
+          orgName: orgId ? orgById.get(orgId)?.name ?? "Unknown school" : "Unknown school",
+        };
+      }),
     );
 
     return {

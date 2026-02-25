@@ -5,6 +5,7 @@ import { Bot, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Settings2, X
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { rightPanelSurfaceClassName } from "@/components/ui/right-panel-surface";
 import { ChatModeSelector } from "@/components/chat/chat-mode-selector";
 import type { ActiveCollaborator } from "@/components/chat/collaborators-live";
 import { RichText } from "@/components/chat/rich-text";
@@ -788,18 +789,18 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
       {!docked ? (
         <button
           type="button"
-          className={`absolute inset-0 cursor-pointer transition ${isOverlay ? "bg-black/42 backdrop-blur-none md:backdrop-blur-sm" : "bg-transparent"}`}
+          className={`absolute inset-0 cursor-pointer transition ${isOverlay ? "bg-black/40" : "bg-transparent"}`}
           onClick={closePanel}
           aria-label="Close panel"
         />
       ) : null}
 
       <aside
-        className={`right-panel-shell pointer-events-auto flex flex-col border-[color-mix(in_oklab,var(--border-default)_55%,transparent)] bg-[color-mix(in_oklab,var(--bg-primary)_94%,var(--bg-elevated))] p-4 ${
+        className={`right-panel-shell ${rightPanelSurfaceClassName()} pointer-events-auto flex flex-col p-4 ${
           docked ? "right-panel-shell--docked" : "right-panel-shell--sheet"
         } ${
           docked
-            ? "relative h-full w-full border-l"
+            ? "relative h-full w-full"
             : compact
               ? "absolute bottom-3 left-3 right-3 max-h-[78vh] rounded-2xl border"
               : "absolute inset-y-0 right-0 w-[92vw] border-l"

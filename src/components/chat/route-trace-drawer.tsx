@@ -6,6 +6,7 @@ import type { RouteTrace } from "@/types";
 import { Button } from "@/components/ui/button";
 import { useCompactSheet } from "@/hooks/use-compact-sheet";
 import { useRightPanelDock } from "@/hooks/use-right-panel-dock";
+import { rightPanelSurfaceClassName } from "@/components/ui/right-panel-surface";
 
 type RouteTraceDrawerProps = {
   open: boolean;
@@ -87,7 +88,7 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
       ) : null}
 
       <aside
-        className={`right-panel-shell pointer-events-auto absolute flex flex-col border-[var(--border-default)] bg-[var(--bg-sidebar)] p-4 shadow-[var(--shadow-soft)] ${
+        className={`right-panel-shell ${rightPanelSurfaceClassName()} pointer-events-auto absolute flex flex-col p-4 shadow-[var(--shadow-soft)] ${
           docked ? "right-panel-shell--docked" : "right-panel-shell--sheet"
         } ${
           compact

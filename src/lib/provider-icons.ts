@@ -37,6 +37,11 @@ const PROVIDER_PRESETS: Array<{
   { key: "zai", match: /z-ai|glm/i, label: "Z-AI", initial: "Z", bgLight: "#eef2ff", bgDark: "#141935", lightFill: "#3949ab", darkFill: "#d6dcff" },
   { key: "moonshot", match: /moonshot|kimi/i, label: "Moonshot", initial: "K", bgLight: "#e9f5ff", bgDark: "#122433", lightFill: "#0a6bb5", darkFill: "#d3ecff" },
   { key: "nvidia", match: /nvidia|nemotron/i, label: "NVIDIA", initial: "N", bgLight: "#eff9e8", bgDark: "#14260f", lightFill: "#3a7d1c", darkFill: "#d8f5c8" },
+  { key: "groq", match: /\bgroq\b/i, label: "Groq", initial: "G", bgLight: "#f1f5f9", bgDark: "#151a22", lightFill: "#0f172a", darkFill: "#e2e8f0" },
+  { key: "cerebras", match: /cerebras/i, label: "Cerebras", initial: "C", bgLight: "#eaf3ff", bgDark: "#112136", lightFill: "#174ea6", darkFill: "#cfe0ff" },
+  { key: "fireworks", match: /fireworks/i, label: "Fireworks", initial: "F", bgLight: "#fff1e8", bgDark: "#31190f", lightFill: "#c05621", darkFill: "#ffd8c4" },
+  { key: "deepinfra", match: /deepinfra/i, label: "DeepInfra", initial: "D", bgLight: "#edf4ff", bgDark: "#121b31", lightFill: "#2f4fb0", darkFill: "#d8e4ff" },
+  { key: "sambanova", match: /sambanova/i, label: "SambaNova", initial: "S", bgLight: "#f2f7ec", bgDark: "#192515", lightFill: "#406329", darkFill: "#d9ebcb" },
 ];
 
 export function inferProviderFromModel(modelId?: string) {

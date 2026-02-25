@@ -1070,13 +1070,6 @@ export function useChatState() {
       streamChatIdRef.current = chatId;
       activeStreamsRef.current.add(chatId);
       setActiveStreamIds(prev => { const next = new Set(prev); next.add(chatId); return next; });
-      setChats((prev) =>
-        prev.map((chat) =>
-          chat._id === chatId && chat.title === "New chat"
-            ? { ...chat, title: text.slice(0, 60) }
-            : chat,
-        ),
-      );
       let uploadedResourceIds: string[] = [];
 
       const attachmentPreviews = await Promise.all(
@@ -1550,7 +1543,7 @@ export function useChatState() {
             ? {
                 ...chat,
                 updatedAt: Date.now(),
-                title: chat.title === "New chat" ? text.slice(0, 60) : chat.title,
+                title: chat.title,
                 mode: requestedMode,
                 agentId: selectedAgentId,
               }

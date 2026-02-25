@@ -56,6 +56,7 @@ export default function ImagesPage() {
   }, []);
 
   async function handleDelete(imageId: string) {
+    if (!window.confirm("Delete this image from your gallery?")) return;
     try {
       const res = await fetch("/api/images", {
         method: "DELETE",
@@ -135,11 +136,12 @@ export default function ImagesPage() {
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="h-7 w-7 text-[var(--danger)] opacity-0 transition group-hover:opacity-100"
+                    className="h-7 w-7 text-[var(--danger)] opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100"
                     onClick={(e) => {
                       e.stopPropagation();
                       void handleDelete(image._id);
                     }}
+                    title="Delete image"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>

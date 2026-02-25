@@ -72,6 +72,11 @@ describe("auto-settings prompt analysis", () => {
   it("does not misclassify abstract outputs as image mode", () => {
     expect(detectSuggestedMode("make a plan for revising chemistry")).toBe(null);
     expect(detectSuggestedMode("draw a conclusion from this data")).toBe(null);
+    expect(detectSuggestedMode("render a comparison table for this topic")).toBe(null);
+  });
+
+  it("keeps image mode for explicit render requests with visual subjects", () => {
+    expect(detectSuggestedMode("render a poster of the solar system")).toBe("image");
   });
 
   it("detects time-sensitive search intent and opt-out hints", () => {

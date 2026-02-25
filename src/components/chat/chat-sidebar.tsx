@@ -8,13 +8,12 @@ import { useClerk, useUser } from "@clerk/nextjs";
 import { formatDistanceToNow } from "date-fns";
 import {
   ArrowDown,
+  ArrowUpDown,
   ArrowUp,
   BarChart3,
   Bookmark,
   BookOpen,
   Bot,
-  ChevronLeft,
-  ChevronRight,
   Compass,
   FileText,
   Flame,
@@ -22,7 +21,8 @@ import {
   LayoutDashboard,
   Loader2,
   MessageSquare,
-  MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pencil,
   Pin,
   Plus,
@@ -217,17 +217,23 @@ export function ChatSidebar({
         ),
         1,
       )
-    : 0;
-  const usagePercent = userSpending ? Math.max(0, Math.min(100, Math.round(usageRatio * 100))) : 0;
+    : null;
+  const usagePercent = typeof usageRatio === "number" ? Math.max(0, Math.min(100, Math.round(usageRatio * 100))) : null;
+  const hasTrackedUsage = Boolean(userSpending && (usagePercent ?? 0) > 0);
+  const monthlySpendLabel = userSpending
+    ? `$${((userSpending.totalCostCents ?? 0) / 100).toFixed(2)}`
+    : "N/A";
   const usageStatus = !userSpending
-    ? "N/A"
-    : usagePercent >= 80
+    ? "No budget profile"
+    : !hasTrackedUsage
+      ? "No tracked usage yet"
+      : (usagePercent ?? 0) >= 80
       ? "High activity"
-      : usagePercent >= 40
+      : (usagePercent ?? 0) >= 40
         ? "Steady activity"
-        : usagePercent > 0
+        : (usagePercent ?? 0) > 0
           ? "Getting started"
-          : "No activity yet";
+          : "No tracked usage yet";
   const canAccessSchoolAdmin = role === "admin" || isSuperAdmin;
   const canAccessAdminConsole = role === "admin" || isSuperAdmin;
 
@@ -308,6 +314,9 @@ export function ChatSidebar({
     ? orderedPrimaryNavItems
     : orderedPrimaryNavItems.slice(0, primaryVisibleCount);
   const hiddenPrimaryCount = Math.max(0, orderedPrimaryNavItems.length - primaryVisibleCount);
+  const collapsedNavItems = [...orderedPrimaryNavItems, ...secondaryNavItems].filter(
+    (item, index, all) => all.findIndex((candidate) => candidate.href === item.href) === index,
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -416,90 +425,79 @@ export function ChatSidebar({
             <Image
               src={orgLogoUrl}
               alt={orgName ?? "Org"}
-              width={34}
-              height={34}
-              className="h-8.5 w-8.5 rounded-xl object-cover"
+              width={40}
+              height={40}
+              className="h-10 w-10 rounded-xl object-cover"
               unoptimized
               onError={() => setLogoLoadFailed(true)}
             />
           ) : (
-            <div className="inline-flex h-8.5 w-8.5 items-center justify-center rounded-xl bg-[var(--gradient-brand)] text-white">
-              <Sparkles className="h-4.5 w-4.5" />
+            <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--gradient-brand)] text-white">
+              <Sparkles className="h-5 w-5" />
             </div>
           )}
           <Button type="button" variant="ghost" size="icon" className="h-8.5 w-8.5" onClick={onToggleCollapse} aria-label="Expand sidebar">
-            <ChevronRight className="h-4 w-4" />
+            <PanelLeftOpen className="h-4 w-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-8.5 w-8.5"
+            onClick={() => setReorderPrimaryNav((prev) => !prev)}
+            aria-label={reorderPrimaryNav ? "Finish page reorder" : "Reorder pages"}
+            title={reorderPrimaryNav ? "Finish reorder" : "Reorder pages"}
+          >
+            <ArrowUpDown className="h-4 w-4" />
           </Button>
         </div>
 
-        <div
-          className="mx-auto flex w-full flex-col items-center gap-1"
-          onMouseEnter={() => setNavExpandedByHover(true)}
-          onMouseLeave={() => setNavExpandedByHover(false)}
-        >
-          {primaryNavVisibleItems.map((item) => {
+        <div className="mx-auto flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto pr-0.5">
+          {collapsedNavItems.map((item) => {
             const Icon = item.icon;
             const active = isNavActive(pathname, item.href);
+            const primaryIndex = orderedPrimaryNavItems.findIndex((navItem) => navItem.href === item.href);
             return (
-              <Link
-                key={item.href}
-                href={item.href}
-                title={item.label}
-                className={`inline-flex h-9.5 w-9.5 items-center justify-center rounded-xl transition ${
-                  active
-                    ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]"
-                    : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                }`}
-              >
-                <Icon className="h-4 w-4" />
-              </Link>
+              <div key={item.href} className="relative">
+                <Link
+                  href={item.href}
+                  title={item.label}
+                  className={`inline-flex h-9.5 w-9.5 items-center justify-center rounded-xl transition ${
+                    active
+                      ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]"
+                      : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                </Link>
+                {reorderPrimaryNav && primaryIndex >= 0 ? (
+                  <div className="absolute -right-4 top-0 flex flex-col">
+                    <button
+                      type="button"
+                      className="inline-flex h-4 w-4 items-center justify-center rounded bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
+                      onClick={() => movePrimaryNavItem(item.href, "up")}
+                      disabled={primaryIndex <= 0}
+                      aria-label={`Move ${item.label} up`}
+                    >
+                      <ArrowUp className="h-2.5 w-2.5" />
+                    </button>
+                    <button
+                      type="button"
+                      className="mt-0.5 inline-flex h-4 w-4 items-center justify-center rounded bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
+                      onClick={() => movePrimaryNavItem(item.href, "down")}
+                      disabled={primaryIndex >= orderedPrimaryNavItems.length - 1}
+                      aria-label={`Move ${item.label} down`}
+                    >
+                      <ArrowDown className="h-2.5 w-2.5" />
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             );
           })}
-          {hiddenPrimaryCount > 0 && !showPrimaryNav ? (
-            <span
-              aria-hidden
-              className="inline-flex h-9.5 w-9.5 items-center justify-center rounded-xl text-[var(--text-secondary)]"
-              title={`Hover to show ${hiddenPrimaryCount} more pages`}
-            >
-              <MoreHorizontal className="h-4 w-4" />
-            </span>
-          ) : null}
-          {secondaryNavItems.length > 0 ? (
-            <>
-              <span
-                aria-hidden
-                className={`inline-flex h-9.5 w-9.5 items-center justify-center rounded-xl transition ${
-                  showSecondaryNav
-                    ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]"
-                    : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                }`}
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </span>
-              {showSecondaryNav &&
-                secondaryNavItems.map((item) => {
-                  const Icon = item.icon;
-                  const active = isNavActive(pathname, item.href);
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      title={item.label}
-                      className={`inline-flex h-9.5 w-9.5 items-center justify-center rounded-xl transition ${
-                        active
-                          ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]"
-                          : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                      }`}
-                    >
-                      <Icon className="h-4 w-4" />
-                    </Link>
-                  );
-                })}
-            </>
-          ) : null}
         </div>
 
-        <div className="mt-auto flex flex-col items-center gap-2">
+        <div className="mt-3 flex flex-col items-center gap-2">
           <div className="mb-1 flex flex-col items-center gap-1 text-[10px] text-[var(--text-secondary)]">
             <span className="inline-flex items-center gap-1" title="Current streak">
               <Flame className="h-3 w-3 text-[var(--accent-coral)]" />
@@ -546,15 +544,15 @@ export function ChatSidebar({
           <Image
             src={orgLogoUrl}
             alt={orgName ?? "Org"}
-            width={32}
-            height={32}
-            className="h-8 w-8 rounded-xl border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_82%,transparent)] object-cover shadow-[var(--shadow-soft)]"
+            width={40}
+            height={40}
+            className="h-10 w-10 rounded-xl border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_82%,transparent)] object-cover shadow-[var(--shadow-soft)]"
             unoptimized
             onError={() => setLogoLoadFailed(true)}
           />
         ) : (
-          <div className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--gradient-brand)] text-white shadow-[var(--shadow-soft)]">
-            <Sparkles className="h-4 w-4" />
+          <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--gradient-brand)] text-white shadow-[var(--shadow-soft)]">
+            <Sparkles className="h-5 w-5" />
           </div>
         )}
         <div className="min-w-0 flex-1">
@@ -562,7 +560,7 @@ export function ChatSidebar({
           <p className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">studio</p>
         </div>
         <Button type="button" variant="ghost" size="icon" onClick={onToggleCollapse} aria-label="Collapse sidebar">
-          <ChevronLeft className="h-4 w-4" />
+          <PanelLeftClose className="h-4 w-4" />
         </Button>
       </div>
 
@@ -588,7 +586,11 @@ export function ChatSidebar({
           </button>
         </div>
 
-        <div className="max-h-[40vh] overflow-y-auto pr-1 transition-[max-height,opacity] duration-300">
+        <div
+          className={`overflow-y-auto pr-1 transition-[max-height,opacity] duration-300 ${
+            showPrimaryNav || showSecondaryNav ? "max-h-[44vh]" : "max-h-[11.5rem]"
+          }`}
+        >
           {primaryNavVisibleItems.map((item) => {
             const Icon = item.icon;
             const active = isNavActive(pathname, item.href);
@@ -682,6 +684,7 @@ export function ChatSidebar({
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search chats"
+            data-search-input
             className="h-8 w-full rounded-lg border border-transparent bg-[var(--bg-primary)] pl-8 pr-2.5 text-xs text-[var(--text-primary)] transition placeholder:text-[var(--text-secondary)] focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0"
           />
         </div>
@@ -704,10 +707,10 @@ export function ChatSidebar({
                     key={chat._id}
                     type="button"
                     onClick={() => onSelectChat(chat._id)}
-                    className={`w-full rounded-xl border px-3 py-2 text-left transition ${
+                    className={`w-full rounded-lg px-2.5 py-1.5 text-left transition ${
                       active
-                        ? "border-[color-mix(in_oklab,var(--accent-cyan)_35%,var(--border-default))] bg-[var(--bg-primary)]"
-                        : "border-transparent hover:border-[var(--border-default)] hover:bg-[var(--bg-primary)]"
+                        ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))]"
+                        : "hover:bg-[var(--bg-primary)]"
                     }`}
                   >
                     <div className="flex items-center gap-1.5">
@@ -719,6 +722,9 @@ export function ChatSidebar({
                       <p className="truncate text-sm font-medium">{promptPreview}</p>
                       {hasDraftIndicator && !isStreaming && <FileText className="h-3 w-3 shrink-0 text-[var(--text-tertiary)]" />}
                     </div>
+                    <p className="truncate pl-3.5 text-[11px] text-[var(--text-secondary)]">
+                      {isStreaming ? <span className="text-[var(--accent-cyan)]">Generating...</span> : "Pinned"}
+                    </p>
                   </button>
                 );
               })}
@@ -751,10 +757,10 @@ export function ChatSidebar({
                       <button
                         type="button"
                         onClick={() => onSelectChat(chat._id)}
-                        className={`w-full rounded-xl border px-2.5 py-1.5 text-left transition ${
+                        className={`w-full rounded-lg px-2.5 py-1.5 text-left transition ${
                           active
-                            ? "border-[color-mix(in_oklab,var(--accent-cyan)_35%,var(--border-default))] bg-[var(--bg-primary)]"
-                            : "border-transparent hover:border-[var(--border-default)] hover:bg-[var(--bg-primary)]"
+                            ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))]"
+                            : "hover:bg-[var(--bg-primary)]"
                         }`}
                       >
                         {editingChatId === chat._id ? (
@@ -841,81 +847,80 @@ export function ChatSidebar({
         {hasMoreChats ? <div ref={chatLoadSentinelRef} className="h-8" aria-hidden /> : null}
       </div>
 
-      <div className="mt-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-soft)]">
-        {userMemorySummary && (
-          <p className="mb-3 line-clamp-2 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2 text-[11px] text-[var(--text-secondary)]">
-            {userMemorySummary}
-          </p>
-        )}
-
-        <div className="mb-3 grid grid-cols-2 gap-2">
-          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2">
-            <p className="inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">
-              <Flame className="h-3.5 w-3.5 text-[var(--accent-coral)]" />
-              Streak
-            </p>
-            <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
-              {gamification.currentStreak.toLocaleString()} day{gamification.currentStreak === 1 ? "" : "s"}
-            </p>
-          </div>
-          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2">
-            <p className="inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">
-              <Star className="h-3.5 w-3.5 text-[var(--warning)]" />
-              XP
-            </p>
-            <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
-              {gamification.totalXp.toLocaleString()}
-            </p>
-          </div>
+      <div className="group mt-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2.5 shadow-[var(--shadow-soft)]">
+        <div className="flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)]">
+          <span
+            className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5"
+            title="Current streak"
+          >
+            <Flame className="h-3 w-3 text-[var(--accent-coral)]" />
+            {gamification.currentStreak}
+          </span>
+          <span
+            className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5"
+            title="Total XP"
+          >
+            <Star className="h-3 w-3 text-[var(--warning)]" />
+            {gamification.totalXp}
+          </span>
+          <span className="ml-auto rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5">
+            Monthly {monthlySpendLabel}
+          </span>
         </div>
 
-        <div className="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-          <span>Usage</span>
-          <span>{userSpending ? `${usagePercent}%` : "N/A"}</span>
-        </div>
-        <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
-          <div
-            className="h-full min-w-[3px] rounded-full transition-all"
-            style={{
-              width: `${Math.max(usagePercent > 0 ? 3 : 0, usagePercent)}%`,
-              background: "var(--gradient-brand)",
-            }}
-          />
-        </div>
-        <p className="mb-3 text-[11px] text-[var(--text-secondary)]">
-          {usageStatus}
-        </p>
+        <div className="pointer-events-none mt-2 max-h-0 overflow-hidden opacity-0 transition-all duration-300 group-hover:pointer-events-auto group-hover:max-h-[20rem] group-hover:opacity-100">
+          {userMemorySummary && (
+            <p className="mb-3 line-clamp-2 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2 text-[11px] text-[var(--text-secondary)]">
+              {userMemorySummary}
+            </p>
+          )}
 
-        <div className="flex items-center gap-2.5">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button type="button" className="cursor-pointer rounded-full">
-                <Avatar>
-                  <AvatarImage src={user?.imageUrl} alt={user?.fullName ?? "User"} />
-                  <AvatarFallback>{initials(user?.fullName || user?.firstName || "User")}</AvatarFallback>
-                </Avatar>
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuItem onSelect={() => openUserProfile()}>
-                <UserRound className="mr-2 h-4 w-4" />
-                Manage account
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => signOut()}>
-                <Sparkles className="mr-2 h-4 w-4" />
-                Sign out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium">{user?.fullName ?? user?.firstName ?? "Signed in user"}</p>
-            <p className="truncate text-xs text-[var(--text-secondary)]">{role}</p>
+          <div className="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+            <span>Usage</span>
+            <span>{typeof usagePercent === "number" ? `${usagePercent}%` : "No data"}</span>
           </div>
-          <ThemeToggle />
-          <Button type="button" variant="secondary" size="icon" onClick={onOpenSettings}>
-            <Settings2 className="h-4 w-4" />
-          </Button>
+          <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
+            <div
+              className="h-full rounded-full transition-all"
+              style={{
+                width: `${Math.max((usagePercent ?? 0) > 0 ? 3 : 0, usagePercent ?? 0)}%`,
+                background: "var(--gradient-brand)",
+              }}
+            />
+          </div>
+          <p className="mb-3 text-[11px] text-[var(--text-secondary)]">{usageStatus}</p>
+
+          <div className="flex items-center gap-2.5">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" className="cursor-pointer rounded-full">
+                  <Avatar>
+                    <AvatarImage src={user?.imageUrl} alt={user?.fullName ?? "User"} />
+                    <AvatarFallback>{initials(user?.fullName || user?.firstName || "User")}</AvatarFallback>
+                  </Avatar>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuItem onSelect={() => openUserProfile()}>
+                  <UserRound className="mr-2 h-4 w-4" />
+                  Manage account
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => signOut()}>
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">{user?.fullName ?? user?.firstName ?? "Signed in user"}</p>
+              <p className="truncate text-xs text-[var(--text-secondary)]">{role}</p>
+            </div>
+            <ThemeToggle />
+            <Button type="button" variant="secondary" size="icon" onClick={onOpenSettings} title="Open global settings">
+              <Settings2 className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </div>
     </div>

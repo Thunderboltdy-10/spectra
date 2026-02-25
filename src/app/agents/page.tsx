@@ -46,7 +46,7 @@ export default function AgentsPage() {
 
   return (
     <AppShell>
-      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3" data-tour="agents-header">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Custom Agents</h1>
           <p className="text-sm text-[var(--text-secondary)]">Browse, search, and launch classroom agents.</p>
@@ -77,7 +77,7 @@ export default function AgentsPage() {
         ))}
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-tour="agents-grid">
         {agents.map((agent) => (
           <AgentCard key={agent._id} agent={agent} />
         ))}

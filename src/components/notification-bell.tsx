@@ -176,9 +176,23 @@ export function NotificationBell() {
                 >
                   <div className="flex items-start justify-between gap-2">
                     <p className="text-sm font-medium leading-tight">{notification.title}</p>
-                    {!notification.read ? (
-                      <span className="mt-1 inline-flex h-2 w-2 shrink-0 rounded-full bg-[var(--accent-cyan)]" />
-                    ) : null}
+                    <div className="flex items-center gap-1">
+                      {!notification.read ? (
+                        <button
+                          type="button"
+                          className="inline-flex rounded-full border border-[var(--border-default)] px-1.5 py-0.5 text-[10px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void markRead(notification._id);
+                          }}
+                        >
+                          Mark read
+                        </button>
+                      ) : null}
+                      {!notification.read ? (
+                        <span className="mt-1 inline-flex h-2 w-2 shrink-0 rounded-full bg-[var(--accent-cyan)]" />
+                      ) : null}
+                    </div>
                   </div>
                   <p
                     role="button"

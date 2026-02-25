@@ -301,6 +301,12 @@ export function ChatComposer(props: ChatComposerProps) {
   const [modelSearch, setModelSearch] = useState("");
   const [providerFilter, setProviderFilter] = useState("all");
   const [composerCompact, setComposerCompact] = useState(false);
+  const [modeTransitioning, setModeTransitioning] = useState(false);
+  const [agentTransitioning, setAgentTransitioning] = useState(false);
+  const [controlsTransitioning, setControlsTransitioning] = useState(false);
+  const lastModeRef = useRef(mode);
+  const lastAgentIdRef = useRef(selectedAgentId);
+  const lastCompactRef = useRef(composerCompact);
   const modeConfig = getModeConfig(mode);
   const selectedModel = useMemo(
     () => models.find((item) => item.modelId === manualModel),
@@ -414,12 +420,42 @@ export function ChatComposer(props: ChatComposerProps) {
   }, [message, mode, onModeChange]);
   useEffect(() => {
     try {
-      const persisted = window.localStorage.getItem("ai-school-composer-compact");
+      const persisted = window.localStorage.getItem("ai-school-controls-collapsed");
       setComposerCompact(persisted === "1");
     } catch {
       setComposerCompact(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (lastModeRef.current !== mode) {
+      setModeTransitioning(true);
+      const timer = window.setTimeout(() => setModeTransitioning(false), 340);
+      lastModeRef.current = mode;
+      return () => window.clearTimeout(timer);
+    }
+    lastModeRef.current = mode;
+  }, [mode]);
+
+  useEffect(() => {
+    if (lastAgentIdRef.current !== selectedAgentId) {
+      setAgentTransitioning(true);
+      const timer = window.setTimeout(() => setAgentTransitioning(false), 340);
+      lastAgentIdRef.current = selectedAgentId;
+      return () => window.clearTimeout(timer);
+    }
+    lastAgentIdRef.current = selectedAgentId;
+  }, [selectedAgentId]);
+
+  useEffect(() => {
+    if (lastCompactRef.current !== composerCompact) {
+      setControlsTransitioning(true);
+      const timer = window.setTimeout(() => setControlsTransitioning(false), 320);
+      lastCompactRef.current = composerCompact;
+      return () => window.clearTimeout(timer);
+    }
+    lastCompactRef.current = composerCompact;
+  }, [composerCompact]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -569,7 +605,7 @@ export function ChatComposer(props: ChatComposerProps) {
     setComposerCompact((prev) => {
       const next = !prev;
       try {
-        window.localStorage.setItem("ai-school-composer-compact", next ? "1" : "0");
+        window.localStorage.setItem("ai-school-controls-collapsed", next ? "1" : "0");
       } catch {
         // Ignore storage errors.
       }
@@ -714,7 +750,7 @@ export function ChatComposer(props: ChatComposerProps) {
                   onClick={() => setShowModeSelector((prev) => !prev)}
                   title={modeConfig.description}
                   data-tour="mode-selector"
-                  className={selectorTriggerClass}
+                  className={cn(selectorTriggerClass, modeTransitioning && "animate-subtle-pulse")}
                 >
                   <span className="inline-flex h-2.5 w-2.5 rounded-full" style={{ background: modeConfig.color }} />
                   <span>{modeConfig.label}</span>
@@ -722,7 +758,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 </button>
 
                 {showModeSelector && (
-                  <div className="absolute bottom-full left-0 z-20 mb-2 max-h-[320px] w-[min(92vw,22rem)] overflow-y-auto overscroll-contain rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[var(--shadow-soft)]">
+                  <div className="absolute bottom-full left-0 z-[72] mb-2 max-h-[320px] w-[min(92vw,22rem)] overflow-y-auto overscroll-contain rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[var(--shadow-soft)]">
                     {ALL_MODES.map((m) => {
                       const mc = getModeConfig(m.key);
                       const isActive = m.key === mode;
@@ -777,7 +813,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 </button>
 
                 {showModelSelector && (
-                  <div className="absolute bottom-full left-1/2 z-20 mb-2 max-h-[480px] w-[min(92vw,32rem)] -translate-x-1/2 overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-soft)]">
+                  <div className="absolute bottom-full left-1/2 z-[75] mb-2 max-h-[480px] w-[min(92vw,32rem)] -translate-x-[48%] overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-soft)]">
                     <div className="mb-2 flex items-center justify-between">
                       <p className="text-xs font-medium text-[var(--text-primary)]">Choose model</p>
                       <button
@@ -948,7 +984,7 @@ export function ChatComposer(props: ChatComposerProps) {
                   onClick={() => setShowAgentSelector((prev) => !prev)}
                   title="Attach an agent persona and resources to this chat"
                   data-tour="agent-selector"
-                  className={selectorTriggerClass}
+                  className={cn(selectorTriggerClass, agentTransitioning && "animate-subtle-pulse")}
                 >
                   <span>{selectedAgent?.avatarEmoji ?? "🧠"}</span>
                   <span className="max-w-[160px] truncate">{selectedAgent?.name ?? "No agent"}</span>
@@ -956,7 +992,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 </button>
 
                 {showAgentSelector && (
-                  <div className="absolute bottom-full left-0 z-20 mb-2 max-h-[360px] w-[min(92vw,22rem)] overflow-y-auto rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[var(--shadow-soft)]">
+                  <div className="absolute bottom-full left-0 z-[72] mb-2 max-h-[360px] w-[min(92vw,22rem)] overflow-y-auto rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[var(--shadow-soft)]">
                     <button
                       type="button"
                       onClick={() => {
@@ -1002,10 +1038,14 @@ export function ChatComposer(props: ChatComposerProps) {
                 size="sm"
                 className="h-8 rounded-full px-3 text-xs"
                 onClick={toggleComposerCompact}
+                title={composerCompact ? "Show automation controls" : "Hide automation controls"}
               >
-                {composerCompact ? "Expand" : "Compact"}
+                {composerCompact ? "Show Controls" : "Hide Controls"}
               </Button>
-              <div data-tour="auto-controls" className={`hidden flex-wrap items-center gap-1.5 sm:flex ${composerCompact ? "opacity-0 pointer-events-none w-0 overflow-hidden" : ""}`}>
+              <div
+                data-tour="auto-controls"
+                className={`hidden flex-wrap items-center gap-1.5 transition-all duration-200 sm:flex ${composerCompact ? "pointer-events-none w-0 overflow-hidden opacity-0" : "w-auto opacity-100"} ${controlsTransitioning ? "animate-subtle-pulse" : ""}`}
+              >
                 <SettingPill
                   label="Enhance"
                   value={autoEnhancePrompt}
@@ -1053,7 +1093,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 </label>
               </div>
 
-              <div className={`sm:hidden ${composerCompact ? "hidden" : ""}`}>
+              <div className={`transition-all duration-200 sm:hidden ${composerCompact ? "hidden" : ""}`}>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button type="button" variant="secondary" size="icon" className="h-8 w-8 rounded-full" aria-label="More controls">

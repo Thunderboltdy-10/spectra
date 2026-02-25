@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { CircleHelp } from "lucide-react";
 import { toast } from "sonner";
 import { ChatComposer } from "@/components/chat/chat-composer";
 import { CodeCanvas } from "@/components/chat/code-canvas";
@@ -13,7 +12,6 @@ import { ChatSidebar } from "@/components/chat/chat-sidebar";
 import { ChatWelcome } from "@/components/chat/chat-welcome";
 import { KeyboardShortcutsRegistrar } from "@/components/keyboard-shortcuts";
 import type { GuidedTourStep } from "@/components/ui/guided-tour";
-import { Button } from "@/components/ui/button";
 import { useChatState } from "@/hooks/use-chat-state";
 import { usePanel } from "@/context/panel-context";
 import type { StudyMode } from "@/types";
@@ -47,6 +45,8 @@ function SidebarSkeleton() {
 }
 
 const TOUR_COMPLETED_KEY = "ai-school-guided-tour-v1";
+const FIRST_PROMPT_KEY = "ai-school-initial-prompt-v2";
+const FIRST_PROMPT_TEXT = "Help me build a focused 7-day study plan for my current subjects with 30-minute daily sessions.";
 
 const TOUR_STEPS: GuidedTourStep[] = [
   {
@@ -86,6 +86,24 @@ const TOUR_STEPS: GuidedTourStep[] = [
     position: "bottom",
   },
   {
+    selector: '[data-tour="utility-feedback"]',
+    title: "Feedback button",
+    description: "Report bugs or ideas with context and optional screenshot in one place.",
+    position: "left",
+  },
+  {
+    selector: '[data-tour="utility-timer"]',
+    title: "Focus timer",
+    description: "Start focused sessions and adjust timer duration whenever needed.",
+    position: "left",
+  },
+  {
+    selector: '[data-tour="utility-tour"]',
+    title: "Persistent tours",
+    description: "Reopen guided tours anytime from this control.",
+    position: "left",
+  },
+  {
     selector: '[data-tour="composer"]',
     title: "Composer",
     description: "Type your prompt here, attach files, and send when ready.",
@@ -99,6 +117,8 @@ export function ChatLayout() {
   const { activeView: panelActiveView, openPanel, closePanel } = usePanel();
   const [tourOpen, setTourOpen] = useState(false);
   const openedOrchestrationForStreamRef = useRef(false);
+  const orchestrationDismissedForStreamRef = useRef(false);
+  const previousPanelViewRef = useRef<string | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -113,6 +133,12 @@ export function ChatLayout() {
     }, 450);
 
     return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const onOpenTour = () => setTourOpen(true);
+    window.addEventListener("ai-school:open-tour", onOpenTour);
+    return () => window.removeEventListener("ai-school:open-tour", onOpenTour);
   }, []);
 
   function markTourSeen() {
@@ -131,6 +157,34 @@ export function ChatLayout() {
     const lastAssistant = [...chat.messages].reverse().find((item) => item.role === "assistant" && item.routeTrace);
     return lastAssistant?.routeTrace;
   }, [chat.messages]);
+  const isFirstSession = !chat.selectedChatId && chat.chats.length === 0 && chat.messages.length === 0;
+
+  useEffect(() => {
+    if (!isFirstSession || chat.message.trim().length > 0 || chat.sending) return;
+    try {
+      if (window.localStorage.getItem(FIRST_PROMPT_KEY) === "1") return;
+      window.localStorage.setItem(FIRST_PROMPT_KEY, "1");
+    } catch {
+      // Ignore storage issues.
+    }
+    chat.setMode("tutor");
+    chat.setMessage(FIRST_PROMPT_TEXT);
+  }, [chat, isFirstSession]);
+
+  useEffect(() => {
+    const previous = previousPanelViewRef.current;
+    if (
+      previous === "orchestration" &&
+      panelActiveView !== "orchestration" &&
+      chat.sending
+    ) {
+      orchestrationDismissedForStreamRef.current = true;
+    }
+    if (panelActiveView === "orchestration") {
+      orchestrationDismissedForStreamRef.current = false;
+    }
+    previousPanelViewRef.current = panelActiveView;
+  }, [chat.sending, panelActiveView]);
   const regenModels = useMemo(
     () =>
       chat.models.slice(0, 5).map((model) => ({
@@ -146,7 +200,11 @@ export function ChatLayout() {
     const highThinking = chat.thinkingLevel === "high";
     const shouldAutoOpen = chat.sending && (collaboratorsActive || likelySearchActive || highThinking);
 
-    if (shouldAutoOpen && panelActiveView !== "orchestration") {
+    if (
+      shouldAutoOpen &&
+      panelActiveView !== "orchestration" &&
+      !orchestrationDismissedForStreamRef.current
+    ) {
       openPanel("orchestration");
       openedOrchestrationForStreamRef.current = true;
       return;
@@ -157,6 +215,7 @@ export function ChatLayout() {
         closePanel();
       }
       openedOrchestrationForStreamRef.current = false;
+      orchestrationDismissedForStreamRef.current = false;
     }
   }, [
     chat.activeCollaborators.length,
@@ -176,7 +235,6 @@ export function ChatLayout() {
       return;
     }
     chat.setMode(mode);
-    toast.success(`Mode changed to ${mode}`);
     void chat.updateExistingChatSettings({ mode }).catch((error: unknown) =>
       toast.error(error instanceof Error ? error.message : "Failed to update mode"),
     );
@@ -204,7 +262,6 @@ export function ChatLayout() {
       else if (arg === "off") chat.setAutoSearch("off");
       else chat.setAutoSearch("auto");
       chat.setMessage("");
-      toast.success(`Search set to ${arg ?? "auto"}`);
       return true;
     }
 
@@ -341,7 +398,7 @@ export function ChatLayout() {
         <div className="fixed inset-0 z-40 md:hidden">
           <button
             type="button"
-            className="absolute inset-0 bg-black/45 backdrop-blur-none md:backdrop-blur-sm"
+            className="absolute inset-0 bg-black/45"
             onClick={() => chat.setMobileSidebarOpen(false)}
             aria-label="Close sidebar"
           />
@@ -361,7 +418,6 @@ export function ChatLayout() {
       >
         <ChatHeader
           title={chat.selectedChat?.title ?? "New chat"}
-          chatId={chat.selectedChatId || undefined}
           agentLabel={chat.selectedAgent ? `${chat.selectedAgent.avatarEmoji} ${chat.selectedAgent.name}` : undefined}
           lastModelUsed={lastModelUsed}
           sending={chat.sending}
@@ -467,21 +523,50 @@ export function ChatLayout() {
             });
           }}
           emptyState={
-            <ChatWelcome
-              agents={chat.agents}
-              onSelectAgent={(agentId) => chat.startNewChat(agentId)}
-              onSelectMode={handleModeChange}
-              onResumeChat={(chatId) => chat.setSelectedChatId(chatId)}
-              onUsePrompt={(prompt, mode) => {
-                if (mode) {
-                  handleModeChange(mode);
-                }
-                chat.setMessage(prompt);
-              }}
-              activeMode={chat.mode}
-              recentChats={chat.chats}
-              welcomeMessage={chat.orgWelcomeMessage}
-            />
+            isFirstSession
+              ? (
+                <section className="mx-auto w-full max-w-3xl rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 text-left shadow-[var(--shadow-soft)]">
+                  <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Starter Prompt Ready</p>
+                  <p className="mt-2 text-sm text-[var(--text-primary)]">{FIRST_PROMPT_TEXT}</p>
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!chat.message.trim()) {
+                          chat.setMessage(FIRST_PROMPT_TEXT);
+                        }
+                      }}
+                      className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]"
+                    >
+                      Use starter prompt
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => chat.setMessage("")}
+                      className="rounded-full border border-[var(--border-default)] bg-transparent px-3 py-1.5 text-xs text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+                    >
+                      Start blank
+                    </button>
+                  </div>
+                </section>
+              )
+              : (
+                <ChatWelcome
+                  agents={chat.agents}
+                  onSelectAgent={(agentId) => chat.startNewChat(agentId)}
+                  onSelectMode={handleModeChange}
+                  onResumeChat={(chatId) => chat.setSelectedChatId(chatId)}
+                  onUsePrompt={(prompt, mode) => {
+                    if (mode) {
+                      handleModeChange(mode);
+                    }
+                    chat.setMessage(prompt);
+                  }}
+                  activeMode={chat.mode}
+                  recentChats={chat.chats}
+                  orgName={chat.orgName}
+                />
+              )
           }
         />
 
@@ -648,16 +733,6 @@ export function ChatLayout() {
           searchEnabled: chat.lastAutoResult?.searchEnabled,
         }}
       />
-
-      <Button
-        type="button"
-        variant="secondary"
-        className="fixed bottom-5 right-5 z-30 h-9 rounded-full px-3"
-        onClick={() => setTourOpen(true)}
-      >
-        <CircleHelp className="mr-1.5 h-4 w-4" />
-        Tour
-      </Button>
 
       <GuidedTour
         open={tourOpen}

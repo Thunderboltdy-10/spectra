@@ -13,7 +13,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { useSidebar } from "@/context/sidebar-context";
-import { cn } from "@/lib/utils";
 
 type UserRow = {
   _id: string;
@@ -191,39 +190,23 @@ export default function AdminPage() {
 
   return (
     <AppShell>
-      <div className="mb-5">
+      <div className="mb-5" data-tour="admin-header">
         <h1 className="text-2xl font-semibold tracking-tight">Admin Console</h1>
         <p className="text-sm text-ink-400">Control roles, quality checks, and spending limits for your school workspace.</p>
-        <div className="mt-3 inline-flex items-center rounded-xl border border-app-border bg-app-muted p-1">
-          {[
-            { href: "/admin", label: "Personal Admin" },
-            { href: "/admin/school", label: "School Admin" },
-          ].map((tab) => (
-            <Link
-              key={tab.href}
-              href={tab.href}
-              className={cn(
-                "rounded-lg px-3 py-1.5 text-xs transition",
-                tab.href === "/admin"
-                  ? "bg-app text-ink-100"
-                  : "text-ink-400 hover:text-ink-200",
-              )}
-            >
-              {tab.label}
-            </Link>
-          ))}
-        </div>
         <div className="mt-3 flex flex-wrap gap-2">
+          <Link href="/admin/school" className="inline-flex items-center rounded-md border border-app-border bg-app-muted px-3 py-1.5 text-sm">
+            School dashboard
+          </Link>
           <Link href="/admin/school/soul" className="inline-flex items-center rounded-md border border-app-border bg-app-muted px-3 py-1.5 text-sm">
             Open School Soul
           </Link>
-          <Link href="/admin/branding" className="inline-flex items-center rounded-md border border-app-border bg-app-muted px-3 py-1.5 text-sm">
+          <Link href="/admin/school/branding" className="inline-flex items-center rounded-md border border-app-border bg-app-muted px-3 py-1.5 text-sm">
             Open Branding
           </Link>
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]" data-tour="admin-controls">
         <Card>
           <CardHeader>
             <CardTitle className="inline-flex items-center gap-2">

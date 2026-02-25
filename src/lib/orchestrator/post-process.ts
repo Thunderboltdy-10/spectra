@@ -6,7 +6,7 @@ import type { WebSearchSource } from "@/lib/orchestrator/retrieval";
 import { withTimeout, type MemoryEntry } from "@/lib/orchestrator/history";
 import type { Citation } from "@/types";
 
-const TITLE_MIN_WORDS = 3;
+const TITLE_MIN_WORDS = 2;
 const TITLE_MAX_WORDS = 5;
 const MEMORY_MAX_ENTRIES = 20;
 const MEMORY_MAX_RAW_CHARS = 1500;
@@ -262,13 +262,10 @@ function heuristicTitle(source: string) {
   if (words.length >= TITLE_MIN_WORDS) {
     return words.slice(0, TITLE_MAX_WORDS).join(" ");
   }
-  if (words.length === 2) {
-    return `${words[0]} ${words[1]} study`;
-  }
   if (words.length === 1) {
-    return `${words[0]} study session`;
+    return `${words[0]} session`;
   }
-  return "General Study Session";
+  return "General Study";
 }
 
 function normalizeTitle(candidate: string, fallbackSource: string) {
@@ -302,7 +299,7 @@ async function generateTitleFromSnippet(source: string, fallbackSource: string) 
         {
           role: "system",
           content:
-            "Generate a conversation title in exactly 3 to 5 words. Keep the same language as the user when possible. Return plain title text only with no quotes.",
+            "Generate a conversation title in 2 to 5 words. Keep the same language as the user when possible. Return plain title text only with no quotes.",
         },
         {
           role: "user",

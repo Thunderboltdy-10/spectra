@@ -15,7 +15,8 @@ function soulActionErrorResponse(error: unknown) {
   if (message.toLowerCase().includes("embedding failed")) {
     return badRequest("School SOUL embedding request failed. Check OpenRouter connectivity and model access.", 503);
   }
-  return badRequest(message || "SOUL action failed.", 500);
+  console.error("[api/admin/soul] SOUL action failed", error);
+  return badRequest("Unexpected server error", 500);
 }
 
 export async function GET(request: NextRequest) {

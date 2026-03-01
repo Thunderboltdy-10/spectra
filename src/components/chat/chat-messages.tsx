@@ -26,7 +26,7 @@ type ChatMessagesProps = {
   draftThinking?: string;
   hasRealThinking?: boolean;
   sending: boolean;
-  streamPhase?: "idle" | "routing" | "searching" | "thinking" | "generating" | "synthesizing";
+  streamPhase?: "idle" | "compacting" | "routing" | "searching" | "thinking" | "generating" | "synthesizing";
   streamError: string | null;
   chatId?: string;
   onRetry: () => void;
@@ -331,6 +331,7 @@ export function ChatMessages({
 
   const streamingStatus = (() => {
     switch (streamPhase) {
+      case "compacting": return "Compacting...";
       case "routing": return "Routing...";
       case "searching": return "Searching...";
       case "thinking": return "Thinking...";
@@ -365,6 +366,26 @@ export function ChatMessages({
             <ContextualTip
               tipId="long-conversation-new-chat"
               message="Start a new conversation for best results."
+            />
+          ) : null}
+          {messages.length >= 6 ? (
+            <ContextualTip
+              tipId="chat-bookmark-tip"
+              message="Bookmark strong explanations so they stay easy to revisit."
+            />
+          ) : null}
+          {messages.length >= 10 ? (
+            <ContextualTip
+              tipId="chat-compaction-auto-tip"
+              message="Turn on auto-compaction to keep long chats fast without losing visible history."
+              actionLabel="Open settings"
+              onAction={() => window.dispatchEvent(new Event("ai-school:toggle-settings"))}
+            />
+          ) : null}
+          {messages.length >= 3 ? (
+            <ContextualTip
+              tipId="chat-slash-commands-tip"
+              message="Use slash commands like /mode, /search, and /export for faster workflow."
             />
           ) : null}
 

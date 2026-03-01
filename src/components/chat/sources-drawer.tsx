@@ -82,55 +82,63 @@ export function SourcesDrawer({ open, onClose, citations }: SourcesDrawerProps) 
         </div>
 
         {!collapsed ? (
-          <div className={`right-panel-content ${compact ? "max-h-[calc(78vh-4rem)]" : "max-h-[calc(100vh-6rem)]"} space-y-3 overflow-y-auto pr-1`}>
-          {citations.length === 0 ? (
-            <p className="text-sm text-[var(--text-secondary)]">No sources available for this response.</p>
-          ) : (
-            citations.map((citation, index) => {
-              const href = hrefForCitation(citation);
-              const isSearch = citation.sourceType === "search";
-              const label = citation.title || citation.filename;
+          <div className={`right-panel-content ${compact ? "max-h-[calc(78vh-4rem)]" : "max-h-[calc(100vh-6rem)]"} overflow-y-auto pr-1`}>
+            {citations.length === 0 ? (
+              <p className="text-sm text-[var(--text-secondary)]">No sources available for this response.</p>
+            ) : (
+              <div className="grid auto-rows-fr gap-2.5">
+                {citations.map((citation, index) => {
+                  const href = hrefForCitation(citation);
+                  const isSearch = citation.sourceType === "search";
+                  const label = citation.title || citation.filename;
 
-              return (
-                <article
-                  key={`${citation.filename}-${index}`}
-                  className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3"
-                >
-                  <div className="mb-2 flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-                    {isSearch ? <Globe className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
-                    <span className="uppercase tracking-[0.08em]">[{index + 1}] {citation.sourceType}</span>
-                  </div>
-
-                  <p className="font-medium text-[var(--text-primary)]">{label}</p>
-                  {isSearch && citation.domain ? (
-                    <p className="mt-1 text-xs text-[var(--text-secondary)]">{citation.domain}</p>
-                  ) : null}
-                  {citation.page ? (
-                    <p className="mt-1 text-xs text-[var(--text-secondary)]">Page {citation.page}</p>
-                  ) : null}
-
-                  {citation.snippet ? (
-                    <RichText content={citation.snippet} className="mt-2 text-xs leading-relaxed text-[var(--text-secondary)]" />
-                  ) : (
-                    <p className="mt-2 text-xs leading-relaxed text-[var(--text-secondary)]">
-                      No preview snippet available for this source.
-                    </p>
-                  )}
-
-                  {href ? (
-                    <a
-                      href={href}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mt-3 inline-flex cursor-pointer rounded-full border border-[var(--border-default)] px-2.5 py-1 text-xs text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+                  return (
+                    <article
+                      key={`${citation.filename}-${index}`}
+                      className="flex h-full flex-col rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3"
                     >
-                      {citation.url ? "Open source URL" : "Download source"}
-                    </a>
-                  ) : null}
-                </article>
-              );
-            })
-          )}
+                      <div className="mb-2 flex items-center justify-between gap-2 text-xs text-[var(--text-secondary)]">
+                        <span className="inline-flex items-center gap-1.5">
+                          {isSearch ? <Globe className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
+                          <span className="uppercase tracking-[0.08em]">[{index + 1}] {citation.sourceType}</span>
+                        </span>
+                        {citation.page ? (
+                          <span className="rounded-full bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] uppercase tracking-[0.06em]">
+                            Page {citation.page}
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <p className="font-medium text-[var(--text-primary)]">{label}</p>
+                      {isSearch && citation.domain ? (
+                        <p className="mt-1 text-xs text-[var(--text-secondary)]">{citation.domain}</p>
+                      ) : null}
+
+                      <div className="mt-2 flex-1 rounded-lg bg-[var(--bg-secondary)] px-2.5 py-2">
+                        {citation.snippet ? (
+                          <RichText content={citation.snippet} className="text-xs leading-relaxed text-[var(--text-secondary)]" />
+                        ) : (
+                          <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
+                            No preview snippet available for this source.
+                          </p>
+                        )}
+                      </div>
+
+                      {href ? (
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-3 inline-flex cursor-pointer self-start rounded-full border border-[var(--border-default)] px-2.5 py-1 text-xs text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+                        >
+                          {citation.url ? "Open source URL" : "Download source"}
+                        </a>
+                      ) : null}
+                    </article>
+                  );
+                })}
+              </div>
+            )}
           </div>
         ) : null}
       </aside>

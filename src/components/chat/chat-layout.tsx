@@ -684,9 +684,11 @@ export function ChatLayout() {
           autoEnhancePrompt={chat.autoEnhancePrompt}
           autoThinking={chat.autoThinking}
           autoSearch={chat.autoSearch}
+          autoCompaction={chat.autoCompaction}
           onAutoEnhancePromptChange={chat.setAutoEnhancePrompt}
           onAutoThinkingChange={chat.setAutoThinking}
           onAutoSearchChange={chat.setAutoSearch}
+          onAutoCompactionChange={chat.setAutoCompaction}
           onSlashCommand={handleSlashCommand}
           lastAutoResult={chat.lastAutoResult}
         />
@@ -736,6 +738,7 @@ export function ChatLayout() {
           autoEnhancePrompt: chat.autoEnhancePrompt,
           autoThinking: chat.autoThinking,
           autoSearch: chat.autoSearch,
+          autoCompaction: chat.autoCompaction,
           onLiveProgressAutoOpenChange: (enabled) => {
             setLiveProgressAutoOpen(enabled);
             try {
@@ -753,6 +756,7 @@ export function ChatLayout() {
           onAutoEnhancePromptChange: chat.setAutoEnhancePrompt,
           onAutoThinkingChange: chat.setAutoThinking,
           onAutoSearchChange: chat.setAutoSearch,
+          onAutoCompactionChange: chat.setAutoCompaction,
           onDeleteResource: (resourceId) => {
             void chat.deletePersonalResource(resourceId).catch((error: unknown) =>
               toast.error(error instanceof Error ? error.message : "Failed to delete file"),

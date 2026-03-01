@@ -33,6 +33,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { GlobalUtilityDock } from "@/components/global-utility-dock";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -674,6 +675,7 @@ export function ChatSidebar({
       </div>
 
       <div className="group mt-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2.5 shadow-[var(--shadow-soft)]">
+        <GlobalUtilityDock placement="profile-bar" className="mb-2" />
         <div className="flex items-center gap-2.5">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

@@ -38,7 +38,7 @@ function AutoChoice({
                 : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
             }`}
           >
-            {item === "auto" ? "Auto" : item === "on" ? "Yes" : "No"}
+            {item === "auto" ? "Auto" : item === "on" ? "On" : "Off"}
           </button>
         ))}
       </div>
@@ -99,11 +99,13 @@ type SettingsViewProps = {
   autoEnhancePrompt: AutoPreference;
   autoThinking: AutoPreference;
   autoSearch: AutoPreference;
+  autoCompaction: AutoPreference;
   onTogglePersonalResources: (enabled: boolean) => void;
   onLiveProgressAutoOpenChange: (enabled: boolean) => void;
   onAutoEnhancePromptChange: (value: AutoPreference) => void;
   onAutoThinkingChange: (value: AutoPreference) => void;
   onAutoSearchChange: (value: AutoPreference) => void;
+  onAutoCompactionChange: (value: AutoPreference) => void;
   onDeleteResource: (resourceId: string) => void;
 };
 
@@ -117,11 +119,13 @@ function SettingsView({
   autoEnhancePrompt,
   autoThinking,
   autoSearch,
+  autoCompaction,
   onTogglePersonalResources,
   onLiveProgressAutoOpenChange,
   onAutoEnhancePromptChange,
   onAutoThinkingChange,
   onAutoSearchChange,
+  onAutoCompactionChange,
   onDeleteResource,
 }: SettingsViewProps) {
   const ratioFromBudget =
@@ -152,6 +156,7 @@ function SettingsView({
           <AutoChoice label="Auto-enhance prompt" value={autoEnhancePrompt} onChange={onAutoEnhancePromptChange} />
           <AutoChoice label="Auto-thinking" value={autoThinking} onChange={onAutoThinkingChange} />
           <AutoChoice label="Auto-search" value={autoSearch} onChange={onAutoSearchChange} />
+          <AutoChoice label="Auto-compaction" value={autoCompaction} onChange={onAutoCompactionChange} />
         </div>
         <div className="mt-2 grid gap-2 text-xs text-[var(--text-secondary)]">
           <p>
@@ -349,7 +354,7 @@ type OrchestrationViewProps = {
   sending: boolean;
   collaboratorPhase: "idle" | "running" | "synthesizing";
   activeCollaborators: ActiveCollaborator[];
-  streamPhase?: "idle" | "routing" | "searching" | "thinking" | "generating" | "synthesizing";
+  streamPhase?: "idle" | "compacting" | "routing" | "searching" | "thinking" | "generating" | "synthesizing";
   routeTrace?: RouteTrace;
   lastModelUsed?: string;
   searchEnabled?: boolean;
@@ -359,9 +364,10 @@ function orchestrationStage(params: {
   sending: boolean;
   collaboratorPhase: "idle" | "running" | "synthesizing";
   activeCollaborators: ActiveCollaborator[];
-  streamPhase?: "idle" | "routing" | "searching" | "thinking" | "generating" | "synthesizing";
+  streamPhase?: "idle" | "compacting" | "routing" | "searching" | "thinking" | "generating" | "synthesizing";
   searchEnabled?: boolean;
 }) {
+  if (params.streamPhase === "compacting") return "compacting";
   if (params.streamPhase === "routing") return "routing";
   if (params.streamPhase === "searching") return "searching";
   if (params.streamPhase === "thinking") return "thinking";
@@ -390,7 +396,7 @@ function OrchestrationView({
     streamPhase,
     searchEnabled,
   });
-  const steps = ["routing", "searching", "thinking", "generating", "synthesizing", "verifying"] as const;
+  const steps = ["compacting", "routing", "searching", "thinking", "generating", "synthesizing", "verifying"] as const;
   const stageIndex = steps.indexOf(stage);
   const selectedModel = routeTrace?.selected.modelId || lastModelUsed;
   const selectedReason =
@@ -501,7 +507,7 @@ function SourcesView({ citations }: { citations: Citation[] }) {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="grid auto-rows-fr gap-2.5">
       {citations.map((citation, index) => {
         const href = hrefForCitation(citation);
         const isSearch = citation.sourceType === "search";
@@ -510,29 +516,37 @@ function SourcesView({ citations }: { citations: Citation[] }) {
         return (
           <article
             key={`${citation.filename}-${index}`}
-            className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3"
+            className="flex h-full flex-col rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3"
           >
-            <div className="mb-2 flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-              {isSearch ? <Milestone className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
-              <span className="uppercase tracking-[0.08em]">[{index + 1}] {citation.sourceType}</span>
+            <div className="mb-2 flex items-center justify-between gap-2 text-xs text-[var(--text-secondary)]">
+              <span className="inline-flex items-center gap-1.5">
+                {isSearch ? <Milestone className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
+                <span className="uppercase tracking-[0.08em]">[{index + 1}] {citation.sourceType}</span>
+              </span>
+              {citation.page ? (
+                <span className="rounded-full bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] uppercase tracking-[0.06em]">
+                  Page {citation.page}
+                </span>
+              ) : null}
             </div>
 
             <p className="font-medium text-[var(--text-primary)]">{label}</p>
             {isSearch && citation.domain ? <p className="mt-1 text-xs text-[var(--text-secondary)]">{citation.domain}</p> : null}
-            {citation.page ? <p className="mt-1 text-xs text-[var(--text-secondary)]">Page {citation.page}</p> : null}
 
-            {citation.snippet ? (
-              <RichText content={citation.snippet} className="mt-2 text-xs leading-relaxed text-[var(--text-secondary)]" />
-            ) : (
-              <p className="mt-2 text-xs leading-relaxed text-[var(--text-secondary)]">No preview snippet available.</p>
-            )}
+            <div className="mt-2 flex-1 rounded-lg bg-[var(--bg-secondary)] px-2.5 py-2">
+              {citation.snippet ? (
+                <RichText content={citation.snippet} className="text-xs leading-relaxed text-[var(--text-secondary)]" />
+              ) : (
+                <p className="text-xs leading-relaxed text-[var(--text-secondary)]">No preview snippet available.</p>
+              )}
+            </div>
 
             {href ? (
               <a
                 href={href}
                 target="_blank"
                 rel="noreferrer"
-                className="mt-3 inline-flex cursor-pointer rounded-full border border-[var(--border-default)] px-2.5 py-1 text-xs text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+                className="mt-3 inline-flex cursor-pointer self-start rounded-full border border-[var(--border-default)] px-2.5 py-1 text-xs text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
               >
                 {citation.url ? "Open source URL" : "Download source"}
               </a>

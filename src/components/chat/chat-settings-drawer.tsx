@@ -19,10 +19,12 @@ type ChatSettingsDrawerProps = {
   autoEnhancePrompt: AutoPreference;
   autoThinking: AutoPreference;
   autoSearch: AutoPreference;
+  autoCompaction: AutoPreference;
   onTogglePersonalResources: (enabled: boolean) => void;
   onAutoEnhancePromptChange: (value: AutoPreference) => void;
   onAutoThinkingChange: (value: AutoPreference) => void;
   onAutoSearchChange: (value: AutoPreference) => void;
+  onAutoCompactionChange: (value: AutoPreference) => void;
   onDeleteResource: (resourceId: string) => void;
 };
 
@@ -50,7 +52,7 @@ function AutoChoice({
                 : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
             }`}
           >
-            {item === "auto" ? "Auto" : item === "on" ? "Yes" : "No"}
+            {item === "auto" ? "Auto" : item === "on" ? "On" : "Off"}
           </button>
         ))}
       </div>
@@ -110,10 +112,12 @@ export function ChatSettingsDrawer({
   autoEnhancePrompt,
   autoThinking,
   autoSearch,
+  autoCompaction,
   onTogglePersonalResources,
   onAutoEnhancePromptChange,
   onAutoThinkingChange,
   onAutoSearchChange,
+  onAutoCompactionChange,
   onDeleteResource,
 }: ChatSettingsDrawerProps) {
   const compact = useCompactSheet(1024);
@@ -200,6 +204,7 @@ export function ChatSettingsDrawer({
               <AutoChoice label="Auto-enhance prompt" value={autoEnhancePrompt} onChange={onAutoEnhancePromptChange} />
               <AutoChoice label="Auto-thinking" value={autoThinking} onChange={onAutoThinkingChange} />
               <AutoChoice label="Auto-search" value={autoSearch} onChange={onAutoSearchChange} />
+              <AutoChoice label="Auto-compaction" value={autoCompaction} onChange={onAutoCompactionChange} />
             </div>
             <div className="mt-3 grid gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2 text-xs text-[var(--text-secondary)]">
               <p>

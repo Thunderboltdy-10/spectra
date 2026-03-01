@@ -96,17 +96,18 @@ export async function GET(request: NextRequest) {
         });
         return ok({ preview: guidance, embeddingsConfigured: Boolean(process.env.OPENROUTER_API_KEY) });
       } catch (error) {
-        if (shouldFallbackToLexical(error)) {
+        try {
           const docs = await convexQuery("soul:listSoulDocs", {
             actorClerkId: actor.clerkId,
           }) as SoulDoc[];
           return ok({
             preview: { bullets: lexicalPreview(previewQuery, docs, 8) },
             embeddingsConfigured: false,
-            fallback: "lexical",
+            fallback: shouldFallbackToLexical(error) ? "lexical" : "lexical-recovery",
           });
+        } catch {
+          return soulActionErrorResponse(error, "preview");
         }
-        return soulActionErrorResponse(error, "preview");
       }
     }
 
@@ -157,21 +158,24 @@ export async function PATCH() {
       });
       return ok(result);
     } catch (error) {
-      if (shouldFallbackToLexical(error)) {
-        try {
-          const lexical = await convexMutation<{ actorClerkId: string }, {
-            ok?: boolean;
-            chunkCount?: number;
-            fallback?: string;
-            docsPublished?: number;
-          }>("soul:publishSoulLexical", {
-            actorClerkId: actor.clerkId,
-          });
-          return ok({
-            ...lexical,
-            warning: "Embeddings unavailable. SOUL is published via lexical fallback.",
-          });
-        } catch {
+      try {
+        const lexical = await convexMutation<{ actorClerkId: string }, {
+          ok?: boolean;
+          chunkCount?: number;
+          fallback?: string;
+          docsPublished?: number;
+        }>("soul:publishSoulLexical", {
+          actorClerkId: actor.clerkId,
+        });
+        return ok({
+          ...lexical,
+          fallback: "lexical",
+          warning: shouldFallbackToLexical(error)
+            ? "Embeddings unavailable. SOUL is published via lexical fallback."
+            : "Publish recovered through lexical fallback.",
+        });
+      } catch {
+        if (shouldFallbackToLexical(error)) {
           return ok({
             ok: true,
             chunkCount: 0,
@@ -179,8 +183,8 @@ export async function PATCH() {
             warning: "Embeddings unavailable. SOUL will run via lexical fallback.",
           });
         }
+        return soulActionErrorResponse(error, "publish");
       }
-      return soulActionErrorResponse(error, "publish");
     }
   });
 }

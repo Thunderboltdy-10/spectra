@@ -106,6 +106,10 @@ export type UserSpending = {
 };
 
 export type AutoPreference = "auto" | "on" | "off";
+type StreamPhase = "idle" | "compacting" | "routing" | "searching" | "thinking" | "generating" | "synthesizing";
+
+const AUTO_COMPACTION_MIN_MESSAGES = 10;
+const AUTO_COMPACTION_KEEP_LATEST = 6;
 
 type LiveModel = {
   id: string;
@@ -396,6 +400,7 @@ export function useChatState() {
   const [autoModel, setAutoModel] = useState(true);
   const [autoThinking, setAutoThinking] = useState<AutoPreference>("auto");
   const [autoSearch, setAutoSearch] = useState<AutoPreference>("auto");
+  const [autoCompaction, setAutoCompaction] = useState<AutoPreference>("auto");
 
   const userSpending = sidebar.userSpending;
   const setUserSpending = sidebar.setUserSpending;
@@ -421,7 +426,7 @@ export function useChatState() {
   const draftThinking = draftThinkings.get(selectedChatId) ?? "";
   const sending = activeStreamIds.has(selectedChatId);
   const [activeCollaborators, setActiveCollaborators] = useState<ActiveCollaboratorState[]>([]);
-  const [streamPhase, setStreamPhase] = useState<"idle" | "routing" | "searching" | "thinking" | "generating" | "synthesizing">("idle");
+  const [streamPhase, setStreamPhase] = useState<StreamPhase>("idle");
   const [collaboratorPhase, setCollaboratorPhase] = useState<"idle" | "running" | "synthesizing">("idle");
   const [fileList, setFileList] = useState<File[]>([]);
   const [fileUploadState, setFileUploadState] = useState<
@@ -811,6 +816,7 @@ export function useChatState() {
       setAutoEnhancePrompt("auto");
       setAutoThinking("auto");
       setAutoSearch("auto");
+      setAutoCompaction("auto");
 
       if (agentId) {
         setSelectedAgentId(agentId);
@@ -1101,6 +1107,7 @@ export function useChatState() {
     const skipServerUserPersist = Boolean(options?.skipServerUserPersist);
     const effectiveRouterMode = requestedRouterMode;
     const effectiveManualModel = requestedManualModel;
+    const messageCountBeforeSend = messages.filter((item) => item.role !== "system").length;
 
     // Capture which chat this stream belongs to
     const streamChatId = selectedChatIdRef.current || options?.chatIdOverride || "";
@@ -1162,6 +1169,23 @@ export function useChatState() {
       streamChatIdRef.current = chatId;
       activeStreamsRef.current.add(chatId);
       setActiveStreamIds(prev => { const next = new Set(prev); next.add(chatId); return next; });
+      const shouldAutoCompact =
+        retryAttempt === 0 &&
+        !isRegenerate &&
+        ((autoCompaction === "on") ||
+          (autoCompaction === "auto" && messageCountBeforeSend >= AUTO_COMPACTION_MIN_MESSAGES));
+      if (shouldAutoCompact) {
+        setStreamPhase("compacting");
+        await runCompaction({
+          chatId,
+          keepLatestMessages: AUTO_COMPACTION_KEEP_LATEST,
+          silent: true,
+          showSuccessToast: false,
+        });
+        if (autoCompaction === "on") {
+          setAutoCompaction("auto");
+        }
+      }
       let uploadedResourceIds: string[] = [];
 
       const attachmentPreviews = await Promise.all(
@@ -1249,6 +1273,7 @@ export function useChatState() {
         }
       }
 
+      setStreamPhase("routing");
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1403,7 +1428,12 @@ export function useChatState() {
               thinkingBuffer += payload.content;
             }
             setHasRealThinking(true);
-            setDraftThinkings(prev => { const next = new Map(prev); next.set(chatId, thinkingBuffer); return next; });
+            setDraftThinkings((prev) => {
+              if (prev.get(chatId) === thinkingBuffer) return prev;
+              const next = new Map(prev);
+              next.set(chatId, thinkingBuffer);
+              return next;
+            });
           }
 
           if (payload.type === "collab_start") {
@@ -1940,19 +1970,21 @@ export function useChatState() {
     await refreshPersonalResources();
   }
 
-  async function compactConversation(keepLatestMessages?: number) {
-    if (!selectedChatId) {
-      toast.info("Start a chat before running compaction.");
-      return;
-    }
-    if (sending) {
-      toast.info("Wait for the current response to finish before compacting.");
-      return;
-    }
-    if (compactingConversation) return;
+  async function runCompaction({
+    chatId,
+    keepLatestMessages,
+    silent,
+    showSuccessToast,
+  }: {
+    chatId: string;
+    keepLatestMessages?: number;
+    silent?: boolean;
+    showSuccessToast?: boolean;
+  }): Promise<"compacted" | "skipped" | "failed"> {
+    if (!chatId || compactingConversation) return "skipped";
     setCompactingConversation(true);
     try {
-      const response = await fetch(`/api/chats/${selectedChatId}`, {
+      const response = await fetch(`/api/chats/${chatId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
@@ -1974,27 +2006,47 @@ export function useChatState() {
       };
 
       if (!result.ok) {
-        if (result.reason === "not_enough_messages") {
-          const minimum = Math.max(4, Math.round(result.minimumMessages ?? 20));
-          const current = Math.max(0, Math.round(result.currentMessages ?? 0));
-          toast.info(`Compaction works best after about ${minimum} messages (currently ${current}).`);
-        } else {
-          toast.info("Nothing to compact yet.");
+        if (!silent) {
+          if (result.reason === "not_enough_messages") {
+            const minimum = Math.max(4, Math.round(result.minimumMessages ?? 20));
+            const current = Math.max(0, Math.round(result.currentMessages ?? 0));
+            toast.info(`Compaction works best after about ${minimum} messages (currently ${current}).`);
+          } else {
+            toast.info("Nothing to compact yet.");
+          }
         }
-        return;
+        return "skipped";
       }
 
-      const reload = await fetch(`/api/chats/${selectedChatId}`);
-      if (reload.ok) {
-        const data = (await reload.json()) as ChatDetailResponse;
-        setMessages(data.messages);
+      if (showSuccessToast) {
+        toast.success(`Conversation compacted (${result.compactedMessages ?? 0} messages summarized).`);
       }
-      toast.success(`Conversation compacted (${result.compactedMessages ?? 0} messages summarized).`);
+      return "compacted";
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to compact conversation");
+      if (!silent) {
+        toast.error(error instanceof Error ? error.message : "Failed to compact conversation");
+      }
+      return "failed";
     } finally {
       setCompactingConversation(false);
     }
+  }
+
+  async function compactConversation(keepLatestMessages?: number) {
+    if (!selectedChatId) {
+      toast.info("Start a chat before running compaction.");
+      return;
+    }
+    if (sending) {
+      toast.info("Wait for the current response to finish before compacting.");
+      return;
+    }
+    await runCompaction({
+      chatId: selectedChatId,
+      keepLatestMessages,
+      silent: false,
+      showSuccessToast: true,
+    });
   }
 
   async function regenerateWithModel(modelId: string) {
@@ -2147,6 +2199,7 @@ export function useChatState() {
     autoModel,
     autoThinking,
     autoSearch,
+    autoCompaction,
     userSpending,
     userMemorySummary,
     orgWelcomeMessage,
@@ -2186,6 +2239,7 @@ export function useChatState() {
     setAutoModel,
     setAutoThinking,
     setAutoSearch,
+    setAutoCompaction,
     setAgentSuggestion,
     imageModel,
     setImageModel,

@@ -307,16 +307,19 @@ export function AppShell({
       return;
     }
     const timer = window.setTimeout(() => {
+      if (window.sessionStorage.getItem('tour-dismissed-' + pathname) === "1") {
+        return;
+      }
       try {
         if (window.localStorage.getItem(pageTourKey) !== "1") {
           setTourOpen(true);
         }
       } catch {
-        setTourOpen(true);
+        // noop
       }
     }, 420);
     return () => window.clearTimeout(timer);
-  }, [pageTourKey]);
+  }, [pageTourKey, pathname]);
 
   useEffect(() => {
     const onOpenTour = () => {
@@ -331,6 +334,7 @@ export function AppShell({
   function markPageTourSeen() {
     if (!pageTourKey) return;
     try {
+      window.sessionStorage.setItem('tour-dismissed-' + pathname, '1');
       window.localStorage.setItem(pageTourKey, "1");
     } catch {
       // Ignore storage failures.

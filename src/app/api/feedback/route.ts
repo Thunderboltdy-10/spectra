@@ -19,6 +19,25 @@ function normalizeOptional(value: string) {
   return trimmed ? trimmed : undefined;
 }
 
+function omitUndefined<T extends Record<string, string | undefined>>(input: T): Partial<T> {
+  const output: Partial<T> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (typeof value === "string") {
+      output[key as keyof T] = value as T[keyof T];
+    }
+  }
+  return output;
+}
+
+function isLegacyFeedbackContextError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("argumentvalidationerror") &&
+    (lower.includes("extra field") || lower.includes("not in the validator"))
+  );
+}
+
 export async function POST(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const form = await request.formData();
@@ -46,16 +65,20 @@ export async function POST(request: NextRequest) {
         return badRequest("Screenshot must be 2MB or smaller");
       }
 
-      const buffer = Buffer.from(await screenshotValue.arrayBuffer());
-      const screenshotBase64 = buffer.toString("base64");
-      const stored = await convexAction<
-        { base64Data: string; mimeType: string },
-        { storageId: string }
-      >("feedback:storeFeedbackScreenshot", {
-        base64Data: screenshotBase64,
-        mimeType: screenshotValue.type,
-      });
-      screenshotStorageId = stored.storageId;
+      try {
+        const buffer = Buffer.from(await screenshotValue.arrayBuffer());
+        const screenshotBase64 = buffer.toString("base64");
+        const stored = await convexAction<
+          { base64Data: string; mimeType: string },
+          { storageId: string }
+        >("feedback:storeFeedbackScreenshot", {
+          base64Data: screenshotBase64,
+          mimeType: screenshotValue.type,
+        });
+        screenshotStorageId = stored.storageId;
+      } catch (error) {
+        console.warn("[feedback] screenshot upload failed, continuing without screenshot", error);
+      }
     }
 
     let actorClerkId: string | undefined;
@@ -70,33 +93,103 @@ export async function POST(request: NextRequest) {
     const page = normalizeOptional(asTrimmedString(form.get("page")));
     const device = normalizeOptional(asTrimmedString(form.get("device")));
     const traceId = normalizeOptional(asTrimmedString(form.get("traceId")));
+    const chatId = normalizeOptional(asTrimmedString(form.get("chatId")));
+    const lastMessage = normalizeOptional(asTrimmedString(form.get("lastMessage")));
+    const activeMode = normalizeOptional(asTrimmedString(form.get("activeMode")));
+    const activeModel = normalizeOptional(asTrimmedString(form.get("activeModel")));
+    const viewportSize = normalizeOptional(asTrimmedString(form.get("viewportSize")));
 
-    const result = await convexMutation<
-      {
-        actorClerkId?: string;
-        category: "bug" | "confusing" | "feature" | "safety";
-        message: string;
-        screenshotStorageId?: string;
-        context: {
-          mode?: string;
-          page?: string;
-          device?: string;
-          traceId?: string;
-        };
-      },
-      { ok: boolean; feedbackId: string }
-    >("feedback:submitFeedback", {
+    let finalScreenshotStorageId = screenshotStorageId;
+    const autoScreenshotValue = form.get("autoScreenshot");
+    if (!finalScreenshotStorageId && typeof autoScreenshotValue === "string" && autoScreenshotValue.startsWith("data:image/jpeg;base64,")) {
+      const base64Data = autoScreenshotValue.replace("data:image/jpeg;base64,", "");
+      if (base64Data.length < MAX_SCREENSHOT_BYTES * 1.5) { // rough base64 overhead allowance
+        try {
+          const stored = await convexAction<
+            { base64Data: string; mimeType: string },
+            { storageId: string }
+          >("feedback:storeFeedbackScreenshot", {
+            base64Data,
+            mimeType: "image/jpeg",
+          });
+          finalScreenshotStorageId = stored.storageId;
+        } catch (error) {
+          console.warn("[feedback] auto screenshot upload failed, continuing without screenshot", error);
+        }
+      }
+    }
+
+    const fullContext = omitUndefined({
+      mode,
+      page,
+      device,
+      traceId,
+      chatId,
+      lastMessage,
+      activeMode,
+      activeModel,
+      viewportSize,
+    });
+    const baseContext = omitUndefined({
+      mode,
+      page,
+      device,
+      traceId,
+    });
+
+    const mutationArgs = {
       actorClerkId,
       category: category as "bug" | "confusing" | "feature" | "safety",
       message,
-      screenshotStorageId,
-      context: {
-        mode,
-        page,
-        device,
-        traceId,
-      },
-    });
+      screenshotStorageId: finalScreenshotStorageId,
+      context: fullContext,
+    };
+
+    let result: { ok: boolean; feedbackId: string };
+    try {
+      result = await convexMutation<
+        {
+          actorClerkId?: string;
+          category: "bug" | "confusing" | "feature" | "safety";
+          message: string;
+          screenshotStorageId?: string;
+          context: {
+            mode?: string;
+            page?: string;
+            device?: string;
+            traceId?: string;
+            chatId?: string;
+            lastMessage?: string;
+            activeMode?: string;
+            activeModel?: string;
+            viewportSize?: string;
+          };
+        },
+        { ok: boolean; feedbackId: string }
+      >("feedback:submitFeedback", mutationArgs);
+    } catch (error) {
+      if (!isLegacyFeedbackContextError(error)) {
+        throw error;
+      }
+      result = await convexMutation<
+        {
+          actorClerkId?: string;
+          category: "bug" | "confusing" | "feature" | "safety";
+          message: string;
+          screenshotStorageId?: string;
+          context: {
+            mode?: string;
+            page?: string;
+            device?: string;
+            traceId?: string;
+          };
+        },
+        { ok: boolean; feedbackId: string }
+      >("feedback:submitFeedback", {
+        ...mutationArgs,
+        context: baseContext,
+      });
+    }
 
     return ok(result);
   }, request);

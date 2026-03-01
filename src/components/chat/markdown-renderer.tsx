@@ -14,6 +14,8 @@ import { ImageReveal } from "@/components/chat/image-reveal";
 import type { Citation } from "@/types";
 import type { StudyMode } from "@/types";
 
+import { stripQuizMarkers } from "@/lib/quiz-parser";
+
 type MarkdownRendererProps = {
   content: string;
   citations?: Citation[];
@@ -148,8 +150,13 @@ function extractImagePayload(content: string) {
 
 export function MarkdownRenderer({ content, citations = [], mode, chatId, onOpenCanvas, onCitationClick, onSubmitQuizAnswers }: MarkdownRendererProps) {
   const cleanContent = useMemo(() => {
+    let baseContent = content;
+    if (mode === "quiz" || mode === "exam" || isQuizContent(content)) {
+      baseContent = stripQuizMarkers(baseContent);
+    }
+
     if (citations.length === 0) {
-      return content.replace(/\n{3,}/g, "\n\n").trim();
+      return baseContent.replace(/\n{3,}/g, "\n\n").trim();
     }
 
     const rewriteSegment = (segment: string) => {
@@ -184,12 +191,12 @@ export function MarkdownRenderer({ content, citations = [], mode, chatId, onOpen
       return processed;
     };
 
-    const chunks = content.split(/(```[\s\S]*?```)/g);
+    const chunks = baseContent.split(/(```[\s\S]*?```)/g);
     const rewritten = chunks
       .map((chunk) => (chunk.startsWith("```") ? chunk : rewriteSegment(chunk)))
       .join("");
     return rewritten.replace(/\n{3,}/g, "\n\n").trim();
-  }, [citations, content]);
+  }, [citations, content, mode]);
 
   const isQuizMode = mode === "quiz" || mode === "exam";
 
@@ -265,6 +272,15 @@ export function MarkdownRenderer({ content, citations = [], mode, chatId, onOpen
                     target={isDeadAnchor ? undefined : "_blank"}
                     rel={isDeadAnchor ? undefined : "noreferrer"}
                     onClick={handleClick}
+                    title={
+                      citationIndex >= 0 && citations[citationIndex]
+                        ? `${citations[citationIndex].title || citations[citationIndex].filename}${
+                            citations[citationIndex].snippet
+                              ? ` — ${citations[citationIndex].snippet.slice(0, 140)}`
+                              : ""
+                          }`
+                        : undefined
+                    }
                     className="mx-0.5 inline-flex cursor-pointer items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 py-0 text-[10px] font-medium text-[var(--accent-cyan)] no-underline transition hover:bg-[var(--bg-hover)]"
                   >
                     {children}

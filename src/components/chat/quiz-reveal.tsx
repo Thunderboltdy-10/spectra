@@ -236,14 +236,14 @@ export function QuizReveal({
   useEffect(() => {
     if (!panelOpen) return;
     openQuizPanel();
-  }, [openQuizPanel, panelOpen]);
+  }, [openQuizPanel, panelOpen, submitted]);
 
   // Auto-open only for the latest quiz message to avoid stacked/flickering panels.
   useEffect(() => {
-    if (autoOpen && questions.length > 0) {
+    if (autoOpen && questions.length > 0 && !submitted) {
       openQuizPanel();
     }
-  }, [autoOpen, openQuizPanel, questions.length]);
+  }, [autoOpen, openQuizPanel, questions.length, submitted]);
 
   if (questions.length === 0) return null;
 

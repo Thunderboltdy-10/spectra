@@ -106,6 +106,10 @@ export type UserSpending = {
 };
 
 export type AutoPreference = "auto" | "on" | "off";
+type StreamPhase = "idle" | "compacting" | "routing" | "searching" | "thinking" | "generating" | "synthesizing";
+
+const AUTO_COMPACTION_MIN_MESSAGES = 10;
+const AUTO_COMPACTION_KEEP_LATEST = 6;
 
 type LiveModel = {
   id: string;
@@ -150,23 +154,38 @@ type SendMessageOptions = {
   localUserMessageId?: string;
 };
 
-function mergeFetchedMessages(fetched: Message[], local: Message[]) {
+function mergeFetchedMessages(
+  fetched: Message[],
+  local: Message[],
+  options?: {
+    pendingLocalUserMessageIds?: Set<string>;
+    isSendInFlight?: boolean;
+  },
+) {
   if (local.length === 0) return fetched;
 
   const merged = [...fetched];
   const fetchedById = new Set(fetched.map((item) => item._id));
-  const existingUserPayloads = new Set(
-    fetched
-      .filter((item) => item.role === "user")
-      .map((item) => item.content.trim()),
-  );
+  const pendingLocalUserMessageIds = options?.pendingLocalUserMessageIds ?? new Set<string>();
+  const isSendInFlight = options?.isSendInFlight ?? false;
 
   for (const pending of local) {
-    if (!pending || fetchedById.has(pending._id)) continue;
+    if (!pending || fetchedById.has(pending._id) || merged.some((item) => item._id === pending._id)) continue;
 
-    if (pending.role === "user" && pending._id.startsWith("local-")) {
+    if (pending.role === "user") {
+      const shouldPreserve =
+        pending._id.startsWith("local-") || (isSendInFlight && pendingLocalUserMessageIds.has(pending._id));
+      if (!shouldPreserve) continue;
       const key = pending.content.trim();
-      if (!key || existingUserPayloads.has(key)) continue;
+      if (!key) continue;
+      const pendingCreatedAt = pending.createdAt ?? Date.now();
+      const duplicateUser = merged.some(
+        (item) =>
+          item.role === "user" &&
+          item.content.trim() === key &&
+          Math.abs((item.createdAt ?? pendingCreatedAt) - pendingCreatedAt) < 90_000,
+      );
+      if (duplicateUser) continue;
       merged.push(pending);
       continue;
     }
@@ -381,6 +400,7 @@ export function useChatState() {
   const [autoModel, setAutoModel] = useState(true);
   const [autoThinking, setAutoThinking] = useState<AutoPreference>("auto");
   const [autoSearch, setAutoSearch] = useState<AutoPreference>("auto");
+  const [autoCompaction, setAutoCompaction] = useState<AutoPreference>("auto");
 
   const userSpending = sidebar.userSpending;
   const setUserSpending = sidebar.setUserSpending;
@@ -406,6 +426,7 @@ export function useChatState() {
   const draftThinking = draftThinkings.get(selectedChatId) ?? "";
   const sending = activeStreamIds.has(selectedChatId);
   const [activeCollaborators, setActiveCollaborators] = useState<ActiveCollaboratorState[]>([]);
+  const [streamPhase, setStreamPhase] = useState<StreamPhase>("idle");
   const [collaboratorPhase, setCollaboratorPhase] = useState<"idle" | "running" | "synthesizing">("idle");
   const [fileList, setFileList] = useState<File[]>([]);
   const [fileUploadState, setFileUploadState] = useState<
@@ -436,6 +457,9 @@ export function useChatState() {
   const streamChatIdRef = useRef<string | null>(null);
   const activeStreamsRef = useRef<Set<string>>(new Set());
   const activeStreamIdsRef = useRef<Set<string>>(new Set());
+  const pendingLocalUserMessageIdsRef = useRef<Set<string>>(new Set());
+  const pendingLocalUserMessagesRef = useRef<Map<string, Message>>(new Map());
+  const pendingLocalUserMessageChatIdsRef = useRef<Map<string, string>>(new Map());
   const sendingRef = useRef(false);
   const shownAchievementToastsRef = useRef<Set<string>>(new Set());
 
@@ -623,6 +647,7 @@ export function useChatState() {
       }
       setActiveCollaborators([]);
       setCollaboratorPhase("idle");
+      setStreamPhase("idle");
       setStreamError(null);
       setLastAutoResult(null);
       setAgentSuggestion(null);
@@ -633,7 +658,19 @@ export function useChatState() {
 
     if (previousSelectedChatIdRef.current !== selectedChatId) {
       // Clear stale messages from the previously viewed chat before merging pending/fetched state.
-      setMessages([]);
+      setMessages(() => {
+        if (pendingLocalUserMessageIdsRef.current.size === 0) {
+          return [];
+        }
+        const pendingUsers = [...pendingLocalUserMessagesRef.current.values()]
+          .filter((item) => {
+            const chatId = pendingLocalUserMessageChatIdsRef.current.get(item._id) ?? "";
+            return chatId === "" || chatId === selectedChatId;
+          })
+          .filter((item) => pendingLocalUserMessageIdsRef.current.has(item._id))
+          .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+        return pendingUsers;
+      });
       previousSelectedChatIdRef.current = selectedChatId;
     }
 
@@ -676,7 +713,39 @@ export function useChatState() {
           }
           return msg;
         });
-        setMessages((prev) => mergeFetchedMessages(messagesWithPreviews, prev));
+        for (const [pendingId, localMessage] of pendingLocalUserMessagesRef.current.entries()) {
+          if (pendingLocalUserMessageChatIdsRef.current.get(pendingId) !== selectedChatId) {
+            continue;
+          }
+          const trimmedLocal = localMessage.content.trim();
+          if (!trimmedLocal) continue;
+          const localCreatedAt = localMessage.createdAt ?? Date.now();
+          const matched = messagesWithPreviews.some(
+            (item) =>
+              item.role === "user" &&
+              item.content.trim() === trimmedLocal &&
+              Math.abs((item.createdAt ?? localCreatedAt) - localCreatedAt) < 90_000,
+          );
+          if (matched) {
+            pendingLocalUserMessageIdsRef.current.delete(pendingId);
+            pendingLocalUserMessagesRef.current.delete(pendingId);
+            pendingLocalUserMessageChatIdsRef.current.delete(pendingId);
+          }
+        }
+        const localPendingForCurrentChat = [...pendingLocalUserMessagesRef.current.entries()]
+          .filter(([pendingId]) => pendingLocalUserMessageChatIdsRef.current.get(pendingId) === selectedChatId)
+          .map(([, message]) => message);
+
+        setMessages((prev) =>
+          mergeFetchedMessages(
+            messagesWithPreviews,
+            [...prev, ...localPendingForCurrentChat],
+            {
+              pendingLocalUserMessageIds: pendingLocalUserMessageIdsRef.current,
+              isSendInFlight: sendingRef.current,
+            },
+          ),
+        );
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Failed to load chat");
       }
@@ -747,6 +816,19 @@ export function useChatState() {
       setLastAutoResult(null);
       setAgentSuggestion(null);
       setMobileSidebarOpen(false);
+      setStreamPhase("idle");
+      pendingLocalUserMessageIdsRef.current.clear();
+      pendingLocalUserMessagesRef.current.clear();
+      pendingLocalUserMessageChatIdsRef.current.clear();
+
+      setMode("auto");
+      setRouterMode("auto");
+      setManualModel("");
+      setThinkingLevel("medium");
+      setAutoEnhancePrompt("auto");
+      setAutoThinking("auto");
+      setAutoSearch("auto");
+      setAutoCompaction("auto");
 
       if (agentId) {
         setSelectedAgentId(agentId);
@@ -885,6 +967,27 @@ export function useChatState() {
     };
   }, [selectedAgentId, startNewChat, updateExistingChatSettings]);
 
+  useEffect(() => {
+    const handleContextRequest = () => {
+      window.dispatchEvent(
+        new CustomEvent("ai-school:chat-context-response", {
+          detail: {
+            chatId: selectedChatId,
+            lastMessage: messages.length > 0 ? messages[messages.length - 1].content : undefined,
+            activeMode: mode,
+            activeModel: activeCollaborators.length > 0
+              ? activeCollaborators[activeCollaborators.length - 1].model
+              : (messages.length > 0 && messages[messages.length - 1].modelUsed)
+                ? messages[messages.length - 1].modelUsed
+                : undefined,
+          },
+        })
+      );
+    };
+    window.addEventListener("ai-school:request-chat-context", handleContextRequest);
+    return () => window.removeEventListener("ai-school:request-chat-context", handleContextRequest);
+  }, [selectedChatId, messages, mode, activeCollaborators]);
+
   function pickBusyFallbackModel(exclude: string[]) {
     const blocked = new Set(exclude.map((item) => item.trim()).filter(Boolean));
     const spendingTier = userSpending?.tier ?? "normal";
@@ -982,6 +1085,8 @@ export function useChatState() {
         activeStreamsRef.current.delete(currentStreamChat);
         setActiveStreamIds(prev => { const next = new Set(prev); next.delete(currentStreamChat); return next; });
       }
+      setStreamPhase("idle");
+      setCollaboratorPhase("idle");
       toast.info("Generation stopped");
     }
   }
@@ -1014,6 +1119,7 @@ export function useChatState() {
     const skipServerUserPersist = Boolean(options?.skipServerUserPersist);
     const effectiveRouterMode = requestedRouterMode;
     const effectiveManualModel = requestedManualModel;
+    const messageCountBeforeSend = messages.filter((item) => item.role !== "system").length;
 
     // Capture which chat this stream belongs to
     const streamChatId = selectedChatIdRef.current || options?.chatIdOverride || "";
@@ -1024,6 +1130,7 @@ export function useChatState() {
     setHasRealThinking(false);
     setActiveCollaborators([]);
     setCollaboratorPhase("idle");
+    setStreamPhase("idle");
     setStreamError(null);
     setSearch("");
     if (retryAttempt === 0) {
@@ -1062,14 +1169,35 @@ export function useChatState() {
           attachments: attachedFileNames,
           attachmentPreviews: initialPreviews.length > 0 ? initialPreviews : undefined,
         };
+        pendingLocalUserMessageIdsRef.current.add(localUserMessageId);
+        pendingLocalUserMessagesRef.current.set(localUserMessageId, userMessage);
+        pendingLocalUserMessageChatIdsRef.current.set(localUserMessageId, targetChatId);
         setMessages((prev) => [...prev, userMessage]);
       }
 
       const chatId = await createChatIfNeeded(options?.chatIdOverride, requestedMode);
       activeChatId = chatId;
+      pendingLocalUserMessageChatIdsRef.current.set(localUserMessageId, chatId);
       streamChatIdRef.current = chatId;
       activeStreamsRef.current.add(chatId);
       setActiveStreamIds(prev => { const next = new Set(prev); next.add(chatId); return next; });
+      const shouldAutoCompact =
+        retryAttempt === 0 &&
+        !isRegenerate &&
+        ((autoCompaction === "on") ||
+          (autoCompaction === "auto" && messageCountBeforeSend >= AUTO_COMPACTION_MIN_MESSAGES));
+      if (shouldAutoCompact) {
+        setStreamPhase("compacting");
+        await runCompaction({
+          chatId,
+          keepLatestMessages: AUTO_COMPACTION_KEEP_LATEST,
+          silent: true,
+          showSuccessToast: false,
+        });
+        if (autoCompaction === "on") {
+          setAutoCompaction("auto");
+        }
+      }
       let uploadedResourceIds: string[] = [];
 
       const attachmentPreviews = await Promise.all(
@@ -1090,6 +1218,15 @@ export function useChatState() {
       );
 
       if (!skipLocalUser && attachmentPreviews.length > 0) {
+        const existingLocalMessage = pendingLocalUserMessagesRef.current.get(localUserMessageId);
+        pendingLocalUserMessagesRef.current.set(localUserMessageId, {
+          _id: localUserMessageId,
+          role: "user",
+          content: text,
+          createdAt: existingLocalMessage?.createdAt ?? Date.now(),
+          attachments: attachedFileNames,
+          attachmentPreviews,
+        });
         setMessages((prev) =>
           prev.map((msg) =>
             msg._id === localUserMessageId
@@ -1148,6 +1285,7 @@ export function useChatState() {
         }
       }
 
+      setStreamPhase("routing");
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1271,21 +1409,30 @@ export function useChatState() {
           const isViewingStreamChat = selectedChatIdRef.current === chatId;
 
           if (payload.type === "delta" && payload.content) {
+            setStreamPhase("generating");
             assistantBuffer += payload.content;
             const targetChatId = chatId;
             if (bufferState.mode !== "none") {
               bufferState = appendToBuffer(bufferState, assistantBuffer);
-              setDraftResponses(prev => { const next = new Map(prev); next.set(targetChatId, bufferState.safeContent); return next; });
+              setDraftResponses(prev => {
+                if (prev.get(targetChatId) === bufferState.safeContent) return prev;
+                const next = new Map(prev);
+                next.set(targetChatId, bufferState.safeContent);
+                return next;
+              });
             } else {
               setDraftResponses(prev => {
+                const newContent = (prev.get(targetChatId) ?? "") + payload.content;
+                if (prev.get(targetChatId) === newContent) return prev;
                 const next = new Map(prev);
-                next.set(targetChatId, (next.get(targetChatId) ?? "") + payload.content);
+                next.set(targetChatId, newContent);
                 return next;
               });
             }
           }
 
           if (payload.type === "thinking" && payload.content?.trim()) {
+            setStreamPhase("thinking");
             if (!hasModelThinking) {
               thinkingBuffer = payload.content;
               hasModelThinking = true;
@@ -1293,10 +1440,16 @@ export function useChatState() {
               thinkingBuffer += payload.content;
             }
             setHasRealThinking(true);
-            setDraftThinkings(prev => { const next = new Map(prev); next.set(chatId, thinkingBuffer); return next; });
+            setDraftThinkings((prev) => {
+              if (prev.get(chatId) === thinkingBuffer) return prev;
+              const next = new Map(prev);
+              next.set(chatId, thinkingBuffer);
+              return next;
+            });
           }
 
           if (payload.type === "collab_start") {
+            setStreamPhase("routing");
             const agents = payload.agents ?? [];
             if (isViewingStreamChat) {
               setActiveCollaborators(
@@ -1362,6 +1515,7 @@ export function useChatState() {
           }
 
           if (payload.type === "collab_synthesizing") {
+            setStreamPhase("synthesizing");
             if (isViewingStreamChat) {
               setCollaboratorPhase("synthesizing");
             }
@@ -1372,9 +1526,19 @@ export function useChatState() {
               assistantBuffer = payload.content;
               if (bufferState.mode !== "none") {
                 bufferState = appendToBuffer(bufferState, assistantBuffer);
-                setDraftResponses(prev => { const next = new Map(prev); next.set(chatId, bufferState.safeContent); return next; });
+                setDraftResponses(prev => {
+                  if (prev.get(chatId) === bufferState.safeContent) return prev;
+                  const next = new Map(prev);
+                  next.set(chatId, bufferState.safeContent);
+                  return next;
+                });
               } else {
-                setDraftResponses(prev => { const next = new Map(prev); next.set(chatId, payload.content!); return next; });
+                setDraftResponses(prev => {
+                  if (prev.get(chatId) === payload.content) return prev;
+                  const next = new Map(prev);
+                  next.set(chatId, payload.content!);
+                  return next;
+                });
               }
             }
             const actualModel =
@@ -1412,6 +1576,9 @@ export function useChatState() {
             }
             if (payload.autoResult) {
               setLastAutoResult(payload.autoResult);
+              if (payload.autoResult.searchEnabled) {
+                setStreamPhase("searching");
+              }
             }
             if (typeof payload.enhancedPrompt === "string" && payload.enhancedPrompt.trim()) {
               enhancedPrompt = payload.enhancedPrompt;
@@ -1488,6 +1655,9 @@ export function useChatState() {
           }
           return changed ? next : prev;
         });
+        pendingLocalUserMessageIdsRef.current.delete(localUserMessageId);
+        pendingLocalUserMessagesRef.current.delete(localUserMessageId);
+        pendingLocalUserMessageChatIdsRef.current.delete(localUserMessageId);
       }
 
       if (assistantBuffer) {
@@ -1610,6 +1780,9 @@ export function useChatState() {
         }
       }
       setMessages((prev) => prev.filter((item) => item._id !== localUserMessageId));
+      pendingLocalUserMessageIdsRef.current.delete(localUserMessageId);
+      pendingLocalUserMessagesRef.current.delete(localUserMessageId);
+      pendingLocalUserMessageChatIdsRef.current.delete(localUserMessageId);
       setMessage(preservedText);
       setFileList(preservedFiles);
       setFileUploadState({});
@@ -1625,6 +1798,7 @@ export function useChatState() {
       }
       setActiveCollaborators([]);
       setCollaboratorPhase("idle");
+      setStreamPhase("idle");
       setHasRealThinking(false);
       abortControllerRef.current = null;
     }
@@ -1808,19 +1982,21 @@ export function useChatState() {
     await refreshPersonalResources();
   }
 
-  async function compactConversation(keepLatestMessages?: number) {
-    if (!selectedChatId) {
-      toast.info("Start a chat before running compaction.");
-      return;
-    }
-    if (sending) {
-      toast.info("Wait for the current response to finish before compacting.");
-      return;
-    }
-    if (compactingConversation) return;
+  async function runCompaction({
+    chatId,
+    keepLatestMessages,
+    silent,
+    showSuccessToast,
+  }: {
+    chatId: string;
+    keepLatestMessages?: number;
+    silent?: boolean;
+    showSuccessToast?: boolean;
+  }): Promise<"compacted" | "skipped" | "failed"> {
+    if (!chatId || compactingConversation) return "skipped";
     setCompactingConversation(true);
     try {
-      const response = await fetch(`/api/chats/${selectedChatId}`, {
+      const response = await fetch(`/api/chats/${chatId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
@@ -1842,27 +2018,47 @@ export function useChatState() {
       };
 
       if (!result.ok) {
-        if (result.reason === "not_enough_messages") {
-          const minimum = Math.max(4, Math.round(result.minimumMessages ?? 20));
-          const current = Math.max(0, Math.round(result.currentMessages ?? 0));
-          toast.info(`Compaction works best after about ${minimum} messages (currently ${current}).`);
-        } else {
-          toast.info("Nothing to compact yet.");
+        if (!silent) {
+          if (result.reason === "not_enough_messages") {
+            const minimum = Math.max(4, Math.round(result.minimumMessages ?? 20));
+            const current = Math.max(0, Math.round(result.currentMessages ?? 0));
+            toast.info(`Compaction works best after about ${minimum} messages (currently ${current}).`);
+          } else {
+            toast.info("Nothing to compact yet.");
+          }
         }
-        return;
+        return "skipped";
       }
 
-      const reload = await fetch(`/api/chats/${selectedChatId}`);
-      if (reload.ok) {
-        const data = (await reload.json()) as ChatDetailResponse;
-        setMessages(data.messages);
+      if (showSuccessToast) {
+        toast.success(`Conversation compacted (${result.compactedMessages ?? 0} messages summarized).`);
       }
-      toast.success(`Conversation compacted (${result.compactedMessages ?? 0} messages summarized).`);
+      return "compacted";
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to compact conversation");
+      if (!silent) {
+        toast.error(error instanceof Error ? error.message : "Failed to compact conversation");
+      }
+      return "failed";
     } finally {
       setCompactingConversation(false);
     }
+  }
+
+  async function compactConversation(keepLatestMessages?: number) {
+    if (!selectedChatId) {
+      toast.info("Start a chat before running compaction.");
+      return;
+    }
+    if (sending) {
+      toast.info("Wait for the current response to finish before compacting.");
+      return;
+    }
+    await runCompaction({
+      chatId: selectedChatId,
+      keepLatestMessages,
+      silent: false,
+      showSuccessToast: true,
+    });
   }
 
   async function regenerateWithModel(modelId: string) {
@@ -2015,6 +2211,7 @@ export function useChatState() {
     autoModel,
     autoThinking,
     autoSearch,
+    autoCompaction,
     userSpending,
     userMemorySummary,
     orgWelcomeMessage,
@@ -2027,6 +2224,7 @@ export function useChatState() {
     draftResponse,
     draftThinking,
     hasRealThinking,
+    streamPhase,
     activeCollaborators,
     collaboratorPhase,
     activeStreamIds,
@@ -2053,6 +2251,7 @@ export function useChatState() {
     setAutoModel,
     setAutoThinking,
     setAutoSearch,
+    setAutoCompaction,
     setAgentSuggestion,
     imageModel,
     setImageModel,

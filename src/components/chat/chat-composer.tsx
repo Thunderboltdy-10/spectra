@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   ChevronDown,
   FileText,
+  Layers,
   Loader2,
   Mic,
   MoreHorizontal,
@@ -62,9 +63,11 @@ type ChatComposerProps = {
   autoEnhancePrompt: AutoPreference;
   autoThinking: AutoPreference;
   autoSearch: AutoPreference;
+  autoCompaction: AutoPreference;
   onAutoEnhancePromptChange: (value: AutoPreference) => void;
   onAutoThinkingChange: (value: AutoPreference) => void;
   onAutoSearchChange: (value: AutoPreference) => void;
+  onAutoCompactionChange: (value: AutoPreference) => void;
   onSlashCommand?: (value: string) => Promise<boolean> | boolean;
   lastAutoResult?: {
     promptEnhanced: boolean;
@@ -157,8 +160,8 @@ function nextPreference(value: AutoPreference): AutoPreference {
 
 function preferenceLabel(value: AutoPreference) {
   if (value === "auto") return "Auto";
-  if (value === "on") return "Yes";
-  return "No";
+  if (value === "on") return "On";
+  return "Off";
 }
 
 function sortedByPopularity(models: ModelOption[]) {
@@ -281,9 +284,11 @@ export function ChatComposer(props: ChatComposerProps) {
     autoEnhancePrompt,
     autoThinking,
     autoSearch,
+    autoCompaction,
     onAutoEnhancePromptChange,
     onAutoThinkingChange,
     onAutoSearchChange,
+    onAutoCompactionChange,
     onSlashCommand,
     lastAutoResult,
   } = props;
@@ -1006,22 +1011,29 @@ export function ChatComposer(props: ChatComposerProps) {
                   label="Enhance"
                   value={autoEnhancePrompt}
                   onChange={onAutoEnhancePromptChange}
-                  title="Auto chooses when to refine prompts. Yes forces refinement. No disables."
+                  title="Auto chooses when to refine prompts. On forces refinement. Off disables."
                   icon={<Sparkles className="h-3.5 w-3.5" />}
                 />
                 <SettingPill
                   label="Thinking"
                   value={autoThinking}
                   onChange={onAutoThinkingChange}
-                  title="Auto adapts reasoning depth. Yes forces deeper reasoning. No keeps it lightweight."
+                  title="Auto adapts reasoning depth. On forces deeper reasoning. Off keeps it lightweight."
                   icon={<Brain className="h-3.5 w-3.5" />}
                 />
                 <SettingPill
                   label="Search"
                   value={autoSearch}
                   onChange={onAutoSearchChange}
-                  title="Auto enables web research for time-sensitive prompts. Yes always enables. No disables."
+                  title="Auto enables web research for time-sensitive prompts. On always enables. Off disables."
                   icon={<Search className="h-3.5 w-3.5" />}
+                />
+                <SettingPill
+                  label="Compact"
+                  value={autoCompaction}
+                  onChange={onAutoCompactionChange}
+                  title="Auto compacts when chats grow long. On compacts once before the next response, then returns to Auto."
+                  icon={<Layers className="h-3.5 w-3.5" />}
                 />
 
                 {lastAutoResult?.promptEnhanced && (
@@ -1065,6 +1077,9 @@ export function ChatComposer(props: ChatComposerProps) {
                     </DropdownMenuItem>
                     <DropdownMenuItem onSelect={() => onAutoSearchChange(nextPreference(autoSearch))}>
                       Search: {preferenceLabel(autoSearch)}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onAutoCompactionChange(nextPreference(autoCompaction))}>
+                      Compact: {preferenceLabel(autoCompaction)}
                     </DropdownMenuItem>
                     <DropdownMenuItem onSelect={() => mobileFileInputRef.current?.click()}>
                       Attach files

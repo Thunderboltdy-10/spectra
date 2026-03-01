@@ -333,11 +333,11 @@ function CardsView({ cards, onRateCard, onLearningCountChange }: CardsViewProps)
       </div>
 
       {/* The big flashcard */}
-      <div className="flashcard-container flashcard-container--main" style={{ minHeight: 280 }}>
+      <div className="flashcard-container flashcard-container--main" style={{ minHeight: "min(400px, 50vh)" }}>
         <div
           className={`flashcard-inner cursor-pointer select-none ${flipped ? "flipped" : ""}`}
           onClick={() => setFlipped((prev) => !prev)}
-          style={{ minHeight: 280, transitionDuration: `${FLIP_DURATION_MS}ms` }}
+          style={{ minHeight: "min(400px, 50vh)", transitionDuration: `${FLIP_DURATION_MS}ms` }}
           onTransitionEnd={() => {
             if (!pendingMove) return;
             const move = pendingMove;
@@ -507,12 +507,12 @@ function GridView({ cards }: GridViewProps) {
           <div
             key={card.cardHash}
             className="flashcard-container cursor-pointer"
-            style={{ minHeight: 200 }}
+            style={{ minHeight: 260 }}
             onClick={() => toggleCard(idx)}
           >
             <div
               className={`flashcard-inner ${isFlipped ? "flipped" : ""}`}
-              style={{ minHeight: 200, transitionDuration: `${FLIP_DURATION_MS}ms` }}
+              style={{ minHeight: 260, transitionDuration: `${FLIP_DURATION_MS}ms` }}
             >
               <div className="flashcard-front flex flex-col items-center justify-center rounded-[var(--radius-container)] border-2 border-[var(--mode-flashcard)] bg-[var(--bg-elevated)] p-5 shadow-[var(--shadow-card)]">
                 <p className="mb-2 text-[9px] font-semibold uppercase tracking-widest text-[var(--mode-flashcard)] opacity-70">

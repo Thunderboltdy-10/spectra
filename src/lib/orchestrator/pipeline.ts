@@ -590,7 +590,11 @@ export async function runChatPipeline(request: NextRequest) {
     }).catch(() => {});
   }
 
-  const recentHistory = existingSummary ? history.slice(-6) : history;
+  const compactedWindow =
+    effectiveMode === "quiz" || effectiveMode === "exam" || effectiveMode === "flashcard"
+      ? 14
+      : 8;
+  const recentHistory = existingSummary ? history.slice(-compactedWindow) : history;
   const historyForModel = recentHistory.map((message, index) => {
     const isLast = index === recentHistory.length - 1;
     if (isLast && message.role === "user" && auto.promptEnhanced) {

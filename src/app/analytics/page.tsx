@@ -91,12 +91,10 @@ export default function AnalyticsPage() {
 
   return (
     <AppShell fullBleed contentClassName="2xl:px-14">
-      <div data-tour="analytics-header" className="mb-6 text-center">
+      <div data-tour="analytics-header" className="mb-6 rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 sm:p-6">
         <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-secondary)]">Learning intelligence</p>
-        <h1 className="font-display text-3xl font-semibold tracking-tight sm:text-4xl">Analytics</h1>
-        <p className="mt-1 text-sm text-[var(--text-secondary)]">
-          Track your study progress and learning patterns
-        </p>
+        <h1 className="font-display text-4xl tracking-tight">Analytics</h1>
+        <p className="mt-1 text-sm text-[var(--text-secondary)]">Track your study progress and learning patterns</p>
       </div>
 
       {loading ? (

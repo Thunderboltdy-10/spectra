@@ -42,15 +42,12 @@ type ChatWelcomeProps = {
   onSelectAgent: (agentId: string) => void;
   onSelectMode: (mode: StudyMode) => void;
   onResumeChat?: (chatId: string) => void;
-  onUsePrompt?: (prompt: string, mode: StudyMode) => void;
   agents: Agent[];
   activeMode?: StudyMode;
   recentChats?: WelcomeChat[];
   welcomeMessage?: string;
   orgName?: string;
 };
-
-const CORE_MODES: StudyMode[] = ["tutor", "quiz", "flashcard", "research"];
 
 const MORNING_GREETINGS = [
   "Good morning",
@@ -86,12 +83,6 @@ const DAILY_TIPS = [
   "Tip: Research mode works best when you ask for sources and confidence levels.",
   "Tip: Alternate Learn and Quiz sessions to improve transfer and recall speed.",
   "Tip: Keep prompts specific: include topic, level, and goal in one sentence.",
-];
-
-const STARTER_PROMPTS: Array<{ mode: StudyMode; prompt: string }> = [
-  { mode: "tutor", prompt: "Help me build a study plan for this week with 30-minute daily blocks." },
-  { mode: "quiz", prompt: "Quiz me on this topic with 5 medium questions and quick explanations." },
-  { mode: "research", prompt: "Find recent sources on this topic and summarize key evidence." },
 ];
 
 function hashString(value: string) {
@@ -140,7 +131,6 @@ export function ChatWelcome({
   onSelectMode,
   agents,
   activeMode,
-  onUsePrompt,
   welcomeMessage,
   orgName,
 }: ChatWelcomeProps) {
@@ -151,6 +141,7 @@ export function ChatWelcome({
     totalXp: number;
     achievements: Array<{ type: string }>;
   } | null>(null);
+  const [tipSeed, setTipSeed] = useState(0);
 
   useEffect(() => {
     if (!activeMode) return;
@@ -180,15 +171,30 @@ export function ChatWelcome({
     void loadGamification();
   }, []);
 
+  useEffect(() => {
+    try {
+      const key = "ai-school-welcome-tip-seed";
+      const previous = Number.parseInt(window.sessionStorage.getItem(key) ?? "0", 10);
+      const next = Number.isFinite(previous) ? previous + 1 : 1;
+      window.sessionStorage.setItem(key, String(next));
+      setTipSeed(next);
+    } catch {
+      setTipSeed(1);
+    }
+  }, []);
+
   const firstName = user?.firstName?.trim() || user?.fullName?.split(" ")[0] || "there";
   const now = new Date();
   const dayKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
   const greeting = getGreeting(now.getHours(), now.getMonth(), firstName, dayKey);
 
   const dailyTip = (() => {
-    const index = hashString(`${dayKey}:${firstName.toLowerCase()}:tip`) % DAILY_TIPS.length;
+    const index = hashString(`${dayKey}:${firstName.toLowerCase()}:tip:${tipSeed}`) % DAILY_TIPS.length;
     return DAILY_TIPS[index] ?? DAILY_TIPS[0];
   })();
+
+  const availableModes = ALL_MODES.filter((mode) => isModeAvailable(mode.key));
+  const comingSoonModes = ALL_MODES.filter((mode) => COMING_SOON_MODES.has(mode.key));
 
   return (
     <div className="flex flex-col items-center justify-center px-4 py-10 sm:py-12">
@@ -213,7 +219,7 @@ export function ChatWelcome({
                 {greeting}, {firstName}
               </h1>
               <p className="mt-2 text-sm text-[var(--text-secondary)] sm:text-base">
-                {dynamicWelcomeLine({ hour: now.getHours(), month: now.getMonth(), orgName }) || welcomeMessage?.trim() || "Pick a mode and start a focused session."}
+                {welcomeMessage?.trim() || dynamicWelcomeLine({ hour: now.getHours(), month: now.getMonth(), orgName }) || "Pick a mode and start a focused session."}
               </p>
             </div>
 
@@ -245,29 +251,24 @@ export function ChatWelcome({
 
         <section className="space-y-3">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="font-display text-xl">Core Study Modes</h2>
+            <h2 className="font-display text-xl">Study Modes</h2>
             <p className="text-xs text-[var(--text-secondary)]">Choose a lane, switch anytime</p>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {CORE_MODES.map((mode) => {
-              const config = getModeConfig(mode);
-              const available = isModeAvailable(mode);
+            {availableModes.map((mode) => {
+              const config = getModeConfig(mode.key);
               return (
                 <button
-                  key={mode}
+                  key={mode.key}
                   type="button"
-                  disabled={!available}
-                  className={`group relative overflow-hidden rounded-2xl border bg-[var(--bg-elevated)] p-4 text-left transition ${
-                    available ? "cursor-pointer hover:-translate-y-0.5 hover:shadow-[var(--shadow-soft)]" : "cursor-not-allowed opacity-45"
-                  } ${
-                    selectedMode === mode
+                  className={`group relative overflow-hidden rounded-2xl border bg-[var(--bg-elevated)] p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[var(--shadow-soft)] ${
+                    selectedMode === mode.key
                       ? "border-[color-mix(in_oklab,var(--accent-cyan)_40%,var(--border-default))] ring-1 ring-[color-mix(in_oklab,var(--accent-cyan)_35%,transparent)]"
                       : "border-[var(--border-default)]"
                   }`}
                   onClick={() => {
-                    if (!available) return;
-                    setSelectedMode(mode);
-                    onSelectMode(mode);
+                    setSelectedMode(mode.key);
+                    onSelectMode(mode.key);
                   }}
                 >
                   <div
@@ -282,11 +283,6 @@ export function ChatWelcome({
                       {MODE_ICONS[config.icon]}
                     </div>
                     <p className="font-semibold text-[var(--text-primary)]">{config.label}</p>
-                    {!available ? (
-                      <span className="ml-auto rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
-                        Coming soon
-                      </span>
-                    ) : null}
                   </div>
                   <p className="text-xs leading-relaxed text-[var(--text-secondary)]">{config.description}</p>
                 </button>
@@ -294,60 +290,22 @@ export function ChatWelcome({
             })}
           </div>
 
-          <div className="flex flex-wrap gap-1.5">
-            {ALL_MODES.filter((mode) => !CORE_MODES.includes(mode.key)).map((mode) => {
-              const available = isModeAvailable(mode.key);
-              const comingSoon = COMING_SOON_MODES.has(mode.key);
-              return (
-                <button
+          {comingSoonModes.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {comingSoonModes.map((mode) => (
+                <span
                   key={mode.key}
-                  type="button"
-                  disabled={!available}
-                  onClick={() => {
-                    if (!available) return;
-                    setSelectedMode(mode.key);
-                    onSelectMode(mode.key);
-                  }}
-                  className={`rounded-full border px-3 py-1 text-xs transition ${
-                    selectedMode === mode.key
-                      ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-elevated))] text-[var(--text-primary)]"
-                      : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)]"
-                  } ${available ? "cursor-pointer hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" : "cursor-not-allowed opacity-45"}`}
+                  className="rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-1 text-xs text-[var(--text-secondary)] opacity-70"
                 >
                   {mode.label}
-                  {comingSoon ? (
-                    <span className="ml-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em]">
-                      Coming Soon
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-        </section>
-
-        {onUsePrompt ? (
-          <section>
-            <h2 className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-              Start Fast
-            </h2>
-            <div className="grid gap-2 sm:grid-cols-3">
-              {STARTER_PROMPTS.map((item) => (
-                <button
-                  key={item.prompt}
-                  type="button"
-                  className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2.5 text-left text-xs text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                  onClick={() => onUsePrompt(item.prompt, item.mode)}
-                >
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--text-primary)]">
-                    {getModeConfig(item.mode).label}
-                  </p>
-                  <p className="mt-1 line-clamp-3">{item.prompt}</p>
-                </button>
+                  <span className="ml-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em]">
+                    Coming Soon
+                  </span>
+                </span>
               ))}
             </div>
-          </section>
-        ) : null}
+          ) : null}
+        </section>
 
         {agents.length > 0 ? (
           <section>

@@ -41,6 +41,13 @@ type SoulSection = {
   placeholder: string;
 };
 
+type PublishSoulResponse = {
+  ok?: boolean;
+  chunkCount?: number;
+  fallback?: "lexical";
+  warning?: string;
+};
+
 async function readApiError(response: Response, fallback: string) {
   const text = await response.text();
   if (!text) return fallback;
@@ -226,6 +233,34 @@ export default function SchoolSoulPage() {
   // Actions
   // ---------------------------------------------------------------------------
 
+  async function publishSoul(options?: { silent?: boolean }) {
+    setPublishing(true);
+    try {
+      const response = await fetch("/api/admin/soul", { method: "PATCH" });
+      if (!response.ok) throw new Error(await readApiError(response, "Failed to publish SOUL"));
+      const payload = (await response.json().catch(() => null)) as PublishSoulResponse | null;
+      if (payload?.ok === false) {
+        throw new Error("SOUL publish did not complete successfully.");
+      }
+      await loadDocs();
+      if (!options?.silent) {
+        if (payload?.fallback === "lexical") {
+          toast.success("SOUL published in lexical mode. Chat guidance is active without embeddings.");
+        } else {
+          toast.success("School SOUL published — AI will use these guidelines immediately");
+        }
+      }
+      return payload;
+    } catch (error) {
+      if (!options?.silent) {
+        toast.error(error instanceof Error ? error.message : "Failed to publish soul");
+      }
+      return null;
+    } finally {
+      setPublishing(false);
+    }
+  }
+
   async function saveSection() {
     if (!title.trim() || !content.trim()) {
       toast.error("Title and content are required");
@@ -244,7 +279,14 @@ export default function SchoolSoulPage() {
       });
       if (!response.ok) throw new Error(await readApiError(response, "Failed to save section"));
       await loadDocs();
-      toast.success(`"${title}" saved successfully`);
+      const publishResult = await publishSoul({ silent: true });
+      if (!publishResult || publishResult.ok === false) {
+        toast.warning(`"${title}" saved, but publish failed. Retry publishing to apply changes in chats.`);
+      } else if (publishResult.fallback === "lexical") {
+        toast.success(`"${title}" saved and published (lexical fallback mode).`);
+      } else {
+        toast.success(`"${title}" saved and published.`);
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save section");
     } finally {
@@ -293,20 +335,6 @@ export default function SchoolSoulPage() {
       toast.error(error instanceof Error ? error.message : "Failed to seed SOUL sections");
     } finally {
       setSeeding(false);
-    }
-  }
-
-  async function publishSoul() {
-    setPublishing(true);
-    try {
-      const response = await fetch("/api/admin/soul", { method: "PATCH" });
-      if (!response.ok) throw new Error(await readApiError(response, "Failed to publish SOUL"));
-      await loadDocs();
-      toast.success("School SOUL published — AI will use these guidelines immediately");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to publish soul");
-    } finally {
-      setPublishing(false);
     }
   }
 
@@ -378,10 +406,10 @@ export default function SchoolSoulPage() {
             </Button>
             <Button
               onClick={() => void saveSection()}
-              disabled={saving || loading}
+              disabled={saving || publishing || loading}
               className="cursor-pointer gap-1.5"
             >
-              {saving ? "Saving..." : "Save Section"}
+              {saving ? "Saving..." : "Save + Publish"}
             </Button>
             <Button
               onClick={() => void publishSoul()}

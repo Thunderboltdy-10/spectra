@@ -457,7 +457,36 @@ export function ChatMessage({
                   </Button>
                 ) : null}
 
-                {(onBranch || onFeedback || tts.isSupported || whyThisResponse) ? (
+                {onFeedback ? (
+                  <>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className={`h-8 cursor-pointer gap-1.5 px-2 ${feedback === "up" ? "text-[var(--success)]" : ""}`}
+                      onClick={() => {
+                        setFeedback("up");
+                        onFeedback?.(true, activeModelId);
+                      }}
+                    >
+                      <ThumbsUp className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className={`h-8 cursor-pointer gap-1.5 px-2 ${feedback === "down" ? "text-[var(--danger)]" : ""}`}
+                      onClick={() => {
+                        setFeedback("down");
+                        onFeedback?.(false, activeModelId);
+                      }}
+                    >
+                      <ThumbsDown className="h-3.5 w-3.5" />
+                    </Button>
+                  </>
+                ) : null}
+
+                {(onBranch || tts.isSupported || whyThisResponse) ? (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button type="button" variant="ghost" size="sm" className="h-8 cursor-pointer gap-1.5 text-xs">
@@ -476,30 +505,6 @@ export function ChatMessage({
                         <DropdownMenuItem onSelect={() => setShowWhy((prev) => !prev)}>
                           <Info className="mr-2 h-3.5 w-3.5" />
                           {showWhy ? "Hide reasoning trace" : "Why this response"}
-                        </DropdownMenuItem>
-                      ) : null}
-                      {onFeedback ? (
-                        <DropdownMenuItem
-                          className={feedback === "up" ? "text-[var(--success)]" : undefined}
-                          onSelect={() => {
-                            setFeedback("up");
-                            onFeedback?.(true, activeModelId);
-                          }}
-                        >
-                          <ThumbsUp className="mr-2 h-3.5 w-3.5" />
-                          Mark as helpful
-                        </DropdownMenuItem>
-                      ) : null}
-                      {onFeedback ? (
-                        <DropdownMenuItem
-                          className={feedback === "down" ? "text-[var(--danger)]" : undefined}
-                          onSelect={() => {
-                            setFeedback("down");
-                            onFeedback?.(false, activeModelId);
-                          }}
-                        >
-                          <ThumbsDown className="mr-2 h-3.5 w-3.5" />
-                          Needs improvement
                         </DropdownMenuItem>
                       ) : null}
                       {tts.isSupported ? (

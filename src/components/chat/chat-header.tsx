@@ -53,7 +53,7 @@ export function ChatHeader({
   const responseAgo = lastResponseAt
     ? formatRelativeTime(lastResponseAt)
     : undefined;
-  const showCompactTip = messageCount > 20;
+  const showCompactTip = messageCount > 8;
 
   return (
     <header className="sticky top-0 z-20 border-b border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_92%,transparent)] backdrop-blur-xl">
@@ -118,7 +118,7 @@ export function ChatHeader({
                 <Settings2 className="h-3.5 w-3.5" />
               </Button>
             )}
-            {!sending && messageCount > 15 && onCompact ? (
+            {!sending && messageCount > 8 && onCompact ? (
               <Button
                 type="button"
                 variant="secondary"

@@ -10,6 +10,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 
 type NotificationItem = {
   _id: string;
@@ -28,7 +29,13 @@ type NotificationsPayload = {
   totalCount: number;
 };
 
-export function NotificationBell() {
+type NotificationBellProps = {
+  buttonClassName?: string;
+  contentClassName?: string;
+  align?: "start" | "center" | "end";
+};
+
+export function NotificationBell({ buttonClassName, contentClassName, align = "end" }: NotificationBellProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [markingAllRead, setMarkingAllRead] = useState(false);
@@ -111,9 +118,8 @@ export function NotificationBell() {
           type="button"
           variant="secondary"
           size="icon"
-          className="relative"
+          className={cn("relative", buttonClassName)}
           aria-label="Open notifications"
-          title="Notifications"
         >
           <Bell className="h-4 w-4" />
           {unreadCount > 0 ? (
@@ -123,7 +129,7 @@ export function NotificationBell() {
           ) : null}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-[360px] p-0">
+      <DropdownMenuContent align={align} className={cn("w-[360px] p-0", contentClassName)}>
         <div className="flex items-center justify-between border-b border-[var(--border-default)] px-3 py-2.5">
           <div>
             <p className="text-sm font-semibold">Notifications</p>

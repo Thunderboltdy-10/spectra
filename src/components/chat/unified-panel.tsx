@@ -1,19 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bot, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Settings2, X, XCircle, FileText, Milestone } from "lucide-react";
+import { Bot, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Loader2, Settings2, X, XCircle, FileText, Milestone } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { rightPanelSurfaceClassName } from "@/components/ui/right-panel-surface";
-import { ChatModeSelector } from "@/components/chat/chat-mode-selector";
 import type { ActiveCollaborator } from "@/components/chat/collaborators-live";
 import { RichText } from "@/components/chat/rich-text";
 import { usePanel, type PanelQuizData } from "@/context/panel-context";
 import { useCompactSheet } from "@/hooks/use-compact-sheet";
 import { useRightPanelDock } from "@/hooks/use-right-panel-dock";
 import type { AutoPreference, ModelOption, PersonalResource, UserSpending } from "@/hooks/use-chat-state";
-import type { RouterMode, StudyMode, ThinkingLevel, Citation, RouteTrace } from "@/types";
+import type { Citation, RouteTrace } from "@/types";
 import { FILE_LIMITS } from "@/lib/file-limits";
 
 function AutoChoice({
@@ -40,7 +38,7 @@ function AutoChoice({
                 : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
             }`}
           >
-            {item === "auto" ? "Auto" : item === "on" ? "Yes" : "No"}
+            {item === "auto" ? "Auto" : item === "on" ? "On" : "Off"}
           </button>
         ))}
       </div>
@@ -69,62 +67,73 @@ function sanitizeModelLabel(value: string) {
     .trim();
 }
 
-function resourceStatusLabel(status: PersonalResource["status"]) {
-  if (status === "uploaded") return "Indexing";
-  if (status === "processed") return "Ready";
-  return "Failed";
+function resourceStatusMeta(status: PersonalResource["status"]) {
+  if (status === "uploaded") {
+    return {
+      label: "Processing...",
+      Icon: Loader2,
+      iconClassName: "animate-spin text-[var(--text-secondary)]",
+    };
+  }
+  if (status === "processed") {
+    return {
+      label: "Ready",
+      Icon: CheckCircle2,
+      iconClassName: "text-[var(--success)]",
+    };
+  }
+  return {
+    label: "Failed - remove and retry",
+    Icon: XCircle,
+    iconClassName: "text-[var(--danger)]",
+  };
 }
 
 type SettingsViewProps = {
   models: ModelOption[];
-  mode: StudyMode;
-  thinkingLevel: ThinkingLevel;
-  routerMode: RouterMode;
-  manualModel: string;
   usePersonalResources: boolean;
   personalResources: PersonalResource[];
   userSpending: UserSpending | null;
+  recentChatCount?: number;
+  liveProgressAutoOpen: boolean;
   autoEnhancePrompt: AutoPreference;
   autoThinking: AutoPreference;
   autoSearch: AutoPreference;
-  onModeChange: (mode: StudyMode) => void;
-  onThinkingChange: (level: ThinkingLevel) => void;
-  onRouterChange: (mode: RouterMode) => void;
-  onManualModelChange: (modelId: string) => void;
+  autoCompaction: AutoPreference;
   onTogglePersonalResources: (enabled: boolean) => void;
+  onLiveProgressAutoOpenChange: (enabled: boolean) => void;
   onAutoEnhancePromptChange: (value: AutoPreference) => void;
   onAutoThinkingChange: (value: AutoPreference) => void;
   onAutoSearchChange: (value: AutoPreference) => void;
+  onAutoCompactionChange: (value: AutoPreference) => void;
   onDeleteResource: (resourceId: string) => void;
 };
 
 function SettingsView({
   models,
-  mode,
-  thinkingLevel,
-  routerMode,
-  manualModel,
   usePersonalResources,
   personalResources,
   userSpending,
+  recentChatCount = 0,
+  liveProgressAutoOpen,
   autoEnhancePrompt,
   autoThinking,
   autoSearch,
-  onModeChange,
-  onThinkingChange,
-  onRouterChange,
-  onManualModelChange,
+  autoCompaction,
   onTogglePersonalResources,
+  onLiveProgressAutoOpenChange,
   onAutoEnhancePromptChange,
   onAutoThinkingChange,
   onAutoSearchChange,
+  onAutoCompactionChange,
   onDeleteResource,
 }: SettingsViewProps) {
-  const [showManual, setShowManual] = useState(false);
-  const ratio =
-    userSpending && typeof userSpending.budgetUsagePercent === "number" && userSpending.budgetUsagePercent > 0
+  const ratioFromBudget =
+    userSpending && typeof userSpending.budgetUsagePercent === "number" && userSpending.budgetUsagePercent >= 0
       ? Math.min(1, Math.max(0, userSpending.budgetUsagePercent / 100))
       : null;
+  const ratioFromActivity = recentChatCount > 0 ? Math.min(1, recentChatCount / 50) : null;
+  const ratio = ratioFromBudget ?? ratioFromActivity;
   const percentUsed = typeof ratio === "number" ? Math.max(0, Math.min(100, Math.round(ratio * 100))) : null;
   const usageLabel =
     percentUsed === null
@@ -136,7 +145,8 @@ function SettingsView({
       : percentUsed > 0
           ? "Getting started"
           : "No activity yet";
-  const selectedModel = models.find((model) => model.modelId === manualModel);
+  const selectedModel = models.find((model) => model.modelId === "openrouter/auto")
+    ?? models[0];
 
   return (
     <div className="space-y-4">
@@ -146,81 +156,23 @@ function SettingsView({
           <AutoChoice label="Auto-enhance prompt" value={autoEnhancePrompt} onChange={onAutoEnhancePromptChange} />
           <AutoChoice label="Auto-thinking" value={autoThinking} onChange={onAutoThinkingChange} />
           <AutoChoice label="Auto-search" value={autoSearch} onChange={onAutoSearchChange} />
+          <AutoChoice label="Auto-compaction" value={autoCompaction} onChange={onAutoCompactionChange} />
         </div>
         <div className="mt-2 grid gap-2 text-xs text-[var(--text-secondary)]">
           <p>
-            Routing:{" "}
-            <span className="font-medium text-[var(--text-primary)]">
-              {routerMode === "manual" ? "Manual model lock" : "Adaptive routing"}
-            </span>
+            Routing: <span className="font-medium text-[var(--text-primary)]">Adaptive routing</span>
           </p>
         </div>
       </section>
 
       <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-        <button
-          type="button"
-          onClick={() => setShowManual((prev) => !prev)}
-          className="flex w-full items-center justify-between"
-        >
-          <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Manual overrides</h3>
-          <ChevronDown className={`h-4 w-4 text-[var(--text-secondary)] transition ${showManual ? "rotate-180" : ""}`} />
-        </button>
-
-        {showManual && (
-          <div className="mt-3 space-y-3">
-            <div className="space-y-1.5">
-              <span className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Study mode</span>
-              <ChatModeSelector mode={mode} onChange={onModeChange} />
-            </div>
-
-            <label className="space-y-1.5">
-              <span className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Thinking</span>
-              <Select value={thinkingLevel} onValueChange={(value) => onThinkingChange(value as ThinkingLevel)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                </SelectContent>
-              </Select>
-            </label>
-
-            <label className="space-y-1.5">
-              <span className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Routing</span>
-              <Select value={routerMode} onValueChange={(value) => onRouterChange(value as RouterMode)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="auto">Auto</SelectItem>
-                  <SelectItem value="manual">Manual</SelectItem>
-                  <SelectItem value="openrouter_auto">OpenRouter auto</SelectItem>
-                </SelectContent>
-              </Select>
-            </label>
-
-            {routerMode === "manual" && (
-              <label className="space-y-1.5">
-                <span className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Model</span>
-                <Select value={manualModel} onValueChange={onManualModelChange}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choose model" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {models.map((model) => (
-                      <SelectItem key={model.modelId} value={model.modelId}>
-                        {sanitizeModelLabel(model.name)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
-            )}
+        <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
+          <div>
+            <p className="text-sm">Auto-open live progress</p>
+            <p className="text-xs text-[var(--text-secondary)]">Open the orchestration panel automatically while streaming</p>
           </div>
-        )}
+          <Switch checked={liveProgressAutoOpen} onCheckedChange={onLiveProgressAutoOpenChange} />
+        </div>
       </section>
 
       {selectedModel && (
@@ -268,7 +220,17 @@ function SettingsView({
               >
                 <div className="min-w-0">
                   <p className="truncate text-xs font-medium text-[var(--text-primary)]">{resource.filename}</p>
-                  <p className="text-[10px] text-[var(--text-secondary)]">{resourceStatusLabel(resource.status)}</p>
+                  <p className="inline-flex items-center gap-1 text-[10px] text-[var(--text-secondary)]">
+                    {(() => {
+                      const status = resourceStatusMeta(resource.status);
+                      return (
+                        <>
+                          <status.Icon className={`h-3 w-3 ${status.iconClassName}`} />
+                          {status.label}
+                        </>
+                      );
+                    })()}
+                  </p>
                 </div>
                 <Button
                   type="button"
@@ -293,7 +255,7 @@ function SettingsView({
         <div className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
           <div
             className="h-full rounded-full bg-[var(--gradient-brand)]"
-            style={{ width: `${Math.max(0, (ratio ?? 0.16) * 100)}%` }}
+            style={{ width: `${typeof ratio === "number" ? Math.max(ratio > 0 ? 2 : 0, ratio * 100) : 0}%` }}
           />
         </div>
         <p className="mt-1 text-[11px] text-[var(--text-secondary)]">{percentUsed === null ? "No tracked activity yet" : `${percentUsed}% utilization`}</p>
@@ -392,6 +354,7 @@ type OrchestrationViewProps = {
   sending: boolean;
   collaboratorPhase: "idle" | "running" | "synthesizing";
   activeCollaborators: ActiveCollaborator[];
+  streamPhase?: "idle" | "compacting" | "routing" | "searching" | "thinking" | "generating" | "synthesizing";
   routeTrace?: RouteTrace;
   lastModelUsed?: string;
   searchEnabled?: boolean;
@@ -401,8 +364,15 @@ function orchestrationStage(params: {
   sending: boolean;
   collaboratorPhase: "idle" | "running" | "synthesizing";
   activeCollaborators: ActiveCollaborator[];
+  streamPhase?: "idle" | "compacting" | "routing" | "searching" | "thinking" | "generating" | "synthesizing";
   searchEnabled?: boolean;
 }) {
+  if (params.streamPhase === "compacting") return "compacting";
+  if (params.streamPhase === "routing") return "routing";
+  if (params.streamPhase === "searching") return "searching";
+  if (params.streamPhase === "thinking") return "thinking";
+  if (params.streamPhase === "generating") return "generating";
+  if (params.streamPhase === "synthesizing") return "synthesizing";
   if (!params.sending) return "verifying";
   if (params.collaboratorPhase === "synthesizing") return "generating";
   if (params.activeCollaborators.length > 0 && params.searchEnabled) return "searching";
@@ -414,6 +384,7 @@ function OrchestrationView({
   sending,
   collaboratorPhase,
   activeCollaborators,
+  streamPhase,
   routeTrace,
   lastModelUsed,
   searchEnabled,
@@ -422,9 +393,10 @@ function OrchestrationView({
     sending,
     collaboratorPhase,
     activeCollaborators,
+    streamPhase,
     searchEnabled,
   });
-  const steps = ["thinking", "searching", "generating", "verifying"] as const;
+  const steps = ["compacting", "routing", "searching", "thinking", "generating", "synthesizing", "verifying"] as const;
   const stageIndex = steps.indexOf(stage);
   const selectedModel = routeTrace?.selected.modelId || lastModelUsed;
   const selectedReason =
@@ -535,7 +507,7 @@ function SourcesView({ citations }: { citations: Citation[] }) {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="grid auto-rows-fr gap-2.5">
       {citations.map((citation, index) => {
         const href = hrefForCitation(citation);
         const isSearch = citation.sourceType === "search";
@@ -544,29 +516,37 @@ function SourcesView({ citations }: { citations: Citation[] }) {
         return (
           <article
             key={`${citation.filename}-${index}`}
-            className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3"
+            className="flex h-full flex-col rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3"
           >
-            <div className="mb-2 flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-              {isSearch ? <Milestone className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
-              <span className="uppercase tracking-[0.08em]">[{index + 1}] {citation.sourceType}</span>
+            <div className="mb-2 flex items-center justify-between gap-2 text-xs text-[var(--text-secondary)]">
+              <span className="inline-flex items-center gap-1.5">
+                {isSearch ? <Milestone className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
+                <span className="uppercase tracking-[0.08em]">[{index + 1}] {citation.sourceType}</span>
+              </span>
+              {citation.page ? (
+                <span className="rounded-full bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] uppercase tracking-[0.06em]">
+                  Page {citation.page}
+                </span>
+              ) : null}
             </div>
 
             <p className="font-medium text-[var(--text-primary)]">{label}</p>
             {isSearch && citation.domain ? <p className="mt-1 text-xs text-[var(--text-secondary)]">{citation.domain}</p> : null}
-            {citation.page ? <p className="mt-1 text-xs text-[var(--text-secondary)]">Page {citation.page}</p> : null}
 
-            {citation.snippet ? (
-              <RichText content={citation.snippet} className="mt-2 text-xs leading-relaxed text-[var(--text-secondary)]" />
-            ) : (
-              <p className="mt-2 text-xs leading-relaxed text-[var(--text-secondary)]">No preview snippet available.</p>
-            )}
+            <div className="mt-2 flex-1 rounded-lg bg-[var(--bg-secondary)] px-2.5 py-2">
+              {citation.snippet ? (
+                <RichText content={citation.snippet} className="text-xs leading-relaxed text-[var(--text-secondary)]" />
+              ) : (
+                <p className="text-xs leading-relaxed text-[var(--text-secondary)]">No preview snippet available.</p>
+              )}
+            </div>
 
             {href ? (
               <a
                 href={href}
                 target="_blank"
                 rel="noreferrer"
-                className="mt-3 inline-flex cursor-pointer rounded-full border border-[var(--border-default)] px-2.5 py-1 text-xs text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+                className="mt-3 inline-flex cursor-pointer self-start rounded-full border border-[var(--border-default)] px-2.5 py-1 text-xs text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
               >
                 {citation.url ? "Open source URL" : "Download source"}
               </a>

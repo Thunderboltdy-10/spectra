@@ -239,6 +239,9 @@ export default function SchoolSoulPage() {
       const response = await fetch("/api/admin/soul", { method: "PATCH" });
       if (!response.ok) throw new Error(await readApiError(response, "Failed to publish SOUL"));
       const payload = (await response.json().catch(() => null)) as PublishSoulResponse | null;
+      if (payload?.ok === false) {
+        throw new Error("SOUL publish did not complete successfully.");
+      }
       await loadDocs();
       if (!options?.silent) {
         if (payload?.fallback === "lexical") {
@@ -277,7 +280,9 @@ export default function SchoolSoulPage() {
       if (!response.ok) throw new Error(await readApiError(response, "Failed to save section"));
       await loadDocs();
       const publishResult = await publishSoul({ silent: true });
-      if (publishResult?.fallback === "lexical") {
+      if (!publishResult || publishResult.ok === false) {
+        toast.warning(`"${title}" saved, but publish failed. Retry publishing to apply changes in chats.`);
+      } else if (publishResult.fallback === "lexical") {
         toast.success(`"${title}" saved and published (lexical fallback mode).`);
       } else {
         toast.success(`"${title}" saved and published.`);

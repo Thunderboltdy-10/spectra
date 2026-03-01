@@ -157,7 +157,7 @@ export async function PATCH() {
         actorClerkId: actor.clerkId,
       });
       return ok(result);
-    } catch (error) {
+    } catch (primaryError) {
       try {
         const lexical = await convexMutation<{ actorClerkId: string }, {
           ok?: boolean;
@@ -167,23 +167,23 @@ export async function PATCH() {
         }>("soul:publishSoulLexical", {
           actorClerkId: actor.clerkId,
         });
+        if (!lexical?.ok) {
+          throw new Error("Lexical fallback returned unsuccessful result.");
+        }
         return ok({
           ...lexical,
           fallback: "lexical",
-          warning: shouldFallbackToLexical(error)
+          warning: shouldFallbackToLexical(primaryError)
             ? "Embeddings unavailable. SOUL is published via lexical fallback."
             : "Publish recovered through lexical fallback.",
         });
-      } catch {
-        if (shouldFallbackToLexical(error)) {
-          return ok({
-            ok: true,
-            chunkCount: 0,
-            fallback: "lexical",
-            warning: "Embeddings unavailable. SOUL will run via lexical fallback.",
-          });
-        }
-        return soulActionErrorResponse(error, "publish");
+      } catch (lexicalError) {
+        const primaryMessage = primaryError instanceof Error ? primaryError.message : String(primaryError ?? "unknown");
+        const lexicalMessage = lexicalError instanceof Error ? lexicalError.message : String(lexicalError ?? "unknown");
+        return soulActionErrorResponse(
+          new Error(`SOUL publish failed. Primary publish error: ${primaryMessage}. Lexical fallback error: ${lexicalMessage}.`),
+          "publish",
+        );
       }
     }
   });

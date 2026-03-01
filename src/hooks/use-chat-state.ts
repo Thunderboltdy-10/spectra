@@ -714,8 +714,17 @@ export function useChatState() {
           return msg;
         });
         for (const [pendingId, localMessage] of pendingLocalUserMessagesRef.current.entries()) {
+          if (pendingLocalUserMessageChatIdsRef.current.get(pendingId) !== selectedChatId) {
+            continue;
+          }
+          const trimmedLocal = localMessage.content.trim();
+          if (!trimmedLocal) continue;
+          const localCreatedAt = localMessage.createdAt ?? Date.now();
           const matched = messagesWithPreviews.some(
-            (item) => item.role === "user" && item.content.trim() === localMessage.content.trim(),
+            (item) =>
+              item.role === "user" &&
+              item.content.trim() === trimmedLocal &&
+              Math.abs((item.createdAt ?? localCreatedAt) - localCreatedAt) < 90_000,
           );
           if (matched) {
             pendingLocalUserMessageIdsRef.current.delete(pendingId);
@@ -723,11 +732,14 @@ export function useChatState() {
             pendingLocalUserMessageChatIdsRef.current.delete(pendingId);
           }
         }
+        const localPendingForCurrentChat = [...pendingLocalUserMessagesRef.current.entries()]
+          .filter(([pendingId]) => pendingLocalUserMessageChatIdsRef.current.get(pendingId) === selectedChatId)
+          .map(([, message]) => message);
 
         setMessages((prev) =>
           mergeFetchedMessages(
             messagesWithPreviews,
-            [...prev, ...pendingLocalUserMessagesRef.current.values()],
+            [...prev, ...localPendingForCurrentChat],
             {
               pendingLocalUserMessageIds: pendingLocalUserMessageIdsRef.current,
               isSendInFlight: sendingRef.current,

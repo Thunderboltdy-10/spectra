@@ -318,6 +318,33 @@ export const publishSoul: ReturnType<typeof action> = action({
   },
 });
 
+export const publishSoulLexical = mutation({
+  args: {
+    actorClerkId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor || (actor.role !== "teacher" && actor.role !== "admin")) {
+      throw new Error("Unauthorized");
+    }
+
+    const docs = await ctx.db
+      .query("orgSoulDocs")
+      .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
+      .collect();
+
+    const now = Date.now();
+    for (const doc of docs) {
+      await ctx.db.patch(doc._id, {
+        publishedAt: now,
+        updatedAt: now,
+      });
+    }
+
+    return { ok: true, fallback: "lexical" as const, chunkCount: 0, docsPublished: docs.length };
+  },
+});
+
 export const retrieveSoulGuidance: ReturnType<typeof action> = action({
   args: {
     actorClerkId: v.string(),

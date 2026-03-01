@@ -24,6 +24,15 @@ function extractDelimitedQuizBody(content: string) {
   return content.slice(from, to);
 }
 
+export function stripQuizMarkers(content: string): string {
+  let cleaned = content;
+  // Strip <<QUIZ_NOTE>>...<<QUIZ_NOTE_END>> blocks
+  cleaned = cleaned.replace(/<<\s*QUIZ_NOTE\s*>>[\s\S]*?<<\s*QUIZ_NOTE_END\s*>>/gi, "");
+  // Strip all other <<TAG>> markers
+  cleaned = cleaned.replace(/<<\s*[^>]+\s*>>/g, "");
+  return cleaned.trim();
+}
+
 export function parseQuiz(content: string): ParsedQuizQuestion[] {
   const quizBody = extractDelimitedQuizBody(content);
   const lines = quizBody.split("\n");

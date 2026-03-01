@@ -20,6 +20,7 @@ export const getOrgSettings = query({
         ? {
             ...org,
             logoUrl: logoUrl ?? undefined,
+            allowPaidModels: org.allowPaidModels ?? true,
             orchestratorV2Enabled: org.orchestratorV2Enabled ?? true,
             soulEnabled: org.soulEnabled ?? true,
             agentModelBoostEnabled: org.agentModelBoostEnabled ?? true,
@@ -37,6 +38,13 @@ export const updateOrgSettings = mutation({
     actorClerkId: v.string(),
     verifyMarkerPassEnabled: v.optional(v.boolean()),
     tokenBudgetDaily: v.optional(v.number()),
+    monthlyBudgetCentsPerUser: v.optional(v.number()),
+    budgetMarginPercent: v.optional(v.number()),
+    allowPaidModels: v.optional(v.boolean()),
+    description: v.optional(v.string()),
+    schoolType: v.optional(v.string()),
+    timezone: v.optional(v.string()),
+    maxStudents: v.optional(v.number()),
     orchestratorV2Enabled: v.optional(v.boolean()),
     soulEnabled: v.optional(v.boolean()),
     agentModelBoostEnabled: v.optional(v.boolean()),
@@ -54,10 +62,33 @@ export const updateOrgSettings = mutation({
       throw new Error("Org not found");
     }
 
+    const safeBudget = args.tokenBudgetDaily !== undefined
+      ? Math.max(1_000, Math.round(args.tokenBudgetDaily))
+      : org.tokenBudgetDaily;
+    const safeMonthlyBudget = args.monthlyBudgetCentsPerUser !== undefined
+      ? Math.max(100, Math.round(args.monthlyBudgetCentsPerUser))
+      : org.monthlyBudgetCentsPerUser;
+    const safeMargin = args.budgetMarginPercent !== undefined
+      ? Math.min(45, Math.max(5, Math.round(args.budgetMarginPercent)))
+      : org.budgetMarginPercent;
+    const safeMaxStudents = args.maxStudents !== undefined
+      ? Math.max(1, Math.round(args.maxStudents))
+      : org.maxStudents;
+
     await ctx.db.patch(actor.orgId, {
       verifyMarkerPassEnabled:
         args.verifyMarkerPassEnabled !== undefined ? args.verifyMarkerPassEnabled : org.verifyMarkerPassEnabled,
-      tokenBudgetDaily: args.tokenBudgetDaily ?? org.tokenBudgetDaily,
+      tokenBudgetDaily: safeBudget,
+      monthlyBudgetCentsPerUser: safeMonthlyBudget,
+      budgetMarginPercent: safeMargin,
+      allowPaidModels:
+        args.allowPaidModels !== undefined
+          ? args.allowPaidModels
+          : (org.allowPaidModels ?? true),
+      description: args.description !== undefined ? args.description : org.description,
+      schoolType: args.schoolType !== undefined ? args.schoolType : org.schoolType,
+      timezone: args.timezone !== undefined ? args.timezone : org.timezone,
+      maxStudents: safeMaxStudents,
       orchestratorV2Enabled:
         args.orchestratorV2Enabled !== undefined
           ? args.orchestratorV2Enabled

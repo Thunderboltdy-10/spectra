@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowUpRight,
@@ -294,6 +294,7 @@ export default function ModelsPage() {
   const [visibleCount, setVisibleCount] = useState(18);
   const [leaderboardEntries, setLeaderboardEntries] = useState<LeaderboardEntry[]>([]);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const autoLoadSentinelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -467,6 +468,24 @@ export default function ModelsPage() {
     setVisibleCount(18);
   }, [modelSearch, selectedProviders, sortMode, tier]);
 
+  useEffect(() => {
+    const sentinel = autoLoadSentinelRef.current;
+    if (!sentinel) return;
+    if (visibleCount >= availableModels.length) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const [entry] = entries;
+        if (!entry?.isIntersecting) return;
+        setVisibleCount((prev) => Math.min(prev + 18, availableModels.length));
+      },
+      { rootMargin: "240px 0px" },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [availableModels.length, visibleCount]);
+
   function tryModel(modelId: string) {
     router.push(`/?model=${encodeURIComponent(modelId)}&mode=auto`);
   }
@@ -593,13 +612,7 @@ export default function ModelsPage() {
                     <ModelCard key={`available-${model.modelId}`} model={model} tier={tier} onTry={tryModel} />
                   ))}
                 </div>
-                {visibleCount < availableModels.length ? (
-                  <div className="mt-4 text-center">
-                    <Button type="button" variant="secondary" onClick={() => setVisibleCount((prev) => prev + 18)}>
-                      Show more models
-                    </Button>
-                  </div>
-                ) : null}
+                {visibleCount < availableModels.length ? <div ref={autoLoadSentinelRef} className="h-10" aria-hidden /> : null}
               </>
             )}
 

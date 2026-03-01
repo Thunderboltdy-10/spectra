@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Manrope, IBM_Plex_Mono, Fraunces } from "next/font/google";
-import "katex/dist/katex.min.css";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 

@@ -113,7 +113,6 @@ export function NotificationBell() {
           size="icon"
           className="relative"
           aria-label="Open notifications"
-          title="Notifications"
         >
           <Bell className="h-4 w-4" />
           {unreadCount > 0 ? (

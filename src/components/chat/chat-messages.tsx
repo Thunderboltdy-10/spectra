@@ -26,6 +26,7 @@ type ChatMessagesProps = {
   draftThinking?: string;
   hasRealThinking?: boolean;
   sending: boolean;
+  streamPhase?: "idle" | "routing" | "searching" | "thinking" | "generating" | "synthesizing";
   streamError: string | null;
   chatId?: string;
   onRetry: () => void;
@@ -58,12 +59,22 @@ type ChatMessagesProps = {
   onOpenCanvas?: (params: { code: string; language: string }) => void;
 };
 
+function hashContent(value: string) {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash << 5) - hash + value.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
 export function ChatMessages({
   messages,
   draftResponse,
   draftThinking,
   hasRealThinking = false,
   sending,
+  streamPhase = "idle",
   streamError,
   chatId,
   onRetry,
@@ -100,6 +111,8 @@ export function ChatMessages({
   const [showStreamCursor, setShowStreamCursor] = useState(false);
   const [visibleStartIndex, setVisibleStartIndex] = useState(() => Math.max(0, messages.length - 36));
   const shouldAutoScrollRef = useRef(true);
+  const stickyBottomRef = useRef(true);
+  const lastScrollTopRef = useRef(0);
 
   const hasContent = messages.length > 0 || Boolean(draftResponse);
   const visibleMessages = useMemo(
@@ -121,7 +134,10 @@ export function ChatMessages({
       return;
     }
 
-    setVisibleStartIndex((prev) => Math.min(prev, Math.max(0, messages.length - 1)));
+    setVisibleStartIndex((prev) => {
+      const next = Math.min(prev, Math.max(0, messages.length - 1));
+      return next === prev ? prev : next;
+    });
   }, [chatId, messages.length]);
 
   useEffect(() => {
@@ -137,16 +153,40 @@ export function ChatMessages({
     if (!element) return;
     scrollContainerRef.current = element;
 
+    let rafId = 0;
     const onScroll = () => {
-      const delta = element.scrollHeight - element.scrollTop - element.clientHeight;
-      setShowJumpButton(delta > 260);
-      shouldAutoScrollRef.current = delta < 180;
+      rafId = requestAnimationFrame(() => {
+        const scrollTop = element.scrollTop;
+        const deltaFromBottom = element.scrollHeight - scrollTop - element.clientHeight;
+        const scrolledUp = scrollTop < lastScrollTopRef.current;
+        const nearBottom = deltaFromBottom < 80;
+
+        if (nearBottom) {
+          shouldAutoScrollRef.current = true;
+          stickyBottomRef.current = true;
+        } else if (shouldAutoScrollRef.current && stickyBottomRef.current && scrolledUp && deltaFromBottom > 400) {
+          shouldAutoScrollRef.current = false;
+          stickyBottomRef.current = false;
+        }
+
+        setShowJumpButton(deltaFromBottom > 400);
+        lastScrollTopRef.current = scrollTop;
+      });
     };
 
     onScroll();
     element.addEventListener("scroll", onScroll);
-    return () => element.removeEventListener("scroll", onScroll);
+    return () => {
+      element.removeEventListener("scroll", onScroll);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
   }, []);
+
+  useEffect(() => {
+    if (!sending) return;
+    shouldAutoScrollRef.current = true;
+    stickyBottomRef.current = true;
+  }, [sending]);
 
   useEffect(() => {
     const root = scrollContainerRef.current;
@@ -289,13 +329,26 @@ export function ChatMessages({
     return "medium" as const;
   }
 
-  const streamingStatus =
-    lastAutoResult?.searchEnabled
-      ? "Searching..."
-      : activeCollaborators.length > 0 || thinkingLevel !== "low"
-        ? "Thinking..."
-        : "Drafting...";
+  const streamingStatus = (() => {
+    switch (streamPhase) {
+      case "routing": return "Routing...";
+      case "searching": return "Searching...";
+      case "thinking": return "Thinking...";
+      case "synthesizing": return "Synthesizing...";
+      case "generating": return "Drafting...";
+      default:
+        return lastAutoResult?.searchEnabled
+          ? "Searching..."
+          : activeCollaborators.length > 0 || thinkingLevel !== "low"
+            ? "Thinking..."
+            : "Drafting...";
+    }
+  })();
   const activeProvider = lastModelUsed?.split("/")[0] ?? "AI";
+  const showQuizSkeletonOnly =
+    sending &&
+    (mode === "quiz" || mode === "exam") &&
+    draftResponse.trim().length < 100;
 
   return (
     <section className="relative flex flex-1" aria-label="Conversation" data-conversation-export>
@@ -384,6 +437,7 @@ export function ChatMessages({
                     >
                       {preamble && <MarkdownRenderer content={preamble} citations={[]} />}
                       <QuizReveal
+                        key={`${msg._id}-${hashContent(structuredContent)}`}
                         content={structuredContent}
                         chatId={chatId}
                         difficulty={quizDifficulty}
@@ -663,7 +717,7 @@ export function ChatMessages({
                   <span>{modelLabel(lastModelUsed)} · {streamingStatus}</span>
                 </div>
 
-                {draftQuizQuestions.length > 0 ? (
+                {!showQuizSkeletonOnly && draftQuizQuestions.length > 0 ? (
                   <div className="space-y-3">
                     <p className="text-xs text-[var(--text-secondary)]">
                       Quiz is still generating. You can already answer completed questions below.
@@ -845,6 +899,7 @@ export function ChatMessages({
           className="fixed bottom-28 right-5 z-30 rounded-full shadow-[var(--shadow-soft)]"
           onClick={() => {
             shouldAutoScrollRef.current = true;
+            stickyBottomRef.current = true;
             endRef.current?.scrollIntoView({
               behavior: scrollContainerRef.current ? "smooth" : "auto",
             });

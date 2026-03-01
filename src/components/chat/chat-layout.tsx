@@ -47,6 +47,7 @@ function SidebarSkeleton() {
 const TOUR_COMPLETED_KEY = "ai-school-guided-tour-v1";
 const FIRST_PROMPT_KEY = "ai-school-initial-prompt-v2";
 const FIRST_PROMPT_TEXT = "Help me build a focused 7-day study plan for my current subjects with 30-minute daily sessions.";
+const LIVE_PROGRESS_DEFAULT_KEY = "ai-school-live-progress-default";
 
 const TOUR_STEPS: GuidedTourStep[] = [
   {
@@ -116,6 +117,8 @@ export function ChatLayout() {
   const canvas = useCanvasState();
   const { activeView: panelActiveView, openPanel, closePanel } = usePanel();
   const [tourOpen, setTourOpen] = useState(false);
+  const [activityCutoffTs, setActivityCutoffTs] = useState<number | null>(null);
+  const [liveProgressAutoOpen, setLiveProgressAutoOpen] = useState(true);
   const openedOrchestrationForStreamRef = useRef(false);
   const orchestrationDismissedForStreamRef = useRef(false);
   const previousPanelViewRef = useRef<string | null>(null);
@@ -133,6 +136,29 @@ export function ChatLayout() {
     }, 450);
 
     return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(LIVE_PROGRESS_DEFAULT_KEY);
+      if (stored === "0") {
+        setLiveProgressAutoOpen(false);
+      } else {
+        setLiveProgressAutoOpen(true);
+      }
+    } catch {
+      setLiveProgressAutoOpen(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    const onPreferenceChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ enabled?: boolean }>).detail;
+      if (typeof detail?.enabled !== "boolean") return;
+      setLiveProgressAutoOpen(detail.enabled);
+    };
+    window.addEventListener("ai-school:live-progress-default-changed", onPreferenceChanged);
+    return () => window.removeEventListener("ai-school:live-progress-default-changed", onPreferenceChanged);
   }, []);
 
   useEffect(() => {
@@ -161,6 +187,15 @@ export function ChatLayout() {
     const lastAssistant = [...chat.messages].reverse().find((item) => item.role === "assistant" && item.routeTrace);
     return lastAssistant?.routeTrace;
   }, [chat.messages]);
+
+  useEffect(() => {
+    setActivityCutoffTs(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  }, []);
+
+  const recentChatCount = useMemo(() => {
+    if (activityCutoffTs === null) return chat.chats.length;
+    return chat.chats.filter((item) => item.updatedAt >= activityCutoffTs).length;
+  }, [activityCutoffTs, chat.chats]);
   const isFirstSession = !chat.selectedChatId && chat.chats.length === 0 && chat.messages.length === 0;
 
   useEffect(() => {
@@ -210,10 +245,7 @@ export function ChatLayout() {
   );
 
   useEffect(() => {
-    const collaboratorsActive = chat.activeCollaborators.length > 1 || chat.collaboratorPhase !== "idle";
-    const likelySearchActive = chat.autoSearch === "on" || Boolean(chat.lastAutoResult?.searchEnabled && chat.sending);
-    const highThinking = chat.thinkingLevel === "high";
-    const shouldAutoOpen = chat.sending && (collaboratorsActive || likelySearchActive || highThinking);
+    const shouldAutoOpen = chat.sending && liveProgressAutoOpen;
 
     if (
       shouldAutoOpen &&
@@ -239,6 +271,7 @@ export function ChatLayout() {
     chat.lastAutoResult?.searchEnabled,
     chat.sending,
     chat.thinkingLevel,
+    liveProgressAutoOpen,
     closePanel,
     openPanel,
     panelActiveView,
@@ -474,6 +507,7 @@ export function ChatLayout() {
           draftThinking={chat.draftThinking}
           hasRealThinking={chat.hasRealThinking}
           sending={chat.sending}
+          streamPhase={chat.streamPhase}
           streamError={chat.streamError}
           chatId={chat.selectedChatId}
           onRetry={() => void chat.retryLastMessage()}
@@ -572,12 +606,6 @@ export function ChatLayout() {
                   onSelectAgent={(agentId) => chat.startNewChat(agentId)}
                   onSelectMode={handleModeChange}
                   onResumeChat={(chatId) => chat.setSelectedChatId(chatId)}
-                  onUsePrompt={(prompt, mode) => {
-                    if (mode) {
-                      handleModeChange(mode);
-                    }
-                    chat.setMessage(prompt);
-                  }}
                   activeMode={chat.mode}
                   recentChats={chat.chats}
                   orgName={chat.orgName}
@@ -700,31 +728,22 @@ export function ChatLayout() {
       <UnifiedPanel
         settingsProps={{
           models: chat.models,
-          mode: chat.mode,
-          thinkingLevel: chat.thinkingLevel,
-          routerMode: chat.routerMode,
-          manualModel: chat.manualModel,
           usePersonalResources: chat.usePersonalResources,
           personalResources: chat.personalResources,
           userSpending: chat.userSpending,
+          recentChatCount,
+          liveProgressAutoOpen,
           autoEnhancePrompt: chat.autoEnhancePrompt,
           autoThinking: chat.autoThinking,
           autoSearch: chat.autoSearch,
-          onModeChange: handleModeChange,
-          onThinkingChange: (thinkingLevel) => {
-            chat.setThinkingLevel(thinkingLevel);
-            void chat.updateExistingChatSettings({ thinkingLevel }).catch((error: unknown) =>
-              toast.error(error instanceof Error ? error.message : "Failed to update thinking level"));
-          },
-          onRouterChange: (routerMode) => {
-            chat.setRouterMode(routerMode);
-            void chat.updateExistingChatSettings({ routerMode, manualModel: routerMode === "manual" ? chat.manualModel : undefined })
-              .catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Failed to update routing"));
-          },
-          onManualModelChange: (manualModel) => {
-            chat.setManualModel(manualModel);
-            void chat.updateExistingChatSettings({ manualModel }).catch((error: unknown) =>
-              toast.error(error instanceof Error ? error.message : "Failed to save model"));
+          onLiveProgressAutoOpenChange: (enabled) => {
+            setLiveProgressAutoOpen(enabled);
+            try {
+              window.localStorage.setItem(LIVE_PROGRESS_DEFAULT_KEY, enabled ? "1" : "0");
+            } catch {
+              // Ignore storage failures.
+            }
+            window.dispatchEvent(new CustomEvent("ai-school:live-progress-default-changed", { detail: { enabled } }));
           },
           onTogglePersonalResources: (usePersonalResources) => {
             chat.setUsePersonalResources(usePersonalResources);
@@ -744,6 +763,7 @@ export function ChatLayout() {
           sending: chat.sending,
           collaboratorPhase: chat.collaboratorPhase,
           activeCollaborators: chat.activeCollaborators,
+          streamPhase: chat.streamPhase,
           routeTrace: latestRouteTrace,
           lastModelUsed,
           searchEnabled: chat.lastAutoResult?.searchEnabled,

@@ -238,7 +238,7 @@ function StudyTimeChart({
   const trackedSeconds = data.reduce((sum, item) => sum + item.timerSeconds, 0);
 
   return (
-    <div className="p-4">
+    <div className="p-5">
       <div className="mb-3 flex items-center justify-between gap-2">
         <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Time spent per day</p>
         <p className="text-xs text-[var(--text-secondary)]">
@@ -249,10 +249,10 @@ function StudyTimeChart({
 
       <div className="grid grid-cols-14 gap-1.5">
         {data.map((item, index) => {
-          const height = Math.max(8, Math.round((item.totalSeconds / maxSeconds) * 86));
+          const height = Math.max(8, Math.round((item.totalSeconds / maxSeconds) * 120));
           return (
             <div key={item.day} className="group flex min-w-0 flex-col items-center gap-1">
-              <div className="relative flex h-24 w-full items-end">
+              <div className="relative flex h-32 w-full items-end">
                 <div
                   className="w-full rounded-md bg-[var(--accent-cyan)]/85 transition-all duration-200 group-hover:bg-[var(--accent-cyan)]"
                   style={{ height }}
@@ -354,7 +354,7 @@ function QuizTrendChart({ trend }: { trend: EnhancedAnalytics["quizTrend"] }) {
   const latest = trend[trend.length - 1];
 
   return (
-    <div className="p-4">
+    <div className="p-5">
       <div className="mb-3 flex items-center justify-between gap-2">
         <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Quiz performance trend</p>
         <p className="text-xs text-[var(--text-secondary)]">
@@ -362,7 +362,7 @@ function QuizTrendChart({ trend }: { trend: EnhancedAnalytics["quizTrend"] }) {
         </p>
       </div>
 
-      <svg viewBox="0 0 100 100" className="h-40 w-full" preserveAspectRatio="none" aria-label="Quiz score trend">
+      <svg viewBox="0 0 100 100" className="h-52 w-full" preserveAspectRatio="none" aria-label="Quiz score trend">
         <line x1="0" y1="100" x2="100" y2="100" stroke="var(--border-default)" strokeWidth="1" />
         <line x1="0" y1="0" x2="0" y2="100" stroke="var(--border-default)" strokeWidth="1" />
         <polyline
@@ -380,7 +380,7 @@ function QuizTrendChart({ trend }: { trend: EnhancedAnalytics["quizTrend"] }) {
 
       <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-[var(--text-secondary)] sm:grid-cols-4">
         {trend.slice(-4).map((item) => (
-          <div key={item.day} className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1.5">
+          <div key={item.day} className="px-1 py-1.5">
             <p>{shortDayLabel(item.day)}</p>
             <p className="font-medium text-[var(--text-primary)]">{item.averageScore}%</p>
           </div>
@@ -406,7 +406,7 @@ function ProductivityInsights({
       : "Short sessions dominate. Try running one full Pomodoro for deeper retention.";
 
   return (
-    <div className="p-4">
+    <div className="p-5">
       <p className="mb-3 text-xs uppercase tracking-wide text-[var(--text-secondary)]">Productivity insights</p>
       <div className="space-y-1">
         <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-[var(--border-default)] px-1 py-2 text-xs">
@@ -493,20 +493,35 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
         </div>
       </div>
 
-      <div data-tour="analytics-charts" className="grid gap-4 xl:grid-cols-3">
-        <ActivityChart data={dailyActivity} label="Daily activity (14 days)" />
-        <StudyTimeChart data={dailyStudyTime} />
-        <TimeOfDayChart hourlyCounts={studentSignals.hourlyPromptCounts} dailyPeaks={studentSignals.dailyPeakHours} />
+      <div data-tour="analytics-charts" className="grid gap-4 xl:grid-cols-2">
+        <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+          <ActivityChart data={dailyActivity} label="Daily activity (14 days)" />
+        </section>
+        <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+          <StudyTimeChart data={dailyStudyTime} />
+        </section>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        <ModePieChart modeCounts={enhanced.modeMessageCounts} />
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.9fr)]">
+        <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+          <TimeOfDayChart hourlyCounts={studentSignals.hourlyPromptCounts} dailyPeaks={studentSignals.dailyPeakHours} />
+        </section>
+        <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+          <ModePieChart modeCounts={enhanced.modeMessageCounts} />
+        </section>
+      </div>
+
+      <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
         <QuizTrendChart trend={enhanced.quizTrend} />
-      </div>
+      </section>
 
-      <ProductivityInsights productivity={enhanced.productivity} />
+      <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+        <ProductivityInsights productivity={enhanced.productivity} />
+      </section>
 
-      <TopicCloud topics={student.topics} />
+      <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+        <TopicCloud topics={student.topics} />
+      </section>
 
       {isTeacher && classData.length > 0 && (
         <div className="mt-8 border-t border-[var(--border-default)] pt-6">
@@ -533,11 +548,17 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
             </div>
           </div>
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <ActivityChart data={classDailyActivity} label="Class daily activity (14 days)" />
-            <ModeBreakdown modeCounts={classAgg.modeCounts} />
+            <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+              <ActivityChart data={classDailyActivity} label="Class daily activity (14 days)" />
+            </section>
+            <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+              <ModeBreakdown modeCounts={classAgg.modeCounts} />
+            </section>
           </div>
           <div className="mt-4">
-            <TopicCloud topics={classAgg.topics} />
+            <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+              <TopicCloud topics={classAgg.topics} />
+            </section>
           </div>
         </div>
       )}

@@ -1,13 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronDown, Trash2, X } from "lucide-react";
+import { AlertCircle, CheckCircle2, ChevronDown, Loader2, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { ChatModeSelector } from "@/components/chat/chat-mode-selector";
 import type { AutoPreference, ModelOption, PersonalResource, UserSpending } from "@/hooks/use-chat-state";
-import type { RouterMode, StudyMode, ThinkingLevel } from "@/types";
 import { useCompactSheet } from "@/hooks/use-compact-sheet";
 import { useRightPanelDock } from "@/hooks/use-right-panel-dock";
 import { rightPanelSurfaceClassName } from "@/components/ui/right-panel-surface";
@@ -16,20 +13,12 @@ type ChatSettingsDrawerProps = {
   open: boolean;
   onClose: () => void;
   models: ModelOption[];
-  mode: StudyMode;
-  thinkingLevel: ThinkingLevel;
-  routerMode: RouterMode;
-  manualModel: string;
   usePersonalResources: boolean;
   personalResources: PersonalResource[];
   userSpending: UserSpending | null;
   autoEnhancePrompt: AutoPreference;
   autoThinking: AutoPreference;
   autoSearch: AutoPreference;
-  onModeChange: (mode: StudyMode) => void;
-  onThinkingChange: (level: ThinkingLevel) => void;
-  onRouterChange: (mode: RouterMode) => void;
-  onManualModelChange: (modelId: string) => void;
   onTogglePersonalResources: (enabled: boolean) => void;
   onAutoEnhancePromptChange: (value: AutoPreference) => void;
   onAutoThinkingChange: (value: AutoPreference) => void;
@@ -89,24 +78,38 @@ function sanitizeModelLabel(value: string) {
     .trim();
 }
 
+function resourceStatusMeta(status: PersonalResource["status"]) {
+  if (status === "uploaded") {
+    return {
+      label: "Processing...",
+      Icon: Loader2,
+      iconClassName: "animate-spin text-[var(--text-secondary)]",
+    };
+  }
+  if (status === "processed") {
+    return {
+      label: "Ready",
+      Icon: CheckCircle2,
+      iconClassName: "text-[var(--success)]",
+    };
+  }
+  return {
+    label: "Failed - remove and retry",
+    Icon: AlertCircle,
+    iconClassName: "text-[var(--danger)]",
+  };
+}
+
 export function ChatSettingsDrawer({
   open,
   onClose,
   models,
-  mode,
-  thinkingLevel,
-  routerMode,
-  manualModel,
   usePersonalResources,
   personalResources,
   userSpending,
   autoEnhancePrompt,
   autoThinking,
   autoSearch,
-  onModeChange,
-  onThinkingChange,
-  onRouterChange,
-  onManualModelChange,
   onTogglePersonalResources,
   onAutoEnhancePromptChange,
   onAutoThinkingChange,
@@ -121,7 +124,6 @@ export function ChatSettingsDrawer({
     maxWidthPx: 448,
   });
   const [collapsed, setCollapsed] = useState(false);
-  const [showManual, setShowManual] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -131,7 +133,7 @@ export function ChatSettingsDrawer({
   if (!open) return null;
 
   const ratio =
-    userSpending && typeof userSpending.budgetUsagePercent === "number" && userSpending.budgetUsagePercent > 0
+    userSpending && typeof userSpending.budgetUsagePercent === "number" && userSpending.budgetUsagePercent >= 0
       ? Math.min(1, Math.max(0, userSpending.budgetUsagePercent / 100))
       : null;
   const usageLabel =
@@ -144,7 +146,8 @@ export function ChatSettingsDrawer({
         : ratio > 0
           ? "Getting started"
           : "No activity yet";
-  const selectedModel = models.find((model) => model.modelId === manualModel);
+  const selectedModel = models.find((model) => model.modelId === "openrouter/auto")
+    ?? models[0];
 
   return (
     <div
@@ -200,78 +203,9 @@ export function ChatSettingsDrawer({
             </div>
             <div className="mt-3 grid gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2 text-xs text-[var(--text-secondary)]">
               <p>
-                Routing:{" "}
-                <span className="font-medium text-[var(--text-primary)]">
-                  {routerMode === "manual" ? "Manual model lock" : "Adaptive routing"}
-                </span>
+                Routing: <span className="font-medium text-[var(--text-primary)]">Adaptive routing</span>
               </p>
             </div>
-          </section>
-
-          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-            <button
-              type="button"
-              onClick={() => setShowManual((prev) => !prev)}
-              className="flex w-full items-center justify-between"
-            >
-              <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Manual overrides</h3>
-              <ChevronDown className={`h-4 w-4 text-[var(--text-secondary)] transition ${showManual ? "rotate-180" : ""}`} />
-            </button>
-
-            {showManual && (
-              <div className="mt-3 space-y-3">
-                <div className="space-y-1.5">
-                  <span className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Study mode</span>
-                  <ChatModeSelector mode={mode} onChange={onModeChange} />
-                </div>
-
-                <label className="space-y-1.5">
-                  <span className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Thinking</span>
-                  <Select value={thinkingLevel} onValueChange={(value) => onThinkingChange(value as ThinkingLevel)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="low">Low</SelectItem>
-                      <SelectItem value="medium">Medium</SelectItem>
-                      <SelectItem value="high">High</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </label>
-
-                <label className="space-y-1.5">
-                  <span className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Routing</span>
-                  <Select value={routerMode} onValueChange={(value) => onRouterChange(value as RouterMode)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="auto">Auto</SelectItem>
-                      <SelectItem value="manual">Manual</SelectItem>
-                      <SelectItem value="openrouter_auto">OpenRouter auto</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </label>
-
-                {routerMode === "manual" && (
-                  <label className="space-y-1.5">
-                    <span className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">Model</span>
-                    <Select value={manualModel} onValueChange={onManualModelChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Choose model" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {models.map((model) => (
-                          <SelectItem key={model.modelId} value={model.modelId}>
-                            {sanitizeModelLabel(model.name)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </label>
-                )}
-              </div>
-            )}
           </section>
 
           {selectedModel && (
@@ -310,7 +244,17 @@ export function ChatSettingsDrawer({
                   >
                     <div className="min-w-0">
                       <p className="truncate text-xs font-medium text-[var(--text-primary)]">{resource.filename}</p>
-                      <p className="text-[10px] text-[var(--text-secondary)]">{resource.status}</p>
+                      <p className="inline-flex items-center gap-1 text-[10px] text-[var(--text-secondary)]">
+                        {(() => {
+                          const status = resourceStatusMeta(resource.status);
+                          return (
+                            <>
+                              <status.Icon className={`h-3 w-3 ${status.iconClassName}`} />
+                              {status.label}
+                            </>
+                          );
+                        })()}
+                      </p>
                     </div>
                     <div className="flex items-center gap-1">
                       <Button
@@ -337,7 +281,9 @@ export function ChatSettingsDrawer({
             <div className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
               <div
                 className="h-full rounded-full bg-[var(--gradient-brand)]"
-                style={{ width: `${Math.max(2, (ratio ?? 0.16) * 100)}%` }}
+                style={{
+                  width: `${typeof ratio === "number" ? Math.max(ratio > 0 ? 2 : 0, ratio * 100) : 0}%`,
+                }}
               />
             </div>
           </section>

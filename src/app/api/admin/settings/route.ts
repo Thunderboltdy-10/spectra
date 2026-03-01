@@ -24,6 +24,14 @@ export async function PATCH(request: NextRequest) {
 
     const body = (await request.json()) as {
       verifyMarkerPassEnabled?: boolean;
+      tokenBudgetDaily?: number;
+      monthlyBudgetCentsPerUser?: number;
+      budgetMarginPercent?: number;
+      allowPaidModels?: boolean;
+      description?: string;
+      schoolType?: string;
+      timezone?: string;
+      maxStudents?: number;
       orchestratorV2Enabled?: boolean;
       soulEnabled?: boolean;
       agentModelBoostEnabled?: boolean;
@@ -31,9 +39,20 @@ export async function PATCH(request: NextRequest) {
       spacedRepetitionEnabled?: boolean;
     };
 
+    const safeNumber = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
+    const safeString = (value: unknown) => (typeof value === "string" ? value.trim() : undefined);
+
     await convexMutation("admin:updateOrgSettings", {
       actorClerkId: actor.clerkId,
       verifyMarkerPassEnabled: body.verifyMarkerPassEnabled,
+      tokenBudgetDaily: safeNumber(body.tokenBudgetDaily),
+      monthlyBudgetCentsPerUser: safeNumber(body.monthlyBudgetCentsPerUser),
+      budgetMarginPercent: safeNumber(body.budgetMarginPercent),
+      allowPaidModels: body.allowPaidModels,
+      description: safeString(body.description),
+      schoolType: safeString(body.schoolType),
+      timezone: safeString(body.timezone),
+      maxStudents: safeNumber(body.maxStudents),
       orchestratorV2Enabled: body.orchestratorV2Enabled,
       soulEnabled: body.soulEnabled,
       agentModelBoostEnabled: body.agentModelBoostEnabled,

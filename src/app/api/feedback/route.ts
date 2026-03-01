@@ -70,6 +70,27 @@ export async function POST(request: NextRequest) {
     const page = normalizeOptional(asTrimmedString(form.get("page")));
     const device = normalizeOptional(asTrimmedString(form.get("device")));
     const traceId = normalizeOptional(asTrimmedString(form.get("traceId")));
+    const chatId = normalizeOptional(asTrimmedString(form.get("chatId")));
+    const lastMessage = normalizeOptional(asTrimmedString(form.get("lastMessage")));
+    const activeMode = normalizeOptional(asTrimmedString(form.get("activeMode")));
+    const activeModel = normalizeOptional(asTrimmedString(form.get("activeModel")));
+    const viewportSize = normalizeOptional(asTrimmedString(form.get("viewportSize")));
+
+    let finalScreenshotStorageId = screenshotStorageId;
+    const autoScreenshotValue = form.get("autoScreenshot");
+    if (!finalScreenshotStorageId && typeof autoScreenshotValue === "string" && autoScreenshotValue.startsWith("data:image/jpeg;base64,")) {
+      const base64Data = autoScreenshotValue.replace("data:image/jpeg;base64,", "");
+      if (base64Data.length < MAX_SCREENSHOT_BYTES * 1.5) { // rough base64 overhead allowance
+        const stored = await convexAction<
+          { base64Data: string; mimeType: string },
+          { storageId: string }
+        >("feedback:storeFeedbackScreenshot", {
+          base64Data,
+          mimeType: "image/jpeg",
+        });
+        finalScreenshotStorageId = stored.storageId;
+      }
+    }
 
     const result = await convexMutation<
       {
@@ -82,6 +103,11 @@ export async function POST(request: NextRequest) {
           page?: string;
           device?: string;
           traceId?: string;
+          chatId?: string;
+          lastMessage?: string;
+          activeMode?: string;
+          activeModel?: string;
+          viewportSize?: string;
         };
       },
       { ok: boolean; feedbackId: string }
@@ -89,12 +115,17 @@ export async function POST(request: NextRequest) {
       actorClerkId,
       category: category as "bug" | "confusing" | "feature" | "safety",
       message,
-      screenshotStorageId,
+      screenshotStorageId: finalScreenshotStorageId,
       context: {
         mode,
         page,
         device,
         traceId,
+        chatId,
+        lastMessage,
+        activeMode,
+        activeModel,
+        viewportSize,
       },
     });
 

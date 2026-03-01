@@ -204,11 +204,11 @@ export function ChatSidebar({
     return chats.filter((chat) => chat.updatedAt >= activityCutoffTs).length;
   }, [activityCutoffTs, chats]);
 
-  const usageRatioFromBudget = userSpending && typeof userSpending.budgetUsagePercent === "number" && userSpending.budgetUsagePercent > 0
+  const usageRatioFromBudget = userSpending && typeof userSpending.budgetUsagePercent === "number" && userSpending.budgetUsagePercent >= 0
     ? Math.min(1, Math.max(0, userSpending.budgetUsagePercent / 100))
     : null;
   const usageRatioFromActivity = recentChatCount > 0
-    ? Math.min(1, recentChatCount / 12)
+    ? Math.min(1, recentChatCount / 50)
     : null;
   const usageRatio = usageRatioFromBudget ?? usageRatioFromActivity;
   const usagePercent = typeof usageRatio === "number"
@@ -249,15 +249,6 @@ export function ChatSidebar({
   const allNavItems = [...orderedPrimaryNavItems, ...secondaryNavItems].filter(
     (item, index, all) => all.findIndex((candidate) => candidate.href === item.href) === index,
   );
-  const collapsedNavItems = useMemo(() => {
-    const windowSize = 5;
-    if (allNavItems.length <= windowSize) return allNavItems;
-    const activeIndex = allNavItems.findIndex((item) => isNavActive(pathname, item.href));
-    if (activeIndex < 0) return allNavItems.slice(0, windowSize);
-    const start = Math.max(0, Math.min(activeIndex - Math.floor(windowSize / 2), allNavItems.length - windowSize));
-    return allNavItems.slice(start, start + windowSize);
-  }, [allNavItems, pathname]);
-
   useEffect(() => {
     if (typeof window === "undefined") return;
     setVisibleChatCount(estimateVisibleChatCount(window.innerHeight));
@@ -388,7 +379,7 @@ export function ChatSidebar({
         </div>
 
         <div data-tour="sidebar-pages" className="mx-auto flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto pr-0.5">
-          {collapsedNavItems.map((item) => {
+          {allNavItems.map((item) => {
             const Icon = item.icon;
             const active = isNavActive(pathname, item.href);
             return (
@@ -451,8 +442,8 @@ export function ChatSidebar({
 
   return (
     <div className="chat-sidebar flex h-full flex-col border-r border-[var(--border-default)] p-3">
-      <div className="mb-3 flex flex-col items-start gap-2">
-        <div className="flex items-center gap-2.5">
+      <div className="mb-3 flex items-center gap-2.5">
+        <div className="flex min-w-0 flex-1 items-center gap-2.5">
           {orgLogoUrl && orgLogoUrl.trim() && !logoLoadFailed ? (
             <Image
               src={orgLogoUrl}
@@ -520,7 +511,7 @@ export function ChatSidebar({
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search chats"
             data-search-input
-            className="h-8 w-full rounded-lg border border-transparent bg-[var(--bg-primary)] pl-8 pr-2.5 text-xs text-[var(--text-primary)] transition placeholder:text-[var(--text-secondary)] focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0"
+            className="h-8 w-full rounded-lg border border-transparent bg-[var(--bg-primary)] pl-8 pr-2.5 text-xs text-[var(--text-primary)] transition placeholder:text-[var(--text-secondary)] focus:outline-none focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0"
           />
         </div>
 
@@ -683,24 +674,55 @@ export function ChatSidebar({
       </div>
 
       <div className="group mt-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2.5 shadow-[var(--shadow-soft)]">
-        <div className="flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)]">
-          <span
-            className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5"
-            title="Current streak"
-          >
-            <Flame className="h-3 w-3 text-[var(--accent-coral)]" />
-            {gamification.currentStreak}
-          </span>
-          <span
-            className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5"
-            title="Total XP"
-          >
-            <Star className="h-3 w-3 text-[var(--warning)]" />
-            {gamification.totalXp}
-          </span>
+        <div className="flex items-center gap-2.5">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button type="button" className="cursor-pointer rounded-full">
+                <Avatar>
+                  <AvatarImage src={user?.imageUrl} alt={user?.fullName ?? "User"} />
+                  <AvatarFallback>{initials(user?.fullName || user?.firstName || "User")}</AvatarFallback>
+                </Avatar>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onSelect={() => openUserProfile()}>
+                <UserRound className="mr-2 h-4 w-4" />
+                Manage account
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => signOut()}>
+                <Sparkles className="mr-2 h-4 w-4" />
+                Sign out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium">{user?.fullName ?? user?.firstName ?? "Signed in user"}</p>
+            <p className="truncate text-xs text-[var(--text-secondary)]">{role}</p>
+          </div>
+          <ThemeToggle />
+          <Button type="button" variant="secondary" size="icon" onClick={onOpenSettings} title="Open global settings">
+            <Settings2 className="h-4 w-4" />
+          </Button>
         </div>
 
         <div className="pointer-events-none mt-2 max-h-0 overflow-hidden opacity-0 transition-all duration-300 group-hover:pointer-events-auto group-hover:max-h-[20rem] group-hover:opacity-100">
+          <div className="mb-2 flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)]">
+            <span
+              className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5"
+              title="Current streak"
+            >
+              <Flame className="h-3 w-3 text-[var(--accent-coral)]" />
+              {gamification.currentStreak}
+            </span>
+            <span
+              className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5"
+              title="Total XP"
+            >
+              <Star className="h-3 w-3 text-[var(--warning)]" />
+              {gamification.totalXp}
+            </span>
+          </div>
           {userMemorySummary && (
             <p className="mb-3 line-clamp-2 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2 text-[11px] text-[var(--text-secondary)]">
               {userMemorySummary}
@@ -715,44 +737,12 @@ export function ChatSidebar({
             <div
               className="h-full rounded-full transition-all"
               style={{
-                width: `${typeof usagePercent === "number" ? Math.max(usagePercent > 0 ? 3 : 0, usagePercent) : 16}%`,
+                width: `${typeof usagePercent === "number" ? Math.max(usagePercent > 0 ? 3 : 0, usagePercent) : 0}%`,
                 background: "var(--gradient-brand)",
               }}
             />
           </div>
           <p className="mb-3 text-[11px] text-[var(--text-secondary)]">{usageStatus}</p>
-
-          <div className="flex items-center gap-2.5">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button type="button" className="cursor-pointer rounded-full">
-                  <Avatar>
-                    <AvatarImage src={user?.imageUrl} alt={user?.fullName ?? "User"} />
-                    <AvatarFallback>{initials(user?.fullName || user?.firstName || "User")}</AvatarFallback>
-                  </Avatar>
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuItem onSelect={() => openUserProfile()}>
-                  <UserRound className="mr-2 h-4 w-4" />
-                  Manage account
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => signOut()}>
-                  <Sparkles className="mr-2 h-4 w-4" />
-                  Sign out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{user?.fullName ?? user?.firstName ?? "Signed in user"}</p>
-              <p className="truncate text-xs text-[var(--text-secondary)]">{role}</p>
-            </div>
-            <ThemeToggle />
-            <Button type="button" variant="secondary" size="icon" onClick={onOpenSettings} title="Open global settings">
-              <Settings2 className="h-4 w-4" />
-            </Button>
-          </div>
         </div>
       </div>
     </div>

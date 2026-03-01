@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { Bug, Loader2, MessageSquare, ShieldAlert, Sparkles, Upload, X, CircleHelp, Timer } from "lucide-react";
 import { toast } from "sonner";
 import dynamic from "next/dynamic";
 import { NotificationBell } from "@/components/notification-bell";
 import { Button } from "@/components/ui/button";
+import { useSidebar } from "@/context/sidebar-context";
+import { cn } from "@/lib/utils";
 
 const StudyTimer = dynamic(
   () => import("@/components/study-timer").then((module) => module.StudyTimer),
@@ -24,6 +27,12 @@ const CATEGORY_OPTIONS = [
 ] as const;
 
 type FeedbackCategory = (typeof CATEGORY_OPTIONS)[number]["value"];
+type ChatFeedbackContext = {
+  chatId?: string;
+  lastMessage?: string;
+  activeMode?: string;
+  activeModel?: string;
+};
 
 function inferModeFromPath(pathname: string) {
   if (pathname.startsWith("/flashcards")) return "flashcard";
@@ -40,18 +49,70 @@ function formatFileSize(bytes: number) {
 }
 
 export function GlobalUtilityDock() {
+  const { sidebarOpen } = useSidebar();
   const pathname = usePathname();
   const isAuthRoute = pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up") || pathname.startsWith("/join");
+  const [desktopViewport, setDesktopViewport] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [timerOpen, setTimerOpen] = useState(false);
   const [category, setCategory] = useState<FeedbackCategory>("bug");
   const [message, setMessage] = useState("");
   const [screenshot, setScreenshot] = useState<File | null>(null);
+  const [autoScreenshot, setAutoScreenshot] = useState<string | null>(null);
+  const [chatContext, setChatContext] = useState<ChatFeedbackContext | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const traceId = useMemo(
     () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `trace-${Date.now()}`),
     [],
   );
+
+  useEffect(() => {
+    const updateViewport = () => setDesktopViewport(window.innerWidth >= 768);
+    updateViewport();
+    window.addEventListener("resize", updateViewport);
+    return () => window.removeEventListener("resize", updateViewport);
+  }, []);
+
+  useEffect(() => {
+    if (feedbackOpen) {
+      let cancelled = false;
+      const onContextResponse = (e: Event) => {
+        setChatContext(((e as CustomEvent<ChatFeedbackContext>).detail ?? null));
+      };
+      window.addEventListener("ai-school:chat-context-response", onContextResponse);
+      window.dispatchEvent(new Event("ai-school:request-chat-context"));
+
+      import("html2canvas").then((mod) => {
+        if (cancelled) return;
+        mod.default(document.body, {
+          backgroundColor: "#ffffff",
+          scale: 0.8,
+          logging: false,
+          useCORS: false,
+        })
+          .then((canvas) => {
+            if (cancelled) return;
+            const dataUrl = canvas.toDataURL("image/jpeg", 0.5);
+            const payloadLength = dataUrl.length - "data:image/jpeg;base64,".length;
+            const byteEstimate = Math.ceil((payloadLength * 3) / 4);
+            if (byteEstimate <= MAX_SCREENSHOT_BYTES) {
+              setAutoScreenshot(dataUrl);
+            } else {
+              setAutoScreenshot(null);
+            }
+          })
+          .catch(() => {});
+      });
+
+      return () => {
+        cancelled = true;
+        window.removeEventListener("ai-school:chat-context-response", onContextResponse);
+      };
+    } else {
+      setAutoScreenshot(null);
+      setChatContext(null);
+    }
+  }, [feedbackOpen]);
 
   useEffect(() => {
     const onOpenFeedback = () => {
@@ -71,7 +132,24 @@ export function GlobalUtilityDock() {
   }, []);
 
   const remaining = MAX_MESSAGE_LENGTH - message.length;
-  const anchorTop = pathname === "/" ? "4.5rem" : "1rem";
+  const anchorTop = "1rem";
+  const dockStyle = desktopViewport
+    ? {
+        top: "auto",
+        right: "auto",
+        left: sidebarOpen ? "0.75rem" : "0.9rem",
+        bottom: "6.9rem",
+        width: sidebarOpen ? "calc(320px - 1.5rem)" : undefined,
+      }
+    : { top: anchorTop };
+  const panelStyle = desktopViewport
+    ? {
+        top: "auto",
+        right: "auto",
+        left: sidebarOpen ? "0.75rem" : "4.25rem",
+        bottom: "10.8rem",
+      }
+    : { top: `calc(${anchorTop} + 3.6rem)` };
 
   function resetFeedbackForm() {
     setCategory("bug");
@@ -118,6 +196,14 @@ export function GlobalUtilityDock() {
       if (screenshot) {
         form.set("screenshot", screenshot);
       }
+      if (chatContext?.chatId) form.set("chatId", chatContext.chatId);
+      if (chatContext?.lastMessage) form.set("lastMessage", chatContext.lastMessage);
+      if (chatContext?.activeMode) form.set("activeMode", chatContext.activeMode);
+      if (chatContext?.activeModel) form.set("activeModel", chatContext.activeModel);
+      form.set("viewportSize", `${window.innerWidth}x${window.innerHeight}`);
+      if (autoScreenshot && !screenshot) {
+        form.set("autoScreenshot", autoScreenshot);
+      }
 
       const response = await fetch("/api/feedback", {
         method: "POST",
@@ -152,24 +238,32 @@ export function GlobalUtilityDock() {
   return (
     <>
       <div
-        className="fixed right-4 z-[74] flex items-center gap-2 rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1.5 shadow-[var(--shadow-soft)] sm:right-5"
-        style={{ top: anchorTop }}
+        className={cn(
+          "pointer-events-none fixed right-4 z-[74] flex items-center gap-2 border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-soft)] sm:right-5",
+          desktopViewport
+            ? sidebarOpen
+              ? "rounded-2xl px-2.5 py-2"
+              : "flex-col rounded-2xl px-1.5 py-1.5"
+            : "rounded-full px-2 py-1.5",
+        )}
+        style={dockStyle}
         aria-label="Global utility actions"
       >
-        <NotificationBell />
+        <div className="pointer-events-auto">
+          <NotificationBell />
+        </div>
 
         <Button
           type="button"
           variant="secondary"
           size="icon"
-          className="h-9 w-9 rounded-full"
+          className="pointer-events-auto h-9 w-9 rounded-full"
           onClick={() => {
             setTimerOpen((prev) => !prev);
             setFeedbackOpen(false);
           }}
           data-tour="utility-timer"
           aria-label={timerOpen ? "Close focus timer" : "Open focus timer"}
-          title="Focus timer"
         >
           <Timer className="h-4 w-4" />
         </Button>
@@ -178,14 +272,13 @@ export function GlobalUtilityDock() {
           type="button"
           variant="secondary"
           size="icon"
-          className="h-9 w-9 rounded-full"
+          className="pointer-events-auto h-9 w-9 rounded-full"
           onClick={() => {
             setFeedbackOpen((prev) => !prev);
             setTimerOpen(false);
           }}
           data-tour="utility-feedback"
           aria-label={feedbackOpen ? "Close feedback form" : "Open feedback form"}
-          title="Send feedback"
         >
           <MessageSquare className="h-4 w-4" />
         </Button>
@@ -194,13 +287,12 @@ export function GlobalUtilityDock() {
           type="button"
           variant="secondary"
           size="icon"
-          className="h-9 w-9 rounded-full"
+          className="pointer-events-auto h-9 w-9 rounded-full"
           onClick={() => {
             window.dispatchEvent(new CustomEvent("ai-school:open-tour"));
           }}
           data-tour="utility-tour"
           aria-label="Open page tour"
-          title="Take a guided tour"
         >
           <CircleHelp className="h-4 w-4" />
         </Button>
@@ -208,8 +300,8 @@ export function GlobalUtilityDock() {
 
       {feedbackOpen ? (
         <aside
-          className="fixed right-4 z-[78] w-[min(92vw,24rem)] rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)] sm:right-5"
-          style={{ top: `calc(${anchorTop} + 3.6rem)` }}
+          className="pointer-events-auto fixed right-4 z-[78] w-[min(92vw,24rem)] rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)] sm:right-5"
+          style={panelStyle}
         >
           <div className="mb-3 flex items-center justify-between gap-2">
             <div>
@@ -298,6 +390,20 @@ export function GlobalUtilityDock() {
               Auto-context: <span className="font-medium text-[var(--text-primary)]">{pathname}</span>
             </div>
 
+            {autoScreenshot ? (
+              <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2">
+                <p className="mb-1 text-[11px] font-medium text-[var(--text-secondary)]">Auto-captured screenshot</p>
+                <Image
+                  src={autoScreenshot}
+                  alt="Auto-captured feedback context screenshot"
+                  className="max-h-28 w-full rounded-md border border-[var(--border-default)] object-cover"
+                  width={640}
+                  height={360}
+                  unoptimized
+                />
+              </div>
+            ) : null}
+
             <Button type="submit" className="w-full gap-2" disabled={submitting}>
               {submitting ? (
                 <>
@@ -315,7 +421,7 @@ export function GlobalUtilityDock() {
       {timerOpen ? (
         <div
           className="fixed right-4 z-[78] sm:right-5"
-          style={{ top: `calc(${anchorTop} + 3.6rem)` }}
+          style={panelStyle}
         >
           <StudyTimer
             open={timerOpen}

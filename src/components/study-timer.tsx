@@ -160,6 +160,7 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
   const [phaseEndAt, setPhaseEndAt] = useState<number | null>(initialState.phaseEndAt);
   const [phaseStartedAt, setPhaseStartedAt] = useState<number | null>(initialState.phaseStartedAt);
   const [completedSessions, setCompletedSessions] = useState(initialState.completedSessions);
+  const [controlFlash, setControlFlash] = useState<"start" | "pause" | null>(null);
   const hydratedRef = useRef(true);
   const transitionLockRef = useRef(false);
 
@@ -308,6 +309,7 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
       setRemainingMs(nextRemaining);
       setIsRunning(false);
       setPhaseEndAt(null);
+      setControlFlash("pause");
       return;
     }
 
@@ -315,6 +317,7 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
     setIsRunning(true);
     setPhaseEndAt(now + remainingMs);
     setPhaseStartedAt((prev) => prev ?? now - Math.max(0, duration - remainingMs));
+    setControlFlash("start");
   }
 
   function handleReset() {
@@ -363,6 +366,12 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
     return () => window.clearInterval(interval);
   }, [advancePhase, isRunning, phaseEndAt]);
 
+  useEffect(() => {
+    if (!controlFlash) return;
+    const timer = window.setTimeout(() => setControlFlash(null), 750);
+    return () => window.clearTimeout(timer);
+  }, [controlFlash]);
+
   if (!open && !showMiniIndicator) {
     return null;
   }
@@ -388,7 +397,7 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
   return (
     <div
       className={cn(
-        "w-[min(100%,328px)] rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)]",
+        "w-full max-w-[328px] rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)]",
         className,
       )}
     >
@@ -476,8 +485,27 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
         <p className="mt-2 text-[10px] text-[var(--text-secondary)]">Duration updates apply after reset or the next phase change.</p>
       ) : null}
 
+      {controlFlash ? (
+        <p
+          className={cn(
+            "mt-2 rounded-md border px-2 py-1 text-[11px] font-medium",
+            controlFlash === "start"
+              ? "border-[color-mix(in_oklab,var(--success)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_10%,transparent)] text-[var(--success)] animate-subtle-pulse"
+              : "border-[color-mix(in_oklab,var(--warning)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_10%,transparent)] text-[var(--warning)] animate-subtle-pulse",
+          )}
+        >
+          {controlFlash === "start" ? "Timer started" : "Timer paused"}
+        </p>
+      ) : null}
+
       <div className="mt-4 grid grid-cols-3 gap-2">
-        <Button type="button" variant="secondary" size="sm" className="gap-1.5" onClick={handleStartPause}>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className={cn("gap-1.5 transition", controlFlash && "animate-subtle-pulse")}
+          onClick={handleStartPause}
+        >
           {isRunning ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
           {isRunning ? "Pause" : "Start"}
         </Button>

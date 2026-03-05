@@ -1252,7 +1252,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 placeholder="Ask anything. For best results, include your context and goal."
                 data-tour="composer"
                 aria-label="Message input"
-                className="max-h-[220px] min-h-[70px] w-full resize-none bg-transparent px-2 py-1 text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] outline-none focus-visible:shadow-none"
+                className="max-h-[220px] min-h-[70px] w-full resize-none appearance-none border-0 bg-transparent px-2 py-1 text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] shadow-none outline-none ring-0 focus:border-transparent focus:outline-none focus:ring-0 focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none"
                 onKeyDown={handleKeyDown}
               />
               {speech.isListening ? (

@@ -870,7 +870,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
           docked ? "right-panel-shell--docked" : "right-panel-shell--sheet"
         } ${
           docked
-            ? "relative h-full w-full p-0"
+            ? "relative h-full w-full border-l border-[var(--border-default)] p-0"
             : compact
               ? "absolute bottom-3 left-3 right-3 max-h-[78vh] rounded-2xl border p-4"
               : "absolute inset-y-0 right-0 w-[92vw] border-l p-4"

@@ -1,46 +1,28 @@
-# Active Prompt Plan (2026-03-05)
+# Active Prompt Plan (2026-03-05 22:23 +01:00)
 
-## Latest User Request (structured)
+## Latest User Request (verbatim)
+"Failed to compile.
+./src/lib/orchestrator/pipeline.ts:385:7
+Type error: Object literal may only specify known properties, and 'isFeatured' does not exist in type '{ modelId: string; name?: string | undefined; provider?: string | undefined; description?: string | undefined; contextLength?: number | undefined; inputCostPerM?: number | undefined; ... 7 more ...; capabilities?: { ...; } | undefined; }'.
+  383 |       tags: [...new Set([...(existing?.tags ?? []), ...(model.tags ?? [])])],
+  384 |       // Keep org curation metadata stable if it exists in DB.
+> 385 |       isFeatured: existing?.isFeatured ?? model.isFeatured,
+      |       ^
+  386 |       featuredOrder: existing?.featuredOrder ?? model.featuredOrder,
+  387 |     });
+  388 |   }
+Next.js build worker exited with code: 1 and signal: null
+Error: Command "npm run build" exited with 1"
 
-1. Restore broken admin areas:
-- Soul & Personality and Branding in `/admin` must not show "coming soon".
-- "Open editor" must work.
-- Keep admin navigation improvements, but do not route to broken `/admin/school` hub.
-
-2. Sidebar + utility regressions:
-- Revert bottom sidebar hover behavior so details are hidden until hover.
-- Keep improved button visuals and per-button tooltip behavior.
-- Timer/Feedback popups must open reliably, including when sidebar is collapsed on desktop.
-- Popups must not be compressed unpredictably.
-
-3. Composer/search + attachment UX:
-- Remove unwanted gray inner outline on searchable/input areas.
-- Keep outer composer border, including top border + top rounding.
-- File attachment area should be separate, tip-like, connected, and not resize the main composer awkwardly.
-
-4. Feedback flow:
-- Auto-capture full-page screenshot when opening feedback.
-- If auto-capture fails, provide graceful fallback messaging.
-- Support pasted screenshots (Ctrl/Cmd+V) plus manual attach.
-
-5. Streaming/presentation regressions:
-- Show model/provider badge during generation without generic fallback glyphs.
-- Reduce streaming-to-final visual flicker.
-- Keep mode updates visible in UI while generation is in progress.
-
-6. Pricing/orchestration correctness:
-- Ensure manual/live catalog merge and vision prepass fallback remain correct.
-- Keep monthly budget scan bounded to current month records.
-- Avoid estimated pricing behavior where exact pricing is unavailable.
-
-7. Process request:
-- Add AGENTS.md guidance so each new prompt rewrites PLAN.md with current request context.
+## Actionable Tasks
+1. Inspect src/lib/orchestrator/pipeline.ts around the catalog merge block.
+2. Remove or safely map unsupported fields (isFeatured, eaturedOrder) so object matches the expected ModelMetadata shape.
+3. Keep merge behavior that preserves DB models without violating type constraints.
+4. Run typecheck/build to confirm compilation passes.
 
 ## Assumptions
-
-- Existing unrelated dirty worktree changes remain untouched.
-- Restoring Soul/Branding editor routes from prior working versions is acceptable.
+- isFeatured/eaturedOrder belong to a broader DB model shape but not the routing metadata type.
+- Build command available in current shell context.
 
 ## Blockers
-
-- Local lint/test execution remains limited by environment toolchain mismatch.
+- None yet.

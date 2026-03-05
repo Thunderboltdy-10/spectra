@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
@@ -35,6 +35,13 @@ type TimerSnapshot = {
   display: string;
   isRunning: boolean;
   progress: number;
+};
+
+type PanelAnchor = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
 };
 
 const CATEGORY_OPTIONS = [
@@ -158,6 +165,9 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [desktopViewport, setDesktopViewport] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(0);
+  const [panelAnchor, setPanelAnchor] = useState<PanelAnchor | null>(null);
   const [activePanel, setActivePanel] = useState<UtilityPanel>("none");
   const [category, setCategory] = useState<FeedbackCategory>("bug");
   const [message, setMessage] = useState("");
@@ -181,11 +191,36 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
   }, []);
 
   useEffect(() => {
-    const updateViewport = () => setDesktopViewport(window.innerWidth >= 768);
+    const updateViewport = () => {
+      setDesktopViewport(window.innerWidth >= 768);
+      setViewportWidth(window.innerWidth);
+      setViewportHeight(window.innerHeight);
+    };
     updateViewport();
     window.addEventListener("resize", updateViewport);
     return () => window.removeEventListener("resize", updateViewport);
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const updateAnchor = () => {
+      const rect = rootRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setPanelAnchor({
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+      });
+    };
+    updateAnchor();
+    window.addEventListener("resize", updateAnchor);
+    window.addEventListener("scroll", updateAnchor, { passive: true });
+    return () => {
+      window.removeEventListener("resize", updateAnchor);
+      window.removeEventListener("scroll", updateAnchor);
+    };
+  }, [activePanel, desktopViewport, inProfileBar, sidebarOpen]);
 
   useEffect(() => {
     const onTimerState = (event: Event) => {
@@ -214,7 +249,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, [activePanel, closeNotifications]);
 
-  const captureAutoScreenshot = useCallback(async () => {
+  const captureAutoScreenshot = useCallback(async (options?: { silent?: boolean }) => {
     try {
       const html2canvas = (await import("html2canvas")).default;
       const root = document.documentElement;
@@ -243,12 +278,20 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
 
       setAutoScreenshot(null);
       setAutoScreenshotFile(null);
-      setAutoCaptureError("Auto capture exceeded 2MB. You can still paste or attach an image.");
+      if (options?.silent) {
+        setAutoCaptureError(null);
+      } else {
+        setAutoCaptureError("Auto capture exceeded 2MB. You can still paste or attach an image.");
+      }
     } catch (error) {
       console.warn("html2canvas failed:", error);
       setAutoScreenshot(null);
       setAutoScreenshotFile(null);
-      setAutoCaptureError("Auto screenshot unavailable. Paste or attach one manually.");
+      if (options?.silent) {
+        setAutoCaptureError(null);
+      } else {
+        setAutoCaptureError("Auto screenshot unavailable. Paste or attach one manually.");
+      }
     }
   }, []);
 
@@ -268,7 +311,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
     };
     window.addEventListener("ai-school:chat-context-response", onContextResponse);
     window.dispatchEvent(new Event("ai-school:request-chat-context"));
-    void captureAutoScreenshot();
+    void captureAutoScreenshot({ silent: true });
 
     return () => {
       cancelled = true;
@@ -314,11 +357,25 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
           bottom: "5.4rem",
         };
 
-  const panelClassName = inProfileBar
-    ? "absolute bottom-[calc(100%+0.65rem)] left-0 z-[280] w-full"
-    : desktopViewport
-      ? "absolute bottom-0 right-[calc(100%+0.8rem)] z-[280]"
+  const panelClassName = desktopViewport
+    ? "fixed z-[280]"
+    : inProfileBar
+      ? "absolute bottom-[calc(100%+0.65rem)] left-0 z-[280] w-full"
       : "absolute bottom-[calc(100%+0.65rem)] right-0 z-[280]";
+
+  const panelStyle = useMemo<CSSProperties | undefined>(() => {
+    if (!desktopViewport) return undefined;
+    if (!panelAnchor) return undefined;
+    const anchorWidth = Math.max(248, Math.min(360, Math.round(panelAnchor.width || 280)));
+    const maxPanelWidth = inProfileBar ? anchorWidth : 384;
+    const maxLeft = Math.max(12, viewportWidth - maxPanelWidth - 12);
+    const left = Math.min(Math.max(12, Math.round(panelAnchor.left)), maxLeft);
+    return {
+      left: `${left}px`,
+      bottom: `${Math.max(12, Math.round(viewportHeight - panelAnchor.top + 10))}px`,
+      width: inProfileBar ? `${anchorWidth}px` : undefined,
+    };
+  }, [desktopViewport, inProfileBar, panelAnchor, viewportHeight, viewportWidth]);
 
   function resetFeedbackForm() {
     setCategory("bug");
@@ -414,7 +471,10 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
   const timerChipVisible = Boolean(timerSnapshot?.isRunning || (timerSnapshot?.progress ?? 0) > 0.01);
 
   const feedbackPanel = (
-    <aside className={cn("w-[min(92vw,24rem)] rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)]", panelClassName)}>
+    <aside
+      className={cn("w-[min(92vw,24rem)] rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)]", panelClassName)}
+      style={panelStyle}
+    >
       <div className="mb-3 flex items-center justify-between gap-2">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Feedback</p>
@@ -468,7 +528,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
             value={message}
             onChange={(event) => setMessage(event.target.value)}
             placeholder="What happened, what did you expect, and how can we improve?"
-            className="max-h-[190px] min-h-[110px] w-full resize-none overflow-y-auto rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus-visible:border-transparent focus-visible:ring-0"
+            className="max-h-[190px] min-h-[110px] w-full resize-none overflow-y-auto rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-transparent focus:ring-0 focus-visible:border-transparent focus-visible:ring-0"
             required
           />
         </div>
@@ -517,7 +577,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
           </div>
         ) : null}
 
-        {autoCaptureError ? (
+        {autoCaptureError && !autoScreenshot && !autoScreenshotFile && !screenshot ? (
           <div className="rounded-md border border-[color-mix(in_oklab,var(--warning)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_10%,transparent)] px-2.5 py-2 text-[11px] text-[var(--warning)]">
             <p>{autoCaptureError}</p>
             <button
@@ -549,7 +609,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
   );
 
   const timerPanel = (
-    <div className={panelClassName}>
+    <div className={panelClassName} style={panelStyle}>
       <StudyTimer
         className={inProfileBar ? "w-full max-w-none" : undefined}
         open={timerOpen}
@@ -560,7 +620,10 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
   );
 
   const infoPanel = (
-    <aside className={cn("w-[min(92vw,22rem)] rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-soft)]", panelClassName)}>
+    <aside
+      className={cn("w-[min(92vw,22rem)] rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-soft)]", panelClassName)}
+      style={panelStyle}
+    >
       <div className="mb-2 flex items-center justify-between">
         <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Info</p>
         <button

@@ -663,7 +663,7 @@ export function ChatSidebar({
       </div>
 
       <div className="group mt-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2.5 shadow-[var(--shadow-soft)]">
-        <GlobalUtilityDock placement="profile-bar" className="w-full" />
+        <GlobalUtilityDock placement="profile-bar" className="mb-2.5 w-full" />
 
         <div className="flex items-center gap-2.5">
           <DropdownMenu>

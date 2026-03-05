@@ -381,9 +381,6 @@ export async function runChatPipeline(request: NextRequest) {
       ...existing,
       ...model,
       tags: [...new Set([...(existing?.tags ?? []), ...(model.tags ?? [])])],
-      // Keep org curation metadata stable if it exists in DB.
-      isFeatured: existing?.isFeatured ?? model.isFeatured,
-      featuredOrder: existing?.featuredOrder ?? model.featuredOrder,
     });
   }
   const catalog = [...mergedCatalogById.values()];
@@ -466,6 +463,14 @@ export async function runChatPipeline(request: NextRequest) {
     promptCategory: auto.promptCategory,
     complexity: auto.complexity,
   });
+
+  const stream = new TransformStream();
+  const writer = stream.writable.getWriter();
+  const encoder = new TextEncoder();
+
+  const send = async (payload: Record<string, unknown>) => {
+    await writer.write(encoder.encode(`${JSON.stringify(payload)}\n`));
+  };
 
   // Auto mode selection: if user selected "auto", always use suggested mode;
   // also auto-detect from default modes.
@@ -1213,14 +1218,6 @@ export async function runChatPipeline(request: NextRequest) {
         return undefined;
       })
     : Promise.resolve(undefined);
-
-  const stream = new TransformStream();
-  const writer = stream.writable.getWriter();
-  const encoder = new TextEncoder();
-
-  const send = async (payload: Record<string, unknown>) => {
-    await writer.write(encoder.encode(`${JSON.stringify(payload)}\n`));
-  };
 
   void (async () => {
     let assistantPersisted = false;

@@ -2186,11 +2186,23 @@ export function useChatState() {
     const result = await uploadComposerFiles(files, undefined, {
       saveToLibrary: true,
     });
+    await refreshPersonalResources();
+    const uploadedCount = (result.results ?? []).filter((item) => item.status === "uploaded" || item.status === "reused").length;
+    if (uploadedCount > 0) {
+      window.setTimeout(() => {
+        void refreshPersonalResources().catch(() => {});
+      }, 2500);
+      window.setTimeout(() => {
+        void refreshPersonalResources().catch(() => {});
+      }, 7000);
+    }
     const failure = (result.results ?? []).find((item) => item.status === "failed");
     if (failure) {
+      if (uploadedCount > 0) {
+        throw new Error(`${uploadedCount} file(s) uploaded, but ${failure.file} failed: ${failure.error || "Unknown error"}`);
+      }
       throw new Error(failure.error || `Failed to upload ${failure.file}`);
     }
-    await refreshPersonalResources();
   }
 
   async function runCompaction({

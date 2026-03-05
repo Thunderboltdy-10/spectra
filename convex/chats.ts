@@ -70,8 +70,7 @@ export const listChats = query({
     const sorted = chats
       .filter((chat) => !chat.deletedAt)
       .filter((chat) => (args.packId ? chat.packId === args.packId : true))
-      .sort((a, b) => b.updatedAt - a.updatedAt)
-      .slice(0, 30);
+      .sort((a, b) => b.updatedAt - a.updatedAt);
 
     const withPrompt = await Promise.all(
       sorted.map(async (chat) => {

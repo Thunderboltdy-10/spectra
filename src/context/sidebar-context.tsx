@@ -38,6 +38,12 @@ export type SidebarSpending = {
   cheapOnlyLimitCents?: number;
   hardLimitCents?: number;
   budgetUsagePercent?: number;
+  activityUsagePercent?: number;
+  tokenUsagePercent?: number;
+  monthlyTokens?: number;
+  monthlyEvents?: number;
+  monthlyTokenBudget?: number;
+  monthlyCostCentsFromEvents?: number;
   marginPercent?: number;
 };
 

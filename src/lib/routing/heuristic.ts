@@ -1,4 +1,11 @@
 import { CHEAP_MODEL_DEFAULTS, MODEL_CONFIG, MODEL_COST_BLOCK_LIST, ROUTER_FALLBACKS } from "@/lib/model-config";
+import {
+  isModelAllowedInTier,
+  modelSupportsCapability,
+  pickModelAndFallbacks,
+  rankCatalogModels,
+  type CatalogModelEntry,
+} from "@/lib/model-selection";
 import type { ModelRouteInput, ModelRouteResult, RouteTrace, RouteTraceCandidate } from "@/types";
 
 const multimodalExts = ["pdf", "png", "jpg", "jpeg", "webp", "docx", "gif", "heic", "heif"];
@@ -72,7 +79,16 @@ function eliminationReason(modelId: string, tier: ModelRouteInput["spendingTier"
   return undefined;
 }
 
-export function canUseInTier(modelId: string, tier: ModelRouteInput["spendingTier"]) {
+export function canUseInTier(
+  modelId: string,
+  tier: ModelRouteInput["spendingTier"],
+  catalog?: CatalogModelEntry[],
+) {
+  if (catalog && catalog.length > 0) {
+    const model = catalog.find((item) => item.modelId === modelId);
+    if (model) return isModelAllowedInTier(model, tier);
+    if (modelId === "openrouter/auto") return tier === "normal";
+  }
   return !eliminationReason(modelId, tier);
 }
 
@@ -376,6 +392,196 @@ function finalizeRoute(params: {
   };
 }
 
+function preferredCapabilitiesForRoute(input: ModelRouteInput) {
+  const preferred = new Set<"vision" | "reasoning" | "code" | "search" | "image_generation">();
+  if (input.mode === "research" || input.mode === "marker" || input.mode === "exam") {
+    preferred.add("reasoning");
+  }
+  if (input.mode === "draft_coach" || input.promptCategory === "code") {
+    preferred.add("code");
+  }
+  if (input.needsSearch || input.mode === "research") {
+    preferred.add("search");
+  }
+  if (input.mode === "image") {
+    preferred.add("image_generation");
+  }
+  return [...preferred];
+}
+
+function requiredCapabilitiesForRoute(params: {
+  input: ModelRouteInput;
+  multimodalNeeded: boolean;
+}) {
+  const required = new Set<"vision" | "reasoning" | "code" | "search" | "image_generation">();
+  if (params.multimodalNeeded) {
+    required.add("vision");
+  }
+  if (params.input.mode === "image") {
+    required.add("image_generation");
+  }
+  return [...required];
+}
+
+function dynamicRouteFromCatalog(params: {
+  input: ModelRouteInput;
+  multimodalNeeded: boolean;
+  complexPrompt: boolean;
+  promptCategory: string;
+  candidates: RouteTraceCandidate[];
+  routingStartedAt: number;
+}): ModelRouteResult | null {
+  const catalog = (params.input.modelCatalog ?? []).filter((model) => model?.modelId);
+  if (catalog.length === 0) return null;
+
+  const catalogWithoutAuto = catalog.filter((model) => model.modelId !== "openrouter/auto");
+  const requiredCapabilities = requiredCapabilitiesForRoute({
+    input: params.input,
+    multimodalNeeded: params.multimodalNeeded,
+  });
+  const preferredCapabilities = preferredCapabilitiesForRoute(params.input);
+  const preferredModelIds = [
+    params.input.agentPreferredModel,
+    params.input.previousModelUsed,
+    ...(params.input.agentTopModels ?? []).map((item) => item.modelId),
+  ].filter((value): value is string => Boolean(value));
+
+  const pickParams = {
+    catalog: catalogWithoutAuto,
+    tier: params.input.spendingTier,
+    mode: params.input.mode,
+    messageLength: params.input.messageLength,
+    needsSearch: params.input.needsSearch,
+    preferCheap: params.input.mode === "quiz" || params.input.mode === "flashcard",
+    preferFast: params.input.mode === "tutor" || params.input.mode === "general",
+    requiredCapabilities,
+    preferredCapabilities,
+    preferredModelIds,
+    runtimeStats: params.input.modelRuntimeStats,
+  } as const;
+
+  let reason = "Catalog-driven adaptive routing";
+  let primaryModel = "";
+  let fallbackModels: string[] = [];
+
+  const ranked = rankCatalogModels(pickParams);
+  for (const row of ranked.slice(0, 10)) {
+    params.candidates.push({
+      modelId: row.model.modelId,
+      allowed: true,
+      score: Number(row.score.toFixed(3)),
+      reason: row.reasons.length > 0 ? row.reasons.join(" · ") : "Catalog-driven score",
+    });
+  }
+
+  if (params.input.routerMode === "manual" && params.input.manualModel) {
+    const manualModelId = params.input.manualModel;
+    const manualMeta = catalog.find((item) => item.modelId === manualModelId);
+    const allowed = manualMeta ? isModelAllowedInTier(manualMeta, params.input.spendingTier) : false;
+    params.candidates.unshift({
+      modelId: manualModelId,
+      allowed,
+      score: allowed ? 1 : 0,
+      reason: allowed ? "Manual selection" : "Manual model restricted by current budget tier",
+      eliminatedBecause: allowed ? undefined : `restricted by ${params.input.spendingTier}`,
+    });
+
+    if (allowed) {
+      primaryModel = manualModelId;
+      fallbackModels = ranked
+        .map((row) => row.model.modelId)
+        .filter((modelId) => modelId !== manualModelId)
+        .slice(0, 4);
+      reason = "Manual model lock";
+    } else {
+      const picked = pickModelAndFallbacks({ ...pickParams, maxFallbacks: 4 });
+      primaryModel = picked.selected?.modelId ?? ranked[0]?.model.modelId ?? manualModelId;
+      fallbackModels = picked.fallbacks;
+      reason = `Manual model restricted by ${params.input.spendingTier}; selected best allowed model`;
+    }
+  } else if (params.input.routerMode === "openrouter_auto") {
+    const autoModel = catalog.find((item) => item.modelId === "openrouter/auto");
+    if (autoModel && isModelAllowedInTier(autoModel, params.input.spendingTier)) {
+      primaryModel = autoModel.modelId;
+      fallbackModels = ranked.map((row) => row.model.modelId).slice(0, 4);
+      params.candidates.unshift({
+        modelId: "openrouter/auto",
+        allowed: true,
+        score: 1,
+        reason: "OpenRouter auto delegation",
+      });
+      reason = "OpenRouter auto-router mode";
+    } else {
+      const picked = pickModelAndFallbacks({ ...pickParams, maxFallbacks: 4 });
+      primaryModel = picked.selected?.modelId ?? ranked[0]?.model.modelId ?? catalogWithoutAuto[0]?.modelId ?? "openrouter/auto";
+      fallbackModels = picked.fallbacks;
+      reason = "Auto-router unavailable under current tier; using catalog-ranked model";
+    }
+  } else {
+    const picked = pickModelAndFallbacks({ ...pickParams, maxFallbacks: 4 });
+    primaryModel = picked.selected?.modelId ?? ranked[0]?.model.modelId ?? catalogWithoutAuto[0]?.modelId ?? "";
+    fallbackModels = picked.fallbacks;
+    reason = "Adaptive catalog route";
+  }
+
+  if (!primaryModel) {
+    return null;
+  }
+
+  if (params.multimodalNeeded) {
+    const model = catalog.find((item) => item.modelId === primaryModel);
+    if (model && !modelSupportsCapability(model, "vision")) {
+      const visionRequirements = [
+        ...new Set([...(pickParams.requiredCapabilities ?? []), "vision"]),
+      ] as Array<"vision" | "reasoning" | "code" | "search" | "image_generation">;
+      const visionPick = pickModelAndFallbacks({
+        ...pickParams,
+        requiredCapabilities: visionRequirements,
+        preferredModelIds: [primaryModel, ...preferredModelIds],
+        maxFallbacks: 3,
+      });
+      if (visionPick.selected) {
+        fallbackModels = [
+          primaryModel,
+          ...fallbackModels.filter((candidate) => candidate !== visionPick.selected?.modelId),
+          ...visionPick.fallbacks,
+        ];
+        primaryModel = visionPick.selected.modelId;
+        reason = `${reason}; vision-capable model selected`;
+      }
+    }
+  }
+
+  const verificationCandidates = rankCatalogModels({
+    catalog: catalogWithoutAuto.filter((model) => model.modelId !== primaryModel),
+    tier: params.input.spendingTier,
+    mode: params.input.mode,
+    messageLength: params.input.messageLength,
+    requiredCapabilities: ["reasoning"],
+    preferredCapabilities: ["reasoning"],
+    runtimeStats: params.input.modelRuntimeStats,
+  });
+  const verificationModel =
+    params.input.mode === "marker"
+      ? verificationCandidates[0]?.model.modelId
+      : undefined;
+
+  return finalizeRoute({
+    input: params.input,
+    primaryModel,
+    fallbackModels: fallbackModels.filter((candidate) => candidate !== primaryModel),
+    verificationModel,
+    reason,
+    autoEnhanced: params.input.routerMode !== "manual",
+    searchEnabled: params.input.needsSearch,
+    candidates: params.candidates,
+    complexPrompt: params.complexPrompt,
+    promptCategory: params.promptCategory,
+    multimodalNeeded: params.multimodalNeeded,
+    routingStartedAt: params.routingStartedAt,
+  });
+}
+
 export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
   const routingStartedAt = nowMs();
   const candidates: RouteTraceCandidate[] = [];
@@ -386,6 +592,18 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
   const promptCategory = input.promptCategory ?? "general";
   const searchAuxModel = input.thinkingLevel === "high" ? MODEL_CONFIG.searchDeep : MODEL_CONFIG.searchFast;
   const paidTier = allowsPaidTier(input.spendingTier);
+
+  const catalogRoute = dynamicRouteFromCatalog({
+    input,
+    multimodalNeeded,
+    complexPrompt,
+    promptCategory,
+    candidates,
+    routingStartedAt,
+  });
+  if (catalogRoute) {
+    return catalogRoute;
+  }
 
   if (input.routerMode === "manual" && input.manualModel) {
     pushCandidate(candidates, input.manualModel, input.spendingTier, 1, "User manually selected this model");

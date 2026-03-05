@@ -23,6 +23,60 @@ type GlobalStats = {
   totalUsers: number;
   totalMessages: number;
   totalAdmins: number;
+  usage?: {
+    days: number;
+    totals: {
+      events: number;
+      totalTokens: number;
+      totalCostCents: number;
+      effectiveCostCents?: number;
+      estimatedCostCents?: number;
+      unpricedEvents?: number;
+    };
+    byDay: Array<{
+      day: string;
+      events: number;
+      totalTokens: number;
+      totalCostCents: number;
+      effectiveCostCents?: number;
+      uniqueUsers: number;
+    }>;
+    byWeek: Array<{
+      weekStart: string;
+      events: number;
+      totalTokens: number;
+      totalCostCents: number;
+      effectiveCostCents?: number;
+    }>;
+    topModels: Array<{
+      modelId: string;
+      modelLabel: string;
+      events: number;
+      totalTokens: number;
+      totalCostCents: number;
+      effectiveCostCents?: number;
+    }>;
+    topUsers: Array<{
+      userId: string;
+      name: string;
+      email: string;
+      role: string;
+      orgName: string;
+      events: number;
+      totalTokens: number;
+      totalCostCents: number;
+      effectiveCostCents?: number;
+      topModels: Array<{ modelId: string; modelLabel: string; tokens: number }>;
+    }>;
+    topOrgs: Array<{
+      orgId: string;
+      orgName: string;
+      events: number;
+      totalTokens: number;
+      totalCostCents: number;
+      effectiveCostCents?: number;
+    }>;
+  };
 };
 
 type StorageStats = {
@@ -117,6 +171,24 @@ function humanizeAuditAction(action: string) {
     .join(" ");
 }
 
+function formatCurrencyCents(value: number) {
+  return `€${(Math.max(0, value) / 100).toFixed(2)}`;
+}
+
+function compactDayLabel(day: string) {
+  const value = new Date(`${day}T00:00:00Z`);
+  return Number.isNaN(value.getTime())
+    ? day
+    : value.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function compactWeekLabel(day: string) {
+  const value = new Date(`${day}T00:00:00Z`);
+  return Number.isNaN(value.getTime())
+    ? day
+    : value.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 export default function SuperAdminDashboard() {
   const [stats, setStats] = useState<GlobalStats | null>(null);
   const [storageStats, setStorageStats] = useState<StorageStats | null>(null);
@@ -132,6 +204,7 @@ export default function SuperAdminDashboard() {
   const [announcementBody, setAnnouncementBody] = useState("");
   const [announcementActionUrl, setAnnouncementActionUrl] = useState("");
   const [sendingAnnouncement, setSendingAnnouncement] = useState(false);
+  const [selectedUsageDay, setSelectedUsageDay] = useState<string | null>(null);
   const knownEmails = useMemo(
     () =>
       Array.from(
@@ -139,6 +212,17 @@ export default function SuperAdminDashboard() {
       ),
     [admins],
   );
+  const usageByDay = stats?.usage?.byDay ?? [];
+  const usageByWeek = stats?.usage?.byWeek ?? [];
+  const dayWindow = usageByDay.slice(-14);
+  const firstDayLabel = dayWindow[0] ? compactDayLabel(dayWindow[0].day) : "—";
+  const lastDayLabel = dayWindow.length > 0 ? compactDayLabel(dayWindow[dayWindow.length - 1].day) : "—";
+  const maxDayTokens = Math.max(1, ...usageByDay.map((row) => row.totalTokens));
+  const maxDaySpend = Math.max(1, ...usageByDay.map((row) => row.effectiveCostCents ?? row.totalCostCents));
+  const maxWeekSpend = Math.max(1, ...usageByWeek.map((row) => row.effectiveCostCents ?? row.totalCostCents));
+  const selectedDayDetails =
+    (selectedUsageDay ? usageByDay.find((row) => row.day === selectedUsageDay) : dayWindow[dayWindow.length - 1])
+    ?? null;
 
   useEffect(() => {
     void (async () => {
@@ -328,6 +412,175 @@ export default function SuperAdminDashboard() {
           />
         </div>
 
+        <div className="grid gap-5 sm:grid-cols-3">
+          <StatCard
+            label="60d Usage Events"
+            value={loading ? "..." : (stats?.usage?.totals.events ?? 0)}
+            icon={<Database className="h-4 w-4" />}
+            sub="Tracked model calls"
+          />
+          <StatCard
+            label="60d Tokens"
+            value={loading ? "..." : (stats?.usage?.totals.totalTokens ?? 0)}
+            icon={<MessageSquare className="h-4 w-4" />}
+            sub="Prompt + completion"
+          />
+          <StatCard
+            label="60d Spend"
+            value={loading ? "..." : formatCurrencyCents(stats?.usage?.totals.effectiveCostCents ?? stats?.usage?.totals.totalCostCents ?? 0)}
+            icon={<HardDrive className="h-4 w-4" />}
+            sub={stats?.usage?.totals.unpricedEvents ? `${stats.usage.totals.unpricedEvents} events were estimated` : "Recorded cost"}
+          />
+        </div>
+
+        {stats?.usage ? (
+          <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 shadow-[var(--shadow-soft)]">
+            <div className="mb-4 flex items-center justify-between gap-2">
+              <div>
+                <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+                  Usage Intelligence
+                </h2>
+                <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                  Detailed usage from the last {stats.usage.days} days (tokens, spend, model and user breakdown).
+                </p>
+              </div>
+              <Database className="h-4 w-4 text-[var(--text-secondary)]" />
+            </div>
+
+            <div className="mb-4 grid gap-4 lg:grid-cols-2">
+              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
+                <p className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Daily token trend</p>
+                <div className="mt-3 flex h-28 items-end gap-1.5">
+                  {dayWindow.map((row) => (
+                    <button
+                      key={row.day}
+                      type="button"
+                      onClick={() => setSelectedUsageDay(row.day)}
+                      className="group relative flex h-full flex-1 cursor-pointer items-end"
+                      title={`${compactDayLabel(row.day)} · ${row.totalTokens.toLocaleString()} tokens`}
+                    >
+                      <span
+                        className="w-full rounded-t-md bg-[color-mix(in_oklab,var(--accent-cyan)_70%,transparent)] transition group-hover:bg-[var(--accent-cyan)]"
+                        style={{ height: `${Math.max(8, (row.totalTokens / maxDayTokens) * 100)}%` }}
+                      />
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-2 flex items-center justify-between text-[10px] text-[var(--text-secondary)]">
+                  <span>{firstDayLabel}</span>
+                  <span>{lastDayLabel}</span>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
+                <p className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Daily spend trend</p>
+                <div className="mt-3 flex h-28 items-end gap-1.5">
+                  {dayWindow.map((row) => (
+                    <button
+                      key={`${row.day}-cost`}
+                      type="button"
+                      onClick={() => setSelectedUsageDay(row.day)}
+                      className="group relative flex h-full flex-1 cursor-pointer items-end"
+                      title={`${compactDayLabel(row.day)} · ${formatCurrencyCents(row.effectiveCostCents ?? row.totalCostCents)}`}
+                    >
+                      <span
+                        className="w-full rounded-t-md bg-[color-mix(in_oklab,var(--accent-coral)_70%,transparent)] transition group-hover:bg-[var(--accent-coral)]"
+                        style={{ height: `${Math.max(8, ((row.effectiveCostCents ?? row.totalCostCents) / maxDaySpend) * 100)}%` }}
+                      />
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-2 flex items-center justify-between text-[10px] text-[var(--text-secondary)]">
+                  <span>{firstDayLabel}</span>
+                  <span>{lastDayLabel}</span>
+                </div>
+              </div>
+            </div>
+
+            {selectedDayDetails ? (
+              <div className="mb-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3 text-xs">
+                <p className="text-[11px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">
+                  Selected Day: {compactDayLabel(selectedDayDetails.day)}
+                </p>
+                <p className="mt-1 text-sm font-medium text-[var(--text-primary)]">
+                  {selectedDayDetails.totalTokens.toLocaleString()} tokens
+                </p>
+                <p className="text-[var(--text-secondary)]">
+                  {formatCurrencyCents(selectedDayDetails.effectiveCostCents ?? selectedDayDetails.totalCostCents)} spend · {selectedDayDetails.uniqueUsers} active users · {selectedDayDetails.events} events
+                </p>
+              </div>
+            ) : null}
+
+            <div className="grid gap-4 lg:grid-cols-3">
+              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
+                <p className="mb-2 text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Top Models</p>
+                <div className="space-y-2">
+                  {stats.usage.topModels.slice(0, 6).map((model) => (
+                    <div key={model.modelId} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 py-2 text-xs">
+                      <p className="font-medium text-[var(--text-primary)]">{model.modelLabel}</p>
+                      <p className="text-[var(--text-secondary)]">
+                        {model.totalTokens.toLocaleString()} tokens • {formatCurrencyCents(model.effectiveCostCents ?? model.totalCostCents)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
+                <p className="mb-2 text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Top Users</p>
+                <div className="space-y-2">
+                  {stats.usage.topUsers.slice(0, 6).map((user) => (
+                    <div key={user.userId} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 py-2 text-xs">
+                      <p className="font-medium text-[var(--text-primary)]">{user.name || user.email}</p>
+                      <p className="truncate text-[var(--text-secondary)]">{user.orgName} • {user.role}</p>
+                      <p className="text-[var(--text-secondary)]">
+                        {user.totalTokens.toLocaleString()} tokens • {formatCurrencyCents(user.effectiveCostCents ?? user.totalCostCents)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
+                <p className="mb-2 text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Daily Usage</p>
+                <div className="space-y-2">
+                  {stats.usage.byDay.slice(-6).map((day) => (
+                    <div key={day.day} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 py-2 text-xs">
+                      <p className="font-medium text-[var(--text-primary)]">{day.day}</p>
+                      <p className="text-[var(--text-secondary)]">
+                        {day.totalTokens.toLocaleString()} tokens • {formatCurrencyCents(day.effectiveCostCents ?? day.totalCostCents)} • {day.uniqueUsers} users
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
+              <p className="mb-2 text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Weekly spend (last 8)</p>
+              <div className="space-y-2">
+                {usageByWeek.slice(-8).map((week) => (
+                  <div key={week.weekStart}>
+                    <div className="mb-1 flex items-center justify-between text-xs">
+                      <span className="text-[var(--text-secondary)]">Week of {compactWeekLabel(week.weekStart)}</span>
+                      <span className="font-medium text-[var(--text-primary)]">{formatCurrencyCents(week.effectiveCostCents ?? week.totalCostCents)}</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-[var(--bg-elevated)]">
+                      <div
+                        className="h-full rounded-full bg-[var(--gradient-brand)]"
+                        style={{ width: `${Math.max(6, ((week.effectiveCostCents ?? week.totalCostCents) / maxWeekSpend) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+                {usageByWeek.length === 0 ? (
+                  <p className="text-sm text-[var(--text-secondary)]">No weekly usage captured yet.</p>
+                ) : null}
+              </div>
+            </div>
+          </section>
+        ) : null}
+
         <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 shadow-[var(--shadow-soft)]">
           <div className="mb-4 flex items-center justify-between">
             <div>
@@ -512,68 +765,34 @@ export default function SuperAdminDashboard() {
           </div>
         )}
 
-        {/* Quick Navigation + Activity Feed */}
-        <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
-          {/* Quick Nav */}
-          <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 shadow-[var(--shadow-soft)]">
-            <h2 className="mb-5 text-sm font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-              Quick Navigation
-            </h2>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {[
-                { label: "All Schools", href: "/super-admin/schools", icon: Building2, desc: "Browse and manage orgs" },
-                { label: "Create School", href: "/super-admin/schools/new", icon: Plus, desc: "Provision a new org" },
-              ].map((item) => {
-                const Icon = item.icon;
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className="group flex items-start gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 transition hover:border-[var(--accent-cyan)] hover:bg-[var(--bg-hover)]"
-                  >
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[color-mix(in_oklab,var(--accent-cyan)_10%,transparent)] text-[var(--accent-cyan)] transition group-hover:bg-[color-mix(in_oklab,var(--accent-cyan)_18%,transparent)]">
-                      <Icon className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-[var(--text-primary)]">{item.label}</p>
-                      <p className="text-xs text-[var(--text-secondary)]">{item.desc}</p>
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Activity Feed */}
-          <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 shadow-[var(--shadow-soft)]">
-            <h2 className="mb-5 text-sm font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-              Recent Activity
-            </h2>
-            <div className="space-y-3">
-              {auditLogs.map((item) => (
-                <div
-                  key={item._id}
-                  className="flex items-start gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3"
-                >
-                  <div className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-[var(--accent-cyan)]" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-[var(--text-primary)]">{humanizeAuditAction(item.action)}</p>
-                    <p className="truncate text-xs text-[var(--text-secondary)]">
-                      {item.details?.trim() || `${item.targetType}: ${item.targetId}`}{" "}
-                      <span className="text-[var(--text-muted)]">
-                        · {(item.actorName || item.actorEmail || "Unknown actor").trim()}
-                      </span>
-                    </p>
-                  </div>
-                  <span className="shrink-0 text-[11px] text-[var(--text-secondary)]">
-                    {formatRelativeTime(item.createdAt)}
-                  </span>
+        <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 shadow-[var(--shadow-soft)]">
+          <h2 className="mb-5 text-sm font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+            Recent Activity
+          </h2>
+          <div className="space-y-3">
+            {auditLogs.map((item) => (
+              <div
+                key={item._id}
+                className="flex items-start gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3"
+              >
+                <div className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-[var(--accent-cyan)]" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-[var(--text-primary)]">{humanizeAuditAction(item.action)}</p>
+                  <p className="truncate text-xs text-[var(--text-secondary)]">
+                    {item.details?.trim() || `${item.targetType}: ${item.targetId}`}{" "}
+                    <span className="text-[var(--text-muted)]">
+                      · {(item.actorName || item.actorEmail || "Unknown actor").trim()}
+                    </span>
+                  </p>
                 </div>
-              ))}
-              {auditLogs.length === 0 && (
-                <p className="text-sm text-[var(--text-secondary)]">No recent platform activity yet.</p>
-              )}
-            </div>
+                <span className="shrink-0 text-[11px] text-[var(--text-secondary)]">
+                  {formatRelativeTime(item.createdAt)}
+                </span>
+              </div>
+            ))}
+            {auditLogs.length === 0 && (
+              <p className="text-sm text-[var(--text-secondary)]">No recent platform activity yet.</p>
+            )}
           </div>
         </div>
 

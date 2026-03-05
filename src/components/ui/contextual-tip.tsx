@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Lightbulb, X } from "lucide-react";
+import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type ContextualTipProps = {
@@ -58,19 +58,18 @@ export function ContextualTip({
   return (
     <div
       className={cn(
-        "flex items-start gap-2 rounded-xl border border-[color-mix(in_oklab,var(--accent-cyan)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--bg-elevated))] px-3 py-2 text-sm text-[var(--text-primary)]",
+        "flex items-center gap-2.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-soft)]",
         className,
       )}
       role="status"
       aria-live="polite"
     >
-      <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent-cyan)]" />
-      <p className="flex-1 text-sm leading-relaxed">{message}</p>
+      <p className="flex-1 truncate text-xs leading-relaxed text-[var(--text-secondary)]">{message}</p>
       {actionLabel && onAction ? (
         <button
           type="button"
           onClick={onAction}
-          className="cursor-pointer whitespace-nowrap rounded-md border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1 text-xs font-medium text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]"
+          className="cursor-pointer whitespace-nowrap rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1 text-[11px] font-medium text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]"
         >
           {actionLabel}
         </button>
@@ -79,7 +78,7 @@ export function ContextualTip({
         type="button"
         onClick={dismissTip}
         aria-label="Dismiss tip"
-        className="cursor-pointer rounded-md p-1 text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+        className="cursor-pointer rounded-md p-1 text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
       >
         <X className="h-3.5 w-3.5" />
       </button>

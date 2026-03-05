@@ -37,7 +37,7 @@ const SelectContent = React.forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       className={cn(
-        "relative z-50 min-w-[8rem] rounded-[var(--radius-input)] border border-[var(--border-default)] text-[var(--text-primary)] shadow-[var(--shadow-lg)]",
+        "relative z-[340] min-w-[8rem] rounded-[var(--radius-input)] border border-[var(--border-default)] text-[var(--text-primary)] shadow-[var(--shadow-lg)]",
         className,
       )}
       style={{
@@ -60,7 +60,7 @@ const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex w-full cursor-default select-none items-center rounded-md py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-[var(--bg-hover)]",
+      "relative flex w-full cursor-pointer select-none items-center rounded-md py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-[var(--bg-hover)]",
       className,
     )}
     {...props}

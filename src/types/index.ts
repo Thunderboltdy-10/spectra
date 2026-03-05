@@ -105,6 +105,29 @@ export type ModelRouteInput = {
   previousModelUsed?: string;
   agentPreferredModel?: string;
   agentTopModels?: Array<{ modelId: string; score: number }>;
+  modelCatalog?: Array<{
+    modelId: string;
+    name?: string;
+    provider?: string;
+    description?: string;
+    contextLength?: number;
+    inputCostPerM?: number;
+    outputCostPerM?: number;
+    tags?: string[];
+    isFree?: boolean;
+    costRating?: "low" | "medium" | "high";
+    speedRating?: "low" | "medium" | "high";
+    reasoningRating?: "low" | "medium" | "high";
+    multimodalRating?: "none" | "basic" | "strong";
+    capabilities?: {
+      reasoning?: number;
+      creative?: number;
+      code?: number;
+      vision?: number;
+      speed?: number;
+    };
+  }>;
+  modelRuntimeStats?: Record<string, { successCount: number; failureCount: number; avgLatencyMs?: number }>;
 };
 
 export type RouteTraceCandidate = {

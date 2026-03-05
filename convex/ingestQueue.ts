@@ -42,9 +42,40 @@ async function parseFileBytes(filename: string, bytes: ArrayBuffer): Promise<{ t
     return { text, pages: [{ text }] };
   }
 
-  // PDFs, DOCX, and images are currently handled as attachment context at runtime.
-  // Keep resource status healthy even when background vector indexing is unavailable.
-  if (ext === "pdf" || ext === "docx" || ext === "png" || ext === "jpg" || ext === "jpeg" || ext === "webp" || ext === "gif") {
+  if (ext === "docx") {
+    const mammoth = await import("mammoth");
+    const extracted = await mammoth.extractRawText({ arrayBuffer: bytes });
+    const text = extracted.value.replace(/\s+\n/g, "\n").trim();
+    return { text, pages: text ? [{ text }] : [] };
+  }
+
+  if (ext === "pdf") {
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const loadingTask = pdfjs.getDocument({
+      data: new Uint8Array(bytes),
+      useWorkerFetch: false,
+      isEvalSupported: false,
+      disableFontFace: true,
+    });
+    const document = await loadingTask.promise;
+    const pages: ParsedPage[] = [];
+    for (let pageIndex = 1; pageIndex <= document.numPages; pageIndex += 1) {
+      const page = await document.getPage(pageIndex);
+      const content = await page.getTextContent();
+      const text = content.items
+        .map((item) => ("str" in item ? item.str : ""))
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (text) {
+        pages.push({ page: pageIndex, text });
+      }
+    }
+    return { text: pages.map((page) => page.text).join("\n"), pages };
+  }
+
+  // Images are currently consumed at runtime via vision-capable models.
+  if (ext === "png" || ext === "jpg" || ext === "jpeg" || ext === "webp" || ext === "gif") {
     return { text: "", pages: [] };
   }
 
@@ -143,9 +174,8 @@ export const processResource = internalAction({
           resourceId: args.resourceId,
           parsedCharCount: 0,
           chunks: [],
-          failedReason: `Background text extraction not available for .${ext} files`,
         });
-        return { ok: false, reason: `no_text_extraction_for_${ext}` };
+        return { ok: true, chunkCount: 0, reason: `empty_text_${ext}` };
       }
 
       const chunks = chunkTextWithPages(parsed.pages);

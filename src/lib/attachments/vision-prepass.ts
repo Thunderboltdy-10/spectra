@@ -1,16 +1,16 @@
 import { openRouterChatCompletion } from "@/lib/openrouter";
-import { ROUTER_FALLBACKS } from "@/lib/model-config";
 
 export async function runVisionPrepass(params: {
   imageContentBlocks: Array<{ type: "image_url"; image_url: { url: string; detail?: "low" | "auto" } }>;
   userMessage: string;
   model: string;
+  fallbackModels?: string[];
 }): Promise<string> {
   if (params.imageContentBlocks.length === 0) return "";
 
   const completion = await openRouterChatCompletion({
     model: params.model,
-    fallbackModels: ROUTER_FALLBACKS[params.model] ?? [],
+    fallbackModels: params.fallbackModels ?? [],
     messages: [
       {
         role: "system",

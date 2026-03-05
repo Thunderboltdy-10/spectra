@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { toast } from "sonner";
 import { ChatComposer } from "@/components/chat/chat-composer";
@@ -10,6 +10,7 @@ import { ChatMessages } from "@/components/chat/chat-messages";
 import { UnifiedPanel } from "@/components/chat/unified-panel";
 import { ChatSidebar } from "@/components/chat/chat-sidebar";
 import { ChatWelcome } from "@/components/chat/chat-welcome";
+import { GlobalUtilityDock } from "@/components/global-utility-dock";
 import { KeyboardShortcutsRegistrar } from "@/components/keyboard-shortcuts";
 import type { GuidedTourStep } from "@/components/ui/guided-tour";
 import { useChatState } from "@/hooks/use-chat-state";
@@ -167,6 +168,32 @@ export function ChatLayout() {
     return () => window.removeEventListener("ai-school:open-tour", onOpenTour);
   }, []);
 
+  const handleModeChange = useCallback((nextMode: StudyMode) => {
+    if (!isModeAvailable(nextMode)) {
+      toast.info("This mode is coming soon.");
+      return;
+    }
+    chat.setMode(nextMode);
+    void chat.updateExistingChatSettings({ mode: nextMode }).catch((error: unknown) =>
+      toast.error(error instanceof Error ? error.message : "Failed to update mode"),
+    );
+  }, [chat]);
+
+  useEffect(() => {
+    const onSwitchMode = (event: Event) => {
+      const detail = (event as CustomEvent<{ mode?: string }>).detail;
+      if (!detail?.mode) return;
+      handleModeChange(detail.mode as StudyMode);
+    };
+    const onOpenOrchestration = () => openPanel("orchestration");
+    window.addEventListener("ai-school:switch-mode", onSwitchMode);
+    window.addEventListener("ai-school:open-orchestration", onOpenOrchestration);
+    return () => {
+      window.removeEventListener("ai-school:switch-mode", onSwitchMode);
+      window.removeEventListener("ai-school:open-orchestration", onOpenOrchestration);
+    };
+  }, [handleModeChange, openPanel]);
+
   function markTourSeen() {
     try {
       window.localStorage.setItem(TOUR_COMPLETED_KEY, "1");
@@ -258,9 +285,6 @@ export function ChatLayout() {
     }
 
     if (!chat.sending) {
-      if (openedOrchestrationForStreamRef.current && panelActiveView === "orchestration") {
-        closePanel();
-      }
       openedOrchestrationForStreamRef.current = false;
       orchestrationDismissedForStreamRef.current = false;
     }
@@ -272,21 +296,9 @@ export function ChatLayout() {
     chat.sending,
     chat.thinkingLevel,
     liveProgressAutoOpen,
-    closePanel,
     openPanel,
     panelActiveView,
   ]);
-
-  function handleModeChange(mode: StudyMode) {
-    if (!isModeAvailable(mode)) {
-      toast.info("This mode is coming soon.");
-      return;
-    }
-    chat.setMode(mode);
-    void chat.updateExistingChatSettings({ mode }).catch((error: unknown) =>
-      toast.error(error instanceof Error ? error.message : "Failed to update mode"),
-    );
-  }
 
   function handleRegenerateLastResponse() {
     void chat.regenerateLastResponse();
@@ -378,7 +390,7 @@ export function ChatLayout() {
 
   if (chat.loading) {
     return (
-      <div className="grid h-screen grid-cols-[320px_1fr] bg-[var(--bg-primary)]">
+      <div className="grid h-screen grid-cols-[clamp(260px,24vw,360px)_1fr] bg-[var(--bg-primary)]">
         <aside className="hidden md:block">
           <SidebarSkeleton />
         </aside>
@@ -435,8 +447,8 @@ export function ChatLayout() {
 
       <aside
         data-tour="sidebar"
-        className={`hidden md:block ${
-          chat.sidebarOpen ? "w-[320px]" : "w-[76px]"
+        className={`hidden md:block transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+          chat.sidebarOpen ? "w-[clamp(260px,24vw,360px)]" : "w-[76px]"
         }`}
       >
         <ChatSidebar {...sidebarProps} />
@@ -691,6 +703,7 @@ export function ChatLayout() {
           onAutoCompactionChange={chat.setAutoCompaction}
           onSlashCommand={handleSlashCommand}
           lastAutoResult={chat.lastAutoResult}
+          messageCount={chat.messages.length}
         />
       </main>
 
@@ -730,7 +743,11 @@ export function ChatLayout() {
       <UnifiedPanel
         settingsProps={{
           models: chat.models,
+          routerMode: chat.routerMode,
+          manualModel: chat.manualModel,
+          activeModelUsed: lastModelUsed,
           usePersonalResources: chat.usePersonalResources,
+          autoSaveConversationFilesToLibrary: chat.autoSaveConversationFilesToLibrary,
           personalResources: chat.personalResources,
           userSpending: chat.userSpending,
           recentChatCount,
@@ -753,6 +770,9 @@ export function ChatLayout() {
             void chat.updateExistingChatSettings({ usePersonalResources }).catch((error: unknown) =>
               toast.error(error instanceof Error ? error.message : "Failed to save setting"));
           },
+          onAutoSaveConversationFilesToLibraryChange: (enabled) => {
+            chat.setAutoSaveConversationFilesToLibrary(enabled);
+          },
           onAutoEnhancePromptChange: chat.setAutoEnhancePrompt,
           onAutoThinkingChange: chat.setAutoThinking,
           onAutoSearchChange: chat.setAutoSearch,
@@ -760,6 +780,11 @@ export function ChatLayout() {
           onDeleteResource: (resourceId) => {
             void chat.deletePersonalResource(resourceId).catch((error: unknown) =>
               toast.error(error instanceof Error ? error.message : "Failed to delete file"),
+            );
+          },
+          onUploadPersonalFiles: (files) => {
+            void chat.uploadPersonalResources(files).catch((error: unknown) =>
+              toast.error(error instanceof Error ? error.message : "Failed to upload file"),
             );
           },
         }}
@@ -773,6 +798,8 @@ export function ChatLayout() {
           searchEnabled: chat.lastAutoResult?.searchEnabled,
         }}
       />
+
+      {!chat.sidebarOpen ? <div className="md:hidden"><GlobalUtilityDock placement="floating" /></div> : null}
 
       <GuidedTour
         open={tourOpen}

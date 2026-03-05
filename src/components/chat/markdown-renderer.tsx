@@ -148,9 +148,15 @@ function extractImagePayload(content: string) {
   return { src, alt, prompt };
 }
 
+function normalizeMathDelimiters(value: string) {
+  return value
+    .replace(/\\\[((?:.|\n)+?)\\\]/g, (_match, expr: string) => `\n$$\n${expr.trim()}\n$$\n`)
+    .replace(/\\\((.+?)\\\)/g, (_match, expr: string) => `$${String(expr).trim()}$`);
+}
+
 export function MarkdownRenderer({ content, citations = [], mode, chatId, onOpenCanvas, onCitationClick, onSubmitQuizAnswers }: MarkdownRendererProps) {
   const cleanContent = useMemo(() => {
-    let baseContent = content;
+    let baseContent = normalizeMathDelimiters(content);
     if (mode === "quiz" || mode === "exam" || isQuizContent(content)) {
       baseContent = stripQuizMarkers(baseContent);
     }
@@ -283,7 +289,7 @@ export function MarkdownRenderer({ content, citations = [], mode, chatId, onOpen
                     }
                     className="mx-0.5 inline-flex cursor-pointer items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 py-0 text-[10px] font-medium text-[var(--accent-cyan)] no-underline transition hover:bg-[var(--bg-hover)]"
                   >
-                    {children}
+                    {citationIndex >= 0 ? `S${citationIndex + 1}` : children}
                   </a>
                 </sup>
               );

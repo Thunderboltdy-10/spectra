@@ -1,4 +1,3 @@
-import { MODEL_CONFIG } from "@/lib/model-config";
 import { openRouterChatCompletion, type OpenRouterMessage } from "@/lib/openrouter";
 import { markerVerificationPrompt } from "@/lib/prompts/policy";
 import type { RouteTraceFallback } from "@/types";
@@ -48,7 +47,7 @@ export async function runMarkerVerificationPipeline(params: {
   if (params.verificationModel) {
     const verify = await openRouterChatCompletion({
       model: params.verificationModel,
-      fallbackModels: [MODEL_CONFIG.tutorFast],
+      fallbackModels: params.fallbackModels,
       messages: [
         { role: "system", content: "Return strict JSON only." },
         { role: "user", content: markerVerificationPrompt(responseText) },

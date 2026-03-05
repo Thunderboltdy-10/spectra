@@ -8,9 +8,11 @@ import { useClerk, useUser } from "@clerk/nextjs";
 import { formatDistanceToNow } from "date-fns";
 import {
   BarChart3,
+  Bell,
   Bookmark,
   BookOpen,
   Bot,
+  CircleHelp,
   Compass,
   FileText,
   Flame,
@@ -28,6 +30,7 @@ import {
   Shield,
   Sparkles,
   Star,
+  Timer,
   Trash2,
   Trophy,
   UserRound,
@@ -43,6 +46,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { getModeConfig } from "@/lib/modes";
+import { cn } from "@/lib/utils";
 import type { Chat, UserSpending } from "@/hooks/use-chat-state";
 
 type GroupedChats = {
@@ -51,8 +55,6 @@ type GroupedChats = {
 };
 
 const EMPTY_PINNED_IDS = new Set<string>();
-const CHAT_ROW_ESTIMATE_PX = 46;
-const CHAT_LIST_CHROME_PX = 360;
 
 const BASE_PRIMARY_NAV_ITEMS = [
   { href: "/", label: "Chat", icon: Sparkles },
@@ -115,11 +117,6 @@ function groupChats(chats: Chat[]): GroupedChats[] {
     .filter((g) => g.chats.length > 0);
 }
 
-function estimateVisibleChatCount(viewportHeight: number) {
-  const available = Math.max(300, viewportHeight - CHAT_LIST_CHROME_PX);
-  return Math.max(8, Math.ceil(available / CHAT_ROW_ESTIMATE_PX));
-}
-
 function initials(name: string) {
   return name
     .split(" ")
@@ -172,9 +169,6 @@ export function ChatSidebar({
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
   const [logoLoadFailed, setLogoLoadFailed] = useState(false);
-  const [visibleChatCount, setVisibleChatCount] = useState(() =>
-    typeof window === "undefined" ? 10 : estimateVisibleChatCount(window.innerHeight),
-  );
   const [activityCutoffTs, setActivityCutoffTs] = useState<number | null>(null);
   const [gamification, setGamification] = useState<{
     currentStreak: number;
@@ -188,7 +182,6 @@ export function ChatSidebar({
     lastActiveDate: null,
   });
   const chatScrollRef = useRef<HTMLDivElement>(null);
-  const chatLoadSentinelRef = useRef<HTMLDivElement>(null);
   const pageNavScrollRef = useRef<HTMLDivElement>(null);
   const pinnedSet = pinnedChatIds ?? EMPTY_PINNED_IDS;
 
@@ -205,13 +198,22 @@ export function ChatSidebar({
     return chats.filter((chat) => chat.updatedAt >= activityCutoffTs).length;
   }, [activityCutoffTs, chats]);
 
-  const usageRatioFromBudget = userSpending && typeof userSpending.budgetUsagePercent === "number" && userSpending.budgetUsagePercent >= 0
-    ? Math.min(1, Math.max(0, userSpending.budgetUsagePercent / 100))
+  const usagePercentFromSpending = userSpending
+    ? (typeof userSpending.tokenUsagePercent === "number" && userSpending.tokenUsagePercent >= 0
+      ? userSpending.tokenUsagePercent
+      : typeof userSpending.budgetUsagePercent === "number" && userSpending.budgetUsagePercent >= 0
+        ? userSpending.budgetUsagePercent
+        : typeof userSpending.activityUsagePercent === "number" && userSpending.activityUsagePercent >= 0
+          ? userSpending.activityUsagePercent
+          : null)
     : null;
-  const usageRatioFromActivity = recentChatCount > 0
+  const usageRatioFromSpending = typeof usagePercentFromSpending === "number"
+    ? Math.min(1, Math.max(0, usagePercentFromSpending / 100))
+    : null;
+  const usageRatioFromActivity = !userSpending && recentChatCount > 0
     ? Math.min(1, recentChatCount / 50)
     : null;
-  const usageRatio = usageRatioFromBudget ?? usageRatioFromActivity;
+  const usageRatio = usageRatioFromSpending ?? usageRatioFromActivity;
   const usagePercent = typeof usageRatio === "number"
     ? Math.max(0, Math.min(100, Math.round(usageRatio * 1000) / 10))
     : null;
@@ -221,7 +223,7 @@ export function ChatSidebar({
       : `${Number.isInteger(usagePercent) ? usagePercent.toFixed(0) : usagePercent.toFixed(1)}%`
     : "No data";
   const usageStatus =
-    typeof usagePercent !== "number"
+    typeof usagePercent !== "number" || (userSpending && (userSpending.monthlyEvents ?? 0) === 0 && (userSpending.monthlyTokens ?? 0) === 0)
       ? "No activity yet"
       : usagePercent >= 80
         ? "High activity"
@@ -232,7 +234,6 @@ export function ChatSidebar({
             : "No activity yet";
   const canAccessSchoolAdmin = role === "admin" || isSuperAdmin;
   const canAccessAdminConsole = role === "admin" || isSuperAdmin;
-
   const primaryNavItems = BASE_PRIMARY_NAV_ITEMS;
   const secondaryNavItems = [
     { href: "/models", label: "Models", icon: Compass },
@@ -250,21 +251,6 @@ export function ChatSidebar({
   const allNavItems = [...orderedPrimaryNavItems, ...secondaryNavItems].filter(
     (item, index, all) => all.findIndex((candidate) => candidate.href === item.href) === index,
   );
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    setVisibleChatCount(estimateVisibleChatCount(window.innerHeight));
-  }, [search]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const handleResize = () => {
-      const next = estimateVisibleChatCount(window.innerHeight);
-      setVisibleChatCount((prev) => Math.max(prev, next));
-    };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
-
   const refreshGamification = useCallback(async () => {
     try {
       const response = await fetch("/api/gamification");
@@ -307,53 +293,34 @@ export function ChatSidebar({
 
   const pinned = useMemo(() => chats.filter((chat) => pinnedSet.has(chat._id)), [chats, pinnedSet]);
   const nonPinnedChats = useMemo(() => chats.filter((chat) => !pinnedSet.has(chat._id)), [chats, pinnedSet]);
-  const selectedNonPinnedIndex = useMemo(
-    () => nonPinnedChats.findIndex((chat) => chat._id === selectedChatId),
-    [nonPinnedChats, selectedChatId],
-  );
-  const effectiveVisibleCount = selectedNonPinnedIndex >= 0
-    ? Math.max(visibleChatCount, selectedNonPinnedIndex + 1)
-    : visibleChatCount;
   const grouped = useMemo(() => groupChats(nonPinnedChats), [nonPinnedChats]);
-  const visibleGrouped = useMemo(() => {
-    let remaining = effectiveVisibleCount;
-    const limited: GroupedChats[] = [];
-    for (const group of grouped) {
-      if (remaining <= 0) break;
-      const chatsForGroup = group.chats.slice(0, remaining);
-      if (chatsForGroup.length > 0) {
-        limited.push({
-          heading: group.heading,
-          chats: chatsForGroup,
-        });
-        remaining -= chatsForGroup.length;
-      }
-    }
-    return limited;
-  }, [effectiveVisibleCount, grouped]);
-  const totalUnpinnedChats = nonPinnedChats.length;
-  const hasMoreChats = effectiveVisibleCount < totalUnpinnedChats;
-
-  useEffect(() => {
-    if (!hasMoreChats) return;
-    const root = chatScrollRef.current;
-    const target = chatLoadSentinelRef.current;
-    if (!root || !target) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries.some((entry) => entry.isIntersecting)) return;
-        setVisibleChatCount((prev) => Math.min(totalUnpinnedChats, prev + 10));
-      },
-      {
-        root,
-        rootMargin: "180px 0px",
-      },
-    );
-
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [hasMoreChats, totalUnpinnedChats]);
+  const visibleGrouped = grouped;
+  const collapsedUtilityActions = [
+    {
+      id: "notifications",
+      title: "Notifications",
+      Icon: Bell,
+      action: () => window.dispatchEvent(new Event("ai-school:open-notifications")),
+    },
+    {
+      id: "timer",
+      title: "Focus timer",
+      Icon: Timer,
+      action: () => window.dispatchEvent(new CustomEvent("ai-school:open-focus-timer")),
+    },
+    {
+      id: "feedback",
+      title: "Feedback",
+      Icon: MessageSquare,
+      action: () => window.dispatchEvent(new CustomEvent("ai-school:open-feedback")),
+    },
+    {
+      id: "help",
+      title: "Info & tour",
+      Icon: CircleHelp,
+      action: () => window.dispatchEvent(new CustomEvent("ai-school:open-tour")),
+    },
+  ] as const;
 
   if (collapsed) {
     return (
@@ -376,6 +343,9 @@ export function ChatSidebar({
           )}
           <Button type="button" variant="ghost" size="icon" className="h-8.5 w-8.5" onClick={onToggleCollapse} aria-label="Expand sidebar">
             <PanelLeftOpen className="h-4 w-4" />
+          </Button>
+          <Button type="button" variant="ghost" size="icon" className="h-8.5 w-8.5" onClick={onNewChat} aria-label="New chat">
+            <Plus className="h-4 w-4" />
           </Button>
         </div>
 
@@ -402,9 +372,22 @@ export function ChatSidebar({
         </div>
 
         <div className="mt-3 flex flex-col items-center gap-2">
+          <div className="mb-1 grid grid-cols-2 gap-1">
+            {collapsedUtilityActions.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                title={item.title}
+                onClick={item.action}
+                className="inline-flex h-8.5 w-8.5 cursor-pointer items-center justify-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              >
+                <item.Icon className="h-4 w-4" />
+              </button>
+            ))}
+          </div>
           <div className="mb-1 flex flex-col items-center gap-1 text-[10px] text-[var(--text-secondary)]">
             <span className="inline-flex items-center gap-1" title="Current streak">
-              <Flame className="h-3 w-3 text-[var(--accent-coral)]" />
+              <Flame className={cn("h-3 w-3", gamification.currentStreak > 0 ? "animate-pulse text-[#ef4444]" : "text-[var(--text-secondary)]")} />
               {gamification.currentStreak}
             </span>
             <span className="inline-flex items-center gap-1" title="Total XP">
@@ -412,8 +395,15 @@ export function ChatSidebar({
               {gamification.totalXp}
             </span>
           </div>
-          <Button type="button" variant="secondary" size="icon" className="h-9.5 w-9.5" onClick={onNewChat} aria-label="New chat">
-            <Plus className="h-4 w-4" />
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            className="h-9.5 w-9.5 rounded-xl"
+            onClick={onOpenSettings}
+            aria-label="Open settings"
+          >
+            <Settings2 className="h-4 w-4" />
           </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -671,11 +661,13 @@ export function ChatSidebar({
             </div>
           ))}
         </div>
-        {hasMoreChats ? <div ref={chatLoadSentinelRef} className="h-8" aria-hidden /> : null}
       </div>
 
       <div className="group mt-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2.5 shadow-[var(--shadow-soft)]">
-        <GlobalUtilityDock placement="profile-bar" className="mb-2" />
+        <div className="mb-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-1.5">
+          <GlobalUtilityDock placement="profile-bar" className="w-full" />
+        </div>
+
         <div className="flex items-center gap-2.5">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -708,43 +700,46 @@ export function ChatSidebar({
           </Button>
         </div>
 
-        <div className="pointer-events-none mt-2 max-h-0 overflow-hidden opacity-0 transition-all duration-300 group-hover:pointer-events-auto group-hover:max-h-[20rem] group-hover:opacity-100">
-          <div className="mb-2 flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)]">
-            <span
-              className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5"
-              title="Current streak"
-            >
-              <Flame className="h-3 w-3 text-[var(--accent-coral)]" />
-              {gamification.currentStreak}
-            </span>
-            <span
-              className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5"
-              title="Total XP"
-            >
-              <Star className="h-3 w-3 text-[var(--warning)]" />
-              {gamification.totalXp}
-            </span>
+        <div className="mt-2 grid overflow-hidden transition-[grid-template-rows] duration-300 ease-[var(--ease-standard)] [grid-template-rows:0fr] group-hover:[grid-template-rows:1fr]">
+          <div className="min-h-0 overflow-hidden">
+            <div className="translate-y-2 opacity-0 transition-all duration-300 ease-[var(--ease-standard)] group-hover:translate-y-0 group-hover:opacity-100">
+              <div className="mb-2 flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)]">
+                <span
+                  className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5"
+                  title="Current streak"
+                >
+                  <Flame className={cn("h-3 w-3", gamification.currentStreak > 0 ? "animate-pulse text-[#ef4444]" : "text-[var(--text-secondary)]")} />
+                  {gamification.currentStreak}
+                </span>
+                <span
+                  className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5"
+                  title="Total XP"
+                >
+                  <Star className="h-3 w-3 text-[var(--warning)]" />
+                  {gamification.totalXp}
+                </span>
+              </div>
+              {userMemorySummary && (
+                <p className="mb-3 line-clamp-2 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2 text-[11px] text-[var(--text-secondary)]">
+                  {userMemorySummary}
+                </p>
+              )}
+              <div className="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+                <span>Monthly activity</span>
+                <span>{usagePercentLabel}</span>
+              </div>
+              <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
+                <div
+                  className="h-full rounded-full transition-all"
+                  style={{
+                    width: `${typeof usagePercent === "number" ? Math.max(usagePercent > 0 ? 3 : 0, usagePercent) : 0}%`,
+                    background: "var(--gradient-brand)",
+                  }}
+                />
+              </div>
+              <p className="text-[11px] text-[var(--text-secondary)]">{usageStatus}</p>
+            </div>
           </div>
-          {userMemorySummary && (
-            <p className="mb-3 line-clamp-2 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2 text-[11px] text-[var(--text-secondary)]">
-              {userMemorySummary}
-            </p>
-          )}
-
-          <div className="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-            <span>Monthly activity</span>
-            <span>{usagePercentLabel}</span>
-          </div>
-          <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
-            <div
-              className="h-full rounded-full transition-all"
-              style={{
-                width: `${typeof usagePercent === "number" ? Math.max(usagePercent > 0 ? 3 : 0, usagePercent) : 0}%`,
-                background: "var(--gradient-brand)",
-              }}
-            />
-          </div>
-          <p className="mb-3 text-[11px] text-[var(--text-secondary)]">{usageStatus}</p>
         </div>
       </div>
     </div>

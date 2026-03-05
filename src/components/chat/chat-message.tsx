@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
+import { RichText } from "@/components/chat/rich-text";
 import { ModelRoutingBadge } from "@/components/chat/model-routing-badge";
 import { ProviderLogo } from "@/components/provider-logo";
 import { ThinkingBlock } from "@/components/chat/thinking-block";
@@ -83,57 +84,61 @@ function CitationCards({ citations, onOpen }: { citations: Citation[]; onOpen: (
   ).slice(0, 5);
 
   return (
-    <section className="mt-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2.5">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Sources</p>
+    <section className="mt-8 border-t border-[var(--border-default)] pt-4">
+      <div className="mb-3 flex items-center justify-between gap-2 border-b border-[var(--border-default)] pb-2">
+        <p className="text-sm font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Sources</p>
         <button
           type="button"
           onClick={onOpen}
-          className="cursor-pointer rounded-full border border-[var(--border-default)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+          className="cursor-pointer rounded-md border border-[var(--border-default)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
         >
           Open all
         </button>
       </div>
       {ragFiles.length > 0 ? (
-        <p className="mb-2 text-[11px] text-[var(--text-secondary)]">
+        <p className="mb-3 text-[11px] text-[var(--text-secondary)]">
           Files used: {ragFiles.join(", ")}
         </p>
       ) : null}
-      <div className="flex flex-wrap gap-1.5">
-      {citations.map((citation, idx) => {
-        const isSearch = citation.sourceType === "search";
-        const href = sanitizeNavigationHref(
-          citation.url ?? (citation.resourceId ? `/api/resources/${citation.resourceId}/download` : undefined),
-        );
-        const label = citation.title || citation.filename || citation.domain || citation.url || "Source";
-        const domain = citation.domain;
-        return (
-          <a
-            key={`${citation.filename}-${idx}`}
-            href={href ?? "#"}
-            onClick={(event) => {
-              if (!href) {
-                event.preventDefault();
-                onOpen();
-              }
-            }}
-            target={href ? "_blank" : undefined}
-            rel={href ? "noreferrer" : undefined}
-            className={`cursor-pointer rounded-full border px-2.5 py-1 text-left text-[11px] transition hover:bg-[var(--bg-hover)] ${
-              isSearch
-                ? "border-[color-mix(in_oklab,var(--accent-cyan)_38%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_10%,transparent)]"
-                : "border-[var(--border-default)] bg-[var(--bg-secondary)]"
-            }`}
-          >
-            <div className="mb-0.5 flex items-center gap-1 text-[var(--text-secondary)]">
-              {isSearch ? <Globe className="h-2.5 w-2.5" /> : <Code2 className="h-2.5 w-2.5" />}
-              <span className="uppercase tracking-[0.06em]">[{idx + 1}]</span>
-            </div>
-            <p className="truncate font-medium text-[var(--text-primary)]">{label}</p>
-            {isSearch && domain ? <p className="truncate text-[10px] text-[var(--text-secondary)]">{domain}</p> : null}
-          </a>
-        );
-      })}
+      <div className="grid gap-2 sm:grid-cols-2">
+        {citations.map((citation, idx) => {
+          const isSearch = citation.sourceType === "search";
+          const href = sanitizeNavigationHref(
+            citation.url ?? (citation.resourceId ? `/api/resources/${citation.resourceId}/download` : undefined),
+          );
+          const label = citation.title || citation.filename || citation.domain || citation.url || "Source";
+          const domain = citation.domain;
+          return (
+            <a
+              key={`${citation.filename}-${idx}`}
+              href={href ?? "#"}
+              onClick={(event) => {
+                if (!href) {
+                  event.preventDefault();
+                  onOpen();
+                }
+              }}
+              target={href ? "_blank" : undefined}
+              rel={href ? "noreferrer" : undefined}
+              className={`flex min-h-[4.75rem] max-w-full cursor-pointer items-start gap-2 rounded-md border px-2.5 py-2 text-[11px] transition hover:bg-[var(--bg-hover)] ${
+                isSearch
+                  ? "border-[color-mix(in_oklab,var(--accent-cyan)_38%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_10%,transparent)]"
+                  : "border-[var(--border-default)] bg-[var(--bg-secondary)]"
+              }`}
+              title={label}
+            >
+              {isSearch ? <Globe className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : <Code2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
+              <span className="min-w-0">
+                <span className="line-clamp-2 block font-medium text-[var(--text-primary)]">
+                  Source {idx + 1}: {label}
+                </span>
+                {isSearch && domain ? (
+                  <span className="mt-1 block truncate text-[10px] text-[var(--text-secondary)]">{domain}</span>
+                ) : null}
+              </span>
+            </a>
+          );
+        })}
       </div>
     </section>
   );
@@ -223,32 +228,9 @@ export function ChatMessage({
       className={cn("chat-fade-in flex", isUser ? "justify-end" : "justify-start")}
       aria-label={isUser ? "Your message" : "Assistant response"}
     >
-      <div className={cn("w-full", isUser ? "max-w-3xl" : "max-w-6xl")}>
+      <div className={cn("w-full", isUser ? "max-w-3xl" : "max-w-5xl xl:max-w-6xl")}>
         {isUser ? (
           <div className="ml-auto rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3 shadow-[var(--shadow-soft)]">
-            <div className="mb-1 flex items-center gap-2">
-              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[var(--accent-cyan)] text-[11px] font-bold text-white">
-                U
-              </span>
-              <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-                {showEnhanced && hasEnhanced ? "Enhanced" : "You"}
-              </span>
-              {timeLabel ? (
-                <>
-                  <span className="text-[10px] text-[var(--text-secondary)]">·</span>
-                  <span className="text-[10px] text-[var(--text-secondary)]">{timeLabel}</span>
-                </>
-              ) : null}
-              {hasEnhanced ? (
-                <button
-                  type="button"
-                  onClick={() => setShowEnhanced((prev) => !prev)}
-                  className="cursor-pointer text-[10px] text-[var(--text-secondary)] underline underline-offset-2 transition hover:text-[var(--text-primary)]"
-                >
-                  {showEnhanced ? "Show original" : "See enhanced prompt"}
-                </button>
-              ) : null}
-            </div>
             {editing ? (
               <div className="space-y-2">
                 <textarea
@@ -266,20 +248,20 @@ export function ChatMessage({
                 </div>
               </div>
             ) : (
-              <p className="whitespace-pre-wrap text-[15px] leading-7 text-[var(--text-primary)]">{displayUserContent}</p>
+              <RichText content={displayUserContent} className="text-[15px] leading-7 text-[var(--text-primary)]" />
             )}
             {attachmentPreviews && attachmentPreviews.length > 0 ? (
-              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                 {attachmentPreviews.map((attachment, index) => {
                   const extension = attachment.name.split(".").pop()?.toUpperCase().slice(0, 5) || "FILE";
                   if (attachment.isImage && attachment.thumbnailUrl) {
                     return (
                       <div
                         key={`${attachment.name}-${index}`}
-                        className="overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]"
+                        className="overflow-hidden rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)]"
                       >
                         <div
-                          className="flex h-32 w-full items-center justify-center bg-[size:16px_16px]"
+                          className="flex h-40 w-full items-center justify-center bg-[size:16px_16px]"
                           style={{
                             backgroundImage:
                               "linear-gradient(45deg, rgba(148,163,184,0.16) 25%, transparent 25%, transparent 75%, rgba(148,163,184,0.16) 75%, rgba(148,163,184,0.16)), linear-gradient(45deg, rgba(148,163,184,0.16) 25%, transparent 25%, transparent 75%, rgba(148,163,184,0.16) 75%, rgba(148,163,184,0.16))",
@@ -294,39 +276,40 @@ export function ChatMessage({
                             className="h-full w-full object-contain"
                           />
                         </div>
-                        <p className="truncate px-2 py-1 text-[10px] text-[var(--text-secondary)]">{attachment.name}</p>
+                        <p className="truncate px-2.5 py-1.5 text-[11px] text-[var(--text-secondary)]">{attachment.name}</p>
                       </div>
                     );
                   }
                   return (
                     <div
                       key={`${attachment.name}-${index}`}
-                      className="flex items-center gap-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2"
+                      className="flex min-h-[4.75rem] items-center gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5"
                     >
-                      <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-1 text-[9px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
-                        <FileText className="mr-1 h-2.5 w-2.5" />
+                      <span className="inline-flex h-8 min-w-8 items-center justify-center rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-1 text-[9px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                        <FileText className="mr-1 h-3 w-3" />
                         {extension}
                       </span>
-                      <p className="truncate text-[11px] text-[var(--text-secondary)]">{attachment.name}</p>
+                      <p className="line-clamp-2 text-[12px] text-[var(--text-secondary)]">{attachment.name}</p>
                     </div>
                   );
                 })}
               </div>
             ) : attachments && attachments.length > 0 ? (
-              <div className="mt-2 flex flex-wrap gap-1.5">
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {attachments.map((name) => (
                   <span
                     key={name}
-                    className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]"
+                    className="inline-flex min-h-[3.5rem] items-center gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[12px] text-[var(--text-secondary)]"
                   >
-                    <Paperclip className="h-3 w-3" />
+                    <Paperclip className="h-3.5 w-3.5" />
                     {name}
                   </span>
                 ))}
               </div>
             ) : null}
-            {(onEdit || onBranch) && !editing ? (
-              <div className="mt-1 flex items-center gap-1.5">
+            {!editing ? (
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-1.5">
                 {onEdit ? (
                   <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setEditing(true)}>
                     <Pencil className="h-3.5 w-3.5" />
@@ -339,6 +322,17 @@ export function ChatMessage({
                     Branch
                   </Button>
                 ) : null}
+                {hasEnhanced ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowEnhanced((prev) => !prev)}
+                    className="cursor-pointer rounded-md border border-[var(--border-default)] px-2 py-1 text-[10px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+                  >
+                    {showEnhanced ? "Show original" : "Show enhanced"}
+                  </button>
+                ) : null}
+                </div>
+                {timeLabel ? <span className="text-[11px] text-[var(--text-secondary)]">{timeLabel}</span> : null}
               </div>
             ) : null}
           </div>
@@ -382,10 +376,10 @@ export function ChatMessage({
                           href={href}
                           target="_blank"
                           rel="noreferrer"
-                          className="cursor-pointer rounded-full border border-[var(--border-default)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                          className="cursor-pointer rounded-md border border-[var(--border-default)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                           title={citation.domain ?? citation.filename}
                         >
-                          [{index + 1}] {citation.title || citation.filename}
+                          Source {index + 1}: {citation.title || citation.filename}
                         </a>
                       );
                     })}

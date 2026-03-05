@@ -19,7 +19,7 @@ export type TaskNode = {
   result?: string;
   tokens?: number;
   durationMs?: number;
-  status: "pending" | "running" | "done" | "failed";
+  status: "pending" | "running" | "done" | "failed" | "skipped";
 };
 
 type BuildTaskGraphContext = {
@@ -52,12 +52,15 @@ export function shouldUseMultiAgent(
   const normalizedComplexity = normalizeComplexityScore(complexity);
   const lower = prompt.toLowerCase();
   const multipart = /(^|\n)\s*(\d+\.|-|\*)\s+/.test(prompt) || /(first|second|finally|compare|contrast)/i.test(lower);
+  const longPrompt = prompt.length > 520;
   // Research mode: lower threshold — use multi-agent for anything non-simple
   if (mode === "research" && normalizedComplexity > 0.3) return true;
   // Explain mode: use multi-agent for complex prompts
   if (mode === "explain" && normalizedComplexity > 0.58) return true;
   if (mode === "exam" && multipart && normalizedComplexity > 0.58) return true;
   if (mode === "draft_coach" && /evidence|citation|sources?|counter-argument/i.test(lower) && normalizedComplexity > 0.52) return true;
+  if ((mode === "tutor" || mode === "general") && multipart && normalizedComplexity >= 0.72) return true;
+  if ((mode === "tutor" || mode === "general" || mode === "marker") && longPrompt && normalizedComplexity >= 0.82) return true;
   return false;
 }
 
@@ -240,7 +243,7 @@ export async function executeGraph(
         node.status === "pending" &&
         node.dependsOn.every((id) => {
           const dependencyStatus = byId.get(id)?.status;
-          return dependencyStatus === "done" || dependencyStatus === "failed";
+          return dependencyStatus === "done" || dependencyStatus === "failed" || dependencyStatus === "skipped";
         }),
     );
     if (ready.length === 0) break;
@@ -270,10 +273,10 @@ export async function executeGraph(
     );
   }
 
-  // Mark unresolved nodes as failed when execution halts due to budgets/time.
+  // Mark unresolved nodes as skipped when execution halts due to budgets/time.
   for (const node of byId.values()) {
     if (node.status === "pending" || node.status === "running") {
-      node.status = "failed";
+      node.status = "skipped";
       node.tokens = 0;
     }
   }

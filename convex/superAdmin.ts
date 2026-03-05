@@ -117,6 +117,221 @@ export const getGlobalStats = query({
   },
 });
 
+function normalizeModelLabel(modelId: string) {
+  return modelId
+    .replace(/:free$/i, "")
+    .replace(/[\s(_-]*\bfree\b[\s)_-]*/gi, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function weekStartFromDay(day: string) {
+  const base = new Date(`${day}T00:00:00.000Z`);
+  if (Number.isNaN(base.getTime())) return day;
+  const weekday = base.getUTCDay() || 7;
+  base.setUTCDate(base.getUTCDate() - weekday + 1);
+  return base.toISOString().slice(0, 10);
+}
+
+export const getUsageOverview = query({
+  args: {
+    actorClerkId: v.string(),
+    days: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx, args.actorClerkId);
+    const days = Math.max(7, Math.min(args.days ?? 30, 180));
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+    const [events, users, orgs, catalog] = await Promise.all([
+      ctx.db.query("usageEvents").collect(),
+      ctx.db.query("users").collect(),
+      ctx.db.query("orgs").collect(),
+      ctx.db.query("modelCatalog").collect(),
+    ]);
+    const filtered = events.filter((event) => event.day >= cutoff);
+    const pricingByOrgModel = new Map(
+      catalog.map((row) => [
+        `${String(row.orgId)}::${row.modelId}`,
+        {
+          inputCostPerM: row.inputCostPerM,
+          outputCostPerM: row.outputCostPerM,
+          isFree: row.isFree ?? false,
+        },
+      ]),
+    );
+
+    const totals = {
+      events: 0,
+      totalTokens: 0,
+      totalCostCents: 0,
+      effectiveCostCents: 0,
+      estimatedCostCents: 0,
+      unpricedEvents: 0,
+    };
+    const byDay = new Map<string, { day: string; events: number; totalTokens: number; totalCostCents: number; effectiveCostCents: number; userIds: Set<string> }>();
+    const byWeek = new Map<string, { weekStart: string; events: number; totalTokens: number; totalCostCents: number; effectiveCostCents: number }>();
+    const byModel = new Map<string, { modelId: string; events: number; totalTokens: number; totalCostCents: number; effectiveCostCents: number }>();
+    const byUser = new Map<string, { userId: string; events: number; totalTokens: number; totalCostCents: number; effectiveCostCents: number; byModel: Map<string, number> }>();
+    const byOrg = new Map<string, { orgId: string; events: number; totalTokens: number; totalCostCents: number; effectiveCostCents: number }>();
+
+    for (const event of filtered) {
+      const safeTokens = Math.max(0, event.totalTokens ?? 0);
+      const safeCost = Math.max(0, event.costCents ?? 0);
+      const pricing = pricingByOrgModel.get(`${String(event.orgId)}::${event.model}`);
+      const inputCostPerM = typeof pricing?.inputCostPerM === "number" ? pricing.inputCostPerM : 0;
+      const outputCostPerM = typeof pricing?.outputCostPerM === "number" ? pricing.outputCostPerM : 0;
+      const estimatedCost = safeCost > 0 || pricing?.isFree
+        ? 0
+        : (
+            ((Math.max(0, event.inputTokens ?? 0) / 1_000_000) * inputCostPerM) +
+            ((Math.max(0, event.outputTokens ?? 0) / 1_000_000) * outputCostPerM)
+          ) * 100;
+      const effectiveCost = safeCost > 0 ? safeCost : Math.max(0, estimatedCost);
+      totals.events += 1;
+      totals.totalTokens += safeTokens;
+      totals.totalCostCents += safeCost;
+      totals.effectiveCostCents += effectiveCost;
+      if (safeCost === 0 && effectiveCost > 0) {
+        totals.estimatedCostCents += effectiveCost;
+      }
+      if (safeCost === 0 && safeTokens > 0) {
+        totals.unpricedEvents += 1;
+      }
+
+      const dayBucket = byDay.get(event.day) ?? {
+        day: event.day,
+        events: 0,
+        totalTokens: 0,
+        totalCostCents: 0,
+        effectiveCostCents: 0,
+        userIds: new Set<string>(),
+      };
+      dayBucket.events += 1;
+      dayBucket.totalTokens += safeTokens;
+      dayBucket.totalCostCents += safeCost;
+      dayBucket.effectiveCostCents += effectiveCost;
+      dayBucket.userIds.add(event.userId);
+      byDay.set(event.day, dayBucket);
+
+      const weekStart = weekStartFromDay(event.day);
+      const weekBucket = byWeek.get(weekStart) ?? {
+        weekStart,
+        events: 0,
+        totalTokens: 0,
+        totalCostCents: 0,
+        effectiveCostCents: 0,
+      };
+      weekBucket.events += 1;
+      weekBucket.totalTokens += safeTokens;
+      weekBucket.totalCostCents += safeCost;
+      weekBucket.effectiveCostCents += effectiveCost;
+      byWeek.set(weekStart, weekBucket);
+
+      const modelBucket = byModel.get(event.model) ?? {
+        modelId: event.model,
+        events: 0,
+        totalTokens: 0,
+        totalCostCents: 0,
+        effectiveCostCents: 0,
+      };
+      modelBucket.events += 1;
+      modelBucket.totalTokens += safeTokens;
+      modelBucket.totalCostCents += safeCost;
+      modelBucket.effectiveCostCents += effectiveCost;
+      byModel.set(event.model, modelBucket);
+
+      const userBucket = byUser.get(event.userId) ?? {
+        userId: event.userId,
+        events: 0,
+        totalTokens: 0,
+        totalCostCents: 0,
+        effectiveCostCents: 0,
+        byModel: new Map<string, number>(),
+      };
+      userBucket.events += 1;
+      userBucket.totalTokens += safeTokens;
+      userBucket.totalCostCents += safeCost;
+      userBucket.effectiveCostCents += effectiveCost;
+      userBucket.byModel.set(event.model, (userBucket.byModel.get(event.model) ?? 0) + safeTokens);
+      byUser.set(event.userId, userBucket);
+
+      const orgBucket = byOrg.get(event.orgId) ?? {
+        orgId: event.orgId,
+        events: 0,
+        totalTokens: 0,
+        totalCostCents: 0,
+        effectiveCostCents: 0,
+      };
+      orgBucket.events += 1;
+      orgBucket.totalTokens += safeTokens;
+      orgBucket.totalCostCents += safeCost;
+      orgBucket.effectiveCostCents += effectiveCost;
+      byOrg.set(event.orgId, orgBucket);
+    }
+
+    const userById = new Map(users.map((user) => [String(user._id), user]));
+    const orgById = new Map(orgs.map((org) => [String(org._id), org]));
+
+    return {
+      days,
+      totals,
+      byDay: [...byDay.values()]
+        .sort((a, b) => a.day.localeCompare(b.day))
+        .map((row) => ({
+          day: row.day,
+          events: row.events,
+          totalTokens: row.totalTokens,
+          totalCostCents: row.totalCostCents,
+          effectiveCostCents: Number(row.effectiveCostCents.toFixed(6)),
+          uniqueUsers: row.userIds.size,
+        })),
+      byWeek: [...byWeek.values()].sort((a, b) => a.weekStart.localeCompare(b.weekStart)),
+      topModels: [...byModel.values()]
+        .sort((a, b) => b.totalTokens - a.totalTokens || b.effectiveCostCents - a.effectiveCostCents)
+        .slice(0, 12)
+        .map((model) => ({
+          ...model,
+          effectiveCostCents: Number(model.effectiveCostCents.toFixed(6)),
+          modelLabel: normalizeModelLabel(model.modelId),
+        })),
+      topUsers: [...byUser.values()]
+        .sort((a, b) => b.totalTokens - a.totalTokens || b.effectiveCostCents - a.effectiveCostCents)
+        .slice(0, 15)
+        .map((row) => {
+          const user = userById.get(String(row.userId));
+          return {
+            userId: row.userId,
+            name: user?.name ?? "Unknown user",
+            email: user?.email ?? "unknown",
+            role: user?.role ?? "student",
+            orgName: user ? (orgById.get(String(user.orgId))?.name ?? "Unknown school") : "Unknown school",
+            events: row.events,
+            totalTokens: row.totalTokens,
+            totalCostCents: row.totalCostCents,
+            effectiveCostCents: Number(row.effectiveCostCents.toFixed(6)),
+            topModels: [...row.byModel.entries()]
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 3)
+              .map(([modelId, tokens]) => ({
+                modelId,
+                modelLabel: normalizeModelLabel(modelId),
+                tokens,
+              })),
+          };
+        }),
+      topOrgs: [...byOrg.values()]
+        .sort((a, b) => b.totalTokens - a.totalTokens || b.effectiveCostCents - a.effectiveCostCents)
+        .slice(0, 12)
+        .map((row) => ({
+          ...row,
+          effectiveCostCents: Number(row.effectiveCostCents.toFixed(6)),
+          orgName: orgById.get(String(row.orgId))?.name ?? "Unknown school",
+        })),
+    };
+  },
+});
+
 /**
  * Get storage statistics across the platform.
  * Note: file size tracking comes from `resources.size` metadata.

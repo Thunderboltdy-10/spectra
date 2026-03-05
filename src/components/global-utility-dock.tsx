@@ -1,9 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { Bug, Loader2, MessageSquare, ShieldAlert, Sparkles, Upload, X, CircleHelp, Timer } from "lucide-react";
+import {
+  Bug,
+  CircleHelp,
+  Loader2,
+  MessageSquare,
+  ShieldAlert,
+  Sparkles,
+  Timer,
+  Upload,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import dynamic from "next/dynamic";
 import { NotificationBell } from "@/components/notification-bell";
@@ -18,6 +28,14 @@ const StudyTimer = dynamic(
 
 const MAX_MESSAGE_LENGTH = 500;
 const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024;
+
+type UtilityPanel = "none" | "feedback" | "timer" | "info";
+
+type TimerSnapshot = {
+  display: string;
+  isRunning: boolean;
+  progress: number;
+};
 
 const CATEGORY_OPTIONS = [
   { value: "bug", label: "Bug", icon: Bug },
@@ -53,24 +71,84 @@ function formatFileSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
 }
 
+function UtilityActionButton(props: {
+  label: string;
+  active?: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  dataTour?: string;
+  ariaLabel?: string;
+  progress?: number;
+  buttonClassName?: string;
+}) {
+  const {
+    label,
+    active = false,
+    onClick,
+    icon,
+    dataTour,
+    ariaLabel,
+    progress,
+    buttonClassName,
+  } = props;
+  const progressWidth = Math.max(0, Math.min(100, Math.round((progress ?? 0) * 100)));
+
+  return (
+    <div className="group relative">
+      <Button
+        type="button"
+        variant="secondary"
+        size="icon"
+        className={cn(
+          "h-9.5 w-9.5 rounded-md border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]",
+          active && "text-[var(--text-primary)]",
+          buttonClassName,
+        )}
+        onClick={onClick}
+        data-tour={dataTour}
+        aria-label={ariaLabel ?? label}
+      >
+        {icon}
+      </Button>
+      <span className="pointer-events-none absolute -top-8 left-1/2 z-[95] -translate-x-1/2 rounded-md border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1 text-[10px] text-[var(--text-secondary)] opacity-0 shadow-[var(--shadow-soft)] transition group-hover:opacity-100">
+        {label}
+      </span>
+      {typeof progress === "number" && progressWidth > 0 ? (
+        <span className="pointer-events-none absolute -bottom-1 left-0 right-0 h-0.5 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
+          <span className="block h-full bg-[var(--accent-cyan)]" style={{ width: `${progressWidth}%` }} />
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 export function GlobalUtilityDock({ placement = "floating", className }: GlobalUtilityDockProps) {
   const { sidebarOpen } = useSidebar();
   const pathname = usePathname();
   const isAuthRoute = pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up") || pathname.startsWith("/join");
   const inProfileBar = placement === "profile-bar";
+
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const [desktopViewport, setDesktopViewport] = useState(false);
-  const [feedbackOpen, setFeedbackOpen] = useState(false);
-  const [timerOpen, setTimerOpen] = useState(false);
+  const [activePanel, setActivePanel] = useState<UtilityPanel>("none");
   const [category, setCategory] = useState<FeedbackCategory>("bug");
   const [message, setMessage] = useState("");
   const [screenshot, setScreenshot] = useState<File | null>(null);
   const [autoScreenshot, setAutoScreenshot] = useState<string | null>(null);
   const [chatContext, setChatContext] = useState<ChatFeedbackContext | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [timerSnapshot, setTimerSnapshot] = useState<TimerSnapshot | null>(null);
   const traceId = useMemo(
     () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `trace-${Date.now()}`),
     [],
   );
+
+  const feedbackOpen = activePanel === "feedback";
+  const timerOpen = activePanel === "timer";
+  const infoOpen = activePanel === "info";
+  const closeNotifications = useCallback(() => {
+    window.dispatchEvent(new Event("ai-school:close-notifications"));
+  }, []);
 
   useEffect(() => {
     const updateViewport = () => setDesktopViewport(window.innerWidth >= 768);
@@ -80,87 +158,128 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
   }, []);
 
   useEffect(() => {
-    if (feedbackOpen) {
-      let cancelled = false;
-      const onContextResponse = (e: Event) => {
-        setChatContext(((e as CustomEvent<ChatFeedbackContext>).detail ?? null));
-      };
-      window.addEventListener("ai-school:chat-context-response", onContextResponse);
-      window.dispatchEvent(new Event("ai-school:request-chat-context"));
-
-      import("html2canvas").then((mod) => {
-        if (cancelled) return;
-        mod.default(document.body, {
-          backgroundColor: "#ffffff",
-          scale: 0.8,
-          logging: false,
-          useCORS: false,
-        })
-          .then((canvas) => {
-            if (cancelled) return;
-            const dataUrl = canvas.toDataURL("image/jpeg", 0.5);
-            const payloadLength = dataUrl.length - "data:image/jpeg;base64,".length;
-            const byteEstimate = Math.ceil((payloadLength * 3) / 4);
-            if (byteEstimate <= MAX_SCREENSHOT_BYTES) {
-              setAutoScreenshot(dataUrl);
-            } else {
-              setAutoScreenshot(null);
-            }
-          })
-          .catch(() => {});
+    const onTimerState = (event: Event) => {
+      const detail = (event as CustomEvent<TimerSnapshot>).detail;
+      if (!detail) return;
+      setTimerSnapshot({
+        display: detail.display,
+        isRunning: Boolean(detail.isRunning),
+        progress: Number.isFinite(detail.progress) ? Math.max(0, Math.min(1, detail.progress)) : 0,
       });
+    };
+    window.addEventListener("ai-school:timer-state", onTimerState as EventListener);
+    return () => window.removeEventListener("ai-school:timer-state", onTimerState as EventListener);
+  }, []);
 
-      return () => {
-        cancelled = true;
-        window.removeEventListener("ai-school:chat-context-response", onContextResponse);
-      };
-    } else {
+  useEffect(() => {
+    if (activePanel === "none") return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!rootRef.current?.contains(target)) {
+        setActivePanel("none");
+        closeNotifications();
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [activePanel, closeNotifications]);
+
+  useEffect(() => {
+    if (!feedbackOpen) {
       setAutoScreenshot(null);
       setChatContext(null);
+      return;
     }
+
+    let cancelled = false;
+    const onContextResponse = (e: Event) => {
+      setChatContext(((e as CustomEvent<ChatFeedbackContext>).detail ?? null));
+    };
+    window.addEventListener("ai-school:chat-context-response", onContextResponse);
+    window.dispatchEvent(new Event("ai-school:request-chat-context"));
+
+    import("html2canvas").then((mod) => {
+      if (cancelled) return;
+      mod.default(document.body, {
+        backgroundColor: "#ffffff",
+        scale: 0.8,
+        logging: false,
+        useCORS: false,
+      })
+        .then((canvas) => {
+          if (cancelled) return;
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.5);
+          const payloadLength = dataUrl.length - "data:image/jpeg;base64,".length;
+          const byteEstimate = Math.ceil((payloadLength * 3) / 4);
+          if (byteEstimate <= MAX_SCREENSHOT_BYTES) {
+            setAutoScreenshot(dataUrl);
+          } else {
+            setAutoScreenshot(null);
+          }
+        })
+        .catch(() => {});
+    });
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("ai-school:chat-context-response", onContextResponse);
+    };
   }, [feedbackOpen]);
 
   useEffect(() => {
     const onOpenFeedback = () => {
-      setTimerOpen(false);
-      setFeedbackOpen(true);
+      closeNotifications();
+      setActivePanel("feedback");
     };
     const onOpenTimer = () => {
-      setFeedbackOpen(false);
-      setTimerOpen(true);
+      closeNotifications();
+      setActivePanel("timer");
+    };
+    const onOpenTour = () => {
+      closeNotifications();
+      setActivePanel("info");
     };
     window.addEventListener("ai-school:open-feedback", onOpenFeedback);
     window.addEventListener("ai-school:open-focus-timer", onOpenTimer);
+    window.addEventListener("ai-school:open-tour", onOpenTour);
     return () => {
       window.removeEventListener("ai-school:open-feedback", onOpenFeedback);
       window.removeEventListener("ai-school:open-focus-timer", onOpenTimer);
+      window.removeEventListener("ai-school:open-tour", onOpenTour);
     };
-  }, []);
+  }, [closeNotifications]);
 
   const remaining = MAX_MESSAGE_LENGTH - message.length;
-  const anchorTop = "1rem";
-  const dockStyle = desktopViewport
-    ? {
-        top: "auto",
-        right: "auto",
-        left: sidebarOpen ? "0.75rem" : "0.9rem",
-        bottom: "6.9rem",
-        width: sidebarOpen ? "calc(320px - 1.5rem)" : undefined,
-      }
-    : { top: anchorTop };
-  const panelStyle = desktopViewport
-    ? {
-        top: "auto",
-        right: "auto",
-        left: sidebarOpen ? "0.75rem" : "4.25rem",
-        bottom: "10.8rem",
-      }
-    : { top: `calc(${anchorTop} + 3.6rem)` };
+  const dockStyle = inProfileBar
+    ? undefined
+    : desktopViewport
+      ? {
+          top: "auto",
+          right: "auto",
+          left: sidebarOpen ? "0.75rem" : "0.9rem",
+          bottom: "6.9rem",
+          width: sidebarOpen ? "calc(320px - 1.5rem)" : undefined,
+        }
+      : {
+          right: "0.75rem",
+          bottom: "5.4rem",
+        };
+
+  const panelClassName = inProfileBar
+    ? "absolute bottom-[calc(100%+0.65rem)] left-0 z-[280]"
+    : desktopViewport
+      ? "absolute bottom-0 right-[calc(100%+0.8rem)] z-[280]"
+      : "absolute bottom-[calc(100%+0.65rem)] right-0 z-[280]";
 
   function resetFeedbackForm() {
     setCategory("bug");
     setMessage("");
     setScreenshot(null);
+  }
+
+  function togglePanel(panel: Exclude<UtilityPanel, "none">) {
+    closeNotifications();
+    setActivePanel((prev) => (prev === panel ? "none" : panel));
   }
 
   async function submitFeedback(event: React.FormEvent<HTMLFormElement>) {
@@ -196,20 +315,14 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
       form.set("traceId", traceId);
 
       const mode = inferModeFromPath(pathname);
-      if (mode) {
-        form.set("mode", mode);
-      }
-      if (screenshot) {
-        form.set("screenshot", screenshot);
-      }
+      if (mode) form.set("mode", mode);
+      if (screenshot) form.set("screenshot", screenshot);
       if (chatContext?.chatId) form.set("chatId", chatContext.chatId);
       if (chatContext?.lastMessage) form.set("lastMessage", chatContext.lastMessage);
       if (chatContext?.activeMode) form.set("activeMode", chatContext.activeMode);
       if (chatContext?.activeModel) form.set("activeModel", chatContext.activeModel);
       form.set("viewportSize", `${window.innerWidth}x${window.innerHeight}`);
-      if (autoScreenshot && !screenshot) {
-        form.set("autoScreenshot", autoScreenshot);
-      }
+      if (autoScreenshot && !screenshot) form.set("autoScreenshot", autoScreenshot);
 
       const response = await fetch("/api/feedback", {
         method: "POST",
@@ -229,7 +342,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
 
       toast.success("Feedback sent. Thank you.");
       resetFeedbackForm();
-      setFeedbackOpen(false);
+      setActivePanel("none");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to submit feedback");
     } finally {
@@ -241,16 +354,10 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
     return null;
   }
 
+  const timerChipVisible = Boolean(timerSnapshot?.isRunning || (timerSnapshot?.progress ?? 0) > 0.01);
+
   const feedbackPanel = (
-    <aside
-      className={cn(
-        "pointer-events-auto w-[min(92vw,24rem)] rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)]",
-        inProfileBar
-          ? "absolute bottom-[calc(100%+0.65rem)] left-1/2 z-[90] -translate-x-1/2"
-          : "fixed right-4 z-[78] sm:right-5",
-      )}
-      style={inProfileBar ? undefined : panelStyle}
-    >
+    <aside className={cn("w-[min(92vw,24rem)] rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)]", panelClassName)}>
       <div className="mb-3 flex items-center justify-between gap-2">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Feedback</p>
@@ -258,8 +365,8 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
         </div>
         <button
           type="button"
-          onClick={() => setFeedbackOpen(false)}
-          className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+          onClick={() => setActivePanel("none")}
+          className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
           aria-label="Close feedback form"
         >
           <X className="h-4 w-4" />
@@ -280,7 +387,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
                   key={option.value}
                   type="button"
                   onClick={() => setCategory(option.value)}
-                  className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-2 text-xs transition ${
+                  className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2.5 py-2 text-xs transition ${
                     active
                       ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,var(--bg-elevated))] text-[var(--text-primary)]"
                       : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
@@ -304,7 +411,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
             value={message}
             onChange={(event) => setMessage(event.target.value.slice(0, MAX_MESSAGE_LENGTH))}
             placeholder="What happened, what did you expect, and how can we improve?"
-            className="max-h-[190px] min-h-[110px] w-full resize-none overflow-y-auto rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
+            className="max-h-[190px] min-h-[110px] w-full resize-none overflow-y-auto rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus-visible:border-transparent focus-visible:ring-0"
             required
             maxLength={MAX_MESSAGE_LENGTH}
           />
@@ -315,7 +422,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
           <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">
             Screenshot (optional)
           </label>
-          <label className="flex cursor-pointer items-center justify-between rounded-xl border border-dashed border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-xs text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]">
+          <label className="flex cursor-pointer items-center justify-between rounded-lg border border-dashed border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-xs text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]">
             <span className="inline-flex items-center gap-1.5">
               <Upload className="h-3.5 w-3.5" />
               {screenshot ? screenshot.name : "Attach image up to 2MB"}
@@ -334,12 +441,12 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
           </label>
         </div>
 
-        <div className="rounded-lg bg-[var(--bg-secondary)] px-2.5 py-2 text-[11px] text-[var(--text-secondary)]">
+        <div className="rounded-md bg-[var(--bg-secondary)] px-2.5 py-2 text-[11px] text-[var(--text-secondary)]">
           Auto-context: <span className="font-medium text-[var(--text-primary)]">{pathname}</span>
         </div>
 
         {autoScreenshot ? (
-          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2">
+          <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2">
             <p className="mb-1 text-[11px] font-medium text-[var(--text-secondary)]">Auto-captured screenshot</p>
             <Image
               src={autoScreenshot}
@@ -367,94 +474,120 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
   );
 
   const timerPanel = (
-    <div
-      className={cn(
-        inProfileBar
-          ? "absolute bottom-[calc(100%+0.65rem)] left-1/2 z-[90] -translate-x-1/2"
-          : "fixed right-4 z-[78] sm:right-5",
-      )}
-      style={inProfileBar ? undefined : panelStyle}
-    >
+    <div className={panelClassName}>
       <StudyTimer
         open={timerOpen}
-        onOpen={() => setTimerOpen(true)}
-        onClose={() => setTimerOpen(false)}
+        onOpen={() => setActivePanel("timer")}
+        onClose={() => setActivePanel("none")}
       />
     </div>
   );
 
+  const infoPanel = (
+    <aside className={cn("w-[min(92vw,22rem)] rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-soft)]", panelClassName)}>
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Info</p>
+        <button
+          type="button"
+          onClick={() => setActivePanel("none")}
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+          aria-label="Close info panel"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="space-y-2 text-xs text-[var(--text-secondary)]">
+        <p>Tips rotate in chat based on context. Use them for faster workflows.</p>
+        <p>Keyboard: <span className="font-medium text-[var(--text-primary)]">Cmd/Ctrl + K</span> for quick mode switch.</p>
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent("ai-school:open-tour"))}
+            className="rounded-md border border-[var(--border-default)] px-2 py-1 text-[11px] transition hover:bg-[var(--bg-hover)]"
+          >
+            Start tour
+          </button>
+          <button
+            type="button"
+            onClick={() => setActivePanel("feedback")}
+            className="rounded-md border border-[var(--border-default)] px-2 py-1 text-[11px] transition hover:bg-[var(--bg-hover)]"
+          >
+            Report issue
+          </button>
+        </div>
+      </div>
+    </aside>
+  );
+
   return (
-    <div className={cn(inProfileBar ? "relative" : "", className)}>
-      <div
-        className={cn(
-          inProfileBar
-            ? "flex items-center justify-center gap-2 rounded-xl border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-secondary)_80%,var(--bg-elevated))] px-2.5 py-2"
-            : "pointer-events-none fixed right-4 z-[74] flex items-center gap-2 border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-soft)] sm:right-5",
-          !inProfileBar &&
-            (desktopViewport
-              ? sidebarOpen
-                ? "rounded-2xl px-2.5 py-2"
-                : "flex-col rounded-2xl px-1.5 py-1.5"
-              : "rounded-full px-2 py-1.5"),
-        )}
-        style={inProfileBar ? undefined : dockStyle}
-        aria-label="Global utility actions"
-      >
-        <div className={cn(inProfileBar ? "" : "pointer-events-auto")}>
-          <NotificationBell
-            buttonClassName="h-9 w-9 rounded-full"
-            contentClassName="z-[91]"
-            align={inProfileBar ? "center" : "end"}
+    <div
+      ref={rootRef}
+      className={cn(inProfileBar ? "relative" : "fixed z-[74]", className)}
+      style={dockStyle}
+    >
+      <div className="relative">
+        <div
+          className={cn(
+            inProfileBar
+              ? "flex w-full items-center justify-between gap-2"
+              : "inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-1.5 py-1 shadow-[var(--shadow-soft)]",
+          )}
+          aria-label="Global utility actions"
+        >
+          <div className="group relative" onClickCapture={() => setActivePanel("none")}>
+            <NotificationBell
+              buttonClassName="h-9.5 w-9.5 rounded-md border border-[var(--border-default)] bg-[var(--bg-elevated)]"
+              contentClassName="z-[98]"
+              align={inProfileBar ? "start" : "end"}
+              side={inProfileBar || desktopViewport ? "left" : "top"}
+              sideOffset={10}
+              onOpenChange={(open) => {
+                if (open) {
+                  setActivePanel("none");
+                }
+              }}
+            />
+            <span className="pointer-events-none absolute -top-8 left-1/2 z-[95] -translate-x-1/2 rounded-md border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1 text-[10px] text-[var(--text-secondary)] opacity-0 shadow-[var(--shadow-soft)] transition group-hover:opacity-100">
+              Notifications
+            </span>
+          </div>
+
+          <UtilityActionButton
+            label="Timer"
+            active={timerOpen}
+            onClick={() => togglePanel("timer")}
+            icon={<Timer className="h-4 w-4" />}
+            dataTour="utility-timer"
+            ariaLabel={timerOpen ? "Close focus timer" : "Open focus timer"}
+            progress={timerChipVisible ? timerSnapshot?.progress : undefined}
+            buttonClassName="rounded-md"
+          />
+
+          <UtilityActionButton
+            label="Feedback"
+            active={feedbackOpen}
+            onClick={() => togglePanel("feedback")}
+            icon={<MessageSquare className="h-4 w-4" />}
+            dataTour="utility-feedback"
+            ariaLabel={feedbackOpen ? "Close feedback form" : "Open feedback form"}
+            buttonClassName="rounded-md"
+          />
+
+          <UtilityActionButton
+            label="Info"
+            active={infoOpen}
+            onClick={() => togglePanel("info")}
+            icon={<CircleHelp className="h-4 w-4" />}
+            dataTour="utility-tour"
+            ariaLabel={infoOpen ? "Close info panel" : "Open info panel"}
+            buttonClassName="rounded-md"
           />
         </div>
 
-        <Button
-          type="button"
-          variant="secondary"
-          size="icon"
-          className={cn("h-9 w-9 rounded-full", inProfileBar ? "" : "pointer-events-auto")}
-          onClick={() => {
-            setTimerOpen((prev) => !prev);
-            setFeedbackOpen(false);
-          }}
-          data-tour="utility-timer"
-          aria-label={timerOpen ? "Close focus timer" : "Open focus timer"}
-        >
-          <Timer className="h-4 w-4" />
-        </Button>
-
-        <Button
-          type="button"
-          variant="secondary"
-          size="icon"
-          className={cn("h-9 w-9 rounded-full", inProfileBar ? "" : "pointer-events-auto")}
-          onClick={() => {
-            setFeedbackOpen((prev) => !prev);
-            setTimerOpen(false);
-          }}
-          data-tour="utility-feedback"
-          aria-label={feedbackOpen ? "Close feedback form" : "Open feedback form"}
-        >
-          <MessageSquare className="h-4 w-4" />
-        </Button>
-
-        <Button
-          type="button"
-          variant="secondary"
-          size="icon"
-          className={cn("h-9 w-9 rounded-full", inProfileBar ? "" : "pointer-events-auto")}
-          onClick={() => {
-            window.dispatchEvent(new CustomEvent("ai-school:open-tour"));
-          }}
-          data-tour="utility-tour"
-          aria-label="Open page tour"
-        >
-          <CircleHelp className="h-4 w-4" />
-        </Button>
+        {feedbackOpen ? feedbackPanel : null}
+        {timerOpen ? timerPanel : null}
+        {infoOpen ? infoPanel : null}
       </div>
-
-      {feedbackOpen ? feedbackPanel : null}
-      {timerOpen ? timerPanel : null}
     </div>
   );
 }

@@ -5,7 +5,7 @@ import { ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 import { runAutoSettingsPipeline } from "@/lib/auto-settings";
 import { chooseModelRoute } from "@/lib/routing/heuristic";
-import { MODEL_CONFIG } from "@/lib/model-config";
+import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
 import { safeStudyMode, type StudyMode } from "@/types";
 
 export const runtime = "nodejs";
@@ -47,6 +47,47 @@ export async function POST(request: NextRequest) {
     const budget = (await convexQuery("usage:checkUserBudget", {
       actorClerkId: actor.clerkId,
     })) as { tier: "normal" | "expensive_blocked" | "cheap_only" | "free_only" };
+    const dbCatalog = (await convexQuery("models:listModels", {
+      actorClerkId: actor.clerkId,
+    })) as Array<{
+      modelId: string;
+      name?: string;
+      provider?: string;
+      description?: string;
+      contextLength?: number;
+      inputCostPerM?: number;
+      outputCostPerM?: number;
+      tags?: string[];
+      isFree?: boolean;
+      costRating?: "low" | "medium" | "high";
+      speedRating?: "low" | "medium" | "high";
+      reasoningRating?: "low" | "medium" | "high";
+      multimodalRating?: "none" | "basic" | "strong";
+      capabilities?: {
+        reasoning?: number;
+        creative?: number;
+        code?: number;
+        vision?: number;
+        speed?: number;
+      };
+    }>;
+    const runtimeStats = (await convexQuery("models:listRuntimeStats", {
+      actorClerkId: actor.clerkId,
+    })) as Array<{
+      modelId: string;
+      successCount: number;
+      failureCount: number;
+      avgLatencyMs?: number;
+    }>;
+    const runtimeStatMap = Object.fromEntries(
+      runtimeStats.map((row) => [row.modelId, row]),
+    ) as Record<string, { successCount: number; failureCount: number; avgLatencyMs?: number }>;
+    const liveCatalog = await getLiveCatalogSnapshot({ fallbackCatalog: dbCatalog });
+    const catalog = liveCatalog.models.length > 0 ? liveCatalog.models : dbCatalog;
+    const fallbackManualModel =
+      body.manualModel
+      ?? catalog.find((model) => model.modelId !== "openrouter/auto")?.modelId
+      ?? "openrouter/auto";
 
     const autoSettings = {
       enhancePrompt: body.autoSettings?.enhancePrompt ?? true,
@@ -79,7 +120,7 @@ export async function POST(request: NextRequest) {
       messageLength: auto.message.length,
       teacherStrictness: "medium",
       routerMode: autoSettings.autoModel ? body.routerMode : "manual",
-      manualModel: autoSettings.autoModel ? body.manualModel : body.manualModel ?? MODEL_CONFIG.tutorFast,
+      manualModel: autoSettings.autoModel ? body.manualModel : fallbackManualModel,
       studentSeemsStuck: false,
       spendingTier: budget.tier,
       needsSearch: auto.searchEnabled,
@@ -88,6 +129,8 @@ export async function POST(request: NextRequest) {
       promptCategory: auto.promptCategory,
       questionType: auto.questionType,
       isMultipart: auto.isMultipart,
+      modelCatalog: catalog,
+      modelRuntimeStats: runtimeStatMap,
     });
 
     return ok({ routeTrace: route.trace });

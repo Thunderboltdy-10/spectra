@@ -1,7 +1,9 @@
 import { convexAction, convexQuery } from "@/lib/convex-server";
-import { MODEL_CONFIG, ROUTER_FALLBACKS } from "@/lib/model-config";
+import { MODEL_CONFIG } from "@/lib/model-config";
+import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
 import { openRouterChatCompletion, openRouterEmbedding } from "@/lib/openrouter";
 import { withTimeout } from "@/lib/orchestrator/history";
+import { pickModelAndFallbacks, type CatalogModelEntry, type ModelRuntimeStat } from "@/lib/model-selection";
 
 export type RetrievedCitation = {
   resourceId?: string;
@@ -277,12 +279,35 @@ export function buildResearchEvidenceBlock(params: {
   ].join("\n");
 }
 
-export async function maybeSearchWeb(message: string, thinkingLevel: "low" | "medium" | "high") {
-  const searchModel = thinkingLevel === "high" ? MODEL_CONFIG.searchDeep : MODEL_CONFIG.searchFast;
+export async function maybeSearchWeb(
+  message: string,
+  thinkingLevel: "low" | "medium" | "high",
+  options?: {
+    modelCatalog?: CatalogModelEntry[];
+    spendingTier?: "normal" | "expensive_blocked" | "cheap_only" | "free_only";
+    modelRuntimeStats?: Record<string, ModelRuntimeStat>;
+  },
+) {
+  const liveCatalog = options?.modelCatalog?.length
+    ? options.modelCatalog
+    : (await getLiveCatalogSnapshot()).models;
+  const searchModelSelection = pickModelAndFallbacks({
+    catalog: liveCatalog.filter((model) => model.modelId !== "openrouter/auto"),
+    tier: options?.spendingTier ?? "normal",
+    requiredCapabilities: ["search"],
+    preferredCapabilities: thinkingLevel === "high" ? ["reasoning", "search"] : ["search"],
+    preferFast: thinkingLevel !== "high",
+    preferCheap: true,
+    runtimeStats: options?.modelRuntimeStats,
+    maxFallbacks: 3,
+  });
+  const searchModel = searchModelSelection.selected?.modelId
+    ?? liveCatalog.find((model) => model.modelId !== "openrouter/auto")?.modelId
+    ?? "openrouter/auto";
   const completion = await withTimeout(
     openRouterChatCompletion({
       model: searchModel,
-      fallbackModels: ROUTER_FALLBACKS[searchModel] ?? [MODEL_CONFIG.searchFast, MODEL_CONFIG.tutorFast],
+      fallbackModels: searchModelSelection.fallbacks,
       messages: [
         {
           role: "system",

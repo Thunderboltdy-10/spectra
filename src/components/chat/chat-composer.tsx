@@ -9,6 +9,7 @@ import {
   Brain,
   CheckCircle2,
   ChevronDown,
+  ChevronUp,
   FileText,
   Layers,
   Loader2,
@@ -21,12 +22,11 @@ import {
   X,
 } from "lucide-react";
 import { ProviderLogo } from "@/components/provider-logo";
-import { ContextualTip } from "@/components/ui/contextual-tip";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { SlashCommandMenu } from "@/components/chat/slash-command-menu";
+import { SmartTipRotator } from "@/components/chat/smart-tip-rotator";
 import { ALL_MODES, COMING_SOON_MODES, getModeConfig, isModeAvailable } from "@/lib/modes";
-import { getRecommendedModelsForMode, MODEL_COST_BLOCK_LIST } from "@/lib/model-config";
 import type { Agent } from "@/types";
 import type { AutoPreference, FileStatus, ModelOption, UserSpending } from "@/hooks/use-chat-state";
 import type { RouterMode, StudyMode } from "@/types";
@@ -74,6 +74,7 @@ type ChatComposerProps = {
     searchEnabled: boolean;
     thinkingLevel: "low" | "medium" | "high";
   } | null;
+  messageCount?: number;
 };
 
 function formatModelLabel(modelId: string) {
@@ -107,6 +108,26 @@ function cleanModelDisplayText(value: string) {
     .trim();
 }
 
+function modelBlob(model: ModelOption) {
+  return `${model.modelId} ${model.name} ${model.provider} ${(model.tags ?? []).join(" ")}`.toLowerCase();
+}
+
+function isReasoningCapable(model: ModelOption) {
+  if (typeof model.capabilities?.reasoning === "number") return model.capabilities.reasoning >= 5;
+  if (model.reasoningRating === "high") return true;
+  return /\b(reason|reasoning|logic|math|o3|o4|r1)\b/.test(modelBlob(model));
+}
+
+function isCodeCapable(model: ModelOption) {
+  if (typeof model.capabilities?.code === "number") return model.capabilities.code >= 5;
+  return /\b(code|coder|programming|dev)\b/.test(modelBlob(model));
+}
+
+function isImageGenerationCapable(model: ModelOption) {
+  return /\b(image[-_ ]?gen|text[-_ ]to[-_ ]image|image generation|recraft|diffusion)\b/.test(modelBlob(model))
+    || (model.tags ?? []).some((tag) => /image[-_ ]?generation|image-gen/.test(tag.toLowerCase()));
+}
+
 function isBudgetSafeModel(model: ModelOption) {
   if (model.isFree) return true;
   if (model.modelId.includes(":free")) return true;
@@ -121,11 +142,16 @@ function isCheapModel(model: ModelOption) {
   return inputCost <= 3;
 }
 
+function isExpensiveModel(model: ModelOption) {
+  const inputCost = typeof model.inputCostPerM === "number" ? model.inputCostPerM : Number.POSITIVE_INFINITY;
+  return inputCost > 12;
+}
+
 function restrictionReasonForTier(model: ModelOption, tier?: UserSpending["tier"]) {
   if (!tier || tier === "normal") return null;
   if (tier === "expensive_blocked") {
     if (model.modelId === "openrouter/auto") return "Auto routing is disabled while guardrails are active.";
-    if (MODEL_COST_BLOCK_LIST.has(model.modelId)) return "Blocked while budget guard is active.";
+    if (isExpensiveModel(model)) return "Blocked while budget guard is active.";
     return null;
   }
   if (tier === "cheap_only") {
@@ -165,70 +191,49 @@ function preferenceLabel(value: AutoPreference) {
 }
 
 function sortedByPopularity(models: ModelOption[]) {
-  const POPULAR_MODELS = [
-    "openrouter/auto",
-    "anthropic/claude-sonnet-4-5",
-    "openai/gpt-4.1-mini",
-    "google/gemini-2.5-pro",
-    "perplexity/sonar",
-    "perplexity/sonar-pro",
-    "deepseek/deepseek-r1-0528:free",
-    "google/gemini-2.0-flash-exp:free",
-  ];
-
   return [...models].sort((a, b) => {
-    const aRank = POPULAR_MODELS.indexOf(a.modelId);
-    const bRank = POPULAR_MODELS.indexOf(b.modelId);
-    const aScore = aRank === -1 ? 999 : aRank;
-    const bScore = bRank === -1 ? 999 : bRank;
-    if (aScore !== bScore) return aScore - bScore;
+    const aFeatured = typeof a.featuredOrder === "number" ? a.featuredOrder : Number.MAX_SAFE_INTEGER;
+    const bFeatured = typeof b.featuredOrder === "number" ? b.featuredOrder : Number.MAX_SAFE_INTEGER;
+    if (aFeatured !== bFeatured) return aFeatured - bFeatured;
+    if (a.isFeatured !== b.isFeatured) return a.isFeatured ? -1 : 1;
+    const aFree = a.isFree || a.modelId.includes(":free");
+    const bFree = b.isFree || b.modelId.includes(":free");
+    if (aFree !== bFree) return aFree ? -1 : 1;
+    const aCost = typeof a.inputCostPerM === "number" ? a.inputCostPerM : Number.MAX_SAFE_INTEGER;
+    const bCost = typeof b.inputCostPerM === "number" ? b.inputCostPerM : Number.MAX_SAFE_INTEGER;
+    if (aCost !== bCost) return aCost - bCost;
     return a.name.localeCompare(b.name);
   });
 }
 
 function hasVisionSupport(model: ModelOption): boolean {
-  const visionKeywords = ["vision", "image", "multimodal", "gpt-4o", "gpt-4-turbo", "claude-3", "gemini", "sonar"];
-  const modelSource = `${model.modelId} ${model.name} ${(model.tags ?? []).join(" ")}`.toLowerCase();
-  return visionKeywords.some((keyword) => modelSource.includes(keyword));
+  if (typeof model.capabilities?.vision === "number") return model.capabilities.vision >= 3;
+  if (model.multimodalRating === "strong" || model.multimodalRating === "basic") return true;
+  const modelSource = modelBlob(model);
+  return /\b(vision|image|multimodal)\b/.test(modelSource);
+}
+
+function isRecommendedForMode(mode: StudyMode, model: ModelOption) {
+  if (mode === "research") {
+    return isReasoningCapable(model) || /\b(search|web)\b/.test(modelBlob(model));
+  }
+  if (mode === "marker" || mode === "exam") {
+    return isReasoningCapable(model);
+  }
+  if (mode === "draft_coach") {
+    return isCodeCapable(model) || isReasoningCapable(model);
+  }
+  if (mode === "image") {
+    return isImageGenerationCapable(model);
+  }
+  if (mode === "flashcard" || mode === "quiz") {
+    return isCheapModel(model) || hasVisionSupport(model);
+  }
+  return isCheapModel(model) || isReasoningCapable(model);
 }
 
 function estimateTokens(message: string): number {
   return Math.ceil(message.length / 4);
-}
-
-function isResearchLikeDraft(value: string) {
-  const text = value.toLowerCase().trim();
-  if (text.length < 24) return false;
-
-  const researchSignals = [
-    "latest",
-    "recent",
-    "today",
-    "news",
-    "study",
-    "studies",
-    "research",
-    "paper",
-    "papers",
-    "source",
-    "sources",
-    "evidence",
-    "statistics",
-    "stat",
-    "cite",
-    "citations",
-    "journal",
-    "meta-analysis",
-    "systematic review",
-  ];
-  const signalCount = researchSignals.reduce(
-    (count, signal) => (text.includes(signal) ? count + 1 : count),
-    0,
-  );
-  const hasYear = /\b(19|20)\d{2}\b/.test(text);
-  const hasResearchQuestionVerb = /\b(find|compare|verify|summarize|analyze|investigate|review)\b/.test(text);
-
-  return signalCount >= 2 || (signalCount >= 1 && (hasYear || hasResearchQuestionVerb));
 }
 
 function SettingPill({
@@ -291,6 +296,7 @@ export function ChatComposer(props: ChatComposerProps) {
     onAutoCompactionChange,
     onSlashCommand,
     lastAutoResult,
+    messageCount = 0,
   } = props;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const modelSearchRef = useRef<HTMLInputElement | null>(null);
@@ -299,17 +305,28 @@ export function ChatComposer(props: ChatComposerProps) {
   const modelMenuRef = useRef<HTMLDivElement | null>(null);
   const agentMenuRef = useRef<HTMLDivElement | null>(null);
   const mobileFileInputRef = useRef<HTMLInputElement | null>(null);
+  const attachInputRef = useRef<HTMLInputElement | null>(null);
+  const previousFileCountRef = useRef(0);
   const [showModeSelector, setShowModeSelector] = useState(false);
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [showAgentSelector, setShowAgentSelector] = useState(false);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
   const [providerFilter, setProviderFilter] = useState("all");
+  const [attachmentsExpanded, setAttachmentsExpanded] = useState(false);
+  const [showVoiceStub, setShowVoiceStub] = useState(false);
   const [modeTransitioning, setModeTransitioning] = useState(false);
   const [agentTransitioning, setAgentTransitioning] = useState(false);
   const lastModeRef = useRef(mode);
   const lastAgentIdRef = useRef(selectedAgentId);
   const modeConfig = getModeConfig(mode);
+  const orderedModes = useMemo(
+    () => [
+      ...ALL_MODES.filter((candidate) => isModeAvailable(candidate.key)),
+      ...ALL_MODES.filter((candidate) => COMING_SOON_MODES.has(candidate.key)),
+    ],
+    [],
+  );
   const selectedModel = useMemo(
     () => models.find((item) => item.modelId === manualModel),
     [manualModel, models],
@@ -330,8 +347,13 @@ export function ChatComposer(props: ChatComposerProps) {
   );
 
   const recommendedModelIds = useMemo(
-    () => new Set(getRecommendedModelsForMode(mode)),
-    [mode],
+    () =>
+      new Set(
+        models
+          .filter((model) => isRecommendedForMode(mode, model))
+          .map((model) => model.modelId),
+      ),
+    [mode, models],
   );
 
   const modelRows = useMemo(() => {
@@ -414,12 +436,6 @@ export function ChatComposer(props: ChatComposerProps) {
     "inline-flex cursor-pointer items-center gap-2 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]";
   const slashActive = message.trimStart().startsWith("/");
   const speech = useSpeechToText();
-  const shouldShowResearchTip = useMemo(() => {
-    if (!onModeChange) return false;
-    if (mode === "research") return false;
-    if (mode !== "general" && mode !== "explain") return false;
-    return isResearchLikeDraft(message);
-  }, [message, mode, onModeChange]);
   useEffect(() => {
     if (lastModeRef.current !== mode) {
       setModeTransitioning(true);
@@ -457,6 +473,16 @@ export function ChatComposer(props: ChatComposerProps) {
     const timer = window.setTimeout(() => modelSearchRef.current?.focus(), 10);
     return () => window.clearTimeout(timer);
   }, [showModelSelector]);
+
+  useEffect(() => {
+    const previousCount = previousFileCountRef.current;
+    if (fileList.length === 0) {
+      setAttachmentsExpanded(false);
+    } else if (fileList.length > previousCount) {
+      setAttachmentsExpanded(false);
+    }
+    previousFileCountRef.current = fileList.length;
+  }, [fileList.length]);
 
   useEffect(() => {
     const preventWindowFileDrop = (event: DragEvent) => {
@@ -572,7 +598,10 @@ export function ChatComposer(props: ChatComposerProps) {
   }
 
   function handleToggleMic() {
-    if (!speech.isSupported) return;
+    if (!speech.isSupported) {
+      setShowVoiceStub(true);
+      return;
+    }
     if (speech.isListening) {
       speech.stop();
       if (speech.transcript.trim()) {
@@ -620,6 +649,34 @@ export function ChatComposer(props: ChatComposerProps) {
     return null;
   }
 
+  function handleTipAction(actionId: "switch-research" | "open-settings" | "open-tour" | "open-timer" | "open-feedback" | "new-chat" | "open-orchestration") {
+    if (actionId === "switch-research") {
+      handleModeSelect("research");
+      return;
+    }
+    if (actionId === "open-settings") {
+      window.dispatchEvent(new CustomEvent("ai-school:toggle-settings"));
+      return;
+    }
+    if (actionId === "open-tour") {
+      window.dispatchEvent(new CustomEvent("ai-school:open-tour"));
+      return;
+    }
+    if (actionId === "open-timer") {
+      window.dispatchEvent(new CustomEvent("ai-school:open-focus-timer"));
+      return;
+    }
+    if (actionId === "open-feedback") {
+      window.dispatchEvent(new CustomEvent("ai-school:open-feedback"));
+      return;
+    }
+    if (actionId === "new-chat") {
+      window.dispatchEvent(new CustomEvent("ai-school:new-chat"));
+      return;
+    }
+    window.dispatchEvent(new CustomEvent("ai-school:open-orchestration"));
+  }
+
   return (
     <footer
       className={cn(
@@ -633,17 +690,6 @@ export function ChatComposer(props: ChatComposerProps) {
       onDrop={handleDrop}
     >
       <div className="mx-auto w-full max-w-6xl">
-        {shouldShowResearchTip ? (
-          <div className="mb-2">
-            <ContextualTip
-              tipId="composer-research-mode-tip"
-              message="Try Research mode for factual questions."
-              actionLabel="Switch to Research"
-              onAction={() => onModeChange?.("research")}
-            />
-          </div>
-        ) : null}
-
         {slashActive ? (
           <SlashCommandMenu
             query={message.trim()}
@@ -659,78 +705,164 @@ export function ChatComposer(props: ChatComposerProps) {
           </div>
         )}
 
+        {!slashActive ? (
+          <SmartTipRotator
+            mode={mode}
+            messageCount={messageCount}
+            sending={sending}
+            streamPhase={sending ? "generating" : "idle"}
+            hasResources={fileList.length > 0}
+            onAction={handleTipAction}
+          />
+        ) : null}
+
         {fileList.length > 0 && (
-          <div className="mb-2 rounded-xl bg-[var(--bg-secondary)] p-2">
-            <div className="flex flex-wrap gap-2">
-              {fileList.map((file) => {
-                const status = fileUploadState[fileKey(file)]?.status ?? "pending";
-                const thumbnailUrl = fileUploadState[fileKey(file)]?.thumbnailUrl;
-                const warning = fileUploadState[fileKey(file)]?.error;
-                const extension = file.name.split(".").pop()?.toUpperCase().slice(0, 4) || "FILE";
-                return (
-                  <span
-                    key={`${file.name}-${file.size}`}
-                    className="inline-flex items-center gap-2 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 py-2 text-xs font-medium shadow-sm"
-                  >
-                    {thumbnailUrl ? (
-                      <span
-                        className="inline-flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-[size:12px_12px]"
-                        style={{
-                          backgroundImage:
-                            "linear-gradient(45deg, rgba(148,163,184,0.14) 25%, transparent 25%, transparent 75%, rgba(148,163,184,0.14) 75%, rgba(148,163,184,0.14)), linear-gradient(45deg, rgba(148,163,184,0.14) 25%, transparent 25%, transparent 75%, rgba(148,163,184,0.14) 75%, rgba(148,163,184,0.14))",
-                          backgroundPosition: "0 0, 6px 6px",
-                        }}
-                      >
-                        <Image
-                          src={thumbnailUrl}
-                          alt={file.name}
-                          className="h-16 w-16 rounded-lg object-contain"
-                          width={64}
-                          height={64}
-                        />
-                      </span>
-                    ) : (
-                      <span className="inline-flex h-12 min-w-12 items-center justify-center rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-1.5 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
-                        <FileText className="mr-1 h-3 w-3" />
-                        {extension}
-                      </span>
-                    )}
-                    <span className="max-w-[220px] truncate">{file.name}</span>
-                    {renderStatus(status, warning)}
-                    <button
-                      type="button"
-                      className="inline-flex h-4 w-4 items-center justify-center rounded-full transition hover:bg-[var(--bg-hover)]"
-                      onClick={() => onRemoveFile(file)}
-                      aria-label={`Remove ${file.name}`}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </span>
-                );
-              })}
+          <div className="mb-2">
+            <div
+              className={cn(
+                "grid overflow-hidden transition-[grid-template-rows,opacity] duration-300 ease-[var(--ease-standard)]",
+                attachmentsExpanded ? "[grid-template-rows:1fr] opacity-100" : "[grid-template-rows:0fr] opacity-0",
+              )}
+            >
+              <div className="min-h-0 overflow-hidden">
+                <div className="mb-2 max-h-[220px] overflow-y-auto rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2.5">
+                  <div className="flex flex-wrap gap-2 pr-1">
+                    {fileList.map((file) => {
+                      const status = fileUploadState[fileKey(file)]?.status ?? "pending";
+                      const thumbnailUrl = fileUploadState[fileKey(file)]?.thumbnailUrl;
+                      const warning = fileUploadState[fileKey(file)]?.error;
+                      const extension = file.name.split(".").pop()?.toUpperCase().slice(0, 4) || "FILE";
+                      return (
+                        <span
+                          key={`${file.name}-${file.size}`}
+                          className="inline-flex items-center gap-2 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 py-2 text-xs font-medium shadow-sm"
+                        >
+                          {thumbnailUrl ? (
+                            <span
+                              className="inline-flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-[size:12px_12px]"
+                              style={{
+                                backgroundImage:
+                                  "linear-gradient(45deg, rgba(148,163,184,0.14) 25%, transparent 25%, transparent 75%, rgba(148,163,184,0.14) 75%, rgba(148,163,184,0.14)), linear-gradient(45deg, rgba(148,163,184,0.14) 25%, transparent 25%, transparent 75%, rgba(148,163,184,0.14) 75%, rgba(148,163,184,0.14))",
+                                backgroundPosition: "0 0, 6px 6px",
+                              }}
+                            >
+                              <Image
+                                src={thumbnailUrl}
+                                alt={file.name}
+                                className="h-16 w-16 rounded-lg object-contain"
+                                width={64}
+                                height={64}
+                              />
+                            </span>
+                          ) : (
+                            <span className="inline-flex h-12 min-w-12 items-center justify-center rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-1.5 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                              <FileText className="mr-1 h-3 w-3" />
+                              {extension}
+                            </span>
+                          )}
+                          <span className="max-w-[220px] truncate">{file.name}</span>
+                          {renderStatus(status, warning)}
+                          <button
+                            type="button"
+                            className="inline-flex h-4 w-4 items-center justify-center rounded-full transition hover:bg-[var(--bg-hover)]"
+                            onClick={() => onRemoveFile(file)}
+                            aria-label={`Remove ${file.name}`}
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 py-1.5 shadow-[var(--shadow-soft)]">
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAttachmentsExpanded((prev) => !prev)}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[11px] text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]"
+                  aria-expanded={attachmentsExpanded}
+                >
+                  <Paperclip className="h-3.5 w-3.5" />
+                  {fileList.length} attachment{fileList.length === 1 ? "" : "s"} ready
+                  {attachmentsExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAttachmentsExpanded((prev) => !prev)}
+                  className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+                >
+                  {attachmentsExpanded ? "Collapse" : "Expand"}
+                </button>
+              </div>
             </div>
           </div>
         )}
 
-        <div className="relative rounded-2xl bg-[color-mix(in_oklab,var(--bg-elevated)_94%,transparent)] shadow-[var(--shadow-soft)] backdrop-blur-sm">
-          <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
-            <div className="flex flex-wrap items-center gap-2">
+        <div className="relative overflow-visible rounded-2xl bg-[color-mix(in_oklab,var(--bg-elevated)_94%,transparent)] shadow-[var(--shadow-soft)] backdrop-blur-sm">
+          <div className="flex items-center justify-between gap-2 px-3 py-2">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 pb-1">
               <div ref={modeMenuRef} className="relative">
                 <button
                   type="button"
                   onClick={() => setShowModeSelector((prev) => !prev)}
                   title={modeConfig.description}
                   data-tour="mode-selector"
-                  className={cn(selectorTriggerClass, modeTransitioning && "animate-subtle-pulse")}
+                  className={cn(selectorTriggerClass, "max-w-[11.5rem] shrink-0", modeTransitioning && "animate-subtle-pulse")}
                 >
                   <span className="inline-flex h-2.5 w-2.5 rounded-full" style={{ background: modeConfig.color }} />
-                  <span>{modeConfig.label}</span>
+                  <span className="truncate">{modeConfig.label}</span>
                   <ChevronDown className="h-3.5 w-3.5" />
                 </button>
 
                 {showModeSelector && (
-                  <div className="absolute bottom-full left-0 z-[72] mb-2 max-h-[320px] w-[min(92vw,22rem)] overflow-y-auto overscroll-contain rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[var(--shadow-soft)]">
-                    {ALL_MODES.map((m) => {
+                  <div className="absolute bottom-full left-0 z-[340] mb-2 max-h-[320px] w-[min(92vw,22rem)] overflow-y-auto overscroll-contain rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[var(--shadow-soft)]">
+                    <p className="mb-1 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.11em] text-[var(--text-secondary)]">
+                      Available
+                    </p>
+                    {orderedModes
+                      .filter((candidate) => isModeAvailable(candidate.key))
+                      .map((m) => {
+                      const mc = getModeConfig(m.key);
+                      const isActive = m.key === mode;
+                      const available = isModeAvailable(m.key);
+                      return (
+                        <button
+                          key={m.key}
+                          type="button"
+                          disabled={!available}
+                          onClick={() => handleModeSelect(m.key)}
+                          className={`flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm transition ${
+                            isActive
+                              ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
+                              : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                          } ${available ? "cursor-pointer" : "cursor-not-allowed opacity-45"}`}
+                        >
+                          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: mc.color }} />
+                          <div>
+                            <p className="inline-flex items-center gap-1.5">
+                              <span>{mc.label}</span>
+                            </p>
+                            <p className="text-[11px] text-[var(--text-secondary)]">{mc.description}</p>
+                          </div>
+                        </button>
+                      );
+                    })}
+
+                    {orderedModes.some((candidate) => COMING_SOON_MODES.has(candidate.key)) ? (
+                      <>
+                        <div className="my-1 border-t border-[var(--border-default)]" />
+                        <p className="mb-1 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.11em] text-[var(--text-secondary)]">
+                          Coming Soon
+                        </p>
+                      </>
+                    ) : null}
+                    {orderedModes
+                      .filter((candidate) => COMING_SOON_MODES.has(candidate.key))
+                      .map((m) => {
                       const mc = getModeConfig(m.key);
                       const isActive = m.key === mode;
                       const available = isModeAvailable(m.key);
@@ -772,19 +904,19 @@ export function ChatComposer(props: ChatComposerProps) {
                   onClick={() => setShowModelSelector((prev) => !prev)}
                   title="Choose model manually or keep auto-routing"
                   data-tour="model-selector"
-                  className={selectorTriggerClass}
+                  className={cn(selectorTriggerClass, "max-w-[13rem] shrink-0")}
                 >
                   <Bot className="h-4 w-4" />
                   <span className="max-w-[260px] truncate">
                     {routerMode === "auto" || routerMode === "openrouter_auto"
-                      ? "Auto model"
+                      ? "Adaptive routing"
                       : formatModelLabel(selectedModel?.modelId ?? manualModel)}
                   </span>
                   <ChevronDown className="h-3.5 w-3.5" />
                 </button>
 
                 {showModelSelector && (
-                  <div className="absolute bottom-full left-1/2 z-[75] mb-2 max-h-[480px] w-[min(92vw,32rem)] -translate-x-[48%] overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-soft)]">
+                  <div className="absolute bottom-full left-1/2 z-[340] mb-2 max-h-[480px] w-[min(92vw,32rem)] -translate-x-[48%] overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-soft)]">
                     <div className="mb-2 flex items-center justify-between">
                       <p className="text-xs font-medium text-[var(--text-primary)]">Choose model</p>
                       <button
@@ -805,7 +937,7 @@ export function ChatComposer(props: ChatComposerProps) {
                           value={modelSearch}
                           onChange={(event) => setModelSearch(event.target.value)}
                           placeholder="Search models..."
-                          className="h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] pl-8 pr-2 text-sm focus-visible:border-[var(--border-default)] focus-visible:outline-none focus-visible:ring-0"
+                          className="h-9 w-full rounded-md border border-transparent bg-[var(--bg-secondary)] pl-8 pr-2 text-sm outline-none focus-visible:border-transparent focus-visible:ring-0"
                         />
                       </div>
                     </div>
@@ -955,15 +1087,15 @@ export function ChatComposer(props: ChatComposerProps) {
                   onClick={() => setShowAgentSelector((prev) => !prev)}
                   title="Attach an agent persona and resources to this chat"
                   data-tour="agent-selector"
-                  className={cn(selectorTriggerClass, agentTransitioning && "animate-subtle-pulse")}
+                  className={cn(selectorTriggerClass, "max-w-[10.5rem] shrink-0", agentTransitioning && "animate-subtle-pulse")}
                 >
                   <span>{selectedAgent?.avatarEmoji ?? "🧠"}</span>
-                  <span className="max-w-[160px] truncate">{selectedAgent?.name ?? "No agent"}</span>
+                  <span className="max-w-[120px] truncate">{selectedAgent?.name ?? "No agent"}</span>
                   <ChevronDown className="h-3.5 w-3.5" />
                 </button>
 
                 {showAgentSelector && (
-                  <div className="absolute bottom-full left-0 z-[72] mb-2 max-h-[360px] w-[min(92vw,22rem)] overflow-y-auto rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[var(--shadow-soft)]">
+                  <div className="absolute bottom-full left-0 z-[340] mb-2 max-h-[360px] w-[min(92vw,22rem)] overflow-y-auto rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[var(--shadow-soft)]">
                     <button
                       type="button"
                       onClick={() => {
@@ -1002,10 +1134,10 @@ export function ChatComposer(props: ChatComposerProps) {
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5">
+            <div className="flex shrink-0 items-center gap-1.5">
               <div
                 data-tour="auto-controls"
-                className="hidden flex-wrap items-center gap-1.5 transition-all duration-200 sm:flex"
+                className="hidden flex-wrap items-center gap-1.5 transition-all duration-200 xl:flex"
               >
                 <SettingPill
                   label="Enhance"
@@ -1042,26 +1174,9 @@ export function ChatComposer(props: ChatComposerProps) {
                     Enhanced
                   </span>
                 )}
-
-                <label className="flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]">
-                  <Paperclip className="h-3.5 w-3.5" />
-                  <span>Attach</span>
-                  <input
-                    type="file"
-                    className="hidden"
-                    multiple
-                    onChange={(event) => {
-                      const files = Array.from(event.target.files ?? []);
-                      if (files.length > 0) {
-                        onFilesAdd(files);
-                      }
-                      event.currentTarget.value = "";
-                    }}
-                  />
-                </label>
               </div>
 
-              <div className="transition-all duration-200 sm:hidden">
+              <div className="transition-all duration-200 xl:hidden">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button type="button" variant="secondary" size="icon" className="h-8 w-8 rounded-full" aria-label="More controls">
@@ -1141,17 +1256,41 @@ export function ChatComposer(props: ChatComposerProps) {
               ) : null}
             </div>
 
-            {speech.isSupported ? (
-              <Button
-                onClick={handleToggleMic}
-                variant={speech.isListening ? "destructive" : "secondary"}
-                size="icon"
-                className={cn("h-10 w-10 rounded-full", speech.isListening && "animate-pulse")}
-                aria-label={speech.isListening ? "Stop voice input" : "Start voice input"}
-              >
-                <Mic className="h-4 w-4" />
-              </Button>
-            ) : null}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-10 w-10 rounded-full border-0 bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+              onClick={() => attachInputRef.current?.click()}
+              aria-label="Attach files"
+              title="Attach files"
+            >
+              <Paperclip className="h-4 w-4" />
+            </Button>
+            <input
+              ref={attachInputRef}
+              type="file"
+              className="hidden"
+              multiple
+              onChange={(event) => {
+                const files = Array.from(event.target.files ?? []);
+                if (files.length > 0) {
+                  onFilesAdd(files);
+                }
+                event.currentTarget.value = "";
+              }}
+            />
+
+            <Button
+              onClick={handleToggleMic}
+              variant={speech.isListening ? "destructive" : "secondary"}
+              size="icon"
+              className={cn("h-10 w-10 rounded-full", speech.isListening && "animate-pulse")}
+              aria-label={speech.isListening ? "Stop voice input" : "Start voice input"}
+              title={speech.isSupported ? undefined : "Voice input support is coming soon for this browser."}
+            >
+              <Mic className="h-4 w-4" />
+            </Button>
 
             {sending && onStop ? (
               <Button
@@ -1178,6 +1317,22 @@ export function ChatComposer(props: ChatComposerProps) {
           </div>
         </div>
       </div>
+
+      {showVoiceStub ? (
+        <div className="fixed inset-0 z-[230] flex items-end justify-center bg-black/35 p-4 sm:items-center">
+          <div className="w-full max-w-sm rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-overlay)]">
+            <h3 className="text-sm font-semibold text-[var(--text-primary)]">Voice input</h3>
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">
+              Voice capture is not available in this browser yet. You can still attach audio files and transcribe later.
+            </p>
+            <div className="mt-3 flex justify-end">
+              <Button type="button" variant="secondary" onClick={() => setShowVoiceStub(false)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </footer>
   );
 }

@@ -69,6 +69,7 @@ export async function POST(request: NextRequest) {
     const scope = (formData.get("scope") as "pack" | "personal" | "agent" | null) ?? "personal";
     const packId = (formData.get("packId") as string | null) ?? undefined;
     const agentId = (formData.get("agentId") as string | null) ?? undefined;
+    const saveToLibraryRequested = (formData.get("saveToLibrary") as string | null) !== "0";
 
     if (files.length === 0) {
       return badRequest("No files uploaded");
@@ -163,7 +164,10 @@ export async function POST(request: NextRequest) {
 
       try {
         const mimeType = normalizedResourceMimeType(file);
-        const saveToLibrary = scope !== "personal" || currentPersonalCount < FILE_LIMITS.maxPersonalLibraryFiles;
+        const saveToLibrary =
+          scope !== "personal"
+            ? true
+            : saveToLibraryRequested && currentPersonalCount < FILE_LIMITS.maxPersonalLibraryFiles;
 
         const uploadUrl = (await convexMutation("resources:createUploadUrl", {
           actorClerkId: actor.clerkId,
@@ -185,6 +189,7 @@ export async function POST(request: NextRequest) {
           size: file.size,
           contentHash,
           storageId,
+          saveToLibrary,
         })) as { resourceId: string };
         await convexMutation("resources:enqueueResourceProcessing", {
           actorClerkId: actor.clerkId,
@@ -198,7 +203,9 @@ export async function POST(request: NextRequest) {
           savedToLibrary: saveToLibrary,
           error: saveToLibrary
             ? undefined
-            : `Attached for this chat only (personal file cap ${FILE_LIMITS.maxPersonalLibraryFiles} reached).`,
+            : saveToLibraryRequested
+              ? `Attached for this chat only (personal file cap ${FILE_LIMITS.maxPersonalLibraryFiles} reached).`
+              : "Attached for this chat only (auto-save to My Files is disabled).",
         });
         if (scope === "personal" && contentHash) {
           localHashToResourceId.set(contentHash, registered.resourceId);

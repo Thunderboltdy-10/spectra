@@ -97,6 +97,7 @@ export function QuizReveal({
   const [loadingExplanations, setLoadingExplanations] = useState(false);
   const storageKey = useMemo(() => `ai-school:quiz-progress:${hashQuizContent(content)}`, [content]);
   const panelOpen = activeView === "quiz" && panelData.quiz?.panelId === panelInstanceId;
+  const [didAutoOpen, setDidAutoOpen] = useState(false);
 
   const score = useMemo(
     () =>
@@ -170,6 +171,7 @@ export function QuizReveal({
   useEffect(() => {
     setActiveIndex(0);
     setAiExplanations({});
+    setDidAutoOpen(false);
     try {
       const raw = window.localStorage.getItem(storageKey);
       if (!raw) {
@@ -240,10 +242,11 @@ export function QuizReveal({
 
   // Auto-open only for the latest quiz message to avoid stacked/flickering panels.
   useEffect(() => {
-    if (autoOpen && questions.length > 0 && !submitted) {
+    if (autoOpen && questions.length > 0 && !submitted && !didAutoOpen) {
       openQuizPanel();
+      setDidAutoOpen(true);
     }
-  }, [autoOpen, openQuizPanel, questions.length, submitted]);
+  }, [autoOpen, didAutoOpen, openQuizPanel, questions.length, submitted]);
 
   if (questions.length === 0) return null;
 

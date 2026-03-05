@@ -96,6 +96,7 @@ export default defineSchema({
     status: v.union(v.literal("uploaded"), v.literal("processed"), v.literal("failed")),
     error: v.optional(v.string()),
     pinned: v.optional(v.boolean()),
+    saveToLibrary: v.optional(v.boolean()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -563,6 +564,20 @@ export default defineSchema({
     benchmarkMMLU: v.optional(v.number()),
     benchmarkHumanEval: v.optional(v.number()),
     arenaElo: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_org", ["orgId"])
+    .index("by_org_model", ["orgId", "modelId"]),
+
+  modelRuntimeStats: defineTable({
+    orgId: v.id("orgs"),
+    modelId: v.string(),
+    successCount: v.number(),
+    failureCount: v.number(),
+    totalLatencyMs: v.number(),
+    avgLatencyMs: v.number(),
+    lastUsedAt: v.number(),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

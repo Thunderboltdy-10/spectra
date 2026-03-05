@@ -1,4 +1,5 @@
-import { MODEL_CONFIG, ROUTER_FALLBACKS } from "@/lib/model-config";
+import { pickModelAndFallbacks, type CatalogModelEntry, type ModelRuntimeStat } from "@/lib/model-selection";
+import type { SpendingTier } from "@/types";
 import type { TaskRole } from "@/lib/orchestrator/task-graph";
 
 export type SpecialistDefinition = {
@@ -6,19 +7,6 @@ export type SpecialistDefinition = {
   model: string;
   fallbackModels: string[];
   systemPrompt: string;
-};
-
-const SPECIALIST_MODELS: Record<TaskRole, string> = {
-  retriever: MODEL_CONFIG.smartCheap,
-  web_researcher: MODEL_CONFIG.searchFast,
-  vision_interpreter: MODEL_CONFIG.multimodal,
-  code_helper: MODEL_CONFIG.tutorFast,
-  curriculum_planner: MODEL_CONFIG.smartCheap,
-  fact_checker: MODEL_CONFIG.verify,
-  pedagogy_coach: MODEL_CONFIG.tutorFast,
-  exam_strategist: MODEL_CONFIG.marker,
-  critic: MODEL_CONFIG.verify,
-  synthesizer: MODEL_CONFIG.tutorFast,
 };
 
 const SPECIALIST_PROMPTS: Record<TaskRole, string> = {
@@ -44,9 +32,61 @@ const SPECIALIST_PROMPTS: Record<TaskRole, string> = {
     "You merge specialist outputs into one coherent user-facing answer with structure and clear confidence notes.",
 };
 
-export function getSpecialist(role: TaskRole): SpecialistDefinition {
-  const model = SPECIALIST_MODELS[role];
-  const fallbackModels = ROUTER_FALLBACKS[model] ?? [MODEL_CONFIG.smartCheap, MODEL_CONFIG.tutorFast];
+function roleRequirements(role: TaskRole) {
+  if (role === "vision_interpreter") return { required: ["vision"] as const, preferred: ["reasoning"] as const };
+  if (role === "web_researcher") return { required: ["search"] as const, preferred: ["reasoning"] as const };
+  if (role === "fact_checker" || role === "critic") return { required: ["reasoning"] as const, preferred: ["search"] as const };
+  if (role === "code_helper") return { required: ["code"] as const, preferred: ["reasoning"] as const };
+  if (role === "synthesizer") return { required: ["reasoning"] as const, preferred: ["code"] as const };
+  if (role === "exam_strategist") return { required: ["reasoning"] as const, preferred: [] as const };
+  return { required: [] as const, preferred: ["reasoning"] as const };
+}
+
+export function getSpecialist(
+  role: TaskRole,
+  options?: {
+    defaultModel?: string;
+    fallbackModels?: string[];
+    roleModelOverrides?: Partial<Record<TaskRole, string>>;
+    catalog?: CatalogModelEntry[];
+    runtimeStats?: Record<string, ModelRuntimeStat>;
+    spendingTier?: SpendingTier;
+    avoidModels?: string[];
+  },
+): SpecialistDefinition {
+  const roleOverride = options?.roleModelOverrides?.[role];
+  const defaultModel = options?.defaultModel;
+  const catalog = options?.catalog ?? [];
+  const tier = options?.spendingTier ?? "normal";
+
+  const explicitModel = roleOverride ?? defaultModel;
+  const requirements = roleRequirements(role);
+
+  const picked = catalog.length > 0
+    ? pickModelAndFallbacks({
+        catalog: catalog.filter((model) => model.modelId !== "openrouter/auto"),
+        tier,
+        requiredCapabilities: [...requirements.required],
+        preferredCapabilities: [...requirements.preferred],
+        preferredModelIds: explicitModel ? [explicitModel] : undefined,
+        avoidModels: options?.avoidModels,
+        preferCheap: role === "retriever" || role === "pedagogy_coach",
+        preferFast: role === "retriever" || role === "web_researcher",
+        runtimeStats: options?.runtimeStats,
+        maxFallbacks: 4,
+      })
+    : { selected: undefined, fallbacks: [] as string[] };
+
+  const model = picked.selected?.modelId ?? explicitModel ?? options?.fallbackModels?.[0] ?? "openrouter/auto";
+  const fallbackModels = Array.from(
+    new Set(
+      [
+        ...picked.fallbacks,
+        ...(options?.fallbackModels ?? []),
+      ].filter((candidate) => candidate && candidate !== model),
+    ),
+  ).slice(0, 5);
+
   return {
     role,
     model,

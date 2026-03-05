@@ -1,20 +1,18 @@
-import { MODEL_CONFIG } from "@/lib/model-config";
+import { modelSupportsCapability, pickModelAndFallbacks, type CatalogModelEntry } from "@/lib/model-selection";
 
-const VISION_CAPABLE_PATTERNS = [
+const LEGACY_VISION_PATTERNS = [
   /vision/i,
-  /gemma.*27b/i,
-  /gemini/i,
-  /gpt-4/i,
-  /gpt-4[\d.-]*o/i,
-  /gpt-5/i,
-  /claude-sonnet/i,
-  /claude-opus/i,
-  /pixtral/i,
-  /llama-3\.2.*vision/i,
+  /image/i,
+  /multimodal/i,
+  /visual/i,
 ];
 
-export function isVisionCapable(modelId: string): boolean {
-  return VISION_CAPABLE_PATTERNS.some((pattern) => pattern.test(modelId));
+export function isVisionCapable(modelId: string, modelCatalog: CatalogModelEntry[] = []): boolean {
+  const inCatalog = modelCatalog.find((model) => model.modelId === modelId);
+  if (inCatalog) {
+    return modelSupportsCapability(inCatalog, "vision");
+  }
+  return LEGACY_VISION_PATTERNS.some((pattern) => pattern.test(modelId));
 }
 
 export type CapabilityGateResult = {
@@ -29,7 +27,11 @@ export function gateCapabilities(params: {
   selectedModel: string;
   requiresVision: boolean;
   fallbackModels: string[];
+  modelCatalog?: CatalogModelEntry[];
+  spendingTier?: "normal" | "expensive_blocked" | "cheap_only" | "free_only";
 }): CapabilityGateResult {
+  const modelCatalog = params.modelCatalog ?? [];
+
   if (!params.requiresVision) {
     return {
       finalModel: params.selectedModel,
@@ -38,7 +40,7 @@ export function gateCapabilities(params: {
     };
   }
 
-  if (isVisionCapable(params.selectedModel)) {
+  if (isVisionCapable(params.selectedModel, modelCatalog)) {
     return {
       finalModel: params.selectedModel,
       modelSwitched: false,
@@ -46,7 +48,7 @@ export function gateCapabilities(params: {
     };
   }
 
-  const visionFallback = params.fallbackModels.find((model) => isVisionCapable(model));
+  const visionFallback = params.fallbackModels.find((modelId) => isVisionCapable(modelId, modelCatalog));
   if (visionFallback) {
     return {
       finalModel: visionFallback,
@@ -56,11 +58,29 @@ export function gateCapabilities(params: {
     };
   }
 
+  const catalogVision = pickModelAndFallbacks({
+    catalog: modelCatalog.filter((model) => model.modelId !== "openrouter/auto"),
+    tier: params.spendingTier ?? "normal",
+    requiredCapabilities: ["vision"],
+    preferredModelIds: [params.selectedModel],
+    maxFallbacks: 2,
+  }).selected?.modelId;
+
+  if (catalogVision) {
+    return {
+      finalModel: params.selectedModel,
+      modelSwitched: false,
+      requiresPrepass: true,
+      prepassModel: catalogVision,
+      userNotice: "Primary model is text-only; running a vision prepass.",
+    };
+  }
+
   return {
     finalModel: params.selectedModel,
     modelSwitched: false,
     requiresPrepass: true,
-    prepassModel: MODEL_CONFIG.multimodal,
-    userNotice: "Primary model is text-only; using a vision prepass.",
+    prepassModel: params.selectedModel,
+    userNotice: "Primary model is text-only; running a vision prepass.",
   };
 }

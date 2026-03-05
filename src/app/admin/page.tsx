@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -39,7 +38,6 @@ type UsageRow = {
 type OrgBootstrap = {
   name?: string;
   verifyMarkerPassEnabled: boolean;
-  tokenBudgetDaily: number;
   monthlyBudgetCentsPerUser?: number;
   budgetMarginPercent?: number;
   allowPaidModels?: boolean;
@@ -72,12 +70,7 @@ export default function AdminPage() {
   const [adminOnboardingComplete, setAdminOnboardingComplete] = useState(true);
 
   const [orgName, setOrgName] = useState("AI School");
-  const [orgDescription, setOrgDescription] = useState("");
-  const [schoolType, setSchoolType] = useState("");
-  const [timezone, setTimezone] = useState("UTC");
-  const [maxStudents, setMaxStudents] = useState("");
 
-  const [tokenBudgetDaily, setTokenBudgetDaily] = useState(500000);
   const [monthlyBudgetCentsPerUser, setMonthlyBudgetCentsPerUser] = useState<number | null>(null);
   const [budgetMarginPercent, setBudgetMarginPercent] = useState<number | null>(null);
   const [allowPaidModels, setAllowPaidModels] = useState(true);
@@ -91,6 +84,7 @@ export default function AdminPage() {
 
   const [users, setUsers] = useState<UserRow[]>([]);
   const [usage, setUsage] = useState<UsageRow[]>([]);
+  const [selectedUsageDay, setSelectedUsageDay] = useState<string | null>(null);
   const [roleSearch, setRoleSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<"all" | "student" | "teacher" | "admin">("all");
   const [savingSettings, setSavingSettings] = useState(false);
@@ -109,12 +103,7 @@ export default function AdminPage() {
     const org = bootstrap.orgSettings.org;
     setAdminOnboardingComplete(Boolean(bootstrap.actor.onboardingComplete));
     setOrgName(org.name ?? "AI School");
-    setOrgDescription(org.description ?? "");
-    setSchoolType(org.schoolType ?? "");
-    setTimezone(org.timezone ?? "UTC");
-    setMaxStudents(typeof org.maxStudents === "number" ? String(org.maxStudents) : "");
 
-    setTokenBudgetDaily(typeof org.tokenBudgetDaily === "number" ? org.tokenBudgetDaily : 500000);
     setMonthlyBudgetCentsPerUser(typeof org.monthlyBudgetCentsPerUser === "number" ? org.monthlyBudgetCentsPerUser : null);
     setBudgetMarginPercent(typeof org.budgetMarginPercent === "number" ? org.budgetMarginPercent : null);
     setAllowPaidModels(org.allowPaidModels ?? true);
@@ -159,6 +148,10 @@ export default function AdminPage() {
 
   const usageSum = useMemo(() => usage.reduce((sum, row) => sum + row.totalTokens, 0), [usage]);
   const usageMax = useMemo(() => Math.max(1, ...usage.map((row) => row.totalTokens)), [usage]);
+  const selectedUsage = useMemo(
+    () => (selectedUsageDay ? usage.find((row) => row.day === selectedUsageDay) : usage[usage.length - 1]) ?? null,
+    [selectedUsageDay, usage],
+  );
   const filteredUsers = useMemo(() => {
     const needle = roleSearch.trim().toLowerCase();
     return users.filter((user) => {
@@ -201,24 +194,14 @@ export default function AdminPage() {
   async function saveSettings() {
     setSavingSettings(true);
     try {
-      const parsedMaxStudents = maxStudents.trim() ? Number(maxStudents) : undefined;
-      const safeMaxStudents =
-        typeof parsedMaxStudents === "number" && Number.isFinite(parsedMaxStudents)
-          ? Math.max(1, Math.round(parsedMaxStudents))
-          : undefined;
       const response = await fetch("/api/admin/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           verifyMarkerPassEnabled: verify,
-          tokenBudgetDaily,
           monthlyBudgetCentsPerUser,
           budgetMarginPercent,
           allowPaidModels,
-          description: orgDescription.trim() || undefined,
-          schoolType: schoolType.trim() || undefined,
-          timezone: timezone.trim() || undefined,
-          maxStudents: safeMaxStudents,
           orchestratorV2Enabled,
           soulEnabled,
           agentModelBoostEnabled,
@@ -273,17 +256,6 @@ export default function AdminPage() {
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
             Operational control center for roles, budget guardrails, and school-level AI policy.
           </p>
-          <div className="mt-4 flex flex-wrap gap-2 text-xs">
-            <Link href="/admin/school" className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]">
-              School dashboard
-            </Link>
-            <Link href="/admin/school/soul" className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]">
-              School SOUL
-            </Link>
-            <Link href="/admin/school/branding" className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]">
-              Branding
-            </Link>
-          </div>
         </div>
 
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.95fr)]" data-tour="admin-controls">
@@ -392,7 +364,12 @@ export default function AdminPage() {
                 {usage.map((row) => {
                   const width = Math.max(2, Math.round((row.totalTokens / usageMax) * 100));
                   return (
-                    <div key={row.day} className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2.5">
+                    <button
+                      key={row.day}
+                      type="button"
+                      onClick={() => setSelectedUsageDay(row.day)}
+                      className="w-full cursor-pointer rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2.5 text-left"
+                    >
                       <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
                         <span className="text-[var(--text-secondary)]">{shortDay(row.day)}</span>
                         <span className="font-medium">{row.totalTokens.toLocaleString()} total</span>
@@ -403,65 +380,29 @@ export default function AdminPage() {
                       <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
                         in: {row.inputTokens.toLocaleString()} / out: {row.outputTokens.toLocaleString()}
                       </p>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
+              {selectedUsage ? (
+                <div className="mt-3 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5 text-xs">
+                  <p className="text-[11px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">Selected day: {shortDay(selectedUsage.day)}</p>
+                  <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">{selectedUsage.totalTokens.toLocaleString()} tokens</p>
+                  <p className="text-[var(--text-secondary)]">input {selectedUsage.inputTokens.toLocaleString()} · output {selectedUsage.outputTokens.toLocaleString()}</p>
+                </div>
+              ) : null}
             </section>
 
             <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 sm:p-6">
               <div className="mb-4 flex items-center justify-between gap-2">
                 <div>
                   <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Organization Settings</p>
-                  <h2 className="mt-1 font-display text-2xl">School Operations</h2>
+                  <h2 className="mt-1 font-display text-2xl">AI Policy & Budget</h2>
                 </div>
                 <Building2 className="h-5 w-5 text-[var(--accent-cyan)]" />
               </div>
 
               <div className="space-y-3">
-                <label className="block">
-                  <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">School profile</span>
-                  <textarea
-                    value={orgDescription}
-                    onChange={(event) => setOrgDescription(event.target.value)}
-                    placeholder="Short description shown in school context and admin tools"
-                    className="min-h-[74px] w-full resize-none rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-sm outline-none"
-                  />
-                </label>
-
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <label>
-                    <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">School type</span>
-                    <Input value={schoolType} onChange={(event) => setSchoolType(event.target.value)} placeholder="High school, IB, university..." />
-                  </label>
-                  <label>
-                    <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Timezone</span>
-                    <Input value={timezone} onChange={(event) => setTimezone(event.target.value)} placeholder="UTC" />
-                  </label>
-                </div>
-
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <label>
-                    <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Max students</span>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={maxStudents}
-                      onChange={(event) => setMaxStudents(event.target.value)}
-                      placeholder="Not set"
-                    />
-                  </label>
-                  <label>
-                    <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Daily token budget (org)</span>
-                    <Input
-                      type="number"
-                      min={1000}
-                      value={tokenBudgetDaily}
-                      onChange={(event) => setTokenBudgetDaily(Math.max(1000, Number(event.target.value) || 1000))}
-                    />
-                  </label>
-                </div>
-
                 <div className="grid gap-2 sm:grid-cols-2">
                   <label>
                     <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Monthly budget per user (USD cents)</span>

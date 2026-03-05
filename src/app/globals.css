@@ -125,7 +125,7 @@ body {
 }
 
 :focus-visible {
-  outline: 2px solid color-mix(in oklab, var(--accent-coral) 46%, var(--border-default));
+  outline: 2px solid color-mix(in oklab, var(--accent-cyan) 44%, var(--border-default));
   outline-offset: 2px;
 }
 
@@ -133,7 +133,18 @@ input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent-coral) 30%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--border-default) 74%, transparent);
+}
+
+button:not(:disabled),
+[role="button"],
+a[href],
+summary {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
 }
 
 .skip-link:focus-visible {
@@ -620,6 +631,7 @@ select:focus-visible {
   width: 100%;
   border-collapse: collapse;
   min-width: 480px;
+  table-layout: auto;
 }
 
 .chat-markdown th,
@@ -627,6 +639,16 @@ select:focus-visible {
   border: 1px solid var(--border-default);
   padding: 0.55rem 0.7rem;
   text-align: left;
+  vertical-align: top;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.chat-markdown td:empty::before {
+  content: "—";
+  color: var(--text-secondary);
+  opacity: 0.55;
 }
 
 .chat-markdown tbody tr:nth-child(even) {

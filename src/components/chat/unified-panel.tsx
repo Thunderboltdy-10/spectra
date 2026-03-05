@@ -11,7 +11,7 @@ import { usePanel, type PanelQuizData } from "@/context/panel-context";
 import { useCompactSheet } from "@/hooks/use-compact-sheet";
 import { useRightPanelDock } from "@/hooks/use-right-panel-dock";
 import type { AutoPreference, ModelOption, PersonalResource, UserSpending } from "@/hooks/use-chat-state";
-import type { Citation, RouteTrace } from "@/types";
+import type { Citation, RouteTrace, RouterMode } from "@/types";
 import { FILE_LIMITS } from "@/lib/file-limits";
 
 function AutoChoice({
@@ -91,7 +91,11 @@ function resourceStatusMeta(status: PersonalResource["status"]) {
 
 type SettingsViewProps = {
   models: ModelOption[];
+  routerMode: RouterMode;
+  manualModel: string;
+  activeModelUsed?: string;
   usePersonalResources: boolean;
+  autoSaveConversationFilesToLibrary: boolean;
   personalResources: PersonalResource[];
   userSpending: UserSpending | null;
   recentChatCount?: number;
@@ -101,17 +105,23 @@ type SettingsViewProps = {
   autoSearch: AutoPreference;
   autoCompaction: AutoPreference;
   onTogglePersonalResources: (enabled: boolean) => void;
+  onAutoSaveConversationFilesToLibraryChange: (enabled: boolean) => void;
   onLiveProgressAutoOpenChange: (enabled: boolean) => void;
   onAutoEnhancePromptChange: (value: AutoPreference) => void;
   onAutoThinkingChange: (value: AutoPreference) => void;
   onAutoSearchChange: (value: AutoPreference) => void;
   onAutoCompactionChange: (value: AutoPreference) => void;
   onDeleteResource: (resourceId: string) => void;
+  onUploadPersonalFiles: (files: File[]) => void;
 };
 
 function SettingsView({
   models,
+  routerMode,
+  manualModel,
+  activeModelUsed,
   usePersonalResources,
+  autoSaveConversationFilesToLibrary,
   personalResources,
   userSpending,
   recentChatCount = 0,
@@ -121,18 +131,28 @@ function SettingsView({
   autoSearch,
   autoCompaction,
   onTogglePersonalResources,
+  onAutoSaveConversationFilesToLibraryChange,
   onLiveProgressAutoOpenChange,
   onAutoEnhancePromptChange,
   onAutoThinkingChange,
   onAutoSearchChange,
   onAutoCompactionChange,
   onDeleteResource,
+  onUploadPersonalFiles,
 }: SettingsViewProps) {
+  const usagePercentFromSpending =
+    userSpending && typeof userSpending.tokenUsagePercent === "number" && userSpending.tokenUsagePercent >= 0
+      ? userSpending.tokenUsagePercent
+      : userSpending && typeof userSpending.budgetUsagePercent === "number" && userSpending.budgetUsagePercent >= 0
+        ? userSpending.budgetUsagePercent
+        : userSpending && typeof userSpending.activityUsagePercent === "number" && userSpending.activityUsagePercent >= 0
+          ? userSpending.activityUsagePercent
+          : null;
   const ratioFromBudget =
-    userSpending && typeof userSpending.budgetUsagePercent === "number" && userSpending.budgetUsagePercent >= 0
-      ? Math.min(1, Math.max(0, userSpending.budgetUsagePercent / 100))
+    typeof usagePercentFromSpending === "number"
+      ? Math.min(1, Math.max(0, usagePercentFromSpending / 100))
       : null;
-  const ratioFromActivity = recentChatCount > 0 ? Math.min(1, recentChatCount / 50) : null;
+  const ratioFromActivity = !userSpending && recentChatCount > 0 ? Math.min(1, recentChatCount / 50) : null;
   const ratio = ratioFromBudget ?? ratioFromActivity;
   const percentUsed = typeof ratio === "number" ? Math.max(0, Math.min(100, Math.round(ratio * 100))) : null;
   const usageLabel =
@@ -145,8 +165,22 @@ function SettingsView({
       : percentUsed > 0
           ? "Getting started"
           : "No activity yet";
-  const selectedModel = models.find((model) => model.modelId === "openrouter/auto")
-    ?? models[0];
+  const selectedManualModel = models.find((model) => model.modelId === manualModel);
+  const routedRecentModel = models.find((model) => model.modelId === activeModelUsed);
+  const modelDisplayName =
+    routerMode === "manual"
+      ? sanitizeModelLabel(selectedManualModel?.name ?? manualModel)
+      : "Adaptive routing";
+  const modelDisplayProvider =
+    routerMode === "manual"
+      ? selectedManualModel?.provider ?? "Manual selection"
+      : routedRecentModel
+        ? `Recent final model: ${sanitizeModelLabel(routedRecentModel.name)}`
+        : "Live model routing from catalog";
+  const modelTags =
+    routerMode === "manual"
+      ? (selectedManualModel?.tags ?? [])
+      : (routedRecentModel?.tags ?? []);
 
   return (
     <div className="space-y-4">
@@ -158,43 +192,35 @@ function SettingsView({
           <AutoChoice label="Auto-search" value={autoSearch} onChange={onAutoSearchChange} />
           <AutoChoice label="Auto-compaction" value={autoCompaction} onChange={onAutoCompactionChange} />
         </div>
-        <div className="mt-2 grid gap-2 text-xs text-[var(--text-secondary)]">
-          <p>
-            Routing: <span className="font-medium text-[var(--text-primary)]">Adaptive routing</span>
-          </p>
+        <div className="mt-3 grid gap-2 md:grid-cols-2">
+          <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
+            <div>
+              <p className="text-sm">Auto-open live progress</p>
+              <p className="text-xs text-[var(--text-secondary)]">Open orchestration panel while streaming</p>
+            </div>
+            <Switch checked={liveProgressAutoOpen} onCheckedChange={onLiveProgressAutoOpenChange} />
+          </div>
+
+          <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
+            <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Current model path</p>
+            <p className="mt-0.5 text-sm font-medium text-[var(--text-primary)]">{modelDisplayName}</p>
+            <p className="text-xs text-[var(--text-secondary)]">{modelDisplayProvider}</p>
+            <div className="mt-2 flex flex-wrap gap-1">
+              {modelTags
+                .filter((tag) => !/\bfree\b/i.test(tag))
+                .slice(0, 5)
+                .map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded-full border border-[var(--border-default)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]"
+                  >
+                    {tag}
+                  </span>
+                ))}
+            </div>
+          </div>
         </div>
       </section>
-
-      <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-        <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
-          <div>
-            <p className="text-sm">Auto-open live progress</p>
-            <p className="text-xs text-[var(--text-secondary)]">Open the orchestration panel automatically while streaming</p>
-          </div>
-          <Switch checked={liveProgressAutoOpen} onCheckedChange={onLiveProgressAutoOpenChange} />
-        </div>
-      </section>
-
-      {selectedModel && (
-        <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-          <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Selected model</h3>
-          <p className="mt-1 text-sm font-medium text-[var(--text-primary)]">{sanitizeModelLabel(selectedModel.name)}</p>
-          <p className="text-xs text-[var(--text-secondary)]">{selectedModel.provider}</p>
-          <div className="mt-2 flex flex-wrap gap-1">
-            {(selectedModel.tags ?? [])
-              .filter((tag) => !/\bfree\b/i.test(tag))
-              .slice(0, 6)
-              .map((tag) => (
-                <span
-                  key={tag}
-                  className="rounded-full border border-[var(--border-default)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]"
-                >
-                  {tag}
-                </span>
-              ))}
-          </div>
-        </section>
-      )}
 
       <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
         <div>
@@ -204,11 +230,41 @@ function SettingsView({
         <Switch checked={usePersonalResources} onCheckedChange={onTogglePersonalResources} />
       </div>
 
+      <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
+        <div>
+          <p className="text-sm">Auto-save conversation files</p>
+          <p className="text-xs text-[var(--text-secondary)]">Store newly attached files in My Files by default</p>
+        </div>
+        <Switch
+          checked={autoSaveConversationFilesToLibrary}
+          onCheckedChange={onAutoSaveConversationFilesToLibraryChange}
+        />
+      </div>
+
       <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-        <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">My files</h3>
-        <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
-          Saved in personal library: {personalResources.length}/{FILE_LIMITS.maxPersonalLibraryFiles}
-        </p>
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">My files</h3>
+            <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+              Saved in personal library: {personalResources.length}/{FILE_LIMITS.maxPersonalLibraryFiles}
+            </p>
+          </div>
+          <label className="inline-flex cursor-pointer items-center rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1 text-xs text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]">
+            Attach files
+            <input
+              type="file"
+              className="hidden"
+              multiple
+              onChange={(event) => {
+                const files = Array.from(event.target.files ?? []);
+                if (files.length > 0) {
+                  onUploadPersonalFiles(files);
+                }
+                event.currentTarget.value = "";
+              }}
+            />
+          </label>
+        </div>
         <div className="mt-3 max-h-[min(56vh,34rem)] space-y-2 overflow-y-auto pr-1">
           {personalResources.length === 0 ? (
             <p className="text-xs text-[var(--text-secondary)]">No personal files yet.</p>
@@ -259,6 +315,13 @@ function SettingsView({
           />
         </div>
         <p className="mt-1 text-[11px] text-[var(--text-secondary)]">{percentUsed === null ? "No tracked activity yet" : `${percentUsed}% utilization`}</p>
+        {userSpending ? (
+          <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+            {typeof userSpending.monthlyTokens === "number"
+              ? `${Math.max(0, userSpending.monthlyTokens).toLocaleString()} tokens this month`
+              : `${Math.max(0, userSpending.totalCostCents ?? 0).toLocaleString()} cents this month`}
+          </p>
+        ) : null}
       </section>
     </div>
   );
@@ -389,6 +452,18 @@ function OrchestrationView({
   lastModelUsed,
   searchEnabled,
 }: OrchestrationViewProps) {
+  const roleLabel = (value: string) =>
+    value
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const statusLabel = (value: ActiveCollaborator["status"]) => {
+    if (value === "pending") return "queued";
+    if (value === "running") return "running";
+    if (value === "done") return "done";
+    if (value === "failed") return "failed";
+    return "skipped";
+  };
+  const visibleCollaborators = activeCollaborators.filter((agent) => agent.status !== "failed");
   const stage = orchestrationStage({
     sending,
     collaboratorPhase,
@@ -418,6 +493,51 @@ function OrchestrationView({
       </section>
 
       <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+        <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Orchestration tree</p>
+        <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-medium text-[var(--text-primary)]">Orchestrator agent</p>
+            <span className="rounded-full border border-[var(--border-default)] px-1.5 py-0.5 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+              {sending ? "running" : "idle"}
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-[var(--text-secondary)]">
+            Plans specialist calls, validates outputs, and composes the final response.
+          </p>
+        </div>
+
+        {visibleCollaborators.length === 0 ? (
+          <p className="mt-2 text-xs text-[var(--text-secondary)]">No specialist sub-agents active right now.</p>
+        ) : (
+          <div className="relative mt-3 pl-4">
+            <div className="absolute bottom-2 left-[7px] top-0 w-px bg-[var(--border-default)]" />
+            <ol className="space-y-2">
+              {visibleCollaborators.map((agent) => (
+                <li
+                  key={agent.role}
+                  className="relative rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2"
+                >
+                  <div className="absolute -left-4 top-1/2 w-3 border-t border-[var(--border-default)]" />
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-medium text-[var(--text-primary)]">{roleLabel(agent.role)}</p>
+                    <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">{statusLabel(agent.status)}</span>
+                  </div>
+                  {agent.model ? (
+                    <p className="mt-1 font-mono text-[10px] text-[var(--text-secondary)]">
+                      {sanitizeModelId(agent.model)}
+                    </p>
+                  ) : null}
+                  {typeof agent.tokensUsed === "number" && agent.tokensUsed > 0 ? (
+                    <p className="mt-0.5 text-[10px] text-[var(--text-secondary)]">{agent.tokensUsed} tokens</p>
+                  ) : null}
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
         <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Progress</p>
         <ol className="space-y-1.5">
           {steps.map((item, index) => {
@@ -441,32 +561,6 @@ function OrchestrationView({
             );
           })}
         </ol>
-      </section>
-
-      <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-        <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Active agents</p>
-        {activeCollaborators.length === 0 ? (
-          <p className="text-xs text-[var(--text-secondary)]">No specialist agents active right now.</p>
-        ) : (
-          <div className="space-y-2">
-            {activeCollaborators.map((agent) => (
-              <div
-                key={agent.role}
-                className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs font-medium capitalize text-[var(--text-primary)]">{agent.role.replace(/_/g, " ")}</p>
-                  <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">{agent.status}</span>
-                </div>
-                {agent.model ? (
-                  <p className="mt-1 font-mono text-[10px] text-[var(--text-secondary)]">
-                    {sanitizeModelId(agent.model)}
-                  </p>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        )}
       </section>
 
       <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
@@ -507,7 +601,11 @@ function SourcesView({ citations }: { citations: Citation[] }) {
   }
 
   return (
-    <div className="grid auto-rows-fr gap-2.5">
+    <div className="space-y-3">
+      <div className="mb-1 flex items-center justify-between border-b border-[var(--border-default)] pb-2.5">
+        <p className="text-sm font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Sources</p>
+        <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">{citations.length}</span>
+      </div>
       {citations.map((citation, index) => {
         const href = hrefForCitation(citation);
         const isSearch = citation.sourceType === "search";
@@ -516,41 +614,42 @@ function SourcesView({ citations }: { citations: Citation[] }) {
         return (
           <article
             key={`${citation.filename}-${index}`}
-            className="flex h-full flex-col rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3"
+            className="min-h-[9.25rem] rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-3"
           >
-            <div className="mb-2 flex items-center justify-between gap-2 text-xs text-[var(--text-secondary)]">
-              <span className="inline-flex items-center gap-1.5">
+            <div className="flex items-start justify-between gap-2">
+              <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-[var(--text-secondary)]">
                 {isSearch ? <Milestone className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
-                <span className="uppercase tracking-[0.08em]">[{index + 1}] {citation.sourceType}</span>
+                <span className="truncate uppercase tracking-[0.08em]">Source {index + 1} · {citation.sourceType}</span>
               </span>
-              {citation.page ? (
-                <span className="rounded-full bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] uppercase tracking-[0.06em]">
-                  Page {citation.page}
-                </span>
-              ) : null}
+              <div className="flex items-center gap-1.5">
+                {citation.page ? (
+                  <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] uppercase tracking-[0.06em]">
+                    Page {citation.page}
+                  </span>
+                ) : null}
+                {href ? (
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex cursor-pointer rounded-md border border-[var(--border-default)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+                  >
+                    {citation.url ? "Open" : "Download"}
+                  </a>
+                ) : null}
+              </div>
             </div>
 
-            <p className="font-medium text-[var(--text-primary)]">{label}</p>
+            <p className="mt-2 truncate text-sm font-semibold text-[var(--text-primary)]">{label}</p>
             {isSearch && citation.domain ? <p className="mt-1 text-xs text-[var(--text-secondary)]">{citation.domain}</p> : null}
 
-            <div className="mt-2 flex-1 rounded-lg bg-[var(--bg-secondary)] px-2.5 py-2">
+            <div className="mt-2 min-h-[4.5rem] rounded-md bg-[var(--bg-secondary)] px-2.5 py-2">
               {citation.snippet ? (
                 <RichText content={citation.snippet} className="text-xs leading-relaxed text-[var(--text-secondary)]" />
               ) : (
                 <p className="text-xs leading-relaxed text-[var(--text-secondary)]">No preview snippet available.</p>
               )}
             </div>
-
-            {href ? (
-              <a
-                href={href}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-3 inline-flex cursor-pointer self-start rounded-full border border-[var(--border-default)] px-2.5 py-1 text-xs text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
-              >
-                {citation.url ? "Open source URL" : "Download source"}
-              </a>
-            ) : null}
           </article>
         );
       })}
@@ -724,13 +823,15 @@ type UnifiedPanelProps = {
 
 export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanelProps) {
   const { activeView, panelData, closePanel } = usePanel();
-  const compact = useCompactSheet(1024);
+  const compact = useCompactSheet(980);
   const maxWidthPx = activeView === "settings" ? 400 : activeView === "quiz" ? 460 : 520;
   const { docked, panelWidth } = useRightPanelDock({
     id: "unified-panel",
     open: !!activeView,
     compact,
     maxWidthPx,
+    minMainWidthPx: activeView === "settings" ? 680 : 760,
+    reserveLeftPx: 160,
   });
   const [collapsed, setCollapsed] = useState(false);
 
@@ -765,14 +866,14 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
       ) : null}
 
       <aside
-        className={`right-panel-shell ${rightPanelSurfaceClassName()} pointer-events-auto flex flex-col p-4 ${
+        className={`right-panel-shell ${rightPanelSurfaceClassName()} pointer-events-auto flex flex-col ${
           docked ? "right-panel-shell--docked" : "right-panel-shell--sheet"
         } ${
           docked
-            ? "relative h-full w-full"
+            ? "relative h-full w-full p-0"
             : compact
-              ? "absolute bottom-3 left-3 right-3 max-h-[78vh] rounded-2xl border"
-              : "absolute inset-y-0 right-0 w-[92vw] border-l"
+              ? "absolute bottom-3 left-3 right-3 max-h-[78vh] rounded-2xl border p-4"
+              : "absolute inset-y-0 right-0 w-[92vw] border-l p-4"
         }`}
         style={
           docked
@@ -782,10 +883,12 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
               : { maxWidth: `${maxWidthPx}px` }
         }
       >
-        <div className="mb-4 flex items-center justify-between">
+        <div
+          className={`flex items-center justify-between ${docked ? "border-b border-[var(--border-default)] px-4 py-3.5" : "mb-4"}`}
+        >
           <div>
             <p className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">{current.subtitle}</p>
-            <h3 className="font-display text-2xl text-[var(--text-primary)]">{current.title}</h3>
+            <h3 className={`font-display text-[var(--text-primary)] ${docked ? "text-xl" : "text-2xl"}`}>{current.title}</h3>
           </div>
           <div className="flex items-center gap-1.5">
             {compact ? (
@@ -823,7 +926,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
         </div>
 
         {!collapsed ? (
-          <div className="right-panel-content min-h-0 flex-1 overflow-y-auto pr-1">
+          <div className={`right-panel-content min-h-0 flex-1 overflow-y-auto ${docked ? "px-4 py-4 pr-3" : "pr-1"}`}>
             {activeView === "settings" && settingsProps && <SettingsView {...settingsProps} />}
             {activeView === "route-trace" && <RouteTraceView trace={panelData.routeTrace ?? orchestrationProps?.routeTrace} />}
             {activeView === "sources" && <SourcesView citations={panelData.sources ?? []} />}

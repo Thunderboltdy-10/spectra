@@ -36,6 +36,25 @@ function toDataUrl(mimeType: string, bytes: ArrayBuffer) {
   return `data:${mimeType};base64,${base64}`;
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withRetry<T>(task: () => Promise<T>, attempts = 3, waitMs = 180): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await task();
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts - 1) {
+        await sleep(waitMs * (attempt + 1));
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Retry attempts exhausted");
+}
+
 async function quickExtractFromRemoteFile(downloadUrl: string, filename: string) {
   const response = await fetch(downloadUrl);
   if (!response.ok) return "";
@@ -83,9 +102,13 @@ export async function normalizeAttachments(params: {
   const prepared: PreparedAttachment[] = [];
   const imageContentBlocks: NormalizedAttachments["imageContentBlocks"] = [];
   const quickExtracts: string[] = [];
+  let hasImageAttachment = false;
 
   for (const resource of resources) {
     const type = inferType(resource.filename, resource.mimeType);
+    if (type === "image") {
+      hasImageAttachment = true;
+    }
     const preparedAttachment: PreparedAttachment = {
       resourceId: resource._id,
       filename: resource.filename,
@@ -95,22 +118,38 @@ export async function normalizeAttachments(params: {
     };
 
     if (type === "image") {
-      const download = await params.convexQuery<{ url: string }>("resources:getResourceDownloadUrl", {
-        actorClerkId: params.actorClerkId,
-        resourceId: resource._id,
-      });
+      try {
+        const download = await withRetry(
+          () =>
+            params.convexQuery<{ url: string }>("resources:getResourceDownloadUrl", {
+              actorClerkId: params.actorClerkId,
+              resourceId: resource._id,
+            }),
+          3,
+          220,
+        );
+        let finalUrl = download.url;
 
-      const response = await fetch(download.url);
-      if (response.ok) {
-        const imageDataUrl = toDataUrl(resource.mimeType || "image/png", await response.arrayBuffer());
-        preparedAttachment.imageDataUrl = imageDataUrl;
+        try {
+          const response = await withRetry(() => fetch(download.url), 3, 220);
+          if (response.ok) {
+            const imageDataUrl = toDataUrl(resource.mimeType || "image/png", await response.arrayBuffer());
+            preparedAttachment.imageDataUrl = imageDataUrl;
+            finalUrl = imageDataUrl;
+          }
+        } catch {
+          // Fall back to signed URL if byte fetch fails; avoids dropping the attachment entirely.
+        }
+
         imageContentBlocks.push({
           type: "image_url",
           image_url: {
-            url: imageDataUrl,
+            url: finalUrl,
             detail: resource.size > 500_000 ? "low" : "auto",
           },
         });
+      } catch {
+        quickExtracts.push(`[${resource.filename}]\nImage attachment is still finalizing. Ask user to retry if visual details are missing.`);
       }
     }
 
@@ -118,11 +157,20 @@ export async function normalizeAttachments(params: {
       let quickExtract = resource.quickExtractText?.slice(0, 4000).trim() ?? "";
 
       if (!quickExtract) {
-        const download = await params.convexQuery<{ url: string }>("resources:getResourceDownloadUrl", {
-          actorClerkId: params.actorClerkId,
-          resourceId: resource._id,
-        });
-        quickExtract = await quickExtractFromRemoteFile(download.url, resource.filename);
+        try {
+          const download = await withRetry(
+            () =>
+              params.convexQuery<{ url: string }>("resources:getResourceDownloadUrl", {
+                actorClerkId: params.actorClerkId,
+                resourceId: resource._id,
+              }),
+            3,
+            220,
+          );
+          quickExtract = await quickExtractFromRemoteFile(download.url, resource.filename);
+        } catch {
+          quickExtract = "";
+        }
       }
 
       if (quickExtract) {
@@ -138,6 +186,6 @@ export async function normalizeAttachments(params: {
     prepared,
     imageContentBlocks,
     quickExtractBlock: quickExtracts.length > 0 ? `ATTACHMENT CONTEXT:\n${quickExtracts.join("\n\n")}` : "",
-    requiresVision: imageContentBlocks.length > 0,
+    requiresVision: hasImageAttachment,
   };
 }

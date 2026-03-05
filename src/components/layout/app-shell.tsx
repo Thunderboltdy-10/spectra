@@ -344,7 +344,7 @@ export function AppShell({
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--bg-primary)] text-[var(--text-primary)]">
       <aside
-        className={`hidden h-full md:block ${sidebar.sidebarOpen ? "w-[320px]" : "w-[76px]"}`}
+        className={`hidden h-full transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] md:block ${sidebar.sidebarOpen ? "w-[clamp(260px,24vw,360px)]" : "w-[76px]"}`}
       >
         <ChatSidebar
           chats={sidebar.filteredChats}

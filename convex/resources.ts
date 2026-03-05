@@ -141,6 +141,7 @@ export const registerResource = mutation({
     size: v.number(),
     contentHash: v.optional(v.string()),
     storageId: v.id("_storage"),
+    saveToLibrary: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
@@ -210,6 +211,7 @@ export const registerResource = mutation({
       storageId: args.storageId,
       parsedCharCount: 0,
       status: "uploaded",
+      saveToLibrary: args.saveToLibrary ?? true,
       createdAt: now,
       updatedAt: now,
     });
@@ -464,10 +466,11 @@ export const listPersonalResources = query({
       throw new Error("Unauthorized");
     }
 
-    return ctx.db
+    const rows = await ctx.db
       .query("resources")
       .withIndex("by_owner_scope", (q) => q.eq("ownerUserId", actor._id).eq("scope", "personal"))
       .collect();
+    return rows.filter((row) => row.saveToLibrary !== false);
   },
 });
 
@@ -774,6 +777,7 @@ export const findReusablePersonalResourcesByHashes = query({
       .collect();
 
     return personal
+      .filter((resource) => resource.saveToLibrary !== false)
       .filter((resource) => resource.contentHash && hashSet.has(resource.contentHash))
       .filter((resource) => resource.status === "processed" || resource.status === "uploaded")
       .map((resource) => ({

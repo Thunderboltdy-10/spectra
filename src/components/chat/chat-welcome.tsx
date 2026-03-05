@@ -195,6 +195,7 @@ export function ChatWelcome({
 
   const availableModes = ALL_MODES.filter((mode) => isModeAvailable(mode.key));
   const comingSoonModes = ALL_MODES.filter((mode) => COMING_SOON_MODES.has(mode.key));
+  const orderedModes = [...availableModes, ...comingSoonModes];
 
   return (
     <div className="flex flex-col items-center justify-center px-4 py-10 sm:py-12">
@@ -255,18 +256,23 @@ export function ChatWelcome({
             <p className="text-xs text-[var(--text-secondary)]">Choose a lane, switch anytime</p>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {availableModes.map((mode) => {
+            {orderedModes.map((mode) => {
               const config = getModeConfig(mode.key);
+              const comingSoon = COMING_SOON_MODES.has(mode.key);
               return (
                 <button
                   key={mode.key}
                   type="button"
+                  disabled={comingSoon}
                   className={`group relative overflow-hidden rounded-2xl border bg-[var(--bg-elevated)] p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[var(--shadow-soft)] ${
-                    selectedMode === mode.key
+                    selectedMode === mode.key && !comingSoon
                       ? "border-[color-mix(in_oklab,var(--accent-cyan)_40%,var(--border-default))] ring-1 ring-[color-mix(in_oklab,var(--accent-cyan)_35%,transparent)]"
-                      : "border-[var(--border-default)]"
+                      : comingSoon
+                        ? "cursor-not-allowed border-[var(--border-default)] opacity-65 grayscale-[0.25]"
+                        : "border-[var(--border-default)]"
                   }`}
                   onClick={() => {
+                    if (comingSoon) return;
                     setSelectedMode(mode.key);
                     onSelectMode(mode.key);
                   }}
@@ -285,26 +291,15 @@ export function ChatWelcome({
                     <p className="font-semibold text-[var(--text-primary)]">{config.label}</p>
                   </div>
                   <p className="text-xs leading-relaxed text-[var(--text-secondary)]">{config.description}</p>
+                  {comingSoon ? (
+                    <span className="mt-2 inline-flex rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                      Coming Soon
+                    </span>
+                  ) : null}
                 </button>
               );
             })}
           </div>
-
-          {comingSoonModes.length > 0 ? (
-            <div className="flex flex-wrap gap-1.5">
-              {comingSoonModes.map((mode) => (
-                <span
-                  key={mode.key}
-                  className="rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-1 text-xs text-[var(--text-secondary)] opacity-70"
-                >
-                  {mode.label}
-                  <span className="ml-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em]">
-                    Coming Soon
-                  </span>
-                </span>
-              ))}
-            </div>
-          ) : null}
         </section>
 
         {agents.length > 0 ? (

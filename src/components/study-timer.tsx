@@ -149,6 +149,19 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
   const showMiniIndicator = !open && (isRunning || remainingMs < duration);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(
+      new CustomEvent("ai-school:timer-state", {
+        detail: {
+          display,
+          isRunning,
+          progress,
+        },
+      }),
+    );
+  }, [display, isRunning, progress]);
+
+  useEffect(() => {
     const restored = readPersistedState();
     if (restored) {
       setPhase(restored.phase);
@@ -421,7 +434,7 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-2">
-        <label className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1.5">
+        <label className="rounded-xl bg-[var(--bg-secondary)] px-2 py-1.5">
           <span className="mb-1 block text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Focus min</span>
           <input
             type="number"
@@ -429,10 +442,10 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
             max={MAX_WORK_MINUTES}
             value={workMinutes}
             onChange={(event) => handleWorkMinutesChange(event.target.value)}
-            className="w-full bg-transparent text-sm font-semibold outline-none"
+            className="w-full appearance-none bg-transparent text-sm font-semibold outline-none [appearance:textfield]"
           />
         </label>
-        <label className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1.5">
+        <label className="rounded-xl bg-[var(--bg-secondary)] px-2 py-1.5">
           <span className="mb-1 block text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Break min</span>
           <input
             type="number"
@@ -440,7 +453,7 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
             max={MAX_BREAK_MINUTES}
             value={breakMinutes}
             onChange={(event) => handleBreakMinutesChange(event.target.value)}
-            className="w-full bg-transparent text-sm font-semibold outline-none"
+            className="w-full appearance-none bg-transparent text-sm font-semibold outline-none [appearance:textfield]"
           />
         </label>
       </div>

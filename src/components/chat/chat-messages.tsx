@@ -4,19 +4,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, RefreshCw, TriangleAlert, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChatMessage } from "@/components/chat/chat-message";
-import { CollaboratorsLive, type ActiveCollaborator } from "@/components/chat/collaborators-live";
+import type { ActiveCollaborator } from "@/components/chat/collaborators-live";
 import { QuizReveal, isQuizContent, type QuizSubmitResult } from "@/components/chat/quiz-reveal";
 import { FlashcardReveal, isFlashcardContent, type FlashcardCard } from "@/components/chat/flashcard-reveal";
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { ThinkingBlock } from "@/components/chat/thinking-block";
 import { ThinkingMessages } from "@/components/loading-states";
-import { ContextualTip } from "@/components/ui/contextual-tip";
 import { ProviderLogo } from "@/components/provider-logo";
-import { usePanel } from "@/context/panel-context";
-import { extractFlashcardPairs } from "@/lib/flashcard-format";
 import { autoCloseMarkdown } from "@/lib/stream-markdown";
 import { getModeConfig } from "@/lib/modes";
-import { parseQuiz } from "@/lib/quiz-parser";
 import type { Message } from "@/hooks/use-chat-state";
 import type { StudyMode } from "@/types";
 
@@ -101,13 +97,11 @@ export function ChatMessages({
   collaboratorPhase = "idle",
   onOpenCanvas,
 }: ChatMessagesProps) {
-  const panel = usePanel();
   const scrollContainerRef = useRef<HTMLElement | null>(null);
   const topLoadSentinelRef = useRef<HTMLDivElement | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const previousChatIdRef = useRef<string | undefined>(chatId);
   const [showJumpButton, setShowJumpButton] = useState(false);
-  const [draftQuizAnswers, setDraftQuizAnswers] = useState<Record<string, string>>({});
   const [showStreamCursor, setShowStreamCursor] = useState(false);
   const [visibleStartIndex, setVisibleStartIndex] = useState(() => Math.max(0, messages.length - 36));
   const shouldAutoScrollRef = useRef(true);
@@ -221,45 +215,6 @@ export function ChatMessages({
     return modelId.split("/").pop() ?? "AI";
   }
 
-  const draftQuizQuestions = useMemo(() => {
-    if (mode !== "quiz" && mode !== "exam") return [];
-    return parseQuiz(draftResponse);
-  }, [draftResponse, mode]);
-
-  const draftQuizTargetCount = useMemo(() => {
-    if (mode !== "quiz" && mode !== "exam") return 0;
-    const numbered = [...draftResponse.matchAll(/(?:^|\n)\s*(?:Q(?:uestion)?\s*)?(\d+)[.):-]\s+/gi)]
-      .map((match) => Number.parseInt(match[1] ?? "", 10))
-      .filter((value) => Number.isFinite(value));
-    const declaredMatch = draftResponse.match(/\b(\d+)\s+questions?\b/i);
-    const declared = declaredMatch ? Number.parseInt(declaredMatch[1] ?? "0", 10) : 0;
-    const maxSeen = numbered.length > 0 ? Math.max(...numbered) : 0;
-    const baseline = Math.max(maxSeen, declared, draftQuizQuestions.length);
-    if (!sending) return baseline;
-    return Math.max(baseline, draftQuizQuestions.length + 1);
-  }, [draftQuizQuestions.length, draftResponse, mode, sending]);
-
-  const draftFlashcards = useMemo(() => {
-    if (mode !== "flashcard") return [];
-    return extractFlashcardPairs(draftResponse);
-  }, [draftResponse, mode]);
-
-  useEffect(() => {
-    if (draftQuizQuestions.length === 0) {
-      setDraftQuizAnswers({});
-      return;
-    }
-    setDraftQuizAnswers((previous) => {
-      const next: Record<string, string> = {};
-      for (const question of draftQuizQuestions) {
-        if (previous[question.id]) {
-          next[question.id] = previous[question.id]!;
-        }
-      }
-      return next;
-    });
-  }, [draftQuizQuestions]);
-
   useEffect(() => {
     if (sending) {
       setShowStreamCursor(true);
@@ -338,6 +293,7 @@ export function ChatMessages({
       case "synthesizing": return "Synthesizing...";
       case "generating": return "Drafting...";
       default:
+        if (collaboratorPhase === "synthesizing") return "Synthesizing...";
         return lastAutoResult?.searchEnabled
           ? "Searching..."
           : activeCollaborators.length > 0 || thinkingLevel !== "low"
@@ -361,33 +317,6 @@ export function ChatMessages({
       >
         <div className="mx-auto w-full max-w-6xl space-y-8">
           {!hasContent && emptyState}
-
-          {messages.length > 30 ? (
-            <ContextualTip
-              tipId="long-conversation-new-chat"
-              message="Start a new conversation for best results."
-            />
-          ) : null}
-          {messages.length >= 6 ? (
-            <ContextualTip
-              tipId="chat-bookmark-tip"
-              message="Bookmark strong explanations so they stay easy to revisit."
-            />
-          ) : null}
-          {messages.length >= 10 ? (
-            <ContextualTip
-              tipId="chat-compaction-auto-tip"
-              message="Turn on auto-compaction to keep long chats fast without losing visible history."
-              actionLabel="Open settings"
-              onAction={() => window.dispatchEvent(new Event("ai-school:toggle-settings"))}
-            />
-          ) : null}
-          {messages.length >= 3 ? (
-            <ContextualTip
-              tipId="chat-slash-commands-tip"
-              message="Use slash commands like /mode, /search, and /export for faster workflow."
-            />
-          ) : null}
 
           {visibleStartIndex > 0 ? (
             <div
@@ -714,72 +643,23 @@ export function ChatMessages({
             );
           })}
 
-          {sending && activeCollaborators.length > 0 ? (
-            <CollaboratorsLive collaborators={activeCollaborators} phase={collaboratorPhase} />
-          ) : null}
-
-          {sending ? (
-            <div className="flex justify-start">
-              <button
-                type="button"
-                onClick={() => panel.openPanel("orchestration")}
-                className="cursor-pointer rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
-              >
-                View orchestration
-              </button>
-            </div>
-          ) : null}
-
-          {draftResponse && (mode === "quiz" || mode === "exam") ? (
+          {draftResponse && (mode === "quiz" || mode === "exam" || mode === "flashcard") ? (
             <article className="chat-fade-in flex justify-start">
               <div className="w-full max-w-5xl rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3">
                 <div className="mb-3 inline-flex items-center gap-2 text-xs text-[var(--text-secondary)]">
                   <ProviderLogo provider={activeProvider} modelId={lastModelUsed} size={12} className="h-5 w-5 rounded-md" />
                   <span>{modelLabel(lastModelUsed)} · {streamingStatus}</span>
                 </div>
-
-                {!showQuizSkeletonOnly && draftQuizQuestions.length > 0 ? (
-                  <div className="space-y-3">
-                    <p className="text-xs text-[var(--text-secondary)]">
-                      Quiz is still generating. You can already answer completed questions below.
-                    </p>
-                    {draftQuizQuestions.map((question) => (
+                <div className="space-y-2">
+                  <p className="text-sm text-[var(--text-secondary)]">
+                    {mode === "flashcard"
+                      ? "Preparing flashcard view. Cards will appear only after the full structured result is ready."
+                      : "Preparing quiz interface. Questions and answers will appear only after the final structured result is ready."}
+                  </p>
+                  <div className="space-y-2">
+                    {(showQuizSkeletonOnly ? [0, 1, 2] : [0, 1, 2, 3]).map((index) => (
                       <div
-                        key={question.id}
-                        className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5"
-                      >
-                        <p className="mb-2 text-sm font-medium text-[var(--text-primary)]">
-                          Q{question.number}. {question.prompt}
-                        </p>
-                        <div className="space-y-1.5">
-                          {question.options.map((option) => {
-                            const selected = draftQuizAnswers[question.id] === option.letter;
-                            return (
-                              <button
-                                key={`${question.id}-${option.letter}`}
-                                type="button"
-                                onClick={() =>
-                                  setDraftQuizAnswers((prev) => ({ ...prev, [question.id]: option.letter }))
-                                }
-                                className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs transition ${
-                                  selected
-                                    ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,var(--bg-primary))]"
-                                    : "border-[var(--border-default)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)]"
-                                }`}
-                              >
-                                <span className="font-semibold">{option.letter}.</span>
-                                <span className="flex-1">{option.text}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                    {Array.from({
-                      length: Math.max(0, draftQuizTargetCount - draftQuizQuestions.length),
-                    }).map((_, index) => (
-                      <div
-                        key={`draft-quiz-skeleton-${index}`}
+                        key={`structured-stream-skeleton-${index}`}
                         className="rounded-xl border border-dashed border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-3"
                       >
                         <div className="h-3 w-2/3 animate-pulse rounded bg-[var(--bg-primary)]" />
@@ -788,58 +668,7 @@ export function ChatMessages({
                       </div>
                     ))}
                   </div>
-                ) : (
-                  <div className="space-y-2">
-                    <p className="text-sm text-[var(--text-secondary)]">
-                      Generating quiz structure and answer key.
-                    </p>
-                    <div className="mt-2 space-y-2">
-                      <div className="h-3 w-3/4 animate-pulse rounded bg-[var(--bg-secondary)]" />
-                      <div className="h-3 w-full animate-pulse rounded bg-[var(--bg-secondary)]" />
-                      <div className="h-3 w-5/6 animate-pulse rounded bg-[var(--bg-secondary)]" />
-                    </div>
-                  </div>
-                )}
-              </div>
-            </article>
-          ) : draftResponse && mode === "flashcard" ? (
-            <article className="chat-fade-in flex justify-start">
-              <div className="w-full max-w-5xl rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3">
-                <div className="mb-2 inline-flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-                  <ProviderLogo provider={activeProvider} modelId={lastModelUsed} size={12} className="h-5 w-5 rounded-md" />
-                  <span>{modelLabel(lastModelUsed)} · {streamingStatus}</span>
                 </div>
-                {draftFlashcards.length > 0 ? (
-                  <div className="space-y-2">
-                    <p className="text-xs text-[var(--text-secondary)]">
-                      Flashcards are generating. You can review ready cards as they appear.
-                    </p>
-                    {draftFlashcards.slice(0, 4).map((card, index) => (
-                      <div
-                        key={`${card.front}-${index}`}
-                        className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-xs"
-                      >
-                        <p className="font-medium text-[var(--text-primary)]">Front: {card.front}</p>
-                        <p className="mt-1 text-[var(--text-secondary)]">Back: {card.back}</p>
-                      </div>
-                    ))}
-                    {sending ? (
-                      <div className="rounded-lg border border-dashed border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-3">
-                        <div className="h-3 w-2/3 animate-pulse rounded bg-[var(--bg-primary)]" />
-                        <div className="mt-2 h-2.5 w-full animate-pulse rounded bg-[var(--bg-primary)]" />
-                      </div>
-                    ) : null}
-                  </div>
-                ) : (
-                  <>
-                    <p className="text-sm text-[var(--text-secondary)]">
-                      Generating flashcard fronts and backs.
-                    </p>
-                    <div className="mt-3 text-xs italic text-[var(--text-secondary)]">
-                      Card backs and review controls appear automatically when ready.
-                    </div>
-                  </>
-                )}
               </div>
             </article>
           ) : draftResponse ? (

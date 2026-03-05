@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 
 export type ActiveCollaborator = {
   role: string;
-  status: "pending" | "running" | "done" | "failed";
+  status: "pending" | "running" | "done" | "failed" | "skipped";
   model?: string;
   preview?: string;
   tokensUsed?: number;
@@ -36,21 +36,24 @@ function formatTokens(value: number) {
 function StatusDot({ status }: { status: ActiveCollaborator["status"] }) {
   if (status === "done") return <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" />;
   if (status === "failed") return <XCircle className="h-3.5 w-3.5 text-[var(--danger)]" />;
+  if (status === "skipped") return <Circle className="h-3.5 w-3.5 text-[var(--text-secondary)] opacity-60" />;
   if (status === "running") return <LoaderCircle className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />;
   return <Circle className="h-3.5 w-3.5 text-[var(--text-secondary)] opacity-40" />;
 }
 
 export function CollaboratorsLive({ collaborators, phase }: CollaboratorsLiveProps) {
-  if (collaborators.length === 0) return null;
-  const totalTokens = collaborators.reduce((sum, item) => sum + (item.tokensUsed ?? 0), 0);
-  const doneCount = collaborators.filter((c) => c.status === "done").length;
+  const visibleCollaborators = collaborators.filter((item) => item.status !== "failed");
+  if (visibleCollaborators.length === 0) return null;
+  const totalTokens = visibleCollaborators.reduce((sum, item) => sum + (item.tokensUsed ?? 0), 0);
+  const doneCount = visibleCollaborators.filter((c) => c.status === "done").length;
   // Sort: done first, running middle, pending bottom
-  const ordered = [...collaborators].sort((a, b) => {
+  const ordered = [...visibleCollaborators].sort((a, b) => {
     const rank = (status: ActiveCollaborator["status"]) => {
       if (status === "done") return 0;
       if (status === "running") return 1;
       if (status === "pending") return 2;
-      return 3;
+      if (status === "skipped") return 3;
+      return 4;
     };
     return rank(a.status) - rank(b.status);
   });
@@ -63,7 +66,7 @@ export function CollaboratorsLive({ collaborators, phase }: CollaboratorsLivePro
             Orchestrator
           </p>
           <span className="rounded-full bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] font-medium text-[var(--text-secondary)]">
-            {doneCount}/{collaborators.length}
+            {doneCount}/{visibleCollaborators.length}
           </span>
         </div>
         <p className="text-[11px] text-[var(--text-secondary)]">
@@ -85,6 +88,7 @@ export function CollaboratorsLive({ collaborators, phase }: CollaboratorsLivePro
                 agent.status === "done" && "border-[color-mix(in_oklab,var(--success)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_6%,transparent)]",
                 agent.status === "failed" && "border-[color-mix(in_oklab,var(--danger)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_6%,transparent)]",
                 agent.status === "running" && "border-[color-mix(in_oklab,var(--accent-cyan)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_6%,transparent)]",
+                agent.status === "skipped" && "border-[var(--border-default)] bg-[var(--bg-secondary)] opacity-70",
                 agent.status === "pending" && "border-[var(--border-default)] bg-[var(--bg-secondary)] opacity-60",
               )}
             >

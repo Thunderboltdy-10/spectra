@@ -39,18 +39,61 @@ export function PanelProvider({ children }: { children: React.ReactNode }) {
   const [activeView, setActiveView] = useState<PanelView>(null);
   const [panelData, setPanelData] = useState<PanelData>({});
   const activeViewRef = useRef<PanelView>(null);
+  const panelDataRef = useRef<PanelData>({});
 
   useEffect(() => {
     activeViewRef.current = activeView;
   }, [activeView]);
+  useEffect(() => {
+    panelDataRef.current = panelData;
+  }, [panelData]);
+
+  const samePanelData = useCallback((a: PanelData, b: PanelData) => {
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    for (const key of keys) {
+      const left = a[key as keyof PanelData];
+      const right = b[key as keyof PanelData];
+      if (key === "quiz") {
+        const leftQuiz = left as PanelQuizData | undefined;
+        const rightQuiz = right as PanelQuizData | undefined;
+        if (!leftQuiz && !rightQuiz) continue;
+        if (!leftQuiz || !rightQuiz) return false;
+        if (leftQuiz.panelId !== rightQuiz.panelId) return false;
+        if (leftQuiz.submitted !== rightQuiz.submitted) return false;
+        if (leftQuiz.activeIndex !== rightQuiz.activeIndex) return false;
+        if (leftQuiz.questions.length !== rightQuiz.questions.length) return false;
+        const leftQuestionSig = leftQuiz.questions.map((question) => question.id).join("|");
+        const rightQuestionSig = rightQuiz.questions.map((question) => question.id).join("|");
+        if (leftQuestionSig !== rightQuestionSig) return false;
+        const leftAnswers = Object.entries(leftQuiz.answers).sort(([aKey], [bKey]) => aKey.localeCompare(bKey));
+        const rightAnswers = Object.entries(rightQuiz.answers).sort(([aKey], [bKey]) => aKey.localeCompare(bKey));
+        if (leftAnswers.length !== rightAnswers.length) return false;
+        for (let index = 0; index < leftAnswers.length; index += 1) {
+          const [leftKey, leftValue] = leftAnswers[index]!;
+          const [rightKey, rightValue] = rightAnswers[index]!;
+          if (leftKey !== rightKey || leftValue !== rightValue) return false;
+        }
+        continue;
+      }
+      if (left !== right) return false;
+    }
+    return true;
+  }, []);
 
   const openPanel = useCallback((view: PanelView, data: PanelData = {}) => {
+    const sameView = activeViewRef.current === view;
+    if (sameView && samePanelData(panelDataRef.current, { ...panelDataRef.current, ...data })) {
+      return;
+    }
     if (typeof window !== "undefined" && view) {
       window.dispatchEvent(new CustomEvent("ai-school:panel-opened", { detail: { view } }));
     }
     setActiveView(view);
-    setPanelData((prev) => (view === activeViewRef.current ? { ...prev, ...data } : data));
-  }, []);
+    setPanelData((prev) => {
+      const next = view === activeViewRef.current ? { ...prev, ...data } : data;
+      return samePanelData(prev, next) ? prev : next;
+    });
+  }, [samePanelData]);
 
   const closePanel = useCallback(() => {
     if (typeof window !== "undefined" && activeViewRef.current) {
@@ -70,16 +113,21 @@ export function PanelProvider({ children }: { children: React.ReactNode }) {
   const togglePanel = useCallback((view: PanelView, data: PanelData = {}) => {
     if (activeView === view) {
       if (hasData(data)) {
-        setPanelData((prev) => ({ ...prev, ...data }));
+        setPanelData((prev) => {
+          const next = { ...prev, ...data };
+          return samePanelData(prev, next) ? prev : next;
+        });
       } else {
         setActiveView(null);
         setPanelData({});
       }
     } else {
-      setActiveView(view);
-      setPanelData(data);
+      if (activeViewRef.current !== view) {
+        setActiveView(view);
+      }
+      setPanelData((prev) => (samePanelData(prev, data) ? prev : data));
     }
-  }, [activeView, hasData]);
+  }, [activeView, hasData, samePanelData]);
 
   return (
     <PanelContext.Provider

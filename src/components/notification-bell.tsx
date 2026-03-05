@@ -33,9 +33,19 @@ type NotificationBellProps = {
   buttonClassName?: string;
   contentClassName?: string;
   align?: "start" | "center" | "end";
+  side?: "top" | "right" | "bottom" | "left";
+  sideOffset?: number;
+  onOpenChange?: (open: boolean) => void;
 };
 
-export function NotificationBell({ buttonClassName, contentClassName, align = "end" }: NotificationBellProps) {
+export function NotificationBell({
+  buttonClassName,
+  contentClassName,
+  align = "end",
+  side = "bottom",
+  sideOffset = 6,
+  onOpenChange,
+}: NotificationBellProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [markingAllRead, setMarkingAllRead] = useState(false);
@@ -66,6 +76,20 @@ export function NotificationBell({ buttonClassName, contentClassName, align = "e
       void refreshNotifications({ silent: true });
     }, 60_000);
     return () => window.clearInterval(interval);
+  }, [refreshNotifications]);
+
+  useEffect(() => {
+    const openBell = () => {
+      setOpen(true);
+      void refreshNotifications({ silent: true });
+    };
+    const closeBell = () => setOpen(false);
+    window.addEventListener("ai-school:open-notifications", openBell);
+    window.addEventListener("ai-school:close-notifications", closeBell);
+    return () => {
+      window.removeEventListener("ai-school:open-notifications", openBell);
+      window.removeEventListener("ai-school:close-notifications", closeBell);
+    };
   }, [refreshNotifications]);
 
   async function markRead(notificationId: string) {
@@ -108,6 +132,7 @@ export function NotificationBell({ buttonClassName, contentClassName, align = "e
   return (
     <DropdownMenu open={open} onOpenChange={(nextOpen) => {
       setOpen(nextOpen);
+      onOpenChange?.(nextOpen);
       if (nextOpen) {
         void refreshNotifications({ silent: true });
       }
@@ -129,7 +154,7 @@ export function NotificationBell({ buttonClassName, contentClassName, align = "e
           ) : null}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align={align} className={cn("w-[360px] p-0", contentClassName)}>
+      <DropdownMenuContent align={align} side={side} sideOffset={sideOffset} className={cn("w-[360px] p-0", contentClassName)}>
         <div className="flex items-center justify-between border-b border-[var(--border-default)] px-3 py-2.5">
           <div>
             <p className="text-sm font-semibold">Notifications</p>

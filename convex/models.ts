@@ -456,6 +456,77 @@ export const getModelPricing = query({
   },
 });
 
+export const listRuntimeStats = query({
+  args: { actorClerkId: v.string() },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Actor not found");
+    }
+
+    return ctx.db
+      .query("modelRuntimeStats")
+      .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
+      .collect();
+  },
+});
+
+export const recordModelRun = mutation({
+  args: {
+    actorClerkId: v.string(),
+    modelId: v.string(),
+    success: v.boolean(),
+    latencyMs: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Actor not found");
+    }
+
+    const now = Date.now();
+    const latency = Math.max(0, Math.round(args.latencyMs ?? 0));
+    const existing = await ctx.db
+      .query("modelRuntimeStats")
+      .withIndex("by_org_model", (q) => q.eq("orgId", actor.orgId).eq("modelId", args.modelId))
+      .unique();
+
+    if (!existing) {
+      const successCount = args.success ? 1 : 0;
+      const failureCount = args.success ? 0 : 1;
+      await ctx.db.insert("modelRuntimeStats", {
+        orgId: actor.orgId,
+        modelId: args.modelId,
+        successCount,
+        failureCount,
+        totalLatencyMs: latency,
+        avgLatencyMs: latency,
+        lastUsedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+      return { ok: true };
+    }
+
+    const successCount = existing.successCount + (args.success ? 1 : 0);
+    const failureCount = existing.failureCount + (args.success ? 0 : 1);
+    const totalLatencyMs = existing.totalLatencyMs + latency;
+    const totalRuns = Math.max(1, successCount + failureCount);
+    const avgLatencyMs = Math.round(totalLatencyMs / totalRuns);
+
+    await ctx.db.patch(existing._id, {
+      successCount,
+      failureCount,
+      totalLatencyMs,
+      avgLatencyMs,
+      lastUsedAt: now,
+      updatedAt: now,
+    });
+
+    return { ok: true };
+  },
+});
+
 export const upsertModelCatalog = mutation({
   args: {
     actorClerkId: v.string(),

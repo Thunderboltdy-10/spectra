@@ -24,6 +24,12 @@ export async function GET() {
         cheapOnlyLimitCents: number;
         hardLimitCents: number;
         budgetUsagePercent: number;
+        activityUsagePercent?: number;
+        tokenUsagePercent?: number;
+        monthlyTokens?: number;
+        monthlyEvents?: number;
+        monthlyTokenBudget?: number;
+        monthlyCostCentsFromEvents?: number;
         marginPercent: number;
       }>,
       convexQuery("memory:getUserMemory", { actorClerkId: actor.clerkId }) as Promise<{

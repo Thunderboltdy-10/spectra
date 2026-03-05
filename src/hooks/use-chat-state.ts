@@ -6,7 +6,6 @@ import { AchievementToast, type AchievementToastData } from "@/components/achiev
 import type { Agent, Citation, RouteTrace, RouterMode, StudyMode, ThinkingLevel } from "@/types";
 import { appendToBuffer, createBufferState } from "@/lib/structured-stream-buffer";
 import { useSidebar } from "@/context/sidebar-context";
-import { IMAGE_GEN_MODELS, MODEL_COST_BLOCK_LIST } from "@/lib/model-config";
 import { isModeAvailable } from "@/lib/modes";
 
 export type Chat = {
@@ -29,7 +28,7 @@ type ChatSearchHit = {
 
 type ActiveCollaboratorState = {
   role: string;
-  status: "pending" | "running" | "done" | "failed";
+  status: "pending" | "running" | "done" | "failed" | "skipped";
   model?: string;
   preview?: string;
   tokensUsed?: number;
@@ -80,6 +79,19 @@ export type ModelOption = {
   inputCostPerM?: number;
   outputCostPerM?: number;
   isFree?: boolean;
+  costRating?: "low" | "medium" | "high";
+  speedRating?: "low" | "medium" | "high";
+  reasoningRating?: "low" | "medium" | "high";
+  multimodalRating?: "none" | "basic" | "strong";
+  capabilities?: {
+    reasoning?: number;
+    creative?: number;
+    code?: number;
+    vision?: number;
+    speed?: number;
+  };
+  isFeatured?: boolean;
+  featuredOrder?: number;
 };
 
 export type PersonalResource = {
@@ -102,6 +114,12 @@ export type UserSpending = {
   cheapOnlyLimitCents?: number;
   hardLimitCents?: number;
   budgetUsagePercent?: number;
+  activityUsagePercent?: number;
+  tokenUsagePercent?: number;
+  monthlyTokens?: number;
+  monthlyEvents?: number;
+  monthlyTokenBudget?: number;
+  monthlyCostCentsFromEvents?: number;
   marginPercent?: number;
 };
 
@@ -110,6 +128,7 @@ type StreamPhase = "idle" | "compacting" | "routing" | "searching" | "thinking" 
 
 const AUTO_COMPACTION_MIN_MESSAGES = 10;
 const AUTO_COMPACTION_KEEP_LATEST = 6;
+const SAVE_CONVERSATION_FILES_KEY = "ai-school:save-conversation-files-to-library";
 
 type LiveModel = {
   id: string;
@@ -244,6 +263,68 @@ async function buildImageThumbnail(file: File): Promise<string | undefined> {
   });
 }
 
+const IMAGE_UPLOAD_MAX_BYTES = 4_500_000;
+const IMAGE_UPLOAD_MAX_EDGE = 1800;
+
+async function compressImageForUpload(file: File): Promise<File> {
+  if (!file.type.startsWith("image/")) return file;
+  if (file.size <= IMAGE_UPLOAD_MAX_BYTES) return file;
+
+  return new Promise((resolve) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+
+    image.onload = () => {
+      const ratio = Math.min(1, IMAGE_UPLOAD_MAX_EDGE / Math.max(image.width, image.height));
+      const width = Math.max(1, Math.round(image.width * ratio));
+      const height = Math.max(1, Math.round(image.height * ratio));
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        URL.revokeObjectURL(objectUrl);
+        resolve(file);
+        return;
+      }
+
+      ctx.drawImage(image, 0, 0, width, height);
+      const targetMime = file.type === "image/jpeg" || file.type === "image/webp" ? file.type : "image/webp";
+      const qualities = [0.86, 0.78, 0.7, 0.62];
+
+      const tryEncode = (index: number) => {
+        const quality = qualities[index];
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            URL.revokeObjectURL(objectUrl);
+            resolve(file);
+            return;
+          }
+          if (blob.size <= IMAGE_UPLOAD_MAX_BYTES || index >= qualities.length - 1) {
+            URL.revokeObjectURL(objectUrl);
+            if (blob.size >= file.size * 0.98) {
+              resolve(file);
+              return;
+            }
+            resolve(new File([blob], file.name, { type: blob.type || targetMime, lastModified: file.lastModified }));
+            return;
+          }
+          tryEncode(index + 1);
+        }, targetMime, quality);
+      };
+
+      tryEncode(0);
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(file);
+    };
+
+    image.src = objectUrl;
+  });
+}
+
 type UploadResponse = {
   resourceIds?: string[];
   chatOnlyResourceIds?: string[];
@@ -256,16 +337,25 @@ type UploadResponse = {
   }>;
 };
 
-async function uploadComposerFiles(files: File[], agentId?: string): Promise<UploadResponse> {
+async function uploadComposerFiles(
+  files: File[],
+  agentId?: string,
+  options?: { saveToLibrary?: boolean },
+): Promise<UploadResponse> {
   if (files.length === 0) return { resourceIds: [], results: [] };
 
   const formData = new FormData();
   formData.set("scope", "personal");
+  formData.set("saveToLibrary", options?.saveToLibrary === false ? "0" : "1");
   if (agentId) {
     formData.set("agentId", agentId);
   }
 
-  for (const file of files) {
+  const preparedFiles = await Promise.all(
+    files.map(async (file) => compressImageForUpload(file).catch(() => file)),
+  );
+
+  for (const file of preparedFiles) {
     formData.append("files", file);
   }
 
@@ -351,23 +441,6 @@ function mergeModels(catalog: ModelOption[], live: LiveModel[]) {
     });
   }
 
-  // Add hardcoded image generation models
-  for (const imgModel of IMAGE_GEN_MODELS) {
-    if (!merged.has(imgModel.id)) {
-      merged.set(imgModel.id, {
-        _id: imgModel.id,
-        modelId: imgModel.id,
-        name: imgModel.name,
-        provider: normalizeProviderName(imgModel.provider),
-        description: imgModel.recommended ? "Recommended for image generation" : "Image generation model",
-        tags: ["image", "generation"],
-        inputCostPerM: 0,
-        outputCostPerM: 0,
-        isFree: true,
-      });
-    }
-  }
-
   return [...merged.values()].sort((a, b) => {
     const aCost = a.inputCostPerM ?? Number.MAX_SAFE_INTEGER;
     const bCost = b.inputCostPerM ?? Number.MAX_SAFE_INTEGER;
@@ -395,6 +468,7 @@ export function useChatState() {
   const [manualModel, setManualModel] = useState("");
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>("medium");
   const [usePersonalResources, setUsePersonalResources] = useState(true);
+  const [autoSaveConversationFilesToLibrary, setAutoSaveConversationFilesToLibrary] = useState(true);
 
   const [autoEnhancePrompt, setAutoEnhancePrompt] = useState<AutoPreference>("auto");
   const [autoModel, setAutoModel] = useState(true);
@@ -634,6 +708,26 @@ export function useChatState() {
   useEffect(() => {
     sendingRef.current = sending;
   }, [sending]);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(SAVE_CONVERSATION_FILES_KEY);
+      setAutoSaveConversationFilesToLibrary(stored !== "0");
+    } catch {
+      setAutoSaveConversationFilesToLibrary(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        SAVE_CONVERSATION_FILES_KEY,
+        autoSaveConversationFilesToLibrary ? "1" : "0",
+      );
+    } catch {
+      // Ignore localStorage write failures.
+    }
+  }, [autoSaveConversationFilesToLibrary]);
 
   useEffect(() => {
     if (!selectedChatId) {
@@ -1001,8 +1095,8 @@ export function useChatState() {
           : spendingTier === "cheap_only"
             ? Boolean(model.isFree || (typeof model.inputCostPerM === "number" && model.inputCostPerM <= 3))
             : spendingTier === "expensive_blocked"
-              ? !MODEL_COST_BLOCK_LIST.has(model.modelId) && model.modelId !== "openrouter/auto"
-            : true,
+              ? model.modelId !== "openrouter/auto" && (typeof model.inputCostPerM !== "number" || model.inputCostPerM <= 12)
+              : true,
       )
       .sort((a, b) => {
         const aFree = a.isFree || a.modelId.includes(":free");
@@ -1087,16 +1181,10 @@ export function useChatState() {
       }
       setStreamPhase("idle");
       setCollaboratorPhase("idle");
-      toast.info("Generation stopped");
     }
   }
 
   function pinChat(chatId: string) {
-    if (pinnedChatIds.has(chatId)) {
-      toast.info("Chat unpinned");
-    } else {
-      toast.success("Chat pinned");
-    }
     sidebar.pinChat(chatId);
   }
 
@@ -1255,7 +1343,9 @@ export function useChatState() {
           return next;
         });
 
-        const uploadResult = await uploadComposerFiles(outgoingFiles, selectedAgentId);
+        const uploadResult = await uploadComposerFiles(outgoingFiles, selectedAgentId, {
+          saveToLibrary: autoSaveConversationFilesToLibrary,
+        });
         uploadedResourceIds = uploadResult.resourceIds ?? [];
         chatOnlyResourceIds = uploadResult.chatOnlyResourceIds ?? [];
         const resultByFile = new Map((uploadResult.results ?? []).map((result) => [result.file, result]));
@@ -1397,7 +1487,7 @@ export function useChatState() {
             suggestedMode?: string;
             agents?: string[];
             agent?: string;
-            status?: "pending" | "running" | "done" | "failed";
+            status?: "pending" | "running" | "done" | "failed" | "skipped";
             preview?: string;
             tokensUsed?: number;
             model?: string;
@@ -1598,7 +1688,6 @@ export function useChatState() {
               setMode(payload.suggestedMode as StudyMode);
               // Use the stream's chatId, not selectedChatId, to avoid updating wrong chat
               void updateChatSettingsById(chatId, { mode: payload.suggestedMode as StudyMode }).catch(() => {});
-              toast.info(`Mode switched to ${payload.suggestedMode} mode`, { duration: 3000 });
             }
             if (payload.unlockedAchievements?.length) {
               for (const achievement of payload.unlockedAchievements) {
@@ -1873,8 +1962,10 @@ export function useChatState() {
 
       let nextMode: StudyMode = mode;
       let followUpPrompt = "";
+      let recommendationLabel = "";
       if (scoreRatio < 0.5) {
         nextMode = "tutor";
+        recommendationLabel = "Learn mode recommendation ready";
         followUpPrompt = [
           `Student answered quiz. Score: ${payload.result.score}/${payload.result.total}.`,
           `Incorrect: ${incorrectSummary}.`,
@@ -1882,6 +1973,7 @@ export function useChatState() {
         ].join(" ");
       } else if (scoreRatio < 0.8) {
         nextMode = "flashcard";
+        recommendationLabel = "Flashcard review recommendation ready";
         followUpPrompt = [
           `Student answered quiz. Score: ${payload.result.score}/${payload.result.total}.`,
           `Incorrect: ${incorrectSummary}.`,
@@ -1889,9 +1981,10 @@ export function useChatState() {
         ].join(" ");
       } else {
         nextMode = "quiz";
+        recommendationLabel = "Challenge quiz suggestion ready";
         followUpPrompt = [
           `Student answered quiz. Score: ${payload.result.score}/${payload.result.total}.`,
-          "Generate a slightly harder follow-up quiz on the same topic with short explanations.",
+          "Generate a slightly harder follow-up quiz on the same topic with short explanations only if I ask for it.",
         ].join(" ");
       }
 
@@ -1899,14 +1992,8 @@ export function useChatState() {
         setMode(nextMode);
         void updateExistingChatSettings({ mode: nextMode }).catch(() => {});
       }
-
-      await sendMessage(followUpPrompt, {
-        chatIdOverride: selectedChatId,
-        modeOverride: nextMode,
-        skipLocalUser: true,
-        skipServerUserPersist: true,
-        retryAttempt: 0,
-      });
+      setMessage(followUpPrompt);
+      toast.success(`Quiz saved. ${recommendationLabel}`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to submit quiz");
     }
@@ -1979,6 +2066,18 @@ export function useChatState() {
       body: JSON.stringify({ resourceId }),
     });
     if (!response.ok) throw new Error(await response.text());
+    await refreshPersonalResources();
+  }
+
+  async function uploadPersonalResources(files: File[]) {
+    if (files.length === 0) return;
+    const result = await uploadComposerFiles(files, undefined, {
+      saveToLibrary: true,
+    });
+    const failure = (result.results ?? []).find((item) => item.status === "failed");
+    if (failure) {
+      throw new Error(failure.error || `Failed to upload ${failure.file}`);
+    }
     await refreshPersonalResources();
   }
 
@@ -2207,6 +2306,7 @@ export function useChatState() {
     manualModel,
     thinkingLevel,
     usePersonalResources,
+    autoSaveConversationFilesToLibrary,
     autoEnhancePrompt,
     autoModel,
     autoThinking,
@@ -2247,6 +2347,7 @@ export function useChatState() {
     setManualModel,
     setThinkingLevel,
     setUsePersonalResources,
+    setAutoSaveConversationFilesToLibrary,
     setAutoEnhancePrompt,
     setAutoModel,
     setAutoThinking,
@@ -2278,6 +2379,7 @@ export function useChatState() {
     refreshBookmarks,
     refreshPersonalResources,
     deletePersonalResource,
+    uploadPersonalResources,
     compactConversation,
     updateExistingChatSettings,
     stopGeneration,

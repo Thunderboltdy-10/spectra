@@ -12,18 +12,20 @@ import {
   summarizeWhyResponse,
   toOpenRouterMessages,
 } from "@/lib/orchestrator/compose";
-import { IMAGE_GEN_FALLBACKS, MODEL_CONFIG } from "@/lib/model-config";
 import { classifyExplainDepth, runAutoSettingsPipeline, suggestMode } from "@/lib/auto-settings";
 import { matchAgentToMessage } from "@/lib/agent-matching";
 import { countFlashcardPairs, isFlashcardDeckStructured, normalizeFlashcardDeck } from "@/lib/flashcard-format";
 import { safeStudyMode } from "@/lib/contracts/studyModes";
 import { createRequestLogger } from "@/lib/logging";
 import { isModeAvailable } from "@/lib/modes";
+import { modelSupportsCapability, pickModelAndFallbacks } from "@/lib/model-selection";
+import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
 import { normalizeAttachments } from "@/lib/attachments/normalizer";
 import { gateCapabilities } from "@/lib/attachments/capability-gate";
 import { runVisionPrepass } from "@/lib/attachments/vision-prepass";
 import { extractAttemptStats, maybeCompactHistory, toChatMessageShape, type MemoryEntry } from "@/lib/orchestrator/history";
 import {
+  buildRelevantMemoryProfile,
   inferCitations,
   maybeExtractMemory,
   maybeGenerateTitle,
@@ -258,6 +260,14 @@ function getReferencedHistoryImageBlocks(params: {
     }));
 }
 
+function buildSpecialistConversationContext(history: Array<{ role: string; content: string }>) {
+  return history
+    .slice(-10)
+    .map((entry) => `${entry.role.toUpperCase()}:\n${entry.content.slice(0, 420).trim()}`)
+    .join("\n\n")
+    .slice(0, 3200);
+}
+
 function jsonError(status: number, error: StructuredError, extra: Record<string, unknown> = {}) {
   return NextResponse.json(
     {
@@ -327,9 +337,56 @@ export async function runChatPipeline(request: NextRequest) {
     hardLimitReached: boolean;
   };
 
-  const catalog = (await convexQuery("models:listModels", {
+  const dbCatalog = (await convexQuery("models:listModels", {
     actorClerkId: actor.clerkId,
-  })) as Array<{ modelId: string; isFree?: boolean; inputCostPerM?: number }>;
+  })) as Array<{
+    modelId: string;
+    name?: string;
+    provider?: string;
+    description?: string;
+    contextLength?: number;
+    inputCostPerM?: number;
+    outputCostPerM?: number;
+    tags?: string[];
+    isFree?: boolean;
+    costRating?: "low" | "medium" | "high";
+    speedRating?: "low" | "medium" | "high";
+    reasoningRating?: "low" | "medium" | "high";
+    multimodalRating?: "none" | "basic" | "strong";
+    capabilities?: {
+      reasoning?: number;
+      creative?: number;
+      code?: number;
+      vision?: number;
+      speed?: number;
+    };
+  }>;
+  const runtimeStats = (await convexQuery("models:listRuntimeStats", {
+    actorClerkId: actor.clerkId,
+  })) as Array<{
+    modelId: string;
+    successCount: number;
+    failureCount: number;
+    avgLatencyMs?: number;
+  }>;
+  const runtimeStatMap = Object.fromEntries(
+    runtimeStats.map((row) => [row.modelId, row]),
+  ) as Record<string, { successCount: number; failureCount: number; avgLatencyMs?: number }>;
+  const liveCatalog = await getLiveCatalogSnapshot({ fallbackCatalog: dbCatalog });
+  const catalog = liveCatalog.models.length > 0 ? liveCatalog.models : dbCatalog;
+  const catalogPricingById = new Map(
+    catalog.map((model) => [
+      model.modelId,
+      {
+        inputCostPerM: model.inputCostPerM,
+        outputCostPerM: model.outputCostPerM,
+      },
+    ]),
+  );
+  logger.info("catalog snapshot ready", {
+    source: liveCatalog.source,
+    modelCount: catalog.length,
+  });
 
   if (budget.tier === "free_only") {
     const hasFreeModel = catalog.some((model) => model.isFree || model.modelId.includes(":free"));
@@ -620,7 +677,11 @@ export async function runChatPipeline(request: NextRequest) {
   });
 
   const searchPromise = auto.searchEnabled
-    ? maybeSearchWeb(auto.message, auto.thinkingLevel).catch(() => ({
+    ? maybeSearchWeb(auto.message, auto.thinkingLevel, {
+      modelCatalog: catalog,
+      spendingTier: budget.tier,
+      modelRuntimeStats: runtimeStatMap,
+    }).catch(() => ({
       text: "",
       urls: [] as string[],
       sources: [] as Array<{ url: string; title: string; domain: string }>,
@@ -747,13 +808,11 @@ export async function runChatPipeline(request: NextRequest) {
   const previousAssistantModel = [...history]
     .reverse()
     .find((message) => message.role === "assistant" && message.modelUsed)?.modelUsed;
-  const agentTopModels = selectedAgent?._id && featureEnabled(orgSettings.org?.agentModelBoostEnabled)
-    ? ((await convexQuery("agents:getTopModelsForAgent", {
-        actorClerkId: actor.clerkId,
-        agentId: selectedAgent._id,
-        limit: 5,
-      })) as Array<{ modelId: string; score: number }>)
-    : [];
+
+  const fallbackManualModel =
+    body.manualModel
+    ?? catalog.find((model) => model.modelId !== "openrouter/auto")?.modelId
+    ?? "openrouter/auto";
 
   const route = chooseModelRoute({
     mode: effectiveMode,
@@ -763,7 +822,7 @@ export async function runChatPipeline(request: NextRequest) {
     messageLength: auto.message.length,
     teacherStrictness: "medium",
     routerMode: autoSettings.autoModel ? body.routerMode : "manual",
-    manualModel: autoSettings.autoModel ? body.manualModel : body.manualModel ?? MODEL_CONFIG.tutorFast,
+    manualModel: autoSettings.autoModel ? body.manualModel : fallbackManualModel,
     studentSeemsStuck: effectiveMode === "tutor" && attemptStats.attemptCount >= 2,
     spendingTier: budget.tier,
     needsSearch: auto.searchEnabled,
@@ -774,8 +833,11 @@ export async function runChatPipeline(request: NextRequest) {
     isMultipart: auto.isMultipart,
     conversationLength: history.length,
     previousModelUsed: previousAssistantModel,
-    agentPreferredModel: selectedAgent?.preferredModel,
-    agentTopModels,
+    // Do not hard-bias routing toward agent-specific model hints.
+    agentPreferredModel: undefined,
+    agentTopModels: [],
+    modelCatalog: catalog,
+    modelRuntimeStats: runtimeStatMap,
   });
   const manualLockRequested = body.routerMode === "manual" && Boolean(body.manualModel) && !body.forcedModel;
   if (manualLockRequested && body.manualModel && route.primaryModel !== body.manualModel) {
@@ -793,7 +855,7 @@ export async function runChatPipeline(request: NextRequest) {
   });
 
   if (body.forcedModel && body.forcedModel !== route.primaryModel) {
-    if (!canUseInTier(body.forcedModel, budget.tier)) {
+    if (!canUseInTier(body.forcedModel, budget.tier, catalog)) {
       logger.warn("forcedModel rejected by tier policy", {
         forcedModel: body.forcedModel,
         tier: budget.tier,
@@ -871,6 +933,8 @@ export async function runChatPipeline(request: NextRequest) {
     selectedModel: route.primaryModel,
     requiresVision,
     fallbackModels: route.fallbackModels,
+    modelCatalog: catalog,
+    spendingTier: budget.tier,
   });
 
   if (capability.modelSwitched) {
@@ -879,7 +943,7 @@ export async function runChatPipeline(request: NextRequest) {
         finalModel: route.primaryModel,
         modelSwitched: false,
         requiresPrepass: true,
-        prepassModel: capability.prepassModel ?? MODEL_CONFIG.multimodal,
+        prepassModel: capability.prepassModel ?? route.fallbackModels[0] ?? route.primaryModel,
         userNotice: "Manual model kept; using vision prepass for attached images.",
       };
       route.reason = `${route.reason}; manual model retained with vision prepass`;
@@ -908,12 +972,16 @@ export async function runChatPipeline(request: NextRequest) {
       imageContentBlocks: allImageBlocks,
       userMessage: auto.message,
       model: capability.prepassModel,
+      fallbackModels: route.fallbackModels,
     });
     route.trace.toolchain.push("vision_prepass");
   }
 
   const primaryModel = route.primaryModel;
-  const modelSupportsExtendedThinking = /reason|r1|o3|o4|claude|gemini|sonar-pro/i.test(primaryModel);
+  const primaryModelMeta = catalog.find((model) => model.modelId === primaryModel);
+  const modelSupportsExtendedThinking = primaryModelMeta
+    ? modelSupportsCapability(primaryModelMeta, "reasoning")
+    : auto.thinkingLevel !== "high";
   const effectiveThinkingLevel = modelSupportsExtendedThinking
     ? auto.thinkingLevel
     : auto.thinkingLevel === "high"
@@ -921,7 +989,17 @@ export async function runChatPipeline(request: NextRequest) {
       : auto.thinkingLevel;
 
   const gate = tutorGate(attemptStats.attemptCount, attemptStats.hasReflection);
-  const useMemoryProfile = shouldInjectMemory(auto.message) && Boolean(userMemory.rawMemoryText);
+  const memoryProfile = buildRelevantMemoryProfile({
+    message: auto.message,
+    entries: userMemory.entries,
+    rawMemoryText: userMemory.rawMemoryText,
+  });
+  const useMemoryProfile = Boolean(memoryProfile) && (
+    shouldInjectMemory(auto.message) ||
+    effectiveMode === "tutor" ||
+    effectiveMode === "explain" ||
+    effectiveMode === "research"
+  );
   if (useMemoryProfile) {
     route.trace.toolchain.push("memory_injection");
   }
@@ -948,7 +1026,7 @@ export async function runChatPipeline(request: NextRequest) {
           guidelinesTopicMap: selectedAgent.guidelinesTopicMap,
         }
       : undefined,
-    memoryProfile: useMemoryProfile ? userMemory.rawMemoryText : undefined,
+    memoryProfile: useMemoryProfile ? memoryProfile : undefined,
     contextSummary: existingSummary,
     searchBlock,
     explainDepth,
@@ -986,8 +1064,18 @@ export async function runChatPipeline(request: NextRequest) {
     budget.tier === "free_only"
       ? { maxSpecialists: 1, maxSubcalls: 2, maxTokensPerSpecialist: 600, includeCritic: false }
       : budget.tier === "cheap_only"
-        ? { maxSpecialists: 3, maxSubcalls: 3, maxTokensPerSpecialist: 900, includeCritic: false }
-        : { maxSpecialists: 5, maxSubcalls: 4, maxTokensPerSpecialist: 1200, includeCritic: true };
+        ? {
+            maxSpecialists: effectiveMode === "research" ? 4 : 3,
+            maxSubcalls: effectiveMode === "research" ? 4 : 3,
+            maxTokensPerSpecialist: effectiveMode === "research" ? 1100 : 900,
+            includeCritic: false,
+          }
+        : {
+            maxSpecialists: effectiveMode === "research" ? 7 : 5,
+            maxSubcalls: effectiveMode === "research" ? 8 : 6,
+            maxTokensPerSpecialist: effectiveMode === "research" ? 1600 : 1200,
+            includeCritic: true,
+          };
   if (!collabLimits.includeCritic) {
     route.trace.toolchain.push("critic_skipped_budget_guard");
   }
@@ -1003,6 +1091,23 @@ export async function runChatPipeline(request: NextRequest) {
       })
     : [];
 
+  const supportModelSelection = pickModelAndFallbacks({
+    catalog: catalog.filter((model) => model.modelId !== "openrouter/auto"),
+    tier: budget.tier,
+    preferCheap: true,
+    preferFast: true,
+    preferredCapabilities: ["reasoning"],
+    runtimeStats: runtimeStatMap,
+    maxFallbacks: 3,
+  });
+  const supportModel = supportModelSelection.selected?.modelId ?? route.primaryModel;
+  const supportFallbackModels = Array.from(
+    new Set(
+      [route.primaryModel, ...route.fallbackModels, ...supportModelSelection.fallbacks]
+        .filter((modelId) => modelId && modelId !== supportModel),
+    ),
+  ).slice(0, 4);
+
   const messages = [
     { role: "system", content: systemPromptParts.join("\n\n") },
     ...toOpenRouterMessages(
@@ -1010,6 +1115,7 @@ export async function runChatPipeline(request: NextRequest) {
       capability.requiresPrepass ? undefined : allImageBlocks,
     ),
   ];
+  const specialistConversationContext = buildSpecialistConversationContext(historyForModel);
 
   const shouldVerify = effectiveMode === "marker" && Boolean(orgSettings.org?.verifyMarkerPassEnabled);
   if (shouldVerify) {
@@ -1053,6 +1159,15 @@ export async function runChatPipeline(request: NextRequest) {
 
   void (async () => {
     let assistantPersisted = false;
+    const recordModelRuntime = async (modelId: string | undefined, success: boolean, latencyMs?: number) => {
+      if (!modelId || !modelId.trim()) return;
+      await convexMutation("models:recordModelRun", {
+        actorClerkId: actor.clerkId,
+        modelId,
+        success,
+        latencyMs,
+      }).catch(() => {});
+    };
 
     try {
       void earlyTitlePromise.then((title) => {
@@ -1085,10 +1200,27 @@ export async function runChatPipeline(request: NextRequest) {
           promptRefinement?.choices?.[0]?.message?.content?.trim() || auto.message;
 
         route.trace.toolchain.push("image_generation");
-        const selectedImageModel = body.imageModel || MODEL_CONFIG.imageGen;
+        const imageModelSelection = pickModelAndFallbacks({
+          catalog: catalog.filter((model) => model.modelId !== "openrouter/auto"),
+          tier: budget.tier,
+          requiredCapabilities: ["image_generation"],
+          preferredCapabilities: ["image_generation"],
+          runtimeStats: runtimeStatMap,
+          maxFallbacks: 3,
+        });
+        const selectedImageModel =
+          body.imageModel
+          || imageModelSelection.selected?.modelId
+          || primaryModel;
+        const imageFallbackModels = Array.from(
+          new Set([
+            ...imageModelSelection.fallbacks,
+            ...route.fallbackModels,
+          ]),
+        ).filter((candidate) => candidate !== selectedImageModel);
         const imageResult = await openRouterGenerateImage({
           model: selectedImageModel,
-          fallbackModels: [...IMAGE_GEN_FALLBACKS],
+          fallbackModels: imageFallbackModels,
           prompt: refinedPrompt,
           size: "1024x1024",
           onFallback: (event) => {
@@ -1156,10 +1288,17 @@ export async function runChatPipeline(request: NextRequest) {
         })) as { messageId: string };
         assistantPersisted = true;
 
-        const pricing = (await convexQuery("models:getModelPricing", {
-          actorClerkId: actor.clerkId,
-          modelId: modelUsed,
-        })) as { inputCostPerM?: number; outputCostPerM?: number; isFree?: boolean };
+        const catalogPricing = catalogPricingById.get(modelUsed);
+        const pricing =
+          (typeof catalogPricing?.inputCostPerM === "number" || typeof catalogPricing?.outputCostPerM === "number")
+            ? {
+                inputCostPerM: catalogPricing?.inputCostPerM,
+                outputCostPerM: catalogPricing?.outputCostPerM,
+              }
+            : ((await convexQuery("models:getModelPricing", {
+                actorClerkId: actor.clerkId,
+                modelId: modelUsed,
+              })) as { inputCostPerM?: number; outputCostPerM?: number; isFree?: boolean });
 
         await convexMutation("usage:recordUsageWithCost", {
           actorClerkId: actor.clerkId,
@@ -1171,6 +1310,7 @@ export async function runChatPipeline(request: NextRequest) {
           inputCostPerM: pricing.inputCostPerM,
           outputCostPerM: pricing.outputCostPerM,
         }).catch(() => {});
+        await recordModelRuntime(modelUsed, true, Date.now() - requestStartedAt);
 
         const spendingUpdate = (await convexQuery("usage:checkUserBudget", {
           actorClerkId: actor.clerkId,
@@ -1300,9 +1440,13 @@ export async function runChatPipeline(request: NextRequest) {
         ? await runCollaborativeStreaming({
             graph: taskGraph,
             originalPrompt: auto.message,
+            conversationContext: specialistConversationContext,
             baseSystemPrompt: systemPromptParts.join("\n\n"),
             primaryModel,
             fallbackModels,
+            catalog,
+            modelRuntimeStats: runtimeStatMap,
+            spendingTier: budget.tier,
             maxTokens,
             maxSubcalls: collabLimits.maxSubcalls,
             maxTokensPerSpecialist: collabLimits.maxTokensPerSpecialist,
@@ -1383,8 +1527,8 @@ export async function runChatPipeline(request: NextRequest) {
         (!isFlashcardDeckStructured(correctedResponse) || flashcardCount < MIN_FLASHCARD_PAIRS);
       if (needsQuizRepair || needsFlashcardRepair) {
         const repaired = await openRouterChatCompletion({
-          model: MODEL_CONFIG.tutorFast,
-          fallbackModels: [route.primaryModel, ...route.fallbackModels].slice(0, 3),
+          model: supportModel,
+          fallbackModels: supportFallbackModels,
           messages: [
             {
               role: "system",
@@ -1454,8 +1598,8 @@ BACK: ...`,
 
       if (stillNeedsQuizRepair || stillNeedsFlashcardRepair) {
         const regenerated = await openRouterChatCompletion({
-          model: MODEL_CONFIG.tutorFast,
-          fallbackModels: [route.primaryModel, ...route.fallbackModels].slice(0, 3),
+          model: supportModel,
+          fallbackModels: supportFallbackModels,
           messages: [
             {
               role: "system",
@@ -1517,8 +1661,8 @@ BACK: ...`,
         (!isQuizStructured(correctedResponse) || countQuizQuestions(correctedResponse) < MIN_QUIZ_QUESTIONS);
       if (finalQuizRepairNeeded) {
         const finalRepair = await openRouterChatCompletion({
-          model: MODEL_CONFIG.tutorFast,
-          fallbackModels: [route.primaryModel, ...route.fallbackModels].slice(0, 3),
+          model: supportModel,
+          fallbackModels: supportFallbackModels,
           messages: [
             {
               role: "system",
@@ -1562,8 +1706,8 @@ Correct: [A|B|C|D]
         (!isFlashcardDeckStructured(correctedResponse) || countFlashcardPairs(correctedResponse) < MIN_FLASHCARD_PAIRS);
       if (finalFlashcardRepairNeeded) {
         const finalFlashcardRepair = await openRouterChatCompletion({
-          model: MODEL_CONFIG.tutorFast,
-          fallbackModels: [route.primaryModel, ...route.fallbackModels].slice(0, 3),
+          model: supportModel,
+          fallbackModels: supportFallbackModels,
           messages: [
             {
               role: "system",
@@ -1649,10 +1793,17 @@ BACK: [answer or definition]`,
       })) as { messageId: string };
       assistantPersisted = true;
 
-      const pricing = (await convexQuery("models:getModelPricing", {
-        actorClerkId: actor.clerkId,
-        modelId: modelUsed,
-      })) as { inputCostPerM?: number; outputCostPerM?: number; isFree?: boolean };
+      const catalogPricing = catalogPricingById.get(modelUsed);
+      const pricing =
+        (typeof catalogPricing?.inputCostPerM === "number" || typeof catalogPricing?.outputCostPerM === "number")
+          ? {
+              inputCostPerM: catalogPricing?.inputCostPerM,
+              outputCostPerM: catalogPricing?.outputCostPerM,
+            }
+          : ((await convexQuery("models:getModelPricing", {
+              actorClerkId: actor.clerkId,
+              modelId: modelUsed,
+            })) as { inputCostPerM?: number; outputCostPerM?: number; isFree?: boolean });
 
       await convexMutation("usage:recordUsageWithCost", {
         actorClerkId: actor.clerkId,
@@ -1664,6 +1815,16 @@ BACK: [answer or definition]`,
         inputCostPerM: pricing.inputCostPerM,
         outputCostPerM: pricing.outputCostPerM,
       });
+      await recordModelRuntime(modelUsed, true, Date.now() - requestStartedAt);
+      if (route.trace.collaborators?.length) {
+        for (const collaborator of route.trace.collaborators) {
+          await recordModelRuntime(
+            collaborator.model,
+            (collaborator.tokensUsed ?? 0) > 0,
+            collaborator.durationMs,
+          );
+        }
+      }
 
       const spendingUpdate = (await convexQuery("usage:checkUserBudget", {
         actorClerkId: actor.clerkId,
@@ -1797,6 +1958,7 @@ BACK: [answer or definition]`,
         "chat stream failed",
         error instanceof Error ? error : new Error("Unknown stream failure"),
       );
+      await recordModelRuntime(route.primaryModel, false, Date.now() - requestStartedAt);
       if (shouldPersistUserMessage && !assistantPersisted) {
         await convexMutation("chats:deleteLastUserMessage", {
           actorClerkId: actor.clerkId,

@@ -1,5 +1,6 @@
-import { convexMutation } from "@/lib/convex-server";
-import { MODEL_CONFIG } from "@/lib/model-config";
+import { convexMutation, convexQuery } from "@/lib/convex-server";
+import { buildRuntimeStatMap, pickModelAndFallbacks } from "@/lib/model-selection";
+import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
 import { openRouterChatCompletion } from "@/lib/openrouter";
 import { extractCitationsFromText } from "@/lib/orchestrator/compose";
 import type { WebSearchSource } from "@/lib/orchestrator/retrieval";
@@ -7,11 +8,105 @@ import { withTimeout, type MemoryEntry } from "@/lib/orchestrator/history";
 import type { Citation } from "@/types";
 
 const TITLE_MIN_WORDS = 2;
-const TITLE_MAX_WORDS = 5;
+const TITLE_MAX_WORDS = 6;
 const MEMORY_MAX_ENTRIES = 20;
 const MEMORY_MAX_RAW_CHARS = 1500;
 const MEMORY_DECAY_CONFIDENCE = 0.3;
 const MEMORY_DECAY_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const MEMORY_PROFILE_MAX_ENTRIES = 8;
+const MEMORY_PROFILE_MIN_SCORE = 0.08;
+
+type UtilityModelSelection = {
+  model: string;
+  fallbackModels: string[];
+};
+
+async function selectUtilityModel(params: {
+  actorClerkId: string;
+  requiredCapabilities?: Array<"reasoning" | "vision" | "code" | "search" | "image_generation">;
+  preferredCapabilities?: Array<"reasoning" | "vision" | "code" | "search" | "image_generation">;
+  preferFast?: boolean;
+  preferCheap?: boolean;
+}): Promise<UtilityModelSelection> {
+  const [dbCatalog, runtimeStats, budget] = await Promise.all([
+    convexQuery("models:listModels", {
+      actorClerkId: params.actorClerkId,
+    }).catch(() => [] as Array<Record<string, unknown>>),
+    convexQuery("models:listRuntimeStats", {
+      actorClerkId: params.actorClerkId,
+    }).catch(() => [] as Array<{ modelId: string; successCount: number; failureCount: number; avgLatencyMs?: number }>),
+    convexQuery("usage:checkUserBudget", {
+      actorClerkId: params.actorClerkId,
+    }).catch(() => ({ tier: "normal" as const })),
+  ]);
+  const liveCatalog = await getLiveCatalogSnapshot({
+    fallbackCatalog: dbCatalog as Array<{
+      modelId: string;
+      name?: string;
+      provider?: string;
+      description?: string;
+      contextLength?: number;
+      inputCostPerM?: number;
+      outputCostPerM?: number;
+      tags?: string[];
+      isFree?: boolean;
+      costRating?: "low" | "medium" | "high";
+      speedRating?: "low" | "medium" | "high";
+      reasoningRating?: "low" | "medium" | "high";
+      multimodalRating?: "none" | "basic" | "strong";
+      capabilities?: {
+        reasoning?: number;
+        creative?: number;
+        code?: number;
+        vision?: number;
+        speed?: number;
+      };
+    }>,
+  });
+  const catalog = liveCatalog.models.length > 0
+    ? liveCatalog.models
+    : (dbCatalog as Array<{
+        modelId: string;
+        name?: string;
+        provider?: string;
+        description?: string;
+        contextLength?: number;
+        inputCostPerM?: number;
+        outputCostPerM?: number;
+        tags?: string[];
+        isFree?: boolean;
+        costRating?: "low" | "medium" | "high";
+        speedRating?: "low" | "medium" | "high";
+        reasoningRating?: "low" | "medium" | "high";
+        multimodalRating?: "none" | "basic" | "strong";
+        capabilities?: {
+          reasoning?: number;
+          creative?: number;
+          code?: number;
+          vision?: number;
+          speed?: number;
+        };
+      }>);
+
+  const picked = pickModelAndFallbacks({
+    catalog: catalog.filter((model) => model.modelId !== "openrouter/auto"),
+    tier: (budget as { tier?: "normal" | "expensive_blocked" | "cheap_only" | "free_only" })?.tier ?? "normal",
+    requiredCapabilities: params.requiredCapabilities,
+    preferredCapabilities: params.preferredCapabilities,
+    preferFast: params.preferFast ?? true,
+    preferCheap: params.preferCheap ?? true,
+    runtimeStats: buildRuntimeStatMap(
+      runtimeStats as Array<{ modelId: string; successCount: number; failureCount: number; avgLatencyMs?: number }>,
+    ),
+    maxFallbacks: 3,
+  });
+
+  const model = picked.selected?.modelId ?? "openrouter/auto";
+  return {
+    model,
+    fallbackModels: picked.fallbacks.filter((candidate) => candidate !== model),
+  };
+}
 
 function canonicalMemoryKey(rawKey: string) {
   const normalized = rawKey
@@ -99,6 +194,67 @@ export function shouldInjectMemory(message: string) {
   return /(i\b|my\b|me\b|struggle|goal|preference|prefer|weakness|improve|last time|again|remember)/i.test(
     normalized,
   );
+}
+
+function tokenize(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((token) => token.length >= 3);
+}
+
+function overlapScore(queryTokens: string[], entryTokens: Set<string>) {
+  if (queryTokens.length === 0) return 0;
+  let overlap = 0;
+  for (const token of queryTokens) {
+    if (entryTokens.has(token)) overlap += 1;
+  }
+  return overlap / queryTokens.length;
+}
+
+function recencyScore(extractedAt: number) {
+  const age = Math.max(0, Date.now() - extractedAt);
+  if (age <= 7 * 24 * 60 * 60 * 1000) return 1;
+  if (age <= 30 * 24 * 60 * 60 * 1000) return 0.7;
+  if (age <= 90 * 24 * 60 * 60 * 1000) return 0.45;
+  return 0.2;
+}
+
+export function buildRelevantMemoryProfile(params: {
+  message: string;
+  entries: MemoryEntry[];
+  rawMemoryText?: string;
+}) {
+  const queryTokens = tokenize(params.message);
+  if (params.entries.length === 0) {
+    return params.rawMemoryText ? params.rawMemoryText.slice(0, MEMORY_MAX_RAW_CHARS) : "";
+  }
+
+  const ranked = params.entries
+    .map((entry) => {
+      const entryTokens = new Set(tokenize(`${entry.key} ${entry.value}`));
+      const lexical = overlapScore(queryTokens, entryTokens);
+      const confidence = Math.max(0, Math.min(1, Number(entry.confidence ?? 0.5)));
+      const recency = recencyScore(entry.extractedAt);
+      const score = lexical * 0.58 + confidence * 0.26 + recency * 0.16;
+      return { ...entry, score };
+    })
+    .sort((a, b) => b.score - a.score || b.extractedAt - a.extractedAt);
+
+  const shortlisted = ranked
+    .filter((entry, index) => index < 2 || entry.score >= MEMORY_PROFILE_MIN_SCORE)
+    .slice(0, MEMORY_PROFILE_MAX_ENTRIES)
+    .map((entry) => ({
+      key: entry.key,
+      value: entry.value,
+      confidence: entry.confidence,
+      extractedAt: entry.extractedAt,
+    }));
+
+  const profile = formatMemory(shortlisted);
+  if (profile) return profile;
+  return params.rawMemoryText ? params.rawMemoryText.slice(0, MEMORY_MAX_RAW_CHARS) : "";
 }
 
 export function inferCitations(
@@ -242,7 +398,7 @@ function tokenizeWords(value: string) {
   return compactText(value)
     .split(" ")
     .map((word) => word.trim())
-    .filter(Boolean);
+    .filter((word) => word.length > 1 || /\d/.test(word));
 }
 
 function looksCodeHeavy(value: string) {
@@ -290,16 +446,22 @@ function normalizeTitle(candidate: string, fallbackSource: string) {
   return title || heuristicTitle(fallbackSource);
 }
 
-async function generateTitleFromSnippet(source: string, fallbackSource: string) {
+async function generateTitleFromSnippet(source: string, fallbackSource: string, actorClerkId: string) {
+  const utility = await selectUtilityModel({
+    actorClerkId,
+    preferredCapabilities: ["reasoning"],
+    preferFast: true,
+    preferCheap: true,
+  });
   const completion = await withTimeout(
     openRouterChatCompletion({
-      model: MODEL_CONFIG.glmAir,
-      fallbackModels: [MODEL_CONFIG.tutorFast, MODEL_CONFIG.marker],
+      model: utility.model,
+      fallbackModels: utility.fallbackModels,
       messages: [
         {
           role: "system",
           content:
-            "Generate a conversation title in 2 to 5 words. Keep the same language as the user when possible. Return plain title text only with no quotes.",
+            "Generate a conversation title in 2 to 6 words. Keep the same language as the user when possible. Return plain title text only with no quotes.",
         },
         {
           role: "user",
@@ -325,7 +487,7 @@ export async function maybeGenerateTitle(params: {
   try {
     const source = `User: ${params.userMessage}\nAssistant: ${params.assistantMessage.slice(0, 260)}`;
     const fallbackSource = compactText(`${params.userMessage} ${params.assistantMessage.slice(0, 180)}`);
-    const title = await generateTitleFromSnippet(source, fallbackSource || params.userMessage);
+    const title = await generateTitleFromSnippet(source, fallbackSource || params.userMessage, params.actorClerkId);
 
     await convexMutation("chats:setChatTitle", {
       actorClerkId: params.actorClerkId,
@@ -345,7 +507,11 @@ export async function maybeGenerateTitleFromUserPrompt(params: {
 }): Promise<string | undefined> {
   try {
     const fallbackSource = compactText(params.userMessage);
-    const title = await generateTitleFromSnippet(params.userMessage, fallbackSource || heuristicTitle(params.userMessage));
+    const title = await generateTitleFromSnippet(
+      params.userMessage,
+      fallbackSource || heuristicTitle(params.userMessage),
+      params.actorClerkId,
+    );
 
     await convexMutation("chats:setChatTitle", {
       actorClerkId: params.actorClerkId,
@@ -365,11 +531,17 @@ export async function maybeExtractMemory(params: {
   assistantResponse: string;
 }) {
   const snippet = `User: ${params.userMessage.slice(0, 500)}\nAssistant: ${params.assistantResponse.slice(0, 500)}`;
+  const utility = await selectUtilityModel({
+    actorClerkId: params.actorClerkId,
+    preferredCapabilities: ["reasoning"],
+    preferFast: true,
+    preferCheap: true,
+  });
 
   const completion = await withTimeout(
     openRouterChatCompletion({
-      model: MODEL_CONFIG.tutorFast,
-      fallbackModels: [MODEL_CONFIG.marker],
+      model: utility.model,
+      fallbackModels: utility.fallbackModels,
       messages: [
         {
           role: "system",
@@ -386,32 +558,67 @@ export async function maybeExtractMemory(params: {
     5000,
   );
 
-  if (!completion) return;
+  const now = Date.now();
+  const extracted: MemoryEntry[] = [];
 
-  const raw = completion.choices?.[0]?.message?.content ?? "[]";
-  const jsonMatch = raw.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) return;
+  const heuristics = (() => {
+    const text = params.userMessage.replace(/\s+/g, " ").trim();
+    if (!text) return [] as MemoryEntry[];
 
-  try {
-    const parsed = JSON.parse(jsonMatch[0]) as Array<{ key?: string; value?: string; confidence?: number }>;
-    const now = Date.now();
-    const extracted: MemoryEntry[] = parsed
-      .filter((entry) => typeof entry.key === "string" && typeof entry.value === "string")
-      .slice(0, 8)
-      .map((entry) => ({
-        key: String(entry.key),
-        value: String(entry.value),
-        confidence: Math.max(0, Math.min(1, Number(entry.confidence ?? 0.6))),
+    const inferred: MemoryEntry[] = [];
+    const patterns: Array<{ key: string; regex: RegExp; confidence: number }> = [
+      { key: "goals", regex: /\b(my goal is|i want to|i need to|help me)\b/i, confidence: 0.72 },
+      { key: "subject_preferences", regex: /\b(i (love|like|enjoy)|favorite subject|interested in)\b/i, confidence: 0.64 },
+      { key: "struggles", regex: /\b(i struggle with|i find .* hard|i'm stuck on|confused about)\b/i, confidence: 0.74 },
+      { key: "learning_style", regex: /\b(i prefer|please explain|step by step|simple terms|visual)\b/i, confidence: 0.58 },
+    ];
+
+    for (const pattern of patterns) {
+      if (!pattern.regex.test(text)) continue;
+      inferred.push({
+        key: pattern.key,
+        value: text.slice(0, 200),
+        confidence: pattern.confidence,
         extractedAt: now,
-      }));
+      });
+    }
+    return inferred.slice(0, 4);
+  })();
+  extracted.push(...heuristics);
 
-    const merged = mergeMemoryEntries(params.existingEntries, extracted);
-    await convexMutation("memory:upsertUserMemory", {
-      actorClerkId: params.actorClerkId,
-      entries: merged,
-      rawMemoryText: formatMemory(merged),
-    });
-  } catch {
-    // Ignore malformed model output.
+  if (completion) {
+    const raw = completion.choices?.[0]?.message?.content ?? "[]";
+    const jsonMatch = raw.match(/\[[\s\S]*\]/) ?? raw.match(/\{[\s\S]*\}/);
+
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]) as
+          | Array<{ key?: string; value?: string; confidence?: number }>
+          | { key?: string; value?: string; confidence?: number };
+        const entries = Array.isArray(parsed) ? parsed : [parsed];
+        extracted.push(
+          ...entries
+            .filter((entry) => typeof entry.key === "string" && typeof entry.value === "string")
+            .slice(0, 8)
+            .map((entry) => ({
+              key: String(entry.key),
+              value: String(entry.value),
+              confidence: Math.max(0, Math.min(1, Number(entry.confidence ?? 0.6))),
+              extractedAt: now,
+            })),
+        );
+      } catch {
+        // Fallback to heuristic extraction only.
+      }
+    }
   }
+
+  if (extracted.length === 0) return;
+
+  const merged = mergeMemoryEntries(params.existingEntries, extracted);
+  await convexMutation("memory:upsertUserMemory", {
+    actorClerkId: params.actorClerkId,
+    entries: merged,
+    rawMemoryText: formatMemory(merged),
+  });
 }

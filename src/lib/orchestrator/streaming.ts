@@ -2,7 +2,8 @@ import { openRouterChatCompletion, openRouterStreamChat, type OpenRouterMessage 
 import { executeGraph, synthesize, type TaskNode } from "@/lib/orchestrator/task-graph";
 import { getSpecialist } from "@/lib/orchestrator/specialists";
 import { runMarkerVerificationPipeline } from "@/lib/orchestrator/verification";
-import type { RouteTraceFallback } from "@/types";
+import type { CatalogModelEntry, ModelRuntimeStat } from "@/lib/model-selection";
+import type { RouteTraceFallback, SpendingTier } from "@/types";
 
 export function chunkString(value: string, size: number) {
   const chunks = value.match(new RegExp(`.{1,${size}}`, "g"));
@@ -185,9 +186,13 @@ function buildCriticFallback(params: {
 export async function runCollaborativeStreaming(params: {
   graph: TaskNode[];
   originalPrompt: string;
+  conversationContext?: string;
   baseSystemPrompt: string;
   primaryModel: string;
   fallbackModels: string[];
+  catalog?: CatalogModelEntry[];
+  modelRuntimeStats?: Record<string, ModelRuntimeStat>;
+  spendingTier?: SpendingTier;
   maxTokens?: number;
   maxSubcalls?: number;
   maxTokensPerSpecialist?: number;
@@ -198,7 +203,9 @@ export async function runCollaborativeStreaming(params: {
   };
 }) {
   const sourceHintsByUrl = new Map<string, SearchSourceHint>();
-  const collaboratorNodes = params.graph.filter((node) => node.role !== "synthesizer");
+  const executionGraph = params.graph.filter((node) => node.role !== "synthesizer");
+  const collaboratorNodes = executionGraph;
+  const specialistModelHistory = new Set<string>();
   await params.send({ type: "collab_start", agents: collaboratorNodes.map((node) => node.role) });
   await params.send({
     type: "thinking",
@@ -206,10 +213,19 @@ export async function runCollaborativeStreaming(params: {
   });
 
   const executed = await executeGraph(
-    params.graph,
+    executionGraph,
     async (node, dependencies) => {
       const startedAt = Date.now();
-      const specialist = getSpecialist(node.role);
+      const specialist = getSpecialist(node.role, {
+        defaultModel: params.primaryModel,
+        fallbackModels: params.fallbackModels,
+        catalog: params.catalog,
+        runtimeStats: params.modelRuntimeStats,
+        spendingTier: params.spendingTier,
+        avoidModels: [...specialistModelHistory],
+      });
+      specialistModelHistory.add(specialist.model);
+      node.specialist = specialist.model;
       await params.send({
         type: "collab_progress",
         agent: node.role,
@@ -238,9 +254,12 @@ export async function runCollaborativeStreaming(params: {
               role: "user",
               content: [
                 `Original user prompt:\n${params.originalPrompt}`,
+                params.conversationContext
+                  ? `Conversation context:\n${params.conversationContext}`
+                  : "",
                 `Task focus:\n${node.prompt}`,
                 `Dependency findings:\n${summarizeDependencyResults(dependencies)}`,
-              ].join("\n\n"),
+              ].filter(Boolean).join("\n\n"),
             },
           ],
           temperature: 0.2,
@@ -296,6 +315,14 @@ export async function runCollaborativeStreaming(params: {
         preview: "Specialist step failed; continuing with available evidence.",
       });
     }
+    if (node.status === "skipped") {
+      await params.send({
+        type: "collab_progress",
+        agent: node.role,
+        status: "skipped",
+        preview: "Skipped to keep response latency and budget within limits.",
+      });
+    }
   }
 
   await params.send({ type: "collab_synthesizing" });
@@ -320,8 +347,11 @@ export async function runCollaborativeStreaming(params: {
         content: [
           "Merge these specialist findings into a coherent answer for the user.",
           "Keep evidence grounded and include confidence notes if there were disagreements.",
+          params.conversationContext
+            ? `Conversation context (must stay consistent):\n${params.conversationContext}`
+            : "",
           combinedFindings,
-        ].join("\n\n"),
+        ].filter(Boolean).join("\n\n"),
       },
     ],
     temperature: 0.2,
@@ -347,12 +377,11 @@ export async function runCollaborativeStreaming(params: {
   const synthesisDurationMs = Date.now() - synthesisStartedAt;
 
   const collaborators: CollaboratorTrace[] = executed
-    .filter((node) => node.role !== "synthesizer")
+    .filter((node) => node.status !== "skipped")
     .map((node) => {
-      const specialist = getSpecialist(node.role);
       return {
         role: node.role,
-        model: specialist.model,
+        model: node.specialist,
         tokensUsed: node.tokens ?? 0,
         durationMs: node.durationMs ?? 0,
       };

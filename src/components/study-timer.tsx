@@ -123,16 +123,44 @@ function readPersistedState(): PersistedTimerState | null {
   }
 }
 
+function getInitialTimerState(): PersistedTimerState {
+  if (typeof window === "undefined") {
+    return {
+      phase: "work",
+      remainingMs: DEFAULT_WORK_MINUTES * 60 * 1000,
+      isRunning: false,
+      phaseEndAt: null,
+      phaseStartedAt: null,
+      completedSessions: 0,
+      workMinutes: DEFAULT_WORK_MINUTES,
+      breakMinutes: DEFAULT_BREAK_MINUTES,
+    };
+  }
+  const restored = readPersistedState();
+  if (restored) return restored;
+  return {
+    phase: "work",
+    remainingMs: DEFAULT_WORK_MINUTES * 60 * 1000,
+    isRunning: false,
+    phaseEndAt: null,
+    phaseStartedAt: null,
+    completedSessions: 0,
+    workMinutes: DEFAULT_WORK_MINUTES,
+    breakMinutes: DEFAULT_BREAK_MINUTES,
+  };
+}
+
 export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTimerProps) {
-  const [phase, setPhase] = useState<TimerPhase>("work");
-  const [workMinutes, setWorkMinutes] = useState(DEFAULT_WORK_MINUTES);
-  const [breakMinutes, setBreakMinutes] = useState(DEFAULT_BREAK_MINUTES);
-  const [remainingMs, setRemainingMs] = useState<number>(DEFAULT_WORK_MINUTES * 60 * 1000);
-  const [isRunning, setIsRunning] = useState(false);
-  const [phaseEndAt, setPhaseEndAt] = useState<number | null>(null);
-  const [phaseStartedAt, setPhaseStartedAt] = useState<number | null>(null);
-  const [completedSessions, setCompletedSessions] = useState(0);
-  const hydratedRef = useRef(false);
+  const initialState = useMemo(getInitialTimerState, []);
+  const [phase, setPhase] = useState<TimerPhase>(initialState.phase);
+  const [workMinutes, setWorkMinutes] = useState(initialState.workMinutes);
+  const [breakMinutes, setBreakMinutes] = useState(initialState.breakMinutes);
+  const [remainingMs, setRemainingMs] = useState<number>(initialState.remainingMs);
+  const [isRunning, setIsRunning] = useState(initialState.isRunning);
+  const [phaseEndAt, setPhaseEndAt] = useState<number | null>(initialState.phaseEndAt);
+  const [phaseStartedAt, setPhaseStartedAt] = useState<number | null>(initialState.phaseStartedAt);
+  const [completedSessions, setCompletedSessions] = useState(initialState.completedSessions);
+  const hydratedRef = useRef(true);
   const transitionLockRef = useRef(false);
 
   const remainingSeconds = Math.max(0, Math.ceil(remainingMs / 1000));
@@ -161,20 +189,7 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
     );
   }, [display, isRunning, progress]);
 
-  useEffect(() => {
-    const restored = readPersistedState();
-    if (restored) {
-      setPhase(restored.phase);
-      setWorkMinutes(restored.workMinutes);
-      setBreakMinutes(restored.breakMinutes);
-      setRemainingMs(restored.remainingMs);
-      setIsRunning(restored.isRunning);
-      setPhaseEndAt(restored.phaseEndAt);
-      setPhaseStartedAt(restored.phaseStartedAt);
-      setCompletedSessions(restored.completedSessions);
-    }
-    hydratedRef.current = true;
-  }, []);
+  // Hydration now happens synchronously via getInitialTimerState in useState initializers.
 
   useEffect(() => {
     if (!hydratedRef.current) return;
@@ -373,7 +388,7 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
   return (
     <div
       className={cn(
-        "w-[328px] rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)]",
+        "w-[min(100%,328px)] rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)]",
         className,
       )}
     >

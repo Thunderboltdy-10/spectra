@@ -211,8 +211,8 @@ export function ChatMessages({
   }, [visibleStartIndex]);
 
   function modelLabel(modelId?: string) {
-    if (!modelId) return "AI";
-    return modelId.split("/").pop() ?? "AI";
+    if (!modelId) return "Routing model";
+    return modelId.split("/").pop() ?? "Model";
   }
 
   useEffect(() => {
@@ -301,11 +301,24 @@ export function ChatMessages({
             : "Drafting...";
     }
   })();
-  const activeProvider = lastModelUsed?.split("/")[0] ?? "AI";
+  const activeProvider = lastModelUsed?.split("/")[0] ?? "openrouter";
+  const visibleDraftResponse = (() => {
+    const cleanDraft = draftResponse.trim();
+    if (!cleanDraft) return "";
+    const lastMessage = messages[messages.length - 1];
+    if (!lastMessage || lastMessage.role !== "assistant") return draftResponse;
+    const cleanFinal = lastMessage.content.trim();
+    if (!cleanFinal) return draftResponse;
+    const duplicate =
+      cleanDraft === cleanFinal
+      || cleanFinal.endsWith(cleanDraft)
+      || cleanDraft.endsWith(cleanFinal);
+    return duplicate ? "" : draftResponse;
+  })();
   const showQuizSkeletonOnly =
     sending &&
     (mode === "quiz" || mode === "exam") &&
-    draftResponse.trim().length < 100;
+    visibleDraftResponse.trim().length < 100;
 
   return (
     <section className="relative flex flex-1" aria-label="Conversation" data-conversation-export>
@@ -643,7 +656,7 @@ export function ChatMessages({
             );
           })}
 
-          {draftResponse && (mode === "quiz" || mode === "exam" || mode === "flashcard") ? (
+          {visibleDraftResponse && (mode === "quiz" || mode === "exam" || mode === "flashcard") ? (
             <article className="chat-fade-in flex justify-start">
               <div className="w-full max-w-5xl rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3">
                 <div className="mb-3 inline-flex items-center gap-2 text-xs text-[var(--text-secondary)]">
@@ -671,18 +684,18 @@ export function ChatMessages({
                 </div>
               </div>
             </article>
-          ) : draftResponse ? (
+          ) : visibleDraftResponse ? (
             <article className="chat-fade-in flex justify-start">
               <div className="w-full max-w-5xl px-1 py-1">
                 <div className="mb-2 inline-flex items-center gap-2 text-xs text-[var(--text-secondary)]">
                   <ProviderLogo provider={activeProvider} modelId={lastModelUsed} size={12} className="h-5 w-5 rounded-md" />
                   <span>{modelLabel(lastModelUsed)} · {streamingStatus}</span>
                 </div>
-                <div className="transition-opacity duration-200 [will-change:contents,opacity]">
+                <div>
                   {hasRealThinking && draftThinking ? (
                     <ThinkingBlock content={draftThinking} streaming />
                   ) : null}
-                  {renderDraftMarkdown(draftResponse)}
+                  {renderDraftMarkdown(visibleDraftResponse)}
                   {showStreamCursor ? (
                     <span className={`stream-cursor ${sending ? "" : "stream-cursor--fade"}`} aria-hidden>
                       |
@@ -693,7 +706,7 @@ export function ChatMessages({
             </article>
           ) : null}
 
-          {sending && !draftResponse && (
+          {sending && !visibleDraftResponse && (
             <div className="chat-fade-in">
               <div className="flex items-center gap-3">
                 <ThinkingMessages />

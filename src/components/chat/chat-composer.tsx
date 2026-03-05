@@ -307,13 +307,14 @@ export function ChatComposer(props: ChatComposerProps) {
   const mobileFileInputRef = useRef<HTMLInputElement | null>(null);
   const attachInputRef = useRef<HTMLInputElement | null>(null);
   const previousFileCountRef = useRef(0);
+  const listeningBaseMessageRef = useRef<string | null>(null);
   const [showModeSelector, setShowModeSelector] = useState(false);
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [showAgentSelector, setShowAgentSelector] = useState(false);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
   const [providerFilter, setProviderFilter] = useState("all");
-  const [attachmentsExpanded, setAttachmentsExpanded] = useState(false);
+  const [attachmentsExpanded, setAttachmentsExpanded] = useState(true);
   const [showVoiceStub, setShowVoiceStub] = useState(false);
   const [modeTransitioning, setModeTransitioning] = useState(false);
   const [agentTransitioning, setAgentTransitioning] = useState(false);
@@ -361,19 +362,27 @@ export function ChatComposer(props: ChatComposerProps) {
     const clean = modelSearch.trim();
     const normalized = normalizeModelSearch(clean);
 
-    return sorted
-      .filter((model) => {
-        if (!clean) return true;
-        const haystack = normalizeModelSearch(`${model.name} ${model.modelId} ${model.provider}`);
-        const score = fuzzyScore(normalized, {
-          name: model.name,
-          modelId: model.modelId,
-          provider: model.provider,
-          description: model.description,
-        });
-        return haystack.includes(normalized) || score > 0.35;
-      })
-      .map((model) => {
+    const filtered = sorted.filter((model) => {
+      if (!clean) return true;
+      const haystack = normalizeModelSearch(`${model.name} ${model.modelId} ${model.provider}`);
+      const score = fuzzyScore(normalized, {
+        name: model.name,
+        modelId: model.modelId,
+        provider: model.provider,
+        description: model.description,
+      });
+      return haystack.includes(normalized) || score > 0.35;
+    });
+
+    if (clean) {
+      filtered.sort((a, b) => {
+        const scoreA = fuzzyScore(normalized, { name: a.name, modelId: a.modelId, provider: a.provider, description: a.description });
+        const scoreB = fuzzyScore(normalized, { name: b.name, modelId: b.modelId, provider: b.provider, description: b.description });
+        return scoreB - scoreA;
+      });
+    }
+
+    return filtered.map((model) => {
         const cautions: string[] = [];
         if (hasImages && !hasVisionSupport(model)) {
           cautions.push("No image support");
@@ -479,10 +488,26 @@ export function ChatComposer(props: ChatComposerProps) {
     if (fileList.length === 0) {
       setAttachmentsExpanded(false);
     } else if (fileList.length > previousCount) {
-      setAttachmentsExpanded(false);
+      setAttachmentsExpanded(true);
     }
     previousFileCountRef.current = fileList.length;
   }, [fileList.length]);
+
+  useEffect(() => {
+    if (!speech.isListening) {
+      listeningBaseMessageRef.current = null;
+      return;
+    }
+    if (listeningBaseMessageRef.current === null) {
+      listeningBaseMessageRef.current = message;
+    }
+    const baseMessage = listeningBaseMessageRef.current ?? "";
+    const transcript = speech.transcript.trim();
+    const nextValue = [baseMessage.trim(), transcript].filter(Boolean).join(baseMessage.trim() ? " " : "");
+    if (nextValue !== message) {
+      onMessageChange(nextValue);
+    }
+  }, [message, onMessageChange, speech.isListening, speech.transcript]);
 
   useEffect(() => {
     const preventWindowFileDrop = (event: DragEvent) => {
@@ -604,12 +629,11 @@ export function ChatComposer(props: ChatComposerProps) {
     }
     if (speech.isListening) {
       speech.stop();
-      if (speech.transcript.trim()) {
-        onMessageChange([message, speech.transcript.trim()].filter(Boolean).join(message.trim() ? " " : ""));
-      }
       speech.reset();
+      listeningBaseMessageRef.current = null;
       return;
     }
+    listeningBaseMessageRef.current = message;
     speech.start();
   }
 
@@ -677,10 +701,12 @@ export function ChatComposer(props: ChatComposerProps) {
     window.dispatchEvent(new CustomEvent("ai-school:open-orchestration"));
   }
 
+  const showSmartTip = !slashActive && fileList.length === 0;
+
   return (
     <footer
       className={cn(
-        "sticky bottom-0 z-20 bg-[color-mix(in_oklab,var(--bg-primary)_88%,transparent)] px-3 pb-[calc(0.9rem+env(safe-area-inset-bottom))] pt-4 backdrop-blur-md sm:px-6 lg:px-10",
+        "sticky bottom-0 z-20 bg-[color-mix(in_oklab,var(--bg-primary)_94%,transparent)] px-3 pb-[calc(0.9rem+env(safe-area-inset-bottom))] pt-4 sm:px-6 lg:px-10",
         draggingFiles && "bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-primary))]",
       )}
       aria-label="Message composer"
@@ -705,7 +731,7 @@ export function ChatComposer(props: ChatComposerProps) {
           </div>
         )}
 
-        {!slashActive ? (
+        {showSmartTip ? (
           <SmartTipRotator
             mode={mode}
             messageCount={messageCount}
@@ -717,15 +743,28 @@ export function ChatComposer(props: ChatComposerProps) {
         ) : null}
 
         {fileList.length > 0 && (
-          <div className="mb-2">
+          <div className="-mb-px mx-auto w-[95%] overflow-hidden rounded-t-xl rounded-b-none border border-b-0 border-[var(--border-default)] bg-[var(--bg-elevated)]">
+            <div className="flex items-center justify-between gap-2 px-2.5 py-1.5">
+              <button
+                type="button"
+                onClick={() => setAttachmentsExpanded((prev) => !prev)}
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[11px] text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]"
+                aria-expanded={attachmentsExpanded}
+              >
+                <Paperclip className="h-3.5 w-3.5" />
+                {fileList.length} attachment{fileList.length === 1 ? "" : "s"} ready
+                {attachmentsExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+
             <div
               className={cn(
                 "grid overflow-hidden transition-[grid-template-rows,opacity] duration-300 ease-[var(--ease-standard)]",
                 attachmentsExpanded ? "[grid-template-rows:1fr] opacity-100" : "[grid-template-rows:0fr] opacity-0",
               )}
             >
-              <div className="min-h-0 overflow-hidden">
-                <div className="mb-2 max-h-[220px] overflow-y-auto rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2.5">
+              <div className="min-h-0 overflow-hidden border-t border-[var(--border-default)] px-2.5 pb-2.5 pt-2">
+                <div className="max-h-[220px] overflow-y-auto rounded-xl bg-[var(--bg-elevated)] p-1.5">
                   <div className="flex flex-wrap gap-2 pr-1">
                     {fileList.map((file) => {
                       const status = fileUploadState[fileKey(file)]?.status ?? "pending";
@@ -735,17 +774,10 @@ export function ChatComposer(props: ChatComposerProps) {
                       return (
                         <span
                           key={`${file.name}-${file.size}`}
-                          className="inline-flex items-center gap-2 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 py-2 text-xs font-medium shadow-sm"
+                          className="inline-flex items-center gap-2 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2 text-xs font-medium"
                         >
                           {thumbnailUrl ? (
-                            <span
-                              className="inline-flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-[size:12px_12px]"
-                              style={{
-                                backgroundImage:
-                                  "linear-gradient(45deg, rgba(148,163,184,0.14) 25%, transparent 25%, transparent 75%, rgba(148,163,184,0.14) 75%, rgba(148,163,184,0.14)), linear-gradient(45deg, rgba(148,163,184,0.14) 25%, transparent 25%, transparent 75%, rgba(148,163,184,0.14) 75%, rgba(148,163,184,0.14))",
-                                backgroundPosition: "0 0, 6px 6px",
-                              }}
-                            >
+                            <span className="inline-flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-[var(--bg-secondary)]">
                               <Image
                                 src={thumbnailUrl}
                                 alt={file.name}
@@ -777,32 +809,10 @@ export function ChatComposer(props: ChatComposerProps) {
                 </div>
               </div>
             </div>
-
-            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 py-1.5 shadow-[var(--shadow-soft)]">
-              <div className="flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={() => setAttachmentsExpanded((prev) => !prev)}
-                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[11px] text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]"
-                  aria-expanded={attachmentsExpanded}
-                >
-                  <Paperclip className="h-3.5 w-3.5" />
-                  {fileList.length} attachment{fileList.length === 1 ? "" : "s"} ready
-                  {attachmentsExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAttachmentsExpanded((prev) => !prev)}
-                  className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
-                >
-                  {attachmentsExpanded ? "Collapse" : "Expand"}
-                </button>
-              </div>
-            </div>
           </div>
         )}
 
-        <div className="relative overflow-visible rounded-2xl bg-[color-mix(in_oklab,var(--bg-elevated)_94%,transparent)] shadow-[var(--shadow-soft)] backdrop-blur-sm">
+        <div className="relative overflow-visible rounded-2xl border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_80%,transparent)]">
           <div className="flex items-center justify-between gap-2 px-3 py-2">
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 pb-1">
               <div ref={modeMenuRef} className="relative">
@@ -909,7 +919,7 @@ export function ChatComposer(props: ChatComposerProps) {
                   <Bot className="h-4 w-4" />
                   <span className="max-w-[260px] truncate">
                     {routerMode === "auto" || routerMode === "openrouter_auto"
-                      ? "Adaptive routing"
+                      ? "Auto"
                       : formatModelLabel(selectedModel?.modelId ?? manualModel)}
                   </span>
                   <ChevronDown className="h-3.5 w-3.5" />
@@ -937,14 +947,14 @@ export function ChatComposer(props: ChatComposerProps) {
                           value={modelSearch}
                           onChange={(event) => setModelSearch(event.target.value)}
                           placeholder="Search models..."
-                          className="h-9 w-full rounded-md border border-transparent bg-[var(--bg-secondary)] pl-8 pr-2 text-sm outline-none focus-visible:border-transparent focus-visible:ring-0"
+                          className="h-9 w-full appearance-none rounded-md border-0 bg-transparent pl-8 pr-2 text-sm outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none"
                         />
                       </div>
                     </div>
 
                     <div className="max-h-[360px] overflow-y-auto pr-1">
                       <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
-                        Auto Routing
+                        Auto
                       </p>
                       <button
                         type="button"
@@ -969,7 +979,7 @@ export function ChatComposer(props: ChatComposerProps) {
                           <Sparkles className="h-4 w-4 text-[var(--accent-cyan)]" />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-[var(--text-primary)]">Auto Routing</p>
+                          <p className="truncate text-sm font-medium text-[var(--text-primary)]">Auto</p>
                           <p className="truncate text-[10px] text-[var(--text-secondary)]">
                             Smart model selection based on your prompt
                           </p>
@@ -1242,13 +1252,13 @@ export function ChatComposer(props: ChatComposerProps) {
                 placeholder="Ask anything. For best results, include your context and goal."
                 data-tour="composer"
                 aria-label="Message input"
-                className="max-h-[220px] min-h-[70px] w-full resize-none bg-transparent px-2 py-1 text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] outline-none"
+                className="max-h-[220px] min-h-[70px] w-full resize-none bg-transparent px-2 py-1 text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] outline-none focus-visible:shadow-none"
                 onKeyDown={handleKeyDown}
               />
               {speech.isListening ? (
                 <p className="inline-flex items-center gap-1 px-2 pb-1 text-xs text-[var(--danger)]" aria-live="polite">
                   <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-[var(--danger)]" />
-                  Recording... {speech.transcript || "Listening"}
+                  Recording... dictating into composer
                 </p>
               ) : null}
               {sendDisabledReason ? (

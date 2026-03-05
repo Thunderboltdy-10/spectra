@@ -81,7 +81,7 @@ export const ProviderLogo = memo(function ProviderLogo({ provider, modelId, clas
     return (
       <span
         className={cn(
-          "inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-lg",
+          "inline-flex aspect-square h-9 w-9 items-center justify-center overflow-hidden rounded-lg",
           className,
         )}
         style={{ backgroundColor: background, color: fill }}
@@ -95,7 +95,7 @@ export const ProviderLogo = memo(function ProviderLogo({ provider, modelId, clas
   return (
     <span
       className={cn(
-        "inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-lg text-xs font-semibold leading-none",
+        "inline-flex aspect-square h-9 w-9 items-center justify-center overflow-hidden rounded-lg text-xs font-semibold leading-none",
         className,
       )}
       style={{ backgroundColor: background, color: fill }}

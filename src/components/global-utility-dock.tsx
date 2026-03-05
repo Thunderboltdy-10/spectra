@@ -26,8 +26,8 @@ const StudyTimer = dynamic(
   { ssr: false },
 );
 
-const MAX_MESSAGE_LENGTH = 500;
 const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024;
+const AUTO_SCREENSHOT_NAME = "page-screenshot.jpg";
 
 type UtilityPanel = "none" | "feedback" | "timer" | "info";
 
@@ -71,6 +71,34 @@ function formatFileSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
 }
 
+function estimateDataUrlBytes(dataUrl: string) {
+  const base64 = dataUrl.split(",")[1] ?? "";
+  return Math.ceil((base64.length * 3) / 4);
+}
+
+function dataUrlToFile(dataUrl: string, fileName: string) {
+  const [header, payload] = dataUrl.split(",");
+  if (!header || !payload) return null;
+  const mimeMatch = header.match(/^data:(.*?);base64$/);
+  const mimeType = mimeMatch?.[1] || "image/jpeg";
+  const binary = atob(payload);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new File([bytes], fileName, { type: mimeType });
+}
+
+function extractImageFromClipboard(clipboardData: DataTransfer | null) {
+  if (!clipboardData) return null;
+  for (const item of Array.from(clipboardData.items)) {
+    if (item.kind === "file" && item.type.startsWith("image/")) {
+      return item.getAsFile();
+    }
+  }
+  return null;
+}
+
 function UtilityActionButton(props: {
   label: string;
   active?: boolean;
@@ -94,13 +122,13 @@ function UtilityActionButton(props: {
   const progressWidth = Math.max(0, Math.min(100, Math.round((progress ?? 0) * 100)));
 
   return (
-    <div className="group relative">
+    <div className="group/utility-btn relative w-fit">
       <Button
         type="button"
         variant="secondary"
         size="icon"
         className={cn(
-          "h-9.5 w-9.5 rounded-md border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]",
+          "h-9.5 w-9.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]",
           active && "text-[var(--text-primary)]",
           buttonClassName,
         )}
@@ -110,7 +138,7 @@ function UtilityActionButton(props: {
       >
         {icon}
       </Button>
-      <span className="pointer-events-none absolute -top-8 left-1/2 z-[95] -translate-x-1/2 rounded-md border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1 text-[10px] text-[var(--text-secondary)] opacity-0 shadow-[var(--shadow-soft)] transition group-hover:opacity-100">
+      <span className="pointer-events-none absolute -top-8 left-1/2 z-[95] -translate-x-1/2 rounded-md border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1 text-[10px] text-[var(--text-secondary)] opacity-0 shadow-[var(--shadow-soft)] transition group-hover/utility-btn:opacity-100">
         {label}
       </span>
       {typeof progress === "number" && progressWidth > 0 ? (
@@ -135,6 +163,8 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
   const [message, setMessage] = useState("");
   const [screenshot, setScreenshot] = useState<File | null>(null);
   const [autoScreenshot, setAutoScreenshot] = useState<string | null>(null);
+  const [autoScreenshotFile, setAutoScreenshotFile] = useState<File | null>(null);
+  const [autoCaptureError, setAutoCaptureError] = useState<string | null>(null);
   const [chatContext, setChatContext] = useState<ChatFeedbackContext | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [timerSnapshot, setTimerSnapshot] = useState<TimerSnapshot | null>(null);
@@ -184,47 +214,67 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, [activePanel, closeNotifications]);
 
+  const captureAutoScreenshot = useCallback(async () => {
+    try {
+      const html2canvas = (await import("html2canvas")).default;
+      const root = document.documentElement;
+      const canvas = await html2canvas(root, {
+        backgroundColor: "#ffffff",
+        scale: Math.min(window.devicePixelRatio || 1, 1),
+        logging: false,
+        useCORS: true,
+        scrollX: window.scrollX,
+        scrollY: window.scrollY,
+        windowWidth: root.clientWidth,
+        windowHeight: root.clientHeight,
+      });
+
+      const qualityCandidates = [0.8, 0.72, 0.64, 0.56, 0.48];
+      for (const quality of qualityCandidates) {
+        const dataUrl = canvas.toDataURL("image/jpeg", quality);
+        if (estimateDataUrlBytes(dataUrl) > MAX_SCREENSHOT_BYTES) continue;
+        const file = dataUrlToFile(dataUrl, AUTO_SCREENSHOT_NAME);
+        if (!file) continue;
+        setAutoScreenshot(dataUrl);
+        setAutoScreenshotFile(file);
+        setAutoCaptureError(null);
+        return;
+      }
+
+      setAutoScreenshot(null);
+      setAutoScreenshotFile(null);
+      setAutoCaptureError("Auto capture exceeded 2MB. You can still paste or attach an image.");
+    } catch (error) {
+      console.warn("html2canvas failed:", error);
+      setAutoScreenshot(null);
+      setAutoScreenshotFile(null);
+      setAutoCaptureError("Auto screenshot unavailable. Paste or attach one manually.");
+    }
+  }, []);
+
   useEffect(() => {
     if (!feedbackOpen) {
       setAutoScreenshot(null);
+      setAutoScreenshotFile(null);
+      setAutoCaptureError(null);
       setChatContext(null);
       return;
     }
 
     let cancelled = false;
     const onContextResponse = (e: Event) => {
+      if (cancelled) return;
       setChatContext(((e as CustomEvent<ChatFeedbackContext>).detail ?? null));
     };
     window.addEventListener("ai-school:chat-context-response", onContextResponse);
     window.dispatchEvent(new Event("ai-school:request-chat-context"));
-
-    import("html2canvas").then((mod) => {
-      if (cancelled) return;
-      mod.default(document.body, {
-        backgroundColor: "#ffffff",
-        scale: 0.8,
-        logging: false,
-        useCORS: false,
-      })
-        .then((canvas) => {
-          if (cancelled) return;
-          const dataUrl = canvas.toDataURL("image/jpeg", 0.5);
-          const payloadLength = dataUrl.length - "data:image/jpeg;base64,".length;
-          const byteEstimate = Math.ceil((payloadLength * 3) / 4);
-          if (byteEstimate <= MAX_SCREENSHOT_BYTES) {
-            setAutoScreenshot(dataUrl);
-          } else {
-            setAutoScreenshot(null);
-          }
-        })
-        .catch(() => {});
-    });
+    void captureAutoScreenshot();
 
     return () => {
       cancelled = true;
       window.removeEventListener("ai-school:chat-context-response", onContextResponse);
     };
-  }, [feedbackOpen]);
+  }, [captureAutoScreenshot, feedbackOpen]);
 
   useEffect(() => {
     const onOpenFeedback = () => {
@@ -249,7 +299,6 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
     };
   }, [closeNotifications]);
 
-  const remaining = MAX_MESSAGE_LENGTH - message.length;
   const dockStyle = inProfileBar
     ? undefined
     : desktopViewport
@@ -266,7 +315,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
         };
 
   const panelClassName = inProfileBar
-    ? "absolute bottom-[calc(100%+0.65rem)] left-0 z-[280]"
+    ? "absolute bottom-[calc(100%+0.65rem)] left-0 z-[280] w-full"
     : desktopViewport
       ? "absolute bottom-0 right-[calc(100%+0.8rem)] z-[280]"
       : "absolute bottom-[calc(100%+0.65rem)] right-0 z-[280]";
@@ -282,24 +331,32 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
     setActivePanel((prev) => (prev === panel ? "none" : panel));
   }
 
+  function handleFeedbackPaste(event: React.ClipboardEvent<HTMLElement>) {
+    const pastedImage = extractImageFromClipboard(event.clipboardData);
+    if (!pastedImage) return;
+    event.preventDefault();
+    if (pastedImage.size > MAX_SCREENSHOT_BYTES) {
+      toast.error("Pasted image is larger than 2MB.");
+      return;
+    }
+    setScreenshot(pastedImage);
+    toast.success("Screenshot pasted.");
+  }
+
   async function submitFeedback(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmed = message.trim();
+    const screenshotToUpload = screenshot ?? autoScreenshotFile;
     if (!trimmed) {
       toast.error("Please describe your feedback.");
       return;
     }
-    if (trimmed.length > MAX_MESSAGE_LENGTH) {
-      toast.error(`Feedback must be ${MAX_MESSAGE_LENGTH} characters or fewer.`);
-      return;
-    }
-
-    if (screenshot) {
-      if (!screenshot.type.startsWith("image/")) {
+    if (screenshotToUpload) {
+      if (!screenshotToUpload.type.startsWith("image/")) {
         toast.error("Screenshot must be an image.");
         return;
       }
-      if (screenshot.size > MAX_SCREENSHOT_BYTES) {
+      if (screenshotToUpload.size > MAX_SCREENSHOT_BYTES) {
         toast.error("Screenshot must be 2MB or smaller.");
         return;
       }
@@ -316,13 +373,13 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
 
       const mode = inferModeFromPath(pathname);
       if (mode) form.set("mode", mode);
-      if (screenshot) form.set("screenshot", screenshot);
+      if (screenshotToUpload) form.set("screenshot", screenshotToUpload);
       if (chatContext?.chatId) form.set("chatId", chatContext.chatId);
       if (chatContext?.lastMessage) form.set("lastMessage", chatContext.lastMessage);
       if (chatContext?.activeMode) form.set("activeMode", chatContext.activeMode);
       if (chatContext?.activeModel) form.set("activeModel", chatContext.activeModel);
       form.set("viewportSize", `${window.innerWidth}x${window.innerHeight}`);
-      if (autoScreenshot && !screenshot) form.set("autoScreenshot", autoScreenshot);
+      if (autoScreenshot && !screenshotToUpload) form.set("autoScreenshot", autoScreenshot);
 
       const response = await fetch("/api/feedback", {
         method: "POST",
@@ -373,7 +430,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
         </button>
       </div>
 
-      <form className="space-y-3" onSubmit={(event) => void submitFeedback(event)}>
+      <form className="space-y-3" onSubmit={(event) => void submitFeedback(event)} onPaste={handleFeedbackPaste}>
         <div>
           <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">
             Category
@@ -409,13 +466,11 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
           <textarea
             id="feedback-message"
             value={message}
-            onChange={(event) => setMessage(event.target.value.slice(0, MAX_MESSAGE_LENGTH))}
+            onChange={(event) => setMessage(event.target.value)}
             placeholder="What happened, what did you expect, and how can we improve?"
             className="max-h-[190px] min-h-[110px] w-full resize-none overflow-y-auto rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus-visible:border-transparent focus-visible:ring-0"
             required
-            maxLength={MAX_MESSAGE_LENGTH}
           />
-          <p className="mt-1 text-right text-[11px] text-[var(--text-secondary)]">{remaining} characters left</p>
         </div>
 
         <div>
@@ -425,7 +480,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
           <label className="flex cursor-pointer items-center justify-between rounded-lg border border-dashed border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-xs text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]">
             <span className="inline-flex items-center gap-1.5">
               <Upload className="h-3.5 w-3.5" />
-              {screenshot ? screenshot.name : "Attach image up to 2MB"}
+              {screenshot ? screenshot.name : autoScreenshotFile ? autoScreenshotFile.name : "Attach image up to 2MB"}
             </span>
             <input
               type="file"
@@ -437,8 +492,11 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
                 event.currentTarget.value = "";
               }}
             />
-            {screenshot ? <span>{formatFileSize(screenshot.size)}</span> : null}
+            {screenshot ? <span>{formatFileSize(screenshot.size)}</span> : autoScreenshotFile ? <span>auto</span> : null}
           </label>
+          <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
+            Tip: paste a screenshot directly here with Ctrl/Cmd+V.
+          </p>
         </div>
 
         <div className="rounded-md bg-[var(--bg-secondary)] px-2.5 py-2 text-[11px] text-[var(--text-secondary)]">
@@ -459,6 +517,23 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
           </div>
         ) : null}
 
+        {autoCaptureError ? (
+          <div className="rounded-md border border-[color-mix(in_oklab,var(--warning)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_10%,transparent)] px-2.5 py-2 text-[11px] text-[var(--warning)]">
+            <p>{autoCaptureError}</p>
+            <button
+              type="button"
+              onClick={() => void captureAutoScreenshot()}
+              className="mt-1 underline underline-offset-2"
+            >
+              Retry auto capture
+            </button>
+          </div>
+        ) : null}
+
+        <p className="text-[10px] text-[var(--text-secondary)]">
+          Feedback screenshots are used only for debugging this report and are not used for model training.
+        </p>
+
         <Button type="submit" className="w-full gap-2" disabled={submitting}>
           {submitting ? (
             <>
@@ -476,6 +551,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
   const timerPanel = (
     <div className={panelClassName}>
       <StudyTimer
+        className={inProfileBar ? "w-full max-w-none" : undefined}
         open={timerOpen}
         onOpen={() => setActivePanel("timer")}
         onClose={() => setActivePanel("none")}
@@ -534,9 +610,9 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
           )}
           aria-label="Global utility actions"
         >
-          <div className="group relative" onClickCapture={() => setActivePanel("none")}>
+          <div className="group/utility-btn relative w-fit" onClickCapture={() => setActivePanel("none")}>
             <NotificationBell
-              buttonClassName="h-9.5 w-9.5 rounded-md border border-[var(--border-default)] bg-[var(--bg-elevated)]"
+              buttonClassName="h-9.5 w-9.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]"
               contentClassName="z-[98]"
               align={inProfileBar ? "start" : "end"}
               side={inProfileBar || desktopViewport ? "left" : "top"}
@@ -547,7 +623,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
                 }
               }}
             />
-            <span className="pointer-events-none absolute -top-8 left-1/2 z-[95] -translate-x-1/2 rounded-md border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1 text-[10px] text-[var(--text-secondary)] opacity-0 shadow-[var(--shadow-soft)] transition group-hover:opacity-100">
+            <span className="pointer-events-none absolute -top-8 left-1/2 z-[95] -translate-x-1/2 rounded-md border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1 text-[10px] text-[var(--text-secondary)] opacity-0 shadow-[var(--shadow-soft)] transition group-hover/utility-btn:opacity-100">
               Notifications
             </span>
           </div>
@@ -560,7 +636,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
             dataTour="utility-timer"
             ariaLabel={timerOpen ? "Close focus timer" : "Open focus timer"}
             progress={timerChipVisible ? timerSnapshot?.progress : undefined}
-            buttonClassName="rounded-md"
+            buttonClassName="rounded-xl"
           />
 
           <UtilityActionButton
@@ -570,7 +646,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
             icon={<MessageSquare className="h-4 w-4" />}
             dataTour="utility-feedback"
             ariaLabel={feedbackOpen ? "Close feedback form" : "Open feedback form"}
-            buttonClassName="rounded-md"
+            buttonClassName="rounded-xl"
           />
 
           <UtilityActionButton
@@ -580,7 +656,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
             icon={<CircleHelp className="h-4 w-4" />}
             dataTour="utility-tour"
             ariaLabel={infoOpen ? "Close info panel" : "Open info panel"}
-            buttonClassName="rounded-md"
+            buttonClassName="rounded-xl"
           />
         </div>
 

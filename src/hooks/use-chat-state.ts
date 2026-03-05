@@ -129,6 +129,9 @@ type StreamPhase = "idle" | "compacting" | "routing" | "searching" | "thinking" 
 const AUTO_COMPACTION_MIN_MESSAGES = 10;
 const AUTO_COMPACTION_KEEP_LATEST = 6;
 const SAVE_CONVERSATION_FILES_KEY = "ai-school:save-conversation-files-to-library";
+const LAST_ACTIVE_CHAT_TS_KEY = "ai-school:lastActiveChatTimestamp";
+const LAST_ACTIVE_CHAT_ID_KEY = "ai-school:lastActiveChatId";
+const CHAT_SESSION_WINDOW_MS = 12 * 60 * 60 * 1000;
 
 type LiveModel = {
   id: string;
@@ -588,6 +591,61 @@ export function useChatState() {
     return draft !== null && draft.trim().length > 0;
   }, []);
 
+  const syncChatIdToUrl = useCallback((chatId?: string) => {
+    if (typeof window === "undefined") return;
+    const current = new URL(window.location.href);
+    const nextChatId = chatId?.trim() ?? "";
+    if (nextChatId) {
+      current.searchParams.set("chatId", nextChatId);
+    } else {
+      current.searchParams.delete("chatId");
+    }
+    const nextUrl = `${current.pathname}${current.search}${current.hash}`;
+    const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (nextUrl !== currentUrl) {
+      window.history.replaceState(null, "", nextUrl);
+    }
+  }, []);
+
+  const clearRecentChatActivity = useCallback(() => {
+    try {
+      window.localStorage.removeItem(LAST_ACTIVE_CHAT_TS_KEY);
+      window.localStorage.removeItem(LAST_ACTIVE_CHAT_ID_KEY);
+    } catch {
+      // Ignore storage failures.
+    }
+  }, []);
+
+  const markChatActive = useCallback((chatId: string) => {
+    if (!chatId) return;
+    try {
+      window.localStorage.setItem(LAST_ACTIVE_CHAT_TS_KEY, String(Date.now()));
+      window.localStorage.setItem(LAST_ACTIVE_CHAT_ID_KEY, chatId);
+    } catch {
+      // Ignore storage failures.
+    }
+  }, []);
+
+  const getRecentChatIdFromStorage = useCallback((): string | null => {
+    try {
+      const storedChatId = window.localStorage.getItem(LAST_ACTIVE_CHAT_ID_KEY);
+      const storedTsRaw = window.localStorage.getItem(LAST_ACTIVE_CHAT_TS_KEY);
+      if (!storedChatId || !storedTsRaw) return null;
+      const storedTs = Number(storedTsRaw);
+      if (!Number.isFinite(storedTs)) {
+        clearRecentChatActivity();
+        return null;
+      }
+      if (Date.now() - storedTs > CHAT_SESSION_WINDOW_MS) {
+        clearRecentChatActivity();
+        return null;
+      }
+      return storedChatId;
+    } catch {
+      return null;
+    }
+  }, [clearRecentChatActivity]);
+
   const selectedAgent = useMemo(
     () => agents.find((item) => item._id === selectedAgentId),
     [agents, selectedAgentId],
@@ -654,16 +712,30 @@ export function useChatState() {
       setMode(modeParam);
     }
 
-    const firstChat = chatIdParam
-      ? chats.find((chat) => chat._id === chatIdParam) ?? chats[0]
-      : chats[0];
+    let firstChat: Chat | undefined;
+    if (chatIdParam) {
+      firstChat = chats.find((chat) => chat._id === chatIdParam);
+      if (!firstChat) {
+        const recentChatId = getRecentChatIdFromStorage();
+        if (recentChatId) {
+          firstChat = chats.find((chat) => chat._id === recentChatId);
+        }
+      }
+    } else {
+      const recentChatId = getRecentChatIdFromStorage();
+      if (recentChatId) {
+        firstChat = chats.find((chat) => chat._id === recentChatId);
+      }
+    }
     if (firstChat?._id) {
       selectedChatIdRef.current = firstChat._id;
       setSelectedChatId(firstChat._id);
+      markChatActive(firstChat._id);
     } else {
       selectedChatIdRef.current = "";
       setSelectedChatId("");
       setMessages([]);
+      syncChatIdToUrl(undefined);
     }
 
     void refreshPersonalResources().catch(() => {});
@@ -679,7 +751,7 @@ export function useChatState() {
     })();
 
     setLoading(false);
-  }, [sidebar.loading, sidebar.models, sidebar.agents, chats]);
+  }, [sidebar.loading, sidebar.models, sidebar.agents, chats, getRecentChatIdFromStorage, markChatActive, syncChatIdToUrl]);
 
   useEffect(() => {
     if (sidebar.loading || !initializedRef.current) return;
@@ -699,7 +771,12 @@ export function useChatState() {
 
   useEffect(() => {
     selectedChatIdRef.current = selectedChatId;
-  }, [selectedChatId]);
+    if (!initializedRef.current) return;
+    syncChatIdToUrl(selectedChatId || undefined);
+    if (selectedChatId) {
+      markChatActive(selectedChatId);
+    }
+  }, [selectedChatId, markChatActive, syncChatIdToUrl]);
 
   useEffect(() => {
     activeStreamIdsRef.current = activeStreamIds;
@@ -900,6 +977,7 @@ export function useChatState() {
     (agentId?: string) => {
       selectedChatIdRef.current = "";
       setSelectedChatId("");
+      clearRecentChatActivity();
       setMessages([]);
       setMessage("");
       // No need to clear per-chat drafts when starting new chat
@@ -928,7 +1006,7 @@ export function useChatState() {
         setSelectedAgentId(agentId);
       }
     },
-    [],
+    [clearRecentChatActivity],
   );
 
   useEffect(() => {
@@ -1112,10 +1190,16 @@ export function useChatState() {
   }
 
   async function createChatIfNeeded(chatIdOverride?: string, modeOverride?: StudyMode) {
-    if (chatIdOverride) return chatIdOverride;
+    if (chatIdOverride) {
+      markChatActive(chatIdOverride);
+      return chatIdOverride;
+    }
 
     const currentChatId = selectedChatIdRef.current;
-    if (currentChatId) return currentChatId;
+    if (currentChatId) {
+      markChatActive(currentChatId);
+      return currentChatId;
+    }
     const requestedMode = modeOverride ?? mode;
 
     const response = await fetch("/api/chats", {
@@ -1143,6 +1227,8 @@ export function useChatState() {
 
     selectedChatIdRef.current = data.chatId;
     setSelectedChatId(data.chatId);
+    markChatActive(data.chatId);
+    syncChatIdToUrl(data.chatId);
     sidebar.addChat(newChat);
     return data.chatId;
   }
@@ -1265,6 +1351,7 @@ export function useChatState() {
 
       const chatId = await createChatIfNeeded(options?.chatIdOverride, requestedMode);
       activeChatId = chatId;
+      markChatActive(chatId);
       pendingLocalUserMessageChatIdsRef.current.set(localUserMessageId, chatId);
       streamChatIdRef.current = chatId;
       activeStreamsRef.current.add(chatId);
@@ -1458,12 +1545,16 @@ export function useChatState() {
               | "thinking"
               | "done"
               | "error"
+              | "mode_update"
+              | "route_model"
               | "collab_start"
               | "collab_progress"
               | "collab_done"
               | "collab_synthesizing"
-              | "chat_title";
+              | "chat_title"
+              | "notice";
             content?: string;
+            message?: string;
             error?: string | { message?: string };
             modelUsed?: string;
             modelRequested?: string;
@@ -1611,6 +1702,23 @@ export function useChatState() {
             }
           }
 
+          if (payload.type === "mode_update" && payload.suggestedMode) {
+            const nextMode = payload.suggestedMode as StudyMode;
+            if (isModeAvailable(nextMode)) {
+              setMode(nextMode);
+              void updateChatSettingsById(chatId, { mode: nextMode }).catch(() => {});
+            }
+          }
+
+          if (payload.type === "route_model" && payload.modelUsed) {
+            setLastAutoResult((prev) => ({
+              modelUsed: payload.modelUsed,
+              searchEnabled: prev?.searchEnabled ?? false,
+              thinkingLevel: prev?.thinkingLevel ?? thinkingLevel,
+              promptEnhanced: prev?.promptEnhanced ?? false,
+            }));
+          }
+
           if (payload.type === "done") {
             if (typeof payload.content === "string" && payload.content.trim()) {
               assistantBuffer = payload.content;
@@ -1713,6 +1821,10 @@ export function useChatState() {
             setChats((prev) =>
               prev.map((chat) => (chat._id === chatId ? { ...chat, title: nextTitle } : chat)),
             );
+          }
+
+          if (payload.type === "notice" && typeof payload.message === "string" && payload.message.trim()) {
+            toast.message(payload.message.trim());
           }
 
           if (payload.type === "error") {
@@ -2227,6 +2339,7 @@ export function useChatState() {
 
     await sidebar.refreshBootstrap().catch(() => {});
     setSelectedChatId(branchChatId);
+    markChatActive(branchChatId);
   }
 
   async function toggleBookmark(messageId: string) {

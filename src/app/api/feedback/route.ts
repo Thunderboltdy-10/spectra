@@ -5,7 +5,6 @@ import { convexMutation } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 
-const MAX_MESSAGE_LENGTH = 500;
 const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024;
 const VALID_CATEGORIES = new Set(["bug", "confusing", "feature", "safety"]);
 
@@ -50,10 +49,6 @@ export async function POST(request: NextRequest) {
     if (!message) {
       return badRequest("Message is required");
     }
-    if (message.length > MAX_MESSAGE_LENGTH) {
-      return badRequest(`Message must be ${MAX_MESSAGE_LENGTH} characters or fewer`);
-    }
-
     const screenshotValue = form.get("screenshot");
     let screenshotStorageId: string | undefined;
 

@@ -376,7 +376,7 @@ export default function SchoolSoulPage() {
                 if (window.history.length > 1) {
                   router.back();
                 } else {
-                  router.push("/admin/school");
+                  router.push("/admin?section=soul");
                 }
               }}
             >

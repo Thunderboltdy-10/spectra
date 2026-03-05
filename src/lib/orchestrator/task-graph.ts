@@ -227,7 +227,7 @@ export async function executeGraph(
 ) {
   const maxSubcalls = Math.max(1, limits?.maxSubcalls ?? 5);
   const maxTokens = Math.max(500, limits?.maxTokensPerSpecialist ?? 8000);
-  const maxWall = Math.max(5000, limits?.maxWallTimeMs ?? 30_000);
+  const maxWall = Math.max(5000, limits?.maxWallTimeMs ?? 120_000);
   const startedAt = Date.now();
 
   let calls = 0;

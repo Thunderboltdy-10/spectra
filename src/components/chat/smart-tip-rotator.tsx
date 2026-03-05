@@ -155,7 +155,7 @@ export function SmartTipRotator({
       message={tip.message}
       actionLabel={tip.actionLabel}
       onAction={tip.actionId ? () => onAction(tip.actionId!) : undefined}
-      className="mb-3"
+      className="-mb-px"
     />
   );
 }

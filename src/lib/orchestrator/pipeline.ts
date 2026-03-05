@@ -31,7 +31,6 @@ import {
   maybeGenerateTitle,
   maybeGenerateTitleFromUserPrompt,
   rewriteCitationMarkers,
-  shouldInjectMemory,
   stripOrphanCitations,
 } from "@/lib/orchestrator/post-process";
 import { buildResearchEvidenceBlock, maybeSearchWeb, runRagRetrieval } from "@/lib/orchestrator/retrieval";
@@ -373,7 +372,21 @@ export async function runChatPipeline(request: NextRequest) {
     runtimeStats.map((row) => [row.modelId, row]),
   ) as Record<string, { successCount: number; failureCount: number; avgLatencyMs?: number }>;
   const liveCatalog = await getLiveCatalogSnapshot({ fallbackCatalog: dbCatalog });
-  const catalog = liveCatalog.models.length > 0 ? liveCatalog.models : dbCatalog;
+  const mergedCatalogById = new Map(
+    dbCatalog.map((model) => [model.modelId, { ...model }]),
+  );
+  for (const model of liveCatalog.models) {
+    const existing = mergedCatalogById.get(model.modelId);
+    mergedCatalogById.set(model.modelId, {
+      ...existing,
+      ...model,
+      tags: [...new Set([...(existing?.tags ?? []), ...(model.tags ?? [])])],
+      // Keep org curation metadata stable if it exists in DB.
+      isFeatured: existing?.isFeatured ?? model.isFeatured,
+      featuredOrder: existing?.featuredOrder ?? model.featuredOrder,
+    });
+  }
+  const catalog = [...mergedCatalogById.values()];
   const catalogPricingById = new Map(
     catalog.map((model) => [
       model.modelId,
@@ -383,6 +396,33 @@ export async function runChatPipeline(request: NextRequest) {
       },
     ]),
   );
+  const normalizeModelForPricing = (value: string) =>
+    value.trim().toLowerCase().replace(/:free$/i, "");
+  const resolveCatalogPricing = (modelId: string) => {
+    const direct = catalogPricingById.get(modelId);
+    if (typeof direct?.inputCostPerM === "number" || typeof direct?.outputCostPerM === "number") {
+      return direct;
+    }
+
+    const stripped = modelId.replace(/:free$/i, "");
+    const strippedMatch = catalogPricingById.get(stripped);
+    if (typeof strippedMatch?.inputCostPerM === "number" || typeof strippedMatch?.outputCostPerM === "number") {
+      return strippedMatch;
+    }
+
+    const normalized = normalizeModelForPricing(modelId);
+    for (const [candidateId, pricing] of catalogPricingById.entries()) {
+      const normalizedCandidate = normalizeModelForPricing(candidateId);
+      if (
+        normalizedCandidate === normalized ||
+        normalizedCandidate.endsWith(normalized) ||
+        normalized.endsWith(normalizedCandidate)
+      ) {
+        return pricing;
+      }
+    }
+    return undefined;
+  };
   logger.info("catalog snapshot ready", {
     source: liveCatalog.source,
     modelCount: catalog.length,
@@ -440,6 +480,8 @@ export async function runChatPipeline(request: NextRequest) {
       const isSevereConflict = (
         (auto.suggestedMode === "image" && safeMode !== "image") ||
         (auto.suggestedMode === "quiz" && !["quiz", "exam"].includes(safeMode)) ||
+        (auto.suggestedMode === "flashcard" && safeMode !== "flashcard") ||
+        (auto.suggestedMode === "exam" && safeMode !== "exam") ||
         (safeMode === "quiz" && auto.suggestedMode === "image")
       );
       if (isSevereConflict) {
@@ -454,6 +496,12 @@ export async function runChatPipeline(request: NextRequest) {
   })();
   if (!isModeAvailable(effectiveMode)) {
     effectiveMode = "general";
+  }
+  if (effectiveMode !== safeMode) {
+    await send({
+      type: "mode_update",
+      suggestedMode: effectiveMode,
+    });
   }
 
   // Research mode always enables search
@@ -571,6 +619,7 @@ export async function runChatPipeline(request: NextRequest) {
   // again with full context and optionally override the initial effectiveMode.
   // Only applies when in auto mode or soft-switchable modes (tutor/general).
   if (safeMode === "auto" || safeMode === "tutor" || safeMode === "general") {
+    const modeBeforeConversationRefine = effectiveMode;
     const conversationHistory = history.map((msg) => ({
       role: msg.role,
       content: msg.content,
@@ -594,6 +643,12 @@ export async function runChatPipeline(request: NextRequest) {
       // Research mode always enables search
       if (effectiveMode === "research") {
         auto.searchEnabled = true;
+      }
+      if (effectiveMode !== modeBeforeConversationRefine) {
+        await send({
+          type: "mode_update",
+          suggestedMode: effectiveMode,
+        });
       }
     }
   }
@@ -939,12 +994,19 @@ export async function runChatPipeline(request: NextRequest) {
 
   if (capability.modelSwitched) {
     if (manualLockRequested) {
+      const manualVisionPrepassModel = capability.prepassModel
+        ?? route.fallbackModels.find((candidate) => {
+          const fallbackMeta = catalog.find((model) => model.modelId === candidate);
+          return fallbackMeta ? modelSupportsCapability(fallbackMeta, "vision") : false;
+        });
       capability = {
         finalModel: route.primaryModel,
         modelSwitched: false,
-        requiresPrepass: true,
-        prepassModel: capability.prepassModel ?? route.fallbackModels[0] ?? route.primaryModel,
-        userNotice: "Manual model kept; using vision prepass for attached images.",
+        requiresPrepass: Boolean(manualVisionPrepassModel),
+        prepassModel: manualVisionPrepassModel,
+        userNotice: manualVisionPrepassModel
+          ? "Manual model kept; using vision prepass for attached images."
+          : "Manual model kept. No vision-capable prepass model available in your current tier.",
       };
       route.reason = `${route.reason}; manual model retained with vision prepass`;
       route.trace.toolchain.push("vision_prepass_manual_lock");
@@ -965,6 +1027,11 @@ export async function runChatPipeline(request: NextRequest) {
       route.trace.toolchain.push("vision_gate");
     }
   }
+
+  await send({
+    type: "route_model",
+    modelUsed: route.primaryModel,
+  });
 
   let imageDescriptionBlock = "";
   if (capability.requiresPrepass && capability.prepassModel && allImageBlocks.length > 0) {
@@ -994,12 +1061,7 @@ export async function runChatPipeline(request: NextRequest) {
     entries: userMemory.entries,
     rawMemoryText: userMemory.rawMemoryText,
   });
-  const useMemoryProfile = Boolean(memoryProfile) && (
-    shouldInjectMemory(auto.message) ||
-    effectiveMode === "tutor" ||
-    effectiveMode === "explain" ||
-    effectiveMode === "research"
-  );
+  const useMemoryProfile = Boolean(memoryProfile);
   if (useMemoryProfile) {
     route.trace.toolchain.push("memory_injection");
   }
@@ -1060,21 +1122,24 @@ export async function runChatPipeline(request: NextRequest) {
     route.trace.toolchain.push("multi_agent_collaboration");
   }
 
+  const collabWallTimeMs = effectiveMode === "research" ? 150_000 : 90_000;
   const collabLimits =
     budget.tier === "free_only"
-      ? { maxSpecialists: 1, maxSubcalls: 2, maxTokensPerSpecialist: 600, includeCritic: false }
+      ? { maxSpecialists: 1, maxSubcalls: 2, maxTokensPerSpecialist: 600, includeCritic: false, maxWallTimeMs: collabWallTimeMs }
       : budget.tier === "cheap_only"
         ? {
             maxSpecialists: effectiveMode === "research" ? 4 : 3,
             maxSubcalls: effectiveMode === "research" ? 4 : 3,
             maxTokensPerSpecialist: effectiveMode === "research" ? 1100 : 900,
             includeCritic: false,
+            maxWallTimeMs: collabWallTimeMs,
           }
         : {
             maxSpecialists: effectiveMode === "research" ? 7 : 5,
             maxSubcalls: effectiveMode === "research" ? 8 : 6,
             maxTokensPerSpecialist: effectiveMode === "research" ? 1600 : 1200,
             includeCritic: true,
+            maxWallTimeMs: collabWallTimeMs,
           };
   if (!collabLimits.includeCritic) {
     route.trace.toolchain.push("critic_skipped_budget_guard");
@@ -1170,6 +1235,11 @@ export async function runChatPipeline(request: NextRequest) {
     };
 
     try {
+      // Surface vision capability notice to the user
+      if (capability.userNotice) {
+        await send({ type: "notice", message: capability.userNotice });
+      }
+
       void earlyTitlePromise.then((title) => {
         if (!title) return;
         void send({
@@ -1288,7 +1358,7 @@ export async function runChatPipeline(request: NextRequest) {
         })) as { messageId: string };
         assistantPersisted = true;
 
-        const catalogPricing = catalogPricingById.get(modelUsed);
+        const catalogPricing = resolveCatalogPricing(modelUsed);
         const pricing =
           (typeof catalogPricing?.inputCostPerM === "number" || typeof catalogPricing?.outputCostPerM === "number")
             ? {
@@ -1450,6 +1520,7 @@ export async function runChatPipeline(request: NextRequest) {
             maxTokens,
             maxSubcalls: collabLimits.maxSubcalls,
             maxTokensPerSpecialist: collabLimits.maxTokensPerSpecialist,
+            maxWallTimeMs: collabLimits.maxWallTimeMs,
             send,
             onFallback,
             logger,
@@ -1793,7 +1864,7 @@ BACK: [answer or definition]`,
       })) as { messageId: string };
       assistantPersisted = true;
 
-      const catalogPricing = catalogPricingById.get(modelUsed);
+      const catalogPricing = resolveCatalogPricing(modelUsed);
       const pricing =
         (typeof catalogPricing?.inputCostPerM === "number" || typeof catalogPricing?.outputCostPerM === "number")
           ? {

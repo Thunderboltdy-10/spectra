@@ -18,6 +18,24 @@ function daysInMonthFromKey(key: string) {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
+function monthRangeFromKey(key: string) {
+  const [yearRaw, monthRaw] = key.split("-");
+  const year = Number.parseInt(yearRaw ?? "", 10);
+  const month = Number.parseInt(monthRaw ?? "", 10);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+    return {
+      startDay: `${key}-01`,
+      endDayExclusive: `${key}-32`,
+    };
+  }
+  const start = new Date(Date.UTC(year, month - 1, 1));
+  const next = new Date(Date.UTC(year, month, 1));
+  return {
+    startDay: start.toISOString().slice(0, 10),
+    endDayExclusive: next.toISOString().slice(0, 10),
+  };
+}
+
 export const recordUsage = mutation({
   args: {
     actorClerkId: v.string(),
@@ -100,17 +118,36 @@ export const recordUsageWithCost = mutation({
     let inPrice = args.inputCostPerM;
     let outPrice = args.outputCostPerM;
     if (typeof inPrice !== "number" || typeof outPrice !== "number") {
-      const modelRow = await ctx.db
+      const directModelRow = await ctx.db
         .query("modelCatalog")
         .withIndex("by_org_model", (q) => q.eq("orgId", actor.orgId).eq("modelId", args.model))
         .unique();
-      if (typeof inPrice !== "number") inPrice = modelRow?.inputCostPerM;
-      if (typeof outPrice !== "number") outPrice = modelRow?.outputCostPerM;
+      if (typeof inPrice !== "number") inPrice = directModelRow?.inputCostPerM;
+      if (typeof outPrice !== "number") outPrice = directModelRow?.outputCostPerM;
+
+      if (typeof inPrice !== "number" || typeof outPrice !== "number") {
+        const normalized = args.model.trim().toLowerCase().replace(/:free$/i, "");
+        const modelRows = await ctx.db
+          .query("modelCatalog")
+          .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
+          .collect();
+        const fuzzyMatch = modelRows.find((row) => {
+          const candidate = row.modelId.trim().toLowerCase().replace(/:free$/i, "");
+          return (
+            candidate === normalized
+            || candidate.endsWith(normalized)
+            || normalized.endsWith(candidate)
+          );
+        });
+        if (typeof inPrice !== "number") inPrice = fuzzyMatch?.inputCostPerM;
+        if (typeof outPrice !== "number") outPrice = fuzzyMatch?.outputCostPerM;
+      }
     }
 
     const hasKnownPricing =
       (typeof inPrice === "number" && Number.isFinite(inPrice)) ||
       (typeof outPrice === "number" && Number.isFinite(outPrice));
+
     const inputPricePerM = typeof inPrice === "number" && Number.isFinite(inPrice) ? inPrice : 0;
     const outputPricePerM = typeof outPrice === "number" && Number.isFinite(outPrice) ? outPrice : 0;
     const rawCostCents =
@@ -252,48 +289,26 @@ export const checkUserBudget = query({
     const softLimitCents = Math.max(0, Math.floor(hardLimitCents * (1 - marginPercent / 100)));
     const cheapOnlyLimitCents = Math.max(0, Math.floor(hardLimitCents * 0.9));
 
+    const { startDay, endDayExclusive } = monthRangeFromKey(key);
     const usageRows = await ctx.db
       .query("usageEvents")
-      .withIndex("by_user_day", (q) => q.eq("userId", actor._id))
+      .withIndex("by_user_day", (q) =>
+        q
+          .eq("userId", actor._id)
+          .gte("day", startDay)
+          .lt("day", endDayExclusive),
+      )
       .collect();
-    const modelRows = await ctx.db
-      .query("modelCatalog")
-      .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
-      .collect();
-    const modelPricingById = new Map(
-      modelRows.map((row) => [
-        row.modelId,
-        {
-          inputCostPerM: row.inputCostPerM,
-          outputCostPerM: row.outputCostPerM,
-          isFree: row.isFree,
-        },
-      ]),
-    );
     const monthlyUsage = usageRows.filter((row) => dayBelongsToMonth(row.day, key));
     const monthlyTokens = monthlyUsage.reduce((sum, row) => sum + Math.max(0, row.totalTokens ?? 0), 0);
     const monthlyEvents = monthlyUsage.length;
+    const monthlyUnpricedEvents = monthlyUsage.reduce(
+      (sum, row) => sum + (Math.max(0, row.totalTokens ?? 0) > 0 && Math.max(0, row.costCents ?? 0) <= 0 ? 1 : 0),
+      0,
+    );
     const monthlyCostCentsFromEvents = Number(
       monthlyUsage
-        .reduce((sum, row) => {
-          const recorded = Math.max(0, row.costCents ?? 0);
-          if (recorded > 0) return sum + recorded;
-
-          const pricing = modelPricingById.get(row.model);
-          if (!pricing) return sum;
-          if (pricing.isFree) return sum;
-
-          const inPrice = typeof pricing.inputCostPerM === "number" ? pricing.inputCostPerM : 0;
-          const outPrice = typeof pricing.outputCostPerM === "number" ? pricing.outputCostPerM : 0;
-          if (inPrice <= 0 && outPrice <= 0) return sum;
-
-          const estimated =
-            (
-              ((Math.max(0, row.inputTokens ?? 0) / 1_000_000) * inPrice) +
-              ((Math.max(0, row.outputTokens ?? 0) / 1_000_000) * outPrice)
-            ) * 100;
-          return sum + Math.max(0, estimated);
-        }, 0)
+        .reduce((sum, row) => sum + Math.max(0, row.costCents ?? 0), 0)
         .toFixed(6),
     );
     const totalCostCents = Math.max(storedTotalCostCents, monthlyCostCentsFromEvents);
@@ -333,6 +348,7 @@ export const checkUserBudget = query({
       tokenUsagePercent,
       monthlyTokens,
       monthlyEvents,
+      monthlyUnpricedEvents,
       monthlyTokenBudget,
       monthlyCostCentsFromEvents,
       marginPercent,

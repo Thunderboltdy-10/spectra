@@ -196,6 +196,7 @@ export async function runCollaborativeStreaming(params: {
   maxTokens?: number;
   maxSubcalls?: number;
   maxTokensPerSpecialist?: number;
+  maxWallTimeMs?: number;
   send: (payload: Record<string, unknown>) => Promise<void>;
   onFallback?: (event: RouteTraceFallback) => void;
   logger?: {
@@ -302,7 +303,7 @@ export async function runCollaborativeStreaming(params: {
     {
       maxSubcalls: params.maxSubcalls ?? 4,
       maxTokensPerSpecialist: params.maxTokensPerSpecialist ?? 1200,
-      maxWallTimeMs: 30_000,
+      maxWallTimeMs: params.maxWallTimeMs ?? 120_000,
     },
   );
 

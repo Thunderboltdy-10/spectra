@@ -1,7 +1,7 @@
 import { fetchOpenRouterModels } from "@/lib/openrouter";
 import type { CatalogModelEntry } from "@/lib/model-selection";
 
-const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const CACHE_TTL_MS = 2 * 60 * 60 * 1000;
 
 declare global {
   var __openRouterCatalogCache:

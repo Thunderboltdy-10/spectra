@@ -13,7 +13,7 @@ type ContextualTipProps = {
   className?: string;
 };
 
-const STORAGE_PREFIX = "ai-school-tip-dismissed:";
+const STORAGE_PREFIX = "ai-school-tip-dismissed-session:";
 
 function normalizeTipId(message: string) {
   return message.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -35,7 +35,7 @@ export function ContextualTip({
   useEffect(() => {
     setMounted(true);
     try {
-      setDismissed(window.localStorage.getItem(storageKey) === "1");
+      setDismissed(window.sessionStorage.getItem(storageKey) === "1");
     } catch {
       setDismissed(false);
     }
@@ -44,7 +44,7 @@ export function ContextualTip({
   function dismissTip() {
     setDismissed(true);
     try {
-      window.localStorage.setItem(storageKey, "1");
+      window.sessionStorage.setItem(storageKey, "1");
     } catch {
       // Ignore storage failures (private mode, blocked storage, etc.).
     }
@@ -58,7 +58,7 @@ export function ContextualTip({
   return (
     <div
       className={cn(
-        "flex items-center gap-2.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-soft)]",
+        "mx-auto w-[95%] flex items-center gap-2.5 rounded-t-xl rounded-b-none border border-b-0 border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-soft)]",
         className,
       )}
       role="status"

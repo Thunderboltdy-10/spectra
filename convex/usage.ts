@@ -312,10 +312,14 @@ export const checkUserBudget = query({
         .toFixed(6),
     );
     const totalCostCents = Math.max(storedTotalCostCents, monthlyCostCentsFromEvents);
+    // Estimate a small cost for unpriced events to prevent budget bypass
+    const UNPRICED_EVENT_ESTIMATE_CENTS = 0.005;
+    const unpricedEstimateCents = monthlyUnpricedEvents * UNPRICED_EVENT_ESTIMATE_CENTS;
+    const effectiveCostCents = totalCostCents + unpricedEstimateCents;
     const totalSpentEur = totalCostCents / 100;
     const monthlyTokenBudget = Math.max(1, org.tokenBudgetDaily * daysInMonthFromKey(key));
     const tokenUsagePercent = (monthlyTokens / monthlyTokenBudget) * 100;
-    const budgetUsagePercent = hardLimitCents > 0 ? (totalCostCents / hardLimitCents) * 100 : 0;
+    const budgetUsagePercent = hardLimitCents > 0 ? (effectiveCostCents / hardLimitCents) * 100 : 0;
     const activityUsagePercent =
       budgetUsagePercent > 0.05
         ? budgetUsagePercent
@@ -326,11 +330,11 @@ export const checkUserBudget = query({
             : 0;
 
     const tier =
-      totalCostCents >= hardLimitCents
+      effectiveCostCents >= hardLimitCents
         ? "free_only"
-        : totalCostCents >= cheapOnlyLimitCents
+        : effectiveCostCents >= cheapOnlyLimitCents
           ? "cheap_only"
-          : totalCostCents >= softLimitCents
+          : effectiveCostCents >= softLimitCents
             ? "expensive_blocked"
             : "normal";
 
@@ -338,8 +342,8 @@ export const checkUserBudget = query({
       totalSpentEur,
       totalCostCents,
       tier,
-      softLimitReached: totalCostCents >= softLimitCents,
-      hardLimitReached: totalCostCents >= hardLimitCents,
+      softLimitReached: effectiveCostCents >= softLimitCents,
+      hardLimitReached: effectiveCostCents >= hardLimitCents,
       softLimitCents,
       cheapOnlyLimitCents,
       hardLimitCents,

@@ -472,6 +472,10 @@ export async function runChatPipeline(request: NextRequest) {
     await writer.write(encoder.encode(`${JSON.stringify(payload)}\n`));
   };
 
+  // Buffer events that fire before the Response is returned (no reader attached yet).
+  // Flushed at the very start of the async IIFE producer.
+  const earlyEventBuffer: Record<string, unknown>[] = [];
+
   // Auto mode selection: if user selected "auto", always use suggested mode;
   // also auto-detect from default modes.
   // NOTE: effectiveMode is a `let` so that conversation-aware mode refinement
@@ -503,7 +507,7 @@ export async function runChatPipeline(request: NextRequest) {
     effectiveMode = "general";
   }
   if (effectiveMode !== safeMode) {
-    await send({
+    earlyEventBuffer.push({
       type: "mode_update",
       suggestedMode: effectiveMode,
     });
@@ -1033,7 +1037,7 @@ export async function runChatPipeline(request: NextRequest) {
     }
   }
 
-  await send({
+  earlyEventBuffer.push({
     type: "route_model",
     modelUsed: route.primaryModel,
   });
@@ -1232,6 +1236,11 @@ export async function runChatPipeline(request: NextRequest) {
     };
 
     try {
+      // Flush events buffered before the Response (and its reader) were created
+      for (const event of earlyEventBuffer) {
+        await send(event);
+      }
+
       // Surface vision capability notice to the user
       if (capability.userNotice) {
         await send({ type: "notice", message: capability.userNotice });

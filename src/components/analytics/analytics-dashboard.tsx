@@ -93,25 +93,30 @@ function formatModelName(modelId?: string) {
     .join(" ");
 }
 
-function StatInline({
+function StatCard({
   icon: Icon,
   label,
   value,
   subtitle,
+  delay = 0,
 }: {
   icon: LucideIcon;
   label: string;
   value: string | number;
   subtitle?: string;
+  delay?: number;
 }) {
   return (
-    <article className="min-w-0 border-b border-[var(--border-default)] pb-3 pt-1 last:border-b-0">
-      <p className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-[0.11em] text-[var(--text-secondary)]">
-        <Icon className="h-3.5 w-3.5" />
-        {label}
-      </p>
-      <p className="mt-1 font-display text-2xl text-[var(--text-primary)]">{value}</p>
-      {subtitle ? <p className="mt-0.5 text-xs text-[var(--text-secondary)]">{subtitle}</p> : null}
+    <article
+      className="relative min-w-0 overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5"
+      style={{ animation: `fade-up 400ms var(--ease-standard) ${delay}ms both` }}
+    >
+      <div className="absolute right-4 top-4 rounded-lg bg-[color-mix(in_oklab,var(--accent-cyan)_10%,transparent)] p-1.5">
+        <Icon className="h-4 w-4 text-[var(--accent-cyan)]" />
+      </div>
+      <p className="text-[10px] uppercase tracking-[0.14em] text-[var(--text-secondary)]">{label}</p>
+      <p className="stat-number mt-2 text-3xl font-semibold text-[var(--text-primary)]">{value}</p>
+      {subtitle ? <p className="mt-1 text-[11px] text-[var(--text-secondary)]">{subtitle}</p> : null}
     </article>
   );
 }
@@ -468,19 +473,20 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
   return (
     <div className="space-y-6">
       <div data-tour="analytics-stats">
-        <h2 className="journal-heading mb-3 text-xl font-semibold">Your Study Stats</h2>
-        <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2 xl:grid-cols-3">
-          <StatInline icon={Activity} label="Study streak" value={`${streak} day${streak !== 1 ? "s" : ""}`} />
-          <StatInline icon={MessageSquare} label="Total messages" value={student.totalMessages} subtitle={`${student.totalSessions} sessions`} />
-          <StatInline icon={BookOpen} label="Topics explored" value={student.uniqueTopicCount} />
-          <StatInline
+        <h2 className="journal-heading mb-4 text-xl font-semibold">Your Study Stats</h2>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <StatCard icon={Activity} label="Study streak" value={`${streak} day${streak !== 1 ? "s" : ""}`} delay={0} />
+          <StatCard icon={MessageSquare} label="Total messages" value={student.totalMessages} subtitle={`${student.totalSessions} sessions`} delay={60} />
+          <StatCard icon={BookOpen} label="Topics explored" value={student.uniqueTopicCount} delay={120} />
+          <StatCard
             icon={Trophy}
             label="Avg quiz score"
             value={student.avgScore !== null ? `${student.avgScore}%` : "-"}
             subtitle={student.avgScore !== null ? "across all quizzes" : "No quizzes yet"}
+            delay={180}
           />
-          <StatInline icon={Clock3} label="Avg study/day" value={`${averageDailyStudyMinutes}m`} subtitle="timers + message estimate" />
-          <StatInline
+          <StatCard icon={Clock3} label="Avg study/day" value={`${averageDailyStudyMinutes}m`} subtitle="timers + message estimate" delay={240} />
+          <StatCard
             icon={Brain}
             label="Preferred model"
             value={formatModelName(studentSignals.preferredModel)}
@@ -489,37 +495,38 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
                 ? `${studentSignals.preferredModelCount} routed responses`
                 : "No routed responses yet"
             }
+            delay={300}
           />
         </div>
       </div>
 
       <div data-tour="analytics-charts" className="grid gap-4 xl:grid-cols-2">
-        <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+        <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
           <ActivityChart data={dailyActivity} label="Daily activity (14 days)" />
         </section>
-        <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+        <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
           <StudyTimeChart data={dailyStudyTime} />
         </section>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.9fr)]">
-        <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+        <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
           <TimeOfDayChart hourlyCounts={studentSignals.hourlyPromptCounts} dailyPeaks={studentSignals.dailyPeakHours} />
         </section>
-        <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+        <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
           <ModePieChart modeCounts={enhanced.modeMessageCounts} />
         </section>
       </div>
 
-      <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+      <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
         <QuizTrendChart trend={enhanced.quizTrend} />
       </section>
 
-      <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+      <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
         <ProductivityInsights productivity={enhanced.productivity} />
       </section>
 
-      <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+      <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
         <TopicCloud topics={student.topics} />
       </section>
 

@@ -366,16 +366,14 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
   const panelStyle = useMemo<CSSProperties | undefined>(() => {
     if (!desktopViewport) return undefined;
     if (!panelAnchor) return undefined;
-    const anchorWidth = Math.max(248, Math.min(360, Math.round(panelAnchor.width || 280)));
-    const maxPanelWidth = inProfileBar ? anchorWidth : 384;
-    const maxLeft = Math.max(12, viewportWidth - maxPanelWidth - 12);
-    const left = Math.min(Math.max(12, Math.round(panelAnchor.left)), maxLeft);
+    const bottomOffset = Math.max(12, Math.round(viewportHeight - panelAnchor.top + 10));
     return {
-      left: `${left}px`,
-      bottom: `${Math.max(12, Math.round(viewportHeight - panelAnchor.top + 10))}px`,
-      width: inProfileBar ? `${anchorWidth}px` : undefined,
+      left: "8px",
+      bottom: `${bottomOffset}px`,
+      minWidth: "360px",
+      maxWidth: "460px",
     };
-  }, [desktopViewport, inProfileBar, panelAnchor, viewportHeight, viewportWidth]);
+  }, [desktopViewport, panelAnchor, viewportHeight]);
 
   function resetFeedbackForm() {
     setCategory("bug");
@@ -664,6 +662,14 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
       className={cn(inProfileBar ? "relative" : "fixed z-[74]", className)}
       style={dockStyle}
     >
+      {inProfileBar && timerChipVisible && (typeof timerSnapshot?.progress === "number") && (
+        <div className="mb-1 h-0.5 w-full overflow-hidden rounded-full bg-[var(--bg-secondary)]">
+          <div
+            className="h-full bg-[var(--accent-cyan)] transition-all duration-500"
+            style={{ width: `${Math.round((timerSnapshot.progress) * 100)}%` }}
+          />
+        </div>
+      )}
       <div className="relative">
         <div
           className={cn(

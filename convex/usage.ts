@@ -302,19 +302,28 @@ export const checkUserBudget = query({
     const monthlyUsage = usageRows.filter((row) => dayBelongsToMonth(row.day, key));
     const monthlyTokens = monthlyUsage.reduce((sum, row) => sum + Math.max(0, row.totalTokens ?? 0), 0);
     const monthlyEvents = monthlyUsage.length;
-    const monthlyUnpricedEvents = monthlyUsage.reduce(
-      (sum, row) => sum + (Math.max(0, row.totalTokens ?? 0) > 0 && Math.max(0, row.costCents ?? 0) <= 0 ? 1 : 0),
-      0,
-    );
     const monthlyCostCentsFromEvents = Number(
       monthlyUsage
         .reduce((sum, row) => sum + Math.max(0, row.costCents ?? 0), 0)
         .toFixed(6),
     );
     const totalCostCents = Math.max(storedTotalCostCents, monthlyCostCentsFromEvents);
-    // Estimate a small cost for unpriced events to prevent budget bypass
-    const UNPRICED_EVENT_ESTIMATE_CENTS = 0.005;
-    const unpricedEstimateCents = monthlyUnpricedEvents * UNPRICED_EVENT_ESTIMATE_CENTS;
+    const UNPRICED_CENTS_PER_M_IN = 100;
+    const UNPRICED_CENTS_PER_M_OUT = 300;
+    const monthlyUnpricedEvents = monthlyUsage.reduce(
+      (sum, row) => sum + (Math.max(0, row.totalTokens ?? 0) > 0 && Math.max(0, row.costCents ?? 0) <= 0 ? 1 : 0),
+      0,
+    );
+    const unpricedEstimateCents = monthlyUsage
+      .filter((row) => Math.max(0, row.costCents ?? 0) <= 0 && Math.max(0, row.totalTokens ?? 0) > 0)
+      .reduce((sum, row) => {
+        const totalTokens = Math.max(0, row.totalTokens ?? 0);
+        const inputTokens = Math.max(0, row.inputTokens ?? Math.round(totalTokens * 0.4));
+        const outputTokens = Math.max(0, row.outputTokens ?? Math.max(0, totalTokens - inputTokens));
+        return sum
+          + ((inputTokens / 1_000_000) * UNPRICED_CENTS_PER_M_IN)
+          + ((outputTokens / 1_000_000) * UNPRICED_CENTS_PER_M_OUT);
+      }, 0);
     const effectiveCostCents = totalCostCents + unpricedEstimateCents;
     const totalSpentEur = totalCostCents / 100;
     const monthlyTokenBudget = Math.max(1, org.tokenBudgetDaily * daysInMonthFromKey(key));

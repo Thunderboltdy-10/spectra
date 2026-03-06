@@ -1552,7 +1552,10 @@ export function useChatState() {
               | "collab_done"
               | "collab_synthesizing"
               | "chat_title"
-              | "notice";
+              | "notice"
+              | "rag_used"
+              | "soul_update"
+              | "agent_summoned";
             content?: string;
             message?: string;
             error?: string | { message?: string };
@@ -1582,8 +1585,11 @@ export function useChatState() {
             preview?: string;
             tokensUsed?: number;
             model?: string;
+            reason?: string;
             agentSuggestion?: AgentSuggestion;
             unlockedAchievements?: AchievementToastData[];
+            sources?: Array<{ filename: string; page?: number; sourceType: string }>;
+            entries?: Array<{ key: string; value: string; confidence: number }>;
           };
 
           // Guard: only update visual draft state if user is still viewing this chat
@@ -1825,6 +1831,18 @@ export function useChatState() {
 
           if (payload.type === "notice" && typeof payload.message === "string" && payload.message.trim()) {
             toast.message(payload.message.trim());
+          }
+
+          if (payload.type === "rag_used" && payload.sources?.length) {
+            toast.message(`Referenced ${payload.sources.length} personal or school source${payload.sources.length === 1 ? "" : "s"}.`);
+          }
+
+          if (payload.type === "soul_update" && payload.entries?.length) {
+            toast.message(`Memory updated: ${payload.entries[0]?.key ?? "profile"}`);
+          }
+
+          if (payload.type === "agent_summoned" && payload.agent && payload.model) {
+            toast.message(`Specialist active: ${payload.agent} via ${payload.model}`);
           }
 
           if (payload.type === "error") {

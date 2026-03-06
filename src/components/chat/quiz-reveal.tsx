@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RichText } from "@/components/chat/rich-text";
@@ -27,6 +27,7 @@ type QuizDifficulty = "easy" | "medium" | "hard";
 
 type QuizRevealProps = {
   content: string;
+  messageId?: string;
   chatId?: string;
   difficulty?: QuizDifficulty;
   autoOpen?: boolean;
@@ -34,15 +35,6 @@ type QuizRevealProps = {
   onFollowUp?: (message: string) => void;
   onModeChange?: (mode: string) => void;
 };
-
-function hashQuizContent(value: string) {
-  let hash = 0;
-  for (let i = 0; i < value.length; i += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash).toString(36);
-}
 
 export function isQuizContent(content: string): boolean {
   const parsed = parseQuiz(content);
@@ -79,6 +71,7 @@ function buildSubmission(questions: ParsedQuizQuestion[], answers: Record<string
 
 export function QuizReveal({
   content,
+  messageId,
   chatId,
   difficulty = "medium",
   autoOpen = false,
@@ -91,13 +84,18 @@ export function QuizReveal({
   const [submitted, setSubmitted] = useState(false);
   const panelInstanceId = useId();
   const [activeIndex, setActiveIndex] = useState(0);
+  const [restoring, setRestoring] = useState(false);
   const { activeView, panelData, openPanel } = usePanel();
 
   const [aiExplanations, setAiExplanations] = useState<Record<string, string>>({});
   const [loadingExplanations, setLoadingExplanations] = useState(false);
-  const storageKey = useMemo(() => `ai-school:quiz-progress:${hashQuizContent(content)}`, [content]);
+  const storageKey = useMemo(
+    () => `ai-school:quiz-progress:${messageId ?? `content:${content.length}`}`,
+    [content.length, messageId],
+  );
   const panelOpen = activeView === "quiz" && panelData.quiz?.panelId === panelInstanceId;
   const [didAutoOpen, setDidAutoOpen] = useState(false);
+  const lastSavedAnswersRef = useRef("");
 
   const score = useMemo(
     () =>
@@ -106,6 +104,14 @@ export function QuizReveal({
         : 0,
     [answers, questions, submitted],
   );
+
+  const clearStoredProgress = useCallback(() => {
+    try {
+      window.localStorage.removeItem(storageKey);
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [storageKey]);
 
   const fetchExplanations = useCallback(async (qs: ParsedQuizQuestion[], ans: Record<string, string>) => {
     if (!chatId) return; // Don't fetch without chatId
@@ -169,24 +175,97 @@ export function QuizReveal({
   }, [chatId]);
 
   useEffect(() => {
-    setActiveIndex(0);
-    setAiExplanations({});
-    setDidAutoOpen(false);
-    try {
-      const raw = window.localStorage.getItem(storageKey);
-      if (!raw) {
-        setSubmitted(false);
-        setAnswers({});
+    let cancelled = false;
+
+    async function restoreState() {
+      setActiveIndex(0);
+      setAiExplanations({});
+      setDidAutoOpen(false);
+      setRestoring(true);
+
+      let localAnswers: Record<string, string> = {};
+      let localSubmitted = false;
+
+      try {
+        const raw = window.localStorage.getItem(storageKey);
+        if (raw) {
+          const parsed = JSON.parse(raw) as { answers?: Record<string, string>; submitted?: boolean };
+          localAnswers = parsed.answers ?? {};
+          localSubmitted = Boolean(parsed.submitted);
+        }
+      } catch {
+        localAnswers = {};
+        localSubmitted = false;
+      }
+
+      if (!messageId) {
+        if (!cancelled) {
+          setAnswers(localAnswers);
+          setSubmitted(localSubmitted);
+          setRestoring(false);
+        }
         return;
       }
-      const parsed = JSON.parse(raw) as { answers?: Record<string, string>; submitted?: boolean };
-      setAnswers(parsed.answers ?? {});
-      setSubmitted(Boolean(parsed.submitted));
-    } catch {
-      setSubmitted(false);
-      setAnswers({});
+
+      try {
+        const response = await fetch(`/api/quizzes?messageId=${encodeURIComponent(messageId)}`);
+        if (!response.ok) throw new Error(await response.text());
+        const payload = (await response.json()) as {
+          result?: {
+            score: number;
+            total: number;
+            questions: QuizQuestionResult[];
+          } | null;
+          session?: {
+            answers: Array<{ questionId: string; selected: string }>;
+          } | null;
+        };
+
+        if (cancelled) return;
+
+        if (payload.result?.questions?.length) {
+          const restoredAnswers = payload.result.questions.reduce<Record<string, string>>((acc, question) => {
+            if (question.selected) acc[question.id] = question.selected;
+            return acc;
+          }, {});
+          setAnswers(restoredAnswers);
+          setSubmitted(true);
+          try {
+            window.localStorage.removeItem(storageKey);
+          } catch {
+            // Ignore storage failures.
+          }
+          setRestoring(false);
+          return;
+        }
+
+        if (payload.session?.answers?.length) {
+          const restoredAnswers = payload.session.answers.reduce<Record<string, string>>((acc, answer) => {
+            acc[answer.questionId] = answer.selected;
+            return acc;
+          }, {});
+          setAnswers({ ...localAnswers, ...restoredAnswers });
+          setSubmitted(false);
+          setRestoring(false);
+          return;
+        }
+      } catch {
+        // Fall back to local restore.
+      }
+
+      if (!cancelled) {
+        setAnswers(localAnswers);
+        setSubmitted(localSubmitted);
+        setRestoring(false);
+      }
     }
-  }, [storageKey]);
+
+    void restoreState();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [messageId, storageKey]);
 
   useEffect(() => {
     if (questions.length === 0) return;
@@ -202,6 +281,27 @@ export function QuizReveal({
       // Ignore storage failures.
     }
   }, [answers, questions.length, storageKey, submitted]);
+
+  useEffect(() => {
+    if (!messageId || submitted) return;
+
+    const entries = Object.entries(answers)
+      .filter(([, selected]) => typeof selected === "string" && selected.length > 0)
+      .map(([questionId, selected]) => ({ questionId, selected }));
+    const serialized = JSON.stringify(entries);
+    if (serialized === lastSavedAnswersRef.current) return;
+    lastSavedAnswersRef.current = serialized;
+
+    void fetch("/api/quizzes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "session",
+        messageId,
+        answers: entries,
+      }),
+    }).catch(() => {});
+  }, [answers, messageId, submitted]);
 
   const openQuizPanel = useCallback(() => {
     openPanel("quiz", {
@@ -219,6 +319,7 @@ export function QuizReveal({
         onSubmit: () => {
           if (submitted) return;
           setSubmitted(true);
+          clearStoredProgress();
           onSubmitAnswers?.(buildSubmission(questions, answers));
           void fetchExplanations(questions, answers);
         },
@@ -228,6 +329,7 @@ export function QuizReveal({
     activeIndex,
     answers,
     fetchExplanations,
+    clearStoredProgress,
     onSubmitAnswers,
     panelInstanceId,
     questions,
@@ -257,6 +359,7 @@ export function QuizReveal({
   function submitAnswers() {
     if (submitted) return;
     setSubmitted(true);
+    clearStoredProgress();
     onSubmitAnswers?.(buildSubmission(questions, answers));
     // Fetch AI explanations for incorrect answers
     void fetchExplanations(questions, answers);
@@ -307,6 +410,14 @@ export function QuizReveal({
         ? "border-[color-mix(in_oklab,var(--danger)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_12%,var(--bg-secondary))] text-[color-mix(in_oklab,var(--danger)_80%,var(--text-primary))]"
         : "border-[color-mix(in_oklab,var(--warning)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_15%,var(--bg-secondary))] text-[color-mix(in_oklab,var(--warning)_85%,var(--text-primary))]";
   // else: very low / zero
+
+  if (restoring) {
+    return (
+      <div className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 text-sm text-[var(--text-secondary)]">
+        Restoring quiz progress...
+      </div>
+    );
+  }
 
   if (longQuiz) {
     return (

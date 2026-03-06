@@ -2,6 +2,7 @@
 
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
 import Image from "next/image";
 import Link from "next/link";
 import { AlertTriangle, CheckCircle2, Clock, Sparkles } from "lucide-react";
@@ -26,9 +27,11 @@ type PageState =
 
 function JoinPageContent() {
   const searchParams = useSearchParams();
+  const { isLoaded, userId } = useAuth();
   const token = searchParams.get("token");
 
   const [state, setState] = useState<PageState>({ status: "loading" });
+  const [redeeming, setRedeeming] = useState(false);
 
   useEffect(() => {
     if (!token) {
@@ -65,6 +68,37 @@ function JoinPageContent() {
       }
     })();
   }, [token]);
+
+  useEffect(() => {
+    if (!isLoaded || !userId || !token || state.status !== "valid" || redeeming) {
+      return;
+    }
+
+    setRedeeming(true);
+    void (async () => {
+      try {
+        const response = await fetch("/api/invitations/redeem", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token }),
+        });
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as
+            | { error?: { message?: string } }
+            | null;
+          throw new Error(payload?.error?.message ?? "Could not accept invitation.");
+        }
+        window.location.href = "/";
+      } catch (error) {
+        setState({
+          status: "error",
+          message: error instanceof Error ? error.message : "Could not accept invitation.",
+        });
+      } finally {
+        setRedeeming(false);
+      }
+    })();
+  }, [isLoaded, redeeming, state, token, userId]);
 
   if (state.status === "loading") {
     return (
@@ -130,7 +164,9 @@ function JoinPageContent() {
   function handleJoin() {
     // Redirect to Clerk signup with the email pre-filled if possible
     const signUpUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up";
-    const redirect = encodeURIComponent(`${typeof window !== "undefined" ? window.location.origin : ""}/`);
+    const redirect = encodeURIComponent(
+      `${typeof window !== "undefined" ? window.location.origin : ""}/join?token=${encodeURIComponent(token ?? "")}`,
+    );
     const emailParam = `email_address=${encodeURIComponent(data.email)}`;
     window.location.href = `${signUpUrl}?${emailParam}&redirect_url=${redirect}`;
   }
@@ -205,8 +241,9 @@ function JoinPageContent() {
           <Button
             onClick={handleJoin}
             className="w-full cursor-pointer"
+            disabled={redeeming}
           >
-            Join {data.orgName ?? "School"}
+            {redeeming ? "Joining..." : `Join ${data.orgName ?? "School"}`}
           </Button>
           <p className="mt-3 text-center text-xs text-[var(--text-secondary)]">
             Already have an account?{" "}

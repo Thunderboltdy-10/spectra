@@ -17,8 +17,17 @@ export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();
     const chatId = request.nextUrl.searchParams.get("chatId") ?? undefined;
+    const messageId = request.nextUrl.searchParams.get("messageId") ?? undefined;
     const parsedLimit = Number(request.nextUrl.searchParams.get("limit") ?? "25");
     const limit = Number.isFinite(parsedLimit) ? parsedLimit : 25;
+
+    if (messageId) {
+      const state = await convexQuery("quizzes:getQuizStateByMessage", {
+        actorClerkId: actor.clerkId,
+        messageId,
+      });
+      return ok(state);
+    }
 
     const history = await convexQuery("quizzes:getQuizHistory", {
       actorClerkId: actor.clerkId,
@@ -34,12 +43,31 @@ export async function POST(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();
     const body = (await request.json()) as {
+      action?: "session" | "submit";
       chatId?: string;
       messageId?: string;
       questions?: QuizQuestionResult[];
       score?: number;
       total?: number;
+      answers?: Array<{ questionId: string; selected: string }>;
     };
+
+    if (body.action === "session") {
+      if (!body.messageId || !Array.isArray(body.answers)) {
+        throw new Error("Missing quiz session payload");
+      }
+
+      const saved = await convexMutation("quizzes:saveQuizSession", {
+        actorClerkId: actor.clerkId,
+        messageId: body.messageId,
+        answers: body.answers.map((answer) => ({
+          questionId: answer.questionId,
+          selected: answer.selected,
+        })),
+      });
+
+      return ok(saved);
+    }
 
     if (!body.chatId || !body.messageId || !Array.isArray(body.questions)) {
       throw new Error("Missing quiz payload");

@@ -52,7 +52,7 @@ export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
-  const [visibility, setVisibility] = useState<"all" | "public" | "private">("all");
+  const [visibility, setVisibility] = useState<"all" | "public" | "private" | "shared">("all");
 
   const loadAgents = useCallback(async () => {
     const response = await fetch("/api/agents");
@@ -133,7 +133,7 @@ export default function AgentsPage() {
               {item === "all" ? "All categories" : item}
             </Button>
           ))}
-          {(["all", "public", "private"] as const).map((value) => (
+          {(["all", "public", "private", "shared"] as const).map((value) => (
             <Button
               key={value}
               type="button"

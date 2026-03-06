@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import { Bot, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Loader2, Settings2, X, XCircle, FileText, Milestone } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ProviderLogo } from "@/components/provider-logo";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { rightPanelSurfaceClassName } from "@/components/ui/right-panel-surface";
 import type { ActiveCollaborator } from "@/components/chat/collaborators-live";
 import { RichText } from "@/components/chat/rich-text";
@@ -65,6 +67,16 @@ function sanitizeModelLabel(value: string) {
     .replace(/[\s(_-]*\bfree\b[\s)_-]*/gi, " ")
     .replace(/\s{2,}/g, " ")
     .trim();
+}
+
+function providerFromModelId(value: string) {
+  const provider = value.split("/")[0] ?? "Unknown";
+  if (!provider) return "Unknown";
+  return provider
+    .split(/[-_ ]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function resourceStatusMeta(status: PersonalResource["status"]) {
@@ -140,6 +152,33 @@ function SettingsView({
   onDeleteResource,
   onUploadPersonalFiles,
 }: SettingsViewProps) {
+  const [memoryEnabled, setMemoryEnabled] = useState(true);
+  const [searxngEnabled, setSearxngEnabled] = useState(true);
+  const [documentModeEnabled, setDocumentModeEnabled] = useState(true);
+  const [multiAgentVerbose, setMultiAgentVerbose] = useState(false);
+  const [showSpecialists, setShowSpecialists] = useState(true);
+
+  useEffect(() => {
+    try {
+      setMemoryEnabled(window.localStorage.getItem("ai-school:memory-enabled") !== "0");
+      setSearxngEnabled(window.localStorage.getItem("ai-school:searxng-enabled") !== "0");
+      setDocumentModeEnabled(window.localStorage.getItem("ai-school:document-mode-enabled") !== "0");
+      setMultiAgentVerbose(window.localStorage.getItem("ai-school:multi-agent-verbose") === "1");
+      setShowSpecialists(window.localStorage.getItem("ai-school:show-specialists") !== "0");
+    } catch {
+      // Keep defaults.
+    }
+  }, []);
+
+  const persistToggle = (key: string, value: boolean, setter: (value: boolean) => void) => {
+    setter(value);
+    try {
+      window.localStorage.setItem(key, value ? "1" : "0");
+    } catch {
+      // Ignore storage failures.
+    }
+  };
+
   const usagePercentFromSpending =
     userSpending && typeof userSpending.tokenUsagePercent === "number" && userSpending.tokenUsagePercent >= 0
       ? userSpending.tokenUsagePercent
@@ -184,7 +223,16 @@ function SettingsView({
 
   return (
     <div className="space-y-4">
-      <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+      <Tabs defaultValue="behavior" className="space-y-4">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="behavior">Behavior</TabsTrigger>
+          <TabsTrigger value="resources">Resources</TabsTrigger>
+          <TabsTrigger value="appearance">Appearance</TabsTrigger>
+          <TabsTrigger value="experimental">Experimental</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="behavior" className="space-y-4">
+          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
         <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Automation profile</h3>
         <div className="mt-2 grid gap-2">
           <AutoChoice label="Auto-enhance prompt" value={autoEnhancePrompt} onChange={onAutoEnhancePromptChange} />
@@ -220,28 +268,46 @@ function SettingsView({
             </div>
           </div>
         </div>
-      </section>
+          </section>
 
-      <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
-        <div>
-          <p className="text-sm">Use personal resources</p>
-          <p className="text-xs text-[var(--text-secondary)]">Include your uploaded files during retrieval</p>
-        </div>
-        <Switch checked={usePersonalResources} onCheckedChange={onTogglePersonalResources} />
-      </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
+              <div>
+                <p className="text-sm">Use personal resources</p>
+                <p className="text-xs text-[var(--text-secondary)]">Include your uploaded files during retrieval</p>
+              </div>
+              <Switch checked={usePersonalResources} onCheckedChange={onTogglePersonalResources} />
+            </div>
+            <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
+              <div>
+                <p className="text-sm">SearXNG web search</p>
+                <p className="text-xs text-[var(--text-secondary)]">Prefer open metasearch before model-generated search</p>
+              </div>
+              <Switch checked={searxngEnabled} onCheckedChange={(value) => persistToggle("ai-school:searxng-enabled", value, setSearxngEnabled)} />
+            </div>
+            <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
+              <div>
+                <p className="text-sm">Memory updates</p>
+                <p className="text-xs text-[var(--text-secondary)]">Allow the tutor to update your personal SOUL profile</p>
+              </div>
+              <Switch checked={memoryEnabled} onCheckedChange={(value) => persistToggle("ai-school:memory-enabled", value, setMemoryEnabled)} />
+            </div>
+          </div>
+        </TabsContent>
 
-      <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
-        <div>
-          <p className="text-sm">Auto-save conversation files</p>
-          <p className="text-xs text-[var(--text-secondary)]">Store newly attached files in My Files by default</p>
-        </div>
-        <Switch
-          checked={autoSaveConversationFilesToLibrary}
-          onCheckedChange={onAutoSaveConversationFilesToLibraryChange}
-        />
-      </div>
+        <TabsContent value="resources" className="space-y-4">
+          <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
+            <div>
+              <p className="text-sm">Auto-save conversation files</p>
+              <p className="text-xs text-[var(--text-secondary)]">Store newly attached files in My Files by default</p>
+            </div>
+            <Switch
+              checked={autoSaveConversationFilesToLibrary}
+              onCheckedChange={onAutoSaveConversationFilesToLibraryChange}
+            />
+          </div>
 
-      <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
         <div className="flex items-center justify-between gap-2">
           <div>
             <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">My files</h3>
@@ -301,7 +367,59 @@ function SettingsView({
             ))
           )}
         </div>
-      </section>
+          </section>
+        </TabsContent>
+
+        <TabsContent value="appearance" className="space-y-4">
+          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+            <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Workspace look</h3>
+            <div className="mt-3 rounded-2xl border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-secondary)_88%,white)] p-4">
+              <p className="font-display text-lg text-[var(--text-primary)]">Warm paper theme</p>
+              <p className="mt-2 text-sm text-[var(--text-secondary)]">
+                This workspace currently uses the shared paper-neutral palette documented in the UI source of truth.
+                Theme switching is intentionally limited until school branding controls settle.
+              </p>
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm">Auto-open live progress</p>
+                <p className="text-xs text-[var(--text-secondary)]">Open orchestration panel while streaming</p>
+              </div>
+              <Switch checked={liveProgressAutoOpen} onCheckedChange={onLiveProgressAutoOpenChange} />
+            </div>
+          </section>
+        </TabsContent>
+
+        <TabsContent value="experimental" className="space-y-4">
+          <section className="space-y-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+            <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Advanced controls</h3>
+            <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
+              <div>
+                <p className="text-sm">Document generation</p>
+                <p className="text-xs text-[var(--text-secondary)]">Enable inline preview and export panels for generated documents</p>
+              </div>
+              <Switch checked={documentModeEnabled} onCheckedChange={(value) => persistToggle("ai-school:document-mode-enabled", value, setDocumentModeEnabled)} />
+            </div>
+            <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
+              <div>
+                <p className="text-sm">Verbose multi-agent traces</p>
+                <p className="text-xs text-[var(--text-secondary)]">Keep richer collaboration notices during complex runs</p>
+              </div>
+              <Switch checked={multiAgentVerbose} onCheckedChange={(value) => persistToggle("ai-school:multi-agent-verbose", value, setMultiAgentVerbose)} />
+            </div>
+            <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
+              <div>
+                <p className="text-sm">Show specialist models</p>
+                <p className="text-xs text-[var(--text-secondary)]">Display specialist model activity in the live panel</p>
+              </div>
+              <Switch checked={showSpecialists} onCheckedChange={(value) => persistToggle("ai-school:show-specialists", value, setShowSpecialists)} />
+            </div>
+          </section>
+        </TabsContent>
+      </Tabs>
 
       <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
         <div className="flex items-center justify-between">
@@ -328,10 +446,10 @@ function SettingsView({
 }
 
 function CandidateBar({ score }: { score?: number }) {
-  const width = typeof score === "number" && Number.isFinite(score) ? Math.max(4, Math.round(score * 100)) : 4;
+  const width = typeof score === "number" && Number.isFinite(score) ? Math.max(6, Math.round(score * 100)) : 6;
   return (
-    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
-      <div className="h-full rounded-full bg-[var(--gradient-brand)]" style={{ width: `${width}%` }} />
+    <div className="h-1 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
+      <div className="h-full rounded-full bg-[var(--accent-cyan)]" style={{ width: `${width}%` }} />
     </div>
   );
 }
@@ -370,12 +488,31 @@ function RouteTraceView({ trace }: { trace?: RouteTrace }) {
           {trace.candidates.map((candidate, index) => (
             <div
               key={`${candidate.modelId}-${index}`}
-              className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2.5"
+              className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2"
             >
-              <p className="font-mono text-xs text-[var(--text-primary)]">{sanitizeModelId(candidate.modelId)}</p>
-              <p className="mt-1 text-xs text-[var(--text-secondary)]">Score: {formatScore(candidate.score)}</p>
-              <CandidateBar score={candidate.score} />
-              {candidate.reason && <p className="mt-1 text-xs text-[var(--text-secondary)]">{candidate.reason}</p>}
+              <div className="flex items-start gap-2">
+                <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] text-[10px] font-medium text-[var(--text-secondary)]">
+                  {index + 1}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <ProviderLogo
+                      provider={providerFromModelId(candidate.modelId)}
+                      modelId={candidate.modelId}
+                      size={14}
+                      className="h-5 w-5 shrink-0 min-w-[20px]"
+                    />
+                    <p className="truncate text-xs font-medium text-[var(--text-primary)]">{sanitizeModelId(candidate.modelId)}</p>
+                    <span className="ml-auto text-[10px] text-[var(--text-secondary)]">{formatScore(candidate.score)}</span>
+                  </div>
+                  <div className="mt-1">
+                    <CandidateBar score={candidate.score} />
+                  </div>
+                  {candidate.reason ? (
+                    <p className="mt-1 line-clamp-1 text-[11px] text-[var(--text-secondary)]">{candidate.reason}</p>
+                  ) : null}
+                </div>
+              </div>
             </div>
           ))}
         </div>
@@ -824,7 +961,7 @@ type UnifiedPanelProps = {
 export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanelProps) {
   const { activeView, panelData, closePanel } = usePanel();
   const compact = useCompactSheet(980);
-  const maxWidthPx = activeView === "settings" ? 400 : activeView === "quiz" ? 460 : 520;
+  const maxWidthPx = activeView === "quiz" ? 420 : 280;
   const { docked, panelWidth } = useRightPanelDock({
     id: "unified-panel",
     open: !!activeView,

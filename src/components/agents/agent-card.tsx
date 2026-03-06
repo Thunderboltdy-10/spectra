@@ -23,6 +23,9 @@ export function AgentCard({ agent }: AgentCardProps) {
           <div className="flex flex-wrap gap-1">
             <Badge variant="secondary">{agent.category}</Badge>
             <Badge variant="secondary">{agent.visibility}</Badge>
+            {agent.visibility === "shared" && (agent.collaborators?.length ?? 0) > 0 ? (
+              <Badge variant="secondary">{agent.collaborators?.length} collaborators</Badge>
+            ) : null}
           </div>
           <p className="text-xs text-[var(--text-secondary)]">Used {agent.usageCount.toLocaleString()} times</p>
         </CardContent>

@@ -228,6 +228,12 @@ export async function runCollaborativeStreaming(params: {
       specialistModelHistory.add(specialist.model);
       node.specialist = specialist.model;
       await params.send({
+        type: "agent_summoned",
+        agent: node.role,
+        model: specialist.model,
+        reason: node.prompt.slice(0, 160),
+      });
+      await params.send({
         type: "collab_progress",
         agent: node.role,
         model: specialist.model,

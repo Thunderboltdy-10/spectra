@@ -6,7 +6,7 @@ import { vStudyMode } from "./shared";
 type AgentDoc = {
   orgId: string;
   creatorUserId: string;
-  visibility: "public" | "private";
+  visibility: "public" | "private" | "shared";
   collaborators?: string[];
 };
 
@@ -63,7 +63,7 @@ export const createAgent = mutation({
     modelAllowlist: v.optional(v.array(v.string())),
     modelDenylist: v.optional(v.array(v.string())),
     attachmentPolicy: v.optional(v.string()),
-    visibility: v.union(v.literal("public"), v.literal("private")),
+    visibility: v.union(v.literal("public"), v.literal("private"), v.literal("shared")),
   },
   handler: async (ctx, args) => {
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
@@ -123,7 +123,7 @@ export const updateAgent = mutation({
     modelAllowlist: v.optional(v.array(v.string())),
     modelDenylist: v.optional(v.array(v.string())),
     attachmentPolicy: v.optional(v.string()),
-    visibility: v.optional(v.union(v.literal("public"), v.literal("private"))),
+    visibility: v.optional(v.union(v.literal("public"), v.literal("private"), v.literal("shared"))),
   },
   handler: async (ctx, args) => {
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
@@ -315,21 +315,23 @@ export const listCollaborators = query({
         role: user.role,
       }));
 
-    const candidates = users
-      .filter((user) => user._id !== agent.creatorUserId && !collaboratorSet.has(user._id))
-      .filter((user) => {
-        if (!searchQuery) return true;
-        const haystack = `${user.name} ${user.email}`.toLowerCase();
-        return haystack.includes(searchQuery);
-      })
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .slice(0, 30)
-      .map((user) => ({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      }));
+    const candidates = canManage
+      ? users
+          .filter((user) => user._id !== agent.creatorUserId && !collaboratorSet.has(user._id))
+          .filter((user) => {
+            if (!searchQuery) return true;
+            const haystack = `${user.name} ${user.email}`.toLowerCase();
+            return haystack.includes(searchQuery);
+          })
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .slice(0, 30)
+          .map((user) => ({
+            _id: user._id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+          }))
+      : [];
 
     return {
       canManage,

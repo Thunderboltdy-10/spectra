@@ -22,6 +22,7 @@ export const getOrgSettings = query({
             logoUrl: logoUrl ?? undefined,
             allowPaidModels: org.allowPaidModels ?? true,
             orchestratorV2Enabled: org.orchestratorV2Enabled ?? true,
+            searxngEnabled: org.searxngEnabled ?? true,
             soulEnabled: org.soulEnabled ?? true,
             agentModelBoostEnabled: org.agentModelBoostEnabled ?? true,
             adaptiveQuizEnabled: org.adaptiveQuizEnabled ?? true,
@@ -46,6 +47,7 @@ export const updateOrgSettings = mutation({
     timezone: v.optional(v.string()),
     maxStudents: v.optional(v.number()),
     orchestratorV2Enabled: v.optional(v.boolean()),
+    searxngEnabled: v.optional(v.boolean()),
     soulEnabled: v.optional(v.boolean()),
     agentModelBoostEnabled: v.optional(v.boolean()),
     adaptiveQuizEnabled: v.optional(v.boolean()),
@@ -93,6 +95,10 @@ export const updateOrgSettings = mutation({
         args.orchestratorV2Enabled !== undefined
           ? args.orchestratorV2Enabled
           : (org.orchestratorV2Enabled ?? true),
+      searxngEnabled:
+        args.searxngEnabled !== undefined
+          ? args.searxngEnabled
+          : (org.searxngEnabled ?? true),
       soulEnabled:
         args.soulEnabled !== undefined
           ? args.soulEnabled

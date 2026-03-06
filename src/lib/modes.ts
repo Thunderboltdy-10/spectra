@@ -82,6 +82,14 @@ export const MODE_REGISTRY: Record<StudyMode, ModeConfig> = {
     cssVar: "var(--mode-explain)",
     description: "Feynman technique: teach-to-learn explanations",
   },
+  document: {
+    key: "document",
+    label: "Documents",
+    icon: "FileText",
+    color: "#0f8a77",
+    cssVar: "var(--mode-document)",
+    description: "Create slides, study guides, structured docs, and export-ready materials",
+  },
   general: {
     key: "general",
     label: "Chat",
@@ -108,6 +116,7 @@ export const AVAILABLE_MODES = new Set<StudyMode>([
   "quiz",
   "flashcard",
   "research",
+  "document",
   "general",
   "image",
 ]);

@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
       category?: string;
       preferredModel?: string;
       preferredMode?: StudyMode;
-      visibility?: "public" | "private";
+      visibility?: "public" | "private" | "shared";
     };
 
     if (!body.name || !body.description || !body.systemPrompt || !body.category) {

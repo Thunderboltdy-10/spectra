@@ -55,7 +55,12 @@ export const validateAgentForActor = internalQuery({
     if (!agent || agent.orgId !== actor.orgId) {
       throw new Error("Agent not found");
     }
-    if (agent.visibility === "private" && agent.creatorUserId !== actor._id && actor.role !== "admin") {
+    const canAccess =
+      actor.role === "admin" ||
+      agent.visibility === "public" ||
+      agent.creatorUserId === actor._id ||
+      (agent.collaborators ?? []).includes(actor._id);
+    if (!canAccess) {
       throw new Error("Not authorized for this agent");
     }
     return { ok: true };

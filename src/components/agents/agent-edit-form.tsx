@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
-type Visibility = "public" | "private";
+type Visibility = "public" | "private" | "shared";
 type BuilderMode = "assisted" | "manual";
 
 export type AgentEditValues = {
@@ -260,6 +260,7 @@ export function AgentEditForm({
             className="h-10 w-full rounded-[var(--radius-input)] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-sm"
           >
             <option value="public">Public</option>
+            <option value="shared">Shared with collaborators</option>
             <option value="private">Private</option>
           </select>
         </label>

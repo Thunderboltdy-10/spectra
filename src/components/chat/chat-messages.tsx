@@ -7,10 +7,12 @@ import { ChatMessage } from "@/components/chat/chat-message";
 import type { ActiveCollaborator } from "@/components/chat/collaborators-live";
 import { QuizReveal, isQuizContent, type QuizSubmitResult } from "@/components/chat/quiz-reveal";
 import { FlashcardReveal, isFlashcardContent, type FlashcardCard } from "@/components/chat/flashcard-reveal";
+import { DocumentPanel } from "@/components/chat/document-panel";
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { ThinkingBlock } from "@/components/chat/thinking-block";
 import { ThinkingMessages } from "@/components/loading-states";
 import { ProviderLogo } from "@/components/provider-logo";
+import { isGeneratedDocumentContent, parseGeneratedDocument } from "@/lib/document-generator";
 import { autoCloseMarkdown } from "@/lib/stream-markdown";
 import { getModeConfig } from "@/lib/modes";
 import type { Message } from "@/hooks/use-chat-state";
@@ -402,6 +404,7 @@ export function ChatMessages({
                       <QuizReveal
                         key={`${msg._id}-${hashContent(structuredContent)}`}
                         content={structuredContent}
+                        messageId={msg._id}
                         chatId={chatId}
                         difficulty={quizDifficulty}
                         autoOpen={isLastAssistant}
@@ -607,6 +610,52 @@ export function ChatMessages({
                     onFeedback={onAssistantFeedback}
                     onOpenCanvas={onOpenCanvas}
                   />
+                </div>
+              );
+            }
+
+            if (msg.role === "assistant" && msgMode === "document" && isGeneratedDocumentContent(msg.content)) {
+              const parsed = parseGeneratedDocument(msg.content);
+              return (
+                <div key={msg._id}>
+                  {showModeTransition && (
+                    <div className="flex items-center gap-2 py-2">
+                      <div className="h-px flex-1 bg-[var(--border-default)]" />
+                      <span className="text-[10px] text-[var(--text-tertiary)]">
+                        Switched to {getModeConfig(msg.mode!)?.label ?? msg.mode} mode
+                      </span>
+                      <div className="h-px flex-1 bg-[var(--border-default)]" />
+                    </div>
+                  )}
+                  <ChatMessage
+                    role={msg.role}
+                    content=""
+                    thinkingContent={msg.thinkingContent}
+                    enhancedContent={msg.enhancedContent}
+                    attachments={msg.attachments}
+                    attachmentPreviews={msg.attachmentPreviews}
+                    modelUsed={msg.modelUsed}
+                    whyThisResponse={msg.whyThisResponse}
+                    routeTrace={msg.routeTrace}
+                    citations={msg.citations}
+                    mode={msgMode}
+                    isLastAssistant={isLastAssistant}
+                    onRegenerate={isLastAssistant ? onRegenerate : undefined}
+                    onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
+                    regenModels={regenModels}
+                    onBranch={onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
+                    onToggleBookmark={onToggleBookmarkMessage ? () => void onToggleBookmarkMessage(msg._id) : undefined}
+                    isBookmarked={assistantIsBookmarked}
+                    bookmarking={assistantBookmarking}
+                    usageIn={msg.usageIn}
+                    usageOut={msg.usageOut}
+                    createdAt={msg.createdAt}
+                    onFeedback={onAssistantFeedback}
+                    onOpenCanvas={onOpenCanvas}
+                  >
+                    {parsed.preamble ? <MarkdownRenderer content={parsed.preamble} citations={[]} /> : null}
+                    <DocumentPanel content={msg.content} />
+                  </ChatMessage>
                 </div>
               );
             }

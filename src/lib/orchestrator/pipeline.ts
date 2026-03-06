@@ -98,6 +98,7 @@ const MODE_MAX_TOKENS: Record<StudyMode, number> = {
   draft_coach: 2048,
   quiz: 1500,
   flashcard: 1500,
+  document: 3072,
   image: 1024,
 };
 const MIN_QUIZ_QUESTIONS = 2;
@@ -596,11 +597,15 @@ export async function runChatPipeline(request: NextRequest) {
     }) as Promise<{ chat: Record<string, unknown>; messages: Array<Record<string, unknown>> }>,
     convexQuery("admin:getOrgSettings", { actorClerkId: actor.clerkId }) as Promise<{
       org: {
+        name?: string;
+        timezone?: string;
         verifyMarkerPassEnabled: boolean;
         orchestratorV2Enabled?: boolean;
+        searxngEnabled?: boolean;
         soulEnabled?: boolean;
         agentModelBoostEnabled?: boolean;
         adaptiveQuizEnabled?: boolean;
+        spacedRepetitionEnabled?: boolean;
       };
     }>,
     convexQuery("memory:getUserMemory", {
@@ -654,7 +659,7 @@ export async function runChatPipeline(request: NextRequest) {
         auto.searchEnabled = true;
       }
       if (effectiveMode !== modeBeforeConversationRefine) {
-        await send({
+        earlyEventBuffer.push({
           type: "mode_update",
           suggestedMode: effectiveMode,
         });
@@ -745,6 +750,7 @@ export async function runChatPipeline(request: NextRequest) {
       modelCatalog: catalog,
       spendingTier: budget.tier,
       modelRuntimeStats: runtimeStatMap,
+      searxngEnabled: featureEnabled(orgSettings.org?.searxngEnabled),
     }).catch(() => ({
       text: "",
       urls: [] as string[],
@@ -1065,12 +1071,23 @@ export async function runChatPipeline(request: NextRequest) {
       : auto.thinkingLevel;
 
   const gate = tutorGate(attemptStats.attemptCount, attemptStats.hasReflection);
+  const staticPersonalContext = [
+    `Name: ${actor.name}`,
+    `School: ${orgSettings.org?.name ?? "AI School"}`,
+    `Timezone: ${orgSettings.org?.timezone ?? "UTC"}`,
+    `Current date: ${new Date().toLocaleString("en-US", {
+      dateStyle: "full",
+      timeStyle: "short",
+      timeZone: orgSettings.org?.timezone ?? "UTC",
+    })}`,
+  ].join("\n");
   const memoryProfile = buildRelevantMemoryProfile({
     message: auto.message,
     entries: userMemory.entries,
     rawMemoryText: userMemory.rawMemoryText,
   });
-  const useMemoryProfile = Boolean(memoryProfile);
+  const combinedMemoryProfile = [staticPersonalContext, memoryProfile].filter(Boolean).join("\n");
+  const useMemoryProfile = Boolean(combinedMemoryProfile);
   if (useMemoryProfile) {
     route.trace.toolchain.push("memory_injection");
   }
@@ -1097,7 +1114,7 @@ export async function runChatPipeline(request: NextRequest) {
           guidelinesTopicMap: selectedAgent.guidelinesTopicMap,
         }
       : undefined,
-    memoryProfile: useMemoryProfile ? memoryProfile : undefined,
+    memoryProfile: useMemoryProfile ? combinedMemoryProfile : undefined,
     contextSummary: existingSummary,
     searchBlock,
     explainDepth,
@@ -1244,6 +1261,16 @@ export async function runChatPipeline(request: NextRequest) {
       // Surface vision capability notice to the user
       if (capability.userNotice) {
         await send({ type: "notice", message: capability.userNotice });
+      }
+      if (retrieval.citations.length > 0) {
+        await send({
+          type: "rag_used",
+          sources: retrieval.citations.map((citation) => ({
+            filename: citation.filename,
+            page: citation.page,
+            sourceType: citation.sourceType,
+          })),
+        });
       }
 
       void earlyTitlePromise.then((title) => {
@@ -1970,12 +1997,22 @@ BACK: [answer or definition]`,
         }).catch(() => {});
       }
 
-      void maybeExtractMemory({
+      const extractedMemory = await maybeExtractMemory({
         actorClerkId: actor.clerkId,
         existingEntries: userMemory.entries,
         userMessage: normalizedMessage,
         assistantResponse: finalizedResponse,
-      }).catch(() => {});
+      }).catch(() => [] as Array<{ key: string; value: string; confidence: number; extractedAt: number }>);
+      if (extractedMemory.length > 0) {
+        await send({
+          type: "soul_update",
+          entries: extractedMemory.slice(0, 6).map((entry) => ({
+            key: entry.key,
+            value: entry.value,
+            confidence: entry.confidence,
+          })),
+        });
+      }
 
       const assistantCount = history.filter((message) => message.role === "assistant").length;
       const generatedTitle = await resolveFirstTurnTitle({

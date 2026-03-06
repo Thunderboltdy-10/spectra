@@ -9,7 +9,7 @@ const vMemoryEntry = v.object({
   extractedAt: v.number(),
 });
 
-const MEMORY_MAX_ENTRIES = 20;
+const MEMORY_MAX_ENTRIES = 50;
 const MEMORY_MAX_RAW_CHARS = 1500;
 const MEMORY_DECAY_CONFIDENCE = 0.3;
 const MEMORY_DECAY_AGE_MS = 30 * 24 * 60 * 60 * 1000;
@@ -93,7 +93,7 @@ export const getUserMemory = query({
 
     const row = await ctx.db
       .query("userMemory")
-      .withIndex("by_user", (q) => q.eq("userId", actor._id))
+      .withIndex("by_user_org", (q) => q.eq("userId", actor._id).eq("orgId", actor.orgId))
       .unique();
 
     if (!row) {
@@ -127,11 +127,57 @@ export const upsertUserMemory = mutation({
     const now = Date.now();
     const existing = await ctx.db
       .query("userMemory")
-      .withIndex("by_user", (q) => q.eq("userId", actor._id))
+      .withIndex("by_user_org", (q) => q.eq("userId", actor._id).eq("orgId", actor.orgId))
       .unique();
 
     const normalizedEntries = normalizeEntries(args.entries, now);
     const rawMemoryText = trimRawMemoryText(args.rawMemoryText ?? flatten(normalizedEntries));
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        rawMemoryText,
+        entries: normalizedEntries,
+        updatedAt: now,
+      });
+      return { ok: true, updatedAt: now };
+    }
+
+    await ctx.db.insert("userMemory", {
+      userId: actor._id,
+      orgId: actor.orgId,
+      rawMemoryText,
+      entries: normalizedEntries,
+      updatedAt: now,
+    });
+
+    return { ok: true, updatedAt: now };
+  },
+});
+
+export const upsertMemoryEntry = mutation({
+  args: {
+    actorClerkId: v.string(),
+    entry: vMemoryEntry,
+    rawSnippet: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("userMemory")
+      .withIndex("by_user_org", (q) => q.eq("userId", actor._id).eq("orgId", actor.orgId))
+      .unique();
+
+    const normalizedEntries = normalizeEntries([...(existing?.entries ?? []), args.entry], now);
+    const rawMemoryText = trimRawMemoryText(
+      [existing?.rawMemoryText, args.rawSnippet]
+        .filter((value): value is string => Boolean(value && value.trim().length > 0))
+        .join("\n") || flatten(normalizedEntries),
+    );
 
     if (existing) {
       await ctx.db.patch(existing._id, {

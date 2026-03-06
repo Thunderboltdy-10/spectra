@@ -32,6 +32,7 @@ type DueCard = {
 };
 
 const QUALITY_OPTIONS = [
+  { label: "Blackout (~today)", value: 1, className: "border-[color-mix(in_oklab,var(--danger)_65%,var(--border-default))] text-[color-mix(in_oklab,var(--danger)_90%,var(--text-primary))] hover:bg-[color-mix(in_oklab,var(--danger)_8%,var(--bg-primary))]" },
   { label: "Again (~1 day)", value: 0, className: "border-[var(--danger)] text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_10%,var(--bg-primary))]" },
   { label: "Hard (~2 days)", value: 2, className: "border-[var(--warning)] text-[var(--warning)] hover:bg-[color-mix(in_oklab,var(--warning)_10%,var(--bg-primary))]" },
   { label: "Good (~5 days)", value: 4, className: "bg-[var(--success)] text-white hover:bg-[color-mix(in_oklab,var(--success)_85%,black)]" },

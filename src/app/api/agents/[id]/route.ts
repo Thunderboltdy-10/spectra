@@ -32,7 +32,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       category?: string;
       preferredModel?: string;
       preferredMode?: StudyMode;
-      visibility?: "public" | "private";
+      visibility?: "public" | "private" | "shared";
     };
 
     const validMode = body.preferredMode ? safeStudyMode(body.preferredMode, "PATCH /api/agents/[id]") : undefined;

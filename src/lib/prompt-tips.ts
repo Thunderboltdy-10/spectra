@@ -61,6 +61,12 @@ export const PROMPT_TIPS: Record<StudyMode, string[]> = {
     "Mention what to avoid for cleaner outputs",
     "Try: 'Generate a cinematic lab scene with warm rim lighting'",
   ],
+  document: [
+    "Ask for the exact output: slides, study guide, report, or comparison table",
+    "Specify audience, length, and tone so the export is usable immediately",
+    "Mention whether you want bullets, speaker notes, or printable formatting",
+    "Try: 'Make a presentation on plate tectonics for Year 9 students'",
+  ],
   general: [
     "Ask anything - I'll find the best approach",
     "Be specific for better responses",

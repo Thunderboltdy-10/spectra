@@ -15,6 +15,7 @@ export const STUDY_MODES = [
   "flashcard",
   "research",
   "explain",
+  "document",
   "general",
   "image",
 ] as const;
@@ -32,6 +33,7 @@ export const vStudyMode = v.union(
   v.literal("flashcard"),
   v.literal("research"),
   v.literal("explain"),
+  v.literal("document"),
   v.literal("general"),
   v.literal("image"),
 );

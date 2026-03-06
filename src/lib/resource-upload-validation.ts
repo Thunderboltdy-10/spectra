@@ -1,18 +1,12 @@
-export const DEFAULT_MAX_RESOURCE_FILE_SIZE_BYTES = 10 * 1024 * 1024;
-const MIN_RESOURCE_FILE_SIZE_BYTES = 1 * 1024 * 1024;
-const MAX_RESOURCE_FILE_SIZE_BYTES = 100 * 1024 * 1024;
-
-const SUPPORTED_RESOURCE_EXTENSIONS = new Set(["pdf", "docx", "txt", "md"]);
-const SUPPORTED_MIME_BY_EXTENSION: Record<string, string[]> = {
-  pdf: ["application/pdf"],
-  docx: ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
-  txt: ["text/plain"],
-  md: ["text/markdown", "text/plain"],
-};
-
-function fileExtension(filename: string) {
-  return filename.split(".").pop()?.trim().toLowerCase() ?? "";
-}
+import {
+  DEFAULT_MAX_RESOURCE_FILE_SIZE_BYTES,
+  MAX_RESOURCE_FILE_SIZE_BYTES,
+  MIN_RESOURCE_FILE_SIZE_BYTES,
+  SUPPORTED_MIME_BY_EXTENSION,
+  SUPPORTED_RESOURCE_EXTENSIONS,
+  VIDEO_RESOURCE_EXTENSIONS,
+  fileExtension,
+} from "../../shared/resource-upload-policy";
 
 export function resolveMaxResourceFileSizeBytes(value: number | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -31,11 +25,16 @@ export function formatMegabytes(bytes: number) {
 
 export function validateResourceUploadFile(file: Pick<File, "name" | "type">) {
   const ext = fileExtension(file.name);
-  if (!SUPPORTED_RESOURCE_EXTENSIONS.has(ext)) {
-    return `Unsupported file type: .${ext || "unknown"}. Allowed: .pdf, .docx, .txt, .md`;
+  const mime = file.type.trim().toLowerCase();
+
+  if (VIDEO_RESOURCE_EXTENSIONS.has(ext) || mime.startsWith("video/")) {
+    return "Video uploads are not supported. Upload documents, code, images, or audio instead.";
   }
 
-  const mime = file.type.trim().toLowerCase();
+  if (!SUPPORTED_RESOURCE_EXTENSIONS.has(ext)) {
+    return `Unsupported file type: .${ext || "unknown"}. Allowed: documents, code, images, and audio only.`;
+  }
+
   if (!mime || mime === "application/octet-stream") {
     return null;
   }

@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
   Bug,
@@ -172,9 +171,6 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
   const [category, setCategory] = useState<FeedbackCategory>("bug");
   const [message, setMessage] = useState("");
   const [screenshot, setScreenshot] = useState<File | null>(null);
-  const [autoScreenshot, setAutoScreenshot] = useState<string | null>(null);
-  const [autoScreenshotFile, setAutoScreenshotFile] = useState<File | null>(null);
-  const [autoCaptureError, setAutoCaptureError] = useState<string | null>(null);
   const [chatContext, setChatContext] = useState<ChatFeedbackContext | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [timerSnapshot, setTimerSnapshot] = useState<TimerSnapshot | null>(null);
@@ -249,6 +245,16 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, [activePanel, closeNotifications]);
 
+  const waitForUiToSettle = useCallback(
+    () =>
+      new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => resolve());
+        });
+      }),
+    [],
+  );
+
   const captureAutoScreenshot = useCallback(async (options?: { silent?: boolean }) => {
     try {
       const html2canvas = (await import("html2canvas")).default;
@@ -270,36 +276,26 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
         if (estimateDataUrlBytes(dataUrl) > MAX_SCREENSHOT_BYTES) continue;
         const file = dataUrlToFile(dataUrl, AUTO_SCREENSHOT_NAME);
         if (!file) continue;
-        setAutoScreenshot(dataUrl);
-        setAutoScreenshotFile(file);
-        setAutoCaptureError(null);
-        return;
+        return { dataUrl, file };
       }
 
-      setAutoScreenshot(null);
-      setAutoScreenshotFile(null);
       if (options?.silent) {
-        setAutoCaptureError(null);
+        return null;
       } else {
-        setAutoCaptureError("Auto capture exceeded 2MB. You can still paste or attach an image.");
+        throw new Error("Auto capture exceeded 2MB. You can still paste or attach an image.");
       }
     } catch (error) {
       console.warn("html2canvas failed:", error);
-      setAutoScreenshot(null);
-      setAutoScreenshotFile(null);
       if (options?.silent) {
-        setAutoCaptureError(null);
+        return null;
       } else {
-        setAutoCaptureError("Auto screenshot unavailable. Paste or attach one manually.");
+        throw new Error("Auto screenshot unavailable. Paste or attach one manually.");
       }
     }
   }, []);
 
   useEffect(() => {
     if (!feedbackOpen) {
-      setAutoScreenshot(null);
-      setAutoScreenshotFile(null);
-      setAutoCaptureError(null);
       setChatContext(null);
       return;
     }
@@ -311,13 +307,12 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
     };
     window.addEventListener("ai-school:chat-context-response", onContextResponse);
     window.dispatchEvent(new Event("ai-school:request-chat-context"));
-    void captureAutoScreenshot({ silent: true });
 
     return () => {
       cancelled = true;
       window.removeEventListener("ai-school:chat-context-response", onContextResponse);
     };
-  }, [captureAutoScreenshot, feedbackOpen]);
+  }, [feedbackOpen]);
 
   useEffect(() => {
     const onOpenFeedback = () => {
@@ -401,17 +396,16 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
   async function submitFeedback(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmed = message.trim();
-    const screenshotToUpload = screenshot ?? autoScreenshotFile;
     if (!trimmed) {
       toast.error("Please describe your feedback.");
       return;
     }
-    if (screenshotToUpload) {
-      if (!screenshotToUpload.type.startsWith("image/")) {
+    if (screenshot) {
+      if (!screenshot.type.startsWith("image/")) {
         toast.error("Screenshot must be an image.");
         return;
       }
-      if (screenshotToUpload.size > MAX_SCREENSHOT_BYTES) {
+      if (screenshot.size > MAX_SCREENSHOT_BYTES) {
         toast.error("Screenshot must be 2MB or smaller.");
         return;
       }
@@ -419,6 +413,17 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
 
     setSubmitting(true);
     try {
+      const contextSnapshot = chatContext;
+      const manualScreenshot = screenshot;
+      setActivePanel("none");
+      closeNotifications();
+
+      let capturedScreenshot: Awaited<ReturnType<typeof captureAutoScreenshot>> = null;
+      if (!manualScreenshot) {
+        await waitForUiToSettle();
+        capturedScreenshot = await captureAutoScreenshot({ silent: true });
+      }
+
       const form = new FormData();
       form.set("category", category);
       form.set("message", trimmed);
@@ -428,13 +433,19 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
 
       const mode = inferModeFromPath(pathname);
       if (mode) form.set("mode", mode);
-      if (screenshotToUpload) form.set("screenshot", screenshotToUpload);
-      if (chatContext?.chatId) form.set("chatId", chatContext.chatId);
-      if (chatContext?.lastMessage) form.set("lastMessage", chatContext.lastMessage);
-      if (chatContext?.activeMode) form.set("activeMode", chatContext.activeMode);
-      if (chatContext?.activeModel) form.set("activeModel", chatContext.activeModel);
+      if (manualScreenshot) {
+        form.set("screenshot", manualScreenshot);
+      } else if (capturedScreenshot?.file) {
+        form.set("screenshot", capturedScreenshot.file);
+      }
+      if (contextSnapshot?.chatId) form.set("chatId", contextSnapshot.chatId);
+      if (contextSnapshot?.lastMessage) form.set("lastMessage", contextSnapshot.lastMessage);
+      if (contextSnapshot?.activeMode) form.set("activeMode", contextSnapshot.activeMode);
+      if (contextSnapshot?.activeModel) form.set("activeModel", contextSnapshot.activeModel);
       form.set("viewportSize", `${window.innerWidth}x${window.innerHeight}`);
-      if (autoScreenshot && !screenshotToUpload) form.set("autoScreenshot", autoScreenshot);
+      if (!manualScreenshot && capturedScreenshot?.dataUrl) {
+        form.set("autoScreenshot", capturedScreenshot.dataUrl);
+      }
 
       const response = await fetch("/api/feedback", {
         method: "POST",
@@ -454,8 +465,8 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
 
       toast.success("Feedback sent. Thank you.");
       resetFeedbackForm();
-      setActivePanel("none");
     } catch (error) {
+      setActivePanel("feedback");
       toast.error(error instanceof Error ? error.message : "Failed to submit feedback");
     } finally {
       setSubmitting(false);
@@ -538,7 +549,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
           <label className="flex cursor-pointer items-center justify-between rounded-lg border border-dashed border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-xs text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]">
             <span className="inline-flex items-center gap-1.5">
               <Upload className="h-3.5 w-3.5" />
-              {screenshot ? screenshot.name : autoScreenshotFile ? autoScreenshotFile.name : "Attach image up to 2MB"}
+              {screenshot ? screenshot.name : "Attach image up to 2MB"}
             </span>
             <input
               type="file"
@@ -550,43 +561,16 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
                 event.currentTarget.value = "";
               }}
             />
-            {screenshot ? <span>{formatFileSize(screenshot.size)}</span> : autoScreenshotFile ? <span>auto</span> : null}
+            {screenshot ? <span>{formatFileSize(screenshot.size)}</span> : null}
           </label>
           <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
-            Tip: paste a screenshot directly here with Ctrl/Cmd+V.
+            Tip: paste a screenshot directly here with Ctrl/Cmd+V. If you skip it, we will capture the page after this popup closes.
           </p>
         </div>
 
         <div className="rounded-md bg-[var(--bg-secondary)] px-2.5 py-2 text-[11px] text-[var(--text-secondary)]">
           Auto-context: <span className="font-medium text-[var(--text-primary)]">{pathname}</span>
         </div>
-
-        {autoScreenshot ? (
-          <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2">
-            <p className="mb-1 text-[11px] font-medium text-[var(--text-secondary)]">Auto-captured screenshot</p>
-            <Image
-              src={autoScreenshot}
-              alt="Auto-captured feedback context screenshot"
-              className="max-h-28 w-full rounded-md border border-[var(--border-default)] object-cover"
-              width={640}
-              height={360}
-              unoptimized
-            />
-          </div>
-        ) : null}
-
-        {autoCaptureError && !autoScreenshot && !autoScreenshotFile && !screenshot ? (
-          <div className="rounded-md border border-[color-mix(in_oklab,var(--warning)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_10%,transparent)] px-2.5 py-2 text-[11px] text-[var(--warning)]">
-            <p>{autoCaptureError}</p>
-            <button
-              type="button"
-              onClick={() => void captureAutoScreenshot()}
-              className="mt-1 underline underline-offset-2"
-            >
-              Retry auto capture
-            </button>
-          </div>
-        ) : null}
 
         <p className="text-[10px] text-[var(--text-secondary)]">
           Feedback screenshots are used only for debugging this report and are not used for model training.

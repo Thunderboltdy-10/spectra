@@ -52,6 +52,29 @@ function uniqueModelList(primary: string, fallbackModels: string[]) {
   return Array.from(set);
 }
 
+function supportsTemperatureControl(model: string) {
+  const leaf = model.split("/").pop()?.toLowerCase() ?? model.toLowerCase();
+  if (/^o\d/.test(leaf)) return false;
+  if (leaf.includes("deep-research")) return false;
+  return true;
+}
+
+function buildChatCompletionBody(params: {
+  model: string;
+  messages: OpenRouterMessage[];
+  temperature?: number;
+  maxTokens?: number;
+  stream?: boolean;
+}) {
+  return {
+    model: params.model,
+    messages: params.messages,
+    ...(params.stream ? { stream: true, stream_options: { include_usage: true } } : {}),
+    ...(supportsTemperatureControl(params.model) ? { temperature: params.temperature ?? 0.2 } : {}),
+    max_tokens: params.maxTokens,
+  };
+}
+
 async function fetchWithTimeout(url: string, init: RequestInit) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("Request timed out"), OPENROUTER_TIMEOUT_MS);
@@ -171,12 +194,14 @@ export async function openRouterChatCompletion(params: {
       const response = await fetchWithTimeout(`${OPENROUTER_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: openRouterHeaders(),
-        body: JSON.stringify({
-          model,
-          messages: params.messages,
-          temperature: params.temperature ?? 0.2,
-          max_tokens: params.maxTokens,
-        }),
+        body: JSON.stringify(
+          buildChatCompletionBody({
+            model,
+            messages: params.messages,
+            temperature: params.temperature,
+            maxTokens: params.maxTokens,
+          }),
+        ),
       });
 
       if (!response.ok) {
@@ -317,14 +342,15 @@ export async function* openRouterStreamChat(params: {
       const response = await fetchWithTimeout(`${OPENROUTER_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: openRouterHeaders(),
-        body: JSON.stringify({
-          model,
-          messages: params.messages,
-          stream: true,
-          stream_options: { include_usage: true },
-          temperature: params.temperature ?? 0.2,
-          max_tokens: params.maxTokens,
-        }),
+        body: JSON.stringify(
+          buildChatCompletionBody({
+            model,
+            messages: params.messages,
+            temperature: params.temperature,
+            maxTokens: params.maxTokens,
+            stream: true,
+          }),
+        ),
       });
 
       if (!response.ok || !response.body) {

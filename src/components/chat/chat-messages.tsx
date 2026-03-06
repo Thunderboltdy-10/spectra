@@ -139,10 +139,10 @@ export function ChatMessages({
   useEffect(() => {
     if (shouldAutoScrollRef.current) {
       endRef.current?.scrollIntoView({
-        behavior: scrollContainerRef.current ? "smooth" : "auto",
+        behavior: sending ? "auto" : scrollContainerRef.current ? "smooth" : "auto",
       });
     }
-  }, [messages, draftResponse]);
+  }, [draftResponse, messages, sending]);
 
   useEffect(() => {
     const element = document.querySelector<HTMLElement>("[data-chat-scroll-root]");
@@ -155,17 +155,17 @@ export function ChatMessages({
         const scrollTop = element.scrollTop;
         const deltaFromBottom = element.scrollHeight - scrollTop - element.clientHeight;
         const scrolledUp = scrollTop < lastScrollTopRef.current;
-        const nearBottom = deltaFromBottom < 80;
+        const nearBottom = deltaFromBottom < 72;
 
         if (nearBottom) {
           shouldAutoScrollRef.current = true;
           stickyBottomRef.current = true;
-        } else if (shouldAutoScrollRef.current && stickyBottomRef.current && scrolledUp && deltaFromBottom > 400) {
+        } else if (shouldAutoScrollRef.current && stickyBottomRef.current && scrolledUp && deltaFromBottom > 140) {
           shouldAutoScrollRef.current = false;
           stickyBottomRef.current = false;
         }
 
-        setShowJumpButton(deltaFromBottom > 400);
+        setShowJumpButton(deltaFromBottom > 180);
         lastScrollTopRef.current = scrollTop;
       });
     };
@@ -180,8 +180,9 @@ export function ChatMessages({
 
   useEffect(() => {
     if (!sending) return;
-    shouldAutoScrollRef.current = true;
-    stickyBottomRef.current = true;
+    if (stickyBottomRef.current) {
+      shouldAutoScrollRef.current = true;
+    }
   }, [sending]);
 
   useEffect(() => {
@@ -383,6 +384,7 @@ export function ChatMessages({
                       citations={msg.citations}
                       mode={msgMode}
                       isLastAssistant={isLastAssistant}
+                      animateIn={!isLastAssistant}
                       onRegenerate={isLastAssistant ? onRegenerate : undefined}
                       onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
                       regenModels={regenModels}
@@ -443,6 +445,7 @@ export function ChatMessages({
                       citations={msg.citations}
                       mode={msgMode}
                       isLastAssistant={isLastAssistant}
+                      animateIn={!isLastAssistant}
                       onRegenerate={isLastAssistant ? onRegenerate : undefined}
                       onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
                       regenModels={regenModels}
@@ -487,6 +490,7 @@ export function ChatMessages({
                     citations={msg.citations}
                     mode={msgMode}
                     isLastAssistant={isLastAssistant}
+                    animateIn={!isLastAssistant}
                     onRegenerate={isLastAssistant ? onRegenerate : undefined}
                     onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
                     regenModels={regenModels}
@@ -535,6 +539,7 @@ export function ChatMessages({
                       citations={msg.citations}
                       mode={msgMode}
                       isLastAssistant={isLastAssistant}
+                      animateIn={!isLastAssistant}
                       onRegenerate={isLastAssistant ? onRegenerate : undefined}
                       onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
                       regenModels={regenModels}
@@ -596,6 +601,7 @@ export function ChatMessages({
                     citations={msg.citations}
                     mode={msgMode}
                     isLastAssistant={isLastAssistant}
+                    animateIn={!isLastAssistant}
                     onRegenerate={isLastAssistant ? onRegenerate : undefined}
                     onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
                     regenModels={regenModels}
@@ -680,11 +686,12 @@ export function ChatMessages({
                   attachmentPreviews={msg.attachmentPreviews}
                   modelUsed={msg.modelUsed}
                   whyThisResponse={msg.whyThisResponse}
-                  routeTrace={msg.routeTrace}
-                  citations={msg.citations}
-                  mode={msg.role === "assistant" ? msgMode : undefined}
-                  isLastAssistant={isLastAssistant}
-                  onRegenerate={isLastAssistant ? onRegenerate : undefined}
+                    routeTrace={msg.routeTrace}
+                    citations={msg.citations}
+                    mode={msg.role === "assistant" ? msgMode : undefined}
+                    isLastAssistant={isLastAssistant}
+                    animateIn={msg.role === "assistant" ? !isLastAssistant : true}
+                    onRegenerate={isLastAssistant ? onRegenerate : undefined}
                   onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
                   regenModels={regenModels}
                   onEdit={msg.role === "user" && onEditMessage ? (value) => void onEditMessage(msg._id, value) : undefined}

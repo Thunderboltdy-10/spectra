@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Bot, Brush, Cpu, MailPlus, Search, Sparkles, Users2, BarChart3 } from "lucide-react";
+import { Brush, Cpu, MailPlus, Search, Sparkles, Users2, BarChart3 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/layout/app-shell";
 import { AdminOnboarding } from "@/components/onboarding/admin-onboarding";
@@ -12,9 +12,8 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useSidebar } from "@/context/sidebar-context";
-import type { Agent } from "@/types";
 
-type NavSection = "soul" | "members" | "usage" | "branding" | "settings" | "agents";
+type NavSection = "soul" | "members" | "usage" | "branding" | "settings";
 type OrgSettings = { name?: string; description?: string; schoolType?: string; timezone?: string; maxStudents?: number; monthlyBudgetCentsPerUser?: number; budgetMarginPercent?: number; soulEnabled?: boolean; orchestratorV2Enabled?: boolean; searxngEnabled?: boolean; adaptiveQuizEnabled?: boolean; spacedRepetitionEnabled?: boolean; agentModelBoostEnabled?: boolean };
 type Member = { _id: string; name: string; email: string; role: "student" | "teacher" | "admin"; createdAt: number };
 type Invitation = { _id: string; email: string; role: "student" | "teacher" | "admin"; status: "pending" | "accepted" | "expired" | "cancelled"; expiresAt: number };
@@ -29,7 +28,6 @@ const NAV: Array<{ id: NavSection; label: string; icon: React.ReactNode }> = [
   { id: "usage", label: "Usage & Models", icon: <BarChart3 className="h-4 w-4" /> },
   { id: "branding", label: "Branding", icon: <Brush className="h-4 w-4" /> },
   { id: "settings", label: "Settings", icon: <Cpu className="h-4 w-4" /> },
-  { id: "agents", label: "Agents", icon: <Bot className="h-4 w-4" /> },
 ];
 
 function shortDay(day: string) {
@@ -67,21 +65,19 @@ function AdminPageContent() {
   const [usage, setUsage] = useState<UsageRow[]>([]);
   const [analytics, setAnalytics] = useState<SchoolAnalytics | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
-  const [agents, setAgents] = useState<Agent[]>([]);
   const [memberSearch, setMemberSearch] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"student" | "teacher">("student");
   const [savingSettings, setSavingSettings] = useState(false);
 
   async function refresh() {
-    const [bootstrap, schoolDashboard, membersPayload, usagePayload, schoolAnalytics, modelPayload, agentsPayload] = await Promise.all([
+    const [bootstrap, schoolDashboard, membersPayload, usagePayload, schoolAnalytics, modelPayload] = await Promise.all([
       loadJson<{ actor: { onboardingComplete?: boolean }; orgSettings: { org: OrgSettings } }>("/api/bootstrap"),
       loadJson<SchoolDashboard>("/api/school-admin/dashboard"),
       loadJson<{ members: { members: Member[] }; invitations: Invitation[] }>("/api/school-admin/members"),
       loadJson<{ usage: UsageRow[] }>("/api/admin/users"),
       loadJson<SchoolAnalytics>("/api/school-admin/analytics?days=30"),
       loadJson<{ models: LeaderboardEntry[] }>("/api/analytics/model-leaderboard"),
-      loadJson<{ agents: Agent[] }>("/api/agents"),
     ]);
     setOnboardingComplete(Boolean(bootstrap.actor.onboardingComplete));
     setOrg(bootstrap.orgSettings.org);
@@ -91,7 +87,6 @@ function AdminPageContent() {
     setUsage(usagePayload.usage ?? []);
     setAnalytics(schoolAnalytics);
     setLeaderboard(modelPayload.models ?? []);
-    setAgents(agentsPayload.agents ?? []);
   }
 
   useEffect(() => {
@@ -168,15 +163,6 @@ function AdminPageContent() {
     }
   }
 
-  async function updateVisibility(agentId: string, visibility: "public" | "private" | "shared") {
-    try {
-      await loadJson(`/api/agents/${agentId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ visibility }) });
-      await refresh();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to update agent");
-    }
-  }
-
   if (sidebarLoading || !hasAdminAccess || loading) return <AppShell><div className="flex items-center justify-center p-8"><div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--border-default)] border-t-[var(--accent-cyan)]" /></div></AppShell>;
   if (!onboardingComplete) return <AppShell><AdminOnboarding orgName={org?.name ?? "AI School"} monthlyBudgetCentsPerUser={org?.monthlyBudgetCentsPerUser ?? null} budgetMarginPercent={org?.budgetMarginPercent ?? null} onComplete={completeOnboarding} onSkip={completeOnboarding} /></AppShell>;
 
@@ -186,7 +172,6 @@ function AdminPageContent() {
     usage: <SectionFrame title="Usage & Models" subtitle="School-wide visibility into token volume, quiz outcomes, and preferred models."><div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]"><div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5"><div className="mb-3 flex items-center justify-between"><p className="text-sm font-semibold">Recent usage</p><p className="text-xs text-[var(--text-secondary)]">{dashboard?.messagesToday ?? 0} messages today</p></div><div className="space-y-2">{usage.length === 0 ? <p className="text-sm text-[var(--text-secondary)]">No usage data yet.</p> : usage.map((row) => <div key={row.day}><div className="mb-1 flex items-center justify-between text-xs"><span className="text-[var(--text-secondary)]">{shortDay(row.day)}</span><span>{formatTokens(row.totalTokens)} tokens</span></div><div className="h-1.5 overflow-hidden rounded-full bg-[var(--bg-secondary)]"><div className="h-full rounded-full bg-[var(--accent-cyan)]" style={{ width: `${Math.max(4, Math.round((row.totalTokens / usageMax) * 100))}%` }} /></div></div>)}</div></div><div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5"><p className="text-sm font-semibold">Model leaderboard</p><div className="mt-3 space-y-2">{leaderboard.slice(0, 8).map((entry, index) => <div key={entry.modelId} className="grid min-h-[44px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5"><span className="text-xs text-[var(--text-secondary)]">{index + 1}</span><div className="min-w-0"><p className="truncate text-sm font-medium">{entry.name}</p><p className="truncate text-xs text-[var(--text-secondary)]">{entry.provider} • {entry.usageCount} uses</p></div><span className="text-xs text-[var(--text-secondary)]">{formatTokens(entry.totalTokens)}</span></div>)}</div><div className="mt-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3 text-sm text-[var(--text-secondary)]">Avg quiz score: <span className="font-medium text-[var(--text-primary)]">{analytics?.avgQuizScore ? `${Math.round(analytics.avgQuizScore)}%` : "No quizzes yet"}</span></div></div></div></SectionFrame>,
     branding: <SectionFrame title="Branding" subtitle="Logo, colors, welcome copy, and school description live in the branding editor."><div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5"><p className="text-sm font-semibold">Branding editor</p><p className="mt-1 text-sm text-[var(--text-secondary)]">{org?.description ?? "Set a welcome message and school description so the workspace reads like your institution."}</p><Button asChild className="mt-4"><Link href="/admin/school/branding">Open branding</Link></Button></div></SectionFrame>,
     settings: <SectionFrame title="Settings" subtitle="School-wide retrieval, quiz, flashcard, and orchestration switches."><div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5"><div className="space-y-3">{[{ key: "searxngEnabled", label: "SearXNG web search", text: "Prefer metasearch before model-generated web briefings." }, { key: "adaptiveQuizEnabled", label: "Adaptive quiz", text: "Adjust quiz difficulty from prior performance." }, { key: "spacedRepetitionEnabled", label: "Spaced repetition", text: "Keep flashcard scheduling active." }, { key: "agentModelBoostEnabled", label: "Agent model boost", text: "Allow specialist agents to escalate when needed." }, { key: "orchestratorV2Enabled", label: "Orchestrator v2", text: "Use the advanced routing pipeline across chats." }].map((item) => <div key={item.key} className="flex items-center justify-between gap-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3.5"><div className="min-w-0"><p className="text-sm font-medium">{item.label}</p><p className="mt-0.5 text-xs text-[var(--text-secondary)]">{item.text}</p></div><Switch checked={(org as Record<string, boolean | undefined> | null)?.[item.key] ?? true} onCheckedChange={(checked) => setOrg((prev) => prev ? { ...prev, [item.key]: checked } : prev)} /></div>)}</div><Button className="mt-4" onClick={() => void saveSettings()} disabled={savingSettings}>{savingSettings ? "Saving..." : "Save settings"}</Button></div></SectionFrame>,
-    agents: <SectionFrame title="Agents" subtitle="Review school agents and switch visibility between public, private, and collaborator-shared."><div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5"><div className="space-y-3">{agents.map((agent) => <div key={agent._id} className="grid gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4 lg:grid-cols-[minmax(0,1fr)_180px] lg:items-center"><div className="min-w-0"><p className="truncate text-sm font-semibold">{agent.name}</p><p className="mt-1 line-clamp-2 text-sm text-[var(--text-secondary)]">{agent.description}</p><p className="mt-1 text-xs text-[var(--text-secondary)]">{agent.category} • {agent.collaborators?.length ?? 0} collaborators</p></div><Select value={agent.visibility} onValueChange={(value) => void updateVisibility(agent._id, value as "public" | "private" | "shared")}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="public">Public</SelectItem><SelectItem value="private">Private</SelectItem><SelectItem value="shared">Shared</SelectItem></SelectContent></Select></div>)}</div></div></SectionFrame>,
   };
 
   return (

@@ -87,6 +87,8 @@ export const vCitation = v.object({
   page: v.optional(v.number()),
   sourceType: vSourceType,
   url: v.optional(v.string()),
+  title: v.optional(v.string()),
+  domain: v.optional(v.string()),
   resourceId: v.optional(v.id("resources")),
   snippet: v.optional(v.string()),
 });

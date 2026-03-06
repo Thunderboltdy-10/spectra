@@ -179,21 +179,19 @@ function SettingsView({
     }
   };
 
-  const usagePercentFromSpending =
-    userSpending && typeof userSpending.tokenUsagePercent === "number" && userSpending.tokenUsagePercent >= 0
-      ? userSpending.tokenUsagePercent
-      : userSpending && typeof userSpending.budgetUsagePercent === "number" && userSpending.budgetUsagePercent >= 0
-        ? userSpending.budgetUsagePercent
-        : userSpending && typeof userSpending.activityUsagePercent === "number" && userSpending.activityUsagePercent >= 0
-          ? userSpending.activityUsagePercent
-          : null;
+  const usagePercentCandidates = [
+    userSpending?.activityUsagePercent,
+    userSpending?.budgetUsagePercent,
+    userSpending?.tokenUsagePercent,
+  ].filter((value): value is number => typeof value === "number" && value >= 0);
+  const usagePercentFromSpending = usagePercentCandidates.length > 0 ? Math.max(...usagePercentCandidates) : null;
   const ratioFromBudget =
     typeof usagePercentFromSpending === "number"
       ? Math.min(1, Math.max(0, usagePercentFromSpending / 100))
       : null;
   const ratioFromActivity = !userSpending && recentChatCount > 0 ? Math.min(1, recentChatCount / 50) : null;
   const ratio = ratioFromBudget ?? ratioFromActivity;
-  const percentUsed = typeof ratio === "number" ? Math.max(0, Math.min(100, Math.round(ratio * 100))) : null;
+  const percentUsed = typeof ratio === "number" ? Math.max(0, Math.min(100, Math.round(ratio * 1000) / 10)) : null;
   const usageLabel =
     percentUsed === null
       ? "No activity yet"
@@ -432,7 +430,11 @@ function SettingsView({
             style={{ width: `${typeof ratio === "number" ? Math.max(ratio > 0 ? 2 : 0, ratio * 100) : 0}%` }}
           />
         </div>
-        <p className="mt-1 text-[11px] text-[var(--text-secondary)]">{percentUsed === null ? "No tracked activity yet" : `${percentUsed}% utilization`}</p>
+        <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+          {percentUsed === null
+            ? "No tracked activity yet"
+            : `${percentUsed > 0 && percentUsed < 1 ? "<1" : Number.isInteger(percentUsed) ? percentUsed.toFixed(0) : percentUsed.toFixed(1)}% utilization`}
+        </p>
         {userSpending ? (
           <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
             {typeof userSpending.monthlyTokens === "number"
@@ -502,7 +504,7 @@ function RouteTraceView({ trace }: { trace?: RouteTrace }) {
                       size={14}
                       className="h-5 w-5 shrink-0 min-w-[20px]"
                     />
-                    <p className="truncate text-xs font-medium text-[var(--text-primary)]">{sanitizeModelId(candidate.modelId)}</p>
+                    <p className="min-w-0 break-all text-xs font-medium text-[var(--text-primary)]">{sanitizeModelId(candidate.modelId)}</p>
                     <span className="ml-auto text-[10px] text-[var(--text-secondary)]">{formatScore(candidate.score)}</span>
                   </div>
                   <div className="mt-1">
@@ -520,8 +522,8 @@ function RouteTraceView({ trace }: { trace?: RouteTrace }) {
 
       <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
         <h4 className="mb-1 text-sm font-semibold text-[var(--text-primary)]">Selected</h4>
-        <p className="font-mono text-xs text-[var(--text-primary)]">{sanitizeModelId(trace.selected.modelId)}</p>
-        <p className="mt-1 text-xs text-[var(--text-secondary)]">{trace.selected.reason}</p>
+        <p className="break-all font-mono text-xs text-[var(--text-primary)]">{sanitizeModelId(trace.selected.modelId)}</p>
+        <p className="mt-1 break-words text-xs text-[var(--text-secondary)]">{trace.selected.reason}</p>
       </section>
 
       {trace.fallbacks.length > 0 && (
@@ -537,10 +539,10 @@ function RouteTraceView({ trace }: { trace?: RouteTrace }) {
                   <Milestone className="h-3.5 w-3.5" />
                   <span className="font-medium">Attempt {fallback.attemptIndex + 1}</span>
                 </div>
-                <p className="font-mono text-[11px] text-[var(--text-secondary)]">
+                <p className="break-all font-mono text-[11px] text-[var(--text-secondary)]">
                   {sanitizeModelId(fallback.fromModel)} → {sanitizeModelId(fallback.toModel)}
                 </p>
-                <p className="mt-1 text-xs text-[var(--text-secondary)]">{fallback.error}</p>
+                <p className="mt-1 break-words text-xs text-[var(--text-secondary)]">{fallback.error}</p>
               </li>
             ))}
           </ol>
@@ -777,8 +779,8 @@ function SourcesView({ citations }: { citations: Citation[] }) {
               </div>
             </div>
 
-            <p className="mt-2 truncate text-sm font-semibold text-[var(--text-primary)]">{label}</p>
-            {isSearch && citation.domain ? <p className="mt-1 text-xs text-[var(--text-secondary)]">{citation.domain}</p> : null}
+            <p className="mt-2 break-words text-sm font-semibold text-[var(--text-primary)]">{label}</p>
+            {isSearch && citation.domain ? <p className="mt-1 break-all text-xs text-[var(--text-secondary)]">{citation.domain}</p> : null}
 
             <div className="mt-2 min-h-[4.5rem] rounded-md bg-[var(--bg-secondary)] px-2.5 py-2">
               {citation.snippet ? (
@@ -961,13 +963,20 @@ type UnifiedPanelProps = {
 export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanelProps) {
   const { activeView, panelData, closePanel } = usePanel();
   const compact = useCompactSheet(980);
-  const maxWidthPx = activeView === "quiz" ? 420 : 280;
+  const maxWidthPx =
+    activeView === "quiz"
+      ? 460
+      : activeView === "route-trace"
+        ? 620
+        : activeView === "settings"
+          ? 400
+          : 360;
   const { docked, panelWidth } = useRightPanelDock({
     id: "unified-panel",
     open: !!activeView,
     compact,
     maxWidthPx,
-    minMainWidthPx: activeView === "settings" ? 680 : 760,
+    minMainWidthPx: activeView === "settings" ? 620 : 720,
     reserveLeftPx: 160,
   });
   const [collapsed, setCollapsed] = useState(false);
@@ -1021,11 +1030,11 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
         }
       >
         <div
-          className={`flex items-center justify-between ${docked ? "shadow-[0_1px_0_var(--border-default)] px-4 py-3.5" : "mb-4"}`}
+          className={`flex min-h-[72px] items-center justify-between ${docked ? "shadow-[0_1px_0_var(--border-default)] px-5 py-2.5" : "mb-4"}`}
         >
-          <div>
+          <div className="min-w-0">
             <p className="text-[9px] uppercase tracking-[0.14em] text-[var(--text-secondary)] truncate">{current.subtitle}</p>
-            <h3 className={`font-display text-[var(--text-primary)] ${docked ? "text-xl" : "text-2xl"}`}>{current.title}</h3>
+            <h3 className={`truncate font-display text-[var(--text-primary)] ${docked ? "text-xl" : "text-2xl"}`}>{current.title}</h3>
           </div>
           <div className="flex items-center gap-1.5">
             {compact ? (
@@ -1063,7 +1072,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
         </div>
 
         {!collapsed ? (
-          <div className={`right-panel-content min-h-0 flex-1 overflow-y-auto ${docked ? "px-4 py-4 pr-3" : "pr-1"}`}>
+          <div className={`right-panel-content min-h-0 flex-1 overflow-x-hidden overflow-y-auto ${docked ? "px-5 py-4 pr-4" : "pr-1"}`}>
             {activeView === "settings" && settingsProps && <SettingsView {...settingsProps} />}
             {activeView === "route-trace" && <RouteTraceView trace={panelData.routeTrace ?? orchestrationProps?.routeTrace} />}
             {activeView === "sources" && <SourcesView citations={panelData.sources ?? []} />}

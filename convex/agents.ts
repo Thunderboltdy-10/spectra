@@ -41,6 +41,10 @@ function canManageCollaborators(agent: AgentDoc, actor: ActorDoc) {
   return actor.role === "admin" || agent.creatorUserId === actor._id;
 }
 
+function canChangeVisibility(agent: AgentDoc, actor: ActorDoc) {
+  return agent.creatorUserId === actor._id;
+}
+
 function canViewAgent(agent: AgentDoc, actor: ActorDoc) {
   return agent.visibility === "public" || canEditAgent(agent, actor);
 }
@@ -138,6 +142,10 @@ export const updateAgent = mutation({
 
     if (!canEditAgent(agent, actor)) {
       throw new Error("Only creator, collaborator, or admin can update this agent");
+    }
+
+    if (args.visibility !== undefined && !canChangeVisibility(agent, actor)) {
+      throw new Error("Only the agent creator can change visibility");
     }
 
     await ctx.db.patch(args.agentId, {

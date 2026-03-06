@@ -51,6 +51,7 @@ type ChatMessageProps = {
   onToggleBookmark?: () => void;
   isBookmarked?: boolean;
   bookmarking?: boolean;
+  animateIn?: boolean;
   children?: React.ReactNode;
 };
 
@@ -171,6 +172,7 @@ export function ChatMessage({
   onToggleBookmark,
   isBookmarked = false,
   bookmarking = false,
+  animateIn = true,
   children,
 }: ChatMessageProps) {
   const isUser = role === "user";
@@ -225,7 +227,7 @@ export function ChatMessage({
 
   return (
     <article
-      className={cn("chat-fade-in flex", isUser ? "justify-end" : "justify-start")}
+      className={cn("flex", animateIn && "chat-fade-in", isUser ? "justify-end" : "justify-start")}
       aria-label={isUser ? "Your message" : "Assistant response"}
     >
       <div className={cn("w-full", isUser ? "max-w-3xl" : "max-w-5xl xl:max-w-6xl")}>

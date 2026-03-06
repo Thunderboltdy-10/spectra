@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   Bar,
   CartesianGrid,
@@ -13,6 +14,7 @@ import {
 } from "recharts";
 import { ModeBreakdown } from "@/components/analytics/mode-breakdown";
 import { TimeOfDayChart } from "@/components/analytics/time-of-day-chart";
+import { Button } from "@/components/ui/button";
 
 type AnalyticsRow = {
   day: string;
@@ -46,14 +48,6 @@ type EnhancedAnalytics = {
     topicDepth: number;
     activeDays: number;
   };
-};
-
-type ModelLeaderboardEntry = {
-  modelId: string;
-  provider: string;
-  name: string;
-  totalTokens: number;
-  usageCount: number;
 };
 
 type AnalyticsDashboardProps = {
@@ -114,16 +108,9 @@ function formatModelName(modelId?: string) {
     .join(" ");
 }
 
-function formatTokens(value: number) {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
-  return String(value);
-}
-
-function scoreLabel(entry: ModelLeaderboardEntry) {
-  const averageTokens = entry.usageCount > 0 ? entry.totalTokens / entry.usageCount : 0;
-  if (averageTokens >= 14_000 || entry.usageCount >= 14) return "High rigor";
-  if (averageTokens >= 7_000 || entry.usageCount >= 7) return "Strong fit";
+function scoreLabel(usageCount: number) {
+  if (usageCount >= 14) return "High rigor";
+  if (usageCount >= 7) return "Strong fit";
   return "Emerging";
 }
 
@@ -162,9 +149,8 @@ function aggregateRows(rows: AnalyticsRow[]) {
     allScores.push(...row.quizScores);
   }
 
-  const avgScore = allScores.length > 0
-    ? Math.round(allScores.reduce((a, b) => a + b, 0) / allScores.length)
-    : null;
+  const avgScore =
+    allScores.length > 0 ? Math.round(allScores.reduce((a, b) => a + b, 0) / allScores.length) : null;
 
   const uniqueTopicCount = new Set(
     allTopics.map((topic) => topic.trim().toLowerCase()).filter((topic) => topic.length > 0),
@@ -179,40 +165,6 @@ function aggregateRows(rows: AnalyticsRow[]) {
     avgScore,
     daysActive: rows.length,
   };
-}
-
-function buildDailyActivity(rows: AnalyticsRow[]) {
-  const now = new Date();
-  const map = new Map<string, number>();
-
-  for (const row of rows) {
-    map.set(row.day, (map.get(row.day) ?? 0) + row.messagesCount);
-  }
-
-  return Array.from({ length: 14 }, (_, offset) => {
-    const date = new Date(now);
-    date.setDate(date.getDate() - (13 - offset));
-    const key = date.toISOString().slice(0, 10);
-    return { day: key, count: map.get(key) ?? 0 };
-  });
-}
-
-function buildDailyStudyTime(daily: EnhancedAnalytics["timeSpentDaily"]) {
-  const now = new Date();
-  const byDay = new Map(daily.map((item) => [item.day, item]));
-
-  return Array.from({ length: 14 }, (_, offset) => {
-    const date = new Date(now);
-    date.setDate(date.getDate() - (13 - offset));
-    const key = date.toISOString().slice(0, 10);
-    const row = byDay.get(key);
-    return {
-      day: key,
-      totalSeconds: row?.totalSeconds ?? 0,
-      totalMinutes: Math.round((row?.totalSeconds ?? 0) / 60),
-      messages: row?.messages ?? 0,
-    };
-  });
 }
 
 function calculateStreak(rows: AnalyticsRow[]) {
@@ -235,6 +187,150 @@ function calculateStreak(rows: AnalyticsRow[]) {
     }
   }
   return streak;
+}
+
+function monthKeyFromDay(day: string) {
+  return day.slice(0, 7);
+}
+
+function formatMonthLabel(monthKey: string) {
+  const [year, month] = monthKey.split("-").map(Number);
+  const value = new Date(Date.UTC(year, (month ?? 1) - 1, 1));
+  return value.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
+function listDaysInMonth(monthKey: string) {
+  const [year, month] = monthKey.split("-").map(Number);
+  if (!year || !month) return [];
+  const totalDays = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return Array.from({ length: totalDays }, (_, index) => {
+    const value = new Date(Date.UTC(year, month - 1, index + 1));
+    return value.toISOString().slice(0, 10);
+  });
+}
+
+function buildMonthOptions(items: Array<{ day: string }>) {
+  return Array.from(new Set(items.map((item) => monthKeyFromDay(item.day)).filter(Boolean))).sort();
+}
+
+function buildDailyActivity(rows: AnalyticsRow[], monthKey: string) {
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    map.set(row.day, (map.get(row.day) ?? 0) + row.messagesCount);
+  }
+
+  return listDaysInMonth(monthKey).map((day) => ({
+    day,
+    count: map.get(day) ?? 0,
+  }));
+}
+
+function buildDailyStudyTime(
+  daily: EnhancedAnalytics["timeSpentDaily"],
+  monthKey: string,
+) {
+  const byDay = new Map(daily.map((item) => [item.day, item]));
+  return listDaysInMonth(monthKey).map((day) => {
+    const row = byDay.get(day);
+    return {
+      day,
+      totalSeconds: row?.totalSeconds ?? 0,
+      totalMinutes: Math.round((row?.totalSeconds ?? 0) / 60),
+      messages: row?.messages ?? 0,
+    };
+  });
+}
+
+function filterByMonth<T extends { day: string }>(rows: T[], monthKey: string) {
+  return rows.filter((row) => monthKeyFromDay(row.day) === monthKey);
+}
+
+function aggregateMonthlyModeCounts(rows: AnalyticsRow[]) {
+  const modeCounts: Record<string, number> = {};
+  for (const row of rows) {
+    for (const mode of row.modesUsed) {
+      modeCounts[mode] = (modeCounts[mode] ?? 0) + 1;
+    }
+  }
+  return modeCounts;
+}
+
+function deriveMonthlyProductivity(
+  rows: AnalyticsRow[],
+  studyRows: EnhancedAnalytics["timeSpentDaily"],
+) {
+  const totals = aggregateRows(rows);
+  const totalStudySeconds = studyRows.reduce((sum, row) => sum + (row.totalSeconds ?? 0), 0);
+  const activeDays = new Set(
+    [...rows.map((row) => row.day), ...studyRows.filter((row) => row.totalSeconds > 0).map((row) => row.day)],
+  ).size;
+
+  return {
+    totalStudySeconds,
+    estimatedSessions: totals.totalSessions,
+    messagesPerSession:
+      totals.totalSessions > 0 ? Number((totals.totalMessages / totals.totalSessions).toFixed(1)) : 0,
+    topicDepth: totals.uniqueTopicCount,
+    activeDays,
+  };
+}
+
+function buildHourlyCountsForMonth(
+  dailyPeaks: Array<{ day: string; hour: number; count: number }>,
+  fallbackHourlyCounts: number[],
+  monthKey: string,
+) {
+  const monthlyPeaks = filterByMonth(dailyPeaks, monthKey);
+  if (monthlyPeaks.length === 0) {
+    return fallbackHourlyCounts;
+  }
+  const hourly = Array.from({ length: 24 }, () => 0);
+  for (const peak of monthlyPeaks) {
+    hourly[peak.hour] = (hourly[peak.hour] ?? 0) + peak.count;
+  }
+  return hourly;
+}
+
+function MonthPager({
+  monthLabel,
+  onPrevious,
+  onNext,
+  previousDisabled,
+  nextDisabled,
+}: {
+  monthLabel: string;
+  onPrevious: () => void;
+  onNext: () => void;
+  previousDisabled: boolean;
+  nextDisabled: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <Button type="button" variant="secondary" size="icon" className="h-8 w-8" onClick={onPrevious} disabled={previousDisabled}>
+        <ChevronLeft className="h-3.5 w-3.5" />
+      </Button>
+      <div className="min-w-[9rem] rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1 text-center text-[11px] font-medium text-[var(--text-primary)]">
+        {monthLabel}
+      </div>
+      <Button type="button" variant="secondary" size="icon" className="h-8 w-8" onClick={onNext} disabled={nextDisabled}>
+        <ChevronRight className="h-3.5 w-3.5" />
+      </Button>
+    </div>
+  );
+}
+
+function ChartToolbar(props: {
+  monthLabel: string;
+  onPrevious: () => void;
+  onNext: () => void;
+  previousDisabled: boolean;
+  nextDisabled: boolean;
+}) {
+  return (
+    <div className="flex justify-end px-4 pt-4 sm:px-5">
+      <MonthPager {...props} />
+    </div>
+  );
 }
 
 function ActivityAndTimeChart({
@@ -278,8 +374,7 @@ function ActivityAndTimeChart({
 }
 
 function QuizTrendChart({ trend }: { trend: EnhancedAnalytics["quizTrend"] }) {
-  const compactTrend = trend.slice(-8);
-  if (compactTrend.length === 0) {
+  if (trend.length === 0) {
     return <div className="p-4 text-center text-sm text-[var(--text-secondary)]">No quiz trend data yet</div>;
   }
 
@@ -287,10 +382,10 @@ function QuizTrendChart({ trend }: { trend: EnhancedAnalytics["quizTrend"] }) {
     <div className="p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
         <p className="text-xs text-[var(--text-secondary)]">Quiz performance</p>
-        <p className="text-xs text-[var(--text-secondary)]">{compactTrend[compactTrend.length - 1]?.averageScore ?? 0}% latest</p>
+        <p className="text-xs text-[var(--text-secondary)]">{trend[trend.length - 1]?.averageScore ?? 0}% latest</p>
       </div>
       <ResponsiveContainer width="100%" height={128}>
-        <ComposedChart data={compactTrend.map((item) => ({ day: shortDayLabel(item.day), score: item.averageScore, attempts: item.attempts }))}>
+        <ComposedChart data={trend.map((item) => ({ day: shortDayLabel(item.day), score: item.averageScore, attempts: item.attempts }))}>
           <CartesianGrid vertical={false} stroke="var(--border-default)" strokeOpacity={0.45} />
           <XAxis dataKey="day" tick={{ fontSize: 10, fill: "var(--text-secondary)" }} tickLine={false} axisLine={false} />
           <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: "var(--text-secondary)" }} tickLine={false} axisLine={false} width={30} />
@@ -302,23 +397,29 @@ function QuizTrendChart({ trend }: { trend: EnhancedAnalytics["quizTrend"] }) {
   );
 }
 
-function ModelLeaderboard() {
-  const [entries, setEntries] = useState<ModelLeaderboardEntry[]>([]);
-
-  useEffect(() => {
-    void (async () => {
-      const response = await fetch("/api/analytics/model-leaderboard");
-      if (!response.ok) return;
-      const payload = (await response.json()) as { models?: ModelLeaderboardEntry[] };
-      setEntries(payload.models ?? []);
-    })();
-  }, []);
+function ModelLeaderboard({ rows }: { rows: AnalyticsRow[] }) {
+  const entries = useMemo(() => {
+    const byModel = new Map<string, number>();
+    for (const row of rows) {
+      for (const model of row.modelsUsed) {
+        if (!model) continue;
+        byModel.set(model, (byModel.get(model) ?? 0) + 1);
+      }
+    }
+    return Array.from(byModel.entries())
+      .map(([modelId, usageCount]) => ({
+        modelId,
+        usageCount,
+      }))
+      .sort((a, b) => b.usageCount - a.usageCount)
+      .slice(0, 6);
+  }, [rows]);
 
   return (
     <div className="p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
         <p className="text-xs text-[var(--text-secondary)]">Personal model leaderboard</p>
-        <p className="text-xs text-[var(--text-secondary)]">{entries.length > 0 ? `Top ${Math.min(entries.length, 6)}` : "No usage yet"}</p>
+        <p className="text-xs text-[var(--text-secondary)]">{entries.length > 0 ? `Top ${entries.length}` : "No usage yet"}</p>
       </div>
       <div className="space-y-2">
         {entries.length === 0 ? (
@@ -326,14 +427,14 @@ function ModelLeaderboard() {
             No routed model usage yet.
           </div>
         ) : (
-          entries.slice(0, 6).map((entry, index) => (
+          entries.map((entry, index) => (
             <div key={entry.modelId} className="grid min-h-[44px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5">
               <span className="text-[11px] font-medium text-[var(--text-secondary)]">{index + 1}</span>
               <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-[var(--text-primary)]">{formatModelName(entry.name || entry.modelId)}</p>
-                <p className="truncate text-[11px] text-[var(--text-secondary)]">{entry.usageCount} uses • {formatTokens(entry.totalTokens)} tokens</p>
+                <p className="truncate text-sm font-medium text-[var(--text-primary)]">{formatModelName(entry.modelId)}</p>
+                <p className="truncate text-[11px] text-[var(--text-secondary)]">{entry.usageCount} routed responses</p>
               </div>
-              <span className="text-[11px] text-[var(--text-secondary)]">{scoreLabel(entry)}</span>
+              <span className="text-[11px] text-[var(--text-secondary)]">{scoreLabel(entry.usageCount)}</span>
             </div>
           ))
         )}
@@ -342,7 +443,17 @@ function ModelLeaderboard() {
   );
 }
 
-function ProductivityInsights({ productivity }: { productivity: EnhancedAnalytics["productivity"] }) {
+function ProductivityInsights({
+  productivity,
+}: {
+  productivity: {
+    totalStudySeconds: number;
+    estimatedSessions: number;
+    messagesPerSession: number;
+    topicDepth: number;
+    activeDays: number;
+  };
+}) {
   const avgStudyPerDay = productivity.activeDays > 0 ? productivity.totalStudySeconds / productivity.activeDays : 0;
 
   return (
@@ -373,12 +484,77 @@ function ProductivityInsights({ productivity }: { productivity: EnhancedAnalytic
 export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced, classData }: AnalyticsDashboardProps) {
   const student = useMemo(() => aggregateRows(studentData), [studentData]);
   const classAgg = useMemo(() => aggregateRows(classData), [classData]);
-  const dailyActivity = useMemo(() => buildDailyActivity(studentData), [studentData]);
-  const classDailyActivity = useMemo(() => buildDailyActivity(classData), [classData]);
-  const dailyStudyTime = useMemo(() => buildDailyStudyTime(enhanced.timeSpentDaily), [enhanced.timeSpentDaily]);
   const streak = useMemo(() => calculateStreak(studentData), [studentData]);
+  const isTeacher = role === "admin" || role === "teacher";
+
+  const availableMonths = useMemo(
+    () =>
+      buildMonthOptions([
+        ...studentData,
+        ...classData,
+        ...enhanced.timeSpentDaily,
+        ...enhanced.quizTrend,
+        ...studentSignals.dailyPeakHours,
+      ]),
+    [classData, enhanced.quizTrend, enhanced.timeSpentDaily, studentData, studentSignals.dailyPeakHours],
+  );
+
+  const [selectedMonthIndex, setSelectedMonthIndex] = useState(0);
+
+  useEffect(() => {
+    setSelectedMonthIndex((prev) => {
+      if (availableMonths.length === 0) return 0;
+      if (prev >= 0 && prev < availableMonths.length) return prev;
+      return availableMonths.length - 1;
+    });
+  }, [availableMonths]);
+
+  const selectedMonthKey =
+    availableMonths[selectedMonthIndex] ??
+    availableMonths[availableMonths.length - 1] ??
+    monthKeyFromDay(new Date().toISOString().slice(0, 10));
+
+  const filteredStudentData = useMemo(
+    () => filterByMonth(studentData, selectedMonthKey),
+    [selectedMonthKey, studentData],
+  );
+  const filteredStudyTime = useMemo(
+    () => filterByMonth(enhanced.timeSpentDaily, selectedMonthKey),
+    [enhanced.timeSpentDaily, selectedMonthKey],
+  );
+  const filteredQuizTrend = useMemo(
+    () => filterByMonth(enhanced.quizTrend, selectedMonthKey),
+    [enhanced.quizTrend, selectedMonthKey],
+  );
+  const filteredDailyPeaks = useMemo(
+    () => filterByMonth(studentSignals.dailyPeakHours, selectedMonthKey),
+    [selectedMonthKey, studentSignals.dailyPeakHours],
+  );
+  const filteredClassData = useMemo(
+    () => filterByMonth(classData, selectedMonthKey),
+    [classData, selectedMonthKey],
+  );
+
+  const dailyActivity = useMemo(() => buildDailyActivity(filteredStudentData, selectedMonthKey), [filteredStudentData, selectedMonthKey]);
+  const dailyStudyTime = useMemo(
+    () => buildDailyStudyTime(filteredStudyTime, selectedMonthKey),
+    [filteredStudyTime, selectedMonthKey],
+  );
+  const filteredModeCounts = useMemo(() => aggregateMonthlyModeCounts(filteredStudentData), [filteredStudentData]);
+  const filteredProductivity = useMemo(
+    () => deriveMonthlyProductivity(filteredStudentData, filteredStudyTime),
+    [filteredStudentData, filteredStudyTime],
+  );
+  const filteredHourlyCounts = useMemo(
+    () => buildHourlyCountsForMonth(studentSignals.dailyPeakHours, studentSignals.hourlyPromptCounts, selectedMonthKey),
+    [selectedMonthKey, studentSignals.dailyPeakHours, studentSignals.hourlyPromptCounts],
+  );
+  const monthLabel = formatMonthLabel(selectedMonthKey);
+  const previousDisabled = selectedMonthIndex <= 0;
+  const nextDisabled = selectedMonthIndex >= availableMonths.length - 1;
+
   const topHour = useMemo(() => {
-    const counts = studentSignals.hourlyPromptCounts ?? [];
+    const counts = filteredHourlyCounts ?? [];
     if (counts.length === 0) return 0;
     let index = 0;
     let max = -1;
@@ -389,8 +565,7 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
       }
     }
     return index;
-  }, [studentSignals.hourlyPromptCounts]);
-  const isTeacher = role === "admin" || role === "teacher";
+  }, [filteredHourlyCounts]);
 
   const uniqueStudents = useMemo(() => {
     const ids = new Set<string>();
@@ -400,9 +575,10 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
     return ids.size;
   }, [classData]);
 
-  const averageDailyStudyMinutes = enhanced.productivity.activeDays > 0
-    ? Math.round((enhanced.productivity.totalStudySeconds / enhanced.productivity.activeDays) / 60)
-    : 0;
+  const averageDailyStudyMinutes =
+    filteredProductivity.activeDays > 0
+      ? Math.round((filteredProductivity.totalStudySeconds / filteredProductivity.activeDays) / 60)
+      : 0;
 
   return (
     <div className="space-y-6">
@@ -413,35 +589,77 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
           <StatItem label="Total messages" value={student.totalMessages} subtitle={`${student.totalSessions} sessions`} />
           <StatItem label="Topics explored" value={student.uniqueTopicCount} />
           <StatItem label="Avg quiz score" value={student.avgScore !== null ? `${student.avgScore}%` : "-"} subtitle={student.avgScore !== null ? "across all quizzes" : "No quizzes yet"} />
-          <StatItem label="Avg study/day" value={`${averageDailyStudyMinutes}m`} subtitle="timers + estimate" />
+          <StatItem label="Avg study/day" value={`${averageDailyStudyMinutes}m`} subtitle={monthLabel} />
           <StatItem label="Preferred model" value={formatModelName(studentSignals.preferredModel)} subtitle={studentSignals.preferredModelCount > 0 ? `${studentSignals.preferredModelCount} routed responses` : "No routed responses yet"} />
         </div>
       </div>
 
       <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] xl:col-span-2">
+        <ChartToolbar
+          monthLabel={monthLabel}
+          onPrevious={() => setSelectedMonthIndex((value) => Math.max(0, value - 1))}
+          onNext={() => setSelectedMonthIndex((value) => Math.min(availableMonths.length - 1, value + 1))}
+          previousDisabled={previousDisabled}
+          nextDisabled={nextDisabled}
+        />
         <ActivityAndTimeChart activity={dailyActivity} studyTime={dailyStudyTime} />
       </section>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
-          <QuizTrendChart trend={enhanced.quizTrend} />
+          <ChartToolbar
+            monthLabel={monthLabel}
+            onPrevious={() => setSelectedMonthIndex((value) => Math.max(0, value - 1))}
+            onNext={() => setSelectedMonthIndex((value) => Math.min(availableMonths.length - 1, value + 1))}
+            previousDisabled={previousDisabled}
+            nextDisabled={nextDisabled}
+          />
+          <QuizTrendChart trend={filteredQuizTrend} />
         </section>
         <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
-          <ModelLeaderboard />
+          <ChartToolbar
+            monthLabel={monthLabel}
+            onPrevious={() => setSelectedMonthIndex((value) => Math.max(0, value - 1))}
+            onNext={() => setSelectedMonthIndex((value) => Math.min(availableMonths.length - 1, value + 1))}
+            previousDisabled={previousDisabled}
+            nextDisabled={nextDisabled}
+          />
+          <ModelLeaderboard rows={filteredStudentData} />
         </section>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.9fr)]">
         <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
-          <TimeOfDayChart hourlyCounts={studentSignals.hourlyPromptCounts} dailyPeaks={studentSignals.dailyPeakHours} />
+          <ChartToolbar
+            monthLabel={monthLabel}
+            onPrevious={() => setSelectedMonthIndex((value) => Math.max(0, value - 1))}
+            onNext={() => setSelectedMonthIndex((value) => Math.min(availableMonths.length - 1, value + 1))}
+            previousDisabled={previousDisabled}
+            nextDisabled={nextDisabled}
+          />
+          <TimeOfDayChart hourlyCounts={filteredHourlyCounts} dailyPeaks={filteredDailyPeaks} />
         </section>
         <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
-          <ModeBreakdown modeCounts={enhanced.modeMessageCounts} />
+          <ChartToolbar
+            monthLabel={monthLabel}
+            onPrevious={() => setSelectedMonthIndex((value) => Math.max(0, value - 1))}
+            onNext={() => setSelectedMonthIndex((value) => Math.min(availableMonths.length - 1, value + 1))}
+            previousDisabled={previousDisabled}
+            nextDisabled={nextDisabled}
+          />
+          <ModeBreakdown modeCounts={filteredModeCounts} />
         </section>
       </div>
 
       <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
-        <ProductivityInsights productivity={enhanced.productivity} />
+        <ChartToolbar
+          monthLabel={monthLabel}
+          onPrevious={() => setSelectedMonthIndex((value) => Math.max(0, value - 1))}
+          onNext={() => setSelectedMonthIndex((value) => Math.min(availableMonths.length - 1, value + 1))}
+          previousDisabled={previousDisabled}
+          nextDisabled={nextDisabled}
+        />
+        <ProductivityInsights productivity={filteredProductivity} />
       </section>
 
       {isTeacher && classData.length > 0 ? (
@@ -466,19 +684,16 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
               <p className="mt-1 text-xl font-semibold text-[var(--text-primary)]">{classAgg.avgScore !== null ? `${classAgg.avgScore}%` : "-"}</p>
             </div>
           </div>
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
-              <ActivityAndTimeChart activity={classDailyActivity} studyTime={classDailyActivity.map((row) => ({ day: row.day, totalMinutes: 0 }))} />
-            </section>
-            <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
-              <ModeBreakdown modeCounts={classAgg.modeCounts} />
-            </section>
+          <div className="mt-4 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 text-sm text-[var(--text-secondary)]">
+            {filteredClassData.length > 0
+              ? `Month focus for ${monthLabel}: ${filteredClassData.length} active class day${filteredClassData.length === 1 ? "" : "s"} recorded.`
+              : `No class activity recorded in ${monthLabel}.`}
           </div>
         </div>
       ) : null}
 
       <div className="p-2 text-xs text-[var(--text-secondary)]">
-        Most active study window: <span className="font-medium text-[var(--text-primary)]">{formatHour(topHour)} UTC</span>
+        Most active study window in {monthLabel}: <span className="font-medium text-[var(--text-primary)]">{formatHour(topHour)} UTC</span>
       </div>
     </div>
   );

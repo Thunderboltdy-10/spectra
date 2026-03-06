@@ -214,6 +214,7 @@ export function ChatLayout() {
     const lastAssistant = [...chat.messages].reverse().find((item) => item.role === "assistant" && item.routeTrace);
     return lastAssistant?.routeTrace;
   }, [chat.messages]);
+  const canOpenOrchestration = chat.sending || Boolean(latestRouteTrace) || chat.activeCollaborators.length > 0;
 
   useEffect(() => {
     setActivityCutoffTs(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -488,7 +489,10 @@ export function ChatLayout() {
           onCompactWithDepth={(keepLatestMessages) => void chat.compactConversation(keepLatestMessages)}
           onToggleMobileSidebar={() => chat.setMobileSidebarOpen(true)}
           onOpenSettings={() => openPanel("settings")}
+          onOpenOrchestration={() => openPanel("orchestration")}
           onNewChat={() => chat.startNewChat(chat.selectedAgentId)}
+          showOrchestrationButton={canOpenOrchestration}
+          orchestrationActive={panelActiveView === "orchestration"}
           onExport={(format) => {
             if (format === "pdf") {
               const node = document.querySelector("[data-conversation-export]") ?? document.querySelector("main");

@@ -465,7 +465,7 @@ export function ChatSidebar({
 
       <div className="mb-3" data-tour="sidebar-pages">
         <p className="mb-1 px-3 text-[9px] uppercase tracking-[0.2em] text-[var(--text-tertiary)]">Navigation</p>
-        <div ref={pageNavScrollRef} className="overflow-y-auto">
+        <div ref={pageNavScrollRef} className="overflow-y-auto max-h-[192px] [mask-image:linear-gradient(to_bottom,black_85%,transparent)]">
           {allNavItems.map((item) => {
             const Icon = item.icon;
             const active = isNavActive(pathname, item.href);

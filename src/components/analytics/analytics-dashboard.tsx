@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo } from "react";
-import { Activity, BookOpen, Brain, Clock3, MessageSquare, Trophy, LucideIcon } from "lucide-react";
 import { MODE_REGISTRY } from "@/lib/modes";
 import type { StudyMode } from "@/types";
 import { ActivityChart } from "@/components/analytics/activity-chart";
@@ -93,31 +92,21 @@ function formatModelName(modelId?: string) {
     .join(" ");
 }
 
-function StatCard({
-  icon: Icon,
+function StatItem({
   label,
   value,
   subtitle,
-  delay = 0,
 }: {
-  icon: LucideIcon;
   label: string;
   value: string | number;
   subtitle?: string;
-  delay?: number;
 }) {
   return (
-    <article
-      className="relative min-w-0 overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5"
-      style={{ animation: `fade-up 400ms var(--ease-standard) ${delay}ms both` }}
-    >
-      <div className="absolute right-4 top-4 rounded-lg bg-[color-mix(in_oklab,var(--accent-cyan)_10%,transparent)] p-1.5">
-        <Icon className="h-4 w-4 text-[var(--accent-cyan)]" />
-      </div>
-      <p className="text-[10px] uppercase tracking-[0.14em] text-[var(--text-secondary)]">{label}</p>
-      <p className="stat-number mt-2 text-3xl font-semibold text-[var(--text-primary)]">{value}</p>
-      {subtitle ? <p className="mt-1 text-[11px] text-[var(--text-secondary)]">{subtitle}</p> : null}
-    </article>
+    <div className="min-w-0 px-4 py-3 first:pl-0">
+      <p className="text-xs text-[var(--text-secondary)]">{label}</p>
+      <p className="mt-0.5 text-2xl font-semibold text-[var(--text-primary)]">{value}</p>
+      {subtitle ? <p className="mt-0.5 text-[11px] text-[var(--text-secondary)]">{subtitle}</p> : null}
+    </div>
   );
 }
 
@@ -473,21 +462,18 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
   return (
     <div className="space-y-6">
       <div data-tour="analytics-stats">
-        <h2 className="journal-heading mb-4 text-xl font-semibold">Your Study Stats</h2>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          <StatCard icon={Activity} label="Study streak" value={`${streak} day${streak !== 1 ? "s" : ""}`} delay={0} />
-          <StatCard icon={MessageSquare} label="Total messages" value={student.totalMessages} subtitle={`${student.totalSessions} sessions`} delay={60} />
-          <StatCard icon={BookOpen} label="Topics explored" value={student.uniqueTopicCount} delay={120} />
-          <StatCard
-            icon={Trophy}
+        <h2 className="mb-3 font-display text-xl">Your Study Stats</h2>
+        <div className="flex flex-wrap divide-x divide-[var(--border-default)] border-t border-b border-[var(--border-default)]">
+          <StatItem label="Study streak" value={`${streak} day${streak !== 1 ? "s" : ""}`} />
+          <StatItem label="Total messages" value={student.totalMessages} subtitle={`${student.totalSessions} sessions`} />
+          <StatItem label="Topics explored" value={student.uniqueTopicCount} />
+          <StatItem
             label="Avg quiz score"
             value={student.avgScore !== null ? `${student.avgScore}%` : "-"}
             subtitle={student.avgScore !== null ? "across all quizzes" : "No quizzes yet"}
-            delay={180}
           />
-          <StatCard icon={Clock3} label="Avg study/day" value={`${averageDailyStudyMinutes}m`} subtitle="timers + message estimate" delay={240} />
-          <StatCard
-            icon={Brain}
+          <StatItem label="Avg study/day" value={`${averageDailyStudyMinutes}m`} subtitle="timers + estimate" />
+          <StatItem
             label="Preferred model"
             value={formatModelName(studentSignals.preferredModel)}
             subtitle={
@@ -495,7 +481,6 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
                 ? `${studentSignals.preferredModelCount} routed responses`
                 : "No routed responses yet"
             }
-            delay={300}
           />
         </div>
       </div>
@@ -532,7 +517,7 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
 
       {isTeacher && classData.length > 0 && (
         <div className="mt-8 border-t border-[var(--border-default)] pt-6">
-          <h2 className="journal-heading mb-3 text-xl font-semibold">Class Overview</h2>
+          <h2 className="mb-3 font-display text-xl">Class Overview</h2>
           <div>
             <div className="grid divide-y divide-[var(--border-default)] text-sm sm:grid-cols-2 sm:divide-y-0 sm:divide-x">
               <div className="px-4 py-3">
@@ -555,15 +540,15 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
             </div>
           </div>
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+            <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
               <ActivityChart data={classDailyActivity} label="Class daily activity (14 days)" />
             </section>
-            <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+            <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
               <ModeBreakdown modeCounts={classAgg.modeCounts} />
             </section>
           </div>
           <div className="mt-4">
-            <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+            <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
               <TopicCloud topics={classAgg.topics} />
             </section>
           </div>

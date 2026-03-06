@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { BookmarkCheck, ExternalLink, RefreshCw, Sparkles, Trash2 } from "lucide-react";
+import { BookmarkCheck, ExternalLink, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
@@ -129,43 +129,25 @@ export default function BookmarksPage() {
   return (
     <AppShell fullBleed contentClassName="2xl:px-14">
       <section className="space-y-6">
-        <header data-tour="bookmarks-header" className="relative overflow-hidden rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-5 py-5 sm:px-7 sm:py-6">
-          <div
-            className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full opacity-35 blur-3xl"
-            style={{ background: "radial-gradient(circle at center, var(--accent-cyan), transparent 68%)" }}
-          />
-          <div
-            className="pointer-events-none absolute -bottom-20 left-10 h-56 w-56 rounded-full opacity-30 blur-3xl"
-            style={{ background: "radial-gradient(circle at center, var(--accent-orange), transparent 70%)" }}
-          />
-          <div className="relative flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-[var(--text-secondary)]">
-                <Sparkles className="h-3 w-3" />
-                Memory shelf
-              </p>
-              <h1 className="mt-2 font-display text-3xl leading-tight sm:text-4xl">Bookmarked Messages</h1>
-              <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                Save key explanations and jump back to the exact conversation when revising.
-              </p>
-            </div>
+        <div data-tour="bookmarks-header" className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="font-display text-3xl">Bookmarks</h1>
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">
+              {bookmarks.length} saved message{bookmarks.length === 1 ? "" : "s"} · Save key explanations to revisit later.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search bookmarks"
+              className="h-9 w-full max-w-sm rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-sm outline-none transition focus:ring-2 focus:ring-[var(--accent-cyan)]/40"
+            />
             <Button type="button" variant="secondary" onClick={() => void loadBookmarks({ silent: true })} disabled={refreshing}>
               <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
               Refresh
             </Button>
           </div>
-        </header>
-
-        <div data-tour="bookmarks-search" className="flex flex-wrap items-center justify-between gap-3">
-          <div className="text-sm text-[var(--text-secondary)]">
-            {bookmarks.length} saved message{bookmarks.length === 1 ? "" : "s"}
-          </div>
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search bookmarks"
-            className="h-9 w-full max-w-sm rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-sm outline-none transition focus:ring-2 focus:ring-[var(--accent-cyan)]/40"
-          />
         </div>
 
         {loading ? (
@@ -189,9 +171,9 @@ export default function BookmarksPage() {
             </Link>
           </div>
         ) : (
-          <div data-tour="bookmarks-list" className="space-y-4">
+          <div data-tour="bookmarks-list" className="divide-y divide-[var(--border-default)] border-t border-[var(--border-default)]">
             {grouped.map((group) => (
-              <article key={group.chatId} className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 sm:p-5">
+              <article key={group.chatId} className="py-5">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <h2 className="text-base font-semibold">{group.chatTitle}</h2>
@@ -208,13 +190,13 @@ export default function BookmarksPage() {
                   </Link>
                 </div>
 
-                <div className="grid gap-3">
+                <div className="space-y-3">
                   {group.items.map((item) => {
                     const text = clip(compactText(item.message?.content) || "Message unavailable.");
                     return (
                       <div
                         key={item._id}
-                        className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3"
+                        className="border-l-2 border-[var(--accent-cyan)] pl-3"
                       >
                         <p className="text-sm leading-relaxed text-[var(--text-primary)]">{text}</p>
                         <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--text-secondary)]">

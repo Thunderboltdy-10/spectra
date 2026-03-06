@@ -884,7 +884,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
         }
       >
         <div
-          className={`flex items-center justify-between ${docked ? "border-b border-[var(--border-default)] px-4 py-3.5" : "mb-4"}`}
+          className={`flex items-center justify-between ${docked ? "shadow-[0_1px_0_var(--border-default)] px-4 py-3.5" : "mb-4"}`}
         >
           <div>
             <p className="text-[9px] uppercase tracking-[0.14em] text-[var(--text-secondary)] truncate">{current.subtitle}</p>

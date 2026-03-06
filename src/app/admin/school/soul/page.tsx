@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -345,6 +346,10 @@ export default function SchoolSoulPage() {
   return (
     <AppShell>
       <div className="space-y-6">
+        <Link href="/admin" className="inline-flex items-center gap-1 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
+          <ChevronRight className="h-4 w-4 rotate-180" />
+          Admin Console
+        </Link>
         {/* Header */}
         <div className="flex flex-wrap items-start justify-between gap-4" data-tour="soul-header">
           <div>

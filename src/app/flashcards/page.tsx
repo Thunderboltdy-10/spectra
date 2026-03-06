@@ -238,28 +238,21 @@ export default function FlashcardsPage() {
           </div>
         </div>
 
-        <section className="relative overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 sm:p-5">
-          <div
-            className="pointer-events-none absolute -right-20 -top-20 h-52 w-52 rounded-full blur-3xl"
-            style={{ background: "radial-gradient(circle at center, color-mix(in oklab, var(--mode-flashcard) 50%, transparent), transparent 68%)" }}
-          />
-          <div className="relative flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-[10px] uppercase tracking-[0.14em] text-[var(--text-secondary)]">Due for review</p>
-              <h2 className="mt-1 text-xl font-semibold text-[var(--text-primary)]">
-                {dueNowCount > 0 ? `${dueNowCount} card${dueNowCount === 1 ? "" : "s"} ready now` : "You are caught up for now"}
-              </h2>
-              <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                {dueNowCount > 0
-                  ? "Start a due-card session to reinforce retention with SM-2 spacing."
-                  : "No cards are currently due. Rate more cards to schedule the next reviews."}
-              </p>
-            </div>
-            <Button type="button" onClick={startDueReview} disabled={dueNowCount === 0}>
-              Start Review
-            </Button>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border-default)] pb-4">
+          <div>
+            <h2 className="text-xl font-semibold text-[var(--text-primary)]">
+              {dueNowCount > 0 ? `${dueNowCount} card${dueNowCount === 1 ? "" : "s"} due for review` : "You are caught up"}
+            </h2>
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">
+              {dueNowCount > 0
+                ? "Start a session to reinforce retention with SM-2 spacing."
+                : "No cards are currently due. Rate more cards to schedule next reviews."}
+            </p>
           </div>
-        </section>
+          <Button type="button" onClick={startDueReview} disabled={dueNowCount === 0}>
+            Start Review
+          </Button>
+        </div>
 
         <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
           <aside data-tour="flashcards-decks" className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
@@ -267,17 +260,17 @@ export default function FlashcardsPage() {
               <h2 className="text-sm font-semibold">Saved Decks</h2>
               <span className="text-xs text-[var(--text-secondary)]">{decks.length} total</span>
             </div>
-            <div className="space-y-2">
+            <div className="divide-y divide-[var(--border-default)] border-t border-[var(--border-default)]">
               <button
                 type="button"
                 onClick={() => {
                   setSelectedDeckId(null);
                   setDeckCards([]);
                 }}
-                className={`w-full rounded-xl border px-3 py-2 text-left text-sm transition ${
+                className={`w-full border-l-2 px-3 py-2.5 text-left text-sm transition ${
                   !selectedDeckId
-                    ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_10%,transparent)]"
-                    : "border-[var(--border-default)] bg-[var(--bg-secondary)]"
+                    ? "border-l-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,transparent)]"
+                    : "border-l-transparent hover:bg-[var(--bg-hover)]"
                 }`}
               >
                 <p className="font-medium">Due review queue</p>
@@ -285,14 +278,18 @@ export default function FlashcardsPage() {
               </button>
 
               {loading ? (
-                <p className="text-sm text-[var(--text-secondary)]">Loading decks...</p>
+                <p className="px-3 py-3 text-sm text-[var(--text-secondary)]">Loading decks...</p>
               ) : decks.length === 0 ? (
-                <p className="rounded-xl border border-dashed border-[var(--border-default)] p-3 text-sm text-[var(--text-secondary)]">
+                <p className="px-3 py-3 text-sm text-[var(--text-secondary)]">
                   No decks yet. Generate flashcards in chat and they save automatically.
                 </p>
               ) : (
                 decks.map((deck) => (
-                  <div key={deck._id} className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
+                  <div key={deck._id} className={`border-l-2 px-3 py-2.5 transition ${
+                    selectedDeckId === deck._id
+                      ? "border-l-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,transparent)]"
+                      : "border-l-transparent hover:bg-[var(--bg-hover)]"
+                  }`}>
                     <button
                       type="button"
                       onClick={() => void loadDeckCards(deck._id)}
@@ -300,10 +297,10 @@ export default function FlashcardsPage() {
                     >
                       <p className="truncate text-sm font-medium text-[var(--text-primary)]">{deck.title}</p>
                       <p className="text-xs text-[var(--text-secondary)]">
-                        {deck.cardCount} cards • {deck.dueCount} due • updated {new Date(deck.updatedAt).toLocaleDateString()}
+                        {deck.cardCount} cards · {deck.dueCount} due
                       </p>
                     </button>
-                    <div className="mt-2 flex items-center justify-between">
+                    <div className="mt-1.5 flex items-center justify-between">
                       <Button type="button" size="sm" variant="secondary" onClick={() => void loadDeckCards(deck._id)}>
                         <Layers className="h-3.5 w-3.5" />
                         Review
@@ -352,14 +349,12 @@ export default function FlashcardsPage() {
                     aria-label={flipped ? "Flip to front" : "Flip to back"}
                   >
                     <div className="flashcard-front flex flex-col justify-center rounded-2xl border-2 border-[var(--mode-flashcard)] bg-[var(--bg-elevated)] p-6 shadow-[var(--shadow-card)]">
-                      <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Front</p>
                       <p className="mt-5 text-xl font-semibold text-[var(--text-primary)]">
                         {current.front}
                       </p>
                       <p className="mt-6 text-xs text-[var(--text-secondary)]">Tap to reveal answer</p>
                     </div>
                     <div className="flashcard-back flex flex-col justify-center rounded-2xl border-2 border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-elevated))] p-6 shadow-[var(--shadow-card)]">
-                      <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Back</p>
                       <p className="mt-5 text-xl font-semibold text-[var(--text-primary)]">
                         {current.back}
                       </p>
@@ -431,19 +426,9 @@ export default function FlashcardsPage() {
                   </div>
                 ) : null}
 
-                <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
-                  <p className="mb-2 text-xs font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)]">
-                    Spaced review projection
-                  </p>
-                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                    {projectedDates.map((item) => (
-                      <div key={item.label} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2">
-                        <p className="text-xs text-[var(--text-secondary)]">{item.label}</p>
-                        <p className="text-sm font-medium text-[var(--text-primary)]">{item.date}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <p className="text-xs text-[var(--text-secondary)]">
+                  Next review: {projectedDates.map((item) => `${item.label.split("(")[0].trim()}: ${item.date}`).join(" · ")}
+                </p>
               </div>
             ) : null}
           </article>

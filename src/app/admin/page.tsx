@@ -1,19 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
-  Activity,
   BarChart3,
   Brush,
-  CircleCheck,
   Cpu,
   LayoutDashboard,
-  ShieldCheck,
   Sparkles,
   Users2,
-  WalletCards,
 } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
 import { AdminOnboarding } from "@/components/onboarding/admin-onboarding";
@@ -92,7 +88,7 @@ const NAV_ITEMS: { id: NavSection; label: string; icon: React.ReactNode }[] = [
 // Main component
 // ---------------------------------------------------------------------------
 
-export default function AdminPage() {
+function AdminPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { role: userRole, isSuperAdmin, loading: sidebarLoading } = useSidebar();
@@ -313,47 +309,24 @@ export default function AdminPage() {
           </p>
         </div>
 
-        {/* Role breakdown stats */}
-        <div className="grid gap-3 sm:grid-cols-3">
+        {/* Stat strip */}
+        <div className="flex flex-wrap divide-x divide-[var(--border-default)] border-t border-b border-[var(--border-default)]">
           {roleBreakdown.map((row) => (
-            <div
-              key={row.label}
-              className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4"
-            >
-              <p className="text-[11px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">{row.label}</p>
-              <p className="mt-1 font-display text-3xl" style={{ color: row.tone }}>
-                {row.value}
-              </p>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-tertiary)]">
-                <div className="h-full rounded-full transition-all" style={{ width: `${row.pct}%`, background: row.tone }} />
-              </div>
-              <p className="mt-1 text-xs text-[var(--text-secondary)]">{row.pct}% of total</p>
+            <div key={row.label} className="px-4 py-3 first:pl-0">
+              <p className="text-xs text-[var(--text-secondary)]">{row.label}</p>
+              <p className="mt-0.5 text-2xl font-semibold" style={{ color: row.tone }}>{row.value}</p>
             </div>
           ))}
-        </div>
-
-        {/* Quick summary cards */}
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
-            <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-              <Users2 className="h-3.5 w-3.5" />
-              Total members
-            </div>
-            <p className="mt-1 font-display text-3xl">{users.length}</p>
-          </div>
-          <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
-            <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-              <WalletCards className="h-3.5 w-3.5" />
-              Tokens (14 days)
-            </div>
-            <p className="mt-1 font-display text-3xl">{usageSum.toLocaleString()}</p>
+          <div className="px-4 py-3">
+            <p className="text-xs text-[var(--text-secondary)]">Tokens (14 days)</p>
+            <p className="mt-0.5 text-2xl font-semibold">{usageSum.toLocaleString()}</p>
           </div>
         </div>
 
         {/* Active AI features */}
-        <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
-          <p className="mb-3 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Active AI systems</p>
-          <div className="flex flex-wrap gap-2">
+        <div>
+          <p className="mb-2 text-xs text-[var(--text-secondary)]">Active AI systems</p>
+          <div className="divide-y divide-[var(--border-default)] border-t border-[var(--border-default)]">
             {[
               { label: "Orchestrator v2", enabled: orchestratorV2Enabled },
               { label: "School SOUL", enabled: soulEnabled },
@@ -362,22 +335,12 @@ export default function AdminPage() {
               { label: "Spaced repetition", enabled: spacedRepetitionEnabled },
               { label: "Marker verification", enabled: verify },
             ].map((item) => (
-              <span
-                key={item.label}
-                className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs"
-                style={{
-                  borderColor: item.enabled ? "var(--accent-cyan)" : "var(--border-default)",
-                  color: item.enabled ? "var(--accent-cyan)" : "var(--text-secondary)",
-                  background: item.enabled ? "color-mix(in oklab, var(--accent-cyan) 10%, transparent)" : "transparent",
-                }}
-              >
-                {item.enabled ? (
-                  <CircleCheck className="h-3.5 w-3.5" />
-                ) : (
-                  <Activity className="h-3.5 w-3.5" />
-                )}
-                {item.label}
-              </span>
+              <div key={item.label} className="flex items-center justify-between py-2 text-sm">
+                <span className="text-[var(--text-secondary)]">{item.label}</span>
+                <span className={`text-xs font-medium ${item.enabled ? "text-[var(--success)]" : "text-[var(--text-tertiary)]"}`}>
+                  {item.enabled ? "On" : "Off"}
+                </span>
+              </div>
             ))}
           </div>
         </div>
@@ -459,37 +422,52 @@ export default function AdminPage() {
           </Select>
         </div>
 
-        {/* User list */}
-        <div className="max-h-[58vh] space-y-2 overflow-y-auto pr-1">
-          {filteredUsers.map((user) => (
-            <div
-              key={user._id}
-              className="grid items-center gap-2 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2.5 sm:grid-cols-[1fr_180px]"
-            >
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold">{user.name}</p>
-                <p className="truncate text-xs text-[var(--text-secondary)]">{user.email}</p>
-              </div>
-              <Select
-                value={user.role}
-                onValueChange={(value) => void updateUserRole(user._id, value as "student" | "teacher" | "admin")}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="student">student</SelectItem>
-                  <SelectItem value="teacher">teacher</SelectItem>
-                  <SelectItem value="admin">admin</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          ))}
-          {filteredUsers.length === 0 ? (
-            <p className="rounded-2xl border border-dashed border-[var(--border-default)] p-5 text-center text-sm text-[var(--text-secondary)]">
-              No users match the current filters.
-            </p>
-          ) : null}
+        {/* User table */}
+        <div className="max-h-[58vh] overflow-y-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[var(--border-default)]">
+                <th className="pb-2 text-left text-xs font-medium text-[var(--text-secondary)]">Name</th>
+                <th className="pb-2 text-left text-xs font-medium text-[var(--text-secondary)] hidden sm:table-cell">Email</th>
+                <th className="pb-2 text-left text-xs font-medium text-[var(--text-secondary)] w-[160px]">Role</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border-default)]">
+              {filteredUsers.map((user) => (
+                <tr key={user._id}>
+                  <td className="py-2.5 pr-2">
+                    <p className="truncate font-medium">{user.name}</p>
+                    <p className="truncate text-xs text-[var(--text-secondary)] sm:hidden">{user.email}</p>
+                  </td>
+                  <td className="py-2.5 pr-2 hidden sm:table-cell">
+                    <p className="truncate text-xs text-[var(--text-secondary)]">{user.email}</p>
+                  </td>
+                  <td className="py-2 w-[160px]">
+                    <Select
+                      value={user.role}
+                      onValueChange={(value) => void updateUserRole(user._id, value as "student" | "teacher" | "admin")}
+                    >
+                      <SelectTrigger className="h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="student">student</SelectItem>
+                        <SelectItem value="teacher">teacher</SelectItem>
+                        <SelectItem value="admin">admin</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </td>
+                </tr>
+              ))}
+              {filteredUsers.length === 0 ? (
+                <tr>
+                  <td colSpan={3} className="py-6 text-center text-sm text-[var(--text-secondary)]">
+                    No users match the current filters.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
         </div>
       </div>
     );
@@ -503,7 +481,6 @@ export default function AdminPage() {
             <h2 className="font-display text-2xl">Usage Analytics</h2>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">Token consumption over the last 14 days.</p>
           </div>
-          <WalletCards className="h-5 w-5 shrink-0 text-[var(--accent-cyan)]" />
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
@@ -517,7 +494,7 @@ export default function AdminPage() {
           </div>
         </div>
 
-        <div className="space-y-2">
+        <div className="divide-y divide-[var(--border-default)] border-t border-[var(--border-default)]">
           {usage.map((row) => {
             const width = Math.max(2, Math.round((row.totalTokens / usageMax) * 100));
             return (
@@ -525,24 +502,21 @@ export default function AdminPage() {
                 key={row.day}
                 type="button"
                 onClick={() => setSelectedUsageDay(row.day)}
-                className="w-full cursor-pointer rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3 text-left transition-colors hover:bg-[var(--bg-hover)]"
+                className="w-full cursor-pointer py-2.5 text-left transition-colors hover:bg-[var(--bg-hover)]"
               >
                 <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
                   <span className="text-[var(--text-secondary)]">{shortDay(row.day)}</span>
                   <span className="font-medium">{row.totalTokens.toLocaleString()} total</span>
                 </div>
-                <div className="h-2 overflow-hidden rounded-full bg-[var(--bg-tertiary)]">
+                <div className="h-1.5 overflow-hidden rounded-full bg-[var(--bg-tertiary)]">
                   <div className="h-full rounded-full bg-[var(--accent-cyan)] transition-all" style={{ width: `${width}%` }} />
                 </div>
-                <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
-                  in: {row.inputTokens.toLocaleString()} / out: {row.outputTokens.toLocaleString()}
-                </p>
               </button>
             );
           })}
 
           {usage.length === 0 ? (
-            <p className="rounded-2xl border border-dashed border-[var(--border-default)] p-6 text-center text-sm text-[var(--text-secondary)]">
+            <p className="py-6 text-center text-sm text-[var(--text-secondary)]">
               No usage data available yet.
             </p>
           ) : null}
@@ -750,21 +724,15 @@ export default function AdminPage() {
     <AppShell fullBleed contentClassName="2xl:px-14">
       <div className="space-y-5">
         {/* Page header */}
-        <div data-tour="admin-header" className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 sm:p-6">
-          <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1 text-[11px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-            <ShieldCheck className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
-            Admin Console
-          </div>
-          <h1 className="font-display text-4xl tracking-tight">{orgName}</h1>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            Operational control center for roles, AI policy, and school configuration.
-          </p>
+        <div data-tour="admin-header">
+          <h1 className="font-display text-3xl">{orgName}</h1>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">Admin Console</p>
         </div>
 
         {/* Sidebar + content */}
-        <div data-tour="admin-controls" className="flex gap-4 rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)] overflow-hidden">
+        <div data-tour="admin-controls" className="flex gap-4 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] overflow-hidden">
           {/* Left sidebar nav */}
-          <nav className="w-[200px] shrink-0 border-r border-[var(--border-default)] bg-[var(--bg-secondary)] p-2">
+          <nav className="w-[200px] shrink-0 border-r border-[var(--border-default)] p-2">
             <ul className="space-y-0.5">
               {NAV_ITEMS.map((item) => {
                 const isActive = activeSection === item.id;
@@ -773,19 +741,13 @@ export default function AdminPage() {
                     <button
                       type="button"
                       onClick={() => setActiveSection(item.id)}
-                      className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm transition-colors"
-                      style={{
-                        background: isActive ? "color-mix(in oklab, var(--accent-cyan) 12%, transparent)" : "transparent",
-                        color: isActive ? "var(--accent-cyan)" : "var(--text-secondary)",
-                        fontWeight: isActive ? "600" : "400",
-                      }}
+                      className={`flex w-full items-center gap-2.5 border-l-2 px-3 py-2.5 text-left text-sm transition-colors ${
+                        isActive
+                          ? "border-l-[var(--accent-cyan)] text-[var(--text-primary)]"
+                          : "border-l-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                      }`}
                     >
-                      <span
-                        style={{
-                          color: isActive ? "var(--accent-cyan)" : "var(--text-secondary)",
-                          opacity: isActive ? 1 : 0.7,
-                        }}
-                      >
+                      <span className={isActive ? "text-[var(--accent-cyan)]" : ""}>
                         {item.icon}
                       </span>
                       {item.label}
@@ -803,5 +765,13 @@ export default function AdminPage() {
         </div>
       </div>
     </AppShell>
+  );
+}
+
+export default function AdminPage() {
+  return (
+    <Suspense>
+      <AdminPageContent />
+    </Suspense>
   );
 }

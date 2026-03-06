@@ -100,7 +100,7 @@ export default function AgentsPage() {
     <AppShell>
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3" data-tour="agents-header">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Custom Agents</h1>
+          <h1 className="font-display text-2xl">Custom Agents</h1>
           <p className="text-sm text-[var(--text-secondary)]">Browse, search, and launch classroom agents.</p>
         </div>
         <Button asChild data-tour="agents-create">
@@ -154,7 +154,7 @@ export default function AgentsPage() {
       </div>
 
       {filteredAgents.length === 0 && (
-        <p className="rounded-[var(--radius-container)] border border-dashed border-[var(--border-default)] p-4 text-sm text-[var(--text-secondary)]">
+        <p className="py-8 text-center text-sm text-[var(--text-secondary)]">
           No agents found.
         </p>
       )}

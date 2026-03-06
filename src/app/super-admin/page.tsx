@@ -5,15 +5,12 @@ import Link from "next/link";
 import { toast } from "sonner";
 import {
   BellRing,
-  Database,
   Building2,
-  HardDrive,
+  Database,
   MessageSquare,
   Plus,
   Send,
   Shield,
-  Users,
-  Zap,
 } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
@@ -119,34 +116,6 @@ type AuditLogRow = {
   actorName?: string;
   actorEmail?: string;
 };
-
-type StatCardProps = {
-  label: string;
-  value: number | string;
-  icon: React.ReactNode;
-  sub?: string;
-};
-
-function StatCard({ label, value, icon, sub }: StatCardProps) {
-  return (
-    <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 shadow-[var(--shadow-card)]">
-      <div className="mb-4 flex items-center justify-between">
-        <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-          {label}
-        </span>
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)] text-[var(--accent-cyan)]">
-          {icon}
-        </div>
-      </div>
-      <p className="font-display text-4xl text-[var(--text-primary)]">
-        {typeof value === "number" ? value.toLocaleString() : value}
-      </p>
-      {sub && (
-        <p className="mt-1 text-sm text-[var(--text-secondary)]">{sub}</p>
-      )}
-    </div>
-  );
-}
 
 const QUICK_ACTIONS = [
   { label: "View All Schools", href: "/super-admin/schools", icon: Building2, variant: "secondary" as const },
@@ -356,15 +325,7 @@ export default function SuperAdminDashboard() {
         {/* Header */}
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <div className="mb-1 flex items-center gap-2">
-              <Shield className="h-5 w-5 text-[var(--accent-cyan)]" />
-              <span className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
-                Super Admin
-              </span>
-            </div>
-            <h1 className="font-display text-3xl text-[var(--text-primary)]">
-              Platform Overview
-            </h1>
+            <h1 className="font-display text-3xl text-[var(--text-primary)]">Platform Overview</h1>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">
               Global management for all schools and users on the platform.
             </p>
@@ -384,72 +345,50 @@ export default function SuperAdminDashboard() {
           </div>
         </div>
 
-        {/* Stats Grid */}
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard
-            label="Total Schools"
-            value={loading ? "..." : (stats?.totalOrgs ?? 0)}
-            icon={<Building2 className="h-4 w-4" />}
-            sub="Registered orgs"
-          />
-          <StatCard
-            label="Total Users"
-            value={loading ? "..." : (stats?.totalUsers ?? 0)}
-            icon={<Users className="h-4 w-4" />}
-            sub="Across all schools"
-          />
-          <StatCard
-            label="Total Messages"
-            value={loading ? "..." : (stats?.totalMessages ?? 0)}
-            icon={<MessageSquare className="h-4 w-4" />}
-            sub="Lifetime messages"
-          />
-          <StatCard
-            label="School Admins"
-            value={loading ? "..." : (stats?.totalAdmins ?? 0)}
-            icon={<Zap className="h-4 w-4" />}
-            sub="Users with admin role"
-          />
-        </div>
-
-        <div className="grid gap-5 sm:grid-cols-3">
-          <StatCard
-            label="60d Usage Events"
-            value={loading ? "..." : (stats?.usage?.totals.events ?? 0)}
-            icon={<Database className="h-4 w-4" />}
-            sub="Tracked model calls"
-          />
-          <StatCard
-            label="60d Tokens"
-            value={loading ? "..." : (stats?.usage?.totals.totalTokens ?? 0)}
-            icon={<MessageSquare className="h-4 w-4" />}
-            sub="Prompt + completion"
-          />
-          <StatCard
-            label="60d Spend"
-            value={loading ? "..." : formatCurrencyCents(stats?.usage?.totals.effectiveCostCents ?? stats?.usage?.totals.totalCostCents ?? 0)}
-            icon={<HardDrive className="h-4 w-4" />}
-            sub={stats?.usage?.totals.unpricedEvents ? `${stats.usage.totals.unpricedEvents} events were estimated` : "Recorded cost"}
-          />
+        {/* Stat strip */}
+        <div className="flex flex-wrap divide-x divide-[var(--border-default)] border-t border-b border-[var(--border-default)]">
+          <div className="px-4 py-3 first:pl-0">
+            <p className="text-xs text-[var(--text-secondary)]">Schools</p>
+            <p className="mt-0.5 text-2xl font-semibold">{loading ? "..." : (stats?.totalOrgs ?? 0).toLocaleString()}</p>
+          </div>
+          <div className="px-4 py-3">
+            <p className="text-xs text-[var(--text-secondary)]">Users</p>
+            <p className="mt-0.5 text-2xl font-semibold">{loading ? "..." : (stats?.totalUsers ?? 0).toLocaleString()}</p>
+          </div>
+          <div className="px-4 py-3">
+            <p className="text-xs text-[var(--text-secondary)]">Messages</p>
+            <p className="mt-0.5 text-2xl font-semibold">{loading ? "..." : (stats?.totalMessages ?? 0).toLocaleString()}</p>
+          </div>
+          <div className="px-4 py-3">
+            <p className="text-xs text-[var(--text-secondary)]">Admins</p>
+            <p className="mt-0.5 text-2xl font-semibold">{loading ? "..." : (stats?.totalAdmins ?? 0).toLocaleString()}</p>
+          </div>
+          {stats?.usage ? (
+            <>
+              <div className="px-4 py-3">
+                <p className="text-xs text-[var(--text-secondary)]">60d tokens</p>
+                <p className="mt-0.5 text-2xl font-semibold">{stats.usage.totals.totalTokens.toLocaleString()}</p>
+              </div>
+              <div className="px-4 py-3">
+                <p className="text-xs text-[var(--text-secondary)]">60d spend</p>
+                <p className="mt-0.5 text-2xl font-semibold">{formatCurrencyCents(stats.usage.totals.effectiveCostCents ?? stats.usage.totals.totalCostCents)}</p>
+              </div>
+            </>
+          ) : null}
         </div>
 
         {stats?.usage ? (
-          <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 shadow-[var(--shadow-soft)]">
-            <div className="mb-4 flex items-center justify-between gap-2">
-              <div>
-                <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-                  Usage Intelligence
-                </h2>
-                <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                  Detailed usage from the last {stats.usage.days} days (tokens, spend, model and user breakdown).
-                </p>
-              </div>
-              <Database className="h-4 w-4 text-[var(--text-secondary)]" />
+          <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
+            <div className="mb-4">
+              <h2 className="font-display text-xl">Usage Intelligence</h2>
+              <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                Detailed usage from the last {stats.usage.days} days.
+              </p>
             </div>
 
             <div className="mb-4 grid gap-4 lg:grid-cols-2">
-              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
-                <p className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Daily token trend</p>
+              <div>
+                <p className="mb-2 text-xs text-[var(--text-secondary)]">Daily token trend</p>
                 <div className="mt-3 flex h-28 items-end gap-1.5">
                   {dayWindow.map((row) => (
                     <button
@@ -472,8 +411,8 @@ export default function SuperAdminDashboard() {
                 </div>
               </div>
 
-              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
-                <p className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Daily spend trend</p>
+              <div>
+                <p className="mb-2 text-xs text-[var(--text-secondary)]">Daily spend trend</p>
                 <div className="mt-3 flex h-28 items-end gap-1.5">
                   {dayWindow.map((row) => (
                     <button
@@ -498,66 +437,69 @@ export default function SuperAdminDashboard() {
             </div>
 
             {selectedDayDetails ? (
-              <div className="mb-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3 text-xs">
-                <p className="text-[11px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">
-                  Selected Day: {compactDayLabel(selectedDayDetails.day)}
-                </p>
-                <p className="mt-1 text-sm font-medium text-[var(--text-primary)]">
-                  {selectedDayDetails.totalTokens.toLocaleString()} tokens
-                </p>
-                <p className="text-[var(--text-secondary)]">
-                  {formatCurrencyCents(selectedDayDetails.effectiveCostCents ?? selectedDayDetails.totalCostCents)} spend · {selectedDayDetails.uniqueUsers} active users · {selectedDayDetails.events} events
+              <div className="mb-4 border-l-2 border-[var(--accent-cyan)] pl-3 text-xs">
+                <p className="text-[var(--text-secondary)]">{compactDayLabel(selectedDayDetails.day)}</p>
+                <p className="mt-0.5 text-sm font-medium text-[var(--text-primary)]">
+                  {selectedDayDetails.totalTokens.toLocaleString()} tokens · {formatCurrencyCents(selectedDayDetails.effectiveCostCents ?? selectedDayDetails.totalCostCents)} · {selectedDayDetails.uniqueUsers} users
                 </p>
               </div>
             ) : null}
 
             <div className="grid gap-4 lg:grid-cols-3">
-              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
-                <p className="mb-2 text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Top Models</p>
-                <div className="space-y-2">
+              <div>
+                <p className="mb-2 text-xs text-[var(--text-secondary)]">Top Models</p>
+                <table className="w-full text-xs">
+                  <tbody className="divide-y divide-[var(--border-default)] border-t border-[var(--border-default)]">
                   {stats.usage.topModels.slice(0, 6).map((model) => (
-                    <div key={model.modelId} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 py-2 text-xs">
-                      <p className="font-medium text-[var(--text-primary)]">{model.modelLabel}</p>
-                      <p className="text-[var(--text-secondary)]">
-                        {model.totalTokens.toLocaleString()} tokens • {formatCurrencyCents(model.effectiveCostCents ?? model.totalCostCents)}
-                      </p>
-                    </div>
+                    <tr key={model.modelId}>
+                      <td className="py-1.5 pr-2 font-medium text-[var(--text-primary)]">{model.modelLabel}</td>
+                      <td className="py-1.5 text-right text-[var(--text-secondary)]">
+                        {model.totalTokens.toLocaleString()} tokens
+                      </td>
+                    </tr>
                   ))}
-                </div>
+                  </tbody>
+                </table>
               </div>
 
-              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
-                <p className="mb-2 text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Top Users</p>
-                <div className="space-y-2">
+              <div>
+                <p className="mb-2 text-xs text-[var(--text-secondary)]">Top Users</p>
+                <table className="w-full text-xs">
+                  <tbody className="divide-y divide-[var(--border-default)] border-t border-[var(--border-default)]">
                   {stats.usage.topUsers.slice(0, 6).map((user) => (
-                    <div key={user.userId} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 py-2 text-xs">
-                      <p className="font-medium text-[var(--text-primary)]">{user.name || user.email}</p>
-                      <p className="truncate text-[var(--text-secondary)]">{user.orgName} • {user.role}</p>
-                      <p className="text-[var(--text-secondary)]">
-                        {user.totalTokens.toLocaleString()} tokens • {formatCurrencyCents(user.effectiveCostCents ?? user.totalCostCents)}
-                      </p>
-                    </div>
+                    <tr key={user.userId}>
+                      <td className="py-1.5 pr-2">
+                        <p className="font-medium text-[var(--text-primary)]">{user.name || user.email}</p>
+                        <p className="truncate text-[var(--text-secondary)]">{user.orgName}</p>
+                      </td>
+                      <td className="py-1.5 text-right text-[var(--text-secondary)]">
+                        {user.totalTokens.toLocaleString()}
+                      </td>
+                    </tr>
                   ))}
-                </div>
+                  </tbody>
+                </table>
               </div>
 
-              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
-                <p className="mb-2 text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Daily Usage</p>
-                <div className="space-y-2">
+              <div>
+                <p className="mb-2 text-xs text-[var(--text-secondary)]">Recent Daily Usage</p>
+                <table className="w-full text-xs">
+                  <tbody className="divide-y divide-[var(--border-default)] border-t border-[var(--border-default)]">
                   {stats.usage.byDay.slice(-6).map((day) => (
-                    <div key={day.day} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 py-2 text-xs">
-                      <p className="font-medium text-[var(--text-primary)]">{day.day}</p>
-                      <p className="text-[var(--text-secondary)]">
-                        {day.totalTokens.toLocaleString()} tokens • {formatCurrencyCents(day.effectiveCostCents ?? day.totalCostCents)} • {day.uniqueUsers} users
-                      </p>
-                    </div>
+                    <tr key={day.day}>
+                      <td className="py-1.5 pr-2 text-[var(--text-secondary)]">{compactDayLabel(day.day)}</td>
+                      <td className="py-1.5 text-right font-medium text-[var(--text-primary)]">
+                        {day.totalTokens.toLocaleString()} tok
+                      </td>
+                    </tr>
                   ))}
-                </div>
+                  </tbody>
+                </table>
               </div>
             </div>
 
-            <div className="mt-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
-              <p className="mb-2 text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Weekly spend (last 8)</p>
+            <div className="mt-4">
+              <p className="mb-2 text-xs text-[var(--text-secondary)]">Weekly spend (last 8)</p>
               <div className="space-y-2">
                 {usageByWeek.slice(-8).map((week) => (
                   <div key={week.weekStart}>
@@ -581,17 +523,12 @@ export default function SuperAdminDashboard() {
           </section>
         ) : null}
 
-        <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 shadow-[var(--shadow-soft)]">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-                Broadcast Notification
-              </h2>
-              <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                Send announcements to all users, one school, or a specific person.
-              </p>
-            </div>
-            <BellRing className="h-4 w-4 text-[var(--text-secondary)]" />
+        <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
+          <div className="mb-4">
+            <h2 className="font-display text-xl">Broadcast Notification</h2>
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">
+              Send announcements to all users, one school, or a specific person.
+            </p>
           </div>
 
           <div className="grid gap-3 lg:grid-cols-2">
@@ -695,48 +632,30 @@ export default function SuperAdminDashboard() {
         </section>
 
         {storageStats && (
-          <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 shadow-[var(--shadow-soft)]">
-            <div className="mb-5 flex items-center justify-between">
-              <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-                Storage Insights
-              </h2>
-              <HardDrive className="h-4 w-4 text-[var(--text-secondary)]" />
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
-                <p className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Tracked Storage</p>
-                <p className="mt-1 text-xl font-semibold text-[var(--text-primary)]">
-                  {storageStats.totalSizeMegabytes.toLocaleString()} MB
-                </p>
-                <p className="text-xs text-[var(--text-secondary)]">From uploaded resources</p>
+          <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
+            <h2 className="mb-4 font-display text-xl">Storage Insights</h2>
+            <div className="flex flex-wrap divide-x divide-[var(--border-default)] border-t border-b border-[var(--border-default)] mb-5">
+              <div className="px-4 py-3 first:pl-0">
+                <p className="text-xs text-[var(--text-secondary)]">Storage</p>
+                <p className="mt-0.5 text-xl font-semibold">{storageStats.totalSizeMegabytes.toLocaleString()} MB</p>
               </div>
-              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
-                <p className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Resource Files</p>
-                <p className="mt-1 text-xl font-semibold text-[var(--text-primary)]">
-                  {storageStats.resourceFileCount.toLocaleString()}
-                </p>
-                <p className="text-xs text-[var(--text-secondary)]">Documents in storage</p>
+              <div className="px-4 py-3">
+                <p className="text-xs text-[var(--text-secondary)]">Files</p>
+                <p className="mt-0.5 text-xl font-semibold">{storageStats.resourceFileCount.toLocaleString()}</p>
               </div>
-              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
-                <p className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Generated Images</p>
-                <p className="mt-1 text-xl font-semibold text-[var(--text-primary)]">
-                  {storageStats.generatedImageCount.toLocaleString()}
-                </p>
-                <p className="text-xs text-[var(--text-secondary)]">
-                  {storageStats.pinnedImageCount.toLocaleString()} pinned
-                </p>
+              <div className="px-4 py-3">
+                <p className="text-xs text-[var(--text-secondary)]">Images</p>
+                <p className="mt-0.5 text-xl font-semibold">{storageStats.generatedImageCount.toLocaleString()}</p>
+                <p className="text-xs text-[var(--text-secondary)]">{storageStats.pinnedImageCount} pinned</p>
               </div>
-              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
-                <p className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Expiring Images</p>
-                <p className="mt-1 text-xl font-semibold text-[var(--text-primary)]">
-                  {storageStats.expiringImageCountIn3Days.toLocaleString()}
-                </p>
-                <p className="text-xs text-[var(--text-secondary)]">Within next 3 days</p>
+              <div className="px-4 py-3">
+                <p className="text-xs text-[var(--text-secondary)]">Expiring soon</p>
+                <p className="mt-0.5 text-xl font-semibold">{storageStats.expiringImageCountIn3Days.toLocaleString()}</p>
               </div>
             </div>
 
-            <div className="mt-5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
-              <p className="mb-3 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">
+            <div>
+              <p className="mb-3 text-xs text-[var(--text-secondary)]">
                 <Database className="h-3.5 w-3.5" />
                 Largest Uploaded Files
               </p>
@@ -765,24 +684,16 @@ export default function SuperAdminDashboard() {
           </div>
         )}
 
-        <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 shadow-[var(--shadow-soft)]">
-          <h2 className="mb-5 text-sm font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-            Recent Activity
-          </h2>
-          <div className="space-y-3">
+        <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
+          <h2 className="mb-4 font-display text-xl">Recent Activity</h2>
+          <div className="divide-y divide-[var(--border-default)]">
             {auditLogs.map((item) => (
-              <div
-                key={item._id}
-                className="flex items-start gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3"
-              >
-                <div className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-[var(--accent-cyan)]" />
+              <div key={item._id} className="flex items-start justify-between gap-3 py-2.5">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-[var(--text-primary)]">{humanizeAuditAction(item.action)}</p>
                   <p className="truncate text-xs text-[var(--text-secondary)]">
-                    {item.details?.trim() || `${item.targetType}: ${item.targetId}`}{" "}
-                    <span className="text-[var(--text-muted)]">
-                      · {(item.actorName || item.actorEmail || "Unknown actor").trim()}
-                    </span>
+                    {item.details?.trim() || `${item.targetType}: ${item.targetId}`}
+                    {" · "}{(item.actorName || item.actorEmail || "Unknown actor").trim()}
                   </p>
                 </div>
                 <span className="shrink-0 text-[11px] text-[var(--text-secondary)]">
@@ -791,30 +702,27 @@ export default function SuperAdminDashboard() {
               </div>
             ))}
             {auditLogs.length === 0 && (
-              <p className="text-sm text-[var(--text-secondary)]">No recent platform activity yet.</p>
+              <p className="py-4 text-sm text-[var(--text-secondary)]">No recent platform activity yet.</p>
             )}
           </div>
         </div>
 
-        <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 shadow-[var(--shadow-soft)]">
-          <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-            School Admin Directory
-          </h2>
+        <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
+          <h2 className="mb-4 font-display text-xl">School Admin Directory</h2>
           {admins.length === 0 ? (
             <p className="text-sm text-[var(--text-secondary)]">No admins found yet.</p>
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <table className="w-full text-sm">
+              <tbody className="divide-y divide-[var(--border-default)]">
               {admins.map((admin) => (
-                <div
-                  key={admin._id}
-                  className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3"
-                >
-                  <p className="truncate text-sm font-semibold text-[var(--text-primary)]">{admin.name}</p>
-                  <p className="truncate text-xs text-[var(--text-secondary)]">{admin.email}</p>
-                  <p className="mt-1 truncate text-xs text-[var(--text-secondary)]">{admin.orgName}</p>
-                </div>
+                <tr key={admin._id}>
+                  <td className="py-2 pr-3 font-medium text-[var(--text-primary)]">{admin.name}</td>
+                  <td className="py-2 pr-3 text-xs text-[var(--text-secondary)]">{admin.email}</td>
+                  <td className="py-2 text-xs text-[var(--text-secondary)]">{admin.orgName}</td>
+                </tr>
               ))}
-            </div>
+              </tbody>
+            </table>
           )}
         </div>
       </div>

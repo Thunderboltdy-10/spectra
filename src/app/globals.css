@@ -75,22 +75,22 @@
   --brand-accent: #38d6a0;
 
   --bg-primary: #13111a;
-  --bg-secondary: #1c1929;
+  --bg-secondary: #1e1b2b;
   --bg-tertiary: #241f33;
   --bg-sidebar: #17151f;
   --bg-user-bubble: #1e2a3a;
 
-  --bg-elevated: #1e1b28;
-  --bg-hover: #272338;
+  --bg-elevated: #211e2e;
+  --bg-hover: #2a273a;
   --bg-overlay: rgba(4, 8, 12, 0.56);
   --bg-code: #0a0910;
 
   --text-primary: #edf4ff;
-  --text-secondary: #8b7fa6;
-  --text-tertiary: #5e5472;
+  --text-secondary: #a09598;
+  --text-tertiary: #6b6478;
   --text-inverse: #0b1220;
 
-  --border-default: #352f46;
+  --border-default: #342f46;
   --accent: var(--brand-primary);
   --accent-cyan: var(--brand-primary);
   --accent-orange: color-mix(in oklab, var(--brand-accent) 66%, #ffb36f);

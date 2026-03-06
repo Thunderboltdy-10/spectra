@@ -90,15 +90,12 @@ export default function ImagesPage() {
 
   return (
     <AppShell>
-      <section className="mb-5">
-        <h1 className="font-display text-4xl tracking-tight">
-          <ImagePlus className="mr-2 inline-block h-8 w-8" />
-          Image Gallery
-        </h1>
+      <div className="mb-5">
+        <h1 className="font-display text-3xl">Generated Images</h1>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">
           All images generated in your chats. Click to view full size.
         </p>
-      </section>
+      </div>
 
       {images.length === 0 ? (
         <p className="rounded-xl border border-dashed border-[var(--border-default)] p-8 text-center text-sm text-[var(--text-secondary)]">

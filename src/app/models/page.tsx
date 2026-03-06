@@ -528,17 +528,15 @@ export default function ModelsPage() {
 
   return (
     <AppShell fullBleed contentClassName="2xl:px-14">
-      <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 sm:p-6" data-tour="models-header">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="text-center sm:text-left">
-            <h1 className="font-display text-4xl tracking-tight">Model Atlas</h1>
-            <p className="mt-1 max-w-2xl text-sm text-[var(--text-secondary)]">
-              Compare providers, keep model discovery fast, and switch to chat with one click.
-            </p>
-          </div>
+      <section data-tour="models-header">
+        <div className="mb-4">
+          <h1 className="font-display text-3xl">Model Atlas</h1>
+          <p className="mt-1 max-w-2xl text-sm text-[var(--text-secondary)]">
+            Compare providers, keep model discovery fast, and switch to chat with one click.
+          </p>
         </div>
 
-        <div className="mt-4 grid gap-2 lg:grid-cols-[1fr_1fr_220px]">
+        <div className="grid gap-2 lg:grid-cols-[1fr_1fr_220px]">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-secondary)]" />
             <Input

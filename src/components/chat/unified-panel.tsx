@@ -170,7 +170,7 @@ function SettingsView({
   const modelDisplayName =
     routerMode === "manual"
       ? sanitizeModelLabel(selectedManualModel?.name ?? manualModel)
-      : "Adaptive routing";
+      : "Auto";
   const modelDisplayProvider =
     routerMode === "manual"
       ? selectedManualModel?.provider ?? "Manual selection"
@@ -870,7 +870,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
           docked ? "right-panel-shell--docked" : "right-panel-shell--sheet"
         } ${
           docked
-            ? "relative h-full w-full p-0"
+            ? "relative h-full w-full border-l border-[var(--border-default)] p-0"
             : compact
               ? "absolute bottom-3 left-3 right-3 max-h-[78vh] rounded-2xl border p-4"
               : "absolute inset-y-0 right-0 w-[92vw] border-l p-4"
@@ -884,10 +884,10 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
         }
       >
         <div
-          className={`flex items-center justify-between ${docked ? "border-b border-[var(--border-default)] px-4 py-3.5" : "mb-4"}`}
+          className={`flex items-center justify-between ${docked ? "shadow-[0_1px_0_var(--border-default)] px-4 py-3.5" : "mb-4"}`}
         >
           <div>
-            <p className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">{current.subtitle}</p>
+            <p className="text-[9px] uppercase tracking-[0.14em] text-[var(--text-secondary)] truncate">{current.subtitle}</p>
             <h3 className={`font-display text-[var(--text-primary)] ${docked ? "text-xl" : "text-2xl"}`}>{current.title}</h3>
           </div>
           <div className="flex items-center gap-1.5">

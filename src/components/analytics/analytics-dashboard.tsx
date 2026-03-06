@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo } from "react";
-import { Activity, BookOpen, Brain, Clock3, MessageSquare, Trophy, LucideIcon } from "lucide-react";
 import { MODE_REGISTRY } from "@/lib/modes";
 import type { StudyMode } from "@/types";
 import { ActivityChart } from "@/components/analytics/activity-chart";
@@ -93,26 +92,21 @@ function formatModelName(modelId?: string) {
     .join(" ");
 }
 
-function StatInline({
-  icon: Icon,
+function StatItem({
   label,
   value,
   subtitle,
 }: {
-  icon: LucideIcon;
   label: string;
   value: string | number;
   subtitle?: string;
 }) {
   return (
-    <article className="min-w-0 border-b border-[var(--border-default)] pb-3 pt-1 last:border-b-0">
-      <p className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-[0.11em] text-[var(--text-secondary)]">
-        <Icon className="h-3.5 w-3.5" />
-        {label}
-      </p>
-      <p className="mt-1 font-display text-2xl text-[var(--text-primary)]">{value}</p>
-      {subtitle ? <p className="mt-0.5 text-xs text-[var(--text-secondary)]">{subtitle}</p> : null}
-    </article>
+    <div className="min-w-0 px-4 py-3 first:pl-0">
+      <p className="text-xs text-[var(--text-secondary)]">{label}</p>
+      <p className="mt-0.5 text-2xl font-semibold text-[var(--text-primary)]">{value}</p>
+      {subtitle ? <p className="mt-0.5 text-[11px] text-[var(--text-secondary)]">{subtitle}</p> : null}
+    </div>
   );
 }
 
@@ -468,20 +462,18 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
   return (
     <div className="space-y-6">
       <div data-tour="analytics-stats">
-        <h2 className="journal-heading mb-3 text-xl font-semibold">Your Study Stats</h2>
-        <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2 xl:grid-cols-3">
-          <StatInline icon={Activity} label="Study streak" value={`${streak} day${streak !== 1 ? "s" : ""}`} />
-          <StatInline icon={MessageSquare} label="Total messages" value={student.totalMessages} subtitle={`${student.totalSessions} sessions`} />
-          <StatInline icon={BookOpen} label="Topics explored" value={student.uniqueTopicCount} />
-          <StatInline
-            icon={Trophy}
+        <h2 className="mb-3 font-display text-xl">Your Study Stats</h2>
+        <div className="flex flex-wrap divide-x divide-[var(--border-default)] border-t border-b border-[var(--border-default)]">
+          <StatItem label="Study streak" value={`${streak} day${streak !== 1 ? "s" : ""}`} />
+          <StatItem label="Total messages" value={student.totalMessages} subtitle={`${student.totalSessions} sessions`} />
+          <StatItem label="Topics explored" value={student.uniqueTopicCount} />
+          <StatItem
             label="Avg quiz score"
             value={student.avgScore !== null ? `${student.avgScore}%` : "-"}
             subtitle={student.avgScore !== null ? "across all quizzes" : "No quizzes yet"}
           />
-          <StatInline icon={Clock3} label="Avg study/day" value={`${averageDailyStudyMinutes}m`} subtitle="timers + message estimate" />
-          <StatInline
-            icon={Brain}
+          <StatItem label="Avg study/day" value={`${averageDailyStudyMinutes}m`} subtitle="timers + estimate" />
+          <StatItem
             label="Preferred model"
             value={formatModelName(studentSignals.preferredModel)}
             subtitle={
@@ -494,38 +486,38 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
       </div>
 
       <div data-tour="analytics-charts" className="grid gap-4 xl:grid-cols-2">
-        <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+        <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
           <ActivityChart data={dailyActivity} label="Daily activity (14 days)" />
         </section>
-        <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+        <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
           <StudyTimeChart data={dailyStudyTime} />
         </section>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.9fr)]">
-        <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+        <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
           <TimeOfDayChart hourlyCounts={studentSignals.hourlyPromptCounts} dailyPeaks={studentSignals.dailyPeakHours} />
         </section>
-        <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+        <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
           <ModePieChart modeCounts={enhanced.modeMessageCounts} />
         </section>
       </div>
 
-      <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+      <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
         <QuizTrendChart trend={enhanced.quizTrend} />
       </section>
 
-      <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+      <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
         <ProductivityInsights productivity={enhanced.productivity} />
       </section>
 
-      <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+      <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
         <TopicCloud topics={student.topics} />
       </section>
 
       {isTeacher && classData.length > 0 && (
         <div className="mt-8 border-t border-[var(--border-default)] pt-6">
-          <h2 className="journal-heading mb-3 text-xl font-semibold">Class Overview</h2>
+          <h2 className="mb-3 font-display text-xl">Class Overview</h2>
           <div>
             <div className="grid divide-y divide-[var(--border-default)] text-sm sm:grid-cols-2 sm:divide-y-0 sm:divide-x">
               <div className="px-4 py-3">
@@ -548,15 +540,15 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
             </div>
           </div>
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+            <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
               <ActivityChart data={classDailyActivity} label="Class daily activity (14 days)" />
             </section>
-            <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+            <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
               <ModeBreakdown modeCounts={classAgg.modeCounts} />
             </section>
           </div>
           <div className="mt-4">
-            <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+            <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
               <TopicCloud topics={classAgg.topics} />
             </section>
           </div>

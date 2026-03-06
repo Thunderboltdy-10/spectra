@@ -7,7 +7,6 @@ import {
   Check,
   Filter,
   Search,
-  SlidersHorizontal,
 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/layout/app-shell";
@@ -438,6 +437,11 @@ export default function ModelsPage() {
     });
 
     rows = rows.sort((a, b) => {
+      // Always push openrouter/auto models to the bottom regardless of sort mode
+      const aIsAuto = a.modelId.includes("openrouter/auto");
+      const bIsAuto = b.modelId.includes("openrouter/auto");
+      if (aIsAuto !== bIsAuto) return aIsAuto ? 1 : -1;
+
       if (sortMode === "context") return (b.contextLength ?? 0) - (a.contextLength ?? 0);
       if (sortMode === "popular") {
         const aRank = typeof a.openRouterRank === "number" ? a.openRouterRank : Number.MAX_SAFE_INTEGER;
@@ -487,7 +491,7 @@ export default function ModelsPage() {
   }, [availableModels.length, visibleCount]);
 
   function tryModel(modelId: string) {
-    router.push(`/?model=${encodeURIComponent(modelId)}&mode=auto`);
+    router.push(`/?model=${encodeURIComponent(modelId)}`);
   }
 
   function toggleProvider(name: string) {
@@ -503,6 +507,13 @@ export default function ModelsPage() {
     setSelectedProviders([]);
   }
 
+  const sortLabel =
+    sortMode === "recommended"
+      ? "Recommended"
+      : sortMode === "popular"
+        ? "Popular"
+        : "Largest context";
+
   if (loading) {
     return (
       <AppShell>
@@ -517,17 +528,15 @@ export default function ModelsPage() {
 
   return (
     <AppShell fullBleed contentClassName="2xl:px-14">
-      <section className="rounded-3xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 sm:p-6" data-tour="models-header">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="text-center sm:text-left">
-            <h1 className="font-display text-4xl tracking-tight">Model Atlas</h1>
-            <p className="mt-1 max-w-2xl text-sm text-[var(--text-secondary)]">
-              Compare providers, keep model discovery fast, and switch to chat with one click.
-            </p>
-          </div>
+      <section data-tour="models-header">
+        <div className="mb-4">
+          <h1 className="font-display text-3xl">Model Atlas</h1>
+          <p className="mt-1 max-w-2xl text-sm text-[var(--text-secondary)]">
+            Compare providers, keep model discovery fast, and switch to chat with one click.
+          </p>
         </div>
 
-        <div className="mt-4 grid gap-2 lg:grid-cols-[1fr_1fr_auto]">
+        <div className="grid gap-2 lg:grid-cols-[1fr_1fr_220px]">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-secondary)]" />
             <Input
@@ -547,26 +556,32 @@ export default function ModelsPage() {
               className="h-10 w-full pl-10 text-sm focus-visible:border-[var(--border-default)] focus-visible:ring-0"
             />
           </div>
-          <div className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-xs text-[var(--text-secondary)]">
-            <SlidersHorizontal className="h-3.5 w-3.5" />
-            Semantic model search
-          </div>
-        </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs text-[var(--text-secondary)]">
-            <Filter className="h-3.5 w-3.5" />
-            Sort
+          <div className="relative">
+            <button
+              type="button"
+              className="inline-flex h-10 w-full items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-sm text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]"
+            >
+              <span className="inline-flex items-center gap-1.5 text-[var(--text-secondary)]">
+                <Filter className="h-3.5 w-3.5" />
+                Sort by
+              </span>
+              <span>{sortLabel}</span>
+            </button>
             <select
               value={sortMode}
               onChange={(event) => setSortMode(event.target.value as SortMode)}
-              className="appearance-none rounded-md border border-transparent bg-transparent px-1.5 py-0.5 text-xs text-[var(--text-primary)] outline-none transition focus:border-[var(--border-default)]"
+              aria-label="Sort models"
+              className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
             >
               <option value="recommended">Recommended</option>
               <option value="popular">Popular</option>
               <option value="context">Largest context</option>
             </select>
           </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           {selectedProviders.length > 0 ? (
             <button
               type="button"

@@ -448,7 +448,7 @@ export function ChatLayout() {
       <aside
         data-tour="sidebar"
         className={`hidden md:block transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${
-          chat.sidebarOpen ? "w-[clamp(260px,24vw,360px)]" : "w-[76px]"
+          chat.sidebarOpen ? "w-[clamp(220px,18vw,280px)]" : "w-[64px]"
         }`}
       >
         <ChatSidebar {...sidebarProps} />
@@ -799,7 +799,7 @@ export function ChatLayout() {
         }}
       />
 
-      {!chat.sidebarOpen ? <div className="md:hidden"><GlobalUtilityDock placement="floating" /></div> : null}
+      {!chat.sidebarOpen ? <GlobalUtilityDock placement="floating" /> : null}
 
       <GuidedTour
         open={tourOpen}

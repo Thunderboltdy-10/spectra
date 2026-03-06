@@ -13,13 +13,11 @@ import {
   Medal,
   RefreshCw,
   SearchCheck,
-  Sparkles,
   Star,
   Trophy,
 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/layout/app-shell";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 type AchievementDefinition = {
@@ -128,57 +126,32 @@ export default function AchievementsPage() {
   return (
     <AppShell fullBleed contentClassName="2xl:px-14">
       <section className="space-y-6">
-        <header data-tour="achievements-header" className="relative overflow-hidden px-1 py-3 sm:px-2">
-          <div
-            className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full opacity-35 blur-3xl"
-            style={{ background: "radial-gradient(circle at center, var(--warning), transparent 68%)" }}
-          />
-          <div
-            className="pointer-events-none absolute -bottom-20 left-10 h-56 w-56 rounded-full opacity-30 blur-3xl"
-            style={{ background: "radial-gradient(circle at center, var(--accent-cyan), transparent 70%)" }}
-          />
-          <div className="relative flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_78%,transparent)] px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-[var(--text-secondary)]">
-                <Sparkles className="h-3 w-3" />
-                Achievement Board
-              </p>
-              <h1 className="mt-2 font-display text-3xl leading-tight sm:text-4xl">Badges and Milestones</h1>
-              <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                Track every unlock, build streak momentum, and level up your study profile.
-              </p>
-            </div>
-            <Button type="button" variant="secondary" onClick={() => void loadGamification({ silent: true })} disabled={refreshing}>
-              <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-              Refresh
-            </Button>
+        <header data-tour="achievements-header" className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="font-display text-3xl">Achievements</h1>
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">
+              Track every unlock, build streak momentum, and level up your study profile.
+            </p>
           </div>
+          <Button type="button" variant="secondary" onClick={() => void loadGamification({ silent: true })} disabled={refreshing}>
+            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
         </header>
 
-        <div data-tour="achievements-overview" className="grid gap-3 sm:grid-cols-3">
-          <div className="rounded-2xl bg-[color-mix(in_oklab,var(--bg-elevated)_76%,transparent)] p-4 shadow-[var(--shadow-card)]">
-            <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-              <Star className="h-3.5 w-3.5 text-[var(--warning)]" />
-              Total XP
-            </p>
-            <p className="mt-1 text-2xl font-semibold">{(data?.totalXp ?? 0).toLocaleString()}</p>
+        <div data-tour="achievements-overview" className="flex flex-wrap divide-x divide-[var(--border-default)] border-t border-b border-[var(--border-default)]">
+          <div className="px-4 py-3 first:pl-0">
+            <p className="text-xs text-[var(--text-secondary)]">Total XP</p>
+            <p className="mt-0.5 text-2xl font-semibold">{(data?.totalXp ?? 0).toLocaleString()}</p>
           </div>
-          <div className="rounded-2xl bg-[color-mix(in_oklab,var(--bg-elevated)_76%,transparent)] p-4 shadow-[var(--shadow-card)]">
-            <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-              <Flame className="h-3.5 w-3.5 text-[var(--accent-coral)]" />
-              Current Streak
-            </p>
-            <p className="mt-1 text-2xl font-semibold">{(data?.currentStreak ?? 0).toLocaleString()} day{(data?.currentStreak ?? 0) === 1 ? "" : "s"}</p>
+          <div className="px-4 py-3">
+            <p className="text-xs text-[var(--text-secondary)]">Current streak</p>
+            <p className="mt-0.5 text-2xl font-semibold">{(data?.currentStreak ?? 0).toLocaleString()} day{(data?.currentStreak ?? 0) === 1 ? "" : "s"}</p>
           </div>
-          <div className="rounded-2xl bg-[color-mix(in_oklab,var(--bg-elevated)_76%,transparent)] p-4 shadow-[var(--shadow-card)]">
-            <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-              <Trophy className="h-3.5 w-3.5 text-[var(--success)]" />
-              Completion
-            </p>
-            <p className="mt-1 text-2xl font-semibold">{completion.percent}%</p>
-            <p className="mt-1 text-xs text-[var(--text-secondary)]">
-              {completion.unlocked}/{completion.total} badges unlocked
-            </p>
+          <div className="px-4 py-3">
+            <p className="text-xs text-[var(--text-secondary)]">Completion</p>
+            <p className="mt-0.5 text-2xl font-semibold">{completion.percent}%</p>
+            <p className="mt-0.5 text-xs text-[var(--text-secondary)]">{completion.unlocked}/{completion.total} unlocked</p>
           </div>
         </div>
 
@@ -203,41 +176,33 @@ export default function AchievementsPage() {
               return (
                 <article
                   key={definition.type}
-                  className={`relative overflow-hidden rounded-2xl border p-4 transition ${
+                  className={`relative rounded-2xl border p-4 transition ${
                     unlocked
-                      ? "border-[color-mix(in_oklab,var(--warning)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_8%,var(--bg-elevated))]"
-                      : "border-[var(--border-default)] bg-[var(--bg-elevated)] opacity-85"
+                      ? "border-l-4 border-[var(--warning)] bg-[var(--bg-elevated)]"
+                      : "border-[var(--border-default)] bg-[var(--bg-elevated)] opacity-70"
                   }`}
                 >
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3">
                     <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]">
                       <Icon className="h-5 w-5 text-[var(--text-primary)]" />
                     </div>
-                    {unlocked ? (
-                      <Badge variant="success">Completed</Badge>
-                    ) : (
-                      <Badge variant="secondary" className="inline-flex items-center gap-1">
-                        <Lock className="h-3 w-3" />
-                        Pending
-                      </Badge>
-                    )}
+                    <div className="min-w-0 flex-1">
+                      <h3 className="text-base font-semibold">{definition.name}</h3>
+                      <p className="mt-0.5 text-sm text-[var(--text-secondary)]">{definition.description}</p>
+                    </div>
                   </div>
 
-                  <h3 className="mt-3 text-base font-semibold">{definition.name}</h3>
-                  <p className="mt-1 text-sm text-[var(--text-secondary)]">{definition.description}</p>
-
                   <div className="mt-3 flex items-center justify-between text-xs text-[var(--text-secondary)]">
-                    <span className="inline-flex items-center gap-1 font-semibold text-[var(--text-primary)]">
-                      <Star className="h-3.5 w-3.5 text-[var(--warning)]" />
+                    <span className="font-semibold text-[var(--text-primary)]">
                       +{definition.xpEarned} XP
                     </span>
-                    <span className="rounded-full border border-[var(--border-default)] px-2 py-0.5 text-[10px] uppercase tracking-[0.08em]">
+                    <span className="text-[var(--text-secondary)]">
                       {difficultyLabel(definition.difficulty)}
                     </span>
                     {unlocked ? (
-                      <span>Completed {new Date(unlocked.earnedAt).toLocaleDateString()}</span>
+                      <span className="text-[var(--success)]">· {new Date(unlocked.earnedAt).toLocaleDateString()}</span>
                     ) : (
-                      <span>Pending criteria</span>
+                      <span className="inline-flex items-center gap-1"><Lock className="h-3 w-3" /> Pending</span>
                     )}
                   </div>
                 </article>

@@ -185,7 +185,7 @@ export function ChatMessage({
   const validCitations = citations.filter((c) => c.url || c.resourceId || c.filename);
   const searchCitations = validCitations.filter((citation) => citation.sourceType === "search");
   const activeModelId = modelUsed ?? routeTrace?.selected.modelId;
-  const activeProvider = activeModelId?.split("/")[0] ?? "AI";
+  const activeProvider = activeModelId?.split("/")[0] ?? "openrouter";
   const renderedContent = content;
   const directTokens = (usageIn ?? 0) + (usageOut ?? 0);
   const collaboratorExtraTokens =
@@ -261,12 +261,7 @@ export function ChatMessage({
                         className="overflow-hidden rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)]"
                       >
                         <div
-                          className="flex h-40 w-full items-center justify-center bg-[size:16px_16px]"
-                          style={{
-                            backgroundImage:
-                              "linear-gradient(45deg, rgba(148,163,184,0.16) 25%, transparent 25%, transparent 75%, rgba(148,163,184,0.16) 75%, rgba(148,163,184,0.16)), linear-gradient(45deg, rgba(148,163,184,0.16) 25%, transparent 25%, transparent 75%, rgba(148,163,184,0.16) 75%, rgba(148,163,184,0.16))",
-                            backgroundPosition: "0 0, 8px 8px",
-                          }}
+                          className="flex h-40 w-full items-center justify-center bg-[var(--bg-secondary)]"
                         >
                           <Image
                             src={attachment.thumbnailUrl}

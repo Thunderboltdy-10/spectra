@@ -157,7 +157,6 @@ export function ChatSidebar({
   role,
   isSuperAdmin = false,
   userSpending,
-  userMemorySummary,
   orgName,
   orgLogoUrl,
   activeStreamIds,
@@ -324,7 +323,7 @@ export function ChatSidebar({
 
   if (collapsed) {
     return (
-      <div className="chat-sidebar flex h-full flex-col border-r border-[var(--border-default)] px-2.5 py-3">
+      <div className="chat-sidebar flex h-full flex-col border-r border-[var(--border-default)] px-1.5 py-3">
         <div className="mb-4 flex flex-col items-center gap-2">
           {orgLogoUrl && orgLogoUrl.trim() && !logoLoadFailed ? (
             <Image
@@ -354,32 +353,36 @@ export function ChatSidebar({
             const Icon = item.icon;
             const active = isNavActive(pathname, item.href);
             return (
-              <div key={item.href} className="relative">
+              <div key={item.href} className="relative flex flex-col items-center">
                 <Link
                   href={item.href}
                   title={item.label}
-                  className={`inline-flex h-9.5 w-9.5 items-center justify-center rounded-xl ${
+                  className={cn(
+                    "inline-flex h-9.5 w-9.5 items-center justify-center rounded-xl transition-colors",
                     active
-                      ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]"
-                      : "text-[var(--text-secondary)]"
-                  }`}
+                      ? "bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)] text-[var(--text-primary)]"
+                      : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+                  )}
                 >
                   <Icon className="h-4 w-4" />
                 </Link>
+                {active && (
+                  <span className="mt-0.5 h-1 w-1 rounded-full bg-[var(--accent-cyan)]" />
+                )}
               </div>
             );
           })}
         </div>
 
         <div className="mt-3 flex flex-col items-center gap-2">
-          <div className="mb-1 grid grid-cols-2 gap-1">
+          <div className="mb-1 flex flex-col gap-1.5">
             {collapsedUtilityActions.map((item) => (
               <button
                 key={item.id}
                 type="button"
                 title={item.title}
                 onClick={item.action}
-                className="inline-flex h-8.5 w-8.5 cursor-pointer items-center justify-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                className="inline-flex h-9.5 w-9.5 cursor-pointer items-center justify-center rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               >
                 <item.Icon className="h-4 w-4" />
               </button>
@@ -460,12 +463,9 @@ export function ChatSidebar({
         </Button>
       </div>
 
-      <div className="mb-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5" data-tour="sidebar-pages">
-        <div className="mb-1 px-2.5 pt-0.5">
-          <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Pages</p>
-        </div>
-
-        <div ref={pageNavScrollRef} className="max-h-[11.5rem] overflow-y-auto pr-1">
+      <div className="mb-3" data-tour="sidebar-pages">
+        <p className="mb-1 px-3 text-[9px] uppercase tracking-[0.2em] text-[var(--text-tertiary)]">Navigation</p>
+        <div ref={pageNavScrollRef} className="overflow-y-auto max-h-[192px] [mask-image:linear-gradient(to_bottom,black_85%,transparent)]">
           {allNavItems.map((item) => {
             const Icon = item.icon;
             const active = isNavActive(pathname, item.href);
@@ -475,13 +475,14 @@ export function ChatSidebar({
                 href={item.href}
                 title={item.label}
                 data-nav-active={active ? "true" : "false"}
-                className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm ${
+                className={cn(
+                  "flex items-center gap-2.5 px-3 py-2 text-sm transition-colors",
                   active
-                    ? "bg-[var(--bg-primary)] text-[var(--text-primary)]"
-                    : "text-[var(--text-secondary)]"
-                }`}
+                    ? "border-l-2 border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,transparent)] pl-[10px] text-[var(--text-primary)]"
+                    : "border-l-2 border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+                )}
               >
-                <Icon className="h-4 w-4" />
+                <Icon className="h-4 w-4 shrink-0" />
                 <span>{item.label}</span>
               </Link>
             );
@@ -502,7 +503,7 @@ export function ChatSidebar({
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search chats"
             data-search-input
-            className="h-8 w-full rounded-lg border border-transparent bg-[var(--bg-primary)] pl-8 pr-2.5 text-xs text-[var(--text-primary)] transition placeholder:text-[var(--text-secondary)] focus:outline-none focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0"
+            className="h-8 w-full rounded-lg border border-transparent bg-[var(--bg-primary)] pl-8 pr-2.5 text-xs text-[var(--text-primary)] transition placeholder:text-[var(--text-secondary)] focus:outline-none focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none"
           />
         </div>
 
@@ -663,18 +664,31 @@ export function ChatSidebar({
         </div>
       </div>
 
-      <div className="group mt-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2.5 shadow-[var(--shadow-soft)]">
-        <div className="mb-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-1.5">
-          <GlobalUtilityDock placement="profile-bar" className="w-full" />
-        </div>
+      <div className="mt-auto border-t border-[var(--border-default)] pt-2">
+        {typeof usagePercent === "number" && (
+          <div
+            className="mb-2 h-0.5 w-full overflow-hidden bg-[var(--bg-secondary)]"
+            title={`Monthly activity: ${usagePercentLabel}`}
+          >
+            <div
+              className="h-full transition-all"
+              style={{
+                width: `${Math.max(usagePercent > 0 ? 3 : 0, usagePercent)}%`,
+                background: "var(--gradient-brand)",
+              }}
+            />
+          </div>
+        )}
 
-        <div className="flex items-center gap-2.5">
+        <GlobalUtilityDock placement="profile-bar" className="mb-2 w-full" />
+
+        <div className="flex items-center gap-2 px-1">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button type="button" className="cursor-pointer rounded-full">
-                <Avatar>
+                <Avatar className="h-7 w-7">
                   <AvatarImage src={user?.imageUrl} alt={user?.fullName ?? "User"} />
-                  <AvatarFallback>{initials(user?.fullName || user?.firstName || "User")}</AvatarFallback>
+                  <AvatarFallback className="text-[10px]">{initials(user?.fullName || user?.firstName || "User")}</AvatarFallback>
                 </Avatar>
               </button>
             </DropdownMenuTrigger>
@@ -691,55 +705,22 @@ export function ChatSidebar({
           </DropdownMenu>
 
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium">{user?.fullName ?? user?.firstName ?? "Signed in user"}</p>
-            <p className="truncate text-xs text-[var(--text-secondary)]">{role}</p>
-          </div>
-          <ThemeToggle />
-          <Button type="button" variant="secondary" size="icon" onClick={onOpenSettings} title="Open global settings">
-            <Settings2 className="h-4 w-4" />
-          </Button>
-        </div>
-
-        <div className="mt-2 grid overflow-hidden transition-[grid-template-rows] duration-300 ease-[var(--ease-standard)] [grid-template-rows:0fr] group-hover:[grid-template-rows:1fr]">
-          <div className="min-h-0 overflow-hidden">
-            <div className="translate-y-2 opacity-0 transition-all duration-300 ease-[var(--ease-standard)] group-hover:translate-y-0 group-hover:opacity-100">
-              <div className="mb-2 flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)]">
-                <span
-                  className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5"
-                  title="Current streak"
-                >
-                  <Flame className={cn("h-3 w-3", gamification.currentStreak > 0 ? "animate-pulse text-[#ef4444]" : "text-[var(--text-secondary)]")} />
-                  {gamification.currentStreak}
-                </span>
-                <span
-                  className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5"
-                  title="Total XP"
-                >
-                  <Star className="h-3 w-3 text-[var(--warning)]" />
-                  {gamification.totalXp}
-                </span>
-              </div>
-              {userMemorySummary && (
-                <p className="mb-3 line-clamp-2 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2 text-[11px] text-[var(--text-secondary)]">
-                  {userMemorySummary}
-                </p>
-              )}
-              <div className="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-                <span>Monthly activity</span>
-                <span>{usagePercentLabel}</span>
-              </div>
-              <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
-                <div
-                  className="h-full rounded-full transition-all"
-                  style={{
-                    width: `${typeof usagePercent === "number" ? Math.max(usagePercent > 0 ? 3 : 0, usagePercent) : 0}%`,
-                    background: "var(--gradient-brand)",
-                  }}
-                />
-              </div>
-              <p className="text-[11px] text-[var(--text-secondary)]">{usageStatus}</p>
+            <p className="truncate text-[13px] font-medium leading-tight">{user?.fullName ?? user?.firstName ?? "User"}</p>
+            <div className="flex items-center gap-1.5 text-[10px] text-[var(--text-tertiary)]">
+              <span className="inline-flex items-center gap-0.5">
+                <Flame className={cn("h-2.5 w-2.5", gamification.currentStreak > 0 ? "text-[#ef4444]" : "text-[var(--text-tertiary)]")} />
+                {gamification.currentStreak}
+              </span>
+              <span className="inline-flex items-center gap-0.5">
+                <Star className="h-2.5 w-2.5 text-[var(--warning)]" />
+                {gamification.totalXp}
+              </span>
             </div>
           </div>
+          <ThemeToggle />
+          <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={onOpenSettings} title="Open global settings">
+            <Settings2 className="h-3.5 w-3.5" />
+          </Button>
         </div>
       </div>
     </div>

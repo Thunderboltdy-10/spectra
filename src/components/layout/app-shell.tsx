@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ChatSidebar } from "@/components/chat/chat-sidebar";
+import { GlobalUtilityDock } from "@/components/global-utility-dock";
 import { useSidebar } from "@/context/sidebar-context";
 import { cn } from "@/lib/utils";
 import type { GuidedTourStep } from "@/components/ui/guided-tour";
@@ -344,7 +345,7 @@ export function AppShell({
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--bg-primary)] text-[var(--text-primary)]">
       <aside
-        className={`hidden h-full transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] md:block ${sidebar.sidebarOpen ? "w-[clamp(260px,24vw,360px)]" : "w-[76px]"}`}
+        className={`hidden h-full transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] md:block ${sidebar.sidebarOpen ? "w-[clamp(220px,18vw,280px)]" : "w-[64px]"}`}
       >
         <ChatSidebar
           chats={sidebar.filteredChats}
@@ -390,6 +391,8 @@ export function AppShell({
           {children}
         </main>
       </div>
+
+      {!sidebar.sidebarOpen ? <GlobalUtilityDock placement="floating" /> : null}
 
       {pageTourSteps.length > 0 ? (
         <GuidedTour

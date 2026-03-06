@@ -56,7 +56,7 @@ export function ChatHeader({
   const showCompactTip = messageCount > 8;
 
   return (
-    <header className="sticky top-0 z-20 border-b border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_92%,transparent)] backdrop-blur-xl">
+    <header className="sticky top-0 z-20 shadow-[0_1px_0_var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_92%,transparent)] backdrop-blur-xl">
       <div className="px-3 py-2.5 sm:px-6 lg:px-10">
         <div className="mx-auto flex w-full max-w-6xl items-center gap-2">
           <Button

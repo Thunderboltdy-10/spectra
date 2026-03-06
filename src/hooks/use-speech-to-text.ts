@@ -18,7 +18,11 @@ type SpeechCtor = new () => SpeechRecognitionLike;
 export function useSpeechToText() {
   const ctor = useMemo<SpeechCtor | null>(() => {
     if (typeof window === "undefined") return null;
-    const value = (window as Window & { webkitSpeechRecognition?: SpeechCtor }).webkitSpeechRecognition;
+    const value = (window as Window & {
+      SpeechRecognition?: SpeechCtor;
+      webkitSpeechRecognition?: SpeechCtor;
+    }).SpeechRecognition
+      ?? (window as Window & { webkitSpeechRecognition?: SpeechCtor }).webkitSpeechRecognition;
     return value ?? null;
   }, []);
 

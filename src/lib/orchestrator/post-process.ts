@@ -9,7 +9,7 @@ import type { Citation } from "@/types";
 
 const TITLE_MIN_WORDS = 2;
 const TITLE_MAX_WORDS = 6;
-const MEMORY_MAX_ENTRIES = 20;
+const MEMORY_MAX_ENTRIES = 40;
 const MEMORY_MAX_RAW_CHARS = 1500;
 const MEMORY_DECAY_CONFIDENCE = 0.3;
 const MEMORY_DECAY_AGE_MS = 30 * 24 * 60 * 60 * 1000;

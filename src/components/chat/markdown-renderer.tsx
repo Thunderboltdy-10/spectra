@@ -148,10 +148,21 @@ function extractImagePayload(content: string) {
   return { src, alt, prompt };
 }
 
-function normalizeMathDelimiters(value: string) {
-  return value
-    .replace(/\\\[((?:.|\n)+?)\\\]/g, (_match, expr: string) => `\n$$\n${expr.trim()}\n$$\n`)
-    .replace(/\\\((.+?)\\\)/g, (_match, expr: string) => `$${String(expr).trim()}$`);
+function normalizeMathDelimiters(content: string) {
+  let result = content;
+  // Only normalize block math if delimiters are balanced (prevents breaking during streaming)
+  const openBrackets = (result.match(/\\\[/g) ?? []).length;
+  const closeBrackets = (result.match(/\\\]/g) ?? []).length;
+  if (openBrackets > 0 && openBrackets === closeBrackets) {
+    result = result.replace(/\\\[([\s\S]+?)\\\]/g, (_m, expr: string) => `\n$$\n${expr.trim()}\n$$\n`);
+  }
+  // Only normalize inline math if delimiters are balanced
+  const openParens = (result.match(/\\\(/g) ?? []).length;
+  const closeParens = (result.match(/\\\)/g) ?? []).length;
+  if (openParens > 0 && openParens === closeParens) {
+    result = result.replace(/\\\((.+?)\\\)/g, (_m, expr: string) => `$${String(expr).trim()}$`);
+  }
+  return result;
 }
 
 export function MarkdownRenderer({ content, citations = [], mode, chatId, onOpenCanvas, onCitationClick, onSubmitQuizAnswers }: MarkdownRendererProps) {
@@ -160,6 +171,7 @@ export function MarkdownRenderer({ content, citations = [], mode, chatId, onOpen
     if (mode === "quiz" || mode === "exam" || isQuizContent(content)) {
       baseContent = stripQuizMarkers(baseContent);
     }
+    baseContent = baseContent.replace(/<<\s*(?:quiz|flashcards)_(?:start|end)\s*>>/gi, "");
 
     if (citations.length === 0) {
       return baseContent.replace(/\n{3,}/g, "\n\n").trim();
@@ -210,7 +222,7 @@ export function MarkdownRenderer({ content, citations = [], mode, chatId, onOpen
   if (isQuizMode && isQuizContent(cleanContent)) {
     return <QuizReveal content={cleanContent} chatId={chatId} onSubmitAnswers={onSubmitQuizAnswers} />;
   }
-  if (mode === "flashcard" && isFlashcardContent(cleanContent)) {
+  if (isFlashcardContent(cleanContent) && (mode === "flashcard" || /(?:^|\n)\s*FRONT\s*:/i.test(cleanContent))) {
     return <FlashcardReveal content={cleanContent} />;
   }
   if (mode === "image") {

@@ -1,5 +1,7 @@
 "use client";
 
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+
 type DayData = {
   day: string;
   count: number;
@@ -16,42 +18,64 @@ function shortDayLabel(value: string) {
 }
 
 export function ActivityChart({ data, label }: ActivityChartProps) {
-  const max = Math.max(...data.map((d) => d.count), 1);
   const total = data.reduce((sum, day) => sum + day.count, 0);
   const activeDays = data.filter((day) => day.count > 0).length;
 
+  const chartData = data.map((d) => ({
+    name: shortDayLabel(d.day),
+    count: d.count,
+  }));
+
   return (
-    <div className="p-4">
+    <div className="p-5">
       <div className="mb-3 flex items-center justify-between gap-2">
-        <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">
+        <p className="text-xs text-[var(--text-secondary)]">
           {label ?? "Daily activity"}
         </p>
         <p className="text-xs text-[var(--text-secondary)]">
-          {total} messages • {activeDays}/{data.length} active days
+          {total} msgs · {activeDays}/{data.length} active
         </p>
       </div>
 
-      <div className="grid grid-cols-14 gap-1.5">
-        {data.map((d, index) => {
-          const height = Math.max(10, Math.round((d.count / max) * 84));
-          return (
-            <div key={d.day} className="group flex min-w-0 flex-col items-center gap-1">
-              <div className="relative flex h-24 w-full items-end">
-                <div
-                  className="w-full rounded-md bg-[var(--accent)]/90 transition-all duration-200 group-hover:bg-[var(--accent)]"
-                  style={{ height }}
-                />
-                <div className="pointer-events-none absolute -top-6 left-1/2 -translate-x-1/2 rounded bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[10px] opacity-0 transition group-hover:opacity-100">
-                  {d.count}
-                </div>
-              </div>
-              <span className="text-[9px] text-[var(--text-secondary)]">
-                {index % 2 === 0 ? shortDayLabel(d.day) : " "}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+      <ResponsiveContainer width="100%" height={112}>
+        <AreaChart data={chartData} margin={{ top: 4, right: 0, left: -32, bottom: 0 }}>
+          <defs>
+            <linearGradient id="activityFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="var(--accent-cyan)" stopOpacity={0.22} />
+              <stop offset="100%" stopColor="var(--accent-cyan)" stopOpacity={0.02} />
+            </linearGradient>
+          </defs>
+          <XAxis
+            dataKey="name"
+            tick={{ fontSize: 9, fill: "var(--text-secondary)" }}
+            tickLine={false}
+            axisLine={false}
+            interval={2}
+          />
+          <YAxis hide />
+          <Tooltip
+            contentStyle={{
+              background: "var(--bg-elevated)",
+              border: "1px solid var(--border-default)",
+              borderRadius: 8,
+              fontSize: 12,
+              color: "var(--text-primary)",
+            }}
+            itemStyle={{ color: "var(--accent-cyan)" }}
+            formatter={(value: number) => [value, "messages"]}
+            labelStyle={{ color: "var(--text-secondary)", marginBottom: 2 }}
+          />
+          <Area
+            type="monotone"
+            dataKey="count"
+            stroke="var(--accent-cyan)"
+            strokeWidth={1.5}
+            fill="url(#activityFill)"
+            dot={{ r: 2, fill: "var(--accent-cyan)", strokeWidth: 0 }}
+            activeDot={{ r: 4, fill: "var(--accent-cyan)", strokeWidth: 0 }}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
     </div>
   );
 }

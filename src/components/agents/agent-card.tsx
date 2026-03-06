@@ -11,7 +11,7 @@ type AgentCardProps = {
 export function AgentCard({ agent }: AgentCardProps) {
   return (
     <Link href={`/agents/${agent._id}`}>
-      <Card className="h-full transition hover:-translate-y-0.5 hover:bg-[var(--bg-secondary)]">
+      <Card className="h-full transition-all duration-200 hover:-translate-y-1 hover:shadow-[var(--shadow-hover)] hover:bg-[var(--bg-elevated)]">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <AgentAvatar avatarIcon={agent.avatarIcon} avatarEmoji={agent.avatarEmoji} category={agent.category} />

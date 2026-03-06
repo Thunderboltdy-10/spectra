@@ -24,45 +24,50 @@ export function TimeOfDayChart({ hourlyCounts, dailyPeaks }: TimeOfDayChartProps
 
   return (
     <div className="p-5">
-      <p className="mb-3 text-xs uppercase tracking-wide text-[var(--text-secondary)]">
-        Prompt activity by time (UTC)
+      <p className="mb-4 text-xs uppercase tracking-wide text-[var(--text-secondary)]">
+        Prompt activity by hour (UTC)
       </p>
 
-      <div className="mb-5 flex items-end gap-1.5" style={{ height: 210 }}>
+      {/* Heatmap strip — 24 cells in a grid */}
+      <div className="mb-1 grid grid-cols-24 gap-0.5">
         {safeHourly.map((count, hour) => {
-          const height = Math.max((count / max) * 180, 6);
+          const opacity = count === 0 ? 0.05 : Math.max(0.12, (count / max) * 0.88);
           return (
-            <div key={hour} className="group flex min-w-0 flex-1 flex-col items-center gap-1.5">
-              <div className="relative w-full">
-                <div
-                  className="mx-auto w-full max-w-[18px] rounded-t-md transition-all duration-200 group-hover:opacity-90"
-                  style={{
-                    height: `${height}px`,
-                    background: "linear-gradient(180deg, color-mix(in oklab, var(--accent-cyan) 88%, #7cd8ff), var(--accent-cyan))",
-                  }}
-                  title={`${hourLabel(hour)}: ${count} prompts`}
-                  aria-label={`${hourLabel(hour)}: ${count} prompts`}
-                />
-                <div className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 rounded bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[10px] opacity-0 transition group-hover:opacity-100">
-                  {count}
-                </div>
-              </div>
-              {hour % 3 === 0 ? <span className="text-[10px] text-[var(--text-secondary)]">{hourLabel(hour)}</span> : <span className="text-[10px] text-transparent">.</span>}
+            <div
+              key={hour}
+              title={`${hourLabel(hour)}: ${count} prompts`}
+              className="group relative aspect-square rounded-sm"
+              style={{ background: `color-mix(in oklab, var(--accent-cyan) ${Math.round(opacity * 100)}%, transparent)` }}
+            >
+              <span className="pointer-events-none absolute -top-7 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded bg-[var(--bg-elevated)] px-1.5 py-0.5 text-[10px] text-[var(--text-primary)] opacity-0 shadow-[var(--shadow-card)] transition group-hover:opacity-100 border border-[var(--border-default)]">
+                {hourLabel(hour)}: {count}
+              </span>
             </div>
           );
         })}
       </div>
 
+      {/* Hour labels */}
+      <div className="mb-5 grid grid-cols-24 gap-0.5">
+        {Array.from({ length: 24 }, (_, hour) => (
+          <div key={hour} className="text-center">
+            {hour % 6 === 0 ? (
+              <span className="text-[9px] text-[var(--text-secondary)]">{hour}</span>
+            ) : null}
+          </div>
+        ))}
+      </div>
+
       <div>
-        <p className="mb-2 text-xs uppercase tracking-wide text-[var(--text-secondary)]">Daily peak prompt windows</p>
+        <p className="mb-2 text-[10px] uppercase tracking-wide text-[var(--text-secondary)]">Daily peak windows</p>
         <div className="divide-y divide-[var(--border-default)]">
           {recentPeaks.length === 0 ? (
-            <p className="text-xs text-[var(--text-secondary)]">Not enough prompt activity yet.</p>
+            <p className="text-xs text-[var(--text-secondary)]">Not enough activity yet.</p>
           ) : (
             recentPeaks.map((item) => (
-              <div key={item.day} className="flex items-center justify-between py-2 text-xs">
+              <div key={item.day} className="flex items-center justify-between py-1.5 text-xs">
                 <span className="text-[var(--text-secondary)]">{item.day}</span>
-                <span className="font-medium text-[var(--text-primary)]">{hourLabel(item.hour)} ({item.count})</span>
+                <span className="font-medium text-[var(--text-primary)]">{hourLabel(item.hour)} · {item.count} msgs</span>
               </div>
             ))
           )}

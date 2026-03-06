@@ -197,6 +197,17 @@ function isExpensiveModel(modelId: string) {
   return /(opus|o3|o4|sonar-pro|gemini-2\.5-pro|gpt-5|claude-4)/i.test(modelId);
 }
 
+function modelProviderKey(modelId: string) {
+  const parts = modelId.toLowerCase().split("/").filter(Boolean);
+  if (parts.length === 0) return "unknown";
+  if (parts[0] === "openrouter" && parts[1]) return parts[1];
+  return parts[0];
+}
+
+function isLikelyVisionModel(modelId: string) {
+  return /(vision|multimodal|image|pixtral|llava|gpt-4o|gemini|claude-3|claude-4|qwen.*vl)/i.test(modelId);
+}
+
 function modelScoreBreakdown(params: {
   input: ModelRouteInput;
   modelId: string;
@@ -217,8 +228,17 @@ function modelScoreBreakdown(params: {
   }
 
   if (params.input.previousModelUsed && params.input.previousModelUsed === params.modelId) {
-    score += 0.05;
-    breakdown.push("conversation continuity +0.05");
+    score += 0.02;
+    breakdown.push("conversation continuity +0.02");
+  }
+
+  if (params.input.previousModelUsed && params.input.previousModelUsed !== params.modelId) {
+    const previousProvider = modelProviderKey(params.input.previousModelUsed);
+    const currentProvider = modelProviderKey(params.modelId);
+    if (previousProvider === currentProvider) {
+      score -= 0.05;
+      breakdown.push("provider diversity -0.05");
+    }
   }
 
   const agentBoost = params.input.agentTopModels?.find((item) => item.modelId === params.modelId);
@@ -477,12 +497,16 @@ function dynamicRouteFromCatalog(params: {
   if (params.input.routerMode === "manual" && params.input.manualModel) {
     const manualModelId = params.input.manualModel;
     const manualMeta = catalog.find((item) => item.modelId === manualModelId);
-    const allowed = manualMeta ? isModelAllowedInTier(manualMeta, params.input.spendingTier) : false;
+    const allowed = manualMeta
+      ? isModelAllowedInTier(manualMeta, params.input.spendingTier)
+      : enforceTier(manualModelId, params.input.spendingTier) === manualModelId;
     params.candidates.unshift({
       modelId: manualModelId,
       allowed,
       score: allowed ? 1 : 0,
-      reason: allowed ? "Manual selection" : "Manual model restricted by current budget tier",
+      reason: allowed
+        ? (manualMeta ? "Manual selection" : "Manual selection (not in catalog snapshot)")
+        : "Manual model restricted by current budget tier",
       eliminatedBecause: allowed ? undefined : `restricted by ${params.input.spendingTier}`,
     });
 
@@ -618,14 +642,26 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
       );
     }
 
+    const fallbackModels = fallbackFor(primaryModel, input.spendingTier);
+    const needsVisionFallback = multimodalNeeded && !isLikelyVisionModel(primaryModel);
+    const visionFirstFallbacks = needsVisionFallback
+      ? [
+          MODEL_CONFIG.multimodal,
+          ...fallbackModels,
+        ]
+          .filter((candidate) => candidate !== primaryModel)
+          .filter((candidate) => canUseInTier(candidate, input.spendingTier))
+          .sort((a, b) => Number(isLikelyVisionModel(b)) - Number(isLikelyVisionModel(a)))
+      : fallbackModels;
+
     return finalizeRoute({
       input,
       primaryModel,
-      fallbackModels: fallbackFor(primaryModel, input.spendingTier),
+      fallbackModels: [...new Set(visionFirstFallbacks)],
       verificationModel: input.mode === "marker" ? MODEL_CONFIG.verify : undefined,
       reason:
         primaryModel === input.manualModel
-          ? "Manual selection"
+          ? (needsVisionFallback ? "Manual selection with vision-capable fallback" : "Manual selection")
           : `Manual model restricted by ${input.spendingTier} tier`,
       autoEnhanced: false,
       searchEnabled: input.needsSearch && input.spendingTier !== "free_only",

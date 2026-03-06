@@ -123,16 +123,45 @@ function readPersistedState(): PersistedTimerState | null {
   }
 }
 
+function getInitialTimerState(): PersistedTimerState {
+  if (typeof window === "undefined") {
+    return {
+      phase: "work",
+      remainingMs: DEFAULT_WORK_MINUTES * 60 * 1000,
+      isRunning: false,
+      phaseEndAt: null,
+      phaseStartedAt: null,
+      completedSessions: 0,
+      workMinutes: DEFAULT_WORK_MINUTES,
+      breakMinutes: DEFAULT_BREAK_MINUTES,
+    };
+  }
+  const restored = readPersistedState();
+  if (restored) return restored;
+  return {
+    phase: "work",
+    remainingMs: DEFAULT_WORK_MINUTES * 60 * 1000,
+    isRunning: false,
+    phaseEndAt: null,
+    phaseStartedAt: null,
+    completedSessions: 0,
+    workMinutes: DEFAULT_WORK_MINUTES,
+    breakMinutes: DEFAULT_BREAK_MINUTES,
+  };
+}
+
 export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTimerProps) {
-  const [phase, setPhase] = useState<TimerPhase>("work");
-  const [workMinutes, setWorkMinutes] = useState(DEFAULT_WORK_MINUTES);
-  const [breakMinutes, setBreakMinutes] = useState(DEFAULT_BREAK_MINUTES);
-  const [remainingMs, setRemainingMs] = useState<number>(DEFAULT_WORK_MINUTES * 60 * 1000);
-  const [isRunning, setIsRunning] = useState(false);
-  const [phaseEndAt, setPhaseEndAt] = useState<number | null>(null);
-  const [phaseStartedAt, setPhaseStartedAt] = useState<number | null>(null);
-  const [completedSessions, setCompletedSessions] = useState(0);
-  const hydratedRef = useRef(false);
+  const initialState = useMemo(getInitialTimerState, []);
+  const [phase, setPhase] = useState<TimerPhase>(initialState.phase);
+  const [workMinutes, setWorkMinutes] = useState(initialState.workMinutes);
+  const [breakMinutes, setBreakMinutes] = useState(initialState.breakMinutes);
+  const [remainingMs, setRemainingMs] = useState<number>(initialState.remainingMs);
+  const [isRunning, setIsRunning] = useState(initialState.isRunning);
+  const [phaseEndAt, setPhaseEndAt] = useState<number | null>(initialState.phaseEndAt);
+  const [phaseStartedAt, setPhaseStartedAt] = useState<number | null>(initialState.phaseStartedAt);
+  const [completedSessions, setCompletedSessions] = useState(initialState.completedSessions);
+  const [controlFlash, setControlFlash] = useState<"start" | "pause" | null>(null);
+  const hydratedRef = useRef(true);
   const transitionLockRef = useRef(false);
 
   const remainingSeconds = Math.max(0, Math.ceil(remainingMs / 1000));
@@ -161,20 +190,7 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
     );
   }, [display, isRunning, progress]);
 
-  useEffect(() => {
-    const restored = readPersistedState();
-    if (restored) {
-      setPhase(restored.phase);
-      setWorkMinutes(restored.workMinutes);
-      setBreakMinutes(restored.breakMinutes);
-      setRemainingMs(restored.remainingMs);
-      setIsRunning(restored.isRunning);
-      setPhaseEndAt(restored.phaseEndAt);
-      setPhaseStartedAt(restored.phaseStartedAt);
-      setCompletedSessions(restored.completedSessions);
-    }
-    hydratedRef.current = true;
-  }, []);
+  // Hydration now happens synchronously via getInitialTimerState in useState initializers.
 
   useEffect(() => {
     if (!hydratedRef.current) return;
@@ -293,6 +309,7 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
       setRemainingMs(nextRemaining);
       setIsRunning(false);
       setPhaseEndAt(null);
+      setControlFlash("pause");
       return;
     }
 
@@ -300,6 +317,7 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
     setIsRunning(true);
     setPhaseEndAt(now + remainingMs);
     setPhaseStartedAt((prev) => prev ?? now - Math.max(0, duration - remainingMs));
+    setControlFlash("start");
   }
 
   function handleReset() {
@@ -348,6 +366,12 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
     return () => window.clearInterval(interval);
   }, [advancePhase, isRunning, phaseEndAt]);
 
+  useEffect(() => {
+    if (!controlFlash) return;
+    const timer = window.setTimeout(() => setControlFlash(null), 750);
+    return () => window.clearTimeout(timer);
+  }, [controlFlash]);
+
   if (!open && !showMiniIndicator) {
     return null;
   }
@@ -370,72 +394,86 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
     );
   }
 
+  const phaseColor = phase === "work" ? "var(--accent-cyan)" : "var(--success)";
+
   return (
     <div
       className={cn(
-        "w-[328px] rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)]",
+        "w-full max-w-[340px] rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)]",
         className,
       )}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-[0.14em] text-[var(--text-secondary)]">
-            <Clock3 className="h-3.5 w-3.5" />
-            Study timer
-          </p>
-          <h3 className="mt-1 text-sm font-semibold">{phaseLabel}</h3>
+      {/* Header */}
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ backgroundColor: phaseColor, boxShadow: isRunning ? `0 0 6px ${phaseColor}` : "none" }}
+          />
+          <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-secondary)]">{phaseLabel}</p>
         </div>
         <button
           type="button"
           onClick={onClose}
           aria-label="Close study timer"
-          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
         >
-          <X className="h-4 w-4" />
+          <X className="h-3.5 w-3.5" />
         </button>
       </div>
 
-      <div className="mt-3 flex items-center gap-4">
-        <div className="relative h-28 w-28 shrink-0">
-          <svg viewBox="0 0 100 100" className="h-28 w-28 -rotate-90">
-            <circle
-              cx="50"
-              cy="50"
-              r={radius}
-              stroke="var(--border-default)"
-              strokeWidth="6"
-              fill="transparent"
-            />
-            <circle
-              cx="50"
-              cy="50"
-              r={radius}
-              stroke={phase === "work" ? "var(--accent-cyan)" : "var(--success)"}
-              strokeWidth="6"
-              fill="transparent"
-              strokeLinecap="round"
-              strokeDasharray={circumference}
-              strokeDashoffset={strokeOffset}
-            />
-          </svg>
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-lg font-semibold">
-            {display}
-          </div>
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <p className="text-sm text-[var(--text-secondary)]">
-            {phase === "work" ? "Stay focused until the timer ends." : "Take a short reset before the next round."}
-          </p>
-          <p className="mt-2 text-xs text-[var(--text-secondary)]">
-            Completed sessions: <span className="font-semibold text-[var(--text-primary)]">{completedSessions}</span>
-          </p>
-        </div>
+      {/* Large time display */}
+      <div className="mb-1 text-center">
+        <p
+          className="font-display text-5xl font-semibold leading-none tracking-tight text-[var(--text-primary)]"
+          style={{ fontVariantNumeric: "tabular-nums" }}
+        >
+          {display}
+        </p>
+        <p className="mt-2 text-xs text-[var(--text-secondary)]">
+          {completedSessions > 0 ? `${completedSessions} session${completedSessions !== 1 ? "s" : ""} completed` : "Ready to focus"}
+        </p>
       </div>
 
+      {/* Linear progress bar */}
+      <div className="my-4 h-1.5 w-full overflow-hidden rounded-full bg-[var(--bg-secondary)]">
+        <div
+          className="h-full rounded-full transition-all duration-500"
+          style={{
+            width: `${Math.round(progress * 100)}%`,
+            background: `linear-gradient(90deg, ${phaseColor}, color-mix(in oklab, ${phaseColor} 72%, #fff))`,
+          }}
+        />
+      </div>
+
+      {/* Controls */}
+      <div className="flex items-center justify-center gap-2">
+        <Button
+          type="button"
+          variant="secondary"
+          size="icon"
+          className={cn("h-10 w-10 rounded-xl transition", controlFlash && "animate-subtle-pulse")}
+          onClick={handleStartPause}
+          aria-label={isRunning ? "Pause" : "Start"}
+        >
+          {isRunning ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-xl text-[var(--text-secondary)]"
+          onClick={handleReset}
+          aria-label="Reset"
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+
+      {/* Duration adjusters */}
       <div className="mt-4 grid grid-cols-2 gap-2">
-        <label className="rounded-xl bg-[var(--bg-secondary)] px-2 py-1.5">
-          <span className="mb-1 block text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Focus min</span>
+        <label className="rounded-xl bg-[var(--bg-secondary)] px-2.5 py-2">
+          <span className="mb-0.5 block text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Focus min</span>
           <input
             type="number"
             min={MIN_WORK_MINUTES}
@@ -445,8 +483,8 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
             className="w-full appearance-none bg-transparent text-sm font-semibold outline-none [appearance:textfield]"
           />
         </label>
-        <label className="rounded-xl bg-[var(--bg-secondary)] px-2 py-1.5">
-          <span className="mb-1 block text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Break min</span>
+        <label className="rounded-xl bg-[var(--bg-secondary)] px-2.5 py-2">
+          <span className="mb-0.5 block text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Break min</span>
           <input
             type="number"
             min={MIN_BREAK_MINUTES}
@@ -458,25 +496,8 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
         </label>
       </div>
       {isRunning ? (
-        <p className="mt-2 text-[10px] text-[var(--text-secondary)]">Duration updates apply after reset or the next phase change.</p>
+        <p className="mt-2 text-[10px] text-[var(--text-secondary)]">Duration updates apply after reset or next phase.</p>
       ) : null}
-
-      <div className="mt-4 grid grid-cols-3 gap-2">
-        <Button type="button" variant="secondary" size="sm" className="gap-1.5" onClick={handleStartPause}>
-          {isRunning ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-          {isRunning ? "Pause" : "Start"}
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          className="col-span-2 gap-1.5"
-          onClick={handleReset}
-        >
-          <RotateCcw className="h-3.5 w-3.5" />
-          Reset current phase
-        </Button>
-      </div>
     </div>
   );
 }

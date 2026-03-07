@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useClerk } from "@clerk/nextjs";
 import { usePathname } from "next/navigation";
-import { Settings2, X } from "lucide-react";
+import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { rightPanelSurfaceClassName } from "@/components/ui/right-panel-surface";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -30,28 +30,22 @@ export function GlobalSettingsDrawer() {
         onClick={() => setOpen(false)}
       />
       <aside className={`${rightPanelSurfaceClassName()} absolute inset-y-0 right-0 w-[92vw] max-w-[400px] border-l p-4 shadow-[var(--shadow-soft)]`}>
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Settings</p>
-            <h3 className="font-display text-2xl text-[var(--text-primary)]">Quick Preferences</h3>
-          </div>
+        <div className="mb-5 flex items-center justify-between">
+          <h3 className="font-display text-xl text-[var(--text-primary)]">Settings</h3>
           <Button type="button" variant="ghost" size="icon" onClick={() => setOpen(false)} aria-label="Close settings">
             <X className="h-4 w-4" />
           </Button>
         </div>
 
-        <div className="space-y-3">
-          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-            <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Appearance</p>
-            <div className="mt-2 flex items-center justify-between">
-              <p className="text-sm text-[var(--text-primary)]">Theme</p>
-              <ThemeToggle />
-            </div>
-          </section>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5">
+            <p className="text-sm text-[var(--text-primary)]">Theme</p>
+            <ThemeToggle />
+          </div>
 
-          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-            <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Account</p>
-            <div className="mt-2 flex flex-wrap gap-2">
+          <div className="space-y-2">
+            <h4 className="text-xs font-medium text-[var(--text-secondary)]">Account</h4>
+            <div className="flex flex-wrap gap-2">
               <Button type="button" size="sm" variant="secondary" onClick={() => openUserProfile()}>
                 Manage account
               </Button>
@@ -59,24 +53,15 @@ export function GlobalSettingsDrawer() {
                 Sign out
               </Button>
             </div>
-          </section>
+          </div>
 
-          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-            <div className="inline-flex items-center gap-1 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-              <Settings2 className="h-3.5 w-3.5" />
-              Session
+          {pathname !== "/" && (
+            <div className="border-t border-[var(--border-default)] pt-3">
+              <Button type="button" size="sm" variant="secondary" onClick={() => (window.location.href = "/")}>
+                Open chat controls
+              </Button>
             </div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {pathname === "/" ? null : (
-                <Button type="button" size="sm" variant="secondary" onClick={() => (window.location.href = "/")}>
-                  Open chat controls
-                </Button>
-              )}
-            </div>
-            <p className="mt-2 text-sm text-[var(--text-secondary)]">
-              Open this drawer from any page with the settings button or command palette. Cookie controls are available in the command palette.
-            </p>
-          </section>
+          )}
         </div>
       </aside>
     </div>

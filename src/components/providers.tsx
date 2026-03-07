@@ -17,7 +17,15 @@ export function Providers({ children }: { children: React.ReactNode }) {
             {children}
             <GlobalSettingsDrawer />
             <CookieConsentManager />
-            <Toaster theme="system" position="top-right" richColors />
+            <Toaster
+              theme="system"
+              position="top-right"
+              richColors
+              toastOptions={{
+                className: "!rounded-xl !border-[var(--border-default)] !bg-[var(--bg-elevated)] !text-[var(--text-primary)] !shadow-[var(--shadow-soft)]",
+                descriptionClassName: "!text-[var(--text-secondary)]",
+              }}
+            />
           </CommandPaletteProvider>
         </PanelProvider>
       </SidebarProvider>

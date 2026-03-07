@@ -221,52 +221,43 @@ function SettingsView({
 
   return (
     <div className="space-y-4">
-      <Tabs defaultValue="behavior" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="behavior">Behavior</TabsTrigger>
-          <TabsTrigger value="resources">Resources</TabsTrigger>
-          <TabsTrigger value="appearance">Appearance</TabsTrigger>
-          <TabsTrigger value="experimental">Experimental</TabsTrigger>
+      <Tabs defaultValue="assistant" className="space-y-4">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="assistant">Assistant</TabsTrigger>
+          <TabsTrigger value="app">App &amp; Account</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="behavior" className="space-y-4">
+        <TabsContent value="assistant" className="space-y-4">
           <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-        <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Automation profile</h3>
-        <div className="mt-2 grid gap-2">
-          <AutoChoice label="Auto-enhance prompt" value={autoEnhancePrompt} onChange={onAutoEnhancePromptChange} />
-          <AutoChoice label="Auto-thinking" value={autoThinking} onChange={onAutoThinkingChange} />
-          <AutoChoice label="Auto-search" value={autoSearch} onChange={onAutoSearchChange} />
-          <AutoChoice label="Auto-compaction" value={autoCompaction} onChange={onAutoCompactionChange} />
-        </div>
-        <div className="mt-3 grid gap-2 md:grid-cols-2">
-          <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
-            <div>
-              <p className="text-sm">Auto-open live progress</p>
-              <p className="text-xs text-[var(--text-secondary)]">Open orchestration panel while streaming</p>
+            <h3 className="mb-2 text-xs font-medium text-[var(--text-secondary)]">Automation profile</h3>
+            <div className="grid gap-2">
+              <AutoChoice label="Auto-enhance prompt" value={autoEnhancePrompt} onChange={onAutoEnhancePromptChange} />
+              <AutoChoice label="Auto-thinking" value={autoThinking} onChange={onAutoThinkingChange} />
+              <AutoChoice label="Auto-search" value={autoSearch} onChange={onAutoSearchChange} />
+              <AutoChoice label="Auto-compaction" value={autoCompaction} onChange={onAutoCompactionChange} />
             </div>
-            <Switch checked={liveProgressAutoOpen} onCheckedChange={onLiveProgressAutoOpenChange} />
-          </div>
+          </section>
 
           <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
-            <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Current model path</p>
+            <p className="text-[11px] text-[var(--text-secondary)]">Current model path</p>
             <p className="mt-0.5 text-sm font-medium text-[var(--text-primary)]">{modelDisplayName}</p>
             <p className="text-xs text-[var(--text-secondary)]">{modelDisplayProvider}</p>
-            <div className="mt-2 flex flex-wrap gap-1">
-              {modelTags
-                .filter((tag) => !/\bfree\b/i.test(tag))
-                .slice(0, 5)
-                .map((tag) => (
-                  <span
-                    key={tag}
-                    className="rounded-full border border-[var(--border-default)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]"
-                  >
-                    {tag}
-                  </span>
-                ))}
-            </div>
+            {modelTags.filter((tag) => !/\bfree\b/i.test(tag)).length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {modelTags
+                  .filter((tag) => !/\bfree\b/i.test(tag))
+                  .slice(0, 5)
+                  .map((tag) => (
+                    <span
+                      key={tag}
+                      className="rounded-full border border-[var(--border-default)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]"
+                    >
+                      {tag}
+                    </span>
+                  ))}
+              </div>
+            )}
           </div>
-        </div>
-          </section>
 
           <div className="space-y-2">
             <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
@@ -290,121 +281,100 @@ function SettingsView({
               </div>
               <Switch checked={memoryEnabled} onCheckedChange={(value) => persistToggle("ai-school:memory-enabled", value, setMemoryEnabled)} />
             </div>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="resources" className="space-y-4">
-          <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
-            <div>
-              <p className="text-sm">Auto-save conversation files</p>
-              <p className="text-xs text-[var(--text-secondary)]">Store newly attached files in My Files by default</p>
-            </div>
-            <Switch
-              checked={autoSaveConversationFilesToLibrary}
-              onCheckedChange={onAutoSaveConversationFilesToLibraryChange}
-            />
-          </div>
-
-          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">My files</h3>
-            <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
-              Saved in personal library: {personalResources.length}/{FILE_LIMITS.maxPersonalLibraryFiles}
-            </p>
-          </div>
-          <label className="inline-flex cursor-pointer items-center rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1 text-xs text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]">
-            Attach files
-            <input
-              type="file"
-              className="hidden"
-              multiple
-              onChange={(event) => {
-                const files = Array.from(event.target.files ?? []);
-                if (files.length > 0) {
-                  onUploadPersonalFiles(files);
-                }
-                event.currentTarget.value = "";
-              }}
-            />
-          </label>
-        </div>
-        <div className="mt-3 max-h-[min(56vh,34rem)] space-y-2 overflow-y-auto pr-1">
-          {personalResources.length === 0 ? (
-            <p className="text-xs text-[var(--text-secondary)]">No personal files yet.</p>
-          ) : (
-            personalResources.map((resource) => (
-              <div
-                key={resource._id}
-                className="flex items-center justify-between gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-medium text-[var(--text-primary)]">{resource.filename}</p>
-                  <p className="inline-flex items-center gap-1 text-[10px] text-[var(--text-secondary)]">
-                    {(() => {
-                      const status = resourceStatusMeta(resource.status);
-                      return (
-                        <>
-                          <status.Icon className={`h-3 w-3 ${status.iconClassName}`} />
-                          {status.label}
-                        </>
-                      );
-                    })()}
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-[var(--danger)]"
-                  onClick={() => onDeleteResource(resource._id)}
-                >
-                  <X className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            ))
-          )}
-        </div>
-          </section>
-        </TabsContent>
-
-        <TabsContent value="appearance" className="space-y-4">
-          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-            <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Workspace look</h3>
-            <div className="mt-3 rounded-2xl border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-secondary)_88%,white)] p-4">
-              <p className="font-display text-lg text-[var(--text-primary)]">Warm paper theme</p>
-              <p className="mt-2 text-sm text-[var(--text-secondary)]">
-                This workspace currently uses the shared paper-neutral palette documented in the UI source of truth.
-                Theme switching is intentionally limited until school branding controls settle.
-              </p>
-            </div>
-          </section>
-
-          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
               <div>
                 <p className="text-sm">Auto-open live progress</p>
                 <p className="text-xs text-[var(--text-secondary)]">Open orchestration panel while streaming</p>
               </div>
               <Switch checked={liveProgressAutoOpen} onCheckedChange={onLiveProgressAutoOpenChange} />
             </div>
-          </section>
-        </TabsContent>
+          </div>
 
-        <TabsContent value="experimental" className="space-y-4">
+          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xs font-medium text-[var(--text-secondary)]">My files</h3>
+                <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+                  {personalResources.length}/{FILE_LIMITS.maxPersonalLibraryFiles} in library
+                </p>
+              </div>
+              <label className="inline-flex cursor-pointer items-center rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1 text-xs text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]">
+                Attach files
+                <input
+                  type="file"
+                  className="hidden"
+                  multiple
+                  onChange={(event) => {
+                    const files = Array.from(event.target.files ?? []);
+                    if (files.length > 0) {
+                      onUploadPersonalFiles(files);
+                    }
+                    event.currentTarget.value = "";
+                  }}
+                />
+              </label>
+            </div>
+            <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 mt-2">
+              <div>
+                <p className="text-sm">Auto-save conversation files</p>
+                <p className="text-xs text-[var(--text-secondary)]">Store newly attached files in My Files</p>
+              </div>
+              <Switch
+                checked={autoSaveConversationFilesToLibrary}
+                onCheckedChange={onAutoSaveConversationFilesToLibraryChange}
+              />
+            </div>
+            <div className="mt-3 max-h-[min(40vh,26rem)] space-y-2 overflow-y-auto pr-1">
+              {personalResources.length === 0 ? (
+                <p className="text-xs text-[var(--text-secondary)]">No personal files yet.</p>
+              ) : (
+                personalResources.map((resource) => (
+                  <div
+                    key={resource._id}
+                    className="flex items-center justify-between gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-medium text-[var(--text-primary)]">{resource.filename}</p>
+                      <p className="inline-flex items-center gap-1 text-[10px] text-[var(--text-secondary)]">
+                        {(() => {
+                          const status = resourceStatusMeta(resource.status);
+                          return (
+                            <>
+                              <status.Icon className={`h-3 w-3 ${status.iconClassName}`} />
+                              {status.label}
+                            </>
+                          );
+                        })()}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-[var(--danger)]"
+                      onClick={() => onDeleteResource(resource._id)}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+
           <section className="space-y-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-            <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Advanced controls</h3>
+            <h3 className="text-xs font-medium text-[var(--text-secondary)]">Advanced</h3>
             <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
               <div>
                 <p className="text-sm">Document generation</p>
-                <p className="text-xs text-[var(--text-secondary)]">Enable inline preview and export panels for generated documents</p>
+                <p className="text-xs text-[var(--text-secondary)]">Inline preview and export for generated documents</p>
               </div>
               <Switch checked={documentModeEnabled} onCheckedChange={(value) => persistToggle("ai-school:document-mode-enabled", value, setDocumentModeEnabled)} />
             </div>
             <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
               <div>
                 <p className="text-sm">Verbose multi-agent traces</p>
-                <p className="text-xs text-[var(--text-secondary)]">Keep richer collaboration notices during complex runs</p>
+                <p className="text-xs text-[var(--text-secondary)]">Richer collaboration notices during complex runs</p>
               </div>
               <Switch checked={multiAgentVerbose} onCheckedChange={(value) => persistToggle("ai-school:multi-agent-verbose", value, setMultiAgentVerbose)} />
             </div>
@@ -417,32 +387,34 @@ function SettingsView({
             </div>
           </section>
         </TabsContent>
-      </Tabs>
 
-      <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Monthly activity</h3>
-          <span className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">{usageLabel}</span>
-        </div>
-        <div className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
-          <div
-            className="h-full rounded-full bg-[var(--gradient-brand)]"
-            style={{ width: `${typeof ratio === "number" ? Math.max(ratio > 0 ? 2 : 0, ratio * 100) : 0}%` }}
-          />
-        </div>
-        <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
-          {percentUsed === null
-            ? "No tracked activity yet"
-            : `${percentUsed > 0 && percentUsed < 1 ? "<1" : Number.isInteger(percentUsed) ? percentUsed.toFixed(0) : percentUsed.toFixed(1)}% utilization`}
-        </p>
-        {userSpending ? (
-          <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
-            {typeof userSpending.monthlyTokens === "number"
-              ? `${Math.max(0, userSpending.monthlyTokens).toLocaleString()} tokens this month`
-              : `${Math.max(0, userSpending.totalCostCents ?? 0).toLocaleString()} cents this month`}
-          </p>
-        ) : null}
-      </section>
+        <TabsContent value="app" className="space-y-4">
+          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-medium text-[var(--text-secondary)]">Monthly activity</h3>
+              <span className="text-[10px] text-[var(--text-secondary)]">{usageLabel}</span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
+              <div
+                className="h-full rounded-full bg-[var(--gradient-brand)]"
+                style={{ width: `${typeof ratio === "number" ? Math.max(ratio > 0 ? 2 : 0, ratio * 100) : 0}%` }}
+              />
+            </div>
+            <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+              {percentUsed === null
+                ? "No tracked activity yet"
+                : `${percentUsed > 0 && percentUsed < 1 ? "<1" : Number.isInteger(percentUsed) ? percentUsed.toFixed(0) : percentUsed.toFixed(1)}% utilization`}
+            </p>
+            {userSpending ? (
+              <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+                {typeof userSpending.monthlyTokens === "number"
+                  ? `${Math.max(0, userSpending.monthlyTokens).toLocaleString()} tokens this month`
+                  : `${Math.max(0, userSpending.totalCostCents ?? 0).toLocaleString()} cents this month`}
+              </p>
+            ) : null}
+          </section>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
@@ -575,7 +547,7 @@ function orchestrationStage(params: {
   if (params.streamPhase === "thinking") return "thinking";
   if (params.streamPhase === "generating") return "generating";
   if (params.streamPhase === "synthesizing") return "synthesizing";
-  if (!params.sending) return "verifying";
+  if (!params.sending) return "complete";
   if (params.collaboratorPhase === "synthesizing") return "generating";
   if (params.activeCollaborators.length > 0 && params.searchEnabled) return "searching";
   if (params.activeCollaborators.length > 0) return "generating";
@@ -610,7 +582,7 @@ function OrchestrationView({
     streamPhase,
     searchEnabled,
   });
-  const steps = ["compacting", "routing", "searching", "thinking", "generating", "synthesizing", "verifying"] as const;
+  const steps = ["compacting", "routing", "searching", "thinking", "generating", "synthesizing", "complete"] as const;
   const stageIndex = steps.indexOf(stage);
   const selectedModel = routeTrace?.selected.modelId || lastModelUsed;
   const selectedReason =
@@ -680,7 +652,8 @@ function OrchestrationView({
         <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Progress</p>
         <ol className="space-y-1.5">
           {steps.map((item, index) => {
-            const done = !sending || index < stageIndex;
+            const isComplete = stage === "complete";
+            const done = isComplete || (!sending && index < steps.length) || (sending && index < stageIndex);
             const active = sending && index === stageIndex;
             return (
               <li key={item} className="flex items-center gap-2">
@@ -694,7 +667,7 @@ function OrchestrationView({
                   }`}
                 />
                 <span className={`text-xs capitalize ${active ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
-                  {item}
+                  {item === "complete" ? (isComplete ? "Done" : "Completing") : item}
                 </span>
               </li>
             );
@@ -1030,7 +1003,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
         }
       >
         <div
-          className={`flex min-h-[72px] items-center justify-between ${docked ? "shadow-[0_1px_0_var(--border-default)] px-5 py-2.5" : "mb-4"}`}
+          className={`flex items-center justify-between ${docked ? "min-h-[56px] shadow-[0_1px_0_var(--border-default)] px-5 py-2.5" : "min-h-[56px] mb-4"}`}
         >
           <div className="min-w-0">
             <p className="text-[9px] uppercase tracking-[0.14em] text-[var(--text-secondary)] truncate">{current.subtitle}</p>

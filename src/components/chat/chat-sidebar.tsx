@@ -475,7 +475,7 @@ export function ChatSidebar({
                 className={cn(
                   "flex items-center gap-2.5 px-3 py-2 text-sm transition-colors",
                   active
-                    ? "border-l-2 border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,transparent)] pl-[10px] text-[var(--text-primary)]"
+                    ? "border-l-2 border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)] pl-[10px] text-[var(--text-primary)]"
                     : "border-l-2 border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
                 )}
               >
@@ -662,21 +662,6 @@ export function ChatSidebar({
       </div>
 
       <div className="mt-auto border-t border-[var(--border-default)] pt-2">
-        {typeof usagePercent === "number" && (
-          <div
-            className="mb-2 h-0.5 w-full overflow-hidden bg-[var(--bg-secondary)]"
-            title={`Monthly activity: ${usagePercentLabel}`}
-          >
-            <div
-              className="h-full transition-all"
-              style={{
-                width: `${Math.max(usagePercent > 0 ? 3 : 0, usagePercent)}%`,
-                background: "var(--gradient-brand)",
-              }}
-            />
-          </div>
-        )}
-
         <GlobalUtilityDock placement="profile-bar" className="mb-2 w-full" />
 
         <div className="flex items-center gap-2 px-1">
@@ -715,7 +700,7 @@ export function ChatSidebar({
             </div>
           </div>
           <ThemeToggle />
-          <Button type="button" variant="secondary" size="icon" className="h-7 w-7" onClick={onOpenSettings} title="Open global settings">
+          <Button type="button" variant="secondary" size="icon" className="h-8 w-8" onClick={onOpenSettings} title="Open global settings">
             <Settings2 className="h-3.5 w-3.5" />
           </Button>
         </div>

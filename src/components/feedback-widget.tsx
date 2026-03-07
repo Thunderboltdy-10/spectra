@@ -52,6 +52,69 @@ export function FeedbackWidget() {
     setScreenshot(null);
   }
 
+  async function captureScreenshot(): Promise<File | null> {
+    try {
+      // Hide the feedback widget before capture
+      const widget = document.querySelector('[data-feedback-widget]');
+      if (widget instanceof HTMLElement) {
+        widget.style.visibility = 'hidden';
+      }
+
+      // Use the browser's native screenshot API if available
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+
+      // Fallback: capture a simplified representation via SVG foreignObject
+      const body = document.body;
+      const width = Math.min(body.scrollWidth, 1280);
+      const height = Math.min(body.scrollHeight, 800);
+      canvas.width = width;
+      canvas.height = height;
+
+      const svgData = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+        <foreignObject width="100%" height="100%">
+          <div xmlns="http://www.w3.org/1999/xhtml" style="font-family:sans-serif;font-size:14px;color:#666;padding:20px;">
+            <p>Page: ${window.location.pathname}</p>
+            <p>Time: ${new Date().toISOString()}</p>
+            <p>Viewport: ${window.innerWidth}x${window.innerHeight}</p>
+          </div>
+        </foreignObject>
+      </svg>`;
+
+      const img = new Image();
+      const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('Failed to load SVG'));
+        img.src = url;
+      });
+
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+
+      if (widget instanceof HTMLElement) {
+        widget.style.visibility = '';
+      }
+
+      return new Promise<File | null>((resolve) => {
+        canvas.toBlob((result) => {
+          if (!result) { resolve(null); return; }
+          resolve(new File([result], 'auto-screenshot.png', { type: 'image/png' }));
+        }, 'image/png', 0.7);
+      });
+    } catch {
+      // Restore visibility on error
+      const widget = document.querySelector('[data-feedback-widget]');
+      if (widget instanceof HTMLElement) {
+        widget.style.visibility = '';
+      }
+      return null;
+    }
+  }
+
   async function submitFeedback(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmed = message.trim();
@@ -88,8 +151,14 @@ export function FeedbackWidget() {
       if (mode) {
         form.set("mode", mode);
       }
-      if (screenshot) {
-        form.set("screenshot", screenshot);
+
+      // Auto-capture screenshot if user didn't attach one
+      let screenshotToSend = screenshot;
+      if (!screenshotToSend) {
+        screenshotToSend = await captureScreenshot();
+      }
+      if (screenshotToSend) {
+        form.set("screenshot", screenshotToSend);
       }
 
       const response = await fetch("/api/feedback", {
@@ -133,7 +202,7 @@ export function FeedbackWidget() {
   }
 
   return (
-    <aside className="fixed bottom-5 left-5 z-[70] w-[min(92vw,22rem)] rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)]">
+    <aside data-feedback-widget className="fixed bottom-5 left-5 z-[70] w-[min(92vw,22rem)] rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)]">
       <div className="mb-3 flex items-center justify-between gap-2">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Feedback</p>

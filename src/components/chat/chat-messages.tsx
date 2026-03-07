@@ -289,19 +289,18 @@ export function ChatMessages({
 
   const streamingStatus = (() => {
     switch (streamPhase) {
-      case "compacting": return "Compacting...";
-      case "routing": return "Routing...";
-      case "searching": return "Searching...";
-      case "thinking": return "Thinking...";
-      case "synthesizing": return "Synthesizing...";
-      case "generating": return "Drafting...";
+      case "compacting": return "Compacting context";
+      case "routing": return "Selecting model";
+      case "searching": return "Checking sources";
+      case "thinking": return "Reasoning";
+      case "synthesizing": return "Formatting result";
+      case "generating": return "Generating response";
       default:
-        if (collaboratorPhase === "synthesizing") return "Synthesizing...";
-        return lastAutoResult?.searchEnabled
-          ? "Searching..."
-          : activeCollaborators.length > 0 || thinkingLevel !== "low"
-            ? "Thinking..."
-            : "Drafting...";
+        if (collaboratorPhase === "synthesizing") return "Formatting result";
+        if (lastAutoResult?.searchEnabled) return "Using search";
+        if (activeCollaborators.length > 0) return "Running specialists";
+        if (thinkingLevel !== "low") return "Reasoning";
+        return "Generating response";
     }
   })();
   const activeProvider = lastModelUsed?.split("/")[0] ?? "openrouter";
@@ -741,46 +740,68 @@ export function ChatMessages({
               </div>
             </article>
           ) : visibleDraftResponse ? (
-            <article className="chat-fade-in flex justify-start">
-              <div className="w-full max-w-5xl px-1 py-1">
-                <div className="mb-2 inline-flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-                  <ProviderLogo provider={activeProvider} modelId={lastModelUsed} size={12} className="h-5 w-5 rounded-md" />
-                  <span>{modelLabel(lastModelUsed)} · {streamingStatus}</span>
-                </div>
-                <div>
-                  {hasRealThinking && draftThinking ? (
-                    <ThinkingBlock content={draftThinking} streaming />
-                  ) : null}
-                  {renderDraftMarkdown(visibleDraftResponse)}
-                  {showStreamCursor ? (
-                    <span className={`stream-cursor ${sending ? "" : "stream-cursor--fade"}`} aria-hidden>
-                      |
-                    </span>
-                  ) : null}
+            <article className="chat-fade-in flex justify-start" aria-label="Assistant response">
+              <div className="w-full max-w-5xl xl:max-w-6xl">
+                <div className="message-journal flex min-w-0 items-start gap-3 px-1 py-4">
+                  <ProviderLogo
+                    provider={activeProvider}
+                    modelId={lastModelUsed}
+                    className="mt-0.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-[var(--text-secondary)]">
+                      <span>{modelLabel(lastModelUsed)}</span>
+                      <span className="h-1 w-1 rounded-full bg-[var(--border-default)]" />
+                      <span className="thinking-wave">{streamingStatus}</span>
+                    </div>
+                    {hasRealThinking && draftThinking ? (
+                      <ThinkingBlock content={draftThinking} streaming />
+                    ) : null}
+                    {renderDraftMarkdown(visibleDraftResponse)}
+                    {showStreamCursor ? (
+                      <span className={`stream-cursor ${sending ? "" : "stream-cursor--fade"}`} aria-hidden>
+                        |
+                      </span>
+                    ) : null}
+                    <div className="mt-5 flex flex-wrap items-center gap-1.5 opacity-40">
+                      <span className="h-7 w-14 animate-pulse rounded bg-[var(--bg-secondary)]" />
+                      <span className="h-7 w-20 animate-pulse rounded bg-[var(--bg-secondary)]" />
+                    </div>
+                  </div>
                 </div>
               </div>
             </article>
           ) : null}
 
           {sending && !visibleDraftResponse && (
-            <div className="chat-fade-in">
-              <div className="flex items-center gap-3">
-                <ThinkingMessages />
+            <article className="chat-fade-in flex justify-start" aria-label="Assistant thinking">
+              <div className="w-full max-w-5xl xl:max-w-6xl">
+                <div className="message-journal flex min-w-0 items-start gap-3 px-1 py-4">
+                  <ProviderLogo
+                    provider={activeProvider}
+                    modelId={lastModelUsed}
+                    className="mt-0.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-[var(--text-secondary)]">
+                      <span>{modelLabel(lastModelUsed)}</span>
+                      <span className="h-1 w-1 rounded-full bg-[var(--border-default)]" />
+                      <span className="thinking-wave">{streamingStatus}</span>
+                    </div>
+                    {hasRealThinking && draftThinking ? (
+                      <ThinkingBlock content={draftThinking} streaming />
+                    ) : null}
+                    {!hasRealThinking && activeCollaborators.length === 0 ? (
+                      <div className="space-y-2">
+                        <div className="h-4 w-3/4 animate-pulse rounded bg-[var(--bg-secondary)]" />
+                        <div className="h-4 w-1/2 animate-pulse rounded bg-[var(--bg-secondary)]" />
+                        <div className="h-4 w-5/6 animate-pulse rounded bg-[var(--bg-secondary)]" />
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
               </div>
-              {hasRealThinking && draftThinking ? (
-                <div className="mt-3">
-                  <ThinkingBlock content={draftThinking} streaming />
-                </div>
-              ) : null}
-              {/* Shimmer skeleton for slow initial response */}
-              {!hasRealThinking && activeCollaborators.length === 0 ? (
-                <div className="mt-4 space-y-2">
-                  <div className="h-4 w-3/4 animate-pulse rounded bg-[var(--bg-secondary)]" />
-                  <div className="h-4 w-1/2 animate-pulse rounded bg-[var(--bg-secondary)]" />
-                  <div className="h-4 w-5/6 animate-pulse rounded bg-[var(--bg-secondary)]" />
-                </div>
-              ) : null}
-            </div>
+            </article>
           )}
 
           {streamError && (

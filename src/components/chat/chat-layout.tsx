@@ -484,6 +484,18 @@ export function ChatLayout() {
           sending={chat.sending}
           messageCount={chat.messages.length}
           compacting={chat.compactingConversation}
+          streamPhase={chat.sending ? (
+            chat.streamPhase === "compacting" ? "Compacting context" :
+            chat.streamPhase === "routing" ? "Selecting model" :
+            chat.streamPhase === "searching" ? "Checking sources" :
+            chat.streamPhase === "thinking" ? "Reasoning" :
+            chat.streamPhase === "synthesizing" ? "Formatting result" :
+            chat.streamPhase === "generating" ? "Generating response" :
+            chat.collaboratorPhase === "synthesizing" ? "Formatting result" :
+            chat.lastAutoResult?.searchEnabled ? "Using search" :
+            chat.activeCollaborators.length > 0 ? "Running specialists" :
+            "Generating response"
+          ) : undefined}
           onStop={chat.stopGeneration}
           onCompact={() => void chat.compactConversation()}
           onCompactWithDepth={(keepLatestMessages) => void chat.compactConversation(keepLatestMessages)}

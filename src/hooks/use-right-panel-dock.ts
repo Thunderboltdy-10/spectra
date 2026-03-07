@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-const MIN_DOCK_WIDTH = 280;
+const MIN_DOCK_WIDTH = 340;
 
 function shouldDock(params: { open: boolean; compact: boolean; width: number }) {
   const { open, compact, width } = params;
@@ -27,7 +27,7 @@ export function useRightPanelDock(params: {
   const computeWidth = useMemo(
     () => () => {
       const vw = window.innerWidth;
-      const ratio = vw <= 1280 ? 0.3 : vw <= 1680 ? 0.34 : 0.38;
+      const ratio = vw <= 1280 ? 0.38 : vw <= 1680 ? 0.4 : 0.42;
       const maxByViewport = Math.floor(vw * ratio);
       const availableAfterGuards = window.innerWidth - minMainWidthPx - reserveLeftPx;
       const guardedWidth = Math.max(MIN_DOCK_WIDTH, availableAfterGuards);

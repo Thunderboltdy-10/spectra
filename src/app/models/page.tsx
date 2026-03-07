@@ -230,7 +230,7 @@ function ModelCard({
         </span>
       ) : null}
       <div className="mb-3 flex items-start gap-2.5">
-        <ProviderLogo provider={model.provider} modelId={model.modelId} size={22} className="h-11 w-11" />
+        <ProviderLogo provider={model.provider} modelId={model.modelId} size={22} className="h-11 w-11 shrink-0 min-w-[24px]" />
         <div className="min-w-0">
           <p className="truncate text-[15px] font-semibold text-[var(--text-primary)]">{sanitizeName(model.name || model.modelId)}</p>
           <p className="truncate text-xs text-[var(--text-secondary)]">{model.provider}</p>
@@ -594,7 +594,7 @@ export default function ModelsPage() {
         </div>
       </section>
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(380px,0.85fr)]">
+      <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_280px]">
         <div className="space-y-6">
           {featured.length > 0 ? (
             <section>
@@ -688,13 +688,13 @@ export default function ModelsPage() {
                   onClick={() => {
                     toggleProvider(provider.name);
                   }}
-                  className={`flex w-full items-center gap-2 rounded-xl border p-2 text-left transition ${
+                  className={`flex min-h-[44px] w-full items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition ${
                     selected
                       ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,var(--bg-primary))]"
                       : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
                   }`}
                 >
-                  <ProviderLogo provider={provider.name} size={22} className="h-10 w-10" />
+                  <ProviderLogo provider={provider.name} size={22} className="h-10 w-10 shrink-0 min-w-[24px]" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-xs font-medium text-[var(--text-primary)]">{provider.name}</p>
                     <p className="text-[10px] text-[var(--text-secondary)]">{provider.count} models</p>
@@ -723,11 +723,11 @@ export default function ModelsPage() {
                 </p>
               ) : (
                 leaderboardEntries.slice(0, 20).map((entry, index) => (
-                  <div key={entry.modelId} className="flex items-center gap-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2">
+                  <div key={entry.modelId} className="flex min-h-[44px] items-center gap-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5">
                     <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[var(--bg-elevated)] text-[11px] font-semibold text-[var(--text-secondary)]">
                       {index + 1}
                     </span>
-                    <ProviderLogo provider={entry.provider} modelId={entry.modelId} size={14} className="h-7 w-7" />
+                    <ProviderLogo provider={entry.provider} modelId={entry.modelId} size={14} className="h-7 w-7 shrink-0 min-w-[24px]" />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-xs font-medium text-[var(--text-primary)]">{sanitizeName(entry.name)}</p>
                       <p className="text-[10px] text-[var(--text-secondary)]">

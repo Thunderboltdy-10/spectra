@@ -192,7 +192,10 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const isAuthRoute =
-      pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up") || pathname.startsWith("/join");
+      pathname.startsWith("/sign-in")
+      || pathname.startsWith("/sign-up")
+      || pathname.startsWith("/join")
+      || pathname.startsWith("/no-access");
     if (isAuthRoute) {
       setLoading(false);
       return;
@@ -202,6 +205,10 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
         await refreshBootstrap();
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to load sidebar data";
+        if (message.startsWith("AUTH_NO_ACCESS")) {
+          window.location.href = "/no-access";
+          return;
+        }
         if (!message.startsWith("AUTH_NOT_SIGNED_IN")) {
           toast.error(message);
         }

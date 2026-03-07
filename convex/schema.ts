@@ -22,6 +22,7 @@ export default defineSchema({
     verifyMarkerPassEnabled: v.boolean(),
     allowPaidModels: v.optional(v.boolean()),
     orchestratorV2Enabled: v.optional(v.boolean()),
+    searxngEnabled: v.optional(v.boolean()),
     monthlyBudgetCentsPerUser: v.optional(v.number()),
     budgetMarginPercent: v.optional(v.number()),
     maxResourceFileSizeBytes: v.optional(v.number()),
@@ -144,7 +145,7 @@ export default defineSchema({
     modelDenylist: v.optional(v.array(v.string())),
     collaborators: v.optional(v.array(v.id("users"))),
     attachmentPolicy: v.optional(v.string()),
-    visibility: v.union(v.literal("public"), v.literal("private")),
+    visibility: v.union(v.literal("public"), v.literal("private"), v.literal("shared")),
     usageCount: v.number(),
     guidelinesSummary: v.optional(v.string()),
     guidelinesTopicMap: v.optional(v.array(v.string())),
@@ -277,7 +278,9 @@ export default defineSchema({
       }),
     ),
     updatedAt: v.number(),
-  }).index("by_user", ["userId"]),
+  })
+    .index("by_user", ["userId"])
+    .index("by_user_org", ["userId", "orgId"]),
 
   studentAnalytics: defineTable({
     orgId: v.id("orgs"),
@@ -425,6 +428,17 @@ export default defineSchema({
     .index("by_user_submitted", ["userId", "submittedAt"])
     .index("by_chat_submitted", ["chatId", "submittedAt"])
     .index("by_message", ["messageId"]),
+
+  quizSessions: defineTable({
+    userId: v.id("users"),
+    orgId: v.id("orgs"),
+    messageId: v.id("messages"),
+    answers: v.array(v.object({ questionId: v.string(), selected: v.string() })),
+    startedAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_message", ["messageId"])
+    .index("by_user", ["userId"]),
 
   flashcardDecks: defineTable({
     userId: v.id("users"),

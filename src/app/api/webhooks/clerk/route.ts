@@ -66,11 +66,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Missing Clerk user id in webhook payload." }, { status: 400 });
   }
 
-  await convexMutation("users:syncFromWebhook", {
+  const result = await convexMutation("users:syncFromWebhook", {
     clerkId,
     email: getUserEmail(event.data),
     name: getUserName(event.data),
   });
 
-  return NextResponse.json({ ok: true, type: event.type });
+  return NextResponse.json({ ok: true, type: event.type, result });
 }

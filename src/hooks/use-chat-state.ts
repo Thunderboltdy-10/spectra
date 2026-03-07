@@ -1528,6 +1528,41 @@ export function useChatState() {
       let bufferState = createBufferState(requestedMode);
       let thinkingBuffer = "";
       let hasModelThinking = false;
+      let orchestrationNotes: string[] = [];
+
+      const buildThinkingContent = () => {
+        const sections: string[] = [];
+        const modelSection = thinkingBuffer.trim();
+        if (modelSection) sections.push(modelSection);
+        if (orchestrationNotes.length > 0) {
+          sections.push(`Planner notes\n${orchestrationNotes.map((note) => `- ${note}`).join("\n")}`);
+        }
+        return sections.join("\n\n").trim();
+      };
+
+      const syncDraftThinking = () => {
+        const composed = buildThinkingContent();
+        setDraftThinkings((prev) => {
+          if (!composed) {
+            if (!prev.has(chatId)) return prev;
+            const next = new Map(prev);
+            next.delete(chatId);
+            return next;
+          }
+          if (prev.get(chatId) === composed) return prev;
+          const next = new Map(prev);
+          next.set(chatId, composed);
+          return next;
+        });
+      };
+
+      const pushThinkingNote = (note: string) => {
+        const clean = note.replace(/\s+/g, " ").trim();
+        if (!clean) return;
+        orchestrationNotes = [...orchestrationNotes.filter((item) => item !== clean), clean].slice(-10);
+        setHasRealThinking(true);
+        syncDraftThinking();
+      };
 
       while (true) {
         const { done, value } = await reader.read();
@@ -1552,7 +1587,10 @@ export function useChatState() {
               | "collab_done"
               | "collab_synthesizing"
               | "chat_title"
-              | "notice";
+              | "notice"
+              | "rag_used"
+              | "soul_update"
+              | "agent_summoned";
             content?: string;
             message?: string;
             error?: string | { message?: string };
@@ -1582,8 +1620,11 @@ export function useChatState() {
             preview?: string;
             tokensUsed?: number;
             model?: string;
+            reason?: string;
             agentSuggestion?: AgentSuggestion;
             unlockedAchievements?: AchievementToastData[];
+            sources?: Array<{ filename: string; page?: number; sourceType: string }>;
+            entries?: Array<{ key: string; value: string; confidence: number }>;
           };
 
           // Guard: only update visual draft state if user is still viewing this chat
@@ -1621,17 +1662,17 @@ export function useChatState() {
               thinkingBuffer += payload.content;
             }
             setHasRealThinking(true);
-            setDraftThinkings((prev) => {
-              if (prev.get(chatId) === thinkingBuffer) return prev;
-              const next = new Map(prev);
-              next.set(chatId, thinkingBuffer);
-              return next;
-            });
+            syncDraftThinking();
           }
 
           if (payload.type === "collab_start") {
             setStreamPhase("routing");
             const agents = payload.agents ?? [];
+            if (agents.length > 0) {
+              pushThinkingNote(
+                `Delegating specialist work to ${agents.map((agent) => agent.replace(/_/g, " ")).join(", ")}.`,
+              );
+            }
             if (isViewingStreamChat) {
               setActiveCollaborators(
                 agents.map((role) => ({
@@ -1647,6 +1688,11 @@ export function useChatState() {
 
           if (payload.type === "collab_progress" && payload.agent) {
             const agentRole = payload.agent;
+            pushThinkingNote(
+              `${agentRole.replace(/_/g, " ")} ${payload.status === "done" ? "completed" : "is running"}${
+                payload.model ? ` with ${payload.model}` : ""
+              }${payload.preview ? `: ${payload.preview}` : ""}`,
+            );
             if (isViewingStreamChat) {
               setCollaboratorPhase("running");
               setActiveCollaborators((prev) => {
@@ -1678,6 +1724,11 @@ export function useChatState() {
 
           if (payload.type === "collab_done" && payload.agent) {
             const agentRole = payload.agent;
+            pushThinkingNote(
+              `${agentRole.replace(/_/g, " ")} finished${payload.model ? ` on ${payload.model}` : ""}${
+                payload.preview ? `: ${payload.preview}` : ""
+              }`,
+            );
             if (isViewingStreamChat) {
               setActiveCollaborators((prev) =>
                 prev.map((item) =>
@@ -1697,6 +1748,7 @@ export function useChatState() {
 
           if (payload.type === "collab_synthesizing") {
             setStreamPhase("synthesizing");
+            pushThinkingNote("Synthesizing specialist outputs into one final response.");
             if (isViewingStreamChat) {
               setCollaboratorPhase("synthesizing");
             }
@@ -1766,7 +1818,7 @@ export function useChatState() {
               routeTrace: normalizedTrace,
               usageIn: payload.usageIn,
               usageOut: payload.usageOut,
-              thinkingContent: payload.thinkingContent ?? (thinkingBuffer || undefined),
+              thinkingContent: payload.thinkingContent ?? (buildThinkingContent() || undefined),
             };
 
             if (payload.spendingUpdate) {
@@ -1824,7 +1876,26 @@ export function useChatState() {
           }
 
           if (payload.type === "notice" && typeof payload.message === "string" && payload.message.trim()) {
-            toast.message(payload.message.trim());
+            pushThinkingNote(payload.message.trim());
+          }
+
+          if (payload.type === "rag_used" && payload.sources?.length) {
+            pushThinkingNote(
+              `Referenced ${payload.sources.length} personal or school source${
+                payload.sources.length === 1 ? "" : "s"
+              }: ${payload.sources
+                .slice(0, 3)
+                .map((source) => source.filename)
+                .join(", ")}.`,
+            );
+          }
+
+          if (payload.type === "soul_update" && payload.entries?.length) {
+            pushThinkingNote(`Updated personal memory: ${payload.entries[0]?.key ?? "profile"}.`);
+          }
+
+          if (payload.type === "agent_summoned" && payload.agent && payload.model) {
+            pushThinkingNote(`Called specialist ${payload.agent.replace(/_/g, " ")} on ${payload.model}.`);
           }
 
           if (payload.type === "error") {

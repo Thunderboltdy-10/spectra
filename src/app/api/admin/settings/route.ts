@@ -32,6 +32,7 @@ export async function PATCH(request: NextRequest) {
       timezone?: string;
       maxStudents?: number;
       orchestratorV2Enabled?: boolean;
+      searxngEnabled?: boolean;
       soulEnabled?: boolean;
       agentModelBoostEnabled?: boolean;
       adaptiveQuizEnabled?: boolean;
@@ -52,6 +53,7 @@ export async function PATCH(request: NextRequest) {
       timezone: safeString(body.timezone),
       maxStudents: safeNumber(body.maxStudents),
       orchestratorV2Enabled: body.orchestratorV2Enabled,
+      searxngEnabled: body.searxngEnabled,
       soulEnabled: body.soulEnabled,
       agentModelBoostEnabled: body.agentModelBoostEnabled,
       adaptiveQuizEnabled: body.adaptiveQuizEnabled,

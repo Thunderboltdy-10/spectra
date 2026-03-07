@@ -11,7 +11,19 @@ import {
   Plus,
   Send,
   Shield,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
+import {
+  Bar,
+  CartesianGrid,
+  ComposedChart,
+  Line,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
 
@@ -158,6 +170,44 @@ function compactWeekLabel(day: string) {
     : value.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+function monthKeyFromDay(day: string) {
+  return day.slice(0, 7);
+}
+
+function formatMonthLabel(monthKey: string) {
+  const [year, month] = monthKey.split("-").map(Number);
+  const value = new Date(Date.UTC(year, (month ?? 1) - 1, 1));
+  return value.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
+function MonthPager({
+  monthLabel,
+  previousDisabled,
+  nextDisabled,
+  onPrevious,
+  onNext,
+}: {
+  monthLabel: string;
+  previousDisabled: boolean;
+  nextDisabled: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <Button type="button" variant="secondary" size="icon" className="h-8 w-8" onClick={onPrevious} disabled={previousDisabled}>
+        <ChevronLeft className="h-3.5 w-3.5" />
+      </Button>
+      <div className="min-w-[9rem] rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1 text-center text-[11px] font-medium text-[var(--text-primary)]">
+        {monthLabel}
+      </div>
+      <Button type="button" variant="secondary" size="icon" className="h-8 w-8" onClick={onNext} disabled={nextDisabled}>
+        <ChevronRight className="h-3.5 w-3.5" />
+      </Button>
+    </div>
+  );
+}
+
 export default function SuperAdminDashboard() {
   const [stats, setStats] = useState<GlobalStats | null>(null);
   const [storageStats, setStorageStats] = useState<StorageStats | null>(null);
@@ -183,15 +233,41 @@ export default function SuperAdminDashboard() {
   );
   const usageByDay = stats?.usage?.byDay ?? [];
   const usageByWeek = stats?.usage?.byWeek ?? [];
-  const dayWindow = usageByDay.slice(-14);
+  const availableUsageMonths = useMemo(
+    () => Array.from(new Set(usageByDay.map((row) => monthKeyFromDay(row.day)).filter(Boolean))).sort(),
+    [usageByDay],
+  );
+  const [selectedUsageMonthIndex, setSelectedUsageMonthIndex] = useState(0);
+  useEffect(() => {
+    setSelectedUsageMonthIndex((prev) => {
+      if (availableUsageMonths.length === 0) return 0;
+      if (prev >= 0 && prev < availableUsageMonths.length) return prev;
+      return availableUsageMonths.length - 1;
+    });
+  }, [availableUsageMonths]);
+  const selectedUsageMonth =
+    availableUsageMonths[selectedUsageMonthIndex] ??
+    availableUsageMonths[availableUsageMonths.length - 1] ??
+    monthKeyFromDay(new Date().toISOString().slice(0, 10));
+  const dayWindow = useMemo(
+    () => usageByDay.filter((row) => monthKeyFromDay(row.day) === selectedUsageMonth),
+    [selectedUsageMonth, usageByDay],
+  );
+  const weeklyWindow = useMemo(
+    () => usageByWeek.filter((row) => monthKeyFromDay(row.weekStart) === selectedUsageMonth),
+    [selectedUsageMonth, usageByWeek],
+  );
   const firstDayLabel = dayWindow[0] ? compactDayLabel(dayWindow[0].day) : "—";
   const lastDayLabel = dayWindow.length > 0 ? compactDayLabel(dayWindow[dayWindow.length - 1].day) : "—";
-  const maxDayTokens = Math.max(1, ...usageByDay.map((row) => row.totalTokens));
-  const maxDaySpend = Math.max(1, ...usageByDay.map((row) => row.effectiveCostCents ?? row.totalCostCents));
-  const maxWeekSpend = Math.max(1, ...usageByWeek.map((row) => row.effectiveCostCents ?? row.totalCostCents));
+  const maxDayTokens = Math.max(1, ...dayWindow.map((row) => row.totalTokens));
+  const maxDaySpend = Math.max(1, ...dayWindow.map((row) => row.effectiveCostCents ?? row.totalCostCents));
+  const maxWeekSpend = Math.max(1, ...weeklyWindow.map((row) => row.effectiveCostCents ?? row.totalCostCents));
   const selectedDayDetails =
-    (selectedUsageDay ? usageByDay.find((row) => row.day === selectedUsageDay) : dayWindow[dayWindow.length - 1])
+    (selectedUsageDay ? dayWindow.find((row) => row.day === selectedUsageDay) : dayWindow[dayWindow.length - 1])
     ?? null;
+  useEffect(() => {
+    setSelectedUsageDay(dayWindow[dayWindow.length - 1]?.day ?? null);
+  }, [dayWindow]);
 
   useEffect(() => {
     void (async () => {
@@ -379,14 +455,77 @@ export default function SuperAdminDashboard() {
 
         {stats?.usage ? (
           <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
-            <div className="mb-4">
-              <h2 className="font-display text-xl">Usage Intelligence</h2>
-              <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                Detailed usage from the last {stats.usage.days} days.
-              </p>
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="font-display text-xl">Usage Intelligence</h2>
+                <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                  Detailed usage from the last {stats.usage.days} days.
+                </p>
+              </div>
+              <MonthPager
+                monthLabel={formatMonthLabel(selectedUsageMonth)}
+                previousDisabled={selectedUsageMonthIndex <= 0}
+                nextDisabled={selectedUsageMonthIndex >= availableUsageMonths.length - 1}
+                onPrevious={() => setSelectedUsageMonthIndex((value) => Math.max(0, value - 1))}
+                onNext={() => setSelectedUsageMonthIndex((value) => Math.min(availableUsageMonths.length - 1, value + 1))}
+              />
             </div>
 
-            <div className="mb-4 grid gap-4 lg:grid-cols-2">
+            <div className="mb-4 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-primary)] p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-xs text-[var(--text-secondary)]">Daily token and spend trend</p>
+                  <p className="mt-1 text-sm text-[var(--text-secondary)]">Tokens on the left axis, spend on the right axis.</p>
+                </div>
+                <p className="text-xs text-[var(--text-secondary)]">{firstDayLabel} to {lastDayLabel}</p>
+              </div>
+              {dayWindow.length > 0 ? (
+                <ResponsiveContainer width="100%" height={240}>
+                  <ComposedChart
+                    data={dayWindow.map((row) => ({
+                      day: compactDayLabel(row.day),
+                      rawDay: row.day,
+                      tokens: row.totalTokens,
+                      spend: row.effectiveCostCents ?? row.totalCostCents,
+                    }))}
+                    margin={{ top: 6, right: 8, left: -18, bottom: 0 }}
+                  >
+                    <CartesianGrid vertical={false} stroke="var(--border-default)" strokeOpacity={0.45} />
+                    <XAxis dataKey="day" tick={{ fontSize: 10, fill: "var(--text-secondary)" }} tickLine={false} axisLine={false} />
+                    <YAxis yAxisId="tokens" tick={{ fontSize: 10, fill: "var(--text-secondary)" }} tickLine={false} axisLine={false} width={44} />
+                    <YAxis yAxisId="spend" orientation="right" tick={{ fontSize: 10, fill: "var(--text-secondary)" }} tickLine={false} axisLine={false} width={44} />
+                    <Tooltip
+                      contentStyle={{
+                        background: "var(--bg-elevated)",
+                        border: "1px solid var(--border-default)",
+                        borderRadius: 8,
+                        fontSize: 12,
+                        color: "var(--text-primary)",
+                      }}
+                      formatter={(value: number, name: string) =>
+                        name === "tokens" ? [value.toLocaleString(), "Tokens"] : [formatCurrencyCents(value), "Spend"]
+                      }
+                    />
+                    <Bar
+                      yAxisId="tokens"
+                      dataKey="tokens"
+                      fill="var(--accent-cyan)"
+                      radius={[4, 4, 0, 0]}
+                      maxBarSize={24}
+                      onClick={(payload) => {
+                        const day = payload?.rawDay;
+                        if (typeof day === "string") setSelectedUsageDay(day);
+                      }}
+                    />
+                    <Line yAxisId="spend" type="monotone" dataKey="spend" stroke="var(--accent-coral)" strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 4 }} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="py-10 text-center text-sm text-[var(--text-secondary)]">No daily usage captured in this month.</p>
+              )}
+            </div>
+
+            <div className="mb-4 hidden grid gap-4 lg:grid-cols-2">
               <div>
                 <p className="mb-2 text-xs text-[var(--text-secondary)]">Daily token trend</p>
                 <div className="mt-3 flex h-28 items-end gap-1.5">
@@ -485,7 +624,7 @@ export default function SuperAdminDashboard() {
                 <p className="mb-2 text-xs text-[var(--text-secondary)]">Recent Daily Usage</p>
                 <table className="w-full text-xs">
                   <tbody className="divide-y divide-[var(--border-default)] border-t border-[var(--border-default)]">
-                  {stats.usage.byDay.slice(-6).map((day) => (
+                  {dayWindow.slice(-6).map((day) => (
                     <tr key={day.day}>
                       <td className="py-1.5 pr-2 text-[var(--text-secondary)]">{compactDayLabel(day.day)}</td>
                       <td className="py-1.5 text-right font-medium text-[var(--text-primary)]">
@@ -499,9 +638,9 @@ export default function SuperAdminDashboard() {
             </div>
 
             <div className="mt-4">
-              <p className="mb-2 text-xs text-[var(--text-secondary)]">Weekly spend (last 8)</p>
+              <p className="mb-2 text-xs text-[var(--text-secondary)]">Weekly spend</p>
               <div className="space-y-2">
-                {usageByWeek.slice(-8).map((week) => (
+                {weeklyWindow.map((week) => (
                   <div key={week.weekStart}>
                     <div className="mb-1 flex items-center justify-between text-xs">
                       <span className="text-[var(--text-secondary)]">Week of {compactWeekLabel(week.weekStart)}</span>
@@ -515,7 +654,7 @@ export default function SuperAdminDashboard() {
                     </div>
                   </div>
                 ))}
-                {usageByWeek.length === 0 ? (
+                {weeklyWindow.length === 0 ? (
                   <p className="text-sm text-[var(--text-secondary)]">No weekly usage captured yet.</p>
                 ) : null}
               </div>

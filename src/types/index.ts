@@ -41,7 +41,7 @@ export type Agent = {
   category: string;
   preferredModel?: string;
   preferredMode?: import("@/lib/contracts/studyModes").StudyMode;
-  visibility: "public" | "private";
+  visibility: "public" | "private" | "shared";
   usageCount: number;
   creatorUserId: string;
   orgId: string;

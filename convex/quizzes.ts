@@ -43,7 +43,7 @@ export const saveQuizResult = mutation({
     }, 0);
 
     const submittedAt = Date.now();
-    const resultId = await ctx.db.insert("quizResults", {
+    const payload = {
       userId: actor._id,
       orgId: actor.orgId,
       chatId: chat._id,
@@ -52,9 +52,112 @@ export const saveQuizResult = mutation({
       score: verifiedScore,
       total: Math.max(0, Math.round(args.total)),
       submittedAt,
-    });
+    };
+
+    const existing = await ctx.db
+      .query("quizResults")
+      .withIndex("by_message", (q) => q.eq("messageId", message._id))
+      .unique();
+
+    const resultId = existing
+      ? (await ctx.db.patch(existing._id, payload), existing._id)
+      : await ctx.db.insert("quizResults", payload);
+
+    const existingSession = await ctx.db
+      .query("quizSessions")
+      .withIndex("by_message", (q) => q.eq("messageId", message._id))
+      .unique();
+    if (existingSession) {
+      await ctx.db.delete(existingSession._id);
+    }
 
     return { resultId };
+  },
+});
+
+export const saveQuizSession = mutation({
+  args: {
+    actorClerkId: v.string(),
+    messageId: v.id("messages"),
+    answers: v.array(v.object({ questionId: v.string(), selected: v.string() })),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) throw new Error("Unauthorized");
+
+    const message = await ctx.db.get(args.messageId);
+    if (!message || message.userId !== actor._id || message.orgId !== actor.orgId) {
+      throw new Error("Message not found");
+    }
+
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("quizSessions")
+      .withIndex("by_message", (q) => q.eq("messageId", args.messageId))
+      .unique();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        answers: args.answers,
+        updatedAt: now,
+      });
+      return { ok: true, updatedAt: now };
+    }
+
+    await ctx.db.insert("quizSessions", {
+      userId: actor._id,
+      orgId: actor.orgId,
+      messageId: args.messageId,
+      answers: args.answers,
+      startedAt: now,
+      updatedAt: now,
+    });
+    return { ok: true, updatedAt: now };
+  },
+});
+
+export const getQuizStateByMessage = query({
+  args: {
+    actorClerkId: v.string(),
+    messageId: v.id("messages"),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) throw new Error("Unauthorized");
+
+    const message = await ctx.db.get(args.messageId);
+    if (!message || message.userId !== actor._id || message.orgId !== actor.orgId) {
+      throw new Error("Message not found");
+    }
+
+    const [result, session] = await Promise.all([
+      ctx.db
+        .query("quizResults")
+        .withIndex("by_message", (q) => q.eq("messageId", args.messageId))
+        .unique(),
+      ctx.db
+        .query("quizSessions")
+        .withIndex("by_message", (q) => q.eq("messageId", args.messageId))
+        .unique(),
+    ]);
+
+    return {
+      result: result
+        ? {
+            score: result.score,
+            total: result.total,
+            questions: result.questions,
+            submittedAt: result.submittedAt,
+          }
+        : null,
+      session: session
+        ? {
+            answers: session.answers,
+            startedAt: session.startedAt,
+            updatedAt: session.updatedAt,
+          }
+        : null,
+    };
   },
 });
 

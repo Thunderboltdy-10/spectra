@@ -4,10 +4,15 @@ import { LIMITS } from "./constants";
 import { getUserByClerkId } from "./helpers";
 import { vScope } from "./shared";
 import { internal } from "./_generated/api";
-
-const DEFAULT_MAX_RESOURCE_FILE_SIZE_BYTES = 10 * 1024 * 1024;
-const MIN_RESOURCE_FILE_SIZE_BYTES = 1 * 1024 * 1024;
-const MAX_RESOURCE_FILE_SIZE_BYTES = 100 * 1024 * 1024;
+import {
+  DEFAULT_MAX_RESOURCE_FILE_SIZE_BYTES,
+  MAX_RESOURCE_FILE_SIZE_BYTES,
+  MIN_RESOURCE_FILE_SIZE_BYTES,
+  SUPPORTED_MIME_BY_EXTENSION,
+  SUPPORTED_RESOURCE_EXTENSIONS,
+  VIDEO_RESOURCE_EXTENSIONS,
+  fileExtension,
+} from "../shared/resource-upload-policy";
 
 function resolveMaxResourceFileSizeBytes(value: number | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -24,26 +29,18 @@ function maxFileSizeError(maxBytes: number) {
   return `File exceeds maximum size (${mb}MB)`;
 }
 
-const SUPPORTED_RESOURCE_EXTENSIONS = new Set(["pdf", "docx", "txt", "md"]);
-const SUPPORTED_MIME_BY_EXTENSION: Record<string, string[]> = {
-  pdf: ["application/pdf"],
-  docx: ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
-  txt: ["text/plain"],
-  md: ["text/markdown", "text/plain"],
-};
-
-function fileExtension(filename: string) {
-  const ext = filename.split(".").pop()?.trim().toLowerCase() ?? "";
-  return ext;
-}
-
 function invalidResourceTypeError(filename: string, mimeType: string) {
   const ext = fileExtension(filename);
-  if (!SUPPORTED_RESOURCE_EXTENSIONS.has(ext)) {
-    return `Unsupported file type: .${ext || "unknown"}. Allowed: .pdf, .docx, .txt, .md`;
+  const normalizedMime = mimeType.trim().toLowerCase();
+
+  if (VIDEO_RESOURCE_EXTENSIONS.has(ext) || normalizedMime.startsWith("video/")) {
+    return "Video uploads are not supported. Upload documents, code, images, or audio instead.";
   }
 
-  const normalizedMime = mimeType.trim().toLowerCase();
+  if (!SUPPORTED_RESOURCE_EXTENSIONS.has(ext)) {
+    return `Unsupported file type: .${ext || "unknown"}. Allowed: documents, code, images, and audio only.`;
+  }
+
   if (!normalizedMime || normalizedMime === "application/octet-stream") {
     return undefined;
   }
@@ -54,6 +51,29 @@ function invalidResourceTypeError(filename: string, mimeType: string) {
   }
 
   return undefined;
+}
+
+function isAgentCollaborator(agent: { collaborators?: string[] }, userId: string) {
+  return (agent.collaborators ?? []).includes(userId);
+}
+
+function canAccessAgentResources(
+  agent: { visibility: "public" | "private" | "shared"; creatorUserId: string; collaborators?: string[] },
+  actor: { _id: string; role: "student" | "teacher" | "admin" },
+) {
+  return (
+    actor.role === "admin" ||
+    agent.visibility === "public" ||
+    agent.creatorUserId === actor._id ||
+    isAgentCollaborator(agent, actor._id)
+  );
+}
+
+function canManageAgentResources(
+  agent: { creatorUserId: string; collaborators?: string[] },
+  actor: { _id: string; role: "student" | "teacher" | "admin" },
+) {
+  return actor.role === "admin" || agent.creatorUserId === actor._id || isAgentCollaborator(agent, actor._id);
 }
 
 export const createUploadUrl = mutation({
@@ -102,7 +122,7 @@ export const createUploadUrl = mutation({
         throw new Error("Agent not found");
       }
 
-      const canUploadToAgent = actor.role === "admin" || agent.creatorUserId === actor._id;
+      const canUploadToAgent = canManageAgentResources(agent, actor);
       if (!canUploadToAgent) {
         throw new Error("Only agent creator/admin can upload agent resources");
       }
@@ -191,7 +211,7 @@ export const registerResource = mutation({
       if (!agent || agent.orgId !== actor.orgId) {
         throw new Error("Agent not found");
       }
-      const canUploadToAgent = actor.role === "admin" || agent.creatorUserId === actor._id;
+      const canUploadToAgent = canManageAgentResources(agent, actor);
       if (!canUploadToAgent) {
         throw new Error("Only agent creator/admin can upload agent resources");
       }
@@ -264,7 +284,7 @@ export const completeResourceIngestion = mutation({
       }
     } else if (resource.scope === "agent") {
       const agent = resource.agentId ? await ctx.db.get(resource.agentId) : null;
-      const canModify = actor.role === "admin" || (agent && agent.creatorUserId === actor._id);
+      const canModify = agent ? canManageAgentResources(agent, actor) : false;
       if (!canModify) {
         throw new Error("No permission for this agent resource");
       }
@@ -415,7 +435,7 @@ export const enqueueResourceProcessing = mutation({
     }
     if (resource.scope === "agent" && resource.agentId) {
       const agent = await ctx.db.get(resource.agentId);
-      if (agent && (agent.creatorUserId === actor._id || actor.role === "teacher" || actor.role === "admin")) {
+      if (agent && (canManageAgentResources(agent, actor) || actor.role === "teacher")) {
         allowed = true;
       }
     }
@@ -489,7 +509,7 @@ export const listAgentResources = query({
     if (!agent || agent.orgId !== actor.orgId) {
       throw new Error("Agent not found");
     }
-    if (agent.visibility === "private" && agent.creatorUserId !== actor._id && actor.role !== "admin") {
+    if (!canAccessAgentResources(agent, actor)) {
       throw new Error("Not authorized for this agent");
     }
 
@@ -528,7 +548,7 @@ export const deleteResource = mutation({
     }
     if (resource.scope === "agent" && resource.agentId) {
       const agent = await ctx.db.get(resource.agentId);
-      if (agent && (agent.creatorUserId === actor._id || actor.role === "admin")) {
+      if (agent && canManageAgentResources(agent, actor)) {
         allowed = true;
       }
     }
@@ -593,7 +613,7 @@ export const getResourceDownloadUrl = query({
     }
     if (resource.scope === "agent" && resource.agentId) {
       const agent = await ctx.db.get(resource.agentId);
-      if (agent && (agent.visibility === "public" || agent.creatorUserId === actor._id || actor.role === "admin")) {
+      if (agent && canAccessAgentResources(agent, actor)) {
         allowed = true;
       }
     }
@@ -662,10 +682,7 @@ export const getResourcesByIds = query({
         const agent = await ctx.db.get(resource.agentId);
         if (
           agent &&
-          (agent.visibility === "public" ||
-            agent.creatorUserId === actor._id ||
-            actor.role === "teacher" ||
-            actor.role === "admin")
+          (canAccessAgentResources(agent, actor) || actor.role === "teacher")
         ) {
           allowed = true;
         }
@@ -736,10 +753,7 @@ export const getResourceNamesByIds = query({
         const agent = await ctx.db.get(resource.agentId);
         if (
           agent &&
-          (agent.visibility === "public" ||
-            agent.creatorUserId === actor._id ||
-            actor.role === "teacher" ||
-            actor.role === "admin")
+          (canAccessAgentResources(agent, actor) || actor.role === "teacher")
         ) {
           allowed = true;
         }
@@ -840,7 +854,7 @@ export const listAgentTexts = query({
       throw new Error("Agent not found");
     }
 
-    if (actor.role !== "admin" && agent.creatorUserId !== actor._id) {
+    if (!canManageAgentResources(agent, actor)) {
       throw new Error("Only creator/admin can build agent guidelines");
     }
 

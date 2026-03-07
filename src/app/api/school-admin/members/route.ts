@@ -45,13 +45,47 @@ export async function POST(request: NextRequest) {
       actorClerkId: string;
       email: string;
       role: string;
-    }, unknown>("schoolAdmin:inviteMember", {
+    }, { invitationId: string; token?: string }>("schoolAdmin:inviteMember", {
       actorClerkId: actor.clerkId,
       email: body.email.trim(),
       role: body.role,
     });
 
-    return ok(result);
+    const origin = new URL(request.url).origin;
+    const joinUrl = result.token ? `${origin}/join?token=${encodeURIComponent(result.token)}` : undefined;
+
+    let emailStatus: "sent" | "skipped" | "failed" = "skipped";
+    if (joinUrl && process.env.RESEND_API_KEY && process.env.INVITE_FROM_EMAIL) {
+      try {
+        const inviteResponse = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            from: process.env.INVITE_FROM_EMAIL,
+            to: [body.email.trim()],
+            subject: "Your AI School invitation",
+            html: `
+              <p>You have been invited to join AI School as a ${body.role}.</p>
+              <p><a href="${joinUrl}">Accept invitation</a></p>
+              <p>If the button does not work, paste this link into your browser:</p>
+              <p>${joinUrl}</p>
+            `,
+          }),
+        });
+        emailStatus = inviteResponse.ok ? "sent" : "failed";
+      } catch {
+        emailStatus = "failed";
+      }
+    }
+
+    return ok({
+      invitationId: result.invitationId,
+      joinUrl,
+      emailStatus,
+    });
   });
 }
 

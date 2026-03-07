@@ -19,7 +19,7 @@ export function calculateNextReview(
 
   if (q < 3) {
     reps = 0;
-    ivl = 1;
+    ivl = q <= 1 ? 0 : 1;
   } else {
     if (reps === 0) ivl = 1;
     else if (reps === 1) ivl = 6;

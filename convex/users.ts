@@ -1,5 +1,6 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
 import { getOrCreateDefaultOrg, getUserByClerkId } from "./helpers";
 import { api } from "./_generated/api";
 
@@ -8,6 +9,114 @@ function normalizeRole(inputRole?: string): "student" | "teacher" | "admin" {
     return inputRole;
   }
   return "student";
+}
+
+async function countStudentSeats(
+  ctx: MutationCtx,
+  orgId: Id<"orgs">,
+  excludeUserId?: Id<"users">,
+) {
+  const students = await ctx.db
+    .query("users")
+    .withIndex("by_org_role", (q) => q.eq("orgId", orgId).eq("role", "student"))
+    .collect();
+
+  if (!excludeUserId) {
+    return students.length;
+  }
+
+  return students.filter((student) => student._id !== excludeUserId).length;
+}
+
+async function ensureSeatAvailableForRole(
+  ctx: MutationCtx,
+  orgId: Id<"orgs">,
+  role: "student" | "teacher" | "admin",
+  excludeUserId?: Id<"users">,
+) {
+  if (role !== "student") return;
+
+  const org = await ctx.db.get(orgId);
+  const maxStudents =
+    typeof org?.maxStudents === "number" && Number.isFinite(org.maxStudents) && org.maxStudents > 0
+      ? Math.floor(org.maxStudents)
+      : null;
+
+  if (!maxStudents) return;
+
+  const currentStudents = await countStudentSeats(ctx, orgId, excludeUserId);
+  if (currentStudents >= maxStudents) {
+    throw new Error("SEAT_LIMIT_REACHED: No student seats are currently available for this school.");
+  }
+}
+
+async function findPendingInvitationByEmail(
+  ctx: MutationCtx,
+  email: string,
+) {
+  const now = Date.now();
+  const invitations = await ctx.db
+    .query("schoolInvitations")
+    .withIndex("by_email", (q) => q.eq("email", email))
+    .collect();
+
+  return invitations
+    .filter((invitation) => invitation.status === "pending" && invitation.expiresAt > now)
+    .sort((a, b) => b.createdAt - a.createdAt)[0];
+}
+
+async function upsertUserFromInvitation(params: {
+  ctx: MutationCtx;
+  clerkId: string;
+  email: string;
+  name: string;
+  invitation: {
+    _id: Id<"schoolInvitations">;
+    orgId: Id<"orgs">;
+    role: "student" | "teacher" | "admin";
+  };
+}) {
+  const { ctx, clerkId, email, name, invitation } = params;
+  const now = Date.now();
+  const existing = await getUserByClerkId(ctx, clerkId);
+
+  await ensureSeatAvailableForRole(ctx, invitation.orgId, invitation.role, existing?._id);
+
+  let userId = existing?._id;
+  if (existing) {
+    await ctx.db.patch(existing._id, {
+      email,
+      name,
+      role: invitation.role,
+      orgId: invitation.orgId,
+      invitedAt: now,
+      updatedAt: now,
+    });
+  } else {
+    userId = await ctx.db.insert("users", {
+      clerkId,
+      email,
+      name,
+      role: invitation.role,
+      orgId: invitation.orgId,
+      invitedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  await ctx.db.patch(invitation._id, {
+    status: "accepted",
+  });
+
+  if (userId) {
+    await ctx.runMutation(api.seed.seedDefaultAgents, {
+      orgId: invitation.orgId,
+      creatorUserId: userId,
+    });
+  }
+
+  return { userId, orgId: invitation.orgId, role: invitation.role };
 }
 
 export const ensureUser = mutation({
@@ -113,28 +222,66 @@ export const syncFromWebhook = mutation({
       return { userId: existing._id, updated: true };
     }
 
-    const orgId = await getOrCreateDefaultOrg(ctx);
-    const userId = await ctx.db.insert("users", {
+    const invitation = await findPendingInvitationByEmail(ctx, args.email.trim().toLowerCase());
+    if (!invitation) {
+      return {
+        rejected: true,
+        reason: "NO_PENDING_INVITATION",
+      };
+    }
+
+    try {
+      const provisioned = await upsertUserFromInvitation({
+        ctx,
+        clerkId: args.clerkId,
+        email: args.email,
+        name: args.name,
+        invitation,
+      });
+      return { userId: provisioned.userId, created: true };
+    } catch (error) {
+      return {
+        rejected: true,
+        reason: error instanceof Error ? error.message : "INVITATION_PROVISION_FAILED",
+      };
+    }
+  },
+});
+
+export const acceptInvitationByToken = mutation({
+  args: {
+    clerkId: v.string(),
+    email: v.string(),
+    name: v.string(),
+    token: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const invitation = await ctx.db
+      .query("schoolInvitations")
+      .withIndex("by_token", (q) => q.eq("token", args.token))
+      .unique();
+
+    if (!invitation) {
+      throw new Error("INVITATION_NOT_FOUND: Invitation not found.");
+    }
+    if (invitation.status !== "pending") {
+      throw new Error("INVITATION_NOT_PENDING: This invitation is no longer pending.");
+    }
+    if (invitation.expiresAt <= Date.now()) {
+      await ctx.db.patch(invitation._id, { status: "expired" });
+      throw new Error("INVITATION_EXPIRED: This invitation has expired.");
+    }
+    if (invitation.email.toLowerCase() !== args.email.trim().toLowerCase()) {
+      throw new Error("INVITATION_EMAIL_MISMATCH: This invitation belongs to a different email address.");
+    }
+
+    return upsertUserFromInvitation({
+      ctx,
       clerkId: args.clerkId,
       email: args.email,
       name: args.name,
-      role: "student",
-      orgId,
-      createdAt: now,
-      updatedAt: now,
+      invitation,
     });
-
-    await ctx.runMutation(api.seed.seedDemoPack, {
-      orgId,
-      ownerUserId: userId,
-    });
-    await ctx.runMutation(api.seed.seedDefaultAgents, {
-      orgId,
-      creatorUserId: userId,
-    });
-    await ctx.runMutation(api.seed.migrateLegacyDemoCopy, { orgId });
-
-    return { userId, created: true };
   },
 });
 

@@ -14,6 +14,7 @@ export const STUDY_MODES = [
   "flashcard",
   "research",
   "explain",
+  "document",
   "general",
   "image",
 ] as const;

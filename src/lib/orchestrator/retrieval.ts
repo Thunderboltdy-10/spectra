@@ -4,6 +4,7 @@ import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
 import { openRouterChatCompletion, openRouterEmbedding } from "@/lib/openrouter";
 import { withTimeout } from "@/lib/orchestrator/history";
 import { pickModelAndFallbacks, type CatalogModelEntry, type ModelRuntimeStat } from "@/lib/model-selection";
+import { searxngSearch } from "@/lib/search/searxng";
 
 export type RetrievedCitation = {
   resourceId?: string;
@@ -286,8 +287,30 @@ export async function maybeSearchWeb(
     modelCatalog?: CatalogModelEntry[];
     spendingTier?: "normal" | "expensive_blocked" | "cheap_only" | "free_only";
     modelRuntimeStats?: Record<string, ModelRuntimeStat>;
+    searxngEnabled?: boolean;
   },
 ) {
+  const searxngResults = options?.searxngEnabled === false
+    ? []
+    : await searxngSearch(message).catch(() => []);
+  if (searxngResults.length > 0) {
+    const sources = await resolveWebSearchSources(searxngResults.map((result) => result.url));
+    const sourceByUrl = new Map(sources.map((source) => [source.url, source]));
+    const text = searxngResults
+      .map((result, index) => {
+        const resolved = sourceByUrl.get(result.url);
+        return `${index + 1}. ${resolved?.title || result.title}\n${result.content || ""}\n${resolved?.url || result.url}`;
+      })
+      .join("\n\n")
+      .trim();
+
+    return {
+      text,
+      urls: sources.map((source) => source.url),
+      sources,
+    };
+  }
+
   const liveCatalog = options?.modelCatalog?.length
     ? options.modelCatalog
     : (await getLiveCatalogSnapshot()).models;
@@ -386,6 +409,9 @@ export async function runRagRetrieval(params: {
         sourceCount: retrieval.citations.length,
         maxSourceFiles: MAX_RAG_SOURCES,
       });
+      if (retrieval.citations.length === 0) {
+        params.logger?.warn("RAG retrieval returned zero high-confidence sources");
+      }
     }
   } catch {
     retrieval = {

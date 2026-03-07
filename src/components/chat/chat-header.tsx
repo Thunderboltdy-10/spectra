@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, Layers, LoaderCircle, Menu, MoreHorizontal, Search, Settings2, Square } from "lucide-react";
+import { Bot, Download, Layers, LoaderCircle, Menu, MoreHorizontal, Search, Settings2, Square } from "lucide-react";
 import { useKBar } from "kbar";
 import { ContextualTip } from "@/components/ui/contextual-tip";
 import { Button } from "@/components/ui/button";
@@ -18,8 +18,11 @@ type ChatHeaderProps = {
   onCompactWithDepth?: (keepLatestMessages: number) => void;
   onToggleMobileSidebar: () => void;
   onOpenSettings: () => void;
+  onOpenOrchestration?: () => void;
   onNewChat: () => void;
   onExport: (format: "markdown" | "pdf" | "text") => void;
+  showOrchestrationButton?: boolean;
+  orchestrationActive?: boolean;
 };
 
 function formatRelativeTime(timestamp: number) {
@@ -46,8 +49,11 @@ export function ChatHeader({
   onCompactWithDepth,
   onToggleMobileSidebar,
   onOpenSettings,
+  onOpenOrchestration,
   onNewChat,
   onExport,
+  showOrchestrationButton = false,
+  orchestrationActive = false,
 }: ChatHeaderProps) {
   const { query } = useKBar();
   const responseAgo = lastResponseAt
@@ -99,24 +105,40 @@ export function ChatHeader({
             >
               <Search className="h-4 w-4" />
             </Button>
+            {showOrchestrationButton && onOpenOrchestration ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size={sending ? "icon" : "sm"}
+                className={sending ? "h-9 w-9" : "h-9 gap-1.5"}
+                onClick={onOpenOrchestration}
+                aria-label="Open orchestration panel"
+                title="Open orchestration panel"
+              >
+                <Bot className={`h-3.5 w-3.5 ${orchestrationActive ? "text-[var(--accent-cyan)]" : ""}`} />
+                {!sending ? "Trace" : null}
+              </Button>
+            ) : null}
             {sending ? (
               <Button type="button" variant="secondary" size="sm" className="h-9 gap-1.5" onClick={onStop}>
                 <Square className="h-3.5 w-3.5" />
                 Stop
               </Button>
             ) : (
-              <Button
-                type="button"
-                variant="secondary"
-                size="icon"
-                className="h-9 w-9"
-                onClick={onOpenSettings}
-                data-tour="settings-trigger"
-                aria-label="Open settings"
-                title="Open settings"
-              >
-                <Settings2 className="h-3.5 w-3.5" />
-              </Button>
+              <>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="icon"
+                  className="h-9 w-9"
+                  onClick={onOpenSettings}
+                  data-tour="settings-trigger"
+                  aria-label="Open settings"
+                  title="Open settings"
+                >
+                  <Settings2 className="h-3.5 w-3.5" />
+                </Button>
+              </>
             )}
             {!sending && messageCount > 8 && onCompact ? (
               <Button

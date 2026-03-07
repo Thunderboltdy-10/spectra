@@ -529,7 +529,7 @@ export async function maybeExtractMemory(params: {
   existingEntries: MemoryEntry[];
   userMessage: string;
   assistantResponse: string;
-}) {
+}): Promise<MemoryEntry[]> {
   const snippet = `User: ${params.userMessage.slice(0, 500)}\nAssistant: ${params.assistantResponse.slice(0, 500)}`;
   const utility = await selectUtilityModel({
     actorClerkId: params.actorClerkId,
@@ -546,7 +546,7 @@ export async function maybeExtractMemory(params: {
         {
           role: "system",
           content:
-            "Extract durable facts about this student: learning level, subject preferences, struggles, study style, goals. Return JSON array of {key,value,confidence}. Only include persistent facts.",
+            "Extract durable student facts. Focus on: name, grade/year, school, timezone/location, languages, subjects, goals, weaknesses, interests, study habits, communication preferences, learning style, and personality traits. Return JSON array of {key,value,confidence}. Only include facts likely to help future tutoring.",
         },
         {
           role: "user",
@@ -613,12 +613,23 @@ export async function maybeExtractMemory(params: {
     }
   }
 
-  if (extracted.length === 0) return;
+  if (extracted.length === 0) return [];
 
   const merged = mergeMemoryEntries(params.existingEntries, extracted);
+  const rawSnippet = trimMemoryText(
+    [
+      "Recent conversation snippet:",
+      snippet,
+      "",
+      "Merged memory:",
+      formatMemory(merged),
+    ].join("\n"),
+  );
   await convexMutation("memory:upsertUserMemory", {
     actorClerkId: params.actorClerkId,
     entries: merged,
-    rawMemoryText: formatMemory(merged),
+    rawMemoryText: rawSnippet,
   });
+
+  return extracted;
 }

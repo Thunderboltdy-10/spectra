@@ -7,6 +7,7 @@ function normalizeErrorStatus(message: string) {
   const lower = message.toLowerCase();
 
   if (message.startsWith("AUTH_NOT_SIGNED_IN")) return 401;
+  if (message.startsWith("AUTH_NO_ACCESS")) return 403;
   if (message.startsWith("AUTH_MISCONFIGURED")) return 500;
   if (message.startsWith("AUTH_PROFILE_UNAVAILABLE")) return 500;
   if (message.startsWith("AUTH_BOOTSTRAP_FAILED")) return 500;

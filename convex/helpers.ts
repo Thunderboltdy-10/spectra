@@ -19,6 +19,7 @@ export async function getOrCreateDefaultOrg(ctx: MutationCtx): Promise<Id<"orgs"
     tokenBudgetDaily: LIMITS.defaultTokenBudgetPerOrgDaily,
     verifyMarkerPassEnabled: false,
     orchestratorV2Enabled: true,
+    searxngEnabled: true,
     soulEnabled: true,
     agentModelBoostEnabled: true,
     adaptiveQuizEnabled: true,

@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
 import { dayKey, getUserByClerkId } from "./helpers";
 import { vRole } from "./shared";
 
@@ -17,6 +18,39 @@ async function requireAdmin(ctx: Parameters<typeof getUserByClerkId>[0], actorCl
   if (!actor) throw new Error("Unauthorized");
   if (actor.role !== "admin") throw new Error("Admin access required");
   return actor;
+}
+
+async function getStudentSeatSnapshot(ctx: Parameters<typeof getUserByClerkId>[0], orgId: Id<"orgs">) {
+  const [org, students, pendingStudentInvitations] = await Promise.all([
+    ctx.db.get(orgId),
+    ctx.db
+      .query("users")
+      .withIndex("by_org_role", (q) => q.eq("orgId", orgId).eq("role", "student"))
+      .collect(),
+    ctx.db
+      .query("schoolInvitations")
+      .withIndex("by_org", (q) => q.eq("orgId", orgId))
+      .collect()
+      .then((invitations) =>
+        invitations.filter(
+          (invitation) =>
+            invitation.role === "student"
+            && invitation.status === "pending"
+            && invitation.expiresAt > Date.now(),
+        ),
+      ),
+  ]);
+
+  const maxStudents =
+    typeof org?.maxStudents === "number" && Number.isFinite(org.maxStudents) && org.maxStudents > 0
+      ? Math.floor(org.maxStudents)
+      : null;
+
+  return {
+    maxStudents,
+    currentStudents: students.length,
+    pendingStudentInvitations: pendingStudentInvitations.length,
+  };
 }
 
 /**
@@ -238,6 +272,16 @@ export const inviteMember = mutation({
       throw new Error("User is already a member of this school");
     }
 
+    if (args.role === "student") {
+      const seatSnapshot = await getStudentSeatSnapshot(ctx, actor.orgId);
+      if (
+        typeof seatSnapshot.maxStudents === "number"
+        && seatSnapshot.currentStudents + seatSnapshot.pendingStudentInvitations >= seatSnapshot.maxStudents
+      ) {
+        throw new Error("SEAT_LIMIT_REACHED: Student seat limit reached for this school.");
+      }
+    }
+
     // Cancel any existing pending invitation for this email
     const existing = await ctx.db
       .query("schoolInvitations")
@@ -261,7 +305,12 @@ export const inviteMember = mutation({
       expiresAt: now + 7 * 24 * 60 * 60 * 1000,
     });
 
-    return { invitationId };
+    const invitation = await ctx.db.get(invitationId);
+
+    return {
+      invitationId,
+      token: invitation?.token,
+    };
   },
 });
 
@@ -440,6 +489,10 @@ export const acceptInvitation = mutation({
     const invitation = await ctx.db.get(args.invitationId);
     if (!invitation) throw new Error("Invitation not found");
     if (invitation.status !== "pending") throw new Error("Invitation is not pending");
+    if (invitation.expiresAt <= Date.now()) {
+      await ctx.db.patch(args.invitationId, { status: "expired" });
+      throw new Error("Invitation has expired");
+    }
     if (invitation.email.toLowerCase() !== args.email.toLowerCase()) {
       throw new Error("Email mismatch");
     }
@@ -448,6 +501,18 @@ export const acceptInvitation = mutation({
       .query("users")
       .withIndex("by_clerk_id", (q) => q.eq("clerkId", args.clerkId))
       .unique();
+
+    if (args.role === "student") {
+      const seatSnapshot = await getStudentSeatSnapshot(ctx, args.orgId);
+      const existingStudentInOrg =
+        existingUser && existingUser.orgId === args.orgId && existingUser.role === "student";
+      if (
+        typeof seatSnapshot.maxStudents === "number"
+        && seatSnapshot.currentStudents - (existingStudentInOrg ? 1 : 0) >= seatSnapshot.maxStudents
+      ) {
+        throw new Error("SEAT_LIMIT_REACHED: Student seat limit reached for this school.");
+      }
+    }
 
     const now = Date.now();
 

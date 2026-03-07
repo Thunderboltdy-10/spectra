@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { computeCompactionWindow } from "../compaction";
+import { computeCompactionWindow, type CompactableMessage } from "../compaction";
 
-function createMessages(count: number, start = 0) {
+function createMessages(count: number, start = 0): CompactableMessage[] {
   return Array.from({ length: count }).map((_, index) => ({
     _id: `m_${start + index}`,
     createdAt: start + index,

@@ -154,6 +154,25 @@ BACK: [answer or definition]
 - Minimum deck size is 5 cards unless the student explicitly requests fewer.`
       : "";
 
+  const documentRules =
+    params.mode === "document"
+      ? `Document mode policy:
+- Modes are guides, not hard walls. You may answer conversationally first, then generate a document when useful.
+- Only generate a structured document when the user asks for one or when it clearly helps the task.
+- If you generate a document, wrap the JSON payload exactly as:
+<<DOCUMENT_START>>
+{...valid JSON...}
+<<DOCUMENT_END>>
+- Supported document types:
+  - presentation: { "type": "presentation", "title": string, "slides": [{ "layout": "title" | "content" | "two-column" | "image" | "blank", "title"?: string, "body"?: string, "bullets"?: string[], "notes"?: string, "accent"?: string }] }
+  - word: { "type": "word", "title": string, "sections": [{ "heading": string, "level": 1 | 2 | 3, "content": string }] }
+  - study_guide: { "type": "study_guide", "title": string, "summary"?: string, "highlights"?: string[], "terms"?: [{ "term": string, "definition": string }], "sections": [{ "heading": string, "content": string }] }
+  - timeline: { "type": "timeline", "title": string, "events": [{ "date": string, "title": string, "detail": string }] }
+  - comparison_table: { "type": "comparison_table", "title": string, "columns": string[], "rows": string[][] }
+- You may include concise commentary outside the delimiters, but the JSON inside must be valid and complete.
+- Use clear academic structure and polished headings.`
+      : "";
+
   const researchRules =
     params.mode === "research"
       ? `Research mode policy:
@@ -192,7 +211,8 @@ BACK: [answer or definition]
       ? `General mode policy:
 - Be helpful and pedagogical.
 - Cite sources when relevant and available.
-- Adapt to the student's needs and question type.`
+- Adapt to the student's needs and question type.
+- You may blend related study activities when pedagogically helpful.`
       : "";
 
   const autoRules =
@@ -200,7 +220,8 @@ BACK: [answer or definition]
       ? `Auto mode policy:
 - Analyze the student's message and respond in the most appropriate format.
 - Be helpful and pedagogical.
-- Adapt your response style to the nature of the request.`
+- Adapt your response style to the nature of the request.
+- Modes are hints, not walls. Blend explanation, quizzes, flashcards, research, and documents when it improves learning.`
       : "";
 
   const topicAnchor =
@@ -265,6 +286,7 @@ ${markerRules}
 ${scaffoldRules}
 ${quizRules}
 ${flashcardRules}
+${documentRules}
 ${researchRules}
 ${explainRules}
 ${imageRules}

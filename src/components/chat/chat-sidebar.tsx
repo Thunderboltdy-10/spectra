@@ -197,15 +197,12 @@ export function ChatSidebar({
     return chats.filter((chat) => chat.updatedAt >= activityCutoffTs).length;
   }, [activityCutoffTs, chats]);
 
-  const usagePercentFromSpending = userSpending
-    ? (typeof userSpending.tokenUsagePercent === "number" && userSpending.tokenUsagePercent >= 0
-      ? userSpending.tokenUsagePercent
-      : typeof userSpending.budgetUsagePercent === "number" && userSpending.budgetUsagePercent >= 0
-        ? userSpending.budgetUsagePercent
-        : typeof userSpending.activityUsagePercent === "number" && userSpending.activityUsagePercent >= 0
-          ? userSpending.activityUsagePercent
-          : null)
-    : null;
+  const usagePercentCandidates = [
+    userSpending?.activityUsagePercent,
+    userSpending?.budgetUsagePercent,
+    userSpending?.tokenUsagePercent,
+  ].filter((value): value is number => typeof value === "number" && value >= 0);
+  const usagePercentFromSpending = usagePercentCandidates.length > 0 ? Math.max(...usagePercentCandidates) : null;
   const usageRatioFromSpending = typeof usagePercentFromSpending === "number"
     ? Math.min(1, Math.max(0, usagePercentFromSpending / 100))
     : null;
@@ -718,7 +715,7 @@ export function ChatSidebar({
             </div>
           </div>
           <ThemeToggle />
-          <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={onOpenSettings} title="Open global settings">
+          <Button type="button" variant="secondary" size="icon" className="h-7 w-7" onClick={onOpenSettings} title="Open global settings">
             <Settings2 className="h-3.5 w-3.5" />
           </Button>
         </div>

@@ -60,7 +60,7 @@ function CandidateBar({ score }: { score?: number }) {
 
 export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps) {
   const compact = useCompactSheet(1024);
-  const { docked, panelWidth } = useRightPanelDock({ id: "route-trace-drawer", open, compact, maxWidthPx: 576 });
+  const { docked, panelWidth } = useRightPanelDock({ id: "route-trace-drawer", open, compact, maxWidthPx: 640 });
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -96,10 +96,10 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
             : "inset-y-0 right-0 w-[92vw] max-w-xl border-l"
         }`}
       >
-        <div className="mb-4 flex items-center justify-between">
-          <div>
+        <div className="mb-4 flex min-h-[72px] items-center justify-between">
+          <div className="min-w-0">
             <p className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Route Trace</p>
-            <h3 className="font-display text-2xl text-[var(--text-primary)]">Model Decision Timeline</h3>
+            <h3 className="truncate font-display text-2xl text-[var(--text-primary)]">Model Decision Timeline</h3>
           </div>
           <div className="flex items-center gap-1.5">
             {compact ? (
@@ -133,7 +133,7 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
         </div>
 
         {!collapsed ? (
-          <div className="right-panel-content min-h-0 flex-1 overflow-y-auto pr-1">
+          <div className="right-panel-content min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-1">
             <section className="mb-5">
           <h4 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Inputs</h4>
           <div className="grid gap-2 sm:grid-cols-2">
@@ -180,14 +180,14 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
                   ) : (
                     <XCircle className="h-4 w-4 text-[var(--danger)]" />
                   )}
-                  <span className="font-mono text-xs text-[var(--text-primary)]">{sanitizeModelId(candidate.modelId)}</span>
+                  <span className="break-all font-mono text-xs text-[var(--text-primary)]">{sanitizeModelId(candidate.modelId)}</span>
                 </div>
                 <p className="mt-1 text-xs text-[var(--text-secondary)]">
                   Score: {formatScore(candidate.score)}
                 </p>
                 <CandidateBar score={candidate.score} />
                 {candidate.reason && (
-                  <p className="mt-1 text-xs text-[var(--text-secondary)]">{candidate.reason}</p>
+                  <p className="mt-1 break-words text-xs text-[var(--text-secondary)]">{candidate.reason}</p>
                 )}
                 {candidate.scoreBreakdown && candidate.scoreBreakdown.length > 0 && (
                   <p className="mt-1 text-xs text-[var(--text-secondary)]">
@@ -204,8 +204,8 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
 
             <section className="mb-5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
           <h4 className="mb-1 text-sm font-semibold text-[var(--text-primary)]">Selected</h4>
-          <p className="font-mono text-xs text-[var(--text-primary)]">{sanitizeModelId(trace.selected.modelId)}</p>
-          <p className="mt-1 text-xs text-[var(--text-secondary)]">{trace.selected.reason}</p>
+          <p className="break-all font-mono text-xs text-[var(--text-primary)]">{sanitizeModelId(trace.selected.modelId)}</p>
+          <p className="mt-1 break-words text-xs text-[var(--text-secondary)]">{trace.selected.reason}</p>
             </section>
 
             <section className="mb-5">
@@ -241,10 +241,10 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
                     <Milestone className="h-3.5 w-3.5" />
                     <span className="font-medium">Attempt {fallback.attemptIndex + 1}</span>
                   </div>
-                  <p className="font-mono text-[11px] text-[var(--text-secondary)] inline-flex items-center gap-1">
+                  <p className="inline-flex flex-wrap items-center gap-1 break-all font-mono text-[11px] text-[var(--text-secondary)]">
                     {sanitizeModelId(fallback.fromModel)} <ArrowRight className="h-3 w-3" /> {sanitizeModelId(fallback.toModel)}
                   </p>
-                  <p className="mt-1 text-xs text-[var(--text-secondary)]">{fallback.error}</p>
+                  <p className="mt-1 break-words text-xs text-[var(--text-secondary)]">{fallback.error}</p>
                 </li>
               ))}
             </ol>

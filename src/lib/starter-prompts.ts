@@ -75,6 +75,11 @@ const MODE_STARTER_PROMPTS: Record<StudyMode, readonly string[]> = {
     "Generate a clean diagram of {topic2} with labels.",
     "Make a visual mind map for {topic3}.",
   ],
+  document: [
+    "Create a presentation about {topic} for a classroom lesson.",
+    "Write a study guide on {topic2} with key terms and summaries.",
+    "Build a comparison table for {topic3} with pros, cons, and examples.",
+  ],
 };
 
 function fillTopicPlaceholders(template: string, topics: string[]) {

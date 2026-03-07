@@ -58,6 +58,8 @@ type RankedModel = {
   reasons: string[];
 };
 
+const MAX_COST_PER_MILLION_EUR = 30;
+
 function clamp01(value: number) {
   return Math.max(0, Math.min(1, value));
 }
@@ -127,6 +129,28 @@ function effectiveInputCost(model: CatalogModelEntry) {
   return 5;
 }
 
+function effectiveOutputCost(model: CatalogModelEntry) {
+  if (typeof model.outputCostPerM === "number" && Number.isFinite(model.outputCostPerM)) {
+    return Math.max(0, model.outputCostPerM);
+  }
+  if (model.isFree || model.modelId.includes(":free")) return 0;
+  if (model.costRating === "low") return 1.8;
+  if (model.costRating === "high") return 20;
+  return 7;
+}
+
+function isImageGenerationModel(model: CatalogModelEntry) {
+  return modelSupportsCapability(model, "image_generation");
+}
+
+export function isModelTooExpensivePerMillion(model: CatalogModelEntry) {
+  if (isImageGenerationModel(model)) return false;
+  return (
+    effectiveInputCost(model) > MAX_COST_PER_MILLION_EUR
+    || effectiveOutputCost(model) > MAX_COST_PER_MILLION_EUR
+  );
+}
+
 function costScore(model: CatalogModelEntry) {
   const inCost = effectiveInputCost(model);
   if (inCost <= 0.05) return 1;
@@ -136,6 +160,10 @@ function costScore(model: CatalogModelEntry) {
 }
 
 export function isModelAllowedInTier(model: CatalogModelEntry, tier: SpendingTier) {
+  if (isModelTooExpensivePerMillion(model)) {
+    return false;
+  }
+
   if (isOpenRouterAutoModel(model.modelId)) {
     return tier === "normal";
   }

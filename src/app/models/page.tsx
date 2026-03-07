@@ -432,8 +432,17 @@ export default function ModelsPage() {
       }
       if (!cleanModelSearch) return true;
       const localScore = fuzzyScore(cleanModelSearch, model);
-      const haystack = `${model.name} ${model.modelId} ${model.provider}`.toLowerCase();
-      return haystack.includes(cleanModelSearch) || localScore > 0.25;
+      const haystack = `${model.name} ${model.modelId} ${model.provider} ${(model.tags ?? []).join(" ")}`.toLowerCase();
+      // Direct substring match
+      if (haystack.includes(cleanModelSearch)) return true;
+      // Fuzzy match
+      if (localScore > 0.25) return true;
+      // Version-aware matching: "4.1" matches "gpt-4.1", "4o" matches "gpt-4o", "sonnet 4.5" matches "claude-sonnet-4.5"
+      const versionPattern = cleanModelSearch.replace(/\./g, "\\.").replace(/\s+/g, ".*");
+      try {
+        if (new RegExp(versionPattern, "i").test(haystack)) return true;
+      } catch { /* ignore invalid regex */ }
+      return false;
     });
 
     rows = rows.sort((a, b) => {
@@ -517,7 +526,7 @@ export default function ModelsPage() {
   if (loading) {
     return (
       <AppShell>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
           {Array.from({ length: 9 }).map((_, index) => (
             <div key={index} className="h-56 animate-pulse rounded-xl bg-[var(--bg-secondary)]" />
           ))}
@@ -594,12 +603,12 @@ export default function ModelsPage() {
         </div>
       </section>
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_280px]">
+      <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
         <div className="space-y-6">
           {featured.length > 0 ? (
             <section>
               <h2 className="mb-3 text-lg font-semibold text-[var(--text-primary)]">Featured Models</h2>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
                 {featured.slice(0, 6).map((model) => (
                   <ModelCard key={`featured-${model.modelId}`} model={model} tier={tier} onTry={tryModel} />
                 ))}
@@ -622,7 +631,7 @@ export default function ModelsPage() {
               </div>
             ) : (
               <>
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
                   {availableModels.slice(0, visibleCount).map((model) => (
                     <ModelCard key={`available-${model.modelId}`} model={model} tier={tier} onTry={tryModel} />
                   ))}
@@ -643,7 +652,7 @@ export default function ModelsPage() {
                   </Button>
                 </div>
                 {showRestricted ? (
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
                     {restrictedModels.map((model) => (
                       <ModelCard key={`restricted-${model.modelId}`} model={model} tier={tier} onTry={tryModel} />
                     ))}

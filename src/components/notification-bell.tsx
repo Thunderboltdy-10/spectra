@@ -71,11 +71,35 @@ export function NotificationBell({
   }, []);
 
   useEffect(() => {
-    void refreshNotifications();
+    let mounted = true;
+    void (async () => {
+      await refreshNotifications();
+      // Show a toast for missed notifications on session start
+      if (!mounted) return;
+      try {
+        const shown = window.sessionStorage.getItem("ai-school:missed-notif-shown");
+        if (shown === "1") return;
+        window.sessionStorage.setItem("ai-school:missed-notif-shown", "1");
+      } catch { return; }
+      // Check unread count after initial fetch
+      const response = await fetch("/api/notifications?limit=3");
+      if (!response.ok) return;
+      const payload = (await response.json()) as NotificationsPayload;
+      if (!mounted) return;
+      const unread = (payload.notifications ?? []).filter((n) => !n.read);
+      if (unread.length === 0) return;
+      if (unread.length === 1) {
+        toast(unread[0].title, { description: unread[0].body });
+      } else {
+        toast(`${payload.unreadCount} unread notification${payload.unreadCount > 1 ? "s" : ""}`, {
+          description: unread[0].title,
+        });
+      }
+    })();
     const interval = window.setInterval(() => {
       void refreshNotifications({ silent: true });
     }, 60_000);
-    return () => window.clearInterval(interval);
+    return () => { mounted = false; window.clearInterval(interval); };
   }, [refreshNotifications]);
 
   useEffect(() => {

@@ -1,27 +1,46 @@
 import Link from "next/link";
-import { AlertTriangle } from "lucide-react";
+import { Clock, Mail, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function NoAccessPage() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)] px-4">
-      <div className="w-full max-w-md rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 shadow-[var(--shadow-soft)]">
-        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-[color-mix(in_oklab,var(--warning)_14%,transparent)]">
-          <AlertTriangle className="h-6 w-6 text-[var(--warning)]" />
+    <main className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)] px-4">
+      <div className="w-full max-w-lg text-center">
+        <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+          <Clock className="h-7 w-7 text-[var(--text-secondary)]" />
         </div>
-        <h1 className="font-display text-2xl text-[var(--text-primary)]">No school access</h1>
-        <p className="mt-3 text-sm text-[var(--text-secondary)]">
-          Your account is not linked to a school workspace. Contact your school administrator for an invitation.
+
+        <h1 className="font-display text-3xl text-[var(--text-primary)]">Approval pending</h1>
+        <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-[var(--text-secondary)]">
+          Your account is waiting for your school administrator to grant access. You will be able to use AI School once approved.
         </p>
-        <div className="mt-6 flex flex-wrap gap-2">
+
+        <div className="mx-auto mt-8 max-w-xs space-y-3">
+          <div className="flex items-center gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3 text-left">
+            <Mail className="h-4 w-4 shrink-0 text-[var(--text-secondary)]" />
+            <div>
+              <p className="text-sm font-medium text-[var(--text-primary)]">Check your email</p>
+              <p className="text-xs text-[var(--text-secondary)]">You may receive an invitation link from your school.</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3 text-left">
+            <Clock className="h-4 w-4 shrink-0 text-[var(--text-secondary)]" />
+            <div>
+              <p className="text-sm font-medium text-[var(--text-primary)]">Contact your admin</p>
+              <p className="text-xs text-[var(--text-secondary)]">Ask your school administrator for access.</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
           <Link href="/sign-in">
-            <Button>Sign in again</Button>
-          </Link>
-          <Link href="/">
-            <Button variant="secondary">Back to AI School</Button>
+            <Button variant="secondary" className="gap-2">
+              <ArrowLeft className="h-3.5 w-3.5" />
+              Sign in again
+            </Button>
           </Link>
         </div>
       </div>
-    </div>
+    </main>
   );
 }

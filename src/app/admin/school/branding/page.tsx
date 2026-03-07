@@ -144,7 +144,7 @@ export default function SchoolBrandingPage() {
         <div className="flex flex-wrap items-start justify-between gap-4" data-tour="branding-header">
           <div>
             <div className="mb-1 flex items-center gap-2">
-              <Link href="/admin?section=branding" className="flex items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition">
+              <Link href="/admin" className="flex items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition">
                 <ChevronLeft className="h-3 w-3" /> School Admin
               </Link>
               <span className="text-xs text-[var(--text-secondary)]">/</span>

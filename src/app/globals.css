@@ -81,17 +81,17 @@
   --bg-sidebar: #17151f;
   --bg-user-bubble: #1e2a3a;
 
-  --bg-elevated: #211e2e;
-  --bg-hover: #2a273a;
+  --bg-elevated: #1f1c2c;
+  --bg-hover: #2d2a3e;
   --bg-overlay: rgba(4, 8, 12, 0.56);
   --bg-code: #0a0910;
 
   --text-primary: #edf4ff;
-  --text-secondary: #a09598;
-  --text-tertiary: #6b6478;
+  --text-secondary: #b8adb0;
+  --text-tertiary: #7d7689;
   --text-inverse: #0b1220;
 
-  --border-default: #342f46;
+  --border-default: #3a3550;
   --accent: var(--brand-primary);
   --accent-cyan: var(--brand-primary);
   --accent-orange: color-mix(in oklab, var(--brand-accent) 66%, #ffb36f);
@@ -118,18 +118,12 @@ body {
 }
 
 .dark body {
-  background:
-    radial-gradient(circle at 10% 0%, color-mix(in oklab, var(--accent-cyan) 8%, transparent), transparent 42%),
-    radial-gradient(circle at 88% 100%, color-mix(in oklab, var(--accent-coral) 6%, transparent), transparent 46%),
-    var(--bg-primary);
+  background: var(--bg-primary);
 }
 
 body {
   margin: 0;
-  background:
-    radial-gradient(circle at 12% 0%, color-mix(in oklab, var(--accent-cyan) 12%, transparent), transparent 44%),
-    radial-gradient(circle at 92% 88%, color-mix(in oklab, var(--accent-coral) 8%, transparent), transparent 42%),
-    var(--bg-primary);
+  background: var(--bg-primary);
   color: var(--text-primary);
   font-family: var(--font-manrope), sans-serif;
   font-size: 15px;
@@ -265,6 +259,10 @@ button:disabled {
 
 .chat-sidebar {
   background: var(--bg-sidebar);
+}
+
+.dark .sidebar-nav-active {
+  background: color-mix(in oklab, var(--accent-cyan) 14%, var(--bg-secondary));
 }
 
 .stat-number {

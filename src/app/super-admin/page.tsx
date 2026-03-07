@@ -13,6 +13,7 @@ import {
   Shield,
   ChevronLeft,
   ChevronRight,
+  X,
 } from "lucide-react";
 import {
   Bar,
@@ -218,7 +219,9 @@ export default function SuperAdminDashboard() {
   const [accessDenied, setAccessDenied] = useState(false);
   const [announcementAudience, setAnnouncementAudience] = useState<"all" | "org" | "email">("all");
   const [announcementOrgId, setAnnouncementOrgId] = useState("");
-  const [announcementEmail, setAnnouncementEmail] = useState("");
+  const [recipientEmailInput, setRecipientEmailInput] = useState("");
+  const [recipientEmails, setRecipientEmails] = useState<string[]>([]);
+  const [recipientDropdownOpen, setRecipientDropdownOpen] = useState(false);
   const [announcementTitle, setAnnouncementTitle] = useState("");
   const [announcementBody, setAnnouncementBody] = useState("");
   const [announcementActionUrl, setAnnouncementActionUrl] = useState("");
@@ -323,7 +326,6 @@ export default function SuperAdminDashboard() {
     const title = announcementTitle.trim();
     const body = announcementBody.trim();
     const actionUrl = announcementActionUrl.trim();
-    const email = announcementEmail.trim();
 
     if (!title || !body) {
       toast.error("Title and message are required.");
@@ -333,39 +335,55 @@ export default function SuperAdminDashboard() {
       toast.error("Choose a school target.");
       return;
     }
-    if (announcementAudience === "email" && !email) {
-      toast.error("Enter a recipient email.");
+    if (announcementAudience === "email" && recipientEmails.length === 0) {
+      toast.error("Add at least one recipient email.");
       return;
     }
 
     setSendingAnnouncement(true);
     try {
-      const response = await fetch("/api/super-admin/notifications", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          audience: announcementAudience,
-          title,
-          body,
-          actionUrl: actionUrl || undefined,
-          orgId: announcementAudience === "org" ? announcementOrgId : undefined,
-          userEmail: announcementAudience === "email" ? email : undefined,
-        }),
-      });
-      if (!response.ok) {
-        throw new Error(await response.text());
+      let totalSent = 0;
+      if (announcementAudience === "email") {
+        // Send one request per email to stay compatible with current backend
+        for (const email of recipientEmails) {
+          const res = await fetch("/api/super-admin/notifications", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ audience: "email", title, body, actionUrl: actionUrl || undefined, userEmail: email }),
+          });
+          if (!res.ok) throw new Error(await res.text());
+          const p = (await res.json()) as { sentCount?: number };
+          totalSent += p.sentCount ?? 1;
+        }
+      } else {
+        const response = await fetch("/api/super-admin/notifications", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            audience: announcementAudience,
+            title,
+            body,
+            actionUrl: actionUrl || undefined,
+            orgId: announcementAudience === "org" ? announcementOrgId : undefined,
+          }),
+        });
+        if (!response.ok) throw new Error(await response.text());
+        const payload = (await response.json()) as { sentCount?: number };
+        totalSent = payload.sentCount ?? 0;
       }
 
-      const payload = (await response.json()) as { sentCount?: number };
-      toast.success(`Announcement sent to ${payload.sentCount ?? 0} user${payload.sentCount === 1 ? "" : "s"}.`);
+      toast.success(`Announcement sent to ${totalSent} user${totalSent === 1 ? "" : "s"}.`);
       setAnnouncementTitle("");
       setAnnouncementBody("");
       setAnnouncementActionUrl("");
+      setRecipientEmails([]);
+      setRecipientEmailInput("");
       if (announcementAudience !== "org") {
         setAnnouncementOrgId("");
       }
-      if (announcementAudience !== "email") {
-        setAnnouncementEmail("");
+      if (announcementAudience === "email") {
+        setRecipientEmails([]);
+        setRecipientEmailInput("");
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to send announcement");
@@ -672,7 +690,7 @@ export default function SuperAdminDashboard() {
 
           <div className="grid gap-3 lg:grid-cols-2">
             <label className="space-y-1.5">
-              <span className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Audience</span>
+              <span className="text-xs text-[var(--text-secondary)]">Audience</span>
               <select
                 value={announcementAudience}
                 onChange={(event) => setAnnouncementAudience(event.target.value as "all" | "org" | "email")}
@@ -686,7 +704,7 @@ export default function SuperAdminDashboard() {
 
             {announcementAudience === "org" ? (
               <label className="space-y-1.5">
-                <span className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">School</span>
+                <span className="text-xs text-[var(--text-secondary)]">School</span>
                 <select
                   value={announcementOrgId}
                   onChange={(event) => setAnnouncementOrgId(event.target.value)}
@@ -701,22 +719,52 @@ export default function SuperAdminDashboard() {
                 </select>
               </label>
             ) : announcementAudience === "email" ? (
-              <label className="space-y-1.5">
-                <span className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Recipient email</span>
-                <input
-                  type="email"
-                  list="super-admin-email-suggestions"
-                  value={announcementEmail}
-                  onChange={(event) => setAnnouncementEmail(event.target.value)}
-                  placeholder="student@school.edu"
-                  className="h-10 w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)] focus:ring-2 focus:ring-[color-mix(in_oklab,var(--accent-cyan)_32%,transparent)]"
-                />
-                <datalist id="super-admin-email-suggestions">
-                  {knownEmails.map((email) => (
-                    <option key={email} value={email} />
-                  ))}
-                </datalist>
-              </label>
+              <div className="space-y-1.5" onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setRecipientDropdownOpen(false); }}>
+                <span className="text-xs text-[var(--text-secondary)]">Recipient emails</span>
+                <div className="relative">
+                  <input
+                    value={recipientEmailInput}
+                    onChange={(e) => { setRecipientEmailInput(e.target.value); setRecipientDropdownOpen(true); }}
+                    onFocus={() => setRecipientDropdownOpen(true)}
+                    placeholder="Search by email…"
+                    className="h-10 w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)] focus:ring-2 focus:ring-[color-mix(in_oklab,var(--accent-cyan)_32%,transparent)]"
+                  />
+                  {recipientDropdownOpen && recipientEmailInput.trim() && (() => {
+                    const needle = recipientEmailInput.trim().toLowerCase();
+                    const filtered = knownEmails.filter((e) => !recipientEmails.includes(e) && e.toLowerCase().includes(needle)).slice(0, 8);
+                    if (filtered.length === 0) return null;
+                    return (
+                      <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-soft)]">
+                        {filtered.map((email) => (
+                          <button
+                            key={email}
+                            type="button"
+                            className="flex w-full items-center px-3 py-2.5 text-left text-sm hover:bg-[var(--bg-hover)]"
+                            onMouseDown={(e) => { e.preventDefault(); setRecipientEmails((prev) => [...prev, email]); setRecipientEmailInput(""); setRecipientDropdownOpen(false); }}
+                          >
+                            {email}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+                {recipientEmails.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    {recipientEmails.map((email) => (
+                      <span key={email} className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] py-0.5 pl-2.5 pr-1.5 text-xs text-[var(--text-primary)]">
+                        {email}
+                        <button type="button" onClick={() => setRecipientEmails((prev) => prev.filter((e) => e !== email))} className="rounded-full hover:opacity-70">
+                          <X className="h-3 w-3 text-[var(--text-secondary)]" />
+                        </button>
+                      </span>
+                    ))}
+                    <button type="button" onClick={() => setRecipientEmails([])} className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]">
+                      Clear all
+                    </button>
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5 text-xs text-[var(--text-secondary)]">
                 Everyone on the platform will receive this message.
@@ -724,7 +772,7 @@ export default function SuperAdminDashboard() {
             )}
 
             <label className="space-y-1.5 lg:col-span-2">
-              <span className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Title</span>
+              <span className="text-xs text-[var(--text-secondary)]">Title</span>
               <input
                 value={announcementTitle}
                 onChange={(event) => setAnnouncementTitle(event.target.value)}
@@ -735,7 +783,7 @@ export default function SuperAdminDashboard() {
             </label>
 
             <label className="space-y-1.5 lg:col-span-2">
-              <span className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Message</span>
+              <span className="text-xs text-[var(--text-secondary)]">Message</span>
               <textarea
                 value={announcementBody}
                 onChange={(event) => setAnnouncementBody(event.target.value)}
@@ -747,7 +795,7 @@ export default function SuperAdminDashboard() {
             </label>
 
             <label className="space-y-1.5 lg:col-span-2">
-              <span className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Action URL (optional)</span>
+              <span className="text-xs text-[var(--text-secondary)]">Action URL (optional)</span>
               <input
                 value={announcementActionUrl}
                 onChange={(event) => setAnnouncementActionUrl(event.target.value)}
@@ -794,31 +842,38 @@ export default function SuperAdminDashboard() {
             </div>
 
             <div>
-              <p className="mb-3 text-xs text-[var(--text-secondary)]">
+              <h3 className="mb-3 flex items-center gap-1.5 text-sm font-medium text-[var(--text-primary)]">
                 <Database className="h-3.5 w-3.5" />
                 Largest Uploaded Files
-              </p>
-              <div className="space-y-2">
-                {storageStats.largestFiles.slice(0, 6).map((file) => (
-                  <div
-                    key={file.resourceId}
-                    className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-[var(--text-primary)]">{file.filename}</p>
-                      <p className="truncate text-xs text-[var(--text-secondary)]">
-                        {file.orgName} · {file.scope}
-                      </p>
-                    </div>
-                    <span className="shrink-0 text-xs font-semibold text-[var(--text-primary)]">
-                      {file.sizeMegabytes.toLocaleString()} MB
-                    </span>
-                  </div>
-                ))}
-                {storageStats.largestFiles.length === 0 && (
-                  <p className="text-sm text-[var(--text-secondary)]">No files uploaded yet.</p>
-                )}
-              </div>
+              </h3>
+              {storageStats.largestFiles.length === 0 ? (
+                <p className="text-sm text-[var(--text-secondary)]">No files uploaded yet.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-[var(--border-default)] text-left text-xs text-[var(--text-secondary)]">
+                        <th className="pb-2 font-medium">Filename</th>
+                        <th className="pb-2 font-medium">Size</th>
+                        <th className="pb-2 font-medium">Type</th>
+                        <th className="pb-2 font-medium">Owner</th>
+                        <th className="pb-2 font-medium w-20">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {storageStats.largestFiles.slice(0, 6).map((file) => (
+                        <tr key={file.resourceId} className="border-b border-[var(--border-default)]">
+                          <td className="py-2.5 pr-3 truncate max-w-[200px] text-[var(--text-primary)]">{file.filename}</td>
+                          <td className="py-2.5 pr-3 text-[var(--text-secondary)]">{file.sizeMegabytes.toLocaleString()} MB</td>
+                          <td className="py-2.5 pr-3 text-[var(--text-secondary)]">{file.scope ?? 'file'}</td>
+                          <td className="py-2.5 pr-3 text-[var(--text-secondary)]">{file.orgName ?? '—'}</td>
+                          <td className="py-2.5"><button type="button" className="text-xs text-[var(--danger)] hover:underline">Delete</button></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         )}

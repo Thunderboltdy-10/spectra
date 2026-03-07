@@ -13,6 +13,7 @@ type ChatHeaderProps = {
   sending: boolean;
   messageCount: number;
   compacting?: boolean;
+  streamPhase?: string;
   onStop: () => void;
   onCompact?: () => void;
   onCompactWithDepth?: (keepLatestMessages: number) => void;
@@ -44,6 +45,7 @@ export function ChatHeader({
   sending,
   messageCount,
   compacting = false,
+  streamPhase,
   onStop,
   onCompact,
   onCompactWithDepth,
@@ -62,7 +64,7 @@ export function ChatHeader({
   const showCompactTip = messageCount > 8;
 
   return (
-    <header className="sticky top-0 z-20 shadow-[0_1px_0_var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_92%,transparent)] backdrop-blur-xl">
+    <header className="sticky top-0 z-20 shadow-[0_1px_0_var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_92%,transparent)] backdrop-blur-xl min-h-[56px]">
       <div className="px-3 py-2.5 sm:px-6 lg:px-10">
         <div className="mx-auto flex w-full max-w-6xl items-center gap-2">
           <Button
@@ -84,11 +86,24 @@ export function ChatHeader({
               {title}
             </h1>
             <div className="mt-0.5 flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-              {agentLabel && <span className="truncate">{agentLabel}</span>}
-              {responseAgo && (
+              {sending && streamPhase && onOpenOrchestration ? (
+                <button
+                  type="button"
+                  onClick={onOpenOrchestration}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-0.5 -ml-1.5 transition hover:bg-[var(--bg-hover)]"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent-cyan)] animate-pulse" />
+                  <span className="thinking-wave">{streamPhase}</span>
+                </button>
+              ) : (
                 <>
-                  <span className="h-1 w-1 rounded-full bg-[var(--border-default)]" />
-                  <span className="truncate">Updated {responseAgo}</span>
+                  {agentLabel && <span className="truncate">{agentLabel}</span>}
+                  {responseAgo && (
+                    <>
+                      <span className="h-1 w-1 rounded-full bg-[var(--border-default)]" />
+                      <span className="truncate">Updated {responseAgo}</span>
+                    </>
+                  )}
                 </>
               )}
             </div>
@@ -181,16 +196,6 @@ export function ChatHeader({
                   <DropdownMenuItem onSelect={onCompact} disabled={compacting}>
                     <Layers className="mr-2 h-3.5 w-3.5" />
                     Compact now
-                  </DropdownMenuItem>
-                ) : null}
-                {!sending && onCompactWithDepth ? (
-                  <DropdownMenuItem onSelect={() => onCompactWithDepth(4)} disabled={compacting}>
-                    Deep compact
-                  </DropdownMenuItem>
-                ) : null}
-                {!sending && onCompactWithDepth ? (
-                  <DropdownMenuItem onSelect={() => onCompactWithDepth(10)} disabled={compacting}>
-                    Gentle compact
                   </DropdownMenuItem>
                 ) : null}
               </DropdownMenuContent>

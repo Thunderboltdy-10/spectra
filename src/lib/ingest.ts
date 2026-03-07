@@ -7,7 +7,7 @@ export type ParsedFile = {
   pages: Array<{ page?: number; text: string }>;
 };
 
-type PdfJsModule = typeof import("pdfjs-dist");
+type PdfJsModule = typeof import("pdfjs-dist/legacy/build/pdf.mjs");
 
 const CHUNK_SIZE = 900;
 const CHUNK_OVERLAP = 160;
@@ -16,7 +16,7 @@ let pdfjsModulePromise: Promise<PdfJsModule> | null = null;
 
 async function getPdfjsModule() {
   if (!pdfjsModulePromise) {
-    pdfjsModulePromise = import("pdfjs-dist");
+    pdfjsModulePromise = import("pdfjs-dist/legacy/build/pdf.mjs");
   }
   return pdfjsModulePromise;
 }
@@ -25,7 +25,9 @@ async function parsePdf(bytes: ArrayBuffer): Promise<ParsedFile> {
   const pdfjs = await getPdfjsModule();
   const loadingTask = pdfjs.getDocument({
     data: new Uint8Array(bytes),
+    useWorkerFetch: false,
     isEvalSupported: false,
+    disableFontFace: true,
   });
 
   const pdf = await loadingTask.promise;

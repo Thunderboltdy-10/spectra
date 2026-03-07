@@ -75,6 +75,73 @@ export type ChatMessage = {
 
 export type SpendingTier = "normal" | "expensive_blocked" | "cheap_only" | "free_only";
 
+export type ToolBundle =
+  | "none"
+  | "memory"
+  | "retrieval"
+  | "search"
+  | "artifact"
+  | "vision"
+  | "multi_agent";
+
+export type MemoryScope = "user_global" | "project" | "chat" | "none";
+export type RetrievalScope = "pack" | "personal" | "agent" | "org";
+
+export type ModeContract = {
+  mode: import("@/lib/contracts/studyModes").StudyMode;
+  pedagogy: string;
+  outputFormat: string;
+  responseDepth: "concise" | "standard" | "deep";
+  escalationPolicy: "stay_simple" | "allow_tools" | "allow_multi_step";
+  toolBundles: ToolBundle[];
+  validator: "none" | "quiz" | "flashcard" | "research" | "document" | "leak_guard";
+  retryPolicy: "none" | "single_bounded_retry";
+};
+
+export type AgentContract = {
+  id?: string;
+  name?: string;
+  scope: "general" | "focused";
+  instructionStyle: "compact" | "full";
+  resourceScopes: RetrievalScope[];
+  toolBundles: ToolBundle[];
+  preferredCapabilities: Array<"vision" | "reasoning" | "code" | "search" | "image_generation">;
+};
+
+export type RoutePlan = {
+  taskClass:
+    | "simple_question"
+    | "personalized_help"
+    | "resource_grounded"
+    | "current_info"
+    | "artifact_generation"
+    | "research"
+    | "study_mode"
+    | "multimodal";
+  timeSensitive: boolean;
+  hasAttachments: boolean;
+  hasSelectedMode: boolean;
+  hasSelectedAgent: boolean;
+  personalTask: boolean;
+  shouldConsultMemory: boolean;
+  shouldWriteMemory: boolean;
+  shouldUseSchoolResources: boolean;
+  shouldUseWebSearch: boolean;
+  shouldUseMultiStep: boolean;
+  responseBudget: "simple" | "normal" | "deep";
+  allowedToolBundles: ToolBundle[];
+  retrievalScopes: RetrievalScope[];
+  memoryScopes: MemoryScope[];
+  candidateModelRequirements: {
+    required: Array<"vision" | "reasoning" | "code" | "search" | "image_generation">;
+    preferred: Array<"vision" | "reasoning" | "code" | "search" | "image_generation">;
+  };
+  allowSubAgents: boolean;
+  modeContract: ModeContract;
+  agentContract?: AgentContract;
+  schoolSoulVersion?: string;
+};
+
 export type ModelRouteInput = {
   mode: import("@/lib/contracts/studyModes").StudyMode;
   thinkingLevel: import("@/lib/contracts/studyModes").ThinkingLevel;
@@ -174,6 +241,7 @@ export type RouteTrace = {
     modelId: string;
     reason: string;
   };
+  routePlan?: RoutePlan;
   toolchain: string[];
   fallbacks: RouteTraceFallback[];
   routingDurationMs: number;

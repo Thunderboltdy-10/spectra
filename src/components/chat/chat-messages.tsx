@@ -10,7 +10,6 @@ import { FlashcardReveal, isFlashcardContent, type FlashcardCard } from "@/compo
 import { DocumentPanel } from "@/components/chat/document-panel";
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { ThinkingBlock } from "@/components/chat/thinking-block";
-import { ThinkingMessages } from "@/components/loading-states";
 import { ProviderLogo } from "@/components/provider-logo";
 import { isGeneratedDocumentContent, parseGeneratedDocument } from "@/lib/document-generator";
 import { autoCloseMarkdown } from "@/lib/stream-markdown";
@@ -33,7 +32,7 @@ type ChatMessagesProps = {
   onRateFlashcardCard?: (payload: { messageId: string; cardHash: string; quality: number }) => void;
   onRegenerate?: () => void;
   onRegenerateWithModel?: (modelId: string) => void;
-  onAssistantFeedback?: (positive: boolean, modelId?: string) => void;
+  onAssistantFeedback?: (messageId: string, positive: boolean, modelId?: string) => void;
   onEditMessage?: (messageId: string, newContent: string) => Promise<void>;
   onBranchMessage?: (messageId: string) => Promise<void> | void;
   onToggleBookmarkMessage?: (messageId: string) => Promise<void> | void;
@@ -371,11 +370,13 @@ export function ChatMessages({
                       </div>
                     )}
                     <ChatMessage
+                      messageId={msg._id}
                       role={msg.role}
                       content=""
                       thinkingContent={msg.thinkingContent}
                       enhancedContent={msg.enhancedContent}
                       attachments={msg.attachments}
+                      attachmentResourceIds={msg.attachmentResourceIds}
                       attachmentPreviews={msg.attachmentPreviews}
                       modelUsed={msg.modelUsed}
                       whyThisResponse={msg.whyThisResponse}
@@ -432,11 +433,13 @@ export function ChatMessages({
                       </div>
                     )}
                     <ChatMessage
+                      messageId={msg._id}
                       role={msg.role}
                       content={msg.content}
                       thinkingContent={msg.thinkingContent}
                       enhancedContent={msg.enhancedContent}
                       attachments={msg.attachments}
+                      attachmentResourceIds={msg.attachmentResourceIds}
                       attachmentPreviews={msg.attachmentPreviews}
                       modelUsed={msg.modelUsed}
                       whyThisResponse={msg.whyThisResponse}
@@ -477,11 +480,13 @@ export function ChatMessages({
                     </div>
                   )}
                   <ChatMessage
+                    messageId={msg._id}
                     role={msg.role}
                     content={msg.content}
                     thinkingContent={msg.thinkingContent}
                     enhancedContent={msg.enhancedContent}
                     attachments={msg.attachments}
+                    attachmentResourceIds={msg.attachmentResourceIds}
                     attachmentPreviews={msg.attachmentPreviews}
                     modelUsed={msg.modelUsed}
                     whyThisResponse={msg.whyThisResponse}
@@ -526,11 +531,13 @@ export function ChatMessages({
                       </div>
                     )}
                     <ChatMessage
+                      messageId={msg._id}
                       role={msg.role}
                       content=""
                       thinkingContent={msg.thinkingContent}
                       enhancedContent={msg.enhancedContent}
                       attachments={msg.attachments}
+                      attachmentResourceIds={msg.attachmentResourceIds}
                       attachmentPreviews={msg.attachmentPreviews}
                       modelUsed={msg.modelUsed}
                       whyThisResponse={msg.whyThisResponse}
@@ -588,11 +595,13 @@ export function ChatMessages({
                     </div>
                   )}
                   <ChatMessage
+                    messageId={msg._id}
                     role={msg.role}
                     content={msg.content}
                     thinkingContent={msg.thinkingContent}
                     enhancedContent={msg.enhancedContent}
                     attachments={msg.attachments}
+                    attachmentResourceIds={msg.attachmentResourceIds}
                     attachmentPreviews={msg.attachmentPreviews}
                     modelUsed={msg.modelUsed}
                     whyThisResponse={msg.whyThisResponse}
@@ -633,11 +642,13 @@ export function ChatMessages({
                     </div>
                   )}
                   <ChatMessage
+                    messageId={msg._id}
                     role={msg.role}
                     content=""
                     thinkingContent={msg.thinkingContent}
                     enhancedContent={msg.enhancedContent}
                     attachments={msg.attachments}
+                    attachmentResourceIds={msg.attachmentResourceIds}
                     attachmentPreviews={msg.attachmentPreviews}
                     modelUsed={msg.modelUsed}
                     whyThisResponse={msg.whyThisResponse}
@@ -677,11 +688,13 @@ export function ChatMessages({
                   </div>
                 )}
                 <ChatMessage
+                  messageId={msg._id}
                   role={msg.role}
                   content={msg.content}
                   thinkingContent={msg.thinkingContent}
                   enhancedContent={msg.enhancedContent}
                   attachments={msg.attachments}
+                  attachmentResourceIds={msg.attachmentResourceIds}
                   attachmentPreviews={msg.attachmentPreviews}
                   modelUsed={msg.modelUsed}
                   whyThisResponse={msg.whyThisResponse}

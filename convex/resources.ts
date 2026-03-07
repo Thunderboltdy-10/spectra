@@ -341,6 +341,38 @@ export const completeResourceIngestion = mutation({
   },
 });
 
+export const finalizeGeneratedResource = mutation({
+  args: {
+    actorClerkId: v.string(),
+    resourceId: v.id("resources"),
+    parsedCharCount: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const resource = await ctx.db.get(args.resourceId);
+    if (!resource || resource.orgId !== actor.orgId) {
+      throw new Error("Resource not found");
+    }
+
+    if (resource.ownerUserId !== actor._id && actor.role !== "admin") {
+      throw new Error("Unauthorized");
+    }
+
+    await ctx.db.patch(args.resourceId, {
+      status: "processed",
+      error: undefined,
+      parsedCharCount: Math.max(0, Math.round(args.parsedCharCount)),
+      updatedAt: Date.now(),
+    });
+
+    return { ok: true };
+  },
+});
+
 export const completeResourceIngestionInternal = internalMutation({
   args: {
     resourceId: v.id("resources"),
@@ -516,6 +548,32 @@ export const listAgentResources = query({
     return ctx.db
       .query("resources")
       .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
+      .collect();
+  },
+});
+
+export const listPackResources = query({
+  args: {
+    actorClerkId: v.string(),
+    packId: v.id("packs"),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const pack = await ctx.db.get(args.packId);
+    if (!pack || pack.orgId !== actor.orgId) {
+      throw new Error("Pack not found");
+    }
+    if (actor.role !== "teacher" && actor.role !== "admin" && pack.ownerUserId !== actor._id) {
+      throw new Error("Not authorized for this pack");
+    }
+
+    return ctx.db
+      .query("resources")
+      .withIndex("by_pack", (q) => q.eq("packId", args.packId))
       .collect();
   },
 });

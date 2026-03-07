@@ -40,6 +40,7 @@ import type * as soul from "../soul.js";
 import type * as streakLogic from "../streakLogic.js";
 import type * as superAdmin from "../superAdmin.js";
 import type * as usage from "../usage.js";
+import type * as userLifecycle from "../userLifecycle.js";
 import type * as users from "../users.js";
 
 import type {
@@ -81,6 +82,7 @@ declare const fullApi: ApiFromModules<{
   streakLogic: typeof streakLogic;
   superAdmin: typeof superAdmin;
   usage: typeof usage;
+  userLifecycle: typeof userLifecycle;
   users: typeof users;
 }>;
 

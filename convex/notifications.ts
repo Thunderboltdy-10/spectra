@@ -16,6 +16,14 @@ async function requireActor(ctx: Parameters<typeof getUserByClerkId>[0], actorCl
   return actor;
 }
 
+async function requireOrgAdmin(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string) {
+  const actor = await requireActor(ctx, actorClerkId);
+  if (actor.role !== "admin") {
+    throw new Error("Admin access required");
+  }
+  return actor;
+}
+
 function isSuperAdminEmail(email: string) {
   return SUPER_ADMIN_EMAILS.has(email.trim().toLowerCase());
 }
@@ -111,6 +119,125 @@ export const sendSuperAdminAnnouncement = mutation({
 
     return {
       sentCount: uniqueRecipients.length,
+    };
+  },
+});
+
+export const searchOrgRecipients = query({
+  args: {
+    actorClerkId: v.string(),
+    search: v.optional(v.string()),
+    role: v.optional(v.union(v.literal("student"), v.literal("teacher"), v.literal("admin"))),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireOrgAdmin(ctx, args.actorClerkId);
+    const search = args.search?.trim().toLowerCase() ?? "";
+    const limit = Math.min(50, Math.max(1, Math.round(args.limit ?? 12)));
+
+    let recipients = await ctx.db
+      .query("users")
+      .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
+      .collect();
+
+    if (args.role) {
+      recipients = recipients.filter((user) => user.role === args.role);
+    }
+
+    if (search) {
+      recipients = recipients.filter((user) =>
+        user.name.trim().toLowerCase().includes(search)
+        || user.email.trim().toLowerCase().includes(search),
+      );
+    }
+
+    return {
+      recipients: recipients
+        .sort((a, b) => a.name.localeCompare(b.name) || a.email.localeCompare(b.email))
+        .slice(0, limit)
+        .map((user) => ({
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+        })),
+    };
+  },
+});
+
+export const sendOrgAnnouncement = mutation({
+  args: {
+    actorClerkId: v.string(),
+    title: v.string(),
+    body: v.string(),
+    actionUrl: v.optional(v.string()),
+    recipientEmails: v.optional(v.array(v.string())),
+    role: v.optional(v.union(v.literal("student"), v.literal("teacher"), v.literal("admin"))),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireOrgAdmin(ctx, args.actorClerkId);
+    const title = args.title.trim();
+    const body = args.body.trim();
+    const actionUrl = args.actionUrl?.trim() || undefined;
+
+    if (!title || !body) {
+      throw new Error("Title and body are required");
+    }
+
+    const orgUsers = await ctx.db
+      .query("users")
+      .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
+      .collect();
+
+    const requestedEmails = new Set(
+      (args.recipientEmails ?? [])
+        .map((email) => email.trim().toLowerCase())
+        .filter(Boolean),
+    );
+
+    let recipients = orgUsers.filter((user) => {
+      if (args.role && user.role !== args.role) return false;
+      if (requestedEmails.size > 0) {
+        return requestedEmails.has(user.email.trim().toLowerCase());
+      }
+      return true;
+    });
+
+    recipients = Array.from(new Map(recipients.map((user) => [user._id, user])).values());
+    if (recipients.length === 0) {
+      throw new Error("No matching recipients found for this school");
+    }
+
+    const createdAt = Date.now();
+    for (const recipient of recipients) {
+      await ctx.db.insert("notifications", {
+        userId: recipient._id,
+        orgId: recipient.orgId,
+        type: "school_admin_announcement",
+        title,
+        body,
+        actionUrl,
+        read: false,
+        createdAt,
+      });
+    }
+
+    await ctx.db.insert("auditLog", {
+      actorUserId: actor._id,
+      action: "school_admin_notification_sent",
+      targetType: "org",
+      targetId: String(actor.orgId),
+      details: JSON.stringify({
+        title,
+        role: args.role,
+        recipientEmails: [...requestedEmails],
+        sentCount: recipients.length,
+      }),
+      createdAt,
+    });
+
+    return {
+      sentCount: recipients.length,
     };
   },
 });

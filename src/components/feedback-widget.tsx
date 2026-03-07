@@ -32,6 +32,10 @@ function formatFileSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
 }
 
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 export function FeedbackWidget() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -52,65 +56,43 @@ export function FeedbackWidget() {
     setScreenshot(null);
   }
 
+  async function compressCanvasToFile(canvas: HTMLCanvasElement): Promise<File | null> {
+    const attempts = [0.78, 0.62, 0.48, 0.36];
+    for (const quality of attempts) {
+      const blob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob(resolve, "image/jpeg", quality);
+      });
+      if (!blob) continue;
+      if (blob.size <= MAX_SCREENSHOT_BYTES) {
+        return new File([blob], "auto-screenshot.jpg", { type: "image/jpeg" });
+      }
+    }
+    return null;
+  }
+
   async function captureScreenshot(): Promise<File | null> {
     try {
-      // Hide the feedback widget before capture
-      const widget = document.querySelector('[data-feedback-widget]');
-      if (widget instanceof HTMLElement) {
-        widget.style.visibility = 'hidden';
-      }
+      const { default: html2canvas } = await import("html2canvas");
+      await wait(180);
+      await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
+      await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
 
-      // Use the browser's native screenshot API if available
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return null;
-
-      // Fallback: capture a simplified representation via SVG foreignObject
-      const body = document.body;
-      const width = Math.min(body.scrollWidth, 1280);
-      const height = Math.min(body.scrollHeight, 800);
-      canvas.width = width;
-      canvas.height = height;
-
-      const svgData = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-        <foreignObject width="100%" height="100%">
-          <div xmlns="http://www.w3.org/1999/xhtml" style="font-family:sans-serif;font-size:14px;color:#666;padding:20px;">
-            <p>Page: ${window.location.pathname}</p>
-            <p>Time: ${new Date().toISOString()}</p>
-            <p>Viewport: ${window.innerWidth}x${window.innerHeight}</p>
-          </div>
-        </foreignObject>
-      </svg>`;
-
-      const img = new Image();
-      const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-
-      await new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve();
-        img.onerror = () => reject(new Error('Failed to load SVG'));
-        img.src = url;
+      const target = document.documentElement;
+      const canvas = await html2canvas(target, {
+        backgroundColor: getComputedStyle(document.body).backgroundColor || "#f7f4ec",
+        useCORS: true,
+        scale: Math.min(window.devicePixelRatio || 1, 1.8),
+        logging: false,
+        width: window.innerWidth,
+        height: window.innerHeight,
+        x: window.scrollX,
+        y: window.scrollY,
+        windowWidth: document.documentElement.scrollWidth,
+        windowHeight: document.documentElement.scrollHeight,
       });
 
-      ctx.drawImage(img, 0, 0);
-      URL.revokeObjectURL(url);
-
-      if (widget instanceof HTMLElement) {
-        widget.style.visibility = '';
-      }
-
-      return new Promise<File | null>((resolve) => {
-        canvas.toBlob((result) => {
-          if (!result) { resolve(null); return; }
-          resolve(new File([result], 'auto-screenshot.png', { type: 'image/png' }));
-        }, 'image/png', 0.7);
-      });
+      return compressCanvasToFile(canvas);
     } catch {
-      // Restore visibility on error
-      const widget = document.querySelector('[data-feedback-widget]');
-      if (widget instanceof HTMLElement) {
-        widget.style.visibility = '';
-      }
       return null;
     }
   }
@@ -139,6 +121,8 @@ export function FeedbackWidget() {
     }
 
     setSubmitting(true);
+    const previousOpen = open;
+    setOpen(false);
     try {
       const form = new FormData();
       form.set("category", category);
@@ -152,10 +136,9 @@ export function FeedbackWidget() {
         form.set("mode", mode);
       }
 
-      // Auto-capture screenshot if user didn't attach one
-      let screenshotToSend = screenshot;
+      let screenshotToSend = await captureScreenshot();
       if (!screenshotToSend) {
-        screenshotToSend = await captureScreenshot();
+        screenshotToSend = screenshot;
       }
       if (screenshotToSend) {
         form.set("screenshot", screenshotToSend);
@@ -179,8 +162,10 @@ export function FeedbackWidget() {
 
       toast.success("Feedback sent. Thank you.");
       resetForm();
-      setOpen(false);
     } catch (error) {
+      if (previousOpen) {
+        setOpen(true);
+      }
       toast.error(error instanceof Error ? error.message : "Failed to submit feedback");
     } finally {
       setSubmitting(false);
@@ -202,7 +187,7 @@ export function FeedbackWidget() {
   }
 
   return (
-    <aside data-feedback-widget className="fixed bottom-5 left-5 z-[70] w-[min(92vw,22rem)] rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)]">
+    <aside data-feedback-widget data-html2canvas-ignore className="fixed bottom-5 left-5 z-[70] w-[min(92vw,22rem)] rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)]">
       <div className="mb-3 flex items-center justify-between gap-2">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Feedback</p>

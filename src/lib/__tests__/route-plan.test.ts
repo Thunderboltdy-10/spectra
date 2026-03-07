@@ -1,0 +1,100 @@
+import { describe, expect, it } from "vitest";
+import { buildRoutePlan } from "@/lib/orchestrator/route-plan";
+
+describe("buildRoutePlan", () => {
+  it("keeps simple factual prompts on the cheap path", () => {
+    const plan = buildRoutePlan({
+      message: "What is photosynthesis?",
+      mode: "general",
+      selectedMode: "general",
+      hasAttachments: false,
+      hasAgent: false,
+      hasPack: false,
+      hasPersonalResources: false,
+      hasAgentResources: false,
+      autoSearchEnabled: false,
+      thinkingLevel: "low",
+      complexity: "simple",
+      schoolSoulVersion: "school-soul-v1",
+    });
+
+    expect(plan.taskClass).toBe("simple_question");
+    expect(plan.responseBudget).toBe("simple");
+    expect(plan.shouldConsultMemory).toBe(false);
+    expect(plan.shouldUseWebSearch).toBe(false);
+    expect(plan.allowedToolBundles).toEqual(["none"]);
+  });
+
+  it("selectively enables memory for personal tutoring prompts", () => {
+    const plan = buildRoutePlan({
+      message: "I struggle with algebra. Remember that I need step-by-step explanations.",
+      mode: "tutor",
+      selectedMode: "tutor",
+      hasAttachments: false,
+      hasAgent: false,
+      hasPack: false,
+      hasPersonalResources: false,
+      hasAgentResources: false,
+      autoSearchEnabled: false,
+      thinkingLevel: "medium",
+      complexity: "medium",
+      schoolSoulVersion: "school-soul-v2",
+    });
+
+    expect(plan.taskClass).toBe("personalized_help");
+    expect(plan.shouldConsultMemory).toBe(true);
+    expect(plan.shouldWriteMemory).toBe(true);
+    expect(plan.memoryScopes).toEqual(["user_global"]);
+    expect(plan.allowedToolBundles).toContain("memory");
+  });
+
+  it("keeps retrieval scopes bounded to the active pack and agent", () => {
+    const plan = buildRoutePlan({
+      message: "Summarize the attached chapter notes from this pack.",
+      mode: "document",
+      selectedMode: "document",
+      hasAttachments: true,
+      hasAgent: true,
+      hasPack: true,
+      hasPersonalResources: false,
+      hasAgentResources: true,
+      autoSearchEnabled: false,
+      thinkingLevel: "medium",
+      complexity: "medium",
+      selectedAgent: {
+        _id: "agent_123",
+        name: "History mentor",
+      },
+      schoolSoulVersion: "school-soul-v3",
+    });
+
+    expect(plan.shouldUseSchoolResources).toBe(true);
+    expect(plan.retrievalScopes).toEqual(["pack", "agent"]);
+    expect(plan.allowedToolBundles).toContain("retrieval");
+    expect(plan.allowedToolBundles).toContain("artifact");
+    expect(plan.allowedToolBundles).toContain("vision");
+  });
+
+  it("earns deep orchestration only for research/current-info work", () => {
+    const plan = buildRoutePlan({
+      message: "Research the latest 2026 university AI policy changes and compare the claims.",
+      mode: "research",
+      selectedMode: "research",
+      hasAttachments: false,
+      hasAgent: false,
+      hasPack: false,
+      hasPersonalResources: false,
+      hasAgentResources: false,
+      autoSearchEnabled: true,
+      thinkingLevel: "high",
+      complexity: "complex",
+      schoolSoulVersion: "school-soul-v4",
+    });
+
+    expect(plan.taskClass).toBe("research");
+    expect(plan.shouldUseWebSearch).toBe(true);
+    expect(plan.shouldUseMultiStep).toBe(true);
+    expect(plan.allowSubAgents).toBe(true);
+    expect(plan.allowedToolBundles).toContain("multi_agent");
+  });
+});

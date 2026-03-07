@@ -189,37 +189,37 @@ function AdminPageContent() {
 
   return (
     <AppShell fullBleed contentClassName="2xl:px-14">
-      <div className="mx-auto max-w-4xl">
+      <div className="mx-auto max-w-4xl space-y-5 pb-10">
         {/* Page header */}
-        <div className="pb-6">
-          <h1 className="font-display text-2xl">Admin Console</h1>
+        <div className="pb-2 pt-1">
+          <h1 className="font-display text-3xl">Admin Console</h1>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">Manage your school settings, members, and usage.</p>
         </div>
 
         {/* Section 1: Soul & Personality */}
-        <div className="border-t border-[var(--border-default)] pt-8">
+        <section className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
           <div className="mb-1 flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-[var(--accent-cyan)]" />
-            <h2 className="font-display text-lg">Soul & Personality</h2>
+            <h2 className="font-display text-xl">Soul & Personality</h2>
           </div>
-          <p className="mb-5 text-sm text-[var(--text-secondary)]">Institutional voice, pedagogy, and policy guidance for every tutoring session.</p>
+          <p className="mb-5 mt-1 text-sm text-[var(--text-secondary)]">Institutional voice, pedagogy, and policy guidance for every tutoring session.</p>
 
-          <div className="mb-5 flex items-center gap-4 divide-x divide-[var(--border-default)] border-b border-t border-[var(--border-default)] py-3 text-sm">
-            <div className="flex items-center gap-2 pr-4">
-              <span className="text-[var(--text-secondary)]">Enabled</span>
-              <span className="font-medium">{org?.soulEnabled === false ? "Off" : "On"}</span>
+          <div className="mb-5 flex flex-wrap items-stretch divide-x divide-[var(--border-default)] rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] text-sm">
+            <div className="px-4 py-2.5">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Enabled</p>
+              <p className="mt-0.5 font-medium">{org?.soulEnabled === false ? "Off" : "On"}</p>
             </div>
-            <div className="flex items-center gap-2 pl-4 pr-4">
-              <span className="text-[var(--text-secondary)]">Timezone</span>
-              <span className="font-medium">{org?.timezone ?? "Not set"}</span>
+            <div className="px-4 py-2.5">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Timezone</p>
+              <p className="mt-0.5 font-medium">{org?.timezone ?? "Not set"}</p>
             </div>
-            <div className="flex items-center gap-2 pl-4">
-              <span className="text-[var(--text-secondary)]">School type</span>
-              <span className="font-medium">{org?.schoolType ?? "Not set"}</span>
+            <div className="px-4 py-2.5">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">School type</p>
+              <p className="mt-0.5 font-medium">{org?.schoolType ?? "Not set"}</p>
             </div>
           </div>
 
-          <div className="mb-4 flex flex-wrap gap-2">
+          <div className="mb-5 flex flex-wrap gap-2">
             {["Values", "Pedagogy", "Subject guidance", "Tone", "Policy", "Draft preview"].map((item) => (
               <span key={item} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-sm text-[var(--text-secondary)]">{item}</span>
             ))}
@@ -228,45 +228,45 @@ function AdminPageContent() {
           <Button asChild size="sm">
             <Link href="/admin/school/soul">Open SOUL editor</Link>
           </Button>
-        </div>
+        </section>
 
         {/* Section 2: Members */}
-        <div className="mt-8 border-t border-[var(--border-default)] pt-8">
+        <section className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
           <div className="mb-1 flex items-center gap-2">
             <Users2 className="h-4 w-4 text-[var(--accent-cyan)]" />
-            <h2 className="font-display text-lg">Members</h2>
+            <h2 className="font-display text-xl">Members</h2>
           </div>
-          <p className="mb-5 text-sm text-[var(--text-secondary)]">Invite students or teachers, manage roles, and keep seat usage visible.</p>
+          <p className="mb-5 mt-1 text-sm text-[var(--text-secondary)]">Invite students or teachers, manage roles, and keep seat usage visible.</p>
 
           {/* Inline stat strip */}
-          <div className="mb-5 flex items-center gap-4 divide-x divide-[var(--border-default)] border-b border-t border-[var(--border-default)] py-3 text-sm">
-            <div className="pr-4">
-              <span className="text-[var(--text-secondary)]">Members </span>
-              <span className="font-medium">{dashboard?.memberCount ?? members.length}</span>
+          <div className="mb-6 flex flex-wrap items-stretch divide-x divide-[var(--border-default)] rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] text-sm">
+            <div className="px-4 py-2.5">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Members</p>
+              <p className="mt-0.5 font-medium">{dashboard?.memberCount ?? members.length}</p>
             </div>
-            <div className="pl-4 pr-4">
-              <span className="text-[var(--text-secondary)]">Students </span>
-              <span className="font-medium">{dashboard?.studentCount ?? 0}</span>
+            <div className="px-4 py-2.5">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Students</p>
+              <p className="mt-0.5 font-medium">{dashboard?.studentCount ?? 0}</p>
             </div>
-            <div className="pl-4 pr-4">
-              <span className="text-[var(--text-secondary)]">Teachers </span>
-              <span className="font-medium">{dashboard?.teacherCount ?? 0}</span>
+            <div className="px-4 py-2.5">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Teachers</p>
+              <p className="mt-0.5 font-medium">{dashboard?.teacherCount ?? 0}</p>
             </div>
-            <div className="pl-4">
-              <span className="text-[var(--text-secondary)]">Seats </span>
-              <span className="font-medium">{org?.maxStudents ? `${seatUsed}/${org.maxStudents}` : seatUsed}</span>
-              {pendingStudentInvites > 0 && (
-                <span className="ml-2 text-xs text-[var(--text-tertiary)]">({pendingStudentInvites} pending)</span>
-              )}
+            <div className="px-4 py-2.5">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Seats</p>
+              <p className="mt-0.5 font-medium">
+                {org?.maxStudents ? `${seatUsed}/${org.maxStudents}` : seatUsed}
+                {pendingStudentInvites > 0 && <span className="ml-1.5 text-xs font-normal text-[var(--text-tertiary)]">({pendingStudentInvites} pending)</span>}
+              </p>
             </div>
           </div>
 
           {/* Invite form */}
           <div className="mb-6">
-            <div className="mb-2 flex items-center gap-2">
-              <MailPlus className="h-4 w-4 text-[var(--text-secondary)]" />
-              <p className="text-sm font-medium">Invite member</p>
-            </div>
+            <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
+              <MailPlus className="h-3.5 w-3.5 text-[var(--text-secondary)]" />
+              Invite member
+            </p>
             <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_160px_auto]">
               <Input value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} placeholder="student@school.edu" />
               <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as "student" | "teacher")}>
@@ -296,7 +296,7 @@ function AdminPageContent() {
 
           {/* Members table */}
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm font-medium">School members</p>
+            <p className="text-sm font-medium text-[var(--text-secondary)]">School members</p>
             <div className="relative w-full max-w-sm">
               <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-secondary)]" />
               <Input value={memberSearch} onChange={(event) => setMemberSearch(event.target.value)} placeholder="Search members" className="pl-9" />
@@ -305,10 +305,10 @@ function AdminPageContent() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-[var(--border-default)] text-left text-xs text-[var(--text-secondary)]">
-                  <th className="pb-2">Name</th>
-                  <th className="pb-2">Email</th>
-                  <th className="pb-2">Role</th>
+                <tr className="border-b border-[var(--border-default)] text-left text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+                  <th className="pb-2.5 font-medium">Name</th>
+                  <th className="pb-2.5 font-medium">Email</th>
+                  <th className="pb-2.5 font-medium">Role</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border-default)]">
@@ -318,7 +318,7 @@ function AdminPageContent() {
                     <td className="py-3 text-[var(--text-secondary)]">{member.email}</td>
                     <td className="py-3">
                       {member.role === "admin" ? (
-                        <span className="text-xs text-[var(--text-secondary)]">admin</span>
+                        <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-xs text-[var(--text-secondary)]">admin</span>
                       ) : (
                         <Select value={member.role} onValueChange={(value) => void updateRole(member._id, value as "student" | "teacher")}>
                           <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
@@ -334,31 +334,31 @@ function AdminPageContent() {
               </tbody>
             </table>
           </div>
-        </div>
+        </section>
 
-        {/* Section 3: Usage */}
-        <div className="mt-8 border-t border-[var(--border-default)] pt-8">
+        {/* Section 3: Usage & Models */}
+        <section className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
           <div className="mb-1 flex items-center gap-2">
             <BarChart3 className="h-4 w-4 text-[var(--accent-cyan)]" />
-            <h2 className="font-display text-lg">Usage & Models</h2>
+            <h2 className="font-display text-xl">Usage & Models</h2>
           </div>
-          <p className="mb-5 text-sm text-[var(--text-secondary)]">Token volume, quiz outcomes, and preferred models.</p>
+          <p className="mb-5 mt-1 text-sm text-[var(--text-secondary)]">Token volume, quiz outcomes, and preferred models.</p>
 
-          <div className="mb-5 flex items-center gap-4 divide-x divide-[var(--border-default)] border-b border-t border-[var(--border-default)] py-3 text-sm">
-            <div className="pr-4">
-              <span className="text-[var(--text-secondary)]">Messages today </span>
-              <span className="font-medium">{dashboard?.messagesToday ?? 0}</span>
+          <div className="mb-6 flex flex-wrap items-stretch divide-x divide-[var(--border-default)] rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] text-sm">
+            <div className="px-4 py-2.5">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Messages today</p>
+              <p className="mt-0.5 font-medium">{dashboard?.messagesToday ?? 0}</p>
             </div>
-            <div className="pl-4">
-              <span className="text-[var(--text-secondary)]">Avg quiz score </span>
-              <span className="font-medium">{analytics?.avgQuizScore ? `${Math.round(analytics.avgQuizScore)}%` : "N/A"}</span>
+            <div className="px-4 py-2.5">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Avg quiz score</p>
+              <p className="mt-0.5 font-medium">{analytics?.avgQuizScore ? `${Math.round(analytics.avgQuizScore)}%` : "N/A"}</p>
             </div>
           </div>
 
           {/* Token usage chart */}
           <div className="mb-6">
             <div className="mb-3 flex items-center justify-between">
-              <p className="text-sm font-medium">Recent token usage</p>
+              <p className="text-sm font-medium">Token usage — last 14 days</p>
               {selectedUsageDay && (
                 <button type="button" onClick={() => setSelectedUsageDay(null)} className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]">
                   Clear selection
@@ -369,44 +369,52 @@ function AdminPageContent() {
               <p className="text-sm text-[var(--text-secondary)]">No usage data yet.</p>
             ) : (
               <>
-                <ResponsiveContainer width="100%" height={160}>
-                  <AreaChart
-                    data={usage.slice(-14)}
-                    onClick={(data) => {
-                      if (data?.activePayload?.[0]) {
-                        const payload = data.activePayload[0].payload as UsageRow;
-                        setSelectedUsageDay((prev) => prev === payload.day ? null : payload.day);
-                      }
-                    }}
-                    style={{ cursor: "pointer" }}
-                  >
-                    <defs>
-                      <linearGradient id="adminTokensGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="var(--accent-cyan)" stopOpacity={0.28} />
-                        <stop offset="95%" stopColor="var(--accent-cyan)" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-default)" vertical={false} />
-                    <XAxis dataKey="day" tickFormatter={shortDay} tick={{ fontSize: 10, fill: "var(--text-secondary)" }} axisLine={false} tickLine={false} />
-                    <YAxis tickFormatter={formatTokens} tick={{ fontSize: 10, fill: "var(--text-secondary)" }} axisLine={false} tickLine={false} width={40} />
-                    <Tooltip
-                      contentStyle={{ background: "var(--bg-elevated)", border: "1px solid var(--border-default)", borderRadius: 8, fontSize: 12 }}
-                      labelFormatter={shortDay}
-                      formatter={(value: number) => [formatTokens(value), "Tokens"]}
-                    />
-                    <Area type="monotone" dataKey="totalTokens" stroke="var(--accent-cyan)" strokeWidth={2} fill="url(#adminTokensGrad)" dot={false} activeDot={{ r: 4, fill: "var(--accent-cyan)" }} />
-                  </AreaChart>
-                </ResponsiveContainer>
+                <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
+                  <ResponsiveContainer width="100%" height={140}>
+                    <AreaChart
+                      data={usage.slice(-14)}
+                      onClick={(data) => {
+                        if (data?.activePayload?.[0]) {
+                          const payload = data.activePayload[0].payload as UsageRow;
+                          setSelectedUsageDay((prev) => prev === payload.day ? null : payload.day);
+                        }
+                      }}
+                      style={{ cursor: "pointer" }}
+                    >
+                      <defs>
+                        <linearGradient id="adminTokensGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="var(--accent-cyan)" stopOpacity={0.28} />
+                          <stop offset="95%" stopColor="var(--accent-cyan)" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border-default)" vertical={false} />
+                      <XAxis dataKey="day" tickFormatter={shortDay} tick={{ fontSize: 10, fill: "var(--text-secondary)" }} axisLine={false} tickLine={false} />
+                      <YAxis tickFormatter={formatTokens} tick={{ fontSize: 10, fill: "var(--text-secondary)" }} axisLine={false} tickLine={false} width={40} />
+                      <Tooltip
+                        contentStyle={{ background: "var(--bg-elevated)", border: "1px solid var(--border-default)", borderRadius: 8, fontSize: 12 }}
+                        labelFormatter={shortDay}
+                        formatter={(value: number) => [formatTokens(value), "Tokens"]}
+                      />
+                      <Area type="monotone" dataKey="totalTokens" stroke="var(--accent-cyan)" strokeWidth={2} fill="url(#adminTokensGrad)" dot={false} activeDot={{ r: 4, fill: "var(--accent-cyan)" }} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
                 {selectedUsageDay && (() => {
                   const row = usage.find((r) => r.day === selectedUsageDay);
                   if (!row) return null;
                   return (
-                    <div className="mt-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-                      <p className="mb-2 text-xs font-medium text-[var(--text-secondary)]">Detail — {shortDay(selectedUsageDay)}</p>
-                      <div className="grid grid-cols-3 gap-3 text-sm">
-                        <div><p className="text-xs text-[var(--text-secondary)]">Input</p><p className="font-medium">{formatTokens(row.inputTokens)}</p></div>
-                        <div><p className="text-xs text-[var(--text-secondary)]">Output</p><p className="font-medium">{formatTokens(row.outputTokens)}</p></div>
-                        <div><p className="text-xs text-[var(--text-secondary)]">Total</p><p className="font-medium">{formatTokens(row.totalTokens)}</p></div>
+                    <div className="mt-3 flex flex-wrap items-stretch divide-x divide-[var(--border-default)] rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]">
+                      <div className="px-4 py-2.5">
+                        <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">{shortDay(selectedUsageDay)} — Input</p>
+                        <p className="mt-0.5 text-sm font-medium">{formatTokens(row.inputTokens)}</p>
+                      </div>
+                      <div className="px-4 py-2.5">
+                        <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Output</p>
+                        <p className="mt-0.5 text-sm font-medium">{formatTokens(row.outputTokens)}</p>
+                      </div>
+                      <div className="px-4 py-2.5">
+                        <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Total</p>
+                        <p className="mt-0.5 text-sm font-medium">{formatTokens(row.totalTokens)}</p>
                       </div>
                     </div>
                   );
@@ -415,43 +423,43 @@ function AdminPageContent() {
             )}
           </div>
 
-          {/* Model leaderboard as table */}
+          {/* Model leaderboard */}
           <p className="mb-3 text-sm font-medium">Model leaderboard</p>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto rounded-xl border border-[var(--border-default)]">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-[var(--border-default)] text-left text-xs text-[var(--text-secondary)]">
-                  <th className="w-8 pb-2">#</th>
-                  <th className="pb-2">Model</th>
-                  <th className="pb-2">Provider</th>
-                  <th className="pb-2 text-right">Uses</th>
-                  <th className="pb-2 text-right">Tokens</th>
+                <tr className="border-b border-[var(--border-default)] bg-[var(--bg-secondary)] text-left text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+                  <th className="w-8 px-3 py-2.5 font-medium">#</th>
+                  <th className="px-3 py-2.5 font-medium">Model</th>
+                  <th className="px-3 py-2.5 font-medium">Provider</th>
+                  <th className="px-3 py-2.5 text-right font-medium">Uses</th>
+                  <th className="px-3 py-2.5 text-right font-medium">Tokens</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border-default)]">
                 {leaderboard.slice(0, 8).map((entry, index) => (
-                  <tr key={entry.modelId}>
-                    <td className="py-2.5 text-[var(--text-secondary)]">{index + 1}</td>
-                    <td className="py-2.5 font-medium">{entry.name}</td>
-                    <td className="py-2.5 text-[var(--text-secondary)]">{entry.provider}</td>
-                    <td className="py-2.5 text-right text-[var(--text-secondary)]">{entry.usageCount}</td>
-                    <td className="py-2.5 text-right">{formatTokens(entry.totalTokens)}</td>
+                  <tr key={entry.modelId} className="hover:bg-[var(--bg-hover)]">
+                    <td className="px-3 py-2.5 text-[var(--text-tertiary)]">{index + 1}</td>
+                    <td className="px-3 py-2.5 font-medium">{entry.name}</td>
+                    <td className="px-3 py-2.5 text-[var(--text-secondary)]">{entry.provider}</td>
+                    <td className="px-3 py-2.5 text-right text-[var(--text-secondary)]">{entry.usageCount}</td>
+                    <td className="px-3 py-2.5 text-right">{formatTokens(entry.totalTokens)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </div>
+        </section>
 
         {/* Section 4: Settings */}
-        <div className="mt-8 border-t border-[var(--border-default)] pb-8 pt-8">
+        <section className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
           <div className="mb-1 flex items-center gap-2">
             <Cpu className="h-4 w-4 text-[var(--accent-cyan)]" />
-            <h2 className="font-display text-lg">Settings</h2>
+            <h2 className="font-display text-xl">Settings</h2>
           </div>
-          <p className="mb-5 text-sm text-[var(--text-secondary)]">School-wide retrieval, quiz, flashcard, and orchestration switches.</p>
+          <p className="mb-5 mt-1 text-sm text-[var(--text-secondary)]">School-wide retrieval, quiz, flashcard, and orchestration switches.</p>
 
-          <div className="divide-y divide-[var(--border-default)] border-b border-t border-[var(--border-default)]">
+          <div className="divide-y divide-[var(--border-default)] rounded-xl border border-[var(--border-default)]">
             {[
               { key: "searxngEnabled", label: "SearXNG web search", text: "Prefer metasearch before model-generated web briefings." },
               { key: "adaptiveQuizEnabled", label: "Adaptive quiz", text: "Adjust quiz difficulty from prior performance." },
@@ -459,7 +467,7 @@ function AdminPageContent() {
               { key: "agentModelBoostEnabled", label: "Agent model boost", text: "Allow specialist agents to escalate when needed." },
               { key: "orchestratorV2Enabled", label: "Orchestrator v2", text: "Use the advanced routing pipeline across chats." },
             ].map((item) => (
-              <div key={item.key} className="flex items-center justify-between gap-4 py-3.5">
+              <div key={item.key} className="flex items-center justify-between gap-4 px-4 py-3.5">
                 <div className="min-w-0">
                   <p className="text-sm font-medium">{item.label}</p>
                   <p className="mt-0.5 text-xs text-[var(--text-secondary)]">{item.text}</p>
@@ -475,15 +483,15 @@ function AdminPageContent() {
           <Button className="mt-4" onClick={() => void saveSettings()} disabled={savingSettings}>
             {savingSettings ? "Saving..." : "Save settings"}
           </Button>
-        </div>
+        </section>
 
         {/* Section 5: Notifications */}
-        <div className="mt-8 border-t border-[var(--border-default)] pb-8 pt-8">
+        <section className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
           <div className="mb-1 flex items-center gap-2">
             <BellRing className="h-4 w-4 text-[var(--accent-cyan)]" />
-            <h2 className="font-display text-lg">Notifications</h2>
+            <h2 className="font-display text-xl">Notifications</h2>
           </div>
-          <p className="mb-5 text-sm text-[var(--text-secondary)]">Send announcements to your school members.</p>
+          <p className="mb-5 mt-1 text-sm text-[var(--text-secondary)]">Send announcements to your school members.</p>
 
           <div className="grid gap-3 sm:grid-cols-2">
             {/* Recipients */}
@@ -577,7 +585,7 @@ function AdminPageContent() {
               {sendingNotif ? "Sending…" : "Send notification"}
             </Button>
           </div>
-        </div>
+        </section>
       </div>
     </AppShell>
   );

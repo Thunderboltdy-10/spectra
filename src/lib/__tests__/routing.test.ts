@@ -100,6 +100,46 @@ describe("chooseModelRoute", () => {
     expect(route.primaryModel).toBe(MODEL_CONFIG.autoRouter);
   });
 
+  it("keeps manual fallback candidates inside the live catalog when the selected model is stale", () => {
+    const catalog = [
+      {
+        modelId: "openai/gpt-4.1-mini",
+        name: "GPT-4.1 Mini",
+        provider: "openai",
+        description: "Fast general model",
+        tags: ["fast"],
+        isFree: false,
+      },
+      {
+        modelId: "google/gemini-2.0-flash-exp:free",
+        name: "Gemini Flash Free",
+        provider: "google",
+        description: "Budget-safe fallback",
+        tags: ["free"],
+        isFree: true,
+      },
+    ];
+
+    const route = chooseModelRoute({
+      mode: "tutor",
+      thinkingLevel: "medium",
+      hasAttachments: false,
+      attachmentTypes: [],
+      messageLength: 180,
+      teacherStrictness: "medium",
+      routerMode: "manual",
+      manualModel: "legacy/removed-model",
+      studentSeemsStuck: false,
+      spendingTier: "normal",
+      needsSearch: false,
+      modelCatalog: catalog,
+    });
+
+    const catalogIds = new Set(catalog.map((item) => item.modelId));
+    expect(catalogIds.has(route.primaryModel)).toBe(true);
+    expect(route.fallbackModels.every((modelId) => catalogIds.has(modelId))).toBe(true);
+  });
+
   it("selection varies by prompt complexity for tutor mode", () => {
     const simple = chooseModelRoute({
       mode: "tutor",

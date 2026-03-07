@@ -1,8 +1,10 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
 import { dayKey, getUserByClerkId } from "./helpers";
 import { vRole } from "./shared";
+import { purgeUserData } from "./userLifecycle";
 
 function randomToken(): string {
   const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -21,22 +23,35 @@ async function requireAdmin(ctx: Parameters<typeof getUserByClerkId>[0], actorCl
 }
 
 async function getStudentSeatSnapshot(ctx: Parameters<typeof getUserByClerkId>[0], orgId: Id<"orgs">) {
+  return getStudentSeatSnapshotWithExclusions(ctx, {
+    orgId,
+  });
+}
+
+async function getStudentSeatSnapshotWithExclusions(
+  ctx: Parameters<typeof getUserByClerkId>[0],
+  args: {
+    orgId: Id<"orgs">;
+    excludeInvitationIds?: Id<"schoolInvitations">[];
+  },
+) {
   const [org, students, pendingStudentInvitations] = await Promise.all([
-    ctx.db.get(orgId),
+    ctx.db.get(args.orgId),
     ctx.db
       .query("users")
-      .withIndex("by_org_role", (q) => q.eq("orgId", orgId).eq("role", "student"))
+      .withIndex("by_org_role", (q) => q.eq("orgId", args.orgId).eq("role", "student"))
       .collect(),
     ctx.db
       .query("schoolInvitations")
-      .withIndex("by_org", (q) => q.eq("orgId", orgId))
+      .withIndex("by_org", (q) => q.eq("orgId", args.orgId))
       .collect()
       .then((invitations) =>
         invitations.filter(
           (invitation) =>
             invitation.role === "student"
             && invitation.status === "pending"
-            && invitation.expiresAt > Date.now(),
+            && invitation.expiresAt > Date.now()
+            && !(args.excludeInvitationIds ?? []).includes(invitation._id),
         ),
       ),
   ]);
@@ -51,6 +66,33 @@ async function getStudentSeatSnapshot(ctx: Parameters<typeof getUserByClerkId>[0
     currentStudents: students.length,
     pendingStudentInvitations: pendingStudentInvitations.length,
   };
+}
+
+async function expirePendingInvitationsForEmail(
+  ctx: MutationCtx,
+  args: {
+    orgId: Id<"orgs">;
+    email: string;
+    excludeInvitationId?: Id<"schoolInvitations">;
+  },
+) {
+  const invitations = await ctx.db
+    .query("schoolInvitations")
+    .withIndex("by_email", (q) => q.eq("email", args.email))
+    .collect();
+
+  const expiredIds: Id<"schoolInvitations">[] = [];
+  for (const invitation of invitations) {
+    if (invitation.orgId !== args.orgId) continue;
+    if (invitation.status !== "pending") continue;
+    if (args.excludeInvitationId && invitation._id === args.excludeInvitationId) continue;
+    await ctx.db.patch(invitation._id, {
+      status: "expired",
+    });
+    expiredIds.push(invitation._id);
+  }
+
+  return expiredIds;
 }
 
 /**
@@ -272,6 +314,11 @@ export const inviteMember = mutation({
       throw new Error("User is already a member of this school");
     }
 
+    await expirePendingInvitationsForEmail(ctx, {
+      orgId: actor.orgId,
+      email,
+    });
+
     if (args.role === "student") {
       const seatSnapshot = await getStudentSeatSnapshot(ctx, actor.orgId);
       if (
@@ -279,17 +326,6 @@ export const inviteMember = mutation({
         && seatSnapshot.currentStudents + seatSnapshot.pendingStudentInvitations >= seatSnapshot.maxStudents
       ) {
         throw new Error("SEAT_LIMIT_REACHED: Student seat limit reached for this school.");
-      }
-    }
-
-    // Cancel any existing pending invitation for this email
-    const existing = await ctx.db
-      .query("schoolInvitations")
-      .withIndex("by_email", (q) => q.eq("email", email))
-      .collect();
-    for (const inv of existing) {
-      if (inv.orgId === actor.orgId && inv.status === "pending") {
-        await ctx.db.patch(inv._id, { status: "expired" });
       }
     }
 
@@ -349,6 +385,29 @@ export const resendInvitation = mutation({
     const invitation = await ctx.db.get(args.invitationId);
     if (!invitation) throw new Error("Invitation not found");
     if (invitation.orgId !== actor.orgId) throw new Error("Not authorized");
+    if (invitation.status === "accepted") {
+      throw new Error("Accepted invitations cannot be resent");
+    }
+
+    const email = invitation.email.trim().toLowerCase();
+    const expiredIds = await expirePendingInvitationsForEmail(ctx, {
+      orgId: actor.orgId,
+      email,
+      excludeInvitationId: invitation._id,
+    });
+
+    if (invitation.role === "student") {
+      const seatSnapshot = await getStudentSeatSnapshotWithExclusions(ctx, {
+        orgId: actor.orgId,
+        excludeInvitationIds: [...expiredIds, invitation._id],
+      });
+      if (
+        typeof seatSnapshot.maxStudents === "number"
+        && seatSnapshot.currentStudents + seatSnapshot.pendingStudentInvitations >= seatSnapshot.maxStudents
+      ) {
+        throw new Error("SEAT_LIMIT_REACHED: Student seat limit reached for this school.");
+      }
+    }
 
     const now = Date.now();
     await ctx.db.patch(args.invitationId, {
@@ -358,7 +417,13 @@ export const resendInvitation = mutation({
       expiresAt: now + 7 * 24 * 60 * 60 * 1000,
     });
 
-    return { ok: true };
+    const refreshed = await ctx.db.get(args.invitationId);
+    return {
+      ok: true,
+      token: refreshed?.token,
+      email,
+      role: invitation.role,
+    };
   },
 });
 
@@ -379,7 +444,19 @@ export const removeMember = mutation({
     if (target._id === actor._id) throw new Error("Cannot remove yourself");
     if (target.role === "admin") throw new Error("Only super admin can remove admins");
 
-    await ctx.db.delete(args.userId);
+    const purgeSummary = await purgeUserData(ctx, { actor, target });
+    await ctx.runMutation(internal.auditLog.logAction, {
+      actorUserId: actor._id as Id<"users">,
+      action: "school_admin.remove_member",
+      targetType: "user",
+      targetId: args.userId,
+      details: JSON.stringify({
+        orgId: actor.orgId,
+        role: target.role,
+        email: target.email,
+        purgeSummary,
+      }),
+    });
     return { ok: true };
   },
 });
@@ -502,10 +579,10 @@ export const acceptInvitation = mutation({
       .withIndex("by_clerk_id", (q) => q.eq("clerkId", args.clerkId))
       .unique();
 
-    if (args.role === "student") {
-      const seatSnapshot = await getStudentSeatSnapshot(ctx, args.orgId);
+    if (invitation.role === "student") {
+      const seatSnapshot = await getStudentSeatSnapshot(ctx, invitation.orgId);
       const existingStudentInOrg =
-        existingUser && existingUser.orgId === args.orgId && existingUser.role === "student";
+        existingUser && existingUser.orgId === invitation.orgId && existingUser.role === "student";
       if (
         typeof seatSnapshot.maxStudents === "number"
         && seatSnapshot.currentStudents - (existingStudentInOrg ? 1 : 0) >= seatSnapshot.maxStudents
@@ -518,8 +595,8 @@ export const acceptInvitation = mutation({
 
     if (existingUser) {
       await ctx.db.patch(existingUser._id, {
-        orgId: args.orgId,
-        role: args.role,
+        orgId: invitation.orgId,
+        role: invitation.role,
         email: args.email,
         name: args.name,
         updatedAt: now,
@@ -529,8 +606,8 @@ export const acceptInvitation = mutation({
         clerkId: args.clerkId,
         email: args.email,
         name: args.name,
-        role: args.role,
-        orgId: args.orgId,
+        role: invitation.role,
+        orgId: invitation.orgId,
         createdAt: now,
         updatedAt: now,
       });

@@ -583,8 +583,13 @@ export function ChatLayout() {
           }}
           bookmarkedMessageIds={chat.bookmarkedMessageIds}
           bookmarkingMessageId={chat.bookmarkingMessageId}
-          onAssistantFeedback={(positive, modelId) => {
-            void chat.recordAssistantFeedback(modelId, positive);
+          onAssistantFeedback={(messageId, positive, modelId) => {
+            void chat.recordAssistantFeedback({
+              messageId,
+              chatId: chat.selectedChatId,
+              modelId,
+              positive,
+            });
           }}
           regenModels={regenModels}
           mode={chat.mode}

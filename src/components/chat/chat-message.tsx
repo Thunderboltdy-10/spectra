@@ -15,16 +15,20 @@ import { CollaboratorsBadge } from "@/components/chat/collaborators-badge";
 import { type QuizSubmitResult } from "@/components/chat/quiz-reveal";
 import { usePanel } from "@/context/panel-context";
 import type { Citation, RouteTrace, StudyMode } from "@/types";
+import { DocumentPanel } from "@/components/chat/document-panel";
+import { parseGeneratedDocument } from "@/lib/document-generator";
 import { getModeConfig } from "@/lib/modes";
 import { cn } from "@/lib/utils";
 import { useTextToSpeech } from "@/hooks/use-text-to-speech";
 
 type ChatMessageProps = {
+  messageId?: string;
   role: "user" | "assistant" | "system";
   content: string;
   thinkingContent?: string;
   enhancedContent?: string;
   attachments?: string[];
+  attachmentResourceIds?: string[];
   attachmentPreviews?: Array<{
     name: string;
     mimeType?: string;
@@ -41,7 +45,7 @@ type ChatMessageProps = {
   onRegenerateWithModel?: (modelId: string) => void;
   regenModels?: Array<{ modelId: string; name: string }>;
   onEdit?: (newContent: string) => void;
-  onFeedback?: (positive: boolean, modelId?: string) => void;
+  onFeedback?: (messageId: string, positive: boolean, modelId?: string) => void;
   usageIn?: number;
   usageOut?: number;
   createdAt?: number;
@@ -146,11 +150,13 @@ function CitationCards({ citations, onOpen }: { citations: Citation[]; onOpen: (
 }
 
 export function ChatMessage({
+  messageId,
   role,
   content,
   thinkingContent,
   enhancedContent,
   attachments,
+  attachmentResourceIds,
   attachmentPreviews,
   modelUsed,
   whyThisResponse,
@@ -189,6 +195,7 @@ export function ChatMessage({
   const activeModelId = modelUsed ?? routeTrace?.selected.modelId;
   const activeProvider = activeModelId?.split("/")[0] ?? "openrouter";
   const renderedContent = content;
+  const parsedDocument = useMemo(() => parseGeneratedDocument(renderedContent), [renderedContent]);
   const directTokens = (usageIn ?? 0) + (usageOut ?? 0);
   const collaboratorExtraTokens =
     routeTrace?.collaborators
@@ -202,6 +209,12 @@ export function ChatMessage({
   const timeLabel = useMemo(() => formatRelativeTime(createdAt), [createdAt]);
   const hasEnhanced = Boolean(enhancedContent && enhancedContent.trim());
   const displayUserContent = isUser && showEnhanced && hasEnhanced ? enhancedContent ?? content : content;
+  const assistantAttachmentLinks = !isUser && attachments?.length
+    ? attachments.map((name, index) => ({
+        name,
+        href: attachmentResourceIds?.[index] ? `/api/resources/${attachmentResourceIds[index]}/download` : undefined,
+      }))
+    : [];
 
   const sanitizeModelLabel = (value: string) =>
     value
@@ -356,7 +369,22 @@ export function ChatMessage({
               </div>
 
               <ThinkingBlock content={thinkingContent ?? ""} />
-              {children ? children : <MarkdownRenderer content={renderedContent} citations={citations} mode={mode} onOpenCanvas={onOpenCanvas} onSubmitQuizAnswers={onSubmitQuizAnswers} />}
+              {children ? children : parsedDocument.document ? (
+                <>
+                  {parsedDocument.preamble ? (
+                    <MarkdownRenderer
+                      content={parsedDocument.preamble}
+                      citations={citations}
+                      mode={mode}
+                      onOpenCanvas={onOpenCanvas}
+                      onSubmitQuizAnswers={onSubmitQuizAnswers}
+                    />
+                  ) : null}
+                  <DocumentPanel content={renderedContent} />
+                </>
+              ) : (
+                <MarkdownRenderer content={renderedContent} citations={citations} mode={mode} onOpenCanvas={onOpenCanvas} onSubmitQuizAnswers={onSubmitQuizAnswers} />
+              )}
               <CollaboratorsBadge collaborators={routeTrace?.collaborators} />
               {mode === "research" && searchCitations.length > 0 && (
                 <div className="mt-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2.5">
@@ -383,6 +411,35 @@ export function ChatMessage({
                   </div>
                 </div>
               )}
+              {assistantAttachmentLinks.length > 0 ? (
+                <section className="mt-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
+                  <p className="mb-2 text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+                    Downloads
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {assistantAttachmentLinks.map((attachment) => (
+                      attachment.href ? (
+                        <a
+                          key={`${attachment.name}-${attachment.href}`}
+                          href={attachment.href}
+                          className="inline-flex items-center gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-xs text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]"
+                        >
+                          <Paperclip className="h-3.5 w-3.5" />
+                          {attachment.name}
+                        </a>
+                      ) : (
+                        <span
+                          key={attachment.name}
+                          className="inline-flex items-center gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-xs text-[var(--text-secondary)]"
+                        >
+                          <Paperclip className="h-3.5 w-3.5" />
+                          {attachment.name}
+                        </span>
+                      )
+                    ))}
+                  </div>
+                </section>
+              ) : null}
               {validCitations.length > 0 && <CitationCards citations={validCitations} onOpen={() => openPanel("sources", { sources: validCitations })} />}
 
               <div className="mt-5 flex flex-wrap items-center gap-1.5">
@@ -457,7 +514,7 @@ export function ChatMessage({
                       className={`h-8 cursor-pointer gap-1.5 px-2 ${feedback === "up" ? "text-[var(--success)]" : ""}`}
                       onClick={() => {
                         setFeedback("up");
-                        onFeedback?.(true, activeModelId);
+                      if (messageId) onFeedback?.(messageId, true, activeModelId);
                       }}
                     >
                       <ThumbsUp className="h-3.5 w-3.5" />
@@ -469,7 +526,7 @@ export function ChatMessage({
                       className={`h-8 cursor-pointer gap-1.5 px-2 ${feedback === "down" ? "text-[var(--danger)]" : ""}`}
                       onClick={() => {
                         setFeedback("down");
-                        onFeedback?.(false, activeModelId);
+                      if (messageId) onFeedback?.(messageId, false, activeModelId);
                       }}
                     >
                       <ThumbsDown className="h-3.5 w-3.5" />

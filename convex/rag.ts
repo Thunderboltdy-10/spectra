@@ -70,8 +70,10 @@ export const validateAgentForActor = internalQuery({
 export const retrieve: ReturnType<typeof action> = action({
   args: {
     actorClerkId: v.string(),
+    packId: v.optional(v.id("packs")),
     agentId: v.optional(v.id("agents")),
     includePersonal: v.boolean(),
+    includePack: v.optional(v.boolean()),
     embedding: v.array(v.float64()),
     topK: v.optional(v.number()),
   },
@@ -90,7 +92,7 @@ export const retrieve: ReturnType<typeof action> = action({
     const topK = Math.max(1, Math.min(args.topK ?? LIMITS.retrievalTopK, 16));
 
     const allHits =
-      args.agentId || args.includePersonal
+      args.agentId || args.includePersonal || (args.includePack && args.packId)
         ? await ctx.vectorSearch("chunks", "by_embedding", {
             vector: args.embedding,
             limit: topK * 8,
@@ -130,6 +132,9 @@ export const retrieve: ReturnType<typeof action> = action({
         const doc = row.doc as Record<string, unknown>;
         if (doc.scope === "agent") {
           return args.agentId ? doc.agentId === args.agentId : false;
+        }
+        if (doc.scope === "pack") {
+          return args.includePack && args.packId ? doc.packId === args.packId : false;
         }
         if (doc.scope === "personal") {
           return args.includePersonal && doc.ownerUserId === actor._id;

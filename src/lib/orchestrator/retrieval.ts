@@ -18,6 +18,17 @@ export type RetrievedCitation = {
 export type RetrievalResult = {
   citations: RetrievedCitation[];
   sourceBlock: string;
+  diagnostics?: {
+    scopesAttempted: string[];
+    status:
+      | "not_requested"
+      | "no_sources_available"
+      | "no_chunks"
+      | "no_high_confidence_matches"
+      | "retrieved"
+      | "failed";
+    reason: string;
+  };
 };
 
 export type ReliabilityScore = {
@@ -369,6 +380,7 @@ export async function maybeSearchWeb(
 
 export async function runRagRetrieval(params: {
   actorClerkId: string;
+  packId?: string;
   usePersonalResources: boolean;
   selectedAgentId?: string;
   message: string;
@@ -377,10 +389,21 @@ export async function runRagRetrieval(params: {
   let retrieval: RetrievalResult = {
     citations: [],
     sourceBlock: "No retrieved sources.",
+    diagnostics: {
+      scopesAttempted: [],
+      status: "not_requested",
+      reason: "Retrieval was not requested for this route.",
+    },
   };
 
   try {
-    const [personalResources, agentResources] = await Promise.all([
+    const [packResources, personalResources, agentResources] = await Promise.all([
+      params.packId
+        ? (convexQuery("resources:listPackResources", {
+            actorClerkId: params.actorClerkId,
+            packId: params.packId,
+          }) as Promise<Array<unknown>>)
+        : Promise.resolve([]),
       params.usePersonalResources
         ? (convexQuery("resources:listPersonalResources", {
             actorClerkId: params.actorClerkId,
@@ -394,29 +417,63 @@ export async function runRagRetrieval(params: {
         : Promise.resolve([]),
     ]);
 
-    const hasRetrievalSources = personalResources.length > 0 || agentResources.length > 0;
+    const scopesAttempted = [
+      ...(params.packId ? ["pack"] : []),
+      ...(params.usePersonalResources ? ["personal"] : []),
+      ...(params.selectedAgentId ? ["agent"] : []),
+    ];
+    const hasRetrievalSources = packResources.length > 0 || personalResources.length > 0 || agentResources.length > 0;
     if (hasRetrievalSources) {
       const queryEmbedding = await openRouterEmbedding(params.message, MODEL_CONFIG.embedding);
       const rawRetrieval = (await convexAction("rag:retrieve", {
         actorClerkId: params.actorClerkId,
+        packId: params.packId,
         agentId: params.selectedAgentId,
+        includePack: Boolean(params.packId),
         includePersonal: params.usePersonalResources,
         embedding: queryEmbedding,
         topK: 8,
       })) as RetrievalResult;
       retrieval = limitRagRetrievalSources(rawRetrieval);
+      retrieval.diagnostics = {
+        scopesAttempted,
+        status: retrieval.citations.length > 0 ? "retrieved" : "no_high_confidence_matches",
+        reason:
+          retrieval.citations.length > 0
+            ? "Retrieved scoped resource evidence."
+            : "Scoped retrieval returned no high-confidence matches.",
+      };
       params.logger?.info("RAG retrieval complete", {
         sourceCount: retrieval.citations.length,
         maxSourceFiles: MAX_RAG_SOURCES,
+        scopesAttempted,
       });
       if (retrieval.citations.length === 0) {
         params.logger?.warn("RAG retrieval returned zero high-confidence sources");
       }
+    } else {
+      retrieval.diagnostics = {
+        scopesAttempted,
+        status: scopesAttempted.length === 0 ? "not_requested" : "no_sources_available",
+        reason:
+          scopesAttempted.length === 0
+            ? "No retrieval scopes were allowed for this route."
+            : "No uploaded resources were available inside the allowed scopes.",
+      };
     }
   } catch {
     retrieval = {
       citations: [],
       sourceBlock: "Retrieval unavailable. Continue with general instructional support.",
+      diagnostics: {
+        scopesAttempted: [
+          ...(params.packId ? ["pack"] : []),
+          ...(params.usePersonalResources ? ["personal"] : []),
+          ...(params.selectedAgentId ? ["agent"] : []),
+        ],
+        status: "failed",
+        reason: "Retrieval failed during embedding or vector search.",
+      },
     };
     params.logger?.warn("RAG retrieval failed; using fallback source block");
   }

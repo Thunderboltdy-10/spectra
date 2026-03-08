@@ -50,19 +50,25 @@ async function ensureSeatAvailableForRole(
   }
 }
 
-async function findPendingInvitationByEmail(
-  ctx: MutationCtx,
-  email: string,
-) {
-  const now = Date.now();
-  const invitations = await ctx.db
+async function expireSiblingPendingInvitations(params: {
+  ctx: MutationCtx;
+  email: string;
+  orgId: Id<"orgs">;
+  acceptedInvitationId: Id<"schoolInvitations">;
+}) {
+  const invitations = await params.ctx.db
     .query("schoolInvitations")
-    .withIndex("by_email", (q) => q.eq("email", email))
+    .withIndex("by_email", (q) => q.eq("email", params.email.trim().toLowerCase()))
     .collect();
 
-  return invitations
-    .filter((invitation) => invitation.status === "pending" && invitation.expiresAt > now)
-    .sort((a, b) => b.createdAt - a.createdAt)[0];
+  for (const invitation of invitations) {
+    if (invitation._id === params.acceptedInvitationId) continue;
+    if (invitation.orgId !== params.orgId) continue;
+    if (invitation.status !== "pending") continue;
+    await params.ctx.db.patch(invitation._id, {
+      status: "expired",
+    });
+  }
 }
 
 async function upsertUserFromInvitation(params: {
@@ -107,6 +113,12 @@ async function upsertUserFromInvitation(params: {
 
   await ctx.db.patch(invitation._id, {
     status: "accepted",
+  });
+  await expireSiblingPendingInvitations({
+    ctx,
+    email: email.trim().toLowerCase(),
+    orgId: invitation.orgId,
+    acceptedInvitationId: invitation._id,
   });
 
   if (userId) {
@@ -222,29 +234,10 @@ export const syncFromWebhook = mutation({
       return { userId: existing._id, updated: true };
     }
 
-    const invitation = await findPendingInvitationByEmail(ctx, args.email.trim().toLowerCase());
-    if (!invitation) {
-      return {
-        rejected: true,
-        reason: "NO_PENDING_INVITATION",
-      };
-    }
-
-    try {
-      const provisioned = await upsertUserFromInvitation({
-        ctx,
-        clerkId: args.clerkId,
-        email: args.email,
-        name: args.name,
-        invitation,
-      });
-      return { userId: provisioned.userId, created: true };
-    } catch (error) {
-      return {
-        rejected: true,
-        reason: error instanceof Error ? error.message : "INVITATION_PROVISION_FAILED",
-      };
-    }
+    return {
+      rejected: true,
+      reason: "INVITATION_TOKEN_REQUIRED",
+    };
   },
 });
 

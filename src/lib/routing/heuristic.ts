@@ -105,6 +105,43 @@ function enforceTier(model: string, tier: ModelRouteInput["spendingTier"]) {
   return MODEL_CONFIG.tutorFast;
 }
 
+function fallbackForCatalog(
+  model: string,
+  tier: ModelRouteInput["spendingTier"],
+  catalog?: CatalogModelEntry[],
+): string[] {
+  if (!catalog || catalog.length === 0) {
+    return fallbackFor(model, tier);
+  }
+  const defaults = ROUTER_FALLBACKS[model] ?? [MODEL_CONFIG.tutorFast, MODEL_CONFIG.marker];
+  return defaults.filter((candidate) => canUseInTier(candidate, tier, catalog));
+}
+
+function enforceTierWithCatalog(
+  model: string,
+  tier: ModelRouteInput["spendingTier"],
+  catalog?: CatalogModelEntry[],
+): string {
+  if (!catalog || catalog.length === 0) {
+    return enforceTier(model, tier);
+  }
+  if (canUseInTier(model, tier, catalog)) return model;
+  const emergencyFallbacks = [
+    tier === "free_only" ? MODEL_CONFIG.tutorFast : undefined,
+    tier === "cheap_only" || tier === "expensive_blocked" ? MODEL_CONFIG.smartCheap : undefined,
+    MODEL_CONFIG.tutorFast,
+  ].reduce<string[]>((acc, candidate) => {
+    if (candidate) acc.push(candidate);
+    return acc;
+  }, []);
+  for (const candidate of emergencyFallbacks) {
+    if (canUseInTier(candidate, tier, catalog)) {
+      return candidate;
+    }
+  }
+  return catalog.find((item) => canUseInTier(item.modelId, tier, catalog))?.modelId ?? model;
+}
+
 function pushCandidate(
   candidates: RouteTraceCandidate[],
   modelId: string,
@@ -499,7 +536,7 @@ function dynamicRouteFromCatalog(params: {
     const manualMeta = catalog.find((item) => item.modelId === manualModelId);
     const allowed = manualMeta
       ? isModelAllowedInTier(manualMeta, params.input.spendingTier)
-      : enforceTier(manualModelId, params.input.spendingTier) === manualModelId;
+      : enforceTierWithCatalog(manualModelId, params.input.spendingTier, catalogWithoutAuto) === manualModelId;
     params.candidates.unshift({
       modelId: manualModelId,
       allowed,
@@ -609,6 +646,7 @@ function dynamicRouteFromCatalog(params: {
 export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
   const routingStartedAt = nowMs();
   const candidates: RouteTraceCandidate[] = [];
+  const catalog = (input.modelCatalog ?? []).filter((model) => model?.modelId);
   const multimodalNeeded = input.hasAttachments && hasMultimodalAttachment(input.attachmentTypes);
   const tabularNeeded = input.hasAttachments && hasTabularAttachment(input.attachmentTypes);
   const longMessage = input.messageLength > 1200;
@@ -631,7 +669,7 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
 
   if (input.routerMode === "manual" && input.manualModel) {
     pushCandidate(candidates, input.manualModel, input.spendingTier, 1, "User manually selected this model");
-    const primaryModel = enforceTier(input.manualModel, input.spendingTier);
+    const primaryModel = enforceTierWithCatalog(input.manualModel, input.spendingTier, catalog);
     if (primaryModel !== input.manualModel) {
       pushCandidate(
         candidates,
@@ -642,7 +680,7 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
       );
     }
 
-    const fallbackModels = fallbackFor(primaryModel, input.spendingTier);
+    const fallbackModels = fallbackForCatalog(primaryModel, input.spendingTier, catalog);
     const needsVisionFallback = multimodalNeeded && !isLikelyVisionModel(primaryModel);
     const visionFirstFallbacks = needsVisionFallback
       ? [
@@ -650,7 +688,7 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
           ...fallbackModels,
         ]
           .filter((candidate) => candidate !== primaryModel)
-          .filter((candidate) => canUseInTier(candidate, input.spendingTier))
+          .filter((candidate) => canUseInTier(candidate, input.spendingTier, catalog))
           .sort((a, b) => Number(isLikelyVisionModel(b)) - Number(isLikelyVisionModel(a)))
       : fallbackModels;
 
@@ -675,7 +713,7 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
 
   if (input.routerMode === "openrouter_auto") {
     pushCandidate(candidates, MODEL_CONFIG.autoRouter, input.spendingTier, 1, "Delegated to OpenRouter auto-router");
-    const primaryModel = enforceTier(MODEL_CONFIG.autoRouter, input.spendingTier);
+    const primaryModel = enforceTierWithCatalog(MODEL_CONFIG.autoRouter, input.spendingTier, catalog);
     if (primaryModel !== MODEL_CONFIG.autoRouter) {
       pushCandidate(
         candidates,
@@ -689,7 +727,7 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
     return finalizeRoute({
       input,
       primaryModel,
-      fallbackModels: fallbackFor(primaryModel, input.spendingTier),
+      fallbackModels: fallbackForCatalog(primaryModel, input.spendingTier, catalog),
       verificationModel: input.mode === "marker" ? MODEL_CONFIG.verify : undefined,
       reason:
         primaryModel === MODEL_CONFIG.autoRouter
@@ -774,11 +812,11 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
       0.92,
       "Prompt looks time-sensitive and benefits from web-enabled routing",
     );
-    const primaryModel = enforceTier(searchModel, input.spendingTier);
-    if (primaryModel !== searchModel) {
+    const tierPrimaryModel = enforceTier(searchModel, input.spendingTier);
+    if (tierPrimaryModel !== searchModel) {
       pushCandidate(
         candidates,
-        primaryModel,
+        tierPrimaryModel,
         input.spendingTier,
         0.87,
         `Tier policy override (${input.spendingTier})`,
@@ -793,16 +831,17 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
         input.agentPreferredModel ?? "",
         input.previousModelUsed ?? "",
         ...(input.agentTopModels ?? []).map((item) => item.modelId),
-        ...fallbackFor(searchModel, input.spendingTier),
+        ...fallbackForCatalog(searchModel, input.spendingTier, catalog),
       ],
       baseModel: searchModel,
       tier: input.spendingTier,
       complexPrompt,
     });
+    const primaryModel = enforceTierWithCatalog(ranked.selectedModel, input.spendingTier, catalog);
     return finalizeRoute({
       input,
-      primaryModel: enforceTier(ranked.selectedModel, input.spendingTier),
-      fallbackModels: [...ranked.rankedFallbacks, ...fallbackFor(primaryModel, input.spendingTier)],
+      primaryModel,
+      fallbackModels: [...ranked.rankedFallbacks, ...fallbackForCatalog(primaryModel, input.spendingTier, catalog)],
       reason: "Research/search-heavy intent detected; routed to web-aware model",
       autoEnhanced: true,
       searchEnabled: true,
@@ -894,13 +933,13 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
       input.agentPreferredModel ?? "",
       input.previousModelUsed ?? "",
       ...(input.agentTopModels ?? []).map((item) => item.modelId),
-      ...fallbackFor(baseModel, input.spendingTier),
+      ...fallbackForCatalog(baseModel, input.spendingTier, catalog),
     ],
     baseModel,
     tier: input.spendingTier,
     complexPrompt,
   });
-  const primaryModel = enforceTier(ranked.selectedModel, input.spendingTier);
+  const primaryModel = enforceTierWithCatalog(ranked.selectedModel, input.spendingTier, catalog);
   if (primaryModel !== baseModel) {
     pushCandidate(
       candidates,
@@ -914,7 +953,7 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
   return finalizeRoute({
     input,
     primaryModel,
-    fallbackModels: [...ranked.rankedFallbacks, ...fallbackFor(primaryModel, input.spendingTier)],
+    fallbackModels: [...ranked.rankedFallbacks, ...fallbackForCatalog(primaryModel, input.spendingTier, catalog)],
     verificationModel: input.mode === "marker" ? MODEL_CONFIG.verify : undefined,
     reason,
     autoEnhanced: true,

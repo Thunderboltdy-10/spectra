@@ -23,11 +23,11 @@ export type NormalizedAttachments = {
 type ConvexQueryFn = <T>(name: string, args: Record<string, unknown>) => Promise<T>;
 
 const IMAGE_MIME_RE = /image\/(png|jpg|jpeg|webp|gif)/i;
-const DOC_EXT_RE = /\.(pdf|docx|txt|md)$/i;
+const DOC_EXT_RE = /\.(pdf|docx|txt|md|pptx|xlsx|odt)$/i;
 
 function inferType(filename: string, mimeType: string): PreparedAttachment["type"] {
   if (IMAGE_MIME_RE.test(mimeType) || /\.(png|jpg|jpeg|webp|gif)$/i.test(filename)) return "image";
-  if (DOC_EXT_RE.test(filename) || /pdf|word|text|markdown/i.test(mimeType)) return "document";
+  if (DOC_EXT_RE.test(filename) || /pdf|word|text|markdown|presentation|spreadsheet|opendocument/i.test(mimeType)) return "document";
   return "text";
 }
 

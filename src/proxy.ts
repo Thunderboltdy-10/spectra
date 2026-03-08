@@ -1,7 +1,5 @@
 import { NextFetchEvent, NextRequest, NextResponse } from "next/server";
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
-import { convexQuery } from "@/lib/convex-server";
-
 const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
@@ -21,7 +19,7 @@ const INVITATION_TOKEN_MAX_AGE = 60 * 60 * 24;
 
 const authMiddleware = clerkMiddleware(async (auth, req) => {
   const url = new URL(req.url);
-  const invitationToken = url.searchParams.get("invitation");
+  const invitationToken = url.searchParams.get("token") ?? url.searchParams.get("invitation");
 
   if (invitationToken) {
     const response = NextResponse.redirect(new URL("/sign-up", req.url));
@@ -65,28 +63,6 @@ const authMiddleware = clerkMiddleware(async (auth, req) => {
     const response = NextResponse.redirect(new URL(`/join?token=${cookieToken}`, req.url));
     response.cookies.delete(INVITATION_TOKEN_COOKIE);
     return response;
-  }
-
-  const actor = await convexQuery("users:me", {
-    clerkId: userId,
-  }).catch(() => null as null | { _id: string });
-
-  if (!actor) {
-    if (req.nextUrl.pathname.startsWith("/api/") || req.nextUrl.pathname.startsWith("/trpc")) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: {
-            code: "AUTH_NO_ACCESS",
-            message: "Your account isn't linked to a school. Contact your school administrator.",
-            status: 403,
-          },
-        },
-        { status: 403 },
-      );
-    }
-
-    return NextResponse.redirect(new URL("/no-access", req.url));
   }
 
   return NextResponse.next();

@@ -106,7 +106,7 @@ async function exportAsPptx(documentData: GeneratedDocument) {
 async function exportAsDocx(documentData: GeneratedDocument) {
   const { Document, HeadingLevel, Packer, Paragraph, TextRun } = await import("docx");
 
-  const children: any[] = [new Paragraph({
+  const children: Array<InstanceType<typeof Paragraph>> = [new Paragraph({
     text: documentData.title,
     heading: HeadingLevel.TITLE,
   })];

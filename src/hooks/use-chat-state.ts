@@ -1517,6 +1517,8 @@ export function useChatState() {
         userMessageId?: string;
         modelUsed?: string;
         modelRequested?: string;
+        attachments?: string[];
+        attachmentResourceIds?: string[];
         whyThisResponse?: string;
         citations?: Citation[];
         routeTrace?: RouteTrace;
@@ -1598,6 +1600,8 @@ export function useChatState() {
             modelRequested?: string;
             whyThisResponse?: string;
             citations?: Citation[];
+            attachments?: string[];
+            attachmentResourceIds?: string[];
             messageId?: string;
             userMessageId?: string;
             usageIn?: number;
@@ -1808,11 +1812,13 @@ export function useChatState() {
                   }
                 : payload.routeTrace;
 
-            finalMeta = {
+            const nextFinalMeta: typeof finalMeta = {
               messageId: payload.messageId,
               userMessageId: payload.userMessageId,
               modelUsed: actualModel,
               modelRequested: payload.modelRequested,
+              attachments: Array.isArray(payload.attachments) ? payload.attachments : undefined,
+              attachmentResourceIds: Array.isArray(payload.attachmentResourceIds) ? payload.attachmentResourceIds : undefined,
               whyThisResponse: payload.whyThisResponse,
               citations: payload.citations,
               routeTrace: normalizedTrace,
@@ -1820,6 +1826,7 @@ export function useChatState() {
               usageOut: payload.usageOut,
               thinkingContent: payload.thinkingContent ?? (buildThinkingContent() || undefined),
             };
+            finalMeta = nextFinalMeta;
 
             if (payload.spendingUpdate) {
               setUserSpending(payload.spendingUpdate);
@@ -2470,15 +2477,21 @@ export function useChatState() {
     }
   }
 
-  async function recordAssistantFeedback(modelId: string | undefined, positive: boolean) {
-    if (!selectedAgentId || !modelId) return;
+  async function recordAssistantFeedback(params: {
+    messageId: string;
+    chatId?: string;
+    modelId?: string;
+    positive: boolean;
+  }) {
     await fetch("/api/agents/model-feedback", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        chatId: params.chatId ?? selectedChatId,
+        messageId: params.messageId,
         agentId: selectedAgentId,
-        modelId,
-        positive,
+        modelId: params.modelId,
+        positive: params.positive,
       }),
     });
   }

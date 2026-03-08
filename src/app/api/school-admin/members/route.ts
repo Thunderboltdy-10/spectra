@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { requireActor } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
+import { sendInvitationEmail } from "@/lib/invitations";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 
 const SCHOOL_MANAGED_ROLES = new Set(["student", "teacher"]);
@@ -53,38 +54,19 @@ export async function POST(request: NextRequest) {
 
     const origin = new URL(request.url).origin;
     const joinUrl = result.token ? `${origin}/join?token=${encodeURIComponent(result.token)}` : undefined;
-
-    let emailStatus: "sent" | "skipped" | "failed" = "skipped";
-    if (joinUrl && process.env.RESEND_API_KEY && process.env.INVITE_FROM_EMAIL) {
-      try {
-        const inviteResponse = await fetch("https://api.resend.com/emails", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            from: process.env.INVITE_FROM_EMAIL,
-            to: [body.email.trim()],
-            subject: "Your AI School invitation",
-            html: `
-              <p>You have been invited to join AI School as a ${body.role}.</p>
-              <p><a href="${joinUrl}">Accept invitation</a></p>
-              <p>If the button does not work, paste this link into your browser:</p>
-              <p>${joinUrl}</p>
-            `,
-          }),
-        });
-        emailStatus = inviteResponse.ok ? "sent" : "failed";
-      } catch {
-        emailStatus = "failed";
-      }
-    }
+    const emailResult = joinUrl
+      ? await sendInvitationEmail({
+          to: body.email.trim(),
+          role: body.role,
+          joinUrl,
+        })
+      : { status: "skipped" as const, reason: "Invitation token was not generated." };
 
     return ok({
       invitationId: result.invitationId,
       joinUrl,
-      emailStatus,
+      emailStatus: emailResult.status,
+      emailReason: "reason" in emailResult ? emailResult.reason : undefined,
     });
   });
 }
@@ -118,11 +100,29 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (body.action === "resendInvite" && body.invitationId) {
-      await convexMutation("schoolAdmin:resendInvitation", {
+      const result = await convexMutation<{
+        actorClerkId: string;
+        invitationId: string;
+      }, { ok: boolean; token?: string; email?: string; role?: string }>("schoolAdmin:resendInvitation", {
         actorClerkId: actor.clerkId,
         invitationId: body.invitationId,
       });
-      return ok({ ok: true });
+      const origin = new URL(request.url).origin;
+      const joinUrl = result.token ? `${origin}/join?token=${encodeURIComponent(result.token)}` : undefined;
+      const emailResult =
+        result.email && result.role && joinUrl
+          ? await sendInvitationEmail({
+              to: result.email,
+              role: result.role,
+              joinUrl,
+            })
+          : { status: "skipped" as const, reason: "Invitation token was not generated." };
+      return ok({
+        ok: true,
+        joinUrl,
+        emailStatus: emailResult.status,
+        emailReason: "reason" in emailResult ? emailResult.reason : undefined,
+      });
     }
 
     if (body.userId && body.role) {

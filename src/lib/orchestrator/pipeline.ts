@@ -23,6 +23,7 @@ import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
 import { normalizeAttachments } from "@/lib/attachments/normalizer";
 import { gateCapabilities } from "@/lib/attachments/capability-gate";
 import { runVisionPrepass } from "@/lib/attachments/vision-prepass";
+import { generateArtifactResources } from "@/lib/artifacts";
 import { extractAttemptStats, maybeCompactHistory, toChatMessageShape, type MemoryEntry } from "@/lib/orchestrator/history";
 import {
   buildRelevantMemoryProfile,
@@ -34,8 +35,10 @@ import {
   stripOrphanCitations,
 } from "@/lib/orchestrator/post-process";
 import { buildResearchEvidenceBlock, maybeSearchWeb, runRagRetrieval } from "@/lib/orchestrator/retrieval";
+import { buildRoutePlan } from "@/lib/orchestrator/route-plan";
 import { runAssistantStreaming, runCollaborativeStreaming } from "@/lib/orchestrator/streaming";
 import { buildTaskGraph, shouldUseMultiAgent } from "@/lib/orchestrator/task-graph";
+import { formatSchoolNow } from "@/lib/timezone";
 import type { StudyMode } from "@/types";
 
 type ChatRequestBody = {
@@ -276,6 +279,103 @@ function jsonError(status: number, error: StructuredError, extra: Record<string,
     },
     { status },
   );
+}
+
+function isLegacyCitationValidatorError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const lower = message.toLowerCase();
+  return lower.includes("argumentvalidationerror") && lower.includes("citations");
+}
+
+async function appendAssistantMessageWithCitationFallback(params: {
+  actorClerkId: string;
+  chatId: string;
+  content: string;
+  mode: StudyMode;
+  attachments?: string[];
+  attachmentResourceIds?: string[];
+  citations: Array<{
+    filename: string;
+    page?: number;
+    sourceType: "pack" | "personal" | "general" | "search";
+    url?: string;
+    title?: string;
+    domain?: string;
+    resourceId?: string;
+    snippet?: string;
+  }>;
+  modelRequested?: string;
+  modelUsed?: string;
+  whyThisResponse?: string;
+  usageIn?: number;
+  usageOut?: number;
+  verificationPassed?: boolean;
+  thinkingContent?: string;
+  routeTrace: unknown;
+}) {
+  const baseArgs = {
+    actorClerkId: params.actorClerkId,
+    chatId: params.chatId,
+    role: "assistant" as const,
+    content: params.content,
+    attachments: params.attachments,
+    attachmentResourceIds: params.attachmentResourceIds,
+    mode: params.mode,
+    citations: params.citations,
+    modelRequested: params.modelRequested,
+    modelUsed: params.modelUsed,
+    whyThisResponse: params.whyThisResponse,
+    usageIn: params.usageIn,
+    usageOut: params.usageOut,
+    verificationPassed: params.verificationPassed,
+    thinkingContent: params.thinkingContent,
+    routeTrace: params.routeTrace,
+  };
+
+  try {
+    return await convexMutation("chats:appendMessage", baseArgs) as { messageId: string };
+  } catch (error) {
+    if (!isLegacyCitationValidatorError(error)) {
+      throw error;
+    }
+
+    return await convexMutation("chats:appendMessage", {
+      ...baseArgs,
+      citations: params.citations.map((citation) => ({
+        filename: citation.filename,
+        page: citation.page,
+        sourceType: citation.sourceType,
+        url: citation.url,
+        resourceId: citation.resourceId,
+        snippet: citation.snippet,
+      })),
+    }) as { messageId: string };
+  }
+}
+
+function buildPersonalSoulExcerpt(params: {
+  preferences?: {
+    learningStyle?: string;
+    preferredDifficulty?: string;
+    interests?: string[];
+    weakAreas?: string[];
+    preferredModes?: string[];
+    communicationStyle?: string;
+    customGuidance?: string;
+  } | null;
+  memoryProfile?: string;
+}) {
+  const lines: string[] = [];
+  const prefs = params.preferences;
+  if (prefs?.learningStyle) lines.push(`Learning style: ${prefs.learningStyle}`);
+  if (prefs?.communicationStyle) lines.push(`Communication preference: ${prefs.communicationStyle}`);
+  if (prefs?.preferredDifficulty) lines.push(`Preferred difficulty: ${prefs.preferredDifficulty}`);
+  if (prefs?.interests?.length) lines.push(`Subject interests: ${prefs.interests.join(", ")}`);
+  if (prefs?.weakAreas?.length) lines.push(`Recurring weak areas: ${prefs.weakAreas.join(", ")}`);
+  if (prefs?.preferredModes?.length) lines.push(`Preferred study modes: ${prefs.preferredModes.join(", ")}`);
+  if (prefs?.customGuidance) lines.push(`Custom guidance: ${prefs.customGuidance}`);
+  if (params.memoryProfile?.trim()) lines.push(params.memoryProfile.trim());
+  return lines.join("\n").trim();
 }
 
 export async function runChatPipeline(request: NextRequest) {
@@ -590,7 +690,7 @@ export async function runChatPipeline(request: NextRequest) {
     persistedUserMessageId = appendedUser.messageId;
   }
 
-  const [chatData, orgSettings, userMemory] = await Promise.all([
+  const [chatData, orgSettings, userMemory, personalSoulPrefs, schoolSoulCapsule] = await Promise.all([
     convexQuery("chats:getChat", {
       actorClerkId: actor.clerkId,
       chatId,
@@ -611,6 +711,23 @@ export async function runChatPipeline(request: NextRequest) {
     convexQuery("memory:getUserMemory", {
       actorClerkId: actor.clerkId,
     }) as Promise<{ rawMemoryText: string; entries: MemoryEntry[] }>,
+    convexQuery("personalSoul:getPreferences", {
+      actorClerkId: actor.clerkId,
+    }).catch(() => null) as Promise<{
+      learningStyle?: string;
+      preferredDifficulty?: string;
+      interests?: string[];
+      weakAreas?: string[];
+      preferredModes?: string[];
+      communicationStyle?: string;
+      customGuidance?: string;
+    } | null>,
+    convexQuery("soul:getSoulCapsule", {
+      actorClerkId: actor.clerkId,
+    }).catch(() => ({ version: "soul-unavailable", capsule: "" })) as Promise<{
+      version: string;
+      capsule: string;
+    }>,
   ]);
 
   const storedAgentId =
@@ -737,15 +854,54 @@ export async function runChatPipeline(request: NextRequest) {
     history,
   });
 
-  const retrievalPromise = runRagRetrieval({
-    actorClerkId: actor.clerkId,
-    usePersonalResources: body.usePersonalResources,
-    selectedAgentId: selectedAgent?._id,
+  const activePackId =
+    body.packId
+    ?? (typeof chatData.chat.packId === "string" && chatData.chat.packId.trim().length > 0
+      ? chatData.chat.packId
+      : undefined);
+  const routePlan = buildRoutePlan({
     message: auto.message,
-    logger,
+    mode: effectiveMode,
+    selectedMode: safeMode,
+    hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
+    hasAgent: Boolean(selectedAgent?._id),
+    hasPack: Boolean(activePackId),
+    hasPersonalResources: body.usePersonalResources,
+    hasAgentResources: Boolean(selectedAgent?._id),
+    autoSearchEnabled: auto.searchEnabled,
+    thinkingLevel: auto.thinkingLevel,
+    complexity: auto.complexity,
+    selectedAgent: selectedAgent
+      ? {
+          _id: selectedAgent._id,
+          name: selectedAgent.name,
+          preferredModel: selectedAgent.preferredModel,
+          preferredMode: selectedAgent.preferredMode,
+        }
+      : undefined,
+    schoolSoulVersion: schoolSoulCapsule.version,
   });
 
-  const searchPromise = auto.searchEnabled
+  const retrievalPromise = routePlan.allowedToolBundles.includes("retrieval") && routePlan.retrievalScopes.length > 0
+    ? runRagRetrieval({
+        actorClerkId: actor.clerkId,
+        packId: routePlan.retrievalScopes.includes("pack") ? activePackId : undefined,
+        usePersonalResources: routePlan.retrievalScopes.includes("personal") && body.usePersonalResources,
+        selectedAgentId: routePlan.retrievalScopes.includes("agent") ? selectedAgent?._id : undefined,
+        message: auto.message,
+        logger,
+      })
+    : Promise.resolve({
+        citations: [],
+        sourceBlock: "No retrieved sources.",
+        diagnostics: {
+          scopesAttempted: [],
+          status: "not_requested" as const,
+          reason: "Retrieval not enabled by the route plan.",
+        },
+      });
+
+  const searchPromise = routePlan.shouldUseWebSearch
     ? maybeSearchWeb(auto.message, auto.thinkingLevel, {
       modelCatalog: catalog,
       spendingTier: budget.tier,
@@ -761,19 +917,6 @@ export async function runChatPipeline(request: NextRequest) {
       urls: [] as string[],
       sources: [] as Array<{ url: string; title: string; domain: string }>,
     });
-
-  const soulPromise: Promise<{ bullets: string[] }> = featureEnabled(orgSettings.org?.soulEnabled)
-    ? convexAction("soul:retrieveSoulGuidance", {
-        actorClerkId: actor.clerkId,
-        query: auto.message,
-        limit: 8,
-      })
-        .then((result) => {
-          const payload = result as { bullets?: string[] } | null;
-          return { bullets: payload?.bullets ?? [] };
-        })
-        .catch(() => ({ bullets: [] as string[] }))
-    : Promise.resolve({ bullets: [] as string[] });
 
   const adaptiveQuizPromise: Promise<{
     currentLevel: number;
@@ -842,21 +985,19 @@ export async function runChatPipeline(request: NextRequest) {
     ? classifyExplainDepth(auto.message, userMemory.rawMemoryText)
     : undefined;
 
-  const [retrieval, webResult, soulResult, quizAdaptive] = await Promise.all([
+  const [retrieval, webResult, quizAdaptive] = await Promise.all([
     retrievalPromise,
     searchPromise,
-    soulPromise,
     adaptiveQuizPromise,
   ]);
 
   const searchBlock = webResult.text ?? "";
   const searchUrls = webResult.urls ?? [];
   let searchSources = webResult.sources ?? [];
-  if (auto.searchEnabled) {
+  if (routePlan.shouldUseWebSearch) {
     logger.info("web search complete", { urlCount: searchUrls.length });
   }
 
-  const soulBullets = (soulResult.bullets ?? []).slice(0, 10);
   const quizDifficultyLevel = clampQuizDifficultyLevel(quizAdaptive.level);
   const quizDifficultyLabel = quizAdaptive.label;
   const quizDifficultyAdjusted = quizAdaptive.level !== quizAdaptive.currentLevel;
@@ -895,7 +1036,7 @@ export async function runChatPipeline(request: NextRequest) {
     manualModel: autoSettings.autoModel ? body.manualModel : fallbackManualModel,
     studentSeemsStuck: effectiveMode === "tutor" && attemptStats.attemptCount >= 2,
     spendingTier: budget.tier,
-    needsSearch: auto.searchEnabled,
+    needsSearch: routePlan.shouldUseWebSearch,
     needsRag: retrieval.citations.length > 0,
     promptEnhanced: auto.promptEnhanced,
     promptCategory: auto.promptCategory,
@@ -903,8 +1044,7 @@ export async function runChatPipeline(request: NextRequest) {
     isMultipart: auto.isMultipart,
     conversationLength: history.length,
     previousModelUsed: previousAssistantModel,
-    // Do not hard-bias routing toward agent-specific model hints.
-    agentPreferredModel: undefined,
+    agentPreferredModel: selectedAgent?.preferredModel,
     agentTopModels: [],
     modelCatalog: catalog,
     modelRuntimeStats: runtimeStatMap,
@@ -955,7 +1095,10 @@ export async function runChatPipeline(request: NextRequest) {
   }
 
   if (retrieval.citations.length > 0) route.trace.toolchain.push("rag_retrieval");
-  if (auto.searchEnabled) route.trace.toolchain.push("web_search");
+  if (retrieval.diagnostics?.status) {
+    route.trace.toolchain.push(`retrieval_${retrieval.diagnostics.status}`);
+  }
+  if (routePlan.shouldUseWebSearch) route.trace.toolchain.push("web_search");
   if (agentSuggestion) route.trace.toolchain.push("agent_suggestion");
   if (explainDepth) route.trace.toolchain.push("explain_depth_detection");
   if (effectiveMode === "quiz" && featureEnabled(orgSettings.org?.adaptiveQuizEnabled)) {
@@ -975,6 +1118,8 @@ export async function runChatPipeline(request: NextRequest) {
   }
   if (auto.promptEnhanced) route.trace.toolchain.push("prompt_enhancement");
   if (existingSummary || scheduledCompaction) route.trace.toolchain.push("context_compaction");
+  route.trace.toolchain.push("route_plan");
+  route.trace.routePlan = routePlan;
 
   const attachments = await normalizeAttachments({
     actorClerkId: actor.clerkId,
@@ -1071,25 +1216,31 @@ export async function runChatPipeline(request: NextRequest) {
       : auto.thinkingLevel;
 
   const gate = tutorGate(attemptStats.attemptCount, attemptStats.hasReflection);
-  const staticPersonalContext = [
-    `Name: ${actor.name}`,
+  const schoolNow = formatSchoolNow(orgSettings.org?.timezone, (warning) => {
+    logger.warn(warning, {
+      requestedTimeZone: orgSettings.org?.timezone,
+    });
+  });
+  const runtimeContextBlock = [
     `School: ${orgSettings.org?.name ?? "AI School"}`,
-    `Timezone: ${orgSettings.org?.timezone ?? "UTC"}`,
-    `Current date: ${new Date().toLocaleString("en-US", {
-      dateStyle: "full",
-      timeStyle: "short",
-      timeZone: orgSettings.org?.timezone ?? "UTC",
-    })}`,
+    `Timezone: ${schoolNow.timeZone}`,
+    `Current date: ${schoolNow.label}`,
   ].join("\n");
   const memoryProfile = buildRelevantMemoryProfile({
     message: auto.message,
     entries: userMemory.entries,
     rawMemoryText: userMemory.rawMemoryText,
   });
-  const combinedMemoryProfile = [staticPersonalContext, memoryProfile].filter(Boolean).join("\n");
-  const useMemoryProfile = Boolean(combinedMemoryProfile);
+  const personalSoulExcerpt = buildPersonalSoulExcerpt({
+    preferences: personalSoulPrefs,
+    memoryProfile,
+  });
+  const useMemoryProfile = routePlan.shouldConsultMemory && Boolean(personalSoulExcerpt);
   if (useMemoryProfile) {
     route.trace.toolchain.push("memory_injection");
+  }
+  if (schoolSoulCapsule.capsule.trim()) {
+    route.trace.toolchain.push("school_soul_capsule");
   }
 
   const systemPromptParts = [buildSystemPrompt({
@@ -1109,12 +1260,12 @@ export async function runChatPipeline(request: NextRequest) {
       ? {
           name: selectedAgent.name,
           description: selectedAgent.description,
-          systemPrompt: selectedAgent.systemPrompt,
+          systemPrompt: selectedAgent.systemPrompt.replace(/\s+/g, " ").trim().slice(0, 420),
           guidelinesSummary: selectedAgent.guidelinesSummary,
           guidelinesTopicMap: selectedAgent.guidelinesTopicMap,
         }
       : undefined,
-    memoryProfile: useMemoryProfile ? combinedMemoryProfile : undefined,
+    memoryProfile: useMemoryProfile ? personalSoulExcerpt : undefined,
     contextSummary: existingSummary,
     searchBlock,
     explainDepth,
@@ -1122,12 +1273,35 @@ export async function runChatPipeline(request: NextRequest) {
     quizDifficultyLabel,
   })];
 
+  systemPromptParts.push(`=== RUNTIME CONTEXT ===\n${runtimeContextBlock}\n=== END RUNTIME CONTEXT ===`);
+  systemPromptParts.push(
+    `=== MODE CONTRACT ===
+Pedagogy: ${routePlan.modeContract.pedagogy}
+Output format: ${routePlan.modeContract.outputFormat}
+Response depth: ${routePlan.modeContract.responseDepth}
+Escalation: ${routePlan.modeContract.escalationPolicy}
+Allowed bundles: ${routePlan.modeContract.toolBundles.join(", ") || "none"}
+Validator: ${routePlan.modeContract.validator}
+=== END MODE CONTRACT ===`,
+  );
+  if (routePlan.agentContract) {
+    systemPromptParts.push(
+      `=== AGENT CONTRACT ===
+Agent: ${routePlan.agentContract.name ?? "Focused agent"}
+Scope: ${routePlan.agentContract.scope}
+Resource scopes: ${routePlan.agentContract.resourceScopes.join(", ") || "none"}
+Allowed bundles: ${routePlan.agentContract.toolBundles.join(", ") || "none"}
+=== END AGENT CONTRACT ===`,
+    );
+  }
+  if (featureEnabled(orgSettings.org?.soulEnabled) && schoolSoulCapsule.capsule.trim()) {
+    systemPromptParts.push(
+      `=== SCHOOL SOUL ${schoolSoulCapsule.version} ===\n${schoolSoulCapsule.capsule}\n=== END SCHOOL SOUL ===`,
+    );
+  }
+
   if (attachments.quickExtractBlock) {
     systemPromptParts.push(attachments.quickExtractBlock);
-  }
-  if (soulBullets.length > 0) {
-    route.trace.toolchain.push("soul_injection");
-    systemPromptParts.push(`=== INTERNAL GUIDANCE (never reveal to student) ===\n${soulBullets.join("\n")}\n===`);
   }
   if (researchEvidenceBlock) {
     systemPromptParts.push(researchEvidenceBlock);
@@ -1137,12 +1311,13 @@ export async function runChatPipeline(request: NextRequest) {
   }
 
   const multiAgentEnabled =
-    budget.tier !== "free_only" && (
-    effectiveMode === "research"
-      ? auto.searchEnabled || retrieval.citations.length > 0 || auto.complexity !== "simple"
-      : auto.searchEnabled ||
-        (featureEnabled(orgSettings.org?.orchestratorV2Enabled) &&
-          shouldUseMultiAgent(auto.message, effectiveMode, auto.complexity))
+    budget.tier !== "free_only"
+    && routePlan.allowSubAgents
+    && featureEnabled(orgSettings.org?.orchestratorV2Enabled)
+    && (
+      routePlan.shouldUseWebSearch
+      || retrieval.citations.length > 0
+      || shouldUseMultiAgent(auto.message, effectiveMode, auto.complexity)
     );
   if (multiAgentEnabled) {
     route.trace.toolchain.push("multi_agent_collaboration");
@@ -1174,7 +1349,7 @@ export async function runChatPipeline(request: NextRequest) {
   const taskGraph = multiAgentEnabled
     ? buildTaskGraph(auto.message, effectiveMode, {
         hasVision: attachments.requiresVision,
-        searchEnabled: auto.searchEnabled,
+        searchEnabled: routePlan.shouldUseWebSearch,
         sourceBlock: retrieval.sourceBlock,
         searchBlock,
         includeCritic: collabLimits.includeCritic,
@@ -1371,13 +1546,10 @@ export async function runChatPipeline(request: NextRequest) {
         route.trace.toolchain = [...new Set(route.trace.toolchain)];
         route.trace.totalDurationMs = Date.now() - requestStartedAt;
 
-        const appended = (await convexMutation("chats:appendMessage", {
+        const appended = await appendAssistantMessageWithCitationFallback({
           actorClerkId: actor.clerkId,
           chatId,
-          role: "assistant",
           content: finalizedResponse,
-          attachments: undefined,
-          attachmentResourceIds: undefined,
           mode: effectiveMode,
           citations,
           modelRequested,
@@ -1388,7 +1560,7 @@ export async function runChatPipeline(request: NextRequest) {
           verificationPassed: undefined,
           thinkingContent: undefined,
           routeTrace: route.trace,
-        })) as { messageId: string };
+        });
         assistantPersisted = true;
 
         const catalogPricing = resolveCatalogPricing(modelUsed);
@@ -1867,7 +2039,29 @@ BACK: [answer or definition]`,
       );
       const rewrittenResponse = rewriteCitationMarkers(correctedResponse, citations);
       // Strip orphan citation markers [N] that have no matching citation
-      const finalizedResponse = stripOrphanCitations(rewrittenResponse, citations);
+      let finalizedResponse = stripOrphanCitations(rewrittenResponse, citations);
+      let generatedArtifactAttachments: string[] | undefined;
+      let generatedArtifactResourceIds: string[] | undefined;
+      if (effectiveMode === "document" || /<<DOCUMENT_START>>/i.test(finalizedResponse)) {
+        const artifactResult = await generateArtifactResources({
+          actorClerkId: actor.clerkId,
+          content: finalizedResponse,
+        }).catch((error: unknown) => {
+          logger.warn("artifact generation failed", {
+            chatId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return null;
+        });
+        if (artifactResult && artifactResult.attachmentResourceIds.length > 0) {
+          generatedArtifactAttachments = artifactResult.attachments;
+          generatedArtifactResourceIds = artifactResult.attachmentResourceIds;
+          finalizedResponse = artifactResult.markdownBlock
+            ? `${finalizedResponse}\n\n${artifactResult.markdownBlock}`
+            : finalizedResponse;
+          route.trace.toolchain.push("artifact_generation");
+        }
+      }
       const whyThisResponse = summarizeWhyResponse(effectiveMode, route.reason);
       route.trace.totalDurationMs = Date.now() - requestStartedAt;
       logger.info("streaming complete", {
@@ -1877,14 +2071,13 @@ BACK: [answer or definition]`,
         fallbackCount: route.trace.fallbacks.length,
       });
 
-      const appended = (await convexMutation("chats:appendMessage", {
+      const appended = await appendAssistantMessageWithCitationFallback({
         actorClerkId: actor.clerkId,
         chatId,
-        role: "assistant",
         content: finalizedResponse,
-        attachments: undefined,
-        attachmentResourceIds: undefined,
         mode: effectiveMode,
+        attachments: generatedArtifactAttachments,
+        attachmentResourceIds: generatedArtifactResourceIds,
         citations,
         modelRequested,
         modelUsed,
@@ -1894,7 +2087,7 @@ BACK: [answer or definition]`,
         verificationPassed,
         thinkingContent: thinkingContent || undefined,
         routeTrace: route.trace,
-      })) as { messageId: string };
+      });
       assistantPersisted = true;
 
       const catalogPricing = resolveCatalogPricing(modelUsed);
@@ -1997,12 +2190,14 @@ BACK: [answer or definition]`,
         }).catch(() => {});
       }
 
-      const extractedMemory = await maybeExtractMemory({
-        actorClerkId: actor.clerkId,
-        existingEntries: userMemory.entries,
-        userMessage: normalizedMessage,
-        assistantResponse: finalizedResponse,
-      }).catch(() => [] as Array<{ key: string; value: string; confidence: number; extractedAt: number }>);
+      const extractedMemory = routePlan.shouldWriteMemory
+        ? await maybeExtractMemory({
+            actorClerkId: actor.clerkId,
+            existingEntries: userMemory.entries,
+            userMessage: normalizedMessage,
+            assistantResponse: finalizedResponse,
+          }).catch(() => [] as Array<{ key: string; value: string; confidence: number; extractedAt: number }>)
+        : [];
       if (extractedMemory.length > 0) {
         await send({
           type: "soul_update",
@@ -2036,13 +2231,15 @@ BACK: [answer or definition]`,
         usageOut,
         whyThisResponse,
         citations,
+        attachments: generatedArtifactAttachments,
+        attachmentResourceIds: generatedArtifactResourceIds,
         verificationPassed,
         thinkingContent: thinkingContent || undefined,
         routeTrace: route.trace,
         spendingUpdate,
         autoResult: {
           modelUsed,
-          searchEnabled: route.searchEnabled || auto.searchEnabled,
+          searchEnabled: route.searchEnabled || routePlan.shouldUseWebSearch,
           thinkingLevel: effectiveThinkingLevel,
           promptEnhanced: auto.promptEnhanced,
         },

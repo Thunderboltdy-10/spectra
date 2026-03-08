@@ -12,6 +12,8 @@ type SoulDocRow = {
   section: string;
   content: string;
   version: number;
+  updatedAt?: number;
+  publishedAt?: number;
 };
 
 function chunkText(value: string, size = 750) {
@@ -68,6 +70,27 @@ function buildLexicalGuidance(query: string, docs: SoulDocRow[], limit = 8) {
   }
 
   return selected.map((row) => `- [${row.docTitle}] ${row.piece.slice(0, 220)}`);
+}
+
+function compactSoulLine(value: string, max = 220) {
+  return value.replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+function buildSoulCapsule(docs: SoulDocRow[]) {
+  const published = docs
+    .filter((doc) => typeof doc.publishedAt === "number")
+    .sort((a, b) => a.section.localeCompare(b.section) || a.title.localeCompare(b.title));
+  const ordered = published.length > 0 ? published : docs.slice().sort((a, b) => a.section.localeCompare(b.section) || a.title.localeCompare(b.title));
+  const lines = ordered
+    .slice(0, 8)
+    .map((doc) => `${doc.section}: ${compactSoulLine(doc.content)}`)
+    .filter(Boolean);
+  const latestVersion = Math.max(0, ...ordered.map((doc) => doc.version ?? 0));
+  const latestPublishedAt = Math.max(0, ...ordered.map((doc) => doc.publishedAt ?? 0));
+  return {
+    version: ordered.length > 0 ? `soul-v${latestVersion}-${latestPublishedAt}-${ordered.length}` : "soul-empty",
+    capsule: lines.join("\n"),
+  };
 }
 
 async function embeddingFor(text: string) {
@@ -213,6 +236,25 @@ export const listSoulDocs = query({
       .query("orgSoulDocs")
       .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
       .collect();
+  },
+});
+
+export const getSoulCapsule = query({
+  args: {
+    actorClerkId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const docs = await ctx.db
+      .query("orgSoulDocs")
+      .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
+      .collect();
+
+    return buildSoulCapsule(docs as SoulDocRow[]);
   },
 });
 

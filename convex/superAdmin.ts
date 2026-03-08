@@ -4,6 +4,7 @@ import { getUserByClerkId } from "./helpers";
 import { vRole } from "./shared";
 import type { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
+import { purgeUserData } from "./userLifecycle";
 
 const SUPER_ADMIN_EMAILS = new Set(
   (process.env.SUPER_ADMIN_EMAILS ?? "pablo.martinez.dovale@gmail.com")
@@ -812,13 +813,18 @@ export const removeOrgMember = mutation({
       }
     }
 
-    await ctx.db.delete(args.userId);
+    const purgeSummary = await purgeUserData(ctx, { actor, target: user });
     await ctx.runMutation(internal.auditLog.logAction, {
       actorUserId: actor._id as Id<"users">,
       action: "super_admin.remove_org_member",
       targetType: "user",
       targetId: args.userId,
-      details: `orgId=${args.orgId};role=${user.role};email=${user.email}`,
+      details: JSON.stringify({
+        orgId: args.orgId,
+        role: user.role,
+        email: user.email,
+        purgeSummary,
+      }),
     });
     return { ok: true };
   },

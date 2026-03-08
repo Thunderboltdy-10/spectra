@@ -264,3 +264,36 @@ export const replyToFeedback = mutation({
     return { ok: true };
   },
 });
+
+export const recordAssistantMessageFeedback = mutation({
+  args: {
+    actorClerkId: v.string(),
+    messageId: v.string(),
+    chatId: v.optional(v.string()),
+    agentId: v.optional(v.string()),
+    modelId: v.optional(v.string()),
+    positive: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    await ctx.db.insert("auditLog", {
+      actorUserId: actor._id,
+      action: "assistant_message_feedback",
+      targetType: "message",
+      targetId: args.messageId,
+      details: JSON.stringify({
+        chatId: args.chatId,
+        agentId: args.agentId,
+        modelId: args.modelId,
+        positive: args.positive,
+      }),
+      createdAt: Date.now(),
+    });
+
+    return { ok: true };
+  },
+});

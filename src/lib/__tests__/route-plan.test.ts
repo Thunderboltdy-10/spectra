@@ -97,4 +97,45 @@ describe("buildRoutePlan", () => {
     expect(plan.allowSubAgents).toBe(true);
     expect(plan.allowedToolBundles).toContain("multi_agent");
   });
+
+  it("does not treat 'current ratio' as a current-events search request", () => {
+    const plan = buildRoutePlan({
+      message: "Explain the current ratio formula with an example.",
+      mode: "general",
+      selectedMode: "general",
+      hasAttachments: false,
+      hasAgent: false,
+      hasPack: false,
+      hasPersonalResources: false,
+      hasAgentResources: false,
+      autoSearchEnabled: true,
+      thinkingLevel: "low",
+      complexity: "simple",
+      schoolSoulVersion: "school-soul-v5",
+    });
+
+    expect(plan.shouldUseWebSearch).toBe(false);
+    expect(plan.allowedToolBundles).not.toContain("search");
+    expect(plan.responseBudget).toBe("simple");
+  });
+
+  it("captures only explicitly requested artifact formats", () => {
+    const plan = buildRoutePlan({
+      message: "Create a Word document and PDF summary of this lesson.",
+      mode: "document",
+      selectedMode: "document",
+      hasAttachments: false,
+      hasAgent: false,
+      hasPack: false,
+      hasPersonalResources: false,
+      hasAgentResources: false,
+      autoSearchEnabled: false,
+      thinkingLevel: "medium",
+      complexity: "medium",
+      schoolSoulVersion: "school-soul-v6",
+    });
+
+    expect(plan.requestedArtifactFormats).toEqual(["docx", "pdf"]);
+    expect(plan.allowedToolBundles).toContain("artifact");
+  });
 });

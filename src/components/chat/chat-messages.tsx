@@ -12,6 +12,7 @@ import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { ThinkingBlock } from "@/components/chat/thinking-block";
 import { ProviderLogo } from "@/components/provider-logo";
 import { isGeneratedDocumentContent, parseGeneratedDocument } from "@/lib/document-generator";
+import { stripQuizMarkers } from "@/lib/quiz-parser";
 import { autoCloseMarkdown } from "@/lib/stream-markdown";
 import { getModeConfig } from "@/lib/modes";
 import type { Message } from "@/hooks/use-chat-state";
@@ -263,7 +264,7 @@ export function ChatMessages({
       const match = content.match(/(?:^|\n)\s*(?:Q(?:uestion)?\s*)?1[.):-]\s/m);
       if (match?.index !== undefined && match.index > 0) {
         return {
-          preamble: content.slice(0, match.index).trim(),
+          preamble: stripQuizMarkers(content.slice(0, match.index)).trim(),
           structuredContent: content.slice(match.index).trim(),
         };
       }
@@ -272,7 +273,7 @@ export function ChatMessages({
       const match = content.match(/(?:^|\n)\s*(?:Card\s*1|FRONT\s*:)/im);
       if (match?.index !== undefined && match.index > 0) {
         return {
-          preamble: content.slice(0, match.index).trim(),
+          preamble: stripQuizMarkers(content.slice(0, match.index)).trim(),
           structuredContent: content.slice(match.index).trim(),
         };
       }

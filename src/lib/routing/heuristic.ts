@@ -265,16 +265,25 @@ function modelScoreBreakdown(params: {
   }
 
   if (params.input.previousModelUsed && params.input.previousModelUsed === params.modelId) {
-    score += 0.02;
-    breakdown.push("conversation continuity +0.02");
+    if (params.complexity < 0.45) {
+      score -= 0.1;
+      breakdown.push("repeat-model penalty -0.10");
+    } else {
+      score -= 0.03;
+      breakdown.push("repeat-model penalty -0.03");
+    }
   }
 
   if (params.input.previousModelUsed && params.input.previousModelUsed !== params.modelId) {
     const previousProvider = modelProviderKey(params.input.previousModelUsed);
     const currentProvider = modelProviderKey(params.modelId);
     if (previousProvider === currentProvider) {
-      score -= 0.05;
-      breakdown.push("provider diversity -0.05");
+      const dampener = params.complexity < 0.45 ? 0.04 : 0.02;
+      score -= dampener;
+      breakdown.push(`same-provider dampener -${dampener.toFixed(2)}`);
+    } else if (params.complexity < 0.45) {
+      score += 0.02;
+      breakdown.push("provider rotation +0.02");
     }
   }
 
@@ -499,9 +508,18 @@ function dynamicRouteFromCatalog(params: {
   const preferredCapabilities = preferredCapabilitiesForRoute(params.input);
   const preferredModelIds = [
     params.input.agentPreferredModel,
-    params.input.previousModelUsed,
     ...(params.input.agentTopModels ?? []).map((item) => item.modelId),
   ].filter((value): value is string => Boolean(value));
+  const shouldRotateAwayFromPrevious =
+    params.input.routerMode === "auto"
+    && Boolean(params.input.previousModelUsed)
+    && !params.complexPrompt
+    && !params.multimodalNeeded
+    && !params.input.needsSearch
+    && !params.input.needsRag
+    && params.input.mode !== "research"
+    && params.input.mode !== "marker"
+    && params.input.mode !== "exam";
 
   const pickParams = {
     catalog: catalogWithoutAuto,
@@ -509,11 +527,18 @@ function dynamicRouteFromCatalog(params: {
     mode: params.input.mode,
     messageLength: params.input.messageLength,
     needsSearch: params.input.needsSearch,
-    preferCheap: params.input.mode === "quiz" || params.input.mode === "flashcard",
-    preferFast: params.input.mode === "tutor" || params.input.mode === "general",
+    preferCheap:
+      params.input.mode === "quiz"
+      || params.input.mode === "flashcard"
+      || (!params.complexPrompt && (params.input.mode === "general" || params.input.mode === "tutor")),
+    preferFast:
+      params.input.mode === "tutor"
+      || params.input.mode === "general"
+      || !params.complexPrompt,
     requiredCapabilities,
     preferredCapabilities,
     preferredModelIds,
+    avoidModels: shouldRotateAwayFromPrevious ? [params.input.previousModelUsed as string] : [],
     runtimeStats: params.input.modelRuntimeStats,
   } as const;
 
@@ -522,6 +547,14 @@ function dynamicRouteFromCatalog(params: {
   let fallbackModels: string[] = [];
 
   const ranked = rankCatalogModels(pickParams);
+  if (shouldRotateAwayFromPrevious && params.input.previousModelUsed) {
+    params.candidates.push({
+      modelId: params.input.previousModelUsed,
+      allowed: false,
+      reason: "Rotated away from the previous turn's model for a simple independent prompt",
+      eliminatedBecause: "simple-turn diversity guard",
+    });
+  }
   for (const row of ranked.slice(0, 10)) {
     params.candidates.push({
       modelId: row.model.modelId,
@@ -536,15 +569,17 @@ function dynamicRouteFromCatalog(params: {
     const manualMeta = catalog.find((item) => item.modelId === manualModelId);
     const allowed = manualMeta
       ? isModelAllowedInTier(manualMeta, params.input.spendingTier)
-      : enforceTierWithCatalog(manualModelId, params.input.spendingTier, catalogWithoutAuto) === manualModelId;
+      : false;
     params.candidates.unshift({
       modelId: manualModelId,
       allowed,
       score: allowed ? 1 : 0,
       reason: allowed
         ? (manualMeta ? "Manual selection" : "Manual selection (not in catalog snapshot)")
-        : "Manual model restricted by current budget tier",
-      eliminatedBecause: allowed ? undefined : `restricted by ${params.input.spendingTier}`,
+        : (manualMeta ? "Manual model restricted by current budget tier" : "Manual model not present in current catalog"),
+      eliminatedBecause: allowed
+        ? undefined
+        : (manualMeta ? `restricted by ${params.input.spendingTier}` : "missing from current catalog"),
     });
 
     if (allowed) {
@@ -558,7 +593,9 @@ function dynamicRouteFromCatalog(params: {
       const picked = pickModelAndFallbacks({ ...pickParams, maxFallbacks: 4 });
       primaryModel = picked.selected?.modelId ?? ranked[0]?.model.modelId ?? manualModelId;
       fallbackModels = picked.fallbacks;
-      reason = `Manual model restricted by ${params.input.spendingTier}; selected best allowed model`;
+      reason = manualMeta
+        ? `Manual model restricted by ${params.input.spendingTier}; selected best allowed model`
+        : "Manual model unavailable in current catalog; selected best allowed model";
     }
   } else if (params.input.routerMode === "openrouter_auto") {
     const autoModel = catalog.find((item) => item.modelId === "openrouter/auto");

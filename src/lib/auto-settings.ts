@@ -1,6 +1,7 @@
 import { MODEL_CONFIG } from "@/lib/model-config";
 import { isModeAvailable } from "@/lib/modes";
 import { openRouterChatCompletion } from "@/lib/openrouter";
+import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 import type { SpendingTier, StudyMode, ThinkingLevel } from "@/types";
 
 const SEARCH_KEYWORDS = [
@@ -68,6 +69,7 @@ export type QuestionType = "what" | "why" | "how" | "evaluate" | "compare" | "ot
 export type ExplainDepth = "introductory" | "intermediate" | "advanced";
 
 export type AutoSettingsInput = {
+  actorClerkId?: string;
   message: string;
   currentThinkingLevel: ThinkingLevel;
   spendingTier: SpendingTier;
@@ -427,7 +429,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Pr
   });
 }
 
-export async function maybeEnhancePrompt(message: string) {
+export async function maybeEnhancePrompt(message: string, actorClerkId?: string) {
   const fallback = {
     prompt: message,
     improvements: [] as string[],
@@ -456,6 +458,14 @@ export async function maybeEnhancePrompt(message: string) {
 
   if (!result) {
     return fallback;
+  }
+
+  if (actorClerkId) {
+    await recordOpenRouterUsage({
+      actorClerkId,
+      model: MODEL_CONFIG.promptEnhance,
+      usage: result.usage,
+    }).catch(() => {});
   }
 
   const raw = result.choices?.[0]?.message?.content ?? "";
@@ -518,7 +528,7 @@ export async function runAutoSettingsPipeline(input: AutoSettingsInput): Promise
   };
 
   if (input.autoEnhancePrompt && enhanceMode !== "off" && !input.skipModelCalls && (enhanceMode === "on" || allowAutoEnhancement)) {
-    const enhanced = await maybeEnhancePrompt(input.message);
+    const enhanced = await maybeEnhancePrompt(input.message, input.actorClerkId);
     if (enhanced.prompt.trim() && enhanced.prompt.trim() !== input.message.trim()) {
       message = enhanced.prompt.trim();
       promptEnhanced = true;

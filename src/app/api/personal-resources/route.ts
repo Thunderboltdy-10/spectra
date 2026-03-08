@@ -14,6 +14,65 @@ export async function GET() {
   });
 }
 
+export async function POST(request: NextRequest) {
+  return withRouteErrorHandling(async () => {
+    const actor = await requireActor();
+    const body = (await request.json().catch(() => null)) as {
+      action?: string;
+      resourceIds?: string[];
+    } | null;
+
+    if (body?.action !== "retry_processing" || !Array.isArray(body.resourceIds) || body.resourceIds.length === 0) {
+      return badRequest("action=retry_processing and resourceIds[] are required");
+    }
+
+    const results: Array<{
+      resourceId: string;
+      ok: boolean;
+      skipped?: boolean;
+      reason?: string;
+      error?: string;
+    }> = [];
+    for (const resourceId of body.resourceIds) {
+      try {
+        const result = (await convexMutation("resources:enqueueResourceProcessing", {
+          actorClerkId: actor.clerkId,
+          resourceId,
+        })) as { ok?: boolean; skipped?: boolean; reason?: string };
+        if (result?.ok === false) {
+          results.push({
+            resourceId,
+            ok: false,
+            reason: result.reason,
+            error: result.reason ?? "Retry failed",
+          });
+          continue;
+        }
+        results.push({
+          resourceId,
+          ok: true,
+          skipped: result?.skipped,
+          reason: result?.reason,
+        });
+      } catch (error) {
+        results.push({
+          resourceId,
+          ok: false,
+          error: error instanceof Error ? error.message : "Retry failed",
+        });
+      }
+    }
+
+    const failures = results.filter((result) => !result.ok);
+    return ok({
+      ok: failures.length === 0,
+      retried: results.filter((result) => result.ok && !result.skipped).length,
+      skipped: results.filter((result) => result.skipped).length,
+      failures,
+    });
+  }, request);
+}
+
 export async function DELETE(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();

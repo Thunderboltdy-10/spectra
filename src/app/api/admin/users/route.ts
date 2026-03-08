@@ -29,11 +29,14 @@ export async function PATCH(request: NextRequest) {
 
     const body = (await request.json()) as {
       targetUserId?: string;
-      role?: "student" | "teacher" | "admin";
+      role?: "student" | "teacher";
     };
 
     if (!body.targetUserId || !body.role) {
       return badRequest("targetUserId and role are required");
+    }
+    if (body.role !== "student" && body.role !== "teacher") {
+      return badRequest("Legacy admin route can only assign student or teacher roles");
     }
 
     await convexMutation("users:updateRole", {

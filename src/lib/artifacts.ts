@@ -1,5 +1,6 @@
 import { convexMutation } from "@/lib/convex-server";
 import { parseGeneratedDocument, type GeneratedDocument, type PresentationSlide } from "@/lib/document-generator";
+import type { ArtifactFormat } from "@/types";
 
 type PersistedArtifact = {
   filename: string;
@@ -331,9 +332,17 @@ async function uploadArtifact(params: {
   } satisfies PersistedArtifact;
 }
 
+function defaultFormatsForDocument(documentData: GeneratedDocument): ArtifactFormat[] {
+  if (documentData.type === "presentation") {
+    return ["pptx"];
+  }
+  return ["docx"];
+}
+
 export async function generateArtifactResources(params: {
   actorClerkId: string;
   content: string;
+  requestedFormats?: ArtifactFormat[];
 }) {
   const parsed = parseGeneratedDocument(params.content);
   if (!parsed.document) {
@@ -346,30 +355,38 @@ export async function generateArtifactResources(params: {
 
   const basename = sanitizeArtifactBasename(parsed.document.title);
   const uploads: PersistedArtifact[] = [];
+  const requestedFormats = Array.from(new Set(params.requestedFormats ?? []));
+  const targetFormats = requestedFormats.length > 0 ? requestedFormats : defaultFormatsForDocument(parsed.document);
 
-  const docxBytes = await buildDocxBytes(parsed.document);
-  uploads.push(await uploadArtifact({
-    actorClerkId: params.actorClerkId,
-    filename: `${basename}.docx`,
-    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    bytes: docxBytes,
-  }));
+  if (targetFormats.includes("docx")) {
+    const docxBytes = await buildDocxBytes(parsed.document);
+    uploads.push(await uploadArtifact({
+      actorClerkId: params.actorClerkId,
+      filename: `${basename}.docx`,
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      bytes: docxBytes,
+    }));
+  }
 
-  const pdfBytes = await buildPdfBytes(parsed.document);
-  uploads.push(await uploadArtifact({
-    actorClerkId: params.actorClerkId,
-    filename: `${basename}.pdf`,
-    mimeType: "application/pdf",
-    bytes: pdfBytes,
-  }));
+  if (targetFormats.includes("pdf")) {
+    const pdfBytes = await buildPdfBytes(parsed.document);
+    uploads.push(await uploadArtifact({
+      actorClerkId: params.actorClerkId,
+      filename: `${basename}.pdf`,
+      mimeType: "application/pdf",
+      bytes: pdfBytes,
+    }));
+  }
 
-  const pptxBytes = await buildPptxBytes(parsed.document);
-  uploads.push(await uploadArtifact({
-    actorClerkId: params.actorClerkId,
-    filename: `${basename}.pptx`,
-    mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    bytes: pptxBytes,
-  }));
+  if (targetFormats.includes("pptx")) {
+    const pptxBytes = await buildPptxBytes(parsed.document);
+    uploads.push(await uploadArtifact({
+      actorClerkId: params.actorClerkId,
+      filename: `${basename}.pptx`,
+      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      bytes: pptxBytes,
+    }));
+  }
 
   return {
     attachments: uploads.map((artifact) => artifact.filename),

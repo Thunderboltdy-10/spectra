@@ -90,7 +90,7 @@ function CitationCards({ citations, onOpen }: { citations: Citation[]; onOpen: (
 
   return (
     <section className="mt-8 border-t border-[var(--border-default)] pt-4">
-      <div className="mb-3 flex items-center justify-between gap-2 border-b border-[var(--border-default)] pb-2">
+      <div className="mb-3 flex items-center justify-between gap-2">
         <p className="text-sm font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Sources</p>
         <button
           type="button"

@@ -1,6 +1,7 @@
 import { convexMutation } from "@/lib/convex-server";
 import { MODEL_CONFIG } from "@/lib/model-config";
 import { openRouterChatCompletion } from "@/lib/openrouter";
+import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 import type { ChatMessage, Citation, StudyMode } from "@/types";
 import { inferAttempt, inferReflection } from "@/lib/prompts/policy";
 
@@ -144,6 +145,14 @@ export async function maybeCompactHistory(params: {
   );
 
   const summary = completion?.choices?.[0]?.message?.content?.trim() ?? fallbackCompactSummary(olderHistory);
+  if (completion) {
+    await recordOpenRouterUsage({
+      actorClerkId: params.actorClerkId,
+      chatId: params.chatId,
+      model: completion.model ?? MODEL_CONFIG.tutorFast,
+      usage: completion.usage,
+    }).catch(() => {});
+  }
   if (!summary) return;
 
   await convexMutation("chats:setContextSummary", {

@@ -1,6 +1,9 @@
 import { openRouterChatCompletion } from "@/lib/openrouter";
+import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 
 export async function runVisionPrepass(params: {
+  actorClerkId?: string;
+  chatId?: string;
   imageContentBlocks: Array<{ type: "image_url"; image_url: { url: string; detail?: "low" | "auto" } }>;
   userMessage: string;
   model: string;
@@ -27,6 +30,15 @@ export async function runVisionPrepass(params: {
     ],
     temperature: 0.1,
   });
+
+  if (params.actorClerkId) {
+    await recordOpenRouterUsage({
+      actorClerkId: params.actorClerkId,
+      chatId: params.chatId,
+      model: completion.model ?? params.model,
+      usage: completion.usage,
+    }).catch(() => {});
+  }
 
   return completion.choices?.[0]?.message?.content?.trim() ?? "";
 }

@@ -1,9 +1,20 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { dayKey, getUserByClerkId } from "./helpers";
+import { estimateUsageCostCents, summarizeEffectiveUsageCost, type UsagePricing } from "../shared/spending";
 
 function monthKey(ts = Date.now()) {
   return new Date(ts).toISOString().slice(0, 7);
+}
+
+function normalizeModelId(value: string) {
+  return value.trim().toLowerCase().replace(/:free$/i, "");
+}
+
+function modelLeaf(value: string) {
+  const normalized = normalizeModelId(value);
+  const leaf = normalized.split("/").pop();
+  return leaf ?? normalized;
 }
 
 function dayBelongsToMonth(day: string, key: string) {
@@ -33,6 +44,73 @@ function monthRangeFromKey(key: string) {
   return {
     startDay: start.toISOString().slice(0, 10),
     endDayExclusive: next.toISOString().slice(0, 10),
+  };
+}
+
+function buildPricingLookup(
+  rows: Array<{ modelId: string; inputCostPerM?: number; outputCostPerM?: number; isFree?: boolean }>,
+) {
+  const direct = new Map<string, UsagePricing>();
+  const leafCounts = new Map<string, number>();
+  const leafPricing = new Map<string, UsagePricing>();
+
+  for (const row of rows) {
+    const normalized = normalizeModelId(row.modelId);
+    const leaf = modelLeaf(row.modelId);
+    const pricing = {
+      inputCostPerM: row.inputCostPerM,
+      outputCostPerM: row.outputCostPerM,
+      isFree: row.isFree ?? false,
+    };
+
+    direct.set(normalized, pricing);
+    leafCounts.set(leaf, (leafCounts.get(leaf) ?? 0) + 1);
+    if (!leafPricing.has(leaf)) {
+      leafPricing.set(leaf, pricing);
+    }
+  }
+
+  return { direct, leafCounts, leafPricing };
+}
+
+function resolveUsagePricing(
+  pricingLookup: ReturnType<typeof buildPricingLookup>,
+  modelId: string,
+) {
+  const normalized = normalizeModelId(modelId);
+  const direct = pricingLookup.direct.get(normalized);
+  if (direct) return direct;
+
+  const leaf = modelLeaf(modelId);
+  if ((pricingLookup.leafCounts.get(leaf) ?? 0) === 1) {
+    return pricingLookup.leafPricing.get(leaf);
+  }
+
+  return undefined;
+}
+
+function summarizeUsageWithPricing(
+  rows: Array<{
+    model: string;
+    totalTokens?: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    costCents?: number;
+  }>,
+  pricingLookup: ReturnType<typeof buildPricingLookup>,
+) {
+  const base = summarizeEffectiveUsageCost(rows);
+  const estimatedUnpricedCostCents = Number(
+    rows
+      .filter((row) => Math.max(0, row.costCents ?? 0) <= 0 && Math.max(0, row.totalTokens ?? 0) > 0)
+      .reduce((sum, row) => sum + estimateUsageCostCents(row, resolveUsagePricing(pricingLookup, row.model)), 0)
+      .toFixed(6),
+  );
+
+  return {
+    ...base,
+    estimatedUnpricedCostCents,
+    effectiveCostCents: base.knownCostCents + estimatedUnpricedCostCents,
   };
 }
 
@@ -126,19 +204,17 @@ export const recordUsageWithCost = mutation({
       if (typeof outPrice !== "number") outPrice = directModelRow?.outputCostPerM;
 
       if (typeof inPrice !== "number" || typeof outPrice !== "number") {
-        const normalized = args.model.trim().toLowerCase().replace(/:free$/i, "");
+        const normalized = normalizeModelId(args.model);
+        const normalizedLeaf = modelLeaf(args.model);
         const modelRows = await ctx.db
           .query("modelCatalog")
           .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
           .collect();
+        const leafMatches = modelRows.filter((row) => modelLeaf(row.modelId) === normalizedLeaf);
         const fuzzyMatch = modelRows.find((row) => {
-          const candidate = row.modelId.trim().toLowerCase().replace(/:free$/i, "");
-          return (
-            candidate === normalized
-            || candidate.endsWith(normalized)
-            || normalized.endsWith(candidate)
-          );
-        });
+          const candidate = normalizeModelId(row.modelId);
+          return candidate === normalized;
+        }) ?? (leafMatches.length === 1 ? leafMatches[0] : undefined);
         if (typeof inPrice !== "number") inPrice = fuzzyMatch?.inputCostPerM;
         if (typeof outPrice !== "number") outPrice = fuzzyMatch?.outputCostPerM;
       }
@@ -299,7 +375,12 @@ export const checkUserBudget = query({
           .lt("day", endDayExclusive),
       )
       .collect();
+    const modelRows = await ctx.db
+      .query("modelCatalog")
+      .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
+      .collect();
     const monthlyUsage = usageRows.filter((row) => dayBelongsToMonth(row.day, key));
+    const pricingLookup = buildPricingLookup(modelRows);
     const monthlyTokens = monthlyUsage.reduce((sum, row) => sum + Math.max(0, row.totalTokens ?? 0), 0);
     const monthlyEvents = monthlyUsage.length;
     const monthlyCostCentsFromEvents = Number(
@@ -307,25 +388,10 @@ export const checkUserBudget = query({
         .reduce((sum, row) => sum + Math.max(0, row.costCents ?? 0), 0)
         .toFixed(6),
     );
-    const totalCostCents = Math.max(storedTotalCostCents, monthlyCostCentsFromEvents);
-    const UNPRICED_CENTS_PER_M_IN = 100;
-    const UNPRICED_CENTS_PER_M_OUT = 300;
-    const monthlyUnpricedEvents = monthlyUsage.reduce(
-      (sum, row) => sum + (Math.max(0, row.totalTokens ?? 0) > 0 && Math.max(0, row.costCents ?? 0) <= 0 ? 1 : 0),
-      0,
-    );
-    const unpricedEstimateCents = monthlyUsage
-      .filter((row) => Math.max(0, row.costCents ?? 0) <= 0 && Math.max(0, row.totalTokens ?? 0) > 0)
-      .reduce((sum, row) => {
-        const totalTokens = Math.max(0, row.totalTokens ?? 0);
-        const inputTokens = Math.max(0, row.inputTokens ?? Math.round(totalTokens * 0.4));
-        const outputTokens = Math.max(0, row.outputTokens ?? Math.max(0, totalTokens - inputTokens));
-        return sum
-          + ((inputTokens / 1_000_000) * UNPRICED_CENTS_PER_M_IN)
-          + ((outputTokens / 1_000_000) * UNPRICED_CENTS_PER_M_OUT);
-      }, 0);
-    const effectiveCostCents = totalCostCents + unpricedEstimateCents;
-    const totalSpentEur = totalCostCents / 100;
+    const usageCost = summarizeUsageWithPricing(monthlyUsage, pricingLookup);
+    const knownCostCents = Math.max(storedTotalCostCents, usageCost.knownCostCents, monthlyCostCentsFromEvents);
+    const effectiveCostCents = Math.max(knownCostCents, usageCost.effectiveCostCents);
+    const totalSpentEur = effectiveCostCents / 100;
     const monthlyTokenBudget = Math.max(1, org.tokenBudgetDaily * daysInMonthFromKey(key));
     const tokenUsagePercent = (monthlyTokens / monthlyTokenBudget) * 100;
     const budgetUsagePercent = hardLimitCents > 0 ? (effectiveCostCents / hardLimitCents) * 100 : 0;
@@ -349,7 +415,9 @@ export const checkUserBudget = query({
 
     return {
       totalSpentEur,
-      totalCostCents,
+      totalCostCents: effectiveCostCents,
+      knownCostCents,
+      estimatedUnpricedCostCents: usageCost.estimatedUnpricedCostCents,
       tier,
       softLimitReached: effectiveCostCents >= softLimitCents,
       hardLimitReached: effectiveCostCents >= hardLimitCents,
@@ -361,7 +429,7 @@ export const checkUserBudget = query({
       tokenUsagePercent,
       monthlyTokens,
       monthlyEvents,
-      monthlyUnpricedEvents,
+      monthlyUnpricedEvents: usageCost.monthlyUnpricedEvents,
       monthlyTokenBudget,
       monthlyCostCentsFromEvents,
       marginPercent,
@@ -385,16 +453,43 @@ export const getUserSpendingHistory = query({
       .query("userSpending")
       .withIndex("by_user_month", (q) => q.eq("userId", actor._id))
       .collect();
+    const usageRows = await ctx.db
+      .query("usageEvents")
+      .withIndex("by_user_day", (q) => q.eq("userId", actor._id))
+      .collect();
+    const modelRows = await ctx.db
+      .query("modelCatalog")
+      .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
+      .collect();
 
     const limit = Math.min(Math.max(args.months ?? 6, 1), 24);
+    const pricingLookup = buildPricingLookup(modelRows);
+    const usageByMonth = new Map<string, Array<(typeof usageRows)[number]>>();
+    for (const row of usageRows) {
+      const key = row.day.slice(0, 7);
+      const bucket = usageByMonth.get(key) ?? [];
+      bucket.push(row);
+      usageByMonth.set(key, bucket);
+    }
+    const storedByMonth = new Map(rows.map((row) => [row.monthKey, row]));
+    const monthKeys = Array.from(new Set([...storedByMonth.keys(), ...usageByMonth.keys()])).sort((a, b) =>
+      a < b ? 1 : -1,
+    );
 
-    return rows
-      .sort((a, b) => (a.monthKey < b.monthKey ? 1 : -1))
+    return monthKeys
       .slice(0, limit)
-      .map((row) => ({
-        monthKey: row.monthKey,
-        totalCostCents: row.totalCostCents,
-        totalSpentEur: row.totalCostCents / 100,
-      }));
+      .map((monthKey) => {
+        const stored = storedByMonth.get(monthKey);
+        const usageCost = summarizeUsageWithPricing(usageByMonth.get(monthKey) ?? [], pricingLookup);
+        const totalCostCents = Math.max(stored?.totalCostCents ?? 0, usageCost.effectiveCostCents);
+        return {
+          monthKey,
+          totalCostCents,
+          totalSpentEur: totalCostCents / 100,
+          knownCostCents: Math.max(stored?.totalCostCents ?? 0, usageCost.knownCostCents),
+          estimatedUnpricedCostCents: usageCost.estimatedUnpricedCostCents,
+          monthlyUnpricedEvents: usageCost.monthlyUnpricedEvents,
+        };
+      });
   },
 });

@@ -42,13 +42,14 @@ export function ModelRoutingBadge({ modelUsed, whyThisResponse, routeTrace }: Mo
   const activeModelId = modelUsed ?? routeTrace?.selected.modelId;
   const formattedName = useMemo(() => formatModelName(activeModelId ?? ""), [activeModelId]);
   const hasTrace = Boolean(routeTrace);
+  const manualLock = routeTrace?.inputs.routerMode === "manual";
   const hintText = whyThisResponse ? "Why this model" : "Routing details";
 
   if (!activeModelId) return null;
 
   return (
     <div className="inline-flex min-w-0 items-center">
-      {hasTrace ? (
+      {hasTrace && !manualLock ? (
         <button
           type="button"
           onClick={() => openPanel("route-trace", { routeTrace })}
@@ -61,7 +62,12 @@ export function ModelRoutingBadge({ modelUsed, whyThisResponse, routeTrace }: Mo
           </span>
         </button>
       ) : (
-        <span className="truncate text-[15px] font-semibold text-[var(--text-primary)]">{formattedName}</span>
+        <div className="inline-flex min-w-0 items-baseline gap-2">
+          <span className="truncate text-[15px] font-semibold text-[var(--text-primary)]">{formattedName}</span>
+          {manualLock ? (
+            <span className="text-[11px] text-[var(--text-secondary)]">Selected manually</span>
+          ) : null}
+        </div>
       )}
     </div>
   );

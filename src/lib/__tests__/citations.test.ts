@@ -11,6 +11,7 @@ describe("inferCitations", () => {
           url: "https://example.com/research-paper",
           title: "Example Research Paper",
           domain: "example.com",
+          snippet: "A validated search snippet.",
         },
       ],
     );
@@ -22,6 +23,7 @@ describe("inferCitations", () => {
       filename: "Example Research Paper",
       title: "Example Research Paper",
       domain: "example.com",
+      snippet: "A validated search snippet.",
     });
   });
 

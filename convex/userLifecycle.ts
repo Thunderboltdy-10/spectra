@@ -8,6 +8,10 @@ type PurgeSummary = {
   };
   deleted: Record<string, number>;
   reassignedInvitationCount: number;
+  reassignedAssetOwnership: {
+    packs: number;
+    agents: number;
+  };
   preservedAuditLogStrategy: "detached";
 };
 
@@ -34,6 +38,7 @@ export async function purgeUserData(
   args: {
     actor: Doc<"users">;
     target: Doc<"users">;
+    replacementOwner?: Doc<"users"> | null;
   },
 ): Promise<PurgeSummary> {
   const { actor, target } = args;
@@ -44,6 +49,10 @@ export async function purgeUserData(
     },
     deleted: {},
     reassignedInvitationCount: 0,
+    reassignedAssetOwnership: {
+      packs: 0,
+      agents: 0,
+    },
     preservedAuditLogStrategy: "detached",
   };
 
@@ -58,16 +67,49 @@ export async function purgeUserData(
       .collect(),
   ]);
 
-  if (ownedPacks.length > 0 || ownedAgents.length > 0) {
-    summary.blocked.packs = ownedPacks.map((pack) => ({ id: pack._id, name: pack.name }));
-    summary.blocked.agents = ownedAgents.map((agent) => ({
+  const blockingAgents = ownedAgents.filter((agent) => agent.visibility !== "private");
+  const privateAgents = ownedAgents.filter((agent) => agent.visibility === "private");
+
+  const replacementOwner =
+    args.replacementOwner
+    && args.replacementOwner._id !== target._id
+    && args.replacementOwner.orgId === target.orgId
+      ? args.replacementOwner
+      : null;
+
+  if (replacementOwner && (ownedPacks.length > 0 || blockingAgents.length > 0)) {
+    const now = Date.now();
+    for (const pack of ownedPacks) {
+      await ctx.db.patch(pack._id, {
+        ownerUserId: replacementOwner._id,
+        updatedAt: now,
+      });
+      summary.reassignedAssetOwnership.packs += 1;
+    }
+
+    for (const agent of blockingAgents) {
+      await ctx.db.patch(agent._id, {
+        creatorUserId: replacementOwner._id,
+        collaborators: (agent.collaborators ?? []).filter((userId) => userId !== target._id),
+        updatedAt: now,
+      });
+      summary.reassignedAssetOwnership.agents += 1;
+    }
+  }
+
+  const remainingOwnedPacks = replacementOwner ? [] : ownedPacks;
+  const remainingBlockingAgents = replacementOwner ? [] : blockingAgents;
+
+  if (remainingOwnedPacks.length > 0 || remainingBlockingAgents.length > 0) {
+    summary.blocked.packs = remainingOwnedPacks.map((pack) => ({ id: pack._id, name: pack.name }));
+    summary.blocked.agents = remainingBlockingAgents.map((agent) => ({
       id: agent._id,
       name: agent.name,
       visibility: agent.visibility,
     }));
     const blockingBits = [
-      ownedPacks.length > 0 ? `${ownedPacks.length} pack(s)` : null,
-      ownedAgents.length > 0 ? `${ownedAgents.length} agent(s)` : null,
+      remainingOwnedPacks.length > 0 ? `${remainingOwnedPacks.length} pack(s)` : null,
+      remainingBlockingAgents.length > 0 ? `${remainingBlockingAgents.length} shared/public agent(s)` : null,
     ].filter(Boolean);
     throw new Error(
       `Cannot permanently delete this user while they still own ${blockingBits.join(" and ")}. Reassign or delete those assets first.`,
@@ -97,6 +139,8 @@ export async function purgeUserData(
     feedbackRows,
     invitationsByEmail,
     orgInvitations,
+    privateAgentResourcesByAgent,
+    privateAgentStatsByAgent,
   ] = await Promise.all([
     ctx.db.query("userMemory").withIndex("by_user", (q) => q.eq("userId", target._id)).collect(),
     ctx.db.query("studentAnalytics").withIndex("by_user_day", (q) => q.eq("userId", target._id)).collect(),
@@ -123,6 +167,16 @@ export async function purgeUserData(
     ctx.db.query("feedback").collect(),
     ctx.db.query("schoolInvitations").withIndex("by_email", (q) => q.eq("email", target.email)).collect(),
     ctx.db.query("schoolInvitations").withIndex("by_org", (q) => q.eq("orgId", target.orgId)).collect(),
+    Promise.all(
+      privateAgents.map((agent) =>
+        ctx.db.query("resources").withIndex("by_agent", (q) => q.eq("agentId", agent._id)).collect(),
+      ),
+    ),
+    Promise.all(
+      privateAgents.map((agent) =>
+        ctx.db.query("agentModelStats").withIndex("by_agent", (q) => q.eq("agentId", agent._id)).collect(),
+      ),
+    ),
   ]);
 
   const chatIds = new Set(chats.map((chat) => String(chat._id)));
@@ -152,6 +206,15 @@ export async function purgeUserData(
       ),
     )
   ).flat();
+  const privateAgentResources = privateAgentResourcesByAgent.flat();
+  const privateAgentChunks = (
+    await Promise.all(
+      privateAgentResources.map((resource) =>
+        ctx.db.query("chunks").withIndex("by_resource", (q) => q.eq("resourceId", resource._id)).collect(),
+      ),
+    )
+  ).flat();
+  const privateAgentStats = privateAgentStatsByAgent.flat();
 
   const invitationRowsToDelete = invitationsByEmail.filter((invitation) => invitation.orgId === target.orgId);
   const invitationRowsToReassign = orgInvitations.filter((invitation) => invitation.invitedBy === target._id);
@@ -172,6 +235,9 @@ export async function purgeUserData(
   }
 
   for (const resource of personalResources) {
+    await deleteStorageIfPresent(ctx, resource.storageId);
+  }
+  for (const resource of privateAgentResources) {
     await deleteStorageIfPresent(ctx, resource.storageId);
   }
 
@@ -213,7 +279,11 @@ export async function purgeUserData(
 
   increment(summary, "chatBranches", await deleteRows(ctx, chatBranchRows.map((row) => row._id)));
   increment(summary, "chunks", await deleteRows(ctx, personalResourceChunks.map((row) => row._id)));
+  increment(summary, "chunks", await deleteRows(ctx, privateAgentChunks.map((row) => row._id)));
   increment(summary, "resources", await deleteRows(ctx, personalResources.map((row) => row._id)));
+  increment(summary, "resources", await deleteRows(ctx, privateAgentResources.map((row) => row._id)));
+  increment(summary, "agentModelStats", await deleteRows(ctx, privateAgentStats.map((row) => row._id)));
+  increment(summary, "agents", await deleteRows(ctx, privateAgents.map((row) => row._id)));
   increment(summary, "messages", await deleteRows(ctx, chatMessages.map((row) => row._id)));
   increment(summary, "chats", await deleteRows(ctx, chats.map((row) => row._id)));
   increment(summary, "schoolInvitations", await deleteRows(ctx, invitationRowsToDelete.map((row) => row._id)));

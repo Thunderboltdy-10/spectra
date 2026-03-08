@@ -1,4 +1,4 @@
-import type { AgentContract, ModeContract, RoutePlan, RetrievalScope, StudyMode, ToolBundle } from "@/types";
+import type { AgentContract, ArtifactFormat, ModeContract, RoutePlan, RetrievalScope, StudyMode, ToolBundle } from "@/types";
 
 type BuildRoutePlanParams = {
   message: string;
@@ -21,8 +21,31 @@ type BuildRoutePlanParams = {
   schoolSoulVersion?: string;
 };
 
+function isExplicitSearchRequest(message: string) {
+  return /\b(search|look up|lookup|find online|browse|web search|use sources|cite sources|check online)\b/i.test(message);
+}
+
 function isTimeSensitiveMessage(message: string) {
-  return /\b(today|latest|current|currently|news|recent|this week|this month|202[5-9]|2026)\b/i.test(message);
+  const normalized = message.toLowerCase();
+  if (/\b(current ratio|current account|electrical current|current flow)\b/i.test(normalized)) {
+    return false;
+  }
+
+  if (
+    /\b(latest|recent|breaking|up[- ]to[- ]date|today|yesterday|tomorrow|this week|this month|this year|as of now)\b/i.test(normalized)
+  ) {
+    return true;
+  }
+
+  if (
+    /\b(news|weather|forecast|score|results|stock price|price today|election|ceo|president|policy changes?|version)\b/i.test(
+      normalized,
+    )
+  ) {
+    return true;
+  }
+
+  return /\b20(2[5-9]|3\d)\b/.test(normalized) && /\b(latest|current|recent|new|policy|news|update|changes?)\b/i.test(normalized);
 }
 
 function isPersonalMessage(message: string) {
@@ -32,6 +55,23 @@ function isPersonalMessage(message: string) {
 function isArtifactRequest(mode: StudyMode, message: string) {
   if (mode === "document") return true;
   return /\b(pdf|docx|pptx|slides|presentation|study guide|worksheet|handout|document)\b/i.test(message);
+}
+
+function detectRequestedArtifactFormats(message: string): ArtifactFormat[] {
+  const normalized = message.toLowerCase();
+  const formats: ArtifactFormat[] = [];
+
+  if (/\b(docx|word doc|word document|microsoft word)\b/i.test(normalized)) {
+    formats.push("docx");
+  }
+  if (/\bpdf\b/i.test(normalized)) {
+    formats.push("pdf");
+  }
+  if (/\b(pptx|powerpoint|slides|slide deck|presentation deck)\b/i.test(normalized)) {
+    formats.push("pptx");
+  }
+
+  return Array.from(new Set(formats));
 }
 
 function buildModeContract(mode: StudyMode): ModeContract {
@@ -119,19 +159,30 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
   const modeContract = buildModeContract(params.mode);
   const agentContract = buildAgentContract(params);
   const timeSensitive = isTimeSensitiveMessage(params.message);
+  const explicitSearchRequest = isExplicitSearchRequest(params.message);
   const personalTask = isPersonalMessage(params.message);
   const artifactRequest = isArtifactRequest(params.mode, params.message);
+  const requestedArtifactFormats = artifactRequest ? detectRequestedArtifactFormats(params.message) : [];
   const studyMode = params.mode === "quiz" || params.mode === "flashcard" || params.mode === "tutor";
   const multimodal = params.hasAttachments;
   const shouldUseSchoolResources = params.hasPack || params.hasAgentResources || /upload|attached|file|notes|resource|chapter|pack/i.test(lowerMessage);
-  const shouldUseWebSearch = params.autoSearchEnabled || timeSensitive;
+  const researchNeedsSearch = params.mode === "research" && !shouldUseSchoolResources && params.complexity !== "simple";
+  const shouldUseWebSearch =
+    explicitSearchRequest
+    || timeSensitive
+    || (params.autoSearchEnabled && (timeSensitive || researchNeedsSearch))
+    || researchNeedsSearch;
   const responseBudget =
-    params.complexity === "complex" || params.mode === "research" || artifactRequest
+    params.complexity === "complex" || artifactRequest
       ? "deep"
+      : params.mode === "research"
+        ? "normal"
       : params.complexity === "medium"
         ? "normal"
         : "simple";
-  const shouldUseMultiStep = responseBudget === "deep" || (params.mode === "research" && shouldUseWebSearch);
+  const shouldUseMultiStep =
+    params.complexity === "complex"
+    && (params.mode === "research" || (artifactRequest && requestedArtifactFormats.includes("pptx")) || (params.hasAgent && shouldUseSchoolResources));
 
   const retrievalScopes: RetrievalScope[] = [
     ...(params.hasPack ? ["pack" as const] : []),
@@ -196,6 +247,7 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
       required,
       preferred,
     },
+    requestedArtifactFormats,
     allowSubAgents: shouldUseMultiStep && (params.mode === "research" || params.complexity === "complex"),
     modeContract,
     agentContract,

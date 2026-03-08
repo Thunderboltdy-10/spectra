@@ -304,6 +304,9 @@ export const updateRole = mutation({
     if (!actor || actor.role !== "admin") {
       throw new Error("Only admin can update roles");
     }
+    if (args.role === "admin") {
+      throw new Error("Only super admin can assign admin role");
+    }
 
     const target = await ctx.db.get(args.targetUserId);
     if (!target || target.orgId !== actor.orgId) {

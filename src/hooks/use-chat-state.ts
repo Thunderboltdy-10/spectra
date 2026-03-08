@@ -7,6 +7,7 @@ import type { Agent, Citation, RouteTrace, RouterMode, StudyMode, ThinkingLevel 
 import { appendToBuffer, createBufferState } from "@/lib/structured-stream-buffer";
 import { useSidebar } from "@/context/sidebar-context";
 import { isModeAvailable } from "@/lib/modes";
+import { shouldRetryResourceProcessing, toClientFileStatus } from "../../shared/resource-processing";
 
 export type Chat = {
   _id: string;
@@ -66,7 +67,7 @@ export type Message = {
   mode?: StudyMode;
 };
 
-export type FileStatus = "pending" | "uploading" | "ready" | "error";
+export type FileStatus = "pending" | "uploading" | "processing" | "ready" | "error";
 
 export type ModelOption = {
   _id: string;
@@ -99,14 +100,19 @@ export type PersonalResource = {
   filename: string;
   mimeType: string;
   size: number;
-  status: "uploaded" | "processed" | "failed";
+  status: "uploaded" | "processing" | "processed" | "failed";
+  processingAttempts?: number;
+  error?: string;
   pinned?: boolean;
   createdAt: number;
+  updatedAt: number;
 };
 
 export type UserSpending = {
   totalSpentEur: number;
   totalCostCents: number;
+  knownCostCents?: number;
+  estimatedUnpricedCostCents?: number;
   tier: "normal" | "expensive_blocked" | "cheap_only" | "free_only";
   softLimitReached: boolean;
   hardLimitReached: boolean;
@@ -132,6 +138,8 @@ const SAVE_CONVERSATION_FILES_KEY = "ai-school:save-conversation-files-to-librar
 const LAST_ACTIVE_CHAT_TS_KEY = "ai-school:lastActiveChatTimestamp";
 const LAST_ACTIVE_CHAT_ID_KEY = "ai-school:lastActiveChatId";
 const CHAT_SESSION_WINDOW_MS = 12 * 60 * 60 * 1000;
+const MEMORY_ENABLED_KEY = "ai-school:memory-enabled";
+const SEARXNG_ENABLED_KEY = "ai-school:searxng-enabled";
 
 type LiveModel = {
   id: string;
@@ -146,6 +154,17 @@ type LiveModel = {
   tags: string[];
   created?: string;
 };
+
+function readStoredToggle(key: string, fallback = true) {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const stored = window.localStorage.getItem(key);
+    if (stored === null) return fallback;
+    return stored !== "0";
+  } catch {
+    return fallback;
+  }
+}
 
 type ChatDetailResponse = {
   chat: {
@@ -539,6 +558,7 @@ export function useChatState() {
   const pendingLocalUserMessageChatIdsRef = useRef<Map<string, string>>(new Map());
   const sendingRef = useRef(false);
   const shownAchievementToastsRef = useRef<Set<string>>(new Set());
+  const lastPersonalRetryFailureRef = useRef("");
 
   const refreshBookmarks = useCallback(async (chatId = selectedChatIdRef.current) => {
     if (!chatId) {
@@ -761,11 +781,39 @@ export function useChatState() {
   }, [models.length, sidebar.agents, sidebar.loading, sidebar.models]);
 
   useEffect(() => {
-    const hasIndexing = personalResources.some((resource) => resource.status === "uploaded");
-    if (!hasIndexing) return;
+    const pendingResources = personalResources.filter(
+      (resource) => resource.status === "uploaded" || resource.status === "processing",
+    );
+    if (pendingResources.length === 0) return;
+
+    const now = Date.now();
+    const staleResourceIds = pendingResources
+      .filter((resource) => {
+        return shouldRetryResourceProcessing({
+          status: resource.status,
+          updatedAt: Math.max(resource.updatedAt ?? resource.createdAt, resource.createdAt),
+          processingAttempts: resource.processingAttempts,
+          now,
+        });
+      })
+      .map((resource) => resource._id);
+
+    if (staleResourceIds.length > 0) {
+      void retryPendingPersonalResources(staleResourceIds)
+        .then(() => refreshPersonalResources())
+        .catch((error) => {
+          const key = staleResourceIds.slice().sort().join(",");
+          if (lastPersonalRetryFailureRef.current !== key) {
+            lastPersonalRetryFailureRef.current = key;
+            toast.error(error instanceof Error ? error.message : "Failed to retry My Files processing");
+          }
+          void refreshPersonalResources().catch(() => {});
+        });
+    }
+
     const timer = window.setTimeout(() => {
       void refreshPersonalResources().catch(() => {});
-    }, 2500);
+    }, staleResourceIds.length > 0 ? 4000 : 3500);
     return () => window.clearTimeout(timer);
   }, [personalResources]);
 
@@ -1444,7 +1492,7 @@ export function useChatState() {
             const result = resultByFile.get(file.name);
             next[key] = {
               ...current,
-              status: result?.status === "processed" ? "ready" : result?.status === "failed" ? "error" : "ready",
+              status: toClientFileStatus(result?.status as "uploaded" | "processed" | "failed" | "reused" | undefined),
               error:
                 result?.status === "failed"
                   ? result?.error
@@ -1490,6 +1538,10 @@ export function useChatState() {
             enhanceMode: autoEnhancePrompt,
             thinkingMode: autoThinking,
             searchMode: autoSearch,
+          },
+          toolPreferences: {
+            memoryEnabled: readStoredToggle(MEMORY_ENABLED_KEY, true),
+            searxngEnabled: readStoredToggle(SEARXNG_ENABLED_KEY, true),
           },
           clientMessageId: !isRegenerate ? localUserMessageId : undefined,
         }),
@@ -2247,6 +2299,32 @@ export function useChatState() {
     setPersonalResources(
       [...(data.resources ?? [])].sort((a, b) => b.createdAt - a.createdAt),
     );
+  }
+
+  async function retryPendingPersonalResources(resourceIds: string[]) {
+    if (resourceIds.length === 0) return;
+    const response = await fetch("/api/personal-resources", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "retry_processing",
+        resourceIds,
+      }),
+    });
+    if (!response.ok) throw new Error(await response.text());
+    const payload = (await response.json()) as {
+      ok?: boolean;
+      retried?: number;
+      failures?: Array<{ resourceId?: string; error?: string; reason?: string }>;
+    };
+    if (payload.ok === false) {
+      const detail = (payload.failures ?? [])
+        .map((failure) => failure.reason?.trim() || failure.error?.trim())
+        .filter((value): value is string => Boolean(value))
+        .join("; ");
+      throw new Error(detail || "Some My Files retries failed");
+    }
+    lastPersonalRetryFailureRef.current = "";
   }
 
   async function deletePersonalResource(resourceId: string) {

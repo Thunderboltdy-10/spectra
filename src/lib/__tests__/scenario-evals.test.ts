@@ -139,4 +139,24 @@ Here is your study guide.
     expect(parsed.document?.type).toBe("study_guide");
     expect(parsed.document?.title).toBe("Cell Respiration");
   });
+
+  it("simple research-mode prompts stay bounded unless live info is needed", () => {
+    const plan = buildRoutePlan({
+      message: "Research the main causes of the French Revolution.",
+      mode: "research",
+      selectedMode: "research",
+      hasAttachments: false,
+      hasAgent: false,
+      hasPack: false,
+      hasPersonalResources: false,
+      hasAgentResources: false,
+      autoSearchEnabled: false,
+      thinkingLevel: "medium",
+      complexity: "simple",
+    });
+
+    expect(plan.responseBudget).toBe("normal");
+    expect(plan.shouldUseWebSearch).toBe(false);
+    expect(plan.allowSubAgents).toBe(false);
+  });
 });

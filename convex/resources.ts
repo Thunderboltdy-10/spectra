@@ -13,6 +13,11 @@ import {
   VIDEO_RESOURCE_EXTENSIONS,
   fileExtension,
 } from "../shared/resource-upload-policy";
+import {
+  canReuseResourceUpload,
+  MAX_RESOURCE_PROCESSING_ATTEMPTS,
+  RESOURCE_PROCESSING_STALE_MS,
+} from "../shared/resource-processing";
 
 function resolveMaxResourceFileSizeBytes(value: number | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -74,6 +79,13 @@ function canManageAgentResources(
   actor: { _id: string; role: "student" | "teacher" | "admin" },
 ) {
   return actor.role === "admin" || agent.creatorUserId === actor._id || isAgentCollaborator(agent, actor._id);
+}
+
+function canAccessPackResources(
+  pack: { orgId: string },
+  actor: { orgId: string },
+) {
+  return pack.orgId === actor.orgId;
 }
 
 export const createUploadUrl = mutation({
@@ -231,6 +243,7 @@ export const registerResource = mutation({
       storageId: args.storageId,
       parsedCharCount: 0,
       status: "uploaded",
+      processingAttempts: 0,
       saveToLibrary: args.saveToLibrary ?? true,
       createdAt: now,
       updatedAt: now,
@@ -441,6 +454,44 @@ export const completeResourceIngestionInternal = internalMutation({
   },
 });
 
+export const touchResourceForProcessingInternal = internalMutation({
+  args: {
+    resourceId: v.id("resources"),
+  },
+  handler: async (ctx, args) => {
+    const resource = await ctx.db.get(args.resourceId);
+    if (!resource || resource.status === "processed") {
+      return { ok: false };
+    }
+
+    await ctx.db.patch(args.resourceId, {
+      status: "processing",
+      error: undefined,
+      updatedAt: Date.now(),
+    });
+
+    return { ok: true };
+  },
+});
+
+export const markResourceProcessingHeartbeatInternal = internalMutation({
+  args: {
+    resourceId: v.id("resources"),
+  },
+  handler: async (ctx, args) => {
+    const resource = await ctx.db.get(args.resourceId);
+    if (!resource || resource.status !== "processing") {
+      return { ok: false };
+    }
+
+    await ctx.db.patch(args.resourceId, {
+      updatedAt: Date.now(),
+    });
+
+    return { ok: true };
+  },
+});
+
 export const enqueueResourceProcessing = mutation({
   args: {
     actorClerkId: v.string(),
@@ -475,10 +526,46 @@ export const enqueueResourceProcessing = mutation({
       throw new Error("No permission to process resource");
     }
 
-    await ctx.scheduler.runAfter(0, internal.ingestQueue.processResource, {
-      resourceId: resource._id,
+    if (resource.status === "processed") {
+      return { ok: true, skipped: true };
+    }
+
+    const now = Date.now();
+    const attempts = resource.processingAttempts ?? 0;
+    const stalled = resource.status === "processing" && now - resource.updatedAt > RESOURCE_PROCESSING_STALE_MS;
+    if (resource.status === "processing" && !stalled) {
+      return { ok: true, skipped: true, reason: "already_processing" as const };
+    }
+    const nextAttempts = attempts + 1;
+    if (nextAttempts > MAX_RESOURCE_PROCESSING_ATTEMPTS) {
+      await ctx.db.patch(resource._id, {
+        status: "failed",
+        error: "Processing failed repeatedly. Remove the file and upload it again.",
+        updatedAt: now,
+      });
+      return { ok: false, stalled, reason: "max_attempts_exhausted" as const };
+    }
+
+    await ctx.db.patch(resource._id, {
+      status: "processing",
+      error: undefined,
+      processingAttempts: nextAttempts,
+      updatedAt: now,
     });
-    return { ok: true };
+
+    try {
+      await ctx.scheduler.runAfter(0, internal.ingestQueue.processResource, {
+        resourceId: resource._id,
+      });
+      return { ok: true };
+    } catch (error) {
+      await ctx.db.patch(resource._id, {
+        status: "failed",
+        error: error instanceof Error ? error.message.slice(0, 400) : "Unable to schedule file processing.",
+        updatedAt: Date.now(),
+      });
+      return { ok: false, scheduled: false };
+    }
   },
 });
 
@@ -567,7 +654,7 @@ export const listPackResources = query({
     if (!pack || pack.orgId !== actor.orgId) {
       throw new Error("Pack not found");
     }
-    if (actor.role !== "teacher" && actor.role !== "admin" && pack.ownerUserId !== actor._id) {
+    if (!canAccessPackResources(pack, actor)) {
       throw new Error("Not authorized for this pack");
     }
 
@@ -600,7 +687,7 @@ export const deleteResource = mutation({
     }
     if (resource.scope === "pack" && resource.packId) {
       const pack = await ctx.db.get(resource.packId);
-      if (pack && (pack.ownerUserId === actor._id || actor.role === "admin")) {
+      if (pack && canAccessPackResources(pack, actor)) {
         allowed = true;
       }
     }
@@ -665,7 +752,7 @@ export const getResourceDownloadUrl = query({
     }
     if (resource.scope === "pack" && resource.packId) {
       const pack = await ctx.db.get(resource.packId);
-      if (pack && (pack.ownerUserId === actor._id || actor.role === "admin")) {
+      if (pack && canAccessPackResources(pack, actor)) {
         allowed = true;
       }
     }
@@ -715,11 +802,13 @@ export const getResourcesByIds = query({
       mimeType: string;
       size: number;
       scope: "pack" | "personal" | "agent";
-      status: "uploaded" | "processed" | "failed";
+      status: "uploaded" | "processing" | "processed" | "failed";
       storageId?: string;
       quickExtractText?: string;
       createdAt: number;
       pinned?: boolean;
+      processingAttempts?: number;
+      error?: string;
     }> = [];
 
     for (const resourceId of args.resourceIds) {
@@ -732,7 +821,7 @@ export const getResourcesByIds = query({
       }
       if (resource.scope === "pack" && resource.packId) {
         const pack = await ctx.db.get(resource.packId);
-        if (pack && (pack.ownerUserId === actor._id || actor.role === "teacher" || actor.role === "admin")) {
+        if (pack && canAccessPackResources(pack, actor)) {
           allowed = true;
         }
       }
@@ -773,6 +862,8 @@ export const getResourcesByIds = query({
         quickExtractText,
         createdAt: resource.createdAt,
         pinned: resource.pinned,
+        processingAttempts: resource.processingAttempts,
+        error: resource.error,
       });
     }
 
@@ -794,7 +885,7 @@ export const getResourceNamesByIds = query({
     const rows: Array<{
       _id: string;
       filename: string;
-      status: "uploaded" | "processed" | "failed";
+      status: "uploaded" | "processing" | "processed" | "failed";
     }> = [];
 
     for (const resourceId of args.resourceIds) {
@@ -805,7 +896,7 @@ export const getResourceNamesByIds = query({
       if (resource.scope === "personal" && resource.ownerUserId === actor._id) allowed = true;
       if (resource.scope === "pack" && resource.packId) {
         const pack = await ctx.db.get(resource.packId);
-        if (pack && (pack.ownerUserId === actor._id || actor.role === "teacher" || actor.role === "admin")) allowed = true;
+        if (pack && canAccessPackResources(pack, actor)) allowed = true;
       }
       if (resource.scope === "agent" && resource.agentId) {
         const agent = await ctx.db.get(resource.agentId);
@@ -851,7 +942,12 @@ export const findReusablePersonalResourcesByHashes = query({
     return personal
       .filter((resource) => resource.saveToLibrary !== false)
       .filter((resource) => resource.contentHash && hashSet.has(resource.contentHash))
-      .filter((resource) => resource.status === "processed" || resource.status === "uploaded")
+      .filter((resource) =>
+        canReuseResourceUpload({
+          status: resource.status,
+          updatedAt: resource.updatedAt,
+        }),
+      )
       .map((resource) => ({
         resourceId: resource._id,
         contentHash: resource.contentHash as string,

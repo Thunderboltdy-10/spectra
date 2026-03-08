@@ -17,6 +17,8 @@ export async function GET() {
       convexQuery("usage:checkUserBudget", { actorClerkId: actor.clerkId }) as Promise<{
         totalSpentEur: number;
         totalCostCents: number;
+        knownCostCents?: number;
+        estimatedUnpricedCostCents?: number;
         tier: "normal" | "expensive_blocked" | "cheap_only" | "free_only";
         softLimitReached: boolean;
         hardLimitReached: boolean;

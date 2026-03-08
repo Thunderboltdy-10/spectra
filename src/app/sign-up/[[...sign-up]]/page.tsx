@@ -23,6 +23,13 @@ export default function SignUpPage() {
             <p className="mt-2 text-sm text-[var(--text-secondary)]">
               Join your school workspace to chat with AI, use curriculum resources, and build subject-specific agents.
             </p>
+            <div className="mt-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 text-sm text-[var(--text-secondary)]">
+              School access is invitation-based. If your school has not invited you yet, submit an access request first.
+              {" "}
+              <Link href="/request-access" className="text-[var(--accent-cyan)] hover:underline">
+                Request access
+              </Link>
+            </div>
           </section>
 
           <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">

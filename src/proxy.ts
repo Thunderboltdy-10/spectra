@@ -3,10 +3,12 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
+  "/request-access(.*)",
   "/api/webhooks(.*)",
   "/join(.*)",
   "/no-access(.*)",
   "/api/join(.*)",
+  "/api/request-access(.*)",
   "/api/invitations/(.*)",
 ]);
 
@@ -22,7 +24,9 @@ const authMiddleware = clerkMiddleware(async (auth, req) => {
   const invitationToken = url.searchParams.get("token") ?? url.searchParams.get("invitation");
 
   if (invitationToken) {
-    const response = NextResponse.redirect(new URL("/sign-up", req.url));
+    const response = url.pathname.startsWith("/join")
+      ? NextResponse.next()
+      : NextResponse.redirect(new URL("/sign-up", req.url));
     response.cookies.set(INVITATION_TOKEN_COOKIE, invitationToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",

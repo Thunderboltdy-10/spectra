@@ -7,6 +7,24 @@ import { withRouteErrorHandling } from "@/lib/route-handler";
 
 const SCHOOL_MANAGED_ROLES = new Set(["student", "teacher"]);
 
+function inviteDeliveryErrorMessage(reason?: string) {
+  if (!reason) {
+    return "Invitation email could not be sent.";
+  }
+  return `Invitation email could not be sent: ${reason}`;
+}
+
+async function loadOrgSettingsName(actorClerkId: string) {
+  try {
+    const result = (await convexQuery("admin:getOrgSettings", {
+      actorClerkId,
+    })) as { org?: { name?: string } } | null;
+    return result ?? {};
+  } catch {
+    return {};
+  }
+}
+
 export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();
@@ -15,7 +33,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const search = searchParams.get("search") ?? undefined;
 
-    const [members, invitations] = await Promise.all([
+    const [members, invitations, accessRequests] = await Promise.all([
       convexQuery<{ actorClerkId: string; search?: string }, unknown>(
         "schoolAdmin:listMembers",
         { actorClerkId: actor.clerkId, search },
@@ -24,10 +42,14 @@ export async function GET(request: NextRequest) {
         "schoolAdmin:listInvitations",
         { actorClerkId: actor.clerkId, status: "pending" },
       ),
+      convexQuery<{ actorClerkId: string; status?: string }, unknown>(
+        "accessRequests:listOrgAccessRequests",
+        { actorClerkId: actor.clerkId, status: "pending" },
+      ),
     ]);
 
-    return ok({ members, invitations });
-  });
+    return ok({ members, invitations, accessRequests });
+  }, request);
 }
 
 export async function POST(request: NextRequest) {
@@ -42,6 +64,7 @@ export async function POST(request: NextRequest) {
       return badRequest("School admins can only invite student or teacher roles");
     }
 
+    const orgSettings = await loadOrgSettingsName(actor.clerkId);
     const result = await convexMutation<{
       actorClerkId: string;
       email: string;
@@ -59,8 +82,12 @@ export async function POST(request: NextRequest) {
           to: body.email.trim(),
           role: body.role,
           joinUrl,
+          orgName: orgSettings.org?.name,
         })
       : { status: "skipped" as const, reason: "Invitation token was not generated." };
+    if (emailResult.status !== "sent") {
+      return badRequest(inviteDeliveryErrorMessage("reason" in emailResult ? emailResult.reason : undefined), 502);
+    }
 
     return ok({
       invitationId: result.invitationId,
@@ -79,8 +106,15 @@ export async function PATCH(request: NextRequest) {
     const body = (await request.json()) as {
       userId?: string;
       role?: string;
-      action?: "updateRole" | "remove" | "cancelInvite" | "resendInvite";
+      action?:
+        | "updateRole"
+        | "remove"
+        | "cancelInvite"
+        | "resendInvite"
+        | "approveAccessRequest"
+        | "rejectAccessRequest";
       invitationId?: string;
+      requestId?: string;
     };
 
     if (body.action === "remove" && body.userId) {
@@ -100,6 +134,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (body.action === "resendInvite" && body.invitationId) {
+      const orgSettings = await loadOrgSettingsName(actor.clerkId);
       const result = await convexMutation<{
         actorClerkId: string;
         invitationId: string;
@@ -115,14 +150,75 @@ export async function PATCH(request: NextRequest) {
               to: result.email,
               role: result.role,
               joinUrl,
+              orgName: orgSettings.org?.name,
             })
           : { status: "skipped" as const, reason: "Invitation token was not generated." };
+      if (emailResult.status !== "sent") {
+        return badRequest(inviteDeliveryErrorMessage("reason" in emailResult ? emailResult.reason : undefined), 502);
+      }
       return ok({
         ok: true,
         joinUrl,
         emailStatus: emailResult.status,
         emailReason: "reason" in emailResult ? emailResult.reason : undefined,
       });
+    }
+
+    if (body.action === "approveAccessRequest" && body.requestId && body.role) {
+      if (!SCHOOL_MANAGED_ROLES.has(body.role)) {
+        return badRequest("School admins can only invite student or teacher roles");
+      }
+
+      const accessRequest = await convexQuery<{
+        actorClerkId: string;
+        requestId: string;
+      }, { email: string }>("accessRequests:getOrgAccessRequest", {
+        actorClerkId: actor.clerkId,
+        requestId: body.requestId,
+      });
+
+      const orgSettings = await loadOrgSettingsName(actor.clerkId);
+      const result = await convexMutation<{
+        actorClerkId: string;
+        email: string;
+        role: string;
+      }, { invitationId: string; token?: string }>("schoolAdmin:inviteMember", {
+        actorClerkId: actor.clerkId,
+        email: accessRequest.email,
+        role: body.role,
+      });
+
+      const origin = new URL(request.url).origin;
+      const joinUrl = result.token ? `${origin}/join?token=${encodeURIComponent(result.token)}` : undefined;
+      const emailResult = joinUrl
+        ? await sendInvitationEmail({
+            to: accessRequest.email,
+            role: body.role,
+            joinUrl,
+            orgName: orgSettings.org?.name,
+          })
+        : { status: "skipped" as const, reason: "Invitation token was not generated." };
+      if (emailResult.status !== "sent") {
+        return badRequest(inviteDeliveryErrorMessage("reason" in emailResult ? emailResult.reason : undefined), 502);
+      }
+
+      await convexMutation("accessRequests:resolveAccessRequest", {
+        actorClerkId: actor.clerkId,
+        requestId: body.requestId,
+        status: "invited",
+        role: body.role,
+      });
+
+      return ok({ ok: true, invitationId: result.invitationId, joinUrl });
+    }
+
+    if (body.action === "rejectAccessRequest" && body.requestId) {
+      await convexMutation("accessRequests:resolveAccessRequest", {
+        actorClerkId: actor.clerkId,
+        requestId: body.requestId,
+        status: "rejected",
+      });
+      return ok({ ok: true });
     }
 
     if (body.userId && body.role) {

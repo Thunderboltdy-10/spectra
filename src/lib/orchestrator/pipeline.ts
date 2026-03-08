@@ -39,6 +39,7 @@ import { buildRoutePlan } from "@/lib/orchestrator/route-plan";
 import { runAssistantStreaming, runCollaborativeStreaming } from "@/lib/orchestrator/streaming";
 import { buildTaskGraph, shouldUseMultiAgent } from "@/lib/orchestrator/task-graph";
 import { formatSchoolNow } from "@/lib/timezone";
+import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 import type { StudyMode } from "@/types";
 
 type ChatRequestBody = {
@@ -67,6 +68,10 @@ type ChatRequestBody = {
     enhanceMode?: "auto" | "on" | "off";
     thinkingMode?: "auto" | "on" | "off";
     searchMode?: "auto" | "on" | "off";
+  };
+  toolPreferences?: {
+    memoryEnabled?: boolean;
+    searxngEnabled?: boolean;
   };
 };
 
@@ -152,6 +157,10 @@ function toQuizDifficultyLabel(level: number): QuizDifficultyLabel {
 function featureEnabled(flag: boolean | undefined, defaultValue = true) {
   if (flag === undefined) return defaultValue;
   return flag;
+}
+
+function featureAllowed(orgFlag: boolean | undefined, userFlag: boolean | undefined, defaultValue = true) {
+  return featureEnabled(orgFlag, defaultValue) && featureEnabled(userFlag, defaultValue);
 }
 
 function isQuizStructured(value: string) {
@@ -496,6 +505,7 @@ export async function runChatPipeline(request: NextRequest) {
   );
   const normalizeModelForPricing = (value: string) =>
     value.trim().toLowerCase().replace(/:free$/i, "");
+  const pricingLeaf = (value: string) => normalizeModelForPricing(value).split("/").pop() ?? normalizeModelForPricing(value);
   const resolveCatalogPricing = (modelId: string) => {
     const direct = catalogPricingById.get(modelId);
     if (typeof direct?.inputCostPerM === "number" || typeof direct?.outputCostPerM === "number") {
@@ -511,11 +521,7 @@ export async function runChatPipeline(request: NextRequest) {
     const normalized = normalizeModelForPricing(modelId);
     for (const [candidateId, pricing] of catalogPricingById.entries()) {
       const normalizedCandidate = normalizeModelForPricing(candidateId);
-      if (
-        normalizedCandidate === normalized ||
-        normalizedCandidate.endsWith(normalized) ||
-        normalized.endsWith(normalizedCandidate)
-      ) {
+      if (normalizedCandidate === normalized || pricingLeaf(normalizedCandidate) === pricingLeaf(normalized)) {
         return pricing;
       }
     }
@@ -548,6 +554,7 @@ export async function runChatPipeline(request: NextRequest) {
   };
 
   const auto = await runAutoSettingsPipeline({
+    actorClerkId: actor.clerkId,
     message: normalizedMessage,
     currentThinkingLevel: body.thinkingLevel,
     spendingTier: budget.tier,
@@ -623,7 +630,7 @@ export async function runChatPipeline(request: NextRequest) {
     ? ((await convexQuery("resources:getResourceNamesByIds", {
         actorClerkId: actor.clerkId,
         resourceIds: attachmentResourceIds,
-      })) as Array<{ _id: string; filename: string; status: "uploaded" | "processed" | "failed" }>)
+      })) as Array<{ _id: string; filename: string; status: "uploaded" | "processing" | "processed" | "failed" }>)
     : [];
   const uploadedAttachmentNames = uploadedAttachmentMeta.map((item) => item.filename);
 
@@ -859,6 +866,12 @@ export async function runChatPipeline(request: NextRequest) {
     ?? (typeof chatData.chat.packId === "string" && chatData.chat.packId.trim().length > 0
       ? chatData.chat.packId
       : undefined);
+  const memoryEnabled = featureEnabled(body.toolPreferences?.memoryEnabled, true);
+  const searxngEnabled = featureAllowed(
+    orgSettings.org?.searxngEnabled,
+    body.toolPreferences?.searxngEnabled,
+    true,
+  );
   const routePlan = buildRoutePlan({
     message: auto.message,
     mode: effectiveMode,
@@ -881,6 +894,11 @@ export async function runChatPipeline(request: NextRequest) {
       : undefined,
     schoolSoulVersion: schoolSoulCapsule.version,
   });
+  if (!memoryEnabled) {
+    routePlan.shouldConsultMemory = false;
+    routePlan.shouldWriteMemory = false;
+    routePlan.allowedToolBundles = routePlan.allowedToolBundles.filter((bundle) => bundle !== "memory");
+  }
 
   const retrievalPromise = routePlan.allowedToolBundles.includes("retrieval") && routePlan.retrievalScopes.length > 0
     ? runRagRetrieval({
@@ -903,15 +921,17 @@ export async function runChatPipeline(request: NextRequest) {
 
   const searchPromise = routePlan.shouldUseWebSearch
     ? maybeSearchWeb(auto.message, auto.thinkingLevel, {
-      modelCatalog: catalog,
-      spendingTier: budget.tier,
-      modelRuntimeStats: runtimeStatMap,
-      searxngEnabled: featureEnabled(orgSettings.org?.searxngEnabled),
-    }).catch(() => ({
-      text: "",
-      urls: [] as string[],
-      sources: [] as Array<{ url: string; title: string; domain: string }>,
-    }))
+        actorClerkId: actor.clerkId,
+        chatId,
+        modelCatalog: catalog,
+        spendingTier: budget.tier,
+        modelRuntimeStats: runtimeStatMap,
+        searxngEnabled,
+      }).catch(() => ({
+        text: "",
+        urls: [] as string[],
+        sources: [] as Array<{ url: string; title: string; domain: string }>,
+      }))
     : Promise.resolve({
       text: "",
       urls: [] as string[],
@@ -1196,6 +1216,8 @@ export async function runChatPipeline(request: NextRequest) {
   let imageDescriptionBlock = "";
   if (capability.requiresPrepass && capability.prepassModel && allImageBlocks.length > 0) {
     imageDescriptionBlock = await runVisionPrepass({
+      actorClerkId: actor.clerkId,
+      chatId,
       imageContentBlocks: allImageBlocks,
       userMessage: auto.message,
       model: capability.prepassModel,
@@ -1221,18 +1243,32 @@ export async function runChatPipeline(request: NextRequest) {
       requestedTimeZone: orgSettings.org?.timezone,
     });
   });
+  const retrievalStatus =
+    retrieval.citations.length > 0
+      ? `scoped retrieval available (${retrieval.citations.length} source${retrieval.citations.length === 1 ? "" : "s"})`
+      : retrieval.diagnostics?.reason ?? "not used";
+  const searchStatus = routePlan.shouldUseWebSearch
+    ? (searchBlock.trim()
+        ? "web search already run; use the provided web context and do not claim browsing is unavailable"
+        : "web search allowed for this route but returned no usable results")
+    : "web search not enabled for this route";
   const runtimeContextBlock = [
     `School: ${orgSettings.org?.name ?? "AI School"}`,
     `Timezone: ${schoolNow.timeZone}`,
     `Current date: ${schoolNow.label}`,
+    `Allowed tool bundles: ${routePlan.allowedToolBundles.join(", ") || "none"}`,
+    `Retrieval: ${retrievalStatus}`,
+    `Web search: ${searchStatus}`,
   ].join("\n");
-  const memoryProfile = buildRelevantMemoryProfile({
-    message: auto.message,
-    entries: userMemory.entries,
-    rawMemoryText: userMemory.rawMemoryText,
-  });
+  const memoryProfile = memoryEnabled
+    ? buildRelevantMemoryProfile({
+        message: auto.message,
+        entries: userMemory.entries,
+        rawMemoryText: userMemory.rawMemoryText,
+      })
+    : "";
   const personalSoulExcerpt = buildPersonalSoulExcerpt({
-    preferences: personalSoulPrefs,
+    preferences: memoryEnabled ? personalSoulPrefs : null,
     memoryProfile,
   });
   const useMemoryProfile = routePlan.shouldConsultMemory && Boolean(personalSoulExcerpt);
@@ -1284,6 +1320,18 @@ Allowed bundles: ${routePlan.modeContract.toolBundles.join(", ") || "none"}
 Validator: ${routePlan.modeContract.validator}
 === END MODE CONTRACT ===`,
   );
+  systemPromptParts.push(
+    `=== ROUTE PRIMITIVES ===
+Web search bundle: ${routePlan.shouldUseWebSearch ? "enabled" : "disabled"}.
+Retrieved school resources: ${retrieval.citations.length > 0 ? `${retrieval.citations.length} source(s) available` : routePlan.retrievalScopes.length > 0 ? "enabled but no high-confidence sources found" : "disabled"}.
+Memory bundle: ${useMemoryProfile ? "relevant memory injected" : routePlan.shouldConsultMemory ? "eligible but no relevant memory injected" : "disabled"}.
+Multi-agent collaboration: ${routePlan.allowSubAgents ? "allowed only if the route earns it" : "disabled"}.
+If web search is enabled, use the provided search briefing and sources instead of claiming you lack web access.
+If retrieval is enabled, ground claims in the provided classroom sources instead of saying files are unavailable.
+If sources exist, cite them inline where useful and finish with a compact sources section.
+Do not invent tool calls that were not actually run.
+=== END ROUTE PRIMITIVES ===`,
+  );
   if (routePlan.agentContract) {
     systemPromptParts.push(
       `=== AGENT CONTRACT ===
@@ -1294,6 +1342,18 @@ Allowed bundles: ${routePlan.agentContract.toolBundles.join(", ") || "none"}
 === END AGENT CONTRACT ===`,
     );
   }
+  systemPromptParts.push(
+    `=== TOOL EXECUTION CONTEXT ===
+Route-approved bundles: ${routePlan.allowedToolBundles.join(", ") || "none"}
+Search route enabled: ${routePlan.shouldUseWebSearch ? "yes" : "no"}
+Retrieval scopes enabled: ${routePlan.retrievalScopes.join(", ") || "none"}
+Memory route enabled: ${routePlan.shouldConsultMemory ? "yes" : "no"}
+Web results provided below: ${searchSources.length > 0 ? "yes" : "no"}
+Retrieved classroom/personal sources provided below: ${retrieval.citations.length > 0 ? "yes" : "no"}
+If a route-approved capability returned no results, say that no usable results were found.
+Do not claim you lack a supported tool when search, retrieval, or memory context is already provided in this prompt.
+=== END TOOL EXECUTION CONTEXT ===`,
+  );
   if (featureEnabled(orgSettings.org?.soulEnabled) && schoolSoulCapsule.capsule.trim()) {
     systemPromptParts.push(
       `=== SCHOOL SOUL ${schoolSoulCapsule.version} ===\n${schoolSoulCapsule.capsule}\n=== END SCHOOL SOUL ===`,
@@ -1398,9 +1458,16 @@ Allowed bundles: ${routePlan.agentContract.toolBundles.join(", ") || "none"}
 
   // Lower token budget for vague quiz/flashcard requests - the model only needs
   // a short clarifying question, not a full quiz or flashcard deck.
+  const modeMaxTokens = MODE_MAX_TOKENS[effectiveMode] ?? 2048;
+  const budgetAwareMaxTokens =
+    routePlan.responseBudget === "simple"
+      ? Math.min(modeMaxTokens, 900)
+      : routePlan.responseBudget === "normal"
+        ? Math.min(modeMaxTokens, effectiveMode === "research" || effectiveMode === "document" ? 2400 : 1800)
+        : modeMaxTokens;
   const maxTokens = isVagueRequest
-    ? Math.min(512, MODE_MAX_TOKENS[effectiveMode] ?? 2048)
-    : (MODE_MAX_TOKENS[effectiveMode] ?? 2048);
+    ? Math.min(512, budgetAwareMaxTokens)
+    : budgetAwareMaxTokens;
   const earlyTitlePromise = isFirstAssistantTurn
     ? maybeGenerateTitleFromUserPrompt({
         chatId,
@@ -1473,6 +1540,15 @@ Allowed bundles: ${routePlan.agentContract.toolBundles.join(", ") || "none"}
           maxTokens: 220,
           temperature: 0.3,
         }).catch(() => null);
+        if (promptRefinement) {
+          await recordOpenRouterUsage({
+            actorClerkId: actor.clerkId,
+            chatId,
+            model: promptRefinement.model ?? primaryModel,
+            usage: promptRefinement.usage,
+            pricing: resolveCatalogPricing(promptRefinement.model ?? primaryModel),
+          }).catch(() => {});
+        }
 
         const refinedPrompt =
           promptRefinement?.choices?.[0]?.message?.content?.trim() || auto.message;
@@ -1575,16 +1651,16 @@ Allowed bundles: ${routePlan.agentContract.toolBundles.join(", ") || "none"}
                 modelId: modelUsed,
               })) as { inputCostPerM?: number; outputCostPerM?: number; isFree?: boolean });
 
-        await convexMutation("usage:recordUsageWithCost", {
+        await recordOpenRouterUsage({
           actorClerkId: actor.clerkId,
           chatId,
           messageId: appended.messageId,
           model: modelUsed,
           inputTokens: usageIn,
           outputTokens: usageOut,
-          inputCostPerM: pricing.inputCostPerM,
-          outputCostPerM: pricing.outputCostPerM,
-        }).catch(() => {});
+          pricing,
+          skipIfZeroTokens: false,
+        });
         await recordModelRuntime(modelUsed, true, Date.now() - requestStartedAt);
 
         const spendingUpdate = (await convexQuery("usage:checkUserBudget", {
@@ -1713,6 +1789,8 @@ Allowed bundles: ${routePlan.agentContract.toolBundles.join(", ") || "none"}
 
       const streamed = multiAgentEnabled
         ? await runCollaborativeStreaming({
+            actorClerkId: actor.clerkId,
+            chatId,
             graph: taskGraph,
             originalPrompt: auto.message,
             conversationContext: specialistConversationContext,
@@ -1731,6 +1809,8 @@ Allowed bundles: ${routePlan.agentContract.toolBundles.join(", ") || "none"}
             logger,
           })
         : await runAssistantStreaming({
+            actorClerkId: actor.clerkId,
+            chatId,
             shouldVerify,
             primaryModel,
             fallbackModels,
@@ -1838,6 +1918,13 @@ BACK: ...`,
           maxTokens: MODE_MAX_TOKENS[effectiveMode],
           temperature: 0.1,
         });
+        await recordOpenRouterUsage({
+          actorClerkId: actor.clerkId,
+          chatId,
+          model: repaired.model ?? supportModel,
+          usage: repaired.usage,
+          pricing: resolveCatalogPricing(repaired.model ?? supportModel),
+        }).catch(() => {});
         const candidate = repaired.choices?.[0]?.message?.content?.trim() ?? "";
         if (candidate) {
           if (needsQuizRepair && isQuizStructured(candidate) && countQuizQuestions(candidate) >= MIN_QUIZ_QUESTIONS) {
@@ -1910,6 +1997,13 @@ BACK: ...`,
           maxTokens: MODE_MAX_TOKENS[effectiveMode],
           temperature: 0.15,
         });
+        await recordOpenRouterUsage({
+          actorClerkId: actor.clerkId,
+          chatId,
+          model: regenerated.model ?? supportModel,
+          usage: regenerated.usage,
+          pricing: resolveCatalogPricing(regenerated.model ?? supportModel),
+        }).catch(() => {});
         const regeneratedCandidate = regenerated.choices?.[0]?.message?.content?.trim() ?? "";
         if (regeneratedCandidate) {
           if (
@@ -1969,6 +2063,13 @@ Correct: [A|B|C|D]
           maxTokens: MODE_MAX_TOKENS[effectiveMode],
           temperature: 0,
         });
+        await recordOpenRouterUsage({
+          actorClerkId: actor.clerkId,
+          chatId,
+          model: finalRepair.model ?? supportModel,
+          usage: finalRepair.usage,
+          pricing: resolveCatalogPricing(finalRepair.model ?? supportModel),
+        }).catch(() => {});
         const finalCandidate = finalRepair.choices?.[0]?.message?.content?.trim() ?? "";
         if (finalCandidate && isQuizStructured(finalCandidate) && countQuizQuestions(finalCandidate) >= MIN_QUIZ_QUESTIONS) {
           correctedResponse = finalCandidate;
@@ -2006,6 +2107,13 @@ BACK: [answer or definition]`,
           maxTokens: MODE_MAX_TOKENS[effectiveMode],
           temperature: 0,
         });
+        await recordOpenRouterUsage({
+          actorClerkId: actor.clerkId,
+          chatId,
+          model: finalFlashcardRepair.model ?? supportModel,
+          usage: finalFlashcardRepair.usage,
+          pricing: resolveCatalogPricing(finalFlashcardRepair.model ?? supportModel),
+        }).catch(() => {});
         const finalFlashcardCandidate = finalFlashcardRepair.choices?.[0]?.message?.content?.trim() ?? "";
         const normalizedFinalFlashcards = normalizeFlashcardDeck(finalFlashcardCandidate);
         if (normalizedFinalFlashcards && countFlashcardPairs(normalizedFinalFlashcards) >= MIN_FLASHCARD_PAIRS) {
@@ -2046,6 +2154,7 @@ BACK: [answer or definition]`,
         const artifactResult = await generateArtifactResources({
           actorClerkId: actor.clerkId,
           content: finalizedResponse,
+          requestedFormats: routePlan.requestedArtifactFormats,
         }).catch((error: unknown) => {
           logger.warn("artifact generation failed", {
             chatId,
@@ -2102,15 +2211,14 @@ BACK: [answer or definition]`,
               modelId: modelUsed,
             })) as { inputCostPerM?: number; outputCostPerM?: number; isFree?: boolean });
 
-      await convexMutation("usage:recordUsageWithCost", {
+      await recordOpenRouterUsage({
         actorClerkId: actor.clerkId,
         chatId,
         messageId: appended.messageId,
         model: modelUsed,
         inputTokens: usageIn,
         outputTokens: usageOut,
-        inputCostPerM: pricing.inputCostPerM,
-        outputCostPerM: pricing.outputCostPerM,
+        pricing,
       });
       await recordModelRuntime(modelUsed, true, Date.now() - requestStartedAt);
       if (route.trace.collaborators?.length) {

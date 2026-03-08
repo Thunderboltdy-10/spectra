@@ -102,6 +102,9 @@ export function extractCitationsFromText(text: string, fallback: Citation[]): Ci
 
 export function summarizeWhyResponse(mode: string, routeReason: string) {
   const normalizedMode = mode.replace(/_/g, " ");
+  if (/manual model lock|manual selection/i.test(routeReason)) {
+    return "Model was fixed by your manual selection. The system still adapted tools and response behavior around that locked model.";
+  }
   if (/search/i.test(routeReason)) {
     return "Used a web-aware route because the prompt looks time-sensitive and benefits from live source retrieval.";
   }

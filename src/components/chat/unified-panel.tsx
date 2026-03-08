@@ -79,10 +79,32 @@ function providerFromModelId(value: string) {
     .join(" ");
 }
 
-function resourceStatusMeta(status: PersonalResource["status"]) {
+function formatSpendCents(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Math.max(0, value) / 100);
+}
+
+function resourceStatusMeta(status: PersonalResource["status"], updatedAt?: number, attempts?: number) {
   if (status === "uploaded") {
     return {
-      label: "Processing...",
+      label: "Queued for processing...",
+      Icon: Loader2,
+      iconClassName: "animate-spin text-[var(--text-secondary)]",
+    };
+  }
+  if (status === "processing") {
+    const stale = typeof updatedAt === "number" && Date.now() - updatedAt > 45_000;
+    const retryCount = Math.max(1, attempts ?? 1);
+    return {
+      label: stale
+        ? retryCount >= 3
+          ? "Processing stalled - remove and retry"
+          : `Still processing... (attempt ${retryCount})`
+        : `Processing... (attempt ${retryCount})`,
       Icon: Loader2,
       iconClassName: "animate-spin text-[var(--text-secondary)]",
     };
@@ -337,7 +359,7 @@ function SettingsView({
                       <p className="truncate text-xs font-medium text-[var(--text-primary)]">{resource.filename}</p>
                       <p className="inline-flex items-center gap-1 text-[10px] text-[var(--text-secondary)]">
                         {(() => {
-                          const status = resourceStatusMeta(resource.status);
+                    const status = resourceStatusMeta(resource.status, resource.updatedAt, resource.processingAttempts);
                           return (
                             <>
                               <status.Icon className={`h-3 w-3 ${status.iconClassName}`} />
@@ -346,6 +368,11 @@ function SettingsView({
                           );
                         })()}
                       </p>
+                      {resource.error ? (
+                        <p className="mt-1 truncate text-[10px] text-[var(--danger)]" title={resource.error}>
+                          {resource.error}
+                        </p>
+                      ) : null}
                     </div>
                     <Button
                       type="button"
@@ -407,9 +434,17 @@ function SettingsView({
             </p>
             {userSpending ? (
               <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
-                {typeof userSpending.monthlyTokens === "number"
-                  ? `${Math.max(0, userSpending.monthlyTokens).toLocaleString()} tokens this month`
-                  : `${Math.max(0, userSpending.totalCostCents ?? 0).toLocaleString()} cents this month`}
+                {[
+                  typeof userSpending.monthlyTokens === "number"
+                    ? `${Math.max(0, userSpending.monthlyTokens).toLocaleString()} tokens`
+                    : null,
+                  typeof userSpending.totalCostCents === "number"
+                    ? `${formatSpendCents(userSpending.totalCostCents)} this month`
+                    : null,
+                  (userSpending.estimatedUnpricedCostCents ?? 0) > 0
+                    ? "includes estimated cost for unpriced events"
+                    : null,
+                ].filter(Boolean).join(" · ")}
               </p>
             ) : null}
           </section>
@@ -714,7 +749,7 @@ function SourcesView({ citations }: { citations: Citation[] }) {
 
   return (
     <div className="space-y-3">
-      <div className="mb-1 flex items-center justify-between border-b border-[var(--border-default)] pb-2.5">
+      <div className="mb-1 flex items-center justify-between">
         <p className="text-sm font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Sources</p>
         <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">{citations.length}</span>
       </div>

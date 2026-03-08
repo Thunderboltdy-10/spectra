@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
-  BellRing,
   Building2,
   Database,
   MessageSquare,
@@ -154,7 +153,12 @@ function humanizeAuditAction(action: string) {
 }
 
 function formatCurrencyCents(value: number) {
-  return `€${(Math.max(0, value) / 100).toFixed(2)}`;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Math.max(0, value) / 100);
 }
 
 function compactDayLabel(day: string) {
@@ -234,8 +238,8 @@ export default function SuperAdminDashboard() {
       ),
     [admins],
   );
-  const usageByDay = stats?.usage?.byDay ?? [];
-  const usageByWeek = stats?.usage?.byWeek ?? [];
+  const usageByDay = useMemo(() => stats?.usage?.byDay ?? [], [stats?.usage?.byDay]);
+  const usageByWeek = useMemo(() => stats?.usage?.byWeek ?? [], [stats?.usage?.byWeek]);
   const availableUsageMonths = useMemo(
     () => Array.from(new Set(usageByDay.map((row) => monthKeyFromDay(row.day)).filter(Boolean))).sort(),
     [usageByDay],

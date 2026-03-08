@@ -84,6 +84,8 @@ export type ToolBundle =
   | "vision"
   | "multi_agent";
 
+export type ArtifactFormat = "docx" | "pdf" | "pptx";
+
 export type MemoryScope = "user_global" | "project" | "chat" | "none";
 export type RetrievalScope = "pack" | "personal" | "agent" | "org";
 
@@ -136,6 +138,7 @@ export type RoutePlan = {
     required: Array<"vision" | "reasoning" | "code" | "search" | "image_generation">;
     preferred: Array<"vision" | "reasoning" | "code" | "search" | "image_generation">;
   };
+  requestedArtifactFormats: ArtifactFormat[];
   allowSubAgents: boolean;
   modeContract: ModeContract;
   agentContract?: AgentContract;

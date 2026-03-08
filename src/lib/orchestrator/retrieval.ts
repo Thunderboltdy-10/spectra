@@ -5,6 +5,7 @@ import { openRouterChatCompletion, openRouterEmbedding } from "@/lib/openrouter"
 import { withTimeout } from "@/lib/orchestrator/history";
 import { pickModelAndFallbacks, type CatalogModelEntry, type ModelRuntimeStat } from "@/lib/model-selection";
 import { searxngSearch } from "@/lib/search/searxng";
+import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 
 export type RetrievedCitation = {
   resourceId?: string;
@@ -43,6 +44,7 @@ export type WebSearchSource = {
   url: string;
   title: string;
   domain: string;
+  snippet?: string;
 };
 
 const MAX_WEB_SOURCES = 6;
@@ -157,7 +159,7 @@ function extractHtmlTitle(html: string) {
   return decodeHtmlEntities(match[1]).replace(/\s+/g, " ").trim();
 }
 
-async function resolveWebSearchSource(url: string): Promise<WebSearchSource | null> {
+async function resolveWebSearchSource(url: string, snippet?: string): Promise<WebSearchSource | null> {
   const parsed = parseHttpUrl(url);
   if (!parsed) return null;
 
@@ -196,11 +198,17 @@ async function resolveWebSearchSource(url: string): Promise<WebSearchSource | nu
     url: finalParsed.toString(),
     title,
     domain,
+    snippet: snippet?.trim() ? snippet.trim().slice(0, 280) : undefined,
   };
 }
 
-async function resolveWebSearchSources(urls: string[]) {
-  const resolved = await Promise.all(urls.map((url) => resolveWebSearchSource(url)));
+async function resolveWebSearchSources(
+  urls: string[],
+  snippetByUrl?: Map<string, string>,
+) {
+  const resolved = await Promise.all(
+    urls.map((url) => resolveWebSearchSource(url, snippetByUrl?.get(url))),
+  );
   return resolved.filter((item): item is WebSearchSource => Boolean(item)).slice(0, MAX_WEB_SOURCES);
 }
 
@@ -295,6 +303,8 @@ export async function maybeSearchWeb(
   message: string,
   thinkingLevel: "low" | "medium" | "high",
   options?: {
+    actorClerkId?: string;
+    chatId?: string;
     modelCatalog?: CatalogModelEntry[];
     spendingTier?: "normal" | "expensive_blocked" | "cheap_only" | "free_only";
     modelRuntimeStats?: Record<string, ModelRuntimeStat>;
@@ -305,12 +315,20 @@ export async function maybeSearchWeb(
     ? []
     : await searxngSearch(message).catch(() => []);
   if (searxngResults.length > 0) {
-    const sources = await resolveWebSearchSources(searxngResults.map((result) => result.url));
+    const snippetByUrl = new Map(
+      searxngResults
+        .filter((result) => result.url)
+        .map((result) => [result.url, result.content?.trim() ?? ""]),
+    );
+    const sources = await resolveWebSearchSources(
+      searxngResults.map((result) => result.url),
+      snippetByUrl,
+    );
     const sourceByUrl = new Map(sources.map((source) => [source.url, source]));
     const text = searxngResults
       .map((result, index) => {
         const resolved = sourceByUrl.get(result.url);
-        return `${index + 1}. ${resolved?.title || result.title}\n${result.content || ""}\n${resolved?.url || result.url}`;
+        return `${index + 1}. ${resolved?.title || result.title}\n${resolved?.snippet || result.content || ""}\n${resolved?.url || result.url}`;
       })
       .join("\n\n")
       .trim();
@@ -359,6 +377,14 @@ export async function maybeSearchWeb(
   );
 
   const text = completion?.choices?.[0]?.message?.content?.trim() ?? "";
+  if (completion && options?.actorClerkId) {
+    await recordOpenRouterUsage({
+      actorClerkId: options.actorClerkId,
+      chatId: options.chatId,
+      model: completion.model ?? searchModel,
+      usage: completion.usage,
+    }).catch(() => {});
+  }
   const extractedUrls = extractUrls(text);
   const sources = await resolveWebSearchSources(extractedUrls);
   const validUrlSet = new Set(sources.map((source) => source.url));

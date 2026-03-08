@@ -444,7 +444,11 @@ export const removeMember = mutation({
     if (target._id === actor._id) throw new Error("Cannot remove yourself");
     if (target.role === "admin") throw new Error("Only super admin can remove admins");
 
-    const purgeSummary = await purgeUserData(ctx, { actor, target });
+    const purgeSummary = await purgeUserData(ctx, {
+      actor,
+      target,
+      replacementOwner: actor,
+    });
     await ctx.runMutation(internal.auditLog.logAction, {
       actorUserId: actor._id as Id<"users">,
       action: "school_admin.remove_member",

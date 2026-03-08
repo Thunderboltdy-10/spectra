@@ -17,7 +17,7 @@ import type { Agent } from "@/types";
 type ResourceItem = {
   _id: string;
   filename: string;
-  status: "uploaded" | "processed" | "failed";
+  status: "uploaded" | "processing" | "processed" | "failed";
   createdAt: number;
   parsedCharCount: number;
 };

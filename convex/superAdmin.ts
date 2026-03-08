@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { getUserByClerkId } from "./helpers";
+import { estimateUsageCostCents } from "../shared/spending";
 import { vRole } from "./shared";
 import type { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
@@ -180,14 +181,9 @@ export const getUsageOverview = query({
       const safeTokens = Math.max(0, event.totalTokens ?? 0);
       const safeCost = Math.max(0, event.costCents ?? 0);
       const pricing = pricingByOrgModel.get(`${String(event.orgId)}::${event.model}`);
-      const inputCostPerM = typeof pricing?.inputCostPerM === "number" ? pricing.inputCostPerM : 0;
-      const outputCostPerM = typeof pricing?.outputCostPerM === "number" ? pricing.outputCostPerM : 0;
-      const estimatedCost = safeCost > 0 || pricing?.isFree
+      const estimatedCost = safeCost > 0
         ? 0
-        : (
-            ((Math.max(0, event.inputTokens ?? 0) / 1_000_000) * inputCostPerM) +
-            ((Math.max(0, event.outputTokens ?? 0) / 1_000_000) * outputCostPerM)
-          ) * 100;
+        : estimateUsageCostCents(event, pricing);
       const effectiveCost = safeCost > 0 ? safeCost : Math.max(0, estimatedCost);
       totals.events += 1;
       totals.totalTokens += safeTokens;
@@ -813,7 +809,28 @@ export const removeOrgMember = mutation({
       }
     }
 
-    const purgeSummary = await purgeUserData(ctx, { actor, target: user });
+    const replacementOwner =
+      actor.orgId === args.orgId
+        ? actor
+        : (
+            await ctx.db
+              .query("users")
+              .withIndex("by_org_role", (q) => q.eq("orgId", args.orgId).eq("role", "admin"))
+              .collect()
+          ).find((candidate) => candidate._id !== user._id)
+          ?? (
+            await ctx.db
+              .query("users")
+              .withIndex("by_org_role", (q) => q.eq("orgId", args.orgId).eq("role", "teacher"))
+              .collect()
+          ).find((candidate) => candidate._id !== user._id)
+          ?? null;
+
+    const purgeSummary = await purgeUserData(ctx, {
+      actor,
+      target: user,
+      replacementOwner,
+    });
     await ctx.runMutation(internal.auditLog.logAction, {
       actorUserId: actor._id as Id<"users">,
       action: "super_admin.remove_org_member",

@@ -1,22 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { generateArtifactResources } from "@/lib/artifacts";
 
-const convexMutation = vi.fn();
+const { convexMutation } = vi.hoisted(() => ({
+  convexMutation: vi.fn(),
+}));
 
 vi.mock("@/lib/convex-server", () => ({
   convexMutation,
 }));
 
 class ParagraphMock {
-  constructor(_value: unknown) {}
+  constructor() {}
 }
 
 class TextRunMock {
-  constructor(_value: unknown) {}
+  constructor() {}
 }
 
 class DocumentMock {
-  constructor(_value: unknown) {}
+  constructor() {}
 }
 
 const PackerMock = {
@@ -121,9 +123,27 @@ describe("generateArtifactResources", () => {
     expect(convexMutation).not.toHaveBeenCalled();
   });
 
-  it("creates docx, pdf, and pptx resources for generated documents", async () => {
+  it("defaults study-guide artifacts to a single docx file", async () => {
     const result = await generateArtifactResources({
       actorClerkId: "user_123",
+      content: `
+Here is your study guide.
+
+<<DOCUMENT_START>>
+{"type":"study_guide","title":"Cell Respiration","summary":"Core review","sections":[{"heading":"Overview","content":"Cell respiration converts glucose into ATP."}]}
+<<DOCUMENT_END>>
+`,
+    });
+
+    expect(result.attachments).toEqual(["Cell Respiration.docx"]);
+    expect(result.attachmentResourceIds).toEqual(["resource_1"]);
+    expect(result.markdownBlock).toContain("[Cell Respiration.docx](/api/resources/resource_1/download)");
+  });
+
+  it("creates only the explicitly requested formats", async () => {
+    const result = await generateArtifactResources({
+      actorClerkId: "user_123",
+      requestedFormats: ["docx", "pdf"],
       content: `
 Here is your study guide.
 
@@ -136,17 +156,14 @@ Here is your study guide.
     expect(result.attachments).toEqual([
       "Cell Respiration.docx",
       "Cell Respiration.pdf",
-      "Cell Respiration.pptx",
     ]);
     expect(result.attachmentResourceIds).toEqual([
       "resource_1",
       "resource_2",
-      "resource_3",
     ]);
-    expect(result.markdownBlock).toContain("[Cell Respiration.docx](/api/resources/resource_1/download)");
     expect(convexMutation).toHaveBeenCalledWith(
       "resources:finalizeGeneratedResource",
-      expect.objectContaining({ resourceId: "resource_3" }),
+      expect.objectContaining({ resourceId: "resource_2" }),
     );
   });
 });

@@ -2,6 +2,7 @@ import { openRouterChatCompletion, openRouterStreamChat, type OpenRouterMessage 
 import { executeGraph, synthesize, type TaskNode } from "@/lib/orchestrator/task-graph";
 import { getSpecialist } from "@/lib/orchestrator/specialists";
 import { runMarkerVerificationPipeline } from "@/lib/orchestrator/verification";
+import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 import type { CatalogModelEntry, ModelRuntimeStat } from "@/lib/model-selection";
 import type { RouteTraceFallback, SpendingTier } from "@/types";
 
@@ -11,6 +12,8 @@ export function chunkString(value: string, size: number) {
 }
 
 export async function runAssistantStreaming(params: {
+  actorClerkId?: string;
+  chatId?: string;
   shouldVerify: boolean;
   primaryModel: string;
   fallbackModels: string[];
@@ -57,6 +60,8 @@ export async function runAssistantStreaming(params: {
     }
   } else {
     const verified = await runMarkerVerificationPipeline({
+      actorClerkId: params.actorClerkId,
+      chatId: params.chatId,
       primaryModel: params.primaryModel,
       fallbackModels: params.fallbackModels,
       messages: params.messages,
@@ -184,6 +189,8 @@ function buildCriticFallback(params: {
 }
 
 export async function runCollaborativeStreaming(params: {
+  actorClerkId?: string;
+  chatId?: string;
   graph: TaskNode[];
   originalPrompt: string;
   conversationContext?: string;
@@ -276,6 +283,14 @@ export async function runCollaborativeStreaming(params: {
 
         result = completion.choices?.[0]?.message?.content?.trim() ?? "";
         tokens = (completion.usage?.prompt_tokens ?? 0) + (completion.usage?.completion_tokens ?? 0);
+        if (params.actorClerkId) {
+          await recordOpenRouterUsage({
+            actorClerkId: params.actorClerkId,
+            chatId: params.chatId,
+            model: completion.model ?? specialist.model,
+            usage: completion.usage,
+          }).catch(() => {});
+        }
       } catch (error) {
         if (node.role !== "critic") {
           throw error;

@@ -131,7 +131,11 @@ function chunkTextWithPages(pages: ParsedPage[]) {
   return chunks.slice(0, LIMITS.maxChunksPerFile);
 }
 
-async function parseFileBytes(filename: string, bytes: ArrayBuffer): Promise<{ text: string; pages: ParsedPage[] }> {
+async function parseFileBytes(
+  filename: string,
+  bytes: ArrayBuffer,
+  options?: { onHeartbeat?: () => Promise<void> },
+): Promise<{ text: string; pages: ParsedPage[] }> {
   const ext = extension(filename);
 
   if (TEXT_RESOURCE_EXTENSIONS.has(ext)) {
@@ -182,6 +186,9 @@ async function parseFileBytes(filename: string, bytes: ArrayBuffer): Promise<{ t
         .trim();
       if (text) {
         pages.push({ page: pageIndex, text });
+      }
+      if (pageIndex === 1 || pageIndex === document.numPages || pageIndex % 4 === 0) {
+        await options?.onHeartbeat?.();
       }
     }
     return { text: pages.map((page) => page.text).join("\n"), pages };
@@ -266,6 +273,24 @@ export const processResource = internalAction({
     if (!resource) {
       return { ok: false, reason: "resource_missing" };
     }
+    if (resource.status === "processed") {
+      return { ok: true, reason: "already_processed" };
+    }
+
+    await ctx.runMutation(internal.resources.touchResourceForProcessingInternal, {
+      resourceId: args.resourceId,
+    });
+
+    let lastHeartbeatAt = 0;
+    const heartbeat = async (force = false) => {
+      const now = Date.now();
+      if (!force && now - lastHeartbeatAt < 1_500) return;
+      lastHeartbeatAt = now;
+      await ctx.runMutation(internal.resources.markResourceProcessingHeartbeatInternal, {
+        resourceId: args.resourceId,
+      });
+    };
+
     if (!resource.storageId) {
       await ctx.runMutation(internal.resources.completeResourceIngestionInternal, {
         resourceId: args.resourceId,
@@ -289,7 +314,11 @@ export const processResource = internalAction({
 
     try {
       const bytes = await blob.arrayBuffer();
-      const parsed = await parseFileBytes(resource.filename, bytes);
+      await heartbeat(true);
+      const parsed = await parseFileBytes(resource.filename, bytes, {
+        onHeartbeat: () => heartbeat(),
+      });
+      await heartbeat(true);
       const ext = extension(resource.filename);
 
       if (!parsed.text && (ext === "pdf" || ext === "docx")) {
@@ -304,15 +333,20 @@ export const processResource = internalAction({
       const chunks = chunkTextWithPages(parsed.pages);
 
       const embedded: Array<{ text: string; page?: number; embedding: number[] }> = [];
-      for (const chunk of chunks) {
+      for (let index = 0; index < chunks.length; index += 1) {
+        const chunk = chunks[index]!;
         const embedding = await openRouterEmbedding(chunk.text);
         embedded.push({
           text: chunk.text,
           page: chunk.page,
           embedding,
         });
+        if (index === 0 || index === chunks.length - 1 || (index + 1) % 3 === 0) {
+          await heartbeat();
+        }
       }
 
+      await heartbeat(true);
       await ctx.runMutation(internal.resources.completeResourceIngestionInternal, {
         resourceId: args.resourceId,
         parsedCharCount: parsed.text.length,

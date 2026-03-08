@@ -17,6 +17,7 @@ import { useSidebar } from "@/context/sidebar-context";
 type OrgSettings = { name?: string; description?: string; schoolType?: string; timezone?: string; maxStudents?: number; monthlyBudgetCentsPerUser?: number; budgetMarginPercent?: number; soulEnabled?: boolean; orchestratorV2Enabled?: boolean; searxngEnabled?: boolean; adaptiveQuizEnabled?: boolean; spacedRepetitionEnabled?: boolean; agentModelBoostEnabled?: boolean };
 type Member = { _id: string; name: string; email: string; role: "student" | "teacher" | "admin"; createdAt: number };
 type Invitation = { _id: string; email: string; role: "student" | "teacher" | "admin"; status: "pending" | "accepted" | "expired" | "cancelled"; expiresAt: number };
+type AccessRequest = { _id: string; email: string; name: string; message?: string; createdAt: number };
 type SchoolDashboard = { memberCount: number; studentCount: number; teacherCount: number; adminCount: number; messagesToday: number; pendingInvitations: number; orgName?: string };
 type UsageRow = { day: string; inputTokens: number; outputTokens: number; totalTokens: number };
 type SchoolAnalytics = { avgQuizScore?: number; totalQuizAttempts: number };
@@ -48,6 +49,7 @@ function AdminPageContent() {
   const [dashboard, setDashboard] = useState<SchoolDashboard | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [accessRequests, setAccessRequests] = useState<AccessRequest[]>([]);
   const [usage, setUsage] = useState<UsageRow[]>([]);
   const [analytics, setAnalytics] = useState<SchoolAnalytics | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
@@ -68,7 +70,7 @@ function AdminPageContent() {
     const [bootstrap, schoolDashboard, membersPayload, usagePayload, schoolAnalytics, modelPayload] = await Promise.all([
       loadJson<{ actor: { onboardingComplete?: boolean }; orgSettings: { org: OrgSettings } }>("/api/bootstrap"),
       loadJson<SchoolDashboard>("/api/school-admin/dashboard"),
-      loadJson<{ members: { members: Member[] }; invitations: Invitation[] }>("/api/school-admin/members"),
+      loadJson<{ members: { members: Member[] }; invitations: Invitation[]; accessRequests?: AccessRequest[] }>("/api/school-admin/members"),
       loadJson<{ usage: UsageRow[] }>("/api/admin/users"),
       loadJson<SchoolAnalytics>("/api/school-admin/analytics?days=30"),
       loadJson<{ models: LeaderboardEntry[] }>("/api/analytics/model-leaderboard"),
@@ -78,6 +80,7 @@ function AdminPageContent() {
     setDashboard(schoolDashboard);
     setMembers(membersPayload.members.members ?? []);
     setInvitations(membersPayload.invitations ?? []);
+    setAccessRequests(membersPayload.accessRequests ?? []);
     setUsage(usagePayload.usage ?? []);
     setAnalytics(schoolAnalytics);
     setLeaderboard(modelPayload.models ?? []);
@@ -148,6 +151,34 @@ function AdminPageContent() {
       await refresh();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to cancel invitation");
+    }
+  }
+
+  async function approveAccessRequest(requestId: string, role: "student" | "teacher") {
+    try {
+      await loadJson("/api/school-admin/members", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId, role, action: "approveAccessRequest" }),
+      });
+      toast.success("Invite sent");
+      await refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to approve access request");
+    }
+  }
+
+  async function rejectAccessRequest(requestId: string) {
+    try {
+      await loadJson("/api/school-admin/members", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId, action: "rejectAccessRequest" }),
+      });
+      toast.success("Access request rejected");
+      await refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to reject access request");
     }
   }
 
@@ -290,6 +321,40 @@ function AdminPageContent() {
                     <Button variant="ghost" size="sm" onClick={() => void cancelInvite(item._id)}>Cancel</Button>
                   </div>
                 ))}
+              </div>
+            )}
+            {accessRequests.length > 0 && (
+              <div className="mt-5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+                <p className="mb-3 text-sm font-medium">Pending access requests</p>
+                <div className="space-y-2">
+                  {accessRequests.map((request) => (
+                    <div key={request._id} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium">{request.name}</p>
+                          <p className="text-xs text-[var(--text-secondary)]">{request.email}</p>
+                          <p className="mt-1 text-[11px] text-[var(--text-tertiary)]">
+                            Requested {new Date(request.createdAt).toLocaleDateString()}
+                          </p>
+                          {request.message ? (
+                            <p className="mt-2 text-xs text-[var(--text-secondary)]">{request.message}</p>
+                          ) : null}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button size="sm" variant="secondary" onClick={() => void approveAccessRequest(request._id, "student")}>
+                            Invite student
+                          </Button>
+                          <Button size="sm" variant="secondary" onClick={() => void approveAccessRequest(request._id, "teacher")}>
+                            Invite teacher
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => void rejectAccessRequest(request._id)}>
+                            Dismiss
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>

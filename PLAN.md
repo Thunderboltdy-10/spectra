@@ -1,13 +1,13 @@
-# Plan - 2026-03-07 00:00 Europe/Madrid
+# Plan - 2026-03-08  
 
 Latest user request:
-Need status now. If you have completed or partially completed the school-admin notifications backend work, summarize exactly what you changed and the files touched. If not completed, stop and report current findings immediately.
+Audit current tool reachability and citation/source visibility in this repo. Focus on whether route-enabled search, memory, retrieval, and orchestration are actually surfaced and callable, and where source objects are dropped or hidden. Do not edit files. Return only concrete blockers with file paths and minimum fixes.
 
 Actionable tasks:
-- Inspect current state of school-admin notifications backend files.
-- Determine whether the work was completed, partially completed, or not started.
-- Summarize exact code changes and files touched, without reverting or expanding scope.
+1. Inspect route-planning and pipeline wiring for search, memory, retrieval, and orchestration reachability.
+2. Trace source/citation objects from retrieval/search through post-processing into UI rendering.
+3. Identify only concrete blockers with exact file paths and minimum viable fixes.
 
-Blockers / assumptions:
-- Only report what is actually present in the workspace now.
-- Do not modify unrelated files.
+Blockers/assumptions:
+- Do not edit product files for this task.
+- PLAN.md overwrite is required by repo workflow.

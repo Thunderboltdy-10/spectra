@@ -94,8 +94,9 @@ export default defineSchema({
     contentHash: v.optional(v.string()),
     storageId: v.optional(v.id("_storage")),
     parsedCharCount: v.number(),
-    status: v.union(v.literal("uploaded"), v.literal("processed"), v.literal("failed")),
+    status: v.union(v.literal("uploaded"), v.literal("processing"), v.literal("processed"), v.literal("failed")),
     error: v.optional(v.string()),
+    processingAttempts: v.optional(v.number()),
     pinned: v.optional(v.boolean()),
     saveToLibrary: v.optional(v.boolean()),
     createdAt: v.number(),
@@ -611,6 +612,26 @@ export default defineSchema({
     .index("by_org", ["orgId"])
     .index("by_email", ["email"])
     .index("by_token", ["token"]),
+
+  accessRequests: defineTable({
+    orgId: v.id("orgs"),
+    requesterClerkId: v.optional(v.string()),
+    email: v.string(),
+    name: v.string(),
+    message: v.optional(v.string()),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("invited"),
+      v.literal("rejected"),
+    ),
+    resolvedRole: v.optional(vRole),
+    resolvedBy: v.optional(v.id("users")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_org_status", ["orgId", "status"])
+    .index("by_org_email", ["orgId", "email"])
+    .index("by_requester", ["requesterClerkId"]),
 
   userSoulPreferences: defineTable({
     userId: v.id("users"),

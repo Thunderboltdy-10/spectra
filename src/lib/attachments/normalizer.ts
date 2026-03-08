@@ -89,7 +89,7 @@ export async function normalizeAttachments(params: {
       mimeType: string;
       size: number;
       scope: "pack" | "personal" | "agent";
-      status: "uploaded" | "processed" | "failed";
+      status: "uploaded" | "processing" | "processed" | "failed";
       storageId?: string;
       quickExtractText?: string;
     }>

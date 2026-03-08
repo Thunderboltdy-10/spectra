@@ -646,6 +646,14 @@ export function ChatComposer(props: ChatComposerProps) {
         </span>
       );
     }
+    if (status === "processing") {
+      return (
+        <span className="inline-flex items-center gap-1 text-[10px] text-[var(--text-secondary)]">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          Processing
+        </span>
+      );
+    }
     if (status === "ready") {
       if (warning?.trim()) {
         return (
@@ -752,7 +760,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 aria-expanded={attachmentsExpanded}
               >
                 <Paperclip className="h-3.5 w-3.5" />
-                {fileList.length} attachment{fileList.length === 1 ? "" : "s"} ready
+                {fileList.length} attachment{fileList.length === 1 ? "" : "s"} attached
                 {attachmentsExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
               </button>
             </div>

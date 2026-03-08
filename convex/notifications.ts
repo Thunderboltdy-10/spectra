@@ -194,6 +194,9 @@ export const sendOrgAnnouncement = mutation({
         .map((email) => email.trim().toLowerCase())
         .filter(Boolean),
     );
+    if (args.recipientEmails && requestedEmails.size === 0) {
+      throw new Error("recipientEmails must contain at least one valid email");
+    }
 
     let recipients = orgUsers.filter((user) => {
       if (args.role && user.role !== args.role) return false;

@@ -2,6 +2,7 @@ import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { buildRuntimeStatMap, pickModelAndFallbacks } from "@/lib/model-selection";
 import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
 import { openRouterChatCompletion } from "@/lib/openrouter";
+import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 import { extractCitationsFromText } from "@/lib/orchestrator/compose";
 import type { WebSearchSource } from "@/lib/orchestrator/retrieval";
 import { withTimeout, type MemoryEntry } from "@/lib/orchestrator/history";
@@ -286,6 +287,7 @@ export function inferCitations(
       url: source.url,
       title: source.title,
       domain: source.domain,
+      snippet: source.snippet,
     });
   }
 
@@ -303,6 +305,7 @@ export function inferCitations(
       const next: Citation = { ...existing };
       if (!next.url && item.url) next.url = item.url;
       if (!next.domain && item.domain) next.domain = item.domain;
+      if (!next.snippet && item.snippet) next.snippet = item.snippet;
       const existingTitle = next.title || "";
       const incomingTitle = item.title || "";
       if (incomingTitle && incomingTitle.length > existingTitle.length) {
@@ -475,6 +478,13 @@ async function generateTitleFromSnippet(source: string, fallbackSource: string, 
   );
 
   const raw = completion?.choices?.[0]?.message?.content ?? "";
+  if (completion) {
+    await recordOpenRouterUsage({
+      actorClerkId,
+      model: completion.model ?? utility.model,
+      usage: completion.usage,
+    }).catch(() => {});
+  }
   return normalizeTitle(raw, fallbackSource);
 }
 
@@ -587,6 +597,11 @@ export async function maybeExtractMemory(params: {
   extracted.push(...heuristics);
 
   if (completion) {
+    await recordOpenRouterUsage({
+      actorClerkId: params.actorClerkId,
+      model: completion.model ?? utility.model,
+      usage: completion.usage,
+    }).catch(() => {});
     const raw = completion.choices?.[0]?.message?.content ?? "[]";
     const jsonMatch = raw.match(/\[[\s\S]*\]/) ?? raw.match(/\{[\s\S]*\}/);
 

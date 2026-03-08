@@ -80,10 +80,23 @@ function sanitizeModelLabel(value: string) {
     .trim();
 }
 
-function resourceStatusMeta(status: PersonalResource["status"]) {
+function resourceStatusMeta(status: PersonalResource["status"], updatedAt?: number, attempts?: number) {
   if (status === "uploaded") {
     return {
-      label: "Processing...",
+      label: "Queued for processing...",
+      Icon: Loader2,
+      iconClassName: "animate-spin text-[var(--text-secondary)]",
+    };
+  }
+  if (status === "processing") {
+    const stale = typeof updatedAt === "number" && Date.now() - updatedAt > 45_000;
+    const retryCount = Math.max(1, attempts ?? 1);
+    return {
+      label: stale
+        ? retryCount >= 3
+          ? "Processing stalled - remove and retry"
+          : `Still processing... (attempt ${retryCount})`
+        : `Processing... (attempt ${retryCount})`,
       Icon: Loader2,
       iconClassName: "animate-spin text-[var(--text-secondary)]",
     };
@@ -251,7 +264,7 @@ export function ChatSettingsDrawer({
                       <p className="truncate text-xs font-medium text-[var(--text-primary)]">{resource.filename}</p>
                       <p className="inline-flex items-center gap-1 text-[10px] text-[var(--text-secondary)]">
                         {(() => {
-                          const status = resourceStatusMeta(resource.status);
+                          const status = resourceStatusMeta(resource.status, resource.updatedAt, resource.processingAttempts);
                           return (
                             <>
                               <status.Icon className={`h-3 w-3 ${status.iconClassName}`} />
@@ -260,6 +273,11 @@ export function ChatSettingsDrawer({
                           );
                         })()}
                       </p>
+                      {resource.error ? (
+                        <p className="mt-1 truncate text-[10px] text-[var(--danger)]" title={resource.error}>
+                          {resource.error}
+                        </p>
+                      ) : null}
                     </div>
                     <div className="flex items-center gap-1">
                       <Button

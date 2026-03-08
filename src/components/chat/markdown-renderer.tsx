@@ -168,7 +168,7 @@ function normalizeMathDelimiters(content: string) {
 export function MarkdownRenderer({ content, citations = [], mode, chatId, onOpenCanvas, onCitationClick, onSubmitQuizAnswers }: MarkdownRendererProps) {
   const cleanContent = useMemo(() => {
     let baseContent = normalizeMathDelimiters(content);
-    if (mode === "quiz" || mode === "exam" || isQuizContent(content)) {
+    if (mode === "quiz" || mode === "exam" || mode === "flashcard" || isQuizContent(content) || isFlashcardContent(content)) {
       baseContent = stripQuizMarkers(baseContent);
     }
     baseContent = baseContent.replace(/<<\s*(?:quiz|flashcards)_(?:start|end)\s*>>/gi, "");

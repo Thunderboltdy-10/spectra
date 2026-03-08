@@ -1,5 +1,6 @@
 import { openRouterChatCompletion, type OpenRouterMessage } from "@/lib/openrouter";
 import { markerVerificationPrompt } from "@/lib/prompts/policy";
+import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 import type { RouteTraceFallback } from "@/types";
 
 export function parseVerificationJson(value: string) {
@@ -15,6 +16,8 @@ export function parseVerificationJson(value: string) {
 }
 
 export async function runMarkerVerificationPipeline(params: {
+  actorClerkId?: string;
+  chatId?: string;
   primaryModel: string;
   fallbackModels: string[];
   messages: OpenRouterMessage[];
@@ -57,6 +60,14 @@ export async function runMarkerVerificationPipeline(params: {
     });
 
     const parsed = parseVerificationJson(verify.choices?.[0]?.message?.content ?? "{}");
+    if (params.actorClerkId) {
+      await recordOpenRouterUsage({
+        actorClerkId: params.actorClerkId,
+        chatId: params.chatId,
+        model: verify.model ?? params.verificationModel,
+        usage: verify.usage,
+      }).catch(() => {});
+    }
     verificationPassed = parsed.pass;
     params.logger?.info("marker verification complete", {
       verificationPassed,

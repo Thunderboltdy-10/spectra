@@ -140,6 +140,97 @@ describe("chooseModelRoute", () => {
     expect(route.fallbackModels.every((modelId) => catalogIds.has(modelId))).toBe(true);
   });
 
+  it("rotates away from the previous auto-selected model for simple independent prompts", () => {
+    const catalog = [
+      {
+        modelId: "alpha/fast-general",
+        name: "Fast General",
+        provider: "alpha",
+        description: "Fast cheap model",
+        inputCostPerM: 1,
+        outputCostPerM: 2,
+        speedRating: "high" as const,
+        reasoningRating: "medium" as const,
+        tags: ["fast"],
+      },
+      {
+        modelId: "beta/fast-general",
+        name: "Another Fast General",
+        provider: "beta",
+        description: "Fast cheap model",
+        inputCostPerM: 1,
+        outputCostPerM: 2,
+        speedRating: "high" as const,
+        reasoningRating: "medium" as const,
+        tags: ["fast"],
+      },
+    ];
+
+    const route = chooseModelRoute({
+      mode: "general",
+      thinkingLevel: "low",
+      hasAttachments: false,
+      attachmentTypes: [],
+      messageLength: 48,
+      teacherStrictness: "medium",
+      routerMode: "auto",
+      studentSeemsStuck: false,
+      spendingTier: "normal",
+      needsSearch: false,
+      promptCategory: "general",
+      previousModelUsed: "alpha/fast-general",
+      modelCatalog: catalog,
+    });
+
+    expect(route.primaryModel).toBe("beta/fast-general");
+    expect(
+      route.trace.candidates.some(
+        (candidate) =>
+          candidate.modelId === "alpha/fast-general"
+          && candidate.eliminatedBecause === "simple-turn diversity guard",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not let the previously used model win simple auto-routing by default", () => {
+    const route = chooseModelRoute({
+      mode: "general",
+      thinkingLevel: "low",
+      hasAttachments: false,
+      attachmentTypes: [],
+      messageLength: 90,
+      teacherStrictness: "medium",
+      routerMode: "auto",
+      studentSeemsStuck: false,
+      spendingTier: "normal",
+      needsSearch: false,
+      promptCategory: "general",
+      previousModelUsed: "alpha/model-a",
+      modelCatalog: [
+        {
+          modelId: "alpha/model-a",
+          name: "Model A",
+          provider: "alpha",
+          description: "Fast general model",
+          tags: ["fast"],
+          speedRating: "high",
+          costRating: "low",
+        },
+        {
+          modelId: "beta/model-b",
+          name: "Model B",
+          provider: "beta",
+          description: "Fast general model",
+          tags: ["fast"],
+          speedRating: "high",
+          costRating: "low",
+        },
+      ],
+    });
+
+    expect(route.primaryModel).toBe("beta/model-b");
+  });
+
   it("selection varies by prompt complexity for tutor mode", () => {
     const simple = chooseModelRoute({
       mode: "tutor",
@@ -170,6 +261,46 @@ describe("chooseModelRoute", () => {
     });
 
     expect(simple.primaryModel).not.toBe(complex.primaryModel);
+  });
+
+  it("rotates away from the previous model on simple independent auto-routed prompts", () => {
+    const catalog = [
+      {
+        modelId: "openai/gpt-4.1-mini",
+        name: "GPT-4.1 Mini",
+        provider: "openai",
+        description: "Fast general model",
+        tags: ["fast"],
+        isFree: false,
+      },
+      {
+        modelId: "google/gemini-2.0-flash-exp:free",
+        name: "Gemini Flash Free",
+        provider: "google",
+        description: "Fast budget-safe model",
+        tags: ["fast", "free"],
+        isFree: true,
+      },
+    ];
+
+    const route = chooseModelRoute({
+      mode: "general",
+      thinkingLevel: "low",
+      hasAttachments: false,
+      attachmentTypes: [],
+      messageLength: 60,
+      teacherStrictness: "medium",
+      routerMode: "auto",
+      studentSeemsStuck: false,
+      spendingTier: "normal",
+      needsSearch: false,
+      promptCategory: "general",
+      previousModelUsed: "openai/gpt-4.1-mini",
+      modelCatalog: catalog,
+    });
+
+    expect(route.primaryModel).toBe("google/gemini-2.0-flash-exp:free");
+    expect(route.trace.candidates.some((candidate) => candidate.eliminatedBecause === "simple-turn diversity guard")).toBe(true);
   });
 
   it("captures tier-based eliminations in trace candidates", () => {
@@ -365,8 +496,8 @@ describe("StudyMode validation", () => {
     }
   });
 
-  it("STUDY_MODES has exactly 11 entries", () => {
-    expect(STUDY_MODES).toHaveLength(11);
+  it("STUDY_MODES has exactly 12 entries", () => {
+    expect(STUDY_MODES).toHaveLength(12);
   });
 
   it("STUDY_MODES includes research mode", () => {

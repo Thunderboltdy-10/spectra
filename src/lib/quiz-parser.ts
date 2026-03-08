@@ -28,6 +28,7 @@ export function stripQuizMarkers(content: string): string {
   let cleaned = content;
   // Strip <<QUIZ_NOTE>>...<<QUIZ_NOTE_END>> blocks
   cleaned = cleaned.replace(/<<\s*QUIZ_NOTE\s*>>[\s\S]*?<<\s*QUIZ_NOTE_END\s*>>/gi, "");
+  cleaned = cleaned.replace(/<<\s*FLASHCARD_NOTE\s*>>[\s\S]*?<<\s*FLASHCARD_NOTE_END\s*>>/gi, "");
   // Strip all other <<TAG>> markers
   cleaned = cleaned.replace(/<<\s*[^>]+\s*>>/g, "");
   return cleaned.trim();

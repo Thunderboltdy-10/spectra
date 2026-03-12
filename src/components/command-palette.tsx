@@ -145,7 +145,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
         id: "open-chat",
         name: "Open chat",
         section: "Navigation",
-        perform: () => router.push("/"),
+        perform: () => router.push("/chat"),
       },
       {
         id: "open-agents",
@@ -209,7 +209,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
         section: "Modes",
         perform: () => {
           if (!isModeAvailable(mode.key)) return;
-          router.push("/");
+          router.push("/chat");
           window.dispatchEvent(
             new CustomEvent("ai-school:set-mode", { detail: mode.key }),
           );

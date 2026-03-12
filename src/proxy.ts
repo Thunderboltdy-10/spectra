@@ -1,6 +1,8 @@
 import { NextFetchEvent, NextRequest, NextResponse } from "next/server";
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 const isPublicRoute = createRouteMatcher([
+  "/",
+  "/landing(.*)",
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/request-access(.*)",

@@ -354,8 +354,8 @@ export function AppShell({
           collapsed={!sidebar.sidebarOpen}
           onToggleCollapse={() => sidebar.setSidebarOpen((prev) => !prev)}
           onSearchChange={sidebar.setSearch}
-          onSelectChat={(chatId) => router.push(`/?chatId=${encodeURIComponent(chatId)}`)}
-          onNewChat={() => router.push("/")}
+          onSelectChat={(chatId) => router.push(`/chat?chatId=${encodeURIComponent(chatId)}`)}
+          onNewChat={() => router.push("/chat")}
           onDeleteChat={(chatId) => {
             void sidebar.deleteChat(chatId).catch((error: unknown) =>
               toast.error(error instanceof Error ? error.message : "Failed to delete chat"),

@@ -375,7 +375,7 @@ export default function OnboardingPage() {
       if (!patchResp.ok) throw new Error(await patchResp.text());
 
       toast.success("Onboarding complete. Let’s start learning.");
-      router.push("/");
+      router.push("/chat");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save preferences");
     } finally {
@@ -454,7 +454,7 @@ export default function OnboardingPage() {
           <p className="mt-4 text-center text-xs text-[var(--text-secondary)]">
             <button
               type="button"
-              onClick={() => router.push("/")}
+              onClick={() => router.push("/chat")}
               className="cursor-pointer underline underline-offset-2 hover:text-[var(--text-primary)]"
             >
               Skip onboarding for now

@@ -112,7 +112,6 @@ function UtilityActionButton(props: {
   icon: React.ReactNode;
   dataTour?: string;
   ariaLabel?: string;
-  progress?: number;
   buttonClassName?: string;
 }) {
   const {
@@ -122,10 +121,8 @@ function UtilityActionButton(props: {
     icon,
     dataTour,
     ariaLabel,
-    progress,
     buttonClassName,
   } = props;
-  const progressWidth = Math.max(0, Math.min(100, Math.round((progress ?? 0) * 100)));
 
   return (
     <div className="group/utility-btn relative w-fit">
@@ -147,11 +144,6 @@ function UtilityActionButton(props: {
       <span className="pointer-events-none absolute -top-8 left-1/2 z-[95] -translate-x-1/2 rounded-md border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1 text-[10px] text-[var(--text-secondary)] opacity-0 shadow-[var(--shadow-soft)] transition group-hover/utility-btn:opacity-100">
         {label}
       </span>
-      {typeof progress === "number" && progressWidth > 0 ? (
-        <span className="pointer-events-none absolute -bottom-1 left-0 right-0 h-0.5 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
-          <span className="block h-full bg-[var(--accent-cyan)]" style={{ width: `${progressWidth}%` }} />
-        </span>
-      ) : null}
     </div>
   );
 }
@@ -164,7 +156,6 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [desktopViewport, setDesktopViewport] = useState(false);
-  const [viewportWidth, setViewportWidth] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [panelAnchor, setPanelAnchor] = useState<PanelAnchor | null>(null);
   const [activePanel, setActivePanel] = useState<UtilityPanel>("none");
@@ -189,7 +180,6 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
   useEffect(() => {
     const updateViewport = () => {
       setDesktopViewport(window.innerWidth >= 768);
-      setViewportWidth(window.innerWidth);
       setViewportHeight(window.innerHeight);
     };
     updateViewport();
@@ -258,12 +248,15 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
   const captureAutoScreenshot = useCallback(async (options?: { silent?: boolean }) => {
     try {
       const html2canvas = (await import("html2canvas")).default;
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const root = document.documentElement;
       const canvas = await html2canvas(root, {
         backgroundColor: "#ffffff",
         scale: Math.min(window.devicePixelRatio || 1, 1),
         logging: false,
         useCORS: true,
+        allowTaint: true,
         scrollX: window.scrollX,
         scrollY: window.scrollY,
         windowWidth: root.clientWidth,
@@ -591,7 +584,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
   );
 
   const timerPanel = (
-    <div className={panelClassName} style={panelStyle}>
+    <div className={panelClassName} style={timerOpen ? panelStyle : undefined} hidden={!timerOpen}>
       <StudyTimer
         className={inProfileBar ? "w-full max-w-none" : undefined}
         open={timerOpen}
@@ -688,7 +681,6 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
             icon={<Timer className="h-4 w-4" />}
             dataTour="utility-timer"
             ariaLabel={timerOpen ? "Close focus timer" : "Open focus timer"}
-            progress={timerChipVisible ? timerSnapshot?.progress : undefined}
             buttonClassName="rounded-xl"
           />
 
@@ -714,7 +706,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
         </div>
 
         {feedbackOpen ? feedbackPanel : null}
-        {timerOpen ? timerPanel : null}
+        {timerPanel}
         {infoOpen ? infoPanel : null}
       </div>
     </div>

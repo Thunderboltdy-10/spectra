@@ -473,10 +473,10 @@ export function ChatSidebar({
                 title={item.label}
                 data-nav-active={active ? "true" : "false"}
                 className={cn(
-                  "flex items-center gap-2.5 px-3 py-2 text-sm transition-colors",
+                  "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
                   active
-                    ? "border-l-2 border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)] pl-[10px] text-[var(--text-primary)]"
-                    : "border-l-2 border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+                    ? "bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)] text-[var(--text-primary)]"
+                    : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
                 )}
               >
                 <Icon className="h-4 w-4 shrink-0" />

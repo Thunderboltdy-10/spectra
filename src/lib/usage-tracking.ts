@@ -41,12 +41,15 @@ export async function recordModelUsage(params: {
   inputTokens?: number;
   outputTokens?: number;
   pricing?: UsagePricing;
+  skipIfZeroTokens?: boolean;
 }) {
   const actorClerkId = params.actorClerkId?.trim();
   const model = params.model?.trim();
   const inputTokens = Math.max(0, Math.round(params.inputTokens ?? 0));
   const outputTokens = Math.max(0, Math.round(params.outputTokens ?? 0));
-  if (!actorClerkId || !model || inputTokens + outputTokens <= 0) return false;
+  const skipIfZeroTokens = params.skipIfZeroTokens ?? true;
+  if (!actorClerkId || !model) return false;
+  if (skipIfZeroTokens && inputTokens + outputTokens <= 0) return false;
 
   const pricing = await resolveUsagePricing({
     actorClerkId,
@@ -112,5 +115,6 @@ export async function recordOpenRouterUsage(params: {
     inputTokens: params.inputTokens ?? params.usage?.prompt_tokens,
     outputTokens: params.outputTokens ?? params.usage?.completion_tokens,
     pricing: params.pricing,
+    skipIfZeroTokens: params.skipIfZeroTokens,
   });
 }

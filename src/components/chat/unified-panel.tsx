@@ -149,6 +149,95 @@ type SettingsViewProps = {
   onUploadPersonalFiles: (files: File[]) => void;
 };
 
+const PALETTE_OPTIONS = [
+  { key: "warm", label: "Warm", lightSwatch: "#ede9e3", darkSwatch: "#1e1b2b" },
+  { key: "slate", label: "Slate", lightSwatch: "#e2e8f0", darkSwatch: "#1e293b" },
+  { key: "zinc", label: "Zinc", lightSwatch: "#e4e4e7", darkSwatch: "#27272a" },
+  { key: "rose", label: "Rose", lightSwatch: "#fff0f3", darkSwatch: "#1d0b15" },
+  { key: "forest", label: "Forest", lightSwatch: "#ecfdf5", darkSwatch: "#092819" },
+  { key: "custom", label: "Custom", lightSwatch: "var(--custom-theme-light, #e0e7ff)", darkSwatch: "var(--custom-theme-dark, #1e1b4b)" },
+] as const;
+
+function ColorPalettePicker() {
+  const [selected, setSelected] = useState(() => {
+    if (typeof window === "undefined") return "warm";
+    return window.localStorage.getItem("ai-school:color-theme") ?? "warm";
+  });
+  const [customColor, setCustomColor] = useState(() => {
+    if (typeof window === "undefined") return "#6366f1";
+    return window.localStorage.getItem("ai-school:custom-color") ?? "#6366f1";
+  });
+  const isDark = typeof window !== "undefined" && document.documentElement.classList.contains("dark");
+
+  function applyPalette(key: string, color?: string) {
+    setSelected(key);
+    try {
+      window.localStorage.setItem("ai-school:color-theme", key);
+      if (color) {
+        window.localStorage.setItem("ai-school:custom-color", color);
+      }
+    } catch { /* ignore */ }
+    
+    if (key === "warm") {
+      document.documentElement.removeAttribute("data-theme-palette");
+      document.documentElement.style.removeProperty("--brand-accent");
+    } else if (key === "custom") {
+      document.documentElement.setAttribute("data-theme-palette", "custom");
+      document.documentElement.style.setProperty("--brand-accent", color || customColor);
+      document.documentElement.style.setProperty("--custom-theme-light", `color-mix(in oklab, ${color || customColor} 15%, #ffffff)`);
+      document.documentElement.style.setProperty("--custom-theme-dark", `color-mix(in oklab, ${color || customColor} 20%, #000000)`);
+    } else {
+      document.documentElement.setAttribute("data-theme-palette", key);
+      document.documentElement.style.removeProperty("--brand-accent");
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {PALETTE_OPTIONS.map((opt) => {
+        const active = selected === opt.key;
+        const swatch = isDark ? opt.darkSwatch : opt.lightSwatch;
+        return (
+          <button
+            key={opt.key}
+            type="button"
+            onClick={() => applyPalette(opt.key)}
+            title={opt.label}
+            className={`flex flex-col items-center gap-1 rounded-lg border-2 p-1.5 transition ${
+              active
+                ? "border-[var(--accent-cyan)] shadow-[0_0_0_1px_var(--accent-cyan)]"
+                : "border-transparent hover:border-[var(--border-default)]"
+            }`}
+          >
+            <span
+              className="h-8 w-8 rounded-md border border-[var(--border-default)]"
+              style={{ background: opt.key === "custom" && active ? customColor : swatch }}
+            />
+            <span className="text-[9px] font-medium uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+              {opt.label}
+            </span>
+          </button>
+        );
+      })}
+      
+      {selected === "custom" && (
+        <div className="ml-2 flex items-center gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-1.5">
+          <input
+            type="color"
+            value={customColor}
+            onChange={(e) => {
+              setCustomColor(e.target.value);
+              applyPalette("custom", e.target.value);
+            }}
+            className="h-8 w-8 cursor-pointer rounded-md border border-[var(--border-default)] p-0"
+            title="Choose custom color"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SettingsView({
   models,
   routerMode,
@@ -416,6 +505,12 @@ function SettingsView({
         </TabsContent>
 
         <TabsContent value="app" className="space-y-4">
+          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+            <h3 className="mb-2 text-xs font-medium text-[var(--text-secondary)]">Color palette</h3>
+            <p className="mb-3 text-[11px] text-[var(--text-secondary)]">Changes neutral surface colors. School brand colors always take priority.</p>
+            <ColorPalettePicker />
+          </section>
+
           <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-medium text-[var(--text-secondary)]">Monthly activity</h3>
@@ -1008,7 +1103,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
   return (
     <div
       className={docked ? "relative z-40 h-full shrink-0" : "fixed inset-0 z-50"}
-      style={docked ? { width: `${panelWidth}px` } : undefined}
+      style={docked ? { width: `${panelWidth}px`, transition: "width 0.32s cubic-bezier(0.16, 1, 0.3, 1)" } : undefined}
     >
       {!docked ? (
         <button

@@ -51,10 +51,12 @@ function buildPricingLookup(
   rows: Array<{ modelId: string; inputCostPerM?: number; outputCostPerM?: number; isFree?: boolean }>,
 ) {
   const direct = new Map<string, UsagePricing>();
+  const byNormalized = new Map<string, UsagePricing>();
   const leafCounts = new Map<string, number>();
   const leafPricing = new Map<string, UsagePricing>();
 
   for (const row of rows) {
+    const rawKey = row.modelId.trim().toLowerCase();
     const normalized = normalizeModelId(row.modelId);
     const leaf = modelLeaf(row.modelId);
     const pricing = {
@@ -63,23 +65,38 @@ function buildPricingLookup(
       isFree: row.isFree ?? false,
     };
 
-    direct.set(normalized, pricing);
+    // Store under raw key (preserves :free suffix) — no collision
+    direct.set(rawKey, pricing);
+
+    // For normalized key, prefer the non-free variant (higher cost) to avoid
+    // a :free sibling's zero pricing shadowing the paid model's pricing
+    const isFreeVariant = rawKey.endsWith(":free");
+    if (!byNormalized.has(normalized) || isFreeVariant === false) {
+      byNormalized.set(normalized, pricing);
+    }
+
     leafCounts.set(leaf, (leafCounts.get(leaf) ?? 0) + 1);
     if (!leafPricing.has(leaf)) {
       leafPricing.set(leaf, pricing);
     }
   }
 
-  return { direct, leafCounts, leafPricing };
+  return { direct, byNormalized, leafCounts, leafPricing };
 }
 
 function resolveUsagePricing(
   pricingLookup: ReturnType<typeof buildPricingLookup>,
   modelId: string,
 ) {
-  const normalized = normalizeModelId(modelId);
-  const direct = pricingLookup.direct.get(normalized);
+  // Try exact raw key first (respects :free suffix)
+  const rawKey = modelId.trim().toLowerCase();
+  const direct = pricingLookup.direct.get(rawKey);
   if (direct) return direct;
+
+  // Fall back to normalized key (strips :free for lookup)
+  const normalized = normalizeModelId(modelId);
+  const byNorm = pricingLookup.byNormalized.get(normalized);
+  if (byNorm) return byNorm;
 
   const leaf = modelLeaf(modelId);
   if ((pricingLookup.leafCounts.get(leaf) ?? 0) === 1) {

@@ -65,15 +65,27 @@ export async function POST(request: NextRequest) {
     }
 
     const orgSettings = await loadOrgSettingsName(actor.clerkId);
-    const result = await convexMutation<{
-      actorClerkId: string;
-      email: string;
-      role: string;
-    }, { invitationId: string; token?: string }>("schoolAdmin:inviteMember", {
-      actorClerkId: actor.clerkId,
-      email: body.email.trim(),
-      role: body.role,
-    });
+    let result: { invitationId: string; token?: string };
+    try {
+      result = await convexMutation<{
+        actorClerkId: string;
+        email: string;
+        role: string;
+      }, { invitationId: string; token?: string }>("schoolAdmin:inviteMember", {
+        actorClerkId: actor.clerkId,
+        email: body.email.trim(),
+        role: body.role,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.includes("already a member")) {
+        return badRequest("This email is already a member of the school.", 409);
+      }
+      if (msg.includes("SEAT_LIMIT_REACHED")) {
+        return badRequest("Student seat limit reached for this school. Please upgrade your plan.", 402);
+      }
+      throw err;
+    }
 
     const origin = new URL(request.url).origin;
     const joinUrl = result.token ? `${origin}/join?token=${encodeURIComponent(result.token)}` : undefined;

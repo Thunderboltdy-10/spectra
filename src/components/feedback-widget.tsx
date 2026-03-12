@@ -77,7 +77,7 @@ export function FeedbackWidget() {
       await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
       await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
 
-      const target = document.documentElement;
+      const target = document.body;
       const canvas = await html2canvas(target, {
         backgroundColor: getComputedStyle(document.body).backgroundColor || "#f7f4ec",
         useCORS: true,
@@ -87,8 +87,6 @@ export function FeedbackWidget() {
         height: window.innerHeight,
         x: window.scrollX,
         y: window.scrollY,
-        windowWidth: document.documentElement.scrollWidth,
-        windowHeight: document.documentElement.scrollHeight,
       });
 
       return compressCanvasToFile(canvas);
@@ -136,9 +134,9 @@ export function FeedbackWidget() {
         form.set("mode", mode);
       }
 
-      let screenshotToSend = await captureScreenshot();
+      let screenshotToSend = screenshot;
       if (!screenshotToSend) {
-        screenshotToSend = screenshot;
+        screenshotToSend = await captureScreenshot();
       }
       if (screenshotToSend) {
         form.set("screenshot", screenshotToSend);

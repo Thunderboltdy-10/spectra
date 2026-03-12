@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   BookOpen,
@@ -153,7 +152,6 @@ const STARTER_TEMPLATES: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 export default function SchoolSoulPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [seeding, setSeeding] = useState(false);
@@ -375,18 +373,6 @@ export default function SchoolSoulPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="ghost"
-              onClick={() => {
-                if (window.history.length > 1) {
-                  router.back();
-                } else {
-                  router.push("/admin");
-                }
-              }}
-            >
-              Go back
-            </Button>
             <Button
               variant="secondary"
               onClick={() =>

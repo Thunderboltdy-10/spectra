@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BellRing, Cpu, MailPlus, Search, Send, Sparkles, Users2, BarChart3, X } from "lucide-react";
+import { BellRing, Bot, Cpu, MailPlus, Search, Send, Sparkles, Trash2, Users2, BarChart3, X } from "lucide-react";
 import { toast } from "sonner";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { AppShell } from "@/components/layout/app-shell";
@@ -22,6 +22,7 @@ type SchoolDashboard = { memberCount: number; studentCount: number; teacherCount
 type UsageRow = { day: string; inputTokens: number; outputTokens: number; totalTokens: number };
 type SchoolAnalytics = { avgQuizScore?: number; totalQuizAttempts: number };
 type LeaderboardEntry = { modelId: string; provider: string; name: string; totalTokens: number; usageCount: number };
+type SchoolAgent = { _id: string; name: string; description: string; avatarEmoji: string; visibility: "public" | "private" | "shared"; usageCount: number; createdAt: number };
 
 function shortDay(day: string) {
   return new Date(`${day}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
@@ -35,7 +36,17 @@ function formatTokens(value: number) {
 
 async function loadJson<T>(url: string, init?: RequestInit) {
   const response = await fetch(url, init);
-  if (!response.ok) throw new Error(await response.text());
+  if (!response.ok) {
+    const text = await response.text();
+    try {
+      const parsed = JSON.parse(text) as { error?: { message?: string } | string };
+      const msg = typeof parsed.error === "string" ? parsed.error : parsed.error?.message;
+      throw new Error(msg || text);
+    } catch (parseErr) {
+      if (parseErr instanceof SyntaxError) throw new Error(text);
+      throw parseErr;
+    }
+  }
   return response.json() as Promise<T>;
 }
 
@@ -53,6 +64,7 @@ function AdminPageContent() {
   const [usage, setUsage] = useState<UsageRow[]>([]);
   const [analytics, setAnalytics] = useState<SchoolAnalytics | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [schoolAgents, setSchoolAgents] = useState<SchoolAgent[]>([]);
   const [memberSearch, setMemberSearch] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"student" | "teacher">("student");
@@ -67,23 +79,25 @@ function AdminPageContent() {
   const [sendingNotif, setSendingNotif] = useState(false);
 
   async function refresh() {
-    const [bootstrap, schoolDashboard, membersPayload, usagePayload, schoolAnalytics, modelPayload] = await Promise.all([
+    const [bootstrap, schoolDashboard, membersPayload, usagePayload, schoolAnalytics, modelPayload, agentsPayload] = await Promise.all([
       loadJson<{ actor: { onboardingComplete?: boolean }; orgSettings: { org: OrgSettings } }>("/api/bootstrap"),
       loadJson<SchoolDashboard>("/api/school-admin/dashboard"),
       loadJson<{ members: { members: Member[] }; invitations: Invitation[]; accessRequests?: AccessRequest[] }>("/api/school-admin/members"),
       loadJson<{ usage: UsageRow[] }>("/api/admin/users"),
       loadJson<SchoolAnalytics>("/api/school-admin/analytics?days=30"),
       loadJson<{ models: LeaderboardEntry[] }>("/api/analytics/model-leaderboard"),
+      loadJson<{ agents: SchoolAgent[] }>("/api/agents").catch(() => ({ agents: [] })),
     ]);
     setOnboardingComplete(Boolean(bootstrap.actor.onboardingComplete));
-    setOrg(bootstrap.orgSettings.org);
+    setOrg(bootstrap.orgSettings?.org ?? null);
     setDashboard(schoolDashboard);
-    setMembers(membersPayload.members.members ?? []);
+    setMembers(membersPayload.members?.members ?? []);
     setInvitations(membersPayload.invitations ?? []);
     setAccessRequests(membersPayload.accessRequests ?? []);
     setUsage(usagePayload.usage ?? []);
     setAnalytics(schoolAnalytics);
     setLeaderboard(modelPayload.models ?? []);
+    setSchoolAgents((agentsPayload.agents ?? []).filter((a) => a.visibility !== "private"));
   }
 
   useEffect(() => {
@@ -98,7 +112,7 @@ function AdminPageContent() {
 
   const filteredMembers = useMemo(() => {
     const needle = memberSearch.trim().toLowerCase();
-    return needle ? members.filter((member) => member.name.toLowerCase().includes(needle) || member.email.toLowerCase().includes(needle)) : members;
+    return needle ? members.filter((member) => (member.name?.toLowerCase() ?? "").includes(needle) || (member.email?.toLowerCase() ?? "").includes(needle)) : members;
   }, [memberSearch, members]);
   const seatUsed = members.filter((member) => member.role === "student").length;
   const pendingStudentInvites = invitations.filter((item) => item.role === "student" && item.status === "pending").length;
@@ -142,6 +156,18 @@ function AdminPageContent() {
       await refresh();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to update member");
+    }
+  }
+
+  async function deleteSchoolAgent(agentId: string) {
+    if (!window.confirm("Remove this public agent? This cannot be undone.")) return;
+    try {
+      const response = await fetch(`/api/agents/${encodeURIComponent(agentId)}`, { method: "DELETE" });
+      if (!response.ok) throw new Error(await response.text());
+      toast.success("Agent removed");
+      setSchoolAgents((prev) => prev.filter((a) => a._id !== agentId));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to remove agent");
     }
   }
 
@@ -256,9 +282,14 @@ function AdminPageContent() {
             ))}
           </div>
 
-          <Button asChild size="sm">
-            <Link href="/admin/school/soul">Open SOUL editor</Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild size="sm">
+              <Link href="/admin/school/soul">Open SOUL editor</Link>
+            </Button>
+            <Button asChild size="sm" variant="secondary">
+              <Link href="/admin/school/branding">Open Branding Settings</Link>
+            </Button>
+          </div>
         </section>
 
         {/* Section 2: Members */}
@@ -651,6 +682,60 @@ function AdminPageContent() {
             </Button>
           </div>
         </section>
+
+        {/* Section 6: Public Agents */}
+        {schoolAgents.length > 0 && (
+          <section className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
+            <div className="mb-1 flex items-center gap-2">
+              <Bot className="h-4 w-4 text-[var(--accent-cyan)]" />
+              <h2 className="font-display text-xl">School Agents</h2>
+            </div>
+            <p className="mb-5 mt-1 text-sm text-[var(--text-secondary)]">
+              Public and shared agents visible to all school members. Remove agents that are no longer needed.
+            </p>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--border-default)] text-left text-xs text-[var(--text-secondary)]">
+                  <th className="pb-2 font-medium">Agent</th>
+                  <th className="pb-2 font-medium">Visibility</th>
+                  <th className="pb-2 font-medium">Uses</th>
+                  <th className="pb-2 w-20 font-medium">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {schoolAgents.map((agent) => (
+                  <tr key={agent._id} className="border-b border-[var(--border-default)]">
+                    <td className="py-2.5 pr-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">{agent.avatarEmoji}</span>
+                        <div>
+                          <p className="font-medium text-[var(--text-primary)]">{agent.name}</p>
+                          <p className="truncate max-w-[200px] text-xs text-[var(--text-secondary)]">{agent.description}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-2.5 pr-3">
+                      <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">
+                        {agent.visibility}
+                      </span>
+                    </td>
+                    <td className="py-2.5 pr-3 text-[var(--text-secondary)]">{agent.usageCount}</td>
+                    <td className="py-2.5">
+                      <button
+                        type="button"
+                        onClick={() => void deleteSchoolAgent(agent._id)}
+                        className="inline-flex items-center gap-1 text-xs text-[var(--danger)] hover:underline"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        )}
       </div>
     </AppShell>
   );

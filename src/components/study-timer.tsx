@@ -33,6 +33,8 @@ type PersistedTimerState = {
   completedSessions: number;
   workMinutes: number;
   breakMinutes: number;
+  workColor: string;
+  breakColor: string;
 };
 
 function clampMinutes(value: number, min: number, max: number) {
@@ -117,6 +119,8 @@ function readPersistedState(): PersistedTimerState | null {
       completedSessions,
       workMinutes,
       breakMinutes,
+      workColor: typeof parsed.workColor === "string" ? parsed.workColor : "#06b6d4", // Default to cyan-500 equivalent
+      breakColor: typeof parsed.breakColor === "string" ? parsed.breakColor : "#22c55e", // Default to green-500 equivalent
     };
   } catch {
     return null;
@@ -134,6 +138,8 @@ function getInitialTimerState(): PersistedTimerState {
       completedSessions: 0,
       workMinutes: DEFAULT_WORK_MINUTES,
       breakMinutes: DEFAULT_BREAK_MINUTES,
+      workColor: "#06b6d4",
+      breakColor: "#22c55e",
     };
   }
   const restored = readPersistedState();
@@ -147,6 +153,8 @@ function getInitialTimerState(): PersistedTimerState {
     completedSessions: 0,
     workMinutes: DEFAULT_WORK_MINUTES,
     breakMinutes: DEFAULT_BREAK_MINUTES,
+    workColor: "#06b6d4",
+    breakColor: "#22c55e",
   };
 }
 
@@ -155,6 +163,8 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
   const [phase, setPhase] = useState<TimerPhase>(initialState.phase);
   const [workMinutes, setWorkMinutes] = useState(initialState.workMinutes);
   const [breakMinutes, setBreakMinutes] = useState(initialState.breakMinutes);
+  const [workColor, setWorkColor] = useState(initialState.workColor);
+  const [breakColor, setBreakColor] = useState(initialState.breakColor);
   const [remainingMs, setRemainingMs] = useState<number>(initialState.remainingMs);
   const [isRunning, setIsRunning] = useState(initialState.isRunning);
   const [phaseEndAt, setPhaseEndAt] = useState<number | null>(initialState.phaseEndAt);
@@ -168,9 +178,6 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
   const display = formatRemaining(remainingSeconds);
   const duration = phaseDurationMs(phase, workMinutes, breakMinutes);
   const progress = Math.min(1, Math.max(0, 1 - (remainingMs / duration)));
-  const radius = 44;
-  const circumference = 2 * Math.PI * radius;
-  const strokeOffset = circumference * (1 - progress);
   const phaseLabel = useMemo(
     () => (phase === "work" ? "Focus session" : "Break session"),
     [phase],
@@ -203,13 +210,15 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
       completedSessions,
       workMinutes,
       breakMinutes,
+      workColor,
+      breakColor,
     };
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     } catch {
       // Storage can fail in private browsing contexts.
     }
-  }, [phase, remainingMs, isRunning, phaseEndAt, phaseStartedAt, completedSessions, workMinutes, breakMinutes]);
+  }, [phase, remainingMs, isRunning, phaseEndAt, phaseStartedAt, completedSessions, workMinutes, breakMinutes, workColor, breakColor]);
 
   function playTransitionTone() {
     try {
@@ -394,7 +403,7 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
     );
   }
 
-  const phaseColor = phase === "work" ? "var(--accent-cyan)" : "var(--success)";
+  const phaseColor = phase === "work" ? workColor : breakColor;
 
   return (
     <div
@@ -435,16 +444,29 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
         </p>
       </div>
 
-      {/* Linear progress bar */}
-      <div className="my-4 h-1.5 w-full overflow-hidden rounded-full bg-[var(--bg-secondary)]">
-        <div
-          className="h-full rounded-full transition-all duration-500"
-          style={{
-            width: `${Math.round(progress * 100)}%`,
-            background: `linear-gradient(90deg, ${phaseColor}, color-mix(in oklab, ${phaseColor} 72%, #fff))`,
-          }}
-        />
-      </div>
+      {/* Linear progress bar with remaining time */}
+      {isRunning ? (
+        <div className="my-4 flex items-center gap-2">
+          <span className="shrink-0 text-[11px] font-semibold tabular-nums text-[var(--text-secondary)]">
+            {formatRemaining(Math.floor((duration - remainingMs) / 1000))}
+          </span>
+          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{
+                width: `${Math.round(progress * 100)}%`,
+                background: `linear-gradient(90deg, ${phaseColor}, color-mix(in oklab, ${phaseColor} 72%, #fff))`,
+              }}
+            />
+          </div>
+          <span
+            className="shrink-0 text-[11px] font-semibold tabular-nums"
+            style={{ color: phaseColor }}
+          >
+            {display}
+          </span>
+        </div>
+      ) : null}
 
       {/* Controls */}
       <div className="flex items-center justify-center gap-2">
@@ -473,26 +495,44 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
       {/* Duration adjusters */}
       <div className="mt-4 grid grid-cols-2 gap-2">
         <label className="rounded-xl bg-[var(--bg-secondary)] px-2.5 py-2">
-          <span className="mb-0.5 block text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Focus min</span>
-          <input
-            type="number"
-            min={MIN_WORK_MINUTES}
-            max={MAX_WORK_MINUTES}
-            value={workMinutes}
-            onChange={(event) => handleWorkMinutesChange(event.target.value)}
-            className="w-full appearance-none bg-transparent text-sm font-semibold outline-none [appearance:textfield]"
-          />
+          <span className="mb-0.5 block text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Focus</span>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min={MIN_WORK_MINUTES}
+              max={MAX_WORK_MINUTES}
+              value={workMinutes}
+              onChange={(event) => handleWorkMinutesChange(event.target.value)}
+              className="w-full appearance-none bg-transparent text-sm font-semibold outline-none [appearance:textfield]"
+            />
+            <input
+              type="color"
+              value={workColor}
+              onChange={(e) => setWorkColor(e.target.value)}
+              className="h-5 w-5 shrink-0 cursor-pointer rounded-full border border-[var(--border-default)] p-0 [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-none"
+              title="Focus color"
+            />
+          </div>
         </label>
         <label className="rounded-xl bg-[var(--bg-secondary)] px-2.5 py-2">
-          <span className="mb-0.5 block text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Break min</span>
-          <input
-            type="number"
-            min={MIN_BREAK_MINUTES}
-            max={MAX_BREAK_MINUTES}
-            value={breakMinutes}
-            onChange={(event) => handleBreakMinutesChange(event.target.value)}
-            className="w-full appearance-none bg-transparent text-sm font-semibold outline-none [appearance:textfield]"
-          />
+          <span className="mb-0.5 block text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Break</span>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min={MIN_BREAK_MINUTES}
+              max={MAX_BREAK_MINUTES}
+              value={breakMinutes}
+              onChange={(event) => handleBreakMinutesChange(event.target.value)}
+              className="w-full appearance-none bg-transparent text-sm font-semibold outline-none [appearance:textfield]"
+            />
+            <input
+              type="color"
+              value={breakColor}
+              onChange={(e) => setBreakColor(e.target.value)}
+              className="h-5 w-5 shrink-0 cursor-pointer rounded-full border border-[var(--border-default)] p-0 [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-none"
+              title="Break color"
+            />
+          </div>
         </label>
       </div>
       {isRunning ? (

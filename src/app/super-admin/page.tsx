@@ -8,6 +8,7 @@ import {
   Database,
   MessageSquare,
   Plus,
+  Search,
   Send,
   Shield,
   ChevronLeft,
@@ -231,6 +232,10 @@ export default function SuperAdminDashboard() {
   const [announcementActionUrl, setAnnouncementActionUrl] = useState("");
   const [sendingAnnouncement, setSendingAnnouncement] = useState(false);
   const [selectedUsageDay, setSelectedUsageDay] = useState<string | null>(null);
+  const [selectedOrgMembers, setSelectedOrgMembers] = useState("");
+  const [orgMembers, setOrgMembers] = useState<Array<{_id: string; name: string; email: string; role: string; createdAt: number}>>([]);
+  const [membersSearch, setMembersSearch] = useState("");
+  const [loadingMembers, setLoadingMembers] = useState(false);
   const knownEmails = useMemo(
     () =>
       Array.from(
@@ -393,6 +398,36 @@ export default function SuperAdminDashboard() {
       toast.error(error instanceof Error ? error.message : "Failed to send announcement");
     } finally {
       setSendingAnnouncement(false);
+    }
+  }
+
+  async function fetchOrgMembers(orgId: string) {
+    setLoadingMembers(true);
+    try {
+      const res = await fetch(`/api/super-admin/org-members?orgId=${encodeURIComponent(orgId)}`);
+      if (!res.ok) throw new Error(await res.text());
+      const data = (await res.json()) as { members?: Array<{_id: string; name: string; email: string; role: string; createdAt: number}> };
+      setOrgMembers(data.members ?? []);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load members");
+    } finally {
+      setLoadingMembers(false);
+    }
+  }
+
+  async function removeSuperAdminMember(userId: string) {
+    if (!window.confirm("Remove this member? This will delete all their data.")) return;
+    try {
+      const res = await fetch("/api/super-admin/org-members", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      toast.success("Member removed");
+      setOrgMembers((prev) => prev.filter((m) => m._id !== userId));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to remove member");
     }
   }
 
@@ -904,6 +939,90 @@ export default function SuperAdminDashboard() {
             )}
           </div>
         </div>
+
+        <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
+          <div className="mb-4">
+            <h2 className="font-display text-xl">Members</h2>
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">
+              Browse and manage members across all schools.
+            </p>
+          </div>
+
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <select
+              value={selectedOrgMembers}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSelectedOrgMembers(val);
+                if (val) void fetchOrgMembers(val);
+                else setOrgMembers([]);
+              }}
+              className="h-9 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 text-sm text-[var(--text-primary)] outline-none"
+            >
+              <option value="">Select a school...</option>
+              {orgs.map((org) => (
+                <option key={org._id} value={org._id}>{org.name}</option>
+              ))}
+            </select>
+            {selectedOrgMembers && (
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-2 h-3.5 w-3.5 text-[var(--text-secondary)]" />
+                <input
+                  value={membersSearch}
+                  onChange={(e) => setMembersSearch(e.target.value)}
+                  placeholder="Search members..."
+                  className="h-9 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] pl-8 pr-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)]"
+                />
+              </div>
+            )}
+            {loadingMembers && <span className="text-xs text-[var(--text-secondary)]">Loading...</span>}
+          </div>
+
+          {selectedOrgMembers && orgMembers.length === 0 && !loadingMembers ? (
+            <p className="text-sm text-[var(--text-secondary)]">No members found.</p>
+          ) : orgMembers.length > 0 ? (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--border-default)] text-left text-xs text-[var(--text-secondary)]">
+                  <th className="pb-2 font-medium">Name</th>
+                  <th className="pb-2 font-medium">Email</th>
+                  <th className="pb-2 font-medium">Role</th>
+                  <th className="pb-2 font-medium w-20">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {orgMembers
+                  .filter((m) => {
+                    if (!membersSearch.trim()) return true;
+                    const q = membersSearch.toLowerCase();
+                    return m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q);
+                  })
+                  .map((member) => (
+                    <tr key={member._id} className="border-b border-[var(--border-default)]">
+                      <td className="py-2.5 pr-3 font-medium text-[var(--text-primary)]">{member.name || "—"}</td>
+                      <td className="py-2.5 pr-3 text-xs text-[var(--text-secondary)]">{member.email}</td>
+                      <td className="py-2.5 pr-3">
+                        <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">
+                          {member.role}
+                        </span>
+                      </td>
+                      <td className="py-2.5">
+                        {member.role !== "admin" && (
+                          <button
+                            type="button"
+                            onClick={() => void removeSuperAdminMember(member._id)}
+                            className="text-xs text-[var(--danger)] hover:underline"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          ) : null}
+        </section>
 
         <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
           <h2 className="mb-4 font-display text-xl">School Admin Directory</h2>

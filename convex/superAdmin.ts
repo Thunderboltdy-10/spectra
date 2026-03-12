@@ -883,3 +883,77 @@ export const transferUser = mutation({
     return { ok: true, fromOrgId: user.orgId, toOrgId: args.targetOrgId };
   },
 });
+
+/**
+ * List members of any org (super admin only)
+ */
+export const listOrgMembers = query({
+  args: {
+    actorClerkId: v.string(),
+    orgId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx, args.actorClerkId);
+
+    const orgId = args.orgId as Id<"orgs">;
+    const members = await ctx.db
+      .query("users")
+      .withIndex("by_org", (q) => q.eq("orgId", orgId))
+      .collect();
+
+    return {
+      members: members.map((m) => ({
+        _id: m._id,
+        name: m.name ?? "",
+        email: m.email,
+        role: m.role,
+        createdAt: m.createdAt,
+      })),
+    };
+  },
+});
+
+/**
+ * Remove any member from any school (super admin only, no orgId required)
+ */
+export const removeAnyMember = mutation({
+  args: {
+    actorClerkId: v.string(),
+    userId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireSuperAdmin(ctx, args.actorClerkId);
+
+    const userId = args.userId as Id<"users">;
+    const user = await ctx.db.get(userId);
+    if (!user) throw new Error("User not found");
+
+    const replacementOwner = (
+      await ctx.db
+        .query("users")
+        .withIndex("by_org_role", (q) => q.eq("orgId", user.orgId).eq("role", "admin"))
+        .collect()
+    ).find((candidate) => candidate._id !== user._id) ?? null;
+
+    const purgeSummary = await purgeUserData(ctx, {
+      actor,
+      target: user,
+      replacementOwner,
+    });
+
+    await ctx.runMutation(internal.auditLog.logAction, {
+      actorUserId: actor._id as Id<"users">,
+      action: "super_admin.remove_any_member",
+      targetType: "user",
+      targetId: userId,
+      details: JSON.stringify({
+        orgId: user.orgId,
+        role: user.role,
+        email: user.email,
+        purgeSummary,
+      }),
+    });
+
+    return { ok: true };
+  },
+});

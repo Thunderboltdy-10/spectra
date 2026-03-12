@@ -52,6 +52,17 @@ const themeInitScript = `
     } else {
       document.documentElement.classList.remove('dark');
     }
+    var validPalettes = ['slate', 'zinc', 'rose', 'forest', 'custom'];
+    var palette = window.localStorage.getItem('ai-school:color-theme');
+    if (palette && validPalettes.indexOf(palette) !== -1) {
+      document.documentElement.setAttribute('data-theme-palette', palette);
+      if (palette === 'custom') {
+        var customColor = window.localStorage.getItem('ai-school:custom-color') || '#6366f1';
+        document.documentElement.style.setProperty('--brand-accent', customColor);
+        document.documentElement.style.setProperty('--custom-theme-light', 'color-mix(in oklab, ' + customColor + ' 15%, #ffffff)');
+        document.documentElement.style.setProperty('--custom-theme-dark', 'color-mix(in oklab, ' + customColor + ' 20%, #000000)');
+      }
+    }
   } catch (e) {
     document.documentElement.classList.remove('dark');
   }

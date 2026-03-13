@@ -164,7 +164,7 @@ export default function BookmarksPage() {
               Save assistant messages from chat to build your personal study highlight reel.
             </p>
             <Link
-              href="/"
+              href="/chat"
               className="mt-4 inline-flex items-center rounded-full border border-[var(--border-default)] px-4 py-2 text-sm transition hover:bg-[var(--bg-hover)]"
             >
               Open chat

@@ -670,7 +670,7 @@ export default function ModelsPage() {
                   Start with a focused provider filter, then compare 2-3 models on your exact coursework prompt.
                 </p>
               </div>
-              <Button variant="secondary" size="sm" className="gap-1.5" onClick={() => router.push("/")}>
+              <Button variant="secondary" size="sm" className="gap-1.5" onClick={() => router.push("/chat")}>
                 Open Chat
                 <ArrowUpRight className="h-3.5 w-3.5" />
               </Button>

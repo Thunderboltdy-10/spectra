@@ -441,7 +441,7 @@ export default function SuperAdminDashboard() {
             <p className="text-sm text-[var(--text-secondary)]">
               This area is restricted to super administrators.
             </p>
-            <Link href="/">
+            <Link href="/chat">
               <Button className="mt-5 cursor-pointer" variant="secondary">
                 Go back home
               </Button>

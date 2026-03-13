@@ -125,7 +125,7 @@ function JoinPageContent() {
           <p className="mt-3 text-xs text-[var(--text-secondary)]">
             Contact your school administrator for a fresh invitation link.
           </p>
-          <Link href="/">
+          <Link href="/chat">
             <Button variant="secondary" className="mt-6 w-full cursor-pointer">
               Go to AI School
             </Button>
@@ -144,7 +144,7 @@ function JoinPageContent() {
           </div>
           <h1 className="mb-2 text-xl font-semibold text-[var(--text-primary)]">Invalid Invitation</h1>
           <p className="text-sm text-[var(--text-secondary)]">{state.message}</p>
-          <Link href="/">
+          <Link href="/chat">
             <Button variant="secondary" className="mt-6 w-full cursor-pointer">
               Go to AI School
             </Button>

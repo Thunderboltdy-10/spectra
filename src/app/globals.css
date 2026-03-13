@@ -1026,3 +1026,22 @@ button:disabled {
   background: color-mix(in oklab, var(--accent-cyan) 35%, transparent);
   color: var(--text-primary);
 }
+
+[data-reveal] {
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity var(--motion-slow) var(--ease-standard),
+              transform var(--motion-slow) var(--ease-standard);
+}
+[data-reveal].is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@keyframes trace-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--brand-primary) 0%, transparent); }
+  50% { box-shadow: 0 0 0 4px color-mix(in oklab, var(--brand-primary) 12%, transparent); }
+}
+.trace-pulse {
+  animation: trace-pulse 4s ease-in-out infinite;
+}

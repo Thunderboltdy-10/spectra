@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as accessRequests from "../accessRequests.js";
 import type * as admin from "../admin.js";
 import type * as agents from "../agents.js";
 import type * as analytics from "../analytics.js";
@@ -50,6 +51,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  accessRequests: typeof accessRequests;
   admin: typeof admin;
   agents: typeof agents;
   analytics: typeof analytics;

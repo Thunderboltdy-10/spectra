@@ -28,6 +28,54 @@ function normalizeMaxResourceFileSizeBytes(value: number | undefined) {
   );
 }
 
+async function getOrgMemberCapacity(
+  ctx: Parameters<typeof getUserByClerkId>[0],
+  orgId: Id<"orgs">,
+) {
+  const [org, members] = await Promise.all([
+    ctx.db.get(orgId),
+    ctx.db
+      .query("users")
+      .withIndex("by_org", (q) => q.eq("orgId", orgId))
+      .collect(),
+  ]);
+  const maxMembers =
+    typeof org?.maxStudents === "number" && Number.isFinite(org.maxStudents) && org.maxStudents > 0
+      ? Math.floor(org.maxStudents)
+      : null;
+  return {
+    maxMembers,
+    memberCount: members.length,
+  };
+}
+
+async function ensureOrgHasCapacityForMember(
+  ctx: Parameters<typeof getUserByClerkId>[0],
+  orgId: Id<"orgs">,
+  options?: { excludingUserId?: Id<"users"> },
+) {
+  const [org, members] = await Promise.all([
+    ctx.db.get(orgId),
+    ctx.db
+      .query("users")
+      .withIndex("by_org", (q) => q.eq("orgId", orgId))
+      .collect(),
+  ]);
+  const maxMembers =
+    typeof org?.maxStudents === "number" && Number.isFinite(org.maxStudents) && org.maxStudents > 0
+      ? Math.floor(org.maxStudents)
+      : null;
+  if (!maxMembers) {
+    return;
+  }
+  const currentMembers = options?.excludingUserId
+    ? members.filter((member) => member._id !== options.excludingUserId).length
+    : members.length;
+  if (currentMembers >= maxMembers) {
+    throw new Error("SEAT_LIMIT_REACHED: School member allocation is full.");
+  }
+}
+
 async function requireSuperAdmin(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string) {
   const actor = await getUserByClerkId(ctx, actorClerkId);
   if (!actor) throw new Error("Unauthorized");
@@ -91,6 +139,117 @@ export const getOrgDetail = query({
     return {
       org: { ...org, logoUrl: logoUrl ?? undefined },
       members,
+    };
+  },
+});
+
+export const getOrgUsageSummary = query({
+  args: {
+    actorClerkId: v.string(),
+    orgId: v.id("orgs"),
+    days: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx, args.actorClerkId);
+
+    const org = await ctx.db.get(args.orgId);
+    if (!org) throw new Error("Org not found");
+
+    const days = Math.max(7, Math.min(args.days ?? 30, 180));
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const [events, users] = await Promise.all([
+      ctx.db
+        .query("usageEvents")
+        .withIndex("by_org_day", (q) => q.eq("orgId", args.orgId))
+        .collect(),
+      ctx.db
+        .query("users")
+        .withIndex("by_org", (q) => q.eq("orgId", args.orgId))
+        .collect(),
+    ]);
+
+    const filtered = events.filter((event) => event.day >= cutoff);
+    const totals = filtered.reduce(
+      (acc, event) => {
+        const tokens = Math.max(0, event.totalTokens ?? 0);
+        const costCents = Math.max(0, event.costCents ?? 0);
+        acc.events += 1;
+        acc.tokens += tokens;
+        acc.costCents += costCents;
+        acc.models.add(event.model);
+        acc.userIds.add(String(event.userId));
+        return acc;
+      },
+      {
+        events: 0,
+        tokens: 0,
+        costCents: 0,
+        models: new Set<string>(),
+        userIds: new Set<string>(),
+      },
+    );
+
+    const byDay = new Map<string, { day: string; events: number; tokens: number; costCents: number }>();
+    for (const event of filtered) {
+      const bucket = byDay.get(event.day) ?? { day: event.day, events: 0, tokens: 0, costCents: 0 };
+      bucket.events += 1;
+      bucket.tokens += Math.max(0, event.totalTokens ?? 0);
+      bucket.costCents += Math.max(0, event.costCents ?? 0);
+      byDay.set(event.day, bucket);
+    }
+
+    return {
+      orgId: args.orgId,
+      orgName: org.name,
+      days,
+      memberCount: users.length,
+      totals: {
+        events: totals.events,
+        totalTokens: totals.tokens,
+        totalCostCents: totals.costCents,
+        uniqueUsers: totals.userIds.size,
+        uniqueModels: totals.models.size,
+      },
+      byDay: [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day)),
+    };
+  },
+});
+
+export const getOrgSoulOverview = query({
+  args: {
+    actorClerkId: v.string(),
+    orgId: v.id("orgs"),
+  },
+  handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx, args.actorClerkId);
+
+    const org = await ctx.db.get(args.orgId);
+    if (!org) throw new Error("Org not found");
+
+    const docs = await ctx.db
+      .query("orgSoulDocs")
+      .withIndex("by_org", (q) => q.eq("orgId", args.orgId))
+      .collect();
+    const publishedDocs = docs.filter((doc) => typeof doc.publishedAt === "number").length;
+    const latestUpdatedAt = docs.reduce((latest, doc) => Math.max(latest, doc.updatedAt), 0);
+    const latestPublishedAt = docs.reduce((latest, doc) => Math.max(latest, doc.publishedAt ?? 0), 0);
+
+    return {
+      orgId: args.orgId,
+      orgName: org.name,
+      flags: {
+        soulEnabled: org.soulEnabled ?? true,
+        adaptiveQuizEnabled: org.adaptiveQuizEnabled ?? true,
+        spacedRepetitionEnabled: org.spacedRepetitionEnabled ?? true,
+      },
+      docs: {
+        total: docs.length,
+        published: publishedDocs,
+        drafts: Math.max(0, docs.length - publishedDocs),
+        latestUpdatedAt: latestUpdatedAt || null,
+        latestPublishedAt: latestPublishedAt || null,
+      },
+      sections: Array.from(new Set(docs.map((doc) => doc.section).filter(Boolean))).sort(),
     };
   },
 });
@@ -454,6 +613,11 @@ export const createOrg = mutation({
       .unique();
     if (existing) throw new Error(`Org with slug "${args.slug}" already exists`);
 
+    const normalizedMaxMembers =
+      typeof args.maxStudents === "number" && Number.isFinite(args.maxStudents) && args.maxStudents > 0
+        ? Math.max(1, Math.floor(args.maxStudents))
+        : undefined;
+
     const now = Date.now();
     const orgId = await ctx.db.insert("orgs", {
       name: args.name,
@@ -462,7 +626,7 @@ export const createOrg = mutation({
       schoolType: args.schoolType,
       country: args.country,
       timezone: args.timezone,
-      maxStudents: args.maxStudents,
+      maxStudents: normalizedMaxMembers,
       tokenBudgetDaily: args.tokenBudgetDaily ?? 500000,
       maxResourceFileSizeBytes: normalizeMaxResourceFileSizeBytes(args.maxResourceFileSizeBytes),
       verifyMarkerPassEnabled: false,
@@ -535,6 +699,22 @@ export const updateOrg = mutation({
       if (value !== undefined) {
         patch[key] = value;
       }
+    }
+
+    const requestedMaxMembers =
+      typeof updates.maxStudents === "number" && Number.isFinite(updates.maxStudents)
+        ? Math.max(1, Math.floor(updates.maxStudents))
+        : undefined;
+
+    if (typeof requestedMaxMembers === "number") {
+      const capacity = await getOrgMemberCapacity(ctx, args.orgId);
+      if (
+        typeof capacity.maxMembers === "number"
+        && requestedMaxMembers < capacity.memberCount
+      ) {
+        throw new Error(`Member allocation cannot be below current member count (${capacity.memberCount}).`);
+      }
+      patch.maxStudents = requestedMaxMembers;
     }
 
     await ctx.db.patch(args.orgId, patch);
@@ -668,6 +848,18 @@ export const assignOrgAdmin = mutation({
     const existingAnywhere = allOrgUsers.find((u) => u.email.toLowerCase() === normalizedEmail);
 
     if (existingAnywhere) {
+      if (existingAnywhere.orgId !== args.orgId) {
+        await ensureOrgHasCapacityForMember(ctx, args.orgId);
+        if (existingAnywhere.role === "admin") {
+          const sourceAdmins = await ctx.db
+            .query("users")
+            .withIndex("by_org_role", (q) => q.eq("orgId", existingAnywhere.orgId).eq("role", "admin"))
+            .collect();
+          if (sourceAdmins.length <= 1) {
+            throw new Error("Source school must keep at least one admin");
+          }
+        }
+      }
       await ctx.db.patch(existingAnywhere._id, {
         orgId: args.orgId,
         role: "admin",
@@ -758,6 +950,13 @@ export const updateOrgMemberRole = mutation({
     const user = await ctx.db.get(args.userId);
     if (!user) throw new Error("User not found");
     if (user.orgId !== args.orgId) throw new Error("User is not in this school");
+    const capacity = await getOrgMemberCapacity(ctx, args.orgId);
+    if (
+      typeof capacity.maxMembers === "number"
+      && capacity.memberCount > capacity.maxMembers
+    ) {
+      throw new Error("School member allocation is currently exceeded; resolve allocation before role updates.");
+    }
 
     if (user.role === "admin" && args.role !== "admin") {
       const admins = await ctx.db
@@ -866,6 +1065,19 @@ export const transferUser = mutation({
     const targetOrg = await ctx.db.get(args.targetOrgId);
     if (!targetOrg) throw new Error("Target org not found");
 
+    if (user.orgId !== args.targetOrgId) {
+      await ensureOrgHasCapacityForMember(ctx, args.targetOrgId);
+      if (user.role === "admin") {
+        const sourceAdmins = await ctx.db
+          .query("users")
+          .withIndex("by_org_role", (q) => q.eq("orgId", user.orgId).eq("role", "admin"))
+          .collect();
+        if (sourceAdmins.length <= 1) {
+          throw new Error("Source school must keep at least one admin");
+        }
+      }
+    }
+
     await ctx.db.patch(args.userId, {
       orgId: args.targetOrgId,
       role: args.role ?? user.role,
@@ -890,15 +1102,14 @@ export const transferUser = mutation({
 export const listOrgMembers = query({
   args: {
     actorClerkId: v.string(),
-    orgId: v.string(),
+    orgId: v.id("orgs"),
   },
   handler: async (ctx, args) => {
     await requireSuperAdmin(ctx, args.actorClerkId);
 
-    const orgId = args.orgId as Id<"orgs">;
     const members = await ctx.db
       .query("users")
-      .withIndex("by_org", (q) => q.eq("orgId", orgId))
+      .withIndex("by_org", (q) => q.eq("orgId", args.orgId))
       .collect();
 
     return {
@@ -919,14 +1130,24 @@ export const listOrgMembers = query({
 export const removeAnyMember = mutation({
   args: {
     actorClerkId: v.string(),
-    userId: v.string(),
+    userId: v.id("users"),
   },
   handler: async (ctx, args) => {
     const actor = await requireSuperAdmin(ctx, args.actorClerkId);
 
-    const userId = args.userId as Id<"users">;
+    const userId = args.userId;
     const user = await ctx.db.get(userId);
     if (!user) throw new Error("User not found");
+
+    if (user.role === "admin") {
+      const admins = await ctx.db
+        .query("users")
+        .withIndex("by_org_role", (q) => q.eq("orgId", user.orgId).eq("role", "admin"))
+        .collect();
+      if (admins.length <= 1) {
+        throw new Error("School must keep at least one admin");
+      }
+    }
 
     const replacementOwner = (
       await ctx.db

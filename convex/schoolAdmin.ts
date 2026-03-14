@@ -22,24 +22,24 @@ async function requireAdmin(ctx: Parameters<typeof getUserByClerkId>[0], actorCl
   return actor;
 }
 
-async function getStudentSeatSnapshot(ctx: Parameters<typeof getUserByClerkId>[0], orgId: Id<"orgs">) {
-  return getStudentSeatSnapshotWithExclusions(ctx, {
+async function getMemberSeatSnapshot(ctx: Parameters<typeof getUserByClerkId>[0], orgId: Id<"orgs">) {
+  return getMemberSeatSnapshotWithExclusions(ctx, {
     orgId,
   });
 }
 
-async function getStudentSeatSnapshotWithExclusions(
+async function getMemberSeatSnapshotWithExclusions(
   ctx: Parameters<typeof getUserByClerkId>[0],
   args: {
     orgId: Id<"orgs">;
     excludeInvitationIds?: Id<"schoolInvitations">[];
   },
 ) {
-  const [org, students, pendingStudentInvitations] = await Promise.all([
+  const [org, members, pendingInvitations] = await Promise.all([
     ctx.db.get(args.orgId),
     ctx.db
       .query("users")
-      .withIndex("by_org_role", (q) => q.eq("orgId", args.orgId).eq("role", "student"))
+      .withIndex("by_org", (q) => q.eq("orgId", args.orgId))
       .collect(),
     ctx.db
       .query("schoolInvitations")
@@ -48,23 +48,22 @@ async function getStudentSeatSnapshotWithExclusions(
       .then((invitations) =>
         invitations.filter(
           (invitation) =>
-            invitation.role === "student"
-            && invitation.status === "pending"
+            invitation.status === "pending"
             && invitation.expiresAt > Date.now()
             && !(args.excludeInvitationIds ?? []).includes(invitation._id),
         ),
       ),
   ]);
 
-  const maxStudents =
+  const maxMembers =
     typeof org?.maxStudents === "number" && Number.isFinite(org.maxStudents) && org.maxStudents > 0
       ? Math.floor(org.maxStudents)
       : null;
 
   return {
-    maxStudents,
-    currentStudents: students.length,
-    pendingStudentInvitations: pendingStudentInvitations.length,
+    maxMembers,
+    currentMembers: members.length,
+    pendingInvitations: pendingInvitations.length,
   };
 }
 
@@ -319,13 +318,13 @@ export const inviteMember = mutation({
       email,
     });
 
-    if (args.role === "student") {
-      const seatSnapshot = await getStudentSeatSnapshot(ctx, actor.orgId);
+    {
+      const seatSnapshot = await getMemberSeatSnapshot(ctx, actor.orgId);
       if (
-        typeof seatSnapshot.maxStudents === "number"
-        && seatSnapshot.currentStudents + seatSnapshot.pendingStudentInvitations >= seatSnapshot.maxStudents
+        typeof seatSnapshot.maxMembers === "number"
+        && seatSnapshot.currentMembers + seatSnapshot.pendingInvitations >= seatSnapshot.maxMembers
       ) {
-        throw new Error("SEAT_LIMIT_REACHED: Student seat limit reached for this school.");
+        throw new Error("SEAT_LIMIT_REACHED: Member allocation reached for this school.");
       }
     }
 
@@ -396,16 +395,16 @@ export const resendInvitation = mutation({
       excludeInvitationId: invitation._id,
     });
 
-    if (invitation.role === "student") {
-      const seatSnapshot = await getStudentSeatSnapshotWithExclusions(ctx, {
+    {
+      const seatSnapshot = await getMemberSeatSnapshotWithExclusions(ctx, {
         orgId: actor.orgId,
         excludeInvitationIds: [...expiredIds, invitation._id],
       });
       if (
-        typeof seatSnapshot.maxStudents === "number"
-        && seatSnapshot.currentStudents + seatSnapshot.pendingStudentInvitations >= seatSnapshot.maxStudents
+        typeof seatSnapshot.maxMembers === "number"
+        && seatSnapshot.currentMembers + seatSnapshot.pendingInvitations >= seatSnapshot.maxMembers
       ) {
-        throw new Error("SEAT_LIMIT_REACHED: Student seat limit reached for this school.");
+        throw new Error("SEAT_LIMIT_REACHED: Member allocation reached for this school.");
       }
     }
 
@@ -583,15 +582,14 @@ export const acceptInvitation = mutation({
       .withIndex("by_clerk_id", (q) => q.eq("clerkId", args.clerkId))
       .unique();
 
-    if (invitation.role === "student") {
-      const seatSnapshot = await getStudentSeatSnapshot(ctx, invitation.orgId);
-      const existingStudentInOrg =
-        existingUser && existingUser.orgId === invitation.orgId && existingUser.role === "student";
+    {
+      const seatSnapshot = await getMemberSeatSnapshot(ctx, invitation.orgId);
+      const existingMemberInOrg = existingUser && existingUser.orgId === invitation.orgId;
       if (
-        typeof seatSnapshot.maxStudents === "number"
-        && seatSnapshot.currentStudents - (existingStudentInOrg ? 1 : 0) >= seatSnapshot.maxStudents
+        typeof seatSnapshot.maxMembers === "number"
+        && seatSnapshot.currentMembers - (existingMemberInOrg ? 1 : 0) >= seatSnapshot.maxMembers
       ) {
-        throw new Error("SEAT_LIMIT_REACHED: Student seat limit reached for this school.");
+        throw new Error("SEAT_LIMIT_REACHED: Member allocation reached for this school.");
       }
     }
 

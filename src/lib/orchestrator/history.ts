@@ -12,6 +12,30 @@ export type MemoryEntry = {
   extractedAt: number;
 };
 
+export function shouldScheduleCompaction(params: {
+  history: ChatMessage[];
+  mode?: StudyMode;
+  hasExistingSummary?: boolean;
+}) {
+  if (params.hasExistingSummary) return false;
+  const turns = params.history.length;
+  if (turns <= 10) return false;
+
+  const totalChars = params.history.reduce((sum, message) => {
+    const content = typeof message.content === "string" ? message.content.length : 0;
+    const thinking = typeof message.thinkingContent === "string" ? message.thinkingContent.length : 0;
+    return sum + content + Math.min(800, thinking);
+  }, 0);
+
+  const mode = params.mode ?? "general";
+  const denseModes = mode === "research" || mode === "document" || mode === "exam";
+  if (turns >= 24) return true;
+  if (denseModes && turns >= 16) return true;
+  if (turns >= 14 && totalChars >= 9_000) return true;
+  if (turns >= 12 && totalChars >= 14_000) return true;
+  return false;
+}
+
 export function toChatMessageShape(messages: Array<Record<string, unknown>>): ChatMessage[] {
   return messages.map((message) => ({
     _id: String(message._id),
@@ -116,7 +140,7 @@ export async function maybeCompactHistory(params: {
   chatId: string;
   history: ChatMessage[];
 }) {
-  if (params.history.length <= 20) return;
+  if (!shouldScheduleCompaction({ history: params.history, hasExistingSummary: false })) return;
 
   const olderHistory = params.history.slice(0, Math.max(0, params.history.length - 6));
   const source = olderHistory

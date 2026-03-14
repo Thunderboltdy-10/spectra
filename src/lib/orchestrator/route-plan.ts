@@ -22,7 +22,7 @@ type BuildRoutePlanParams = {
 };
 
 function isExplicitSearchRequest(message: string) {
-  return /\b(search|look up|lookup|find online|browse|web search|use sources|cite sources|check online)\b/i.test(message);
+  return /\b(search (the )?web|look up online|find online|browse the web|web search|check online|verify online|use current sources|cite sources)\b/i.test(message);
 }
 
 function isTimeSensitiveMessage(message: string) {
@@ -37,15 +37,11 @@ function isTimeSensitiveMessage(message: string) {
     return true;
   }
 
-  if (
-    /\b(news|weather|forecast|score|results|stock price|price today|election|ceo|president|policy changes?|version)\b/i.test(
-      normalized,
-    )
-  ) {
+  if (/\b(news|weather|forecast|score|results|stock price|election|ceo|president)\b/i.test(normalized)) {
     return true;
   }
 
-  return /\b20(2[5-9]|3\d)\b/.test(normalized) && /\b(latest|current|recent|new|policy|news|update|changes?)\b/i.test(normalized);
+  return /\b20(2[5-9]|3\d)\b/.test(normalized) && /\b(latest|current|recent|new|policy|news|regulation|changes?)\b/i.test(normalized);
 }
 
 function isPersonalMessage(message: string) {
@@ -70,8 +66,29 @@ function detectRequestedArtifactFormats(message: string): ArtifactFormat[] {
   if (/\b(pptx|powerpoint|slides|slide deck|presentation deck)\b/i.test(normalized)) {
     formats.push("pptx");
   }
+  if (/\b(html|web page|webpage|website|interactive page|landing page)\b/i.test(normalized)) {
+    formats.push("html");
+  }
 
   return Array.from(new Set(formats));
+}
+
+function shouldWriteMemoryFromMessage(message: string) {
+  const normalized = message.toLowerCase().trim();
+  if (!normalized) return false;
+  if (normalized.length < 12 && /^(hi|hello|hey|thanks|ok|okay|cool|nice)[!?.\s]*$/.test(normalized)) {
+    return false;
+  }
+  const preferenceSignals = [
+    /\b(i prefer|please (?:keep|use)|from now on|always|never|don't (?:use|do)|do not (?:use|do))\b/i,
+    /\bmy (?:goal|target|exam|deadline|timezone|language|name|grade|year|subject|difficulty|learning style)\b/i,
+    /\b(i am|i'm)\b.{0,48}\b(student|teacher|in grade|years old|from|based in|studying)\b/i,
+    /\b(i struggle with|i find .* hard|i'm weak at|i'm stuck on|i get confused by)\b/i,
+    /\b(update (?:my )?(?:memory|profile)|remember (?:that|this) about me|save (?:this|that) preference)\b/i,
+    /\b(i changed my (?:goal|preference|timezone|language|study plan|subject))\b/i,
+    /\b(remember this|save this|note this)\b/i,
+  ];
+  return preferenceSignals.some((pattern) => pattern.test(normalized));
 }
 
 function buildModeContract(mode: StudyMode): ModeContract {
@@ -198,6 +215,7 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
       ...(shouldUseWebSearch ? (["search"] as ToolBundle[]) : []),
       ...(retrievalScopes.length > 0 ? (["retrieval"] as ToolBundle[]) : []),
       ...(artifactRequest ? (["artifact"] as ToolBundle[]) : []),
+      ...(artifactRequest || params.mode === "research" ? (["skills"] as ToolBundle[]) : []),
       ...(personalTask ? (["memory"] as ToolBundle[]) : []),
       ...(shouldUseMultiStep ? (["multi_agent"] as ToolBundle[]) : []),
     ]),
@@ -235,7 +253,7 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
     hasSelectedAgent: params.hasAgent,
     personalTask,
     shouldConsultMemory: personalTask,
-    shouldWriteMemory: /\bremember\b/i.test(params.message) || /\bmy goal\b/i.test(lowerMessage),
+    shouldWriteMemory: shouldWriteMemoryFromMessage(params.message),
     shouldUseSchoolResources,
     shouldUseWebSearch,
     shouldUseMultiStep,

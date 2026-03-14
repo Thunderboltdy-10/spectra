@@ -1,13 +1,18 @@
-# Plan - 2026-03-08  
+# Plan Sync - 2026-03-14T00:00:00+01:00
 
-Latest user request:
-Audit current tool reachability and citation/source visibility in this repo. Focus on whether route-enabled search, memory, retrieval, and orchestration are actually surfaced and callable, and where source objects are dropped or hidden. Do not edit files. Return only concrete blockers with file paths and minimum fixes.
+Latest user request (verbatim when practical):
+"[-design](<local-workspace>
+great progress again! now, finish it off. complete ALL of [CODEX.md](CODEX.md)"
 
 Actionable tasks:
-1. Inspect route-planning and pipeline wiring for search, memory, retrieval, and orchestration reachability.
-2. Trace source/citation objects from retrieval/search through post-processing into UI rendering.
-3. Identify only concrete blockers with exact file paths and minimum viable fixes.
+1. Re-read CODEX.md and enumerate all unresolved items.
+2. Load and apply frontend-design skill guidance for remaining UI work.
+3. Implement fixes for each unresolved issue end-to-end (backend, frontend, orchestration, auth, admin/super-admin, docs/export).
+4. Update CODEX.md continuously; only mark done once verified.
+5. Run typecheck/lint/tests for touched paths and verify key UI flows.
+6. Produce implementation + verification documentation of what changed and how to validate.
 
-Blockers/assumptions:
-- Do not edit product files for this task.
-- PLAN.md overwrite is required by repo workflow.
+Blockers / assumptions:
+- Assume existing local/dev test environment and dependencies are installed.
+- If full e2e suite is unavailable, run targeted checks and report any residual risk.
+- No destructive git operations; preserve unrelated worktree changes.

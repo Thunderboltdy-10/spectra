@@ -43,6 +43,7 @@ type OrgDetail = {
     schoolType?: string;
     country?: string;
     timezone?: string;
+    maxMembers?: number;
     maxStudents?: number;
     tokenBudgetDaily: number;
     isActive?: boolean;
@@ -59,9 +60,48 @@ type OrgDetail = {
   members: Member[];
 };
 
-type TabId = "overview" | "members" | "usage" | "settings" | "soul";
+type OrgUsageOverview = {
+  orgId: string;
+  orgName: string;
+  days: number;
+  memberCount: number;
+  totals: {
+    events: number;
+    totalTokens: number;
+    totalCostCents: number;
+    uniqueUsers: number;
+    uniqueModels: number;
+  };
+  byDay: Array<{
+    day: string;
+    events: number;
+    tokens: number;
+    costCents: number;
+  }>;
+};
+
+type OrgSoulOverview = {
+  orgId: string;
+  orgName: string;
+  flags: {
+    soulEnabled: boolean;
+    adaptiveQuizEnabled: boolean;
+    spacedRepetitionEnabled: boolean;
+  };
+  docs: {
+    total: number;
+    published: number;
+    drafts: number;
+    latestUpdatedAt: number | null;
+    latestPublishedAt: number | null;
+  };
+  sections: string[];
+};
+
+type TabId = "all" | "overview" | "members" | "usage" | "settings" | "soul";
 
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
+  { id: "all", label: "All Sections", icon: <Settings className="h-3.5 w-3.5" /> },
   { id: "overview", label: "Overview", icon: <Building2 className="h-3.5 w-3.5" /> },
   { id: "members", label: "Members", icon: <Users className="h-3.5 w-3.5" /> },
   { id: "usage", label: "Usage", icon: <BarChart3 className="h-3.5 w-3.5" /> },
@@ -76,6 +116,16 @@ function formatDate(ts?: number) {
     month: "short",
     year: "numeric",
   });
+}
+
+function formatUsdCents(cents?: number) {
+  if (typeof cents !== "number" || !Number.isFinite(cents)) return "—";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Math.max(0, cents) / 100);
 }
 
 // ---- Overview Tab ----
@@ -110,7 +160,7 @@ function OverviewTab({ data }: { data: OrgDetail }) {
               { label: "Type", value: org.schoolType ?? "—" },
               { label: "Country", value: org.country ?? "—" },
               { label: "Timezone", value: org.timezone ?? "—" },
-              { label: "Max Students", value: org.maxStudents?.toLocaleString() ?? "Unlimited" },
+              { label: "Member Allocation", value: (org.maxMembers ?? org.maxStudents)?.toLocaleString() ?? "Unlimited" },
               { label: "Monthly/User Budget", value: (org.monthlyBudgetCentsPerUser ?? 900).toLocaleString() },
               { label: "Budget Margin", value: `${org.budgetMarginPercent ?? 20}%` },
               { label: "Max Resource File", value: `${Math.round(((org.maxResourceFileSizeBytes ?? (10 * 1024 * 1024)) / (1024 * 1024)) * 10) / 10} MB` },
@@ -138,6 +188,7 @@ function MembersTab({ members, orgId, onChanged }: { members: Member[]; orgId: s
   const [adminEmail, setAdminEmail] = useState("");
   const [assigningAdmin, setAssigningAdmin] = useState(false);
   const [busyMemberId, setBusyMemberId] = useState<string | null>(null);
+  const adminCount = members.filter((member) => member.role === "admin").length;
   const memberEmails = Array.from(
     new Set(members.map((member) => member.email.trim()).filter((email) => email.includes("@"))),
   );
@@ -247,6 +298,11 @@ function MembersTab({ members, orgId, onChanged }: { members: Member[]; orgId: s
               </thead>
               <tbody>
                 {members.map((m, i) => (
+                  (() => {
+                    const isLastAdmin = m.role === "admin" && adminCount <= 1;
+                    const roleSelectDisabled = busyMemberId === m._id || isLastAdmin;
+                    const removeDisabled = busyMemberId === m._id || isLastAdmin;
+                    return (
                   <tr
                     key={m._id}
                     className={`border-b border-[var(--border-default)] ${i === members.length - 1 ? "border-b-0" : ""}`}
@@ -254,24 +310,32 @@ function MembersTab({ members, orgId, onChanged }: { members: Member[]; orgId: s
                     <td className="px-5 py-3.5 font-medium text-[var(--text-primary)]">{m.name}</td>
                     <td className="px-5 py-3.5 text-[var(--text-secondary)]">{m.email}</td>
                     <td className="px-5 py-3.5">
-                      <Select value={m.role} onValueChange={(value) => void updateRole(m._id, value as "student" | "teacher" | "admin")}>
+                      <Select
+                        value={m.role}
+                        onValueChange={(value) => void updateRole(m._id, value as "student" | "teacher" | "admin")}
+                        disabled={roleSelectDisabled}
+                      >
                         <SelectTrigger className="h-8 w-[120px]">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="student">student</SelectItem>
-                          <SelectItem value="teacher">teacher</SelectItem>
+                          <SelectItem value="student" disabled={isLastAdmin}>student</SelectItem>
+                          <SelectItem value="teacher" disabled={isLastAdmin}>teacher</SelectItem>
                           <SelectItem value="admin">admin</SelectItem>
                         </SelectContent>
                       </Select>
+                      {isLastAdmin ? (
+                        <p className="mt-1 text-[10px] text-[var(--text-secondary)]">At least one admin must remain.</p>
+                      ) : null}
                     </td>
                     <td className="px-5 py-3.5 text-xs text-[var(--text-secondary)]">{formatDate(m.createdAt)}</td>
                     <td className="px-5 py-3.5 text-xs text-[var(--text-secondary)]">{formatDate(m.lastActiveAt)}</td>
                     <td className="px-5 py-3.5">
                       <button
                         type="button"
-                        disabled={busyMemberId === m._id}
+                        disabled={removeDisabled}
                         onClick={() => void removeMember(m._id, m.name)}
+                        title={isLastAdmin ? "School must keep at least one admin." : undefined}
                         className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[color-mix(in_oklab,var(--danger)_10%,transparent)] hover:text-[var(--danger)] disabled:opacity-50"
                         aria-label="Remove member"
                       >
@@ -279,6 +343,8 @@ function MembersTab({ members, orgId, onChanged }: { members: Member[]; orgId: s
                       </button>
                     </td>
                   </tr>
+                    );
+                  })()
                 ))}
               </tbody>
             </table>
@@ -290,13 +356,59 @@ function MembersTab({ members, orgId, onChanged }: { members: Member[]; orgId: s
 }
 
 // ---- Usage Tab ----
-function UsageTab() {
+function UsageTab({ usage, loading }: { usage: OrgUsageOverview | null; loading: boolean }) {
+  if (loading) {
+    return (
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-8 text-center">
+        <p className="text-sm text-[var(--text-secondary)]">Loading usage...</p>
+      </div>
+    );
+  }
+
+  if (!usage) {
+    return (
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-8 text-center">
+        <p className="text-sm text-[var(--text-secondary)]">Usage data unavailable.</p>
+      </div>
+    );
+  }
+
+  const latestDay = usage.byDay[usage.byDay.length - 1];
   return (
-    <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-8 text-center">
-      <BarChart3 className="mx-auto mb-3 h-10 w-10 text-[var(--text-secondary)]" />
-      <p className="text-sm text-[var(--text-secondary)]">
-        Usage analytics charts coming soon.
-      </p>
+    <div className="space-y-5">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        {[
+          { label: "Tracked days", value: usage.days.toLocaleString() },
+          { label: "Events", value: usage.totals.events.toLocaleString() },
+          { label: "Tokens", value: usage.totals.totalTokens.toLocaleString() },
+          { label: "Active users", value: usage.totals.uniqueUsers.toLocaleString() },
+          { label: "Models used", value: usage.totals.uniqueModels.toLocaleString() },
+        ].map((stat) => (
+          <div key={stat.label} className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">{stat.label}</p>
+            <p className="mt-1 font-display text-2xl text-[var(--text-primary)]">{stat.value}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-5">
+        <div className="mb-3 flex items-center gap-2">
+          <BarChart3 className="h-4 w-4 text-[var(--text-secondary)]" />
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">Usage summary ({usage.days}d)</h3>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
+            <p className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">Recorded cost</p>
+            <p className="text-sm font-medium text-[var(--text-primary)]">{formatUsdCents(usage.totals.totalCostCents)}</p>
+          </div>
+          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
+            <p className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">Latest day</p>
+            <p className="text-sm font-medium text-[var(--text-primary)]">
+              {latestDay ? `${latestDay.day} · ${latestDay.tokens.toLocaleString()} tokens` : "No events yet"}
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -311,6 +423,13 @@ function SettingsTab({ data, orgId, onSaved }: { data: OrgDetail; orgId: string;
   const [adaptiveQuiz, setAdaptiveQuiz] = useState(org.adaptiveQuizEnabled ?? true);
   const [spacedRep, setSpacedRep] = useState(org.spacedRepetitionEnabled ?? true);
   const [allowPaid, setAllowPaid] = useState(org.allowPaidModels ?? false);
+  const [memberAllocation, setMemberAllocation] = useState(
+    typeof (org.maxMembers ?? org.maxStudents) === "number"
+      && Number.isFinite(org.maxMembers ?? org.maxStudents)
+      && (org.maxMembers ?? org.maxStudents)! > 0
+      ? String(Math.floor(org.maxMembers ?? org.maxStudents ?? 0))
+      : "",
+  );
   const [maxResourceFileSizeMb, setMaxResourceFileSizeMb] = useState(
     String(Math.round(((org.maxResourceFileSizeBytes ?? (10 * 1024 * 1024)) / (1024 * 1024)) * 10) / 10),
   );
@@ -328,6 +447,11 @@ function SettingsTab({ data, orgId, onSaved }: { data: OrgDetail; orgId: string;
     ? Math.min(100, Math.max(1, Number(maxResourceFileSizeMb)))
     : 10;
   const normalizedMaxResourceFileSizeBytes = Math.round(normalizedMaxResourceFileSizeMb * 1024 * 1024);
+  const normalizedMemberAllocation = (() => {
+    const parsed = Number(memberAllocation);
+    if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+    return Math.max(1, Math.floor(parsed));
+  })();
 
   async function handleSave() {
     setSaving(true);
@@ -343,6 +467,7 @@ function SettingsTab({ data, orgId, onSaved }: { data: OrgDetail; orgId: string;
           adaptiveQuizEnabled: adaptiveQuiz,
           spacedRepetitionEnabled: spacedRep,
           allowPaidModels: allowPaid,
+          maxMembers: normalizedMemberAllocation,
           maxResourceFileSizeBytes: normalizedMaxResourceFileSizeBytes,
         }),
       });
@@ -396,6 +521,18 @@ function SettingsTab({ data, orgId, onSaved }: { data: OrgDetail; orgId: string;
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">Member Allocation</label>
+            <input
+              className={inputClass}
+              type="number"
+              min="1"
+              placeholder="Unlimited"
+              value={memberAllocation}
+              onChange={(e) => setMemberAllocation(e.target.value)}
+            />
+            <p className="mt-1 text-[11px] text-[var(--text-secondary)]">Maximum total active members (students, teachers, admins).</p>
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">Max Resource File Size (MB)</label>
@@ -478,7 +615,7 @@ function SettingsTab({ data, orgId, onSaved }: { data: OrgDetail; orgId: string;
             { label: "School Soul", desc: "Inject Soul guidance at runtime", value: soulEnabled, onChange: setSoulEnabled },
             { label: "Adaptive quiz difficulty", desc: "SM-2 adaptive quiz mode", value: adaptiveQuiz, onChange: setAdaptiveQuiz },
             { label: "Spaced repetition", desc: "Flashcard spaced repetition scheduling", value: spacedRep, onChange: setSpacedRep },
-            { label: "Allow paid models", desc: "Let users access premium AI models", value: allowPaid, onChange: setAllowPaid },
+            { label: "Allow paid models", desc: "Enable paid models under the enforced 30/M input + output cap", value: allowPaid, onChange: setAllowPaid },
           ].map((toggle) => (
             <div key={toggle.label} className="flex items-center justify-between gap-4 rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3">
               <div>
@@ -501,13 +638,64 @@ function SettingsTab({ data, orgId, onSaved }: { data: OrgDetail; orgId: string;
 }
 
 // ---- SOUL Tab ----
-function SoulTab({ data }: { data: OrgDetail }) {
+function SoulTab({ data, overview, loading }: { data: OrgDetail; overview: OrgSoulOverview | null; loading: boolean }) {
+  if (loading) {
+    return (
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-8 text-center">
+        <p className="text-sm text-[var(--text-secondary)]">Loading SOUL overview...</p>
+      </div>
+    );
+  }
+
+  if (!overview) {
+    return (
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-8 text-center">
+        <p className="text-sm text-[var(--text-secondary)]">SOUL overview unavailable.</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-8 text-center">
-      <BookOpen className="mx-auto mb-3 h-10 w-10 text-[var(--text-secondary)]" />
-      <p className="mb-3 text-sm text-[var(--text-secondary)]">
-        Manage this school&apos;s Soul docs via the School Admin SOUL page.
-      </p>
+    <div className="space-y-4">
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-5">
+        <div className="mb-3 flex items-center gap-2">
+          <BookOpen className="h-4 w-4 text-[var(--text-secondary)]" />
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">SOUL Runtime</h3>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {[
+            { label: "SOUL enabled", value: overview.flags.soulEnabled ? "On" : "Off" },
+            { label: "Adaptive quiz", value: overview.flags.adaptiveQuizEnabled ? "On" : "Off" },
+            { label: "Spaced repetition", value: overview.flags.spacedRepetitionEnabled ? "On" : "Off" },
+          ].map((item) => (
+            <div key={item.label} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
+              <p className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">{item.label}</p>
+              <p className="text-sm font-medium text-[var(--text-primary)]">{item.value}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-5">
+        <h3 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">SOUL Documents</h3>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {[
+            { label: "Total docs", value: overview.docs.total.toLocaleString() },
+            { label: "Published", value: overview.docs.published.toLocaleString() },
+            { label: "Drafts", value: overview.docs.drafts.toLocaleString() },
+            { label: "Sections", value: overview.sections.length.toLocaleString() },
+          ].map((item) => (
+            <div key={item.label} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
+              <p className="text-[10px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">{item.label}</p>
+              <p className="text-sm font-medium text-[var(--text-primary)]">{item.value}</p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-xs text-[var(--text-secondary)]">
+          Last updated: {formatDate(overview.docs.latestUpdatedAt ?? undefined)} · Last published: {formatDate(overview.docs.latestPublishedAt ?? undefined)}
+        </p>
+      </div>
+
       <p className="text-xs text-[var(--text-secondary)]">School: {data.org.name}</p>
     </div>
   );
@@ -519,19 +707,45 @@ export default function SchoolDetailPage() {
   const id = typeof params.id === "string" ? params.id : (params.id as string[])[0] ?? "";
 
   const [data, setData] = useState<OrgDetail | null>(null);
+  const [usageOverview, setUsageOverview] = useState<OrgUsageOverview | null>(null);
+  const [soulOverview, setSoulOverview] = useState<OrgSoulOverview | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<TabId>("overview");
+  const [loadingUsage, setLoadingUsage] = useState(true);
+  const [loadingSoul, setLoadingSoul] = useState(true);
+  const [activeTab, setActiveTab] = useState<TabId>("all");
 
   const load = useCallback(async () => {
+    setLoading(true);
+    setLoadingUsage(true);
+    setLoadingSoul(true);
     try {
-      const response = await fetch(`/api/super-admin/schools/${id}`);
+      const [response, usageResponse, soulResponse] = await Promise.all([
+        fetch(`/api/super-admin/schools/${id}`),
+        fetch(`/api/super-admin/schools/${id}/usage?days=60`),
+        fetch(`/api/super-admin/schools/${id}/soul`),
+      ]);
       if (!response.ok) throw new Error(await response.text());
       const result = (await response.json()) as OrgDetail;
       setData(result);
+
+      if (usageResponse.ok) {
+        const usageResult = (await usageResponse.json()) as OrgUsageOverview;
+        setUsageOverview(usageResult);
+      } else {
+        setUsageOverview(null);
+      }
+      if (soulResponse.ok) {
+        const soulResult = (await soulResponse.json()) as OrgSoulOverview;
+        setSoulOverview(soulResult);
+      } else {
+        setSoulOverview(null);
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load school");
     } finally {
       setLoading(false);
+      setLoadingUsage(false);
+      setLoadingSoul(false);
     }
   }, [id]);
 
@@ -595,6 +809,27 @@ export default function SchoolDetailPage() {
           ))}
         </div>
 
+        {activeTab === "all" ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-xs text-[var(--text-secondary)]">
+            <span className="font-medium text-[var(--text-primary)]">Jump to</span>
+            {[
+              { id: "section-overview", label: "Overview" },
+              { id: "section-members", label: "Members" },
+              { id: "section-usage", label: "Usage" },
+              { id: "section-settings", label: "Settings" },
+              { id: "section-soul", label: "SOUL" },
+            ].map((item) => (
+              <a
+                key={item.id}
+                href={`#${item.id}`}
+                className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-1 transition hover:bg-[var(--bg-hover)]"
+              >
+                {item.label}
+              </a>
+            ))}
+          </div>
+        ) : null}
+
         {/* Tab Content */}
         {loading ? (
           <div className="flex items-center justify-center py-20 text-sm text-[var(--text-secondary)]">
@@ -606,13 +841,37 @@ export default function SchoolDetailPage() {
           </div>
         ) : (
           <>
+            {activeTab === "all" && (
+              <div className="space-y-8">
+                <section id="section-overview" className="space-y-3">
+                  <h2 className="font-display text-2xl text-[var(--text-primary)]">Overview</h2>
+                  <OverviewTab data={data} />
+                </section>
+                <section id="section-members" className="space-y-3">
+                  <h2 className="font-display text-2xl text-[var(--text-primary)]">Members</h2>
+                  <MembersTab members={data.members} orgId={id} onChanged={() => void load()} />
+                </section>
+                <section id="section-usage" className="space-y-3">
+                  <h2 className="font-display text-2xl text-[var(--text-primary)]">Usage</h2>
+                  <UsageTab usage={usageOverview} loading={loadingUsage} />
+                </section>
+                <section id="section-settings" className="space-y-3">
+                  <h2 className="font-display text-2xl text-[var(--text-primary)]">Settings</h2>
+                  <SettingsTab data={data} orgId={id} onSaved={() => void load()} />
+                </section>
+                <section id="section-soul" className="space-y-3">
+                  <h2 className="font-display text-2xl text-[var(--text-primary)]">SOUL</h2>
+                  <SoulTab data={data} overview={soulOverview} loading={loadingSoul} />
+                </section>
+              </div>
+            )}
             {activeTab === "overview" && <OverviewTab data={data} />}
             {activeTab === "members" && <MembersTab members={data.members} orgId={id} onChanged={() => void load()} />}
-            {activeTab === "usage" && <UsageTab />}
+            {activeTab === "usage" && <UsageTab usage={usageOverview} loading={loadingUsage} />}
             {activeTab === "settings" && (
               <SettingsTab data={data} orgId={id} onSaved={() => void load()} />
             )}
-            {activeTab === "soul" && <SoulTab data={data} />}
+            {activeTab === "soul" && <SoulTab data={data} overview={soulOverview} loading={loadingSoul} />}
           </>
         )}
       </div>

@@ -179,50 +179,75 @@
   --text-tertiary: #fb7185;
 }
 
-[data-theme-palette="forest"] {
-  --bg-primary: #f8faf9;
-  --bg-secondary: #ecfdf5;
-  --bg-tertiary: #dcfce7;
-  --bg-sidebar: #f0fdf4;
-  --bg-elevated: #ffffff;
-  --bg-hover: #dcfce7;
-  --border-default: #bbf7d0;
-  --text-secondary: #059669;
-  --text-tertiary: #10b981;
-}
-[data-theme-palette="forest"].dark {
-  --bg-primary: #021a0c;
-  --bg-secondary: #092819;
-  --bg-tertiary: #0d3320;
-  --bg-sidebar: #052e16;
-  --bg-elevated: #061f10;
-  --bg-hover: #14472e;
-  --border-default: #1d5c3c;
-  --text-secondary: #6ee7b7;
-  --text-tertiary: #34d399;
-}
-
 [data-theme-palette="custom"] {
+  --accent: var(--brand-primary);
+  --accent-cyan: var(--brand-primary);
+  --accent-orange: color-mix(in oklab, var(--brand-accent) 72%, #ff9a4f);
+  --accent-coral: color-mix(in oklab, var(--brand-accent) 68%, #ff6f45);
+  --accent-mint: color-mix(in oklab, var(--brand-accent) 70%, #18b886);
+
   --bg-primary: var(--custom-theme-light, #e0e7ff);
-  --bg-secondary: color-mix(in oklab, var(--custom-theme-light, #e0e7ff) 80%, #ffffff);
-  --bg-tertiary: color-mix(in oklab, var(--custom-theme-light, #e0e7ff) 60%, #ffffff);
-  --bg-sidebar: var(--custom-theme-light, #e0e7ff);
+  --bg-secondary: color-mix(in oklab, var(--custom-theme-light, #e0e7ff) 84%, #ffffff);
+  --bg-tertiary: color-mix(in oklab, var(--custom-theme-light, #e0e7ff) 68%, #ffffff);
+  --bg-sidebar: color-mix(in oklab, var(--custom-theme-light, #e0e7ff) 88%, #ffffff);
   --bg-elevated: #ffffff;
-  --bg-hover: color-mix(in oklab, var(--custom-theme-light, #e0e7ff) 70%, #ffffff);
-  --border-default: color-mix(in oklab, var(--custom-theme-light, #e0e7ff) 40%, #ffffff);
+  --bg-hover: color-mix(in oklab, var(--custom-theme-light, #e0e7ff) 74%, #ffffff);
+  --bg-user-bubble: color-mix(in oklab, var(--brand-primary) 16%, #ffffff);
+  --border-default: color-mix(in oklab, var(--custom-theme-light, #e0e7ff) 48%, #ffffff);
   --text-secondary: color-mix(in oklab, var(--brand-accent) 80%, #000000);
   --text-tertiary: color-mix(in oklab, var(--brand-accent) 60%, #000000);
+  --mode-tutor: color-mix(in oklab, var(--brand-primary) 90%, #0a4f8f);
+  --mode-marker: color-mix(in oklab, var(--brand-accent) 78%, #d18f10);
+  --mode-exam: color-mix(in oklab, var(--brand-accent) 82%, #d45334);
+  --mode-draft_coach: color-mix(in oklab, var(--brand-accent) 70%, #b04e2c);
+  --mode-quiz: color-mix(in oklab, var(--brand-primary) 50%, var(--brand-accent));
+  --mode-flashcard: color-mix(in oklab, var(--brand-primary) 64%, #0fb4c8);
+  --mode-research: color-mix(in oklab, var(--brand-primary) 80%, #0f5e9b);
+  --mode-explain: color-mix(in oklab, var(--brand-accent) 62%, #ff7b59);
+  --mode-document: color-mix(in oklab, var(--brand-accent) 72%, #157f72);
+  --mode-general: color-mix(in oklab, var(--brand-primary) 40%, #5f6d7f);
+  --mode-image: color-mix(in oklab, var(--brand-accent) 42%, #ec4899);
+  --gradient-brand: linear-gradient(132deg, var(--brand-primary) 0%, var(--brand-accent) 56%, #ff8751 100%);
+  --gradient-surface: linear-gradient(
+    145deg,
+    color-mix(in oklab, var(--custom-theme-light, #e0e7ff) 28%, #ffffff),
+    color-mix(in oklab, var(--custom-theme-light, #e0e7ff) 12%, #ffffff)
+  );
 }
 [data-theme-palette="custom"].dark {
+  --accent: var(--brand-primary);
+  --accent-cyan: var(--brand-primary);
+  --accent-orange: color-mix(in oklab, var(--brand-accent) 70%, #ffbd72);
+  --accent-coral: color-mix(in oklab, var(--brand-accent) 72%, #ff9a7d);
+  --accent-mint: color-mix(in oklab, var(--brand-accent) 78%, #39d6a0);
+
   --bg-primary: var(--custom-theme-dark, #1e1b4b);
-  --bg-secondary: color-mix(in oklab, var(--custom-theme-dark, #1e1b4b) 80%, #000000);
-  --bg-tertiary: color-mix(in oklab, var(--custom-theme-dark, #1e1b4b) 60%, #000000);
-  --bg-sidebar: var(--custom-theme-dark, #1e1b4b);
-  --bg-elevated: color-mix(in oklab, var(--custom-theme-dark, #1e1b4b) 90%, #ffffff);
+  --bg-secondary: color-mix(in oklab, var(--custom-theme-dark, #1e1b4b) 84%, #000000);
+  --bg-tertiary: color-mix(in oklab, var(--custom-theme-dark, #1e1b4b) 66%, #000000);
+  --bg-sidebar: color-mix(in oklab, var(--custom-theme-dark, #1e1b4b) 88%, #000000);
+  --bg-elevated: color-mix(in oklab, var(--custom-theme-dark, #1e1b4b) 88%, #ffffff);
   --bg-hover: color-mix(in oklab, var(--custom-theme-dark, #1e1b4b) 70%, #000000);
+  --bg-user-bubble: color-mix(in oklab, var(--brand-primary) 18%, #10131b);
   --border-default: color-mix(in oklab, var(--custom-theme-dark, #1e1b4b) 40%, #000000);
   --text-secondary: color-mix(in oklab, var(--brand-accent) 80%, #ffffff);
   --text-tertiary: color-mix(in oklab, var(--brand-accent) 60%, #ffffff);
+  --mode-tutor: color-mix(in oklab, var(--brand-primary) 84%, #73c6ff);
+  --mode-marker: color-mix(in oklab, var(--brand-accent) 50%, #f4ba54);
+  --mode-exam: color-mix(in oklab, var(--brand-accent) 46%, #ff8b6f);
+  --mode-draft_coach: color-mix(in oklab, var(--brand-accent) 40%, #d58b4f);
+  --mode-quiz: color-mix(in oklab, var(--brand-primary) 42%, var(--brand-accent));
+  --mode-flashcard: color-mix(in oklab, var(--brand-primary) 54%, #50d3dd);
+  --mode-research: color-mix(in oklab, var(--brand-primary) 68%, #59a3ff);
+  --mode-explain: color-mix(in oklab, var(--brand-accent) 40%, #f99a83);
+  --mode-document: color-mix(in oklab, var(--brand-accent) 54%, #4fd8bd);
+  --mode-general: color-mix(in oklab, var(--brand-primary) 36%, #9ca3af);
+  --mode-image: color-mix(in oklab, var(--brand-accent) 34%, #f472b6);
+  --gradient-brand: linear-gradient(132deg, var(--brand-primary) 0%, var(--brand-accent) 56%, #ff9a67 100%);
+  --gradient-surface: linear-gradient(
+    145deg,
+    color-mix(in oklab, var(--custom-theme-dark, #1e1b4b) 74%, #181325),
+    color-mix(in oklab, var(--custom-theme-dark, #1e1b4b) 88%, #0a0b11)
+  );
 }
 
 * {
@@ -457,16 +482,16 @@ button:disabled {
 }
 
 .right-panel-shell--docked {
-  animation: right-panel-enter-docked 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: right-panel-enter-docked 520ms cubic-bezier(0.2, 0.95, 0.22, 1) both;
 }
 
 .right-panel-shell--sheet {
-  animation: right-panel-enter-sheet 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: right-panel-enter-sheet 540ms cubic-bezier(0.2, 0.95, 0.22, 1) both;
 }
 
 .right-panel-content {
-  animation: right-panel-content-in 260ms var(--ease-standard) both;
-  animation-delay: 70ms;
+  animation: right-panel-content-in 340ms var(--ease-standard) both;
+  animation-delay: 120ms;
 }
 
 @keyframes chat-fade-in {
@@ -509,11 +534,7 @@ button:disabled {
 @keyframes right-panel-enter-docked {
   0% {
     opacity: 0;
-    transform: translateX(34px) scale(0.988);
-  }
-  64% {
-    opacity: 1;
-    transform: translateX(-4px) scale(1.003);
+    transform: translateX(24px) scale(0.992);
   }
   100% {
     opacity: 1;
@@ -524,11 +545,7 @@ button:disabled {
 @keyframes right-panel-enter-sheet {
   0% {
     opacity: 0;
-    transform: translateY(26px) scale(0.985);
-  }
-  68% {
-    opacity: 1;
-    transform: translateY(-3px) scale(1.003);
+    transform: translateY(18px) scale(0.992);
   }
   100% {
     opacity: 1;

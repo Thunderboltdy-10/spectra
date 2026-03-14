@@ -2,7 +2,13 @@ import { getEnv } from "@/lib/env";
 import type { RouteTraceFallback } from "@/types";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
-const OPENROUTER_TIMEOUT_MS = 30_000;
+const OPENROUTER_TIMEOUT_MS = (() => {
+  const raw = Number.parseInt(process.env.OPENROUTER_TIMEOUT_MS ?? "", 10);
+  if (Number.isFinite(raw) && raw >= 30_000 && raw <= 300_000) {
+    return raw;
+  }
+  return 90_000;
+})();
 
 export type OpenRouterStreamEvent =
   | { type: "delta"; content: string }

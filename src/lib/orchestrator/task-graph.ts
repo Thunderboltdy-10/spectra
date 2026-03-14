@@ -1,4 +1,5 @@
 export type TaskRole =
+  | "workflow_planner"
   | "retriever"
   | "web_researcher"
   | "vision_interpreter"
@@ -72,8 +73,27 @@ function hasPlanningIntent(prompt: string) {
   return /\b(plan|roadmap|schedule|timeline|syllabus|strategy|study plan|weekly)\b/i.test(prompt);
 }
 
+function hasMultipartIntent(prompt: string) {
+  const lower = prompt.toLowerCase();
+  return /(^|\n)\s*(\d+\.|-|\*)\s+/.test(prompt) || /\b(first|second|third|then|finally|compare|contrast)\b/.test(lower);
+}
+
 export function buildTaskGraph(prompt: string, mode: string, context: BuildTaskGraphContext = {}): TaskNode[] {
   const graph: TaskNode[] = [];
+  const hasSourceContext = Boolean(context.sourceBlock?.trim());
+  const hasSearchContext = Boolean(context.searchBlock?.trim());
+  const codeIntent = hasCodeIntent(prompt);
+  const planningIntent = hasPlanningIntent(prompt);
+  const multipartIntent = hasMultipartIntent(prompt);
+  const needsPlanner =
+    mode === "research"
+    || mode === "document"
+    || mode === "exam"
+    || multipartIntent
+    || planningIntent
+    || codeIntent
+    || Boolean(context.hasVision)
+    || prompt.trim().length > 280;
   const packedPrompt = [
     prompt.trim(),
     context.sourceBlock ? `\nRetrieved context:\n${context.sourceBlock}` : "",
@@ -82,14 +102,35 @@ export function buildTaskGraph(prompt: string, mode: string, context: BuildTaskG
     .filter(Boolean)
     .join("\n");
 
-  graph.push({
-    id: "retriever",
-    role: "retriever",
-    specialist: "retriever",
-    prompt: packedPrompt,
-    dependsOn: [],
-    status: "pending",
-  });
+  if (needsPlanner) {
+    graph.push({
+      id: "planner",
+      role: "workflow_planner",
+      specialist: "workflow_planner",
+      prompt: `Create a short staged execution plan for this request.
+Return:
+- objective
+- stage sequence
+- dependency notes
+- risk checks
+
+Prompt and context:
+${packedPrompt}`,
+      dependsOn: [],
+      status: "pending",
+    });
+  }
+
+  if (hasSourceContext) {
+    graph.push({
+      id: "retriever",
+      role: "retriever",
+      specialist: "retriever",
+      prompt: packedPrompt,
+      dependsOn: needsPlanner ? ["planner"] : [],
+      status: "pending",
+    });
+  }
 
   if (mode === "research" || context.searchEnabled) {
     graph.push({
@@ -97,7 +138,7 @@ export function buildTaskGraph(prompt: string, mode: string, context: BuildTaskG
       role: "web_researcher",
       specialist: "web_researcher",
       prompt: packedPrompt,
-      dependsOn: [],
+      dependsOn: needsPlanner ? ["planner"] : [],
       status: "pending",
     });
     graph.push({
@@ -105,7 +146,11 @@ export function buildTaskGraph(prompt: string, mode: string, context: BuildTaskG
       role: "fact_checker",
       specialist: "fact_checker",
       prompt: packedPrompt,
-      dependsOn: [],
+      dependsOn: [
+        ...(needsPlanner ? ["planner"] : []),
+        ...(hasSearchContext ? ["web"] : []),
+        ...(hasSourceContext ? ["retriever"] : []),
+      ],
       status: "pending",
     });
   }
@@ -116,18 +161,24 @@ export function buildTaskGraph(prompt: string, mode: string, context: BuildTaskG
       role: "vision_interpreter",
       specialist: "vision_interpreter",
       prompt: packedPrompt,
-      dependsOn: [],
+      dependsOn: [
+        ...(needsPlanner ? ["planner"] : []),
+        ...(hasSourceContext ? ["retriever"] : []),
+      ],
       status: "pending",
     });
   }
 
-  if (hasCodeIntent(prompt)) {
+  if (codeIntent) {
     graph.push({
       id: "code",
       role: "code_helper",
       specialist: "code_helper",
       prompt: packedPrompt,
-      dependsOn: [],
+      dependsOn: [
+        ...(needsPlanner ? ["planner"] : []),
+        ...(hasSourceContext ? ["retriever"] : []),
+      ],
       status: "pending",
     });
   }
@@ -138,7 +189,10 @@ export function buildTaskGraph(prompt: string, mode: string, context: BuildTaskG
       role: "pedagogy_coach",
       specialist: "pedagogy_coach",
       prompt: packedPrompt,
-      dependsOn: [],
+      dependsOn: [
+        ...(needsPlanner ? ["planner"] : []),
+        ...(hasSourceContext ? ["retriever"] : []),
+      ],
       status: "pending",
     });
   }
@@ -149,24 +203,31 @@ export function buildTaskGraph(prompt: string, mode: string, context: BuildTaskG
       role: "exam_strategist",
       specialist: "exam_strategist",
       prompt: packedPrompt,
-      dependsOn: [],
+      dependsOn: [
+        ...(needsPlanner ? ["planner"] : []),
+        ...(hasSourceContext ? ["retriever"] : []),
+      ],
       status: "pending",
     });
   }
 
-  if (mode === "draft_coach" || hasPlanningIntent(prompt)) {
+  if (mode === "draft_coach" || planningIntent) {
     graph.push({
       id: "curriculum-plan",
       role: "curriculum_planner",
       specialist: "curriculum_planner",
       prompt: packedPrompt,
-      dependsOn: [],
+      dependsOn: [
+        ...(needsPlanner ? ["planner"] : []),
+        ...(hasSourceContext ? ["retriever"] : []),
+      ],
       status: "pending",
     });
   }
 
   const maxSpecialists = Math.max(1, context.maxSpecialists ?? 5);
   const priority = [
+    "workflow_planner",
     "retriever",
     "web_researcher",
     "fact_checker",
@@ -180,16 +241,35 @@ export function buildTaskGraph(prompt: string, mode: string, context: BuildTaskG
     const idx = priority.indexOf(role as (typeof priority)[number]);
     return idx === -1 ? 999 : idx;
   };
+  const plannerNode = graph.find((node) => node.role === "workflow_planner");
   const specialistNodes = graph
     .slice()
+    .filter((node) => node.role !== "workflow_planner")
     .sort((a, b) => rank(a.role) - rank(b.role))
     .slice(0, maxSpecialists);
 
+  if (specialistNodes.length === 0) {
+    specialistNodes.push({
+      id: "pedagogy",
+      role: "pedagogy_coach",
+      specialist: "pedagogy_coach",
+      prompt: packedPrompt,
+      dependsOn: [],
+      status: "pending",
+    });
+  }
+
   graph.length = 0;
+  if (plannerNode) {
+    graph.push(plannerNode);
+  }
   graph.push(...specialistNodes);
 
   const includeCritic = context.includeCritic ?? true;
   if (includeCritic) {
+    const criticDependencies = graph
+      .map((node) => node.id)
+      .filter((id) => id !== "planner");
     graph.push({
       id: "critic",
       role: "critic",
@@ -203,7 +283,7 @@ Return bullets with:
 
 Original question and context:
 ${packedPrompt}`,
-      dependsOn: specialistNodes.map((node) => node.id),
+      dependsOn: criticDependencies.length > 0 ? criticDependencies : specialistNodes.map((node) => node.id),
       status: "pending",
     });
   }
@@ -235,7 +315,7 @@ export async function executeGraph(
 
   while (true) {
     if (Date.now() - startedAt > maxWall) {
-      throw new Error("Task graph timed out");
+      break;
     }
 
     const ready = [...byId.values()].filter(
@@ -250,11 +330,11 @@ export async function executeGraph(
     if (calls >= maxSubcalls) break;
 
     const remaining = maxSubcalls - calls;
-    const batch = ready.slice(0, Math.max(1, remaining));
+    const batchSize = Math.min(ready.length, Math.max(1, remaining));
+    const batch = ready.slice(0, batchSize);
+    calls += batch.length;
     await Promise.all(
       batch.map(async (node) => {
-        if (calls >= maxSubcalls) return;
-        calls += 1;
         node.status = "running";
         const dependencies = node.dependsOn
           .map((id) => byId.get(id))

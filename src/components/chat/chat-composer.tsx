@@ -34,6 +34,7 @@ import { fuzzyScore } from "@/lib/fuzzy-model-search";
 import { cn } from "@/lib/utils";
 import { parseSlashCommand } from "@/lib/slash-commands";
 import { useSpeechToText } from "@/hooks/use-speech-to-text";
+import { CHEAP_MODEL_COST_PER_MILLION, MAX_MODEL_COST_PER_MILLION } from "@/lib/model-policy";
 
 type ChatComposerProps = {
   message: string;
@@ -139,12 +140,14 @@ function isBudgetSafeModel(model: ModelOption) {
 function isCheapModel(model: ModelOption) {
   if (isBudgetSafeModel(model)) return true;
   const inputCost = typeof model.inputCostPerM === "number" ? model.inputCostPerM : Number.POSITIVE_INFINITY;
-  return inputCost <= 3;
+  const outputCost = typeof model.outputCostPerM === "number" ? model.outputCostPerM : Number.POSITIVE_INFINITY;
+  return inputCost <= CHEAP_MODEL_COST_PER_MILLION && outputCost <= CHEAP_MODEL_COST_PER_MILLION;
 }
 
 function isExpensiveModel(model: ModelOption) {
   const inputCost = typeof model.inputCostPerM === "number" ? model.inputCostPerM : Number.POSITIVE_INFINITY;
-  return inputCost > 12;
+  const outputCost = typeof model.outputCostPerM === "number" ? model.outputCostPerM : Number.POSITIVE_INFINITY;
+  return inputCost > MAX_MODEL_COST_PER_MILLION || outputCost > MAX_MODEL_COST_PER_MILLION;
 }
 
 function restrictionReasonForTier(model: ModelOption, tier?: UserSpending["tier"]) {
@@ -972,7 +975,7 @@ export function ChatComposer(props: ChatComposerProps) {
                           setShowModelSelector(false);
                         }}
                         disabled={Boolean(autoRoutingRestriction)}
-                        title={autoRoutingRestriction ?? "Let routing choose the best model for this prompt."}
+                        title={autoRoutingRestriction ?? "Use adaptive routing for this conversation."}
                         className={`mb-2 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${
                           autoRoutingRestriction
                             ? "cursor-not-allowed opacity-55"
@@ -989,7 +992,7 @@ export function ChatComposer(props: ChatComposerProps) {
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-[var(--text-primary)]">Auto</p>
                           <p className="truncate text-[10px] text-[var(--text-secondary)]">
-                            Smart model selection based on your prompt
+                            Adaptive routing (only while Auto is selected)
                           </p>
                           {autoRoutingRestriction ? (
                             <p className="truncate text-[10px] text-[var(--warning)]">{autoRoutingRestriction}</p>

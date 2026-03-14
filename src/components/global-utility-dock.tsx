@@ -68,7 +68,7 @@ function inferModeFromPath(pathname: string) {
   if (pathname.startsWith("/analytics")) return "general";
   if (pathname.startsWith("/agents")) return "general";
   if (pathname.startsWith("/models")) return "research";
-  if (pathname === "/") return "general";
+  if (pathname === "/" || pathname.startsWith("/chat")) return "general";
   return undefined;
 }
 
@@ -256,7 +256,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
         scale: Math.min(window.devicePixelRatio || 1, 1),
         logging: false,
         useCORS: true,
-        allowTaint: true,
+        allowTaint: false,
         scrollX: window.scrollX,
         scrollY: window.scrollY,
         windowWidth: root.clientWidth,

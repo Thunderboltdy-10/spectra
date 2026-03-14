@@ -16,7 +16,6 @@ import { Input } from "@/components/ui/input";
 import { rightPanelSurfaceClassName } from "@/components/ui/right-panel-surface";
 import { useSidebar } from "@/context/sidebar-context";
 import { fuzzyScore } from "@/lib/fuzzy-model-search";
-import { MODEL_COST_BLOCK_LIST } from "@/lib/model-config";
 
 type SpendingTier = "normal" | "expensive_blocked" | "cheap_only" | "free_only";
 type SortMode = "recommended" | "popular" | "context";
@@ -128,8 +127,11 @@ function formatContext(value?: number) {
 function isBudgetSafe(model: ExplorerModel) {
   if (model.isFree) return true;
   if (model.modelId.includes(":free")) return true;
-  const inCost = typeof model.inputCostPerM === "number" ? model.inputCostPerM : undefined;
-  const outCost = typeof model.outputCostPerM === "number" ? model.outputCostPerM : undefined;
+  const hasInCost = typeof model.inputCostPerM === "number" && Number.isFinite(model.inputCostPerM);
+  const hasOutCost = typeof model.outputCostPerM === "number" && Number.isFinite(model.outputCostPerM);
+  if (!hasInCost && !hasOutCost) return false;
+  const inCost = hasInCost ? model.inputCostPerM : undefined;
+  const outCost = hasOutCost ? model.outputCostPerM : undefined;
   return (inCost ?? 0) === 0 && (outCost ?? 0) === 0;
 }
 
@@ -140,9 +142,14 @@ function isCheapModel(model: ExplorerModel) {
 }
 
 function blockedByTier(model: ExplorerModel, tier: SpendingTier) {
+  const inCost = typeof model.inputCostPerM === "number" ? model.inputCostPerM : 0;
+  const outCost = typeof model.outputCostPerM === "number" ? model.outputCostPerM : 0;
+  if (!isBudgetSafe(model) && (inCost > 30 || outCost > 30)) {
+    return true;
+  }
   if (tier === "normal") return false;
   if (tier === "expensive_blocked") {
-    return MODEL_COST_BLOCK_LIST.has(model.modelId) || model.modelId === "openrouter/auto";
+    return model.modelId === "openrouter/auto";
   }
   if (tier === "cheap_only") {
     return !isCheapModel(model) || model.modelId === "openrouter/auto";
@@ -152,6 +159,13 @@ function blockedByTier(model: ExplorerModel, tier: SpendingTier) {
 
 function blockedReason(model: ExplorerModel, tier: SpendingTier) {
   if (!blockedByTier(model, tier)) return null;
+  if (
+    !isBudgetSafe(model)
+    && ((typeof model.inputCostPerM === "number" && model.inputCostPerM > 30)
+      || (typeof model.outputCostPerM === "number" && model.outputCostPerM > 30))
+  ) {
+    return "Unavailable: exceeds 30/M input or output cost cap";
+  }
   if (tier === "expensive_blocked") return "Temporarily blocked by current usage guardrails";
   if (tier === "cheap_only") return "Limited to low-cost models until guardrails relax";
   return "Only guardrail-safe models are available right now";
@@ -500,7 +514,7 @@ export default function ModelsPage() {
   }, [availableModels.length, visibleCount]);
 
   function tryModel(modelId: string) {
-    router.push(`/?model=${encodeURIComponent(modelId)}`);
+    router.push(`/chat?model=${encodeURIComponent(modelId)}`);
   }
 
   function toggleProvider(name: string) {

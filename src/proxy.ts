@@ -1,5 +1,6 @@
 import { NextFetchEvent, NextRequest, NextResponse } from "next/server";
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { hasClerkServerConfig } from "@/lib/clerk-config";
 const isPublicRoute = createRouteMatcher([
   "/",
   "/landing(.*)",
@@ -12,11 +13,8 @@ const isPublicRoute = createRouteMatcher([
   "/api/join(.*)",
   "/api/request-access(.*)",
   "/api/invitations/(.*)",
+  "/api/auth/access-state(.*)",
 ]);
-
-const hasClerkConfig = Boolean(
-  process.env.CLERK_SECRET_KEY && (process.env.CLERK_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY),
-);
 
 const INVITATION_TOKEN_COOKIE = "ai-school-invitation-token";
 const INVITATION_TOKEN_MAX_AGE = 60 * 60 * 24;
@@ -71,11 +69,38 @@ const authMiddleware = clerkMiddleware(async (auth, req) => {
     return response;
   }
 
+  const shouldCheckAccess =
+    !url.pathname.startsWith("/api/")
+    && !url.pathname.startsWith("/trpc")
+    && !url.pathname.startsWith("/no-access");
+
+  if (shouldCheckAccess) {
+    try {
+      const accessResponse = await fetch(new URL("/api/auth/access-state", req.url), {
+        method: "GET",
+        headers: {
+          cookie: req.headers.get("cookie") ?? "",
+        },
+        cache: "no-store",
+      });
+      if (accessResponse.status === 403) {
+        const payload = (await accessResponse.json().catch(() => null)) as { status?: string } | null;
+        const destination = new URL("/no-access", req.url);
+        if (payload?.status === "org_inactive") {
+          destination.searchParams.set("reason", "inactive");
+        }
+        return NextResponse.redirect(destination);
+      }
+    } catch {
+      // Fail open in middleware; route handlers and page guards still enforce access.
+    }
+  }
+
   return NextResponse.next();
 });
 
 export default function proxy(request: NextRequest, event: NextFetchEvent) {
-  if (!hasClerkConfig) {
+  if (!hasClerkServerConfig()) {
     return NextResponse.next();
   }
   return authMiddleware(request, event);

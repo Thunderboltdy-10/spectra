@@ -1,8 +1,14 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { Download, FileText, Presentation, ScrollText } from "lucide-react";
+import { Download, FileText, Globe, Presentation, ScrollText } from "lucide-react";
 import { parseGeneratedDocument, type GeneratedDocument, type PresentationSlide } from "@/lib/document-generator";
+import {
+  buildDocxBytes,
+  buildHtmlArtifact,
+  buildPdfBytes,
+  buildPptxBytes,
+} from "@/lib/document-export";
 import { Button } from "@/components/ui/button";
 
 type DocumentPanelProps = {
@@ -23,157 +29,23 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 async function exportAsPptx(documentData: GeneratedDocument) {
-  const { default: PptxGenJS } = await import("pptxgenjs");
-  const pptx = new PptxGenJS();
-  pptx.layout = "LAYOUT_WIDE";
-  pptx.author = "AI School";
-  pptx.subject = documentData.title;
-  pptx.title = documentData.title;
-
-  if (documentData.type === "presentation") {
-    documentData.slides.forEach((slide, index) => {
-      const page = pptx.addSlide();
-      const accent = toneForSlide(slide, index);
-      page.background = { color: "F7F4EC" };
-      page.addShape(pptx.ShapeType.rect, { x: 0.4, y: 0.3, w: 0.18, h: 6.7, fill: { color: accent.replace("#", "") } });
-      page.addText(slide.title || documentData.title, {
-        x: 1.0,
-        y: 0.5,
-        w: 11.5,
-        h: 0.8,
-        fontFace: "Aptos Display",
-        fontSize: 22,
-        bold: true,
-        color: "1E1E1A",
-      });
-      if (slide.body) {
-        page.addText(slide.body, {
-          x: 1.0,
-          y: 1.4,
-          w: 11.0,
-          h: 1.1,
-          fontFace: "Aptos",
-          fontSize: 13,
-          color: "3E4A52",
-        });
-      }
-      if (slide.bullets?.length) {
-        page.addText(
-          slide.bullets.map((bullet) => ({ text: bullet, options: { bullet: { indent: 14 } } })),
-          {
-            x: 1.0,
-            y: slide.body ? 2.5 : 1.6,
-            w: 10.8,
-            h: 3.4,
-            fontFace: "Aptos",
-            fontSize: 16,
-            color: "1E1E1A",
-            breakLine: true,
-          },
-        );
-      }
-      if (slide.notes) {
-        page.addNotes(slide.notes);
-      }
-    });
-  } else {
-    const page = pptx.addSlide();
-    page.background = { color: "F7F4EC" };
-    page.addText(documentData.title, {
-      x: 0.8,
-      y: 0.6,
-      w: 11.2,
-      h: 0.8,
-      fontFace: "Aptos Display",
-      fontSize: 24,
-      bold: true,
-      color: "1E1E1A",
-    });
-    page.addText(JSON.stringify(documentData, null, 2), {
-      x: 0.8,
-      y: 1.6,
-      w: 11.2,
-      h: 4.8,
-      fontFace: "Courier New",
-      fontSize: 11,
-      color: "3E4A52",
-    });
-  }
-
-  await pptx.writeFile({ fileName: `${documentData.title || "document"}.pptx` });
+  const bytes = await buildPptxBytes(documentData);
+  downloadBlob(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.presentationml.presentation" }), `${documentData.title || "document"}.pptx`);
 }
 
 async function exportAsDocx(documentData: GeneratedDocument) {
-  const { Document, HeadingLevel, Packer, Paragraph, TextRun } = await import("docx");
-
-  const children: Array<InstanceType<typeof Paragraph>> = [new Paragraph({
-    text: documentData.title,
-    heading: HeadingLevel.TITLE,
-  })];
-
-  if (documentData.type === "word") {
-    for (const section of documentData.sections) {
-      children.push(new Paragraph({
-        text: section.heading,
-        heading: section.level === 1 ? HeadingLevel.HEADING_1 : section.level === 2 ? HeadingLevel.HEADING_2 : HeadingLevel.HEADING_3,
-      }));
-      children.push(new Paragraph(section.content));
-    }
-  } else if (documentData.type === "study_guide") {
-    if (documentData.summary) {
-      children.push(new Paragraph({
-        children: [new TextRun({ text: documentData.summary })],
-      }));
-    }
-    for (const section of documentData.sections) {
-      children.push(new Paragraph({ text: section.heading, heading: HeadingLevel.HEADING_1 }));
-      children.push(new Paragraph(section.content));
-    }
-  } else if (documentData.type === "timeline") {
-    for (const event of documentData.events) {
-      children.push(new Paragraph({ text: `${event.date} - ${event.title}`, heading: HeadingLevel.HEADING_2 }));
-      children.push(new Paragraph(event.detail));
-    }
-  } else if (documentData.type === "comparison_table") {
-    documentData.rows.forEach((row, index) => {
-      children.push(new Paragraph({ text: `Row ${index + 1}`, heading: HeadingLevel.HEADING_2 }));
-      row.forEach((cell, cellIndex) => {
-        children.push(new Paragraph(`${documentData.columns[cellIndex] || `Column ${cellIndex + 1}`}: ${cell}`));
-      });
-    });
-  } else {
-    documentData.slides.forEach((slide, index) => {
-      children.push(new Paragraph({ text: slide.title || `Slide ${index + 1}`, heading: HeadingLevel.HEADING_1 }));
-      if (slide.body) children.push(new Paragraph(slide.body));
-      slide.bullets?.forEach((bullet) => children.push(new Paragraph({ text: bullet, bullet: { level: 0 } })));
-    });
-  }
-
-  const doc = new Document({
-    sections: [{ children }],
-  });
-  const blob = await Packer.toBlob(doc);
-  downloadBlob(blob, `${documentData.title || "document"}.docx`);
+  const bytes = await buildDocxBytes(documentData);
+  downloadBlob(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }), `${documentData.title || "document"}.docx`);
 }
 
-async function exportAsPdf(target: HTMLElement, title: string) {
-  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
-    import("html2canvas"),
-    import("jspdf"),
-  ]);
+async function exportAsPdf(documentData: GeneratedDocument) {
+  const bytes = await buildPdfBytes(documentData);
+  downloadBlob(new Blob([bytes], { type: "application/pdf" }), `${documentData.title || "document"}.pdf`);
+}
 
-  const canvas = await html2canvas(target, {
-    scale: 2,
-    backgroundColor: "#f7f4ec",
-  });
-  const image = canvas.toDataURL("image/png");
-  const pdf = new jsPDF({
-    orientation: canvas.width > canvas.height ? "landscape" : "portrait",
-    unit: "px",
-    format: [canvas.width, canvas.height],
-  });
-  pdf.addImage(image, "PNG", 0, 0, canvas.width, canvas.height);
-  pdf.save(`${title || "document"}.pdf`);
+async function exportAsHtml(documentData: GeneratedDocument) {
+  const html = buildHtmlArtifact(documentData);
+  downloadBlob(new Blob([html], { type: "text/html;charset=utf-8" }), `${documentData.title || "document"}.html`);
 }
 
 function SectionHeader({ icon: Icon, label }: { icon: typeof FileText; label: string }) {
@@ -187,21 +59,23 @@ function SectionHeader({ icon: Icon, label }: { icon: typeof FileText; label: st
 
 export function DocumentPanel({ content }: DocumentPanelProps) {
   const previewRef = useRef<HTMLDivElement | null>(null);
-  const [exporting, setExporting] = useState<"" | "pptx" | "docx" | "pdf">("");
+  const [exporting, setExporting] = useState<"" | "pptx" | "docx" | "pdf" | "html">("");
   const parsed = useMemo(() => parseGeneratedDocument(content), [content]);
 
   if (!parsed.document) return null;
   const documentData = parsed.document;
 
-  async function handleExport(format: "pptx" | "docx" | "pdf") {
+  async function handleExport(format: "pptx" | "docx" | "pdf" | "html") {
     setExporting(format);
     try {
       if (format === "pptx") {
         await exportAsPptx(documentData);
       } else if (format === "docx") {
         await exportAsDocx(documentData);
-      } else if (previewRef.current) {
-        await exportAsPdf(previewRef.current, documentData.title);
+      } else if (format === "pdf") {
+        await exportAsPdf(documentData);
+      } else if (format === "html") {
+        await exportAsHtml(documentData);
       }
     } finally {
       setExporting("");
@@ -223,6 +97,10 @@ export function DocumentPanel({ content }: DocumentPanelProps) {
           <Button type="button" size="sm" variant="secondary" onClick={() => void handleExport("docx")} disabled={exporting !== ""}>
             <FileText className="h-4 w-4" />
             {exporting === "docx" ? "Exporting..." : "Export DOCX"}
+          </Button>
+          <Button type="button" size="sm" variant="secondary" onClick={() => void handleExport("html")} disabled={exporting !== ""}>
+            <Globe className="h-4 w-4" />
+            {exporting === "html" ? "Exporting..." : "Export HTML"}
           </Button>
           <Button type="button" size="sm" onClick={() => void handleExport("pdf")} disabled={exporting !== ""}>
             <Download className="h-4 w-4" />
@@ -343,6 +221,20 @@ export function DocumentPanel({ content }: DocumentPanelProps) {
               </tbody>
             </table>
           </div>
+        ) : null}
+
+        {documentData.type === "webpage" ? (
+          <article className="overflow-hidden rounded-[24px] border border-[var(--border-default)] bg-white shadow-[var(--shadow-soft)]">
+            <div className="border-b border-[var(--border-default)] px-4 py-3 text-xs text-[var(--text-secondary)]">
+              Live webpage preview
+            </div>
+            <iframe
+              title={documentData.title}
+              srcDoc={buildHtmlArtifact(documentData)}
+              sandbox="allow-scripts allow-popups allow-forms"
+              className="h-[540px] w-full bg-white"
+            />
+          </article>
         ) : null}
       </div>
     </section>

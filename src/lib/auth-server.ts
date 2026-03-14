@@ -1,6 +1,7 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { cookies } from "next/headers";
 import { getAdminEmails } from "@/lib/env";
+import { hasClerkServerConfig } from "@/lib/clerk-config";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import type { Role } from "@/types";
 
@@ -24,11 +25,6 @@ export type SessionActor = {
 export function isSuperAdminEmail(email: string) {
   return SUPER_ADMIN_EMAILS.has(email.trim().toLowerCase());
 }
-
-const hasClerkConfig = Boolean(
-  process.env.CLERK_SECRET_KEY &&
-    (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || process.env.CLERK_PUBLISHABLE_KEY),
-);
 
 const INVITATION_TOKEN_COOKIE = "ai-school-invitation-token";
 
@@ -75,8 +71,24 @@ async function bootstrapActor(params: {
   };
 }
 
+async function assertActiveOrgAccess(clerkId: string) {
+  const access = await convexQuery<
+    { clerkId: string },
+    { hasUser: boolean; hasOrg: boolean; orgActive: boolean } | null
+  >("users:accessState", {
+    clerkId,
+  });
+
+  if (!access?.hasUser || !access.hasOrg) {
+    throw new Error("AUTH_NO_ACCESS: Your account isn't linked to a school. Contact your school administrator.");
+  }
+  if (!access.orgActive) {
+    throw new Error("AUTH_ORG_INACTIVE: Your school's workspace is currently inactive. Contact your administrator.");
+  }
+}
+
 export async function requireActor(): Promise<SessionActor> {
-  if (!hasClerkConfig) {
+  if (!hasClerkServerConfig()) {
     return bootstrapActor({
       clerkId: "local-demo-admin",
       email: "local-admin@school.local",
@@ -92,7 +104,7 @@ export async function requireActor(): Promise<SessionActor> {
     userId = authData.userId;
   } catch {
     throw new Error(
-      "AUTH_MISCONFIGURED: Clerk auth failed. Check CLERK_SECRET_KEY and NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY.",
+      "AUTH_MISCONFIGURED: Clerk auth failed. Check CLERK_SECRET_KEY and your Clerk publishable key env.",
     );
   }
 
@@ -164,6 +176,8 @@ export async function requireActor(): Promise<SessionActor> {
       }
     }
 
+    await assertActiveOrgAccess(userId);
+
     return {
       clerkId: userId,
       email: current.email,
@@ -219,6 +233,7 @@ export async function requireActor(): Promise<SessionActor> {
     });
 
     if (provisioned) {
+      await assertActiveOrgAccess(userId);
       return {
         clerkId: userId,
         email: provisioned.email,

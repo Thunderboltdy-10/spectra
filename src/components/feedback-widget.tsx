@@ -23,7 +23,7 @@ function inferModeFromPath(pathname: string) {
   if (pathname.startsWith("/analytics")) return "general";
   if (pathname.startsWith("/agents")) return "general";
   if (pathname.startsWith("/models")) return "research";
-  if (pathname === "/") return "general";
+  if (pathname === "/" || pathname.startsWith("/chat")) return "general";
   return undefined;
 }
 
@@ -81,6 +81,7 @@ export function FeedbackWidget() {
       const canvas = await html2canvas(target, {
         backgroundColor: getComputedStyle(document.body).backgroundColor || "#f7f4ec",
         useCORS: true,
+        allowTaint: false,
         scale: Math.min(window.devicePixelRatio || 1, 1.8),
         logging: false,
         width: window.innerWidth,

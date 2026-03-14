@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Wifi, WifiOff, Shield, AlertCircle } from "lucide-react";
+import { hasClerkPublishableKey } from "@/lib/clerk-config";
 
 export function ConnectionStatus() {
   const [status, setStatus] = useState<"connected" | "disconnected" | "checking">("checking");
@@ -54,7 +55,7 @@ export function ConnectionStatus() {
 }
 
 export function EnvironmentBadge() {
-  const isLocal = !process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  const isLocal = !hasClerkPublishableKey();
   
   if (!isLocal) return null;
 

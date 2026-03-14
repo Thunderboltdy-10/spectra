@@ -313,7 +313,10 @@ export async function maybeSearchWeb(
 ) {
   const searxngResults = options?.searxngEnabled === false
     ? []
-    : await searxngSearch(message).catch(() => []);
+    : await searxngSearch(message, {
+      limit: thinkingLevel === "high" ? 8 : 6,
+      language: "en",
+    }).catch(() => []);
   if (searxngResults.length > 0) {
     const snippetByUrl = new Map(
       searxngResults
@@ -337,6 +340,7 @@ export async function maybeSearchWeb(
       text,
       urls: sources.map((source) => source.url),
       sources,
+      provider: "searxng" as const,
     };
   }
 
@@ -401,6 +405,7 @@ export async function maybeSearchWeb(
     text: sanitizedText || text,
     urls: sources.map((source) => source.url),
     sources,
+    provider: "model_fallback" as const,
   };
 }
 

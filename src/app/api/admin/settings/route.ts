@@ -31,6 +31,7 @@ export async function PATCH(request: NextRequest) {
       schoolType?: string;
       timezone?: string;
       maxStudents?: number;
+      maxResourceFileSizeBytes?: number;
       orchestratorV2Enabled?: boolean;
       searxngEnabled?: boolean;
       soulEnabled?: boolean;
@@ -52,6 +53,7 @@ export async function PATCH(request: NextRequest) {
       schoolType: safeString(body.schoolType),
       timezone: safeString(body.timezone),
       maxStudents: safeNumber(body.maxStudents),
+      maxResourceFileSizeBytes: safeNumber(body.maxResourceFileSizeBytes),
       orchestratorV2Enabled: body.orchestratorV2Enabled,
       searxngEnabled: body.searxngEnabled,
       soulEnabled: body.soulEnabled,

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
+import { useSearchParams } from "next/navigation";
 import { Clock, Mail, ArrowLeft, Search, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +17,8 @@ type SchoolOption = {
 
 export default function NoAccessPage() {
   const { isLoaded, isSignedIn } = useUser();
+  const searchParams = useSearchParams();
+  const reason = searchParams.get("reason");
   const [query, setQuery] = useState("");
   const [message, setMessage] = useState("");
   const [schools, setSchools] = useState<SchoolOption[]>([]);
@@ -28,6 +31,11 @@ export default function NoAccessPage() {
   }>({ status: "idle" });
 
   useEffect(() => {
+    if (isLoaded && !isSignedIn) {
+      setSchools([]);
+      return;
+    }
+
     const trimmed = query.trim();
     if (trimmed.length < 2) {
       setSchools([]);
@@ -54,7 +62,7 @@ export default function NoAccessPage() {
       });
 
     return () => controller.abort();
-  }, [query]);
+  }, [isLoaded, isSignedIn, query]);
 
   async function submitRequest() {
     if (!selectedSchool?._id) {
@@ -121,7 +129,9 @@ export default function NoAccessPage() {
 
           <h1 className="text-center font-display text-3xl text-[var(--text-primary)]">Approval pending</h1>
           <p className="mx-auto mt-3 max-w-md text-center text-sm leading-relaxed text-[var(--text-secondary)]">
-            Your account is signed in, but it is not linked to a school yet. Use an invitation link if you have one, or request access below.
+            {reason === "inactive"
+              ? "Your school workspace is currently inactive. Contact your school administrator to reactivate access."
+              : "Your account is signed in, but it is not linked to a school yet. Use an invitation link if you have one, or request access below."}
           </p>
 
           <div className="mx-auto mt-8 grid gap-3">

@@ -2,6 +2,17 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { getUserByClerkId } from "./helpers";
 
+const MIN_RESOURCE_FILE_SIZE_BYTES = 1 * 1024 * 1024;
+const MAX_RESOURCE_FILE_SIZE_BYTES = 100 * 1024 * 1024;
+const DEFAULT_RESOURCE_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+
+function normalizeMaxResourceFileSizeBytes(value: number | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return DEFAULT_RESOURCE_FILE_SIZE_BYTES;
+  }
+  return Math.min(MAX_RESOURCE_FILE_SIZE_BYTES, Math.max(MIN_RESOURCE_FILE_SIZE_BYTES, Math.round(value)));
+}
+
 export const getOrgSettings = query({
   args: { actorClerkId: v.string() },
   handler: async (ctx, args) => {
@@ -46,6 +57,7 @@ export const updateOrgSettings = mutation({
     schoolType: v.optional(v.string()),
     timezone: v.optional(v.string()),
     maxStudents: v.optional(v.number()),
+    maxResourceFileSizeBytes: v.optional(v.number()),
     orchestratorV2Enabled: v.optional(v.boolean()),
     searxngEnabled: v.optional(v.boolean()),
     soulEnabled: v.optional(v.boolean()),
@@ -76,6 +88,9 @@ export const updateOrgSettings = mutation({
     const safeMaxStudents = args.maxStudents !== undefined
       ? Math.max(1, Math.round(args.maxStudents))
       : org.maxStudents;
+    const safeMaxResourceFileSizeBytes = args.maxResourceFileSizeBytes !== undefined
+      ? normalizeMaxResourceFileSizeBytes(args.maxResourceFileSizeBytes)
+      : normalizeMaxResourceFileSizeBytes(org.maxResourceFileSizeBytes);
 
     await ctx.db.patch(actor.orgId, {
       verifyMarkerPassEnabled:
@@ -91,6 +106,7 @@ export const updateOrgSettings = mutation({
       schoolType: args.schoolType !== undefined ? args.schoolType : org.schoolType,
       timezone: args.timezone !== undefined ? args.timezone : org.timezone,
       maxStudents: safeMaxStudents,
+      maxResourceFileSizeBytes: safeMaxResourceFileSizeBytes,
       orchestratorV2Enabled:
         args.orchestratorV2Enabled !== undefined
           ? args.orchestratorV2Enabled

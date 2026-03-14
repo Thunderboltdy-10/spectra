@@ -3,6 +3,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { Manrope, IBM_Plex_Mono, Fraunces } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
+import { getClerkPublishableKey } from "@/lib/clerk-config";
 
 const manrope = Manrope({
   variable: "--font-manrope",
@@ -52,15 +53,18 @@ const themeInitScript = `
     } else {
       document.documentElement.classList.remove('dark');
     }
-    var validPalettes = ['slate', 'zinc', 'rose', 'forest', 'custom'];
+    var validPalettes = ['slate', 'zinc', 'rose', 'custom'];
     var palette = window.localStorage.getItem('ai-school:color-theme');
     if (palette && validPalettes.indexOf(palette) !== -1) {
       document.documentElement.setAttribute('data-theme-palette', palette);
       if (palette === 'custom') {
-        var customColor = window.localStorage.getItem('ai-school:custom-color') || '#6366f1';
-        document.documentElement.style.setProperty('--brand-accent', customColor);
-        document.documentElement.style.setProperty('--custom-theme-light', 'color-mix(in oklab, ' + customColor + ' 15%, #ffffff)');
-        document.documentElement.style.setProperty('--custom-theme-dark', 'color-mix(in oklab, ' + customColor + ' 20%, #000000)');
+        var customPrimary = window.localStorage.getItem('ai-school:custom-primary-color') || '#0e8ee8';
+        var customSecondary = window.localStorage.getItem('ai-school:custom-secondary-color') || '#20b8b2';
+        var mixedCore = 'color-mix(in oklab, ' + customPrimary + ' 56%, ' + customSecondary + ')';
+        document.documentElement.style.setProperty('--brand-primary', customPrimary);
+        document.documentElement.style.setProperty('--brand-accent', customSecondary);
+        document.documentElement.style.setProperty('--custom-theme-light', 'color-mix(in oklab, ' + mixedCore + ' 14%, #ffffff)');
+        document.documentElement.style.setProperty('--custom-theme-dark', 'color-mix(in oklab, ' + mixedCore + ' 28%, #000000)');
       }
     }
   } catch (e) {
@@ -69,8 +73,7 @@ const themeInitScript = `
 })();`;
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const publishableKey =
-    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? process.env.CLERK_PUBLISHABLE_KEY;
+  const publishableKey = getClerkPublishableKey();
 
   const content = (
     <html lang="en" suppressHydrationWarning>

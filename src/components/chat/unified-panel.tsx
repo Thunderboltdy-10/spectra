@@ -15,6 +15,7 @@ import { useRightPanelDock } from "@/hooks/use-right-panel-dock";
 import type { AutoPreference, ModelOption, PersonalResource, UserSpending } from "@/hooks/use-chat-state";
 import type { Citation, RouteTrace, RouterMode } from "@/types";
 import { FILE_LIMITS } from "@/lib/file-limits";
+import { formatToolchainLabel } from "@/lib/orchestrator/trace-labels";
 
 function AutoChoice({
   label,
@@ -123,11 +124,12 @@ function resourceStatusMeta(status: PersonalResource["status"], updatedAt?: numb
   };
 }
 
-type SettingsViewProps = {
+export type SettingsViewProps = {
   models: ModelOption[];
   routerMode: RouterMode;
   manualModel: string;
   activeModelUsed?: string;
+  showCostDetails?: boolean;
   usePersonalResources: boolean;
   autoSaveConversationFilesToLibrary: boolean;
   personalResources: PersonalResource[];
@@ -154,7 +156,6 @@ const PALETTE_OPTIONS = [
   { key: "slate", label: "Slate", lightSwatch: "#e2e8f0", darkSwatch: "#1e293b" },
   { key: "zinc", label: "Zinc", lightSwatch: "#e4e4e7", darkSwatch: "#27272a" },
   { key: "rose", label: "Rose", lightSwatch: "#fff0f3", darkSwatch: "#1d0b15" },
-  { key: "forest", label: "Forest", lightSwatch: "#ecfdf5", darkSwatch: "#092819" },
   { key: "custom", label: "Custom", lightSwatch: "var(--custom-theme-light, #e0e7ff)", darkSwatch: "var(--custom-theme-dark, #1e1b4b)" },
 ] as const;
 
@@ -163,32 +164,53 @@ function ColorPalettePicker() {
     if (typeof window === "undefined") return "warm";
     return window.localStorage.getItem("ai-school:color-theme") ?? "warm";
   });
-  const [customColor, setCustomColor] = useState(() => {
-    if (typeof window === "undefined") return "#6366f1";
-    return window.localStorage.getItem("ai-school:custom-color") ?? "#6366f1";
+  const [customPrimary, setCustomPrimary] = useState(() => {
+    if (typeof window === "undefined") return "#0e8ee8";
+    return (
+      window.localStorage.getItem("ai-school:custom-primary-color")
+      ?? window.localStorage.getItem("ai-school:custom-color")
+      ?? "#0e8ee8"
+    );
+  });
+  const [customSecondary, setCustomSecondary] = useState(() => {
+    if (typeof window === "undefined") return "#20b8b2";
+    return window.localStorage.getItem("ai-school:custom-secondary-color") ?? "#20b8b2";
   });
   const isDark = typeof window !== "undefined" && document.documentElement.classList.contains("dark");
 
-  function applyPalette(key: string, color?: string) {
+  function applyPalette(key: string, colors?: { primary?: string; secondary?: string }) {
+    const nextPrimary = colors?.primary ?? customPrimary;
+    const nextSecondary = colors?.secondary ?? customSecondary;
     setSelected(key);
     try {
       window.localStorage.setItem("ai-school:color-theme", key);
-      if (color) {
-        window.localStorage.setItem("ai-school:custom-color", color);
+      if (colors?.primary) {
+        window.localStorage.setItem("ai-school:custom-primary-color", nextPrimary);
+      }
+      if (colors?.secondary) {
+        window.localStorage.setItem("ai-school:custom-secondary-color", nextSecondary);
       }
     } catch { /* ignore */ }
     
     if (key === "warm") {
       document.documentElement.removeAttribute("data-theme-palette");
       document.documentElement.style.removeProperty("--brand-accent");
+      document.documentElement.style.removeProperty("--brand-primary");
+      document.documentElement.style.removeProperty("--custom-theme-light");
+      document.documentElement.style.removeProperty("--custom-theme-dark");
     } else if (key === "custom") {
+      const mixedCore = `color-mix(in oklab, ${nextPrimary} 56%, ${nextSecondary})`;
       document.documentElement.setAttribute("data-theme-palette", "custom");
-      document.documentElement.style.setProperty("--brand-accent", color || customColor);
-      document.documentElement.style.setProperty("--custom-theme-light", `color-mix(in oklab, ${color || customColor} 15%, #ffffff)`);
-      document.documentElement.style.setProperty("--custom-theme-dark", `color-mix(in oklab, ${color || customColor} 20%, #000000)`);
+      document.documentElement.style.setProperty("--brand-primary", nextPrimary);
+      document.documentElement.style.setProperty("--brand-accent", nextSecondary);
+      document.documentElement.style.setProperty("--custom-theme-light", `color-mix(in oklab, ${mixedCore} 14%, #ffffff)`);
+      document.documentElement.style.setProperty("--custom-theme-dark", `color-mix(in oklab, ${mixedCore} 28%, #000000)`);
     } else {
       document.documentElement.setAttribute("data-theme-palette", key);
       document.documentElement.style.removeProperty("--brand-accent");
+      document.documentElement.style.removeProperty("--brand-primary");
+      document.documentElement.style.removeProperty("--custom-theme-light");
+      document.documentElement.style.removeProperty("--custom-theme-dark");
     }
   }
 
@@ -211,7 +233,7 @@ function ColorPalettePicker() {
           >
             <span
               className="h-8 w-8 rounded-md border border-[var(--border-default)]"
-              style={{ background: opt.key === "custom" && active ? customColor : swatch }}
+              style={{ background: opt.key === "custom" && active ? customPrimary : swatch }}
             />
             <span className="text-[9px] font-medium uppercase tracking-[0.08em] text-[var(--text-secondary)]">
               {opt.label}
@@ -222,27 +244,46 @@ function ColorPalettePicker() {
       
       {selected === "custom" && (
         <div className="ml-2 flex items-center gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-1.5">
-          <input
-            type="color"
-            value={customColor}
-            onChange={(e) => {
-              setCustomColor(e.target.value);
-              applyPalette("custom", e.target.value);
-            }}
-            className="h-8 w-8 cursor-pointer rounded-md border border-[var(--border-default)] p-0"
-            title="Choose custom color"
-          />
+          <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+            Primary
+            <input
+              type="color"
+              value={customPrimary}
+              onChange={(event) => {
+                const next = event.target.value;
+                setCustomPrimary(next);
+                applyPalette("custom", { primary: next });
+              }}
+              className="h-8 w-8 cursor-pointer rounded-md border border-[var(--border-default)] p-0"
+              title="Primary color"
+            />
+          </label>
+          <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+            Secondary
+            <input
+              type="color"
+              value={customSecondary}
+              onChange={(event) => {
+                const next = event.target.value;
+                setCustomSecondary(next);
+                applyPalette("custom", { secondary: next });
+              }}
+              className="h-8 w-8 cursor-pointer rounded-md border border-[var(--border-default)] p-0"
+              title="Secondary color"
+            />
+          </label>
         </div>
       )}
     </div>
   );
 }
 
-function SettingsView({
+export function SettingsView({
   models,
   routerMode,
   manualModel,
   activeModelUsed,
+  showCostDetails = false,
   usePersonalResources,
   autoSaveConversationFilesToLibrary,
   personalResources,
@@ -506,8 +547,8 @@ function SettingsView({
 
         <TabsContent value="app" className="space-y-4">
           <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-            <h3 className="mb-2 text-xs font-medium text-[var(--text-secondary)]">Color palette</h3>
-            <p className="mb-3 text-[11px] text-[var(--text-secondary)]">Changes neutral surface colors. School brand colors always take priority.</p>
+            <h3 className="mb-2 text-xs font-medium text-[var(--text-secondary)]">Color theme</h3>
+            <p className="mb-3 text-[11px] text-[var(--text-secondary)]">Pick a surface tone and custom primary/secondary colors. Changes apply instantly.</p>
             <ColorPalettePicker />
           </section>
 
@@ -533,10 +574,10 @@ function SettingsView({
                   typeof userSpending.monthlyTokens === "number"
                     ? `${Math.max(0, userSpending.monthlyTokens).toLocaleString()} tokens`
                     : null,
-                  typeof userSpending.totalCostCents === "number"
+                  showCostDetails && typeof userSpending.totalCostCents === "number"
                     ? `${formatSpendCents(userSpending.totalCostCents)} this month`
                     : null,
-                  (userSpending.estimatedUnpricedCostCents ?? 0) > 0
+                  showCostDetails && (userSpending.estimatedUnpricedCostCents ?? 0) > 0
                     ? "includes estimated cost for unpriced events"
                     : null,
                 ].filter(Boolean).join(" · ")}
@@ -670,6 +711,7 @@ function orchestrationStage(params: {
   activeCollaborators: ActiveCollaborator[];
   streamPhase?: "idle" | "compacting" | "routing" | "searching" | "thinking" | "generating" | "synthesizing";
   searchEnabled?: boolean;
+  hasFinishedWork?: boolean;
 }) {
   if (params.streamPhase === "compacting") return "compacting";
   if (params.streamPhase === "routing") return "routing";
@@ -677,7 +719,7 @@ function orchestrationStage(params: {
   if (params.streamPhase === "thinking") return "thinking";
   if (params.streamPhase === "generating") return "generating";
   if (params.streamPhase === "synthesizing") return "synthesizing";
-  if (!params.sending) return "complete";
+  if (!params.sending) return params.hasFinishedWork ? "complete" : "idle";
   if (params.collaboratorPhase === "synthesizing") return "generating";
   if (params.activeCollaborators.length > 0 && params.searchEnabled) return "searching";
   if (params.activeCollaborators.length > 0) return "generating";
@@ -711,8 +753,9 @@ function OrchestrationView({
     activeCollaborators,
     streamPhase,
     searchEnabled,
+    hasFinishedWork: Boolean(routeTrace || lastModelUsed),
   });
-  const steps = ["compacting", "routing", "searching", "thinking", "generating", "synthesizing", "complete"] as const;
+  const steps = ["idle", "compacting", "routing", "searching", "thinking", "generating", "synthesizing", "complete"] as const;
   const stageIndex = steps.indexOf(stage);
   const selectedModel = routeTrace?.selected.modelId || lastModelUsed;
   const selectedReason =
@@ -783,8 +826,10 @@ function OrchestrationView({
         <ol className="space-y-1.5">
           {steps.map((item, index) => {
             const isComplete = stage === "complete";
-            const done = isComplete || (!sending && index < steps.length) || (sending && index < stageIndex);
-            const active = sending && index === stageIndex;
+            const done = isComplete
+              ? index > 0 && index < steps.length - 1
+              : stage !== "idle" && index > 0 && index < stageIndex;
+            const active = stage !== "idle" && stage !== "complete" && index === stageIndex;
             return (
               <li key={item} className="flex items-center gap-2">
                 <span
@@ -797,7 +842,11 @@ function OrchestrationView({
                   }`}
                 />
                 <span className={`text-xs capitalize ${active ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
-                  {item === "complete" ? (isComplete ? "Done" : "Completing") : item}
+                  {item === "idle"
+                    ? "Waiting"
+                    : item === "complete"
+                      ? (isComplete ? "Done" : "Completing")
+                      : item}
                 </span>
               </li>
             );
@@ -821,7 +870,7 @@ function OrchestrationView({
                 key={tool}
                 className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]"
               >
-                {tool}
+                {formatToolchainLabel(tool)}
               </span>
             ))}
           </div>

@@ -10,6 +10,8 @@ export type SpecialistDefinition = {
 };
 
 const SPECIALIST_PROMPTS: Record<TaskRole, string> = {
+  workflow_planner:
+    "You design a compact staged workflow before execution. Clarify dependencies, sequencing, and risk checks.",
   retriever:
     "You extract key evidence from provided school materials. Return concise bullets with source-friendly phrasing.",
   web_researcher:
@@ -33,6 +35,7 @@ const SPECIALIST_PROMPTS: Record<TaskRole, string> = {
 };
 
 function roleRequirements(role: TaskRole) {
+  if (role === "workflow_planner") return { required: ["reasoning"] as const, preferred: ["search"] as const };
   if (role === "vision_interpreter") return { required: ["vision"] as const, preferred: ["reasoning"] as const };
   if (role === "web_researcher") return { required: ["search"] as const, preferred: ["reasoning"] as const };
   if (role === "fact_checker" || role === "critic") return { required: ["reasoning"] as const, preferred: ["search"] as const };

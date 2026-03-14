@@ -58,6 +58,12 @@ export type GeneratedDocument =
       title: string;
       columns: string[];
       rows: string[][];
+    }
+  | {
+      type: "webpage";
+      title: string;
+      summary?: string;
+      html: string;
     };
 
 export type ParsedGeneratedDocument = {
@@ -210,6 +216,27 @@ export function parseGeneratedDocument(content: string): ParsedGeneratedDocument
         preamble,
         rawJson,
         document: columns.length > 0 && rows.length > 0 ? { type: "comparison_table", title, columns, rows } : null,
+      };
+    }
+
+    if (type === "webpage") {
+      const html = typeof parsed.html === "string" ? parsed.html.trim() : "";
+      if (!html) {
+        return {
+          preamble,
+          rawJson,
+          document: null,
+        };
+      }
+      return {
+        preamble,
+        rawJson,
+        document: {
+          type: "webpage",
+          title,
+          summary: asString(parsed.summary),
+          html,
+        },
       };
     }
   } catch {

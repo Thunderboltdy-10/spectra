@@ -24,7 +24,13 @@ import { normalizeAttachments } from "@/lib/attachments/normalizer";
 import { gateCapabilities } from "@/lib/attachments/capability-gate";
 import { runVisionPrepass } from "@/lib/attachments/vision-prepass";
 import { generateArtifactResources } from "@/lib/artifacts";
-import { extractAttemptStats, maybeCompactHistory, toChatMessageShape, type MemoryEntry } from "@/lib/orchestrator/history";
+import {
+  extractAttemptStats,
+  maybeCompactHistory,
+  shouldScheduleCompaction,
+  toChatMessageShape,
+  type MemoryEntry,
+} from "@/lib/orchestrator/history";
 import {
   buildRelevantMemoryProfile,
   inferCitations,
@@ -36,6 +42,7 @@ import {
 } from "@/lib/orchestrator/post-process";
 import { buildResearchEvidenceBlock, maybeSearchWeb, runRagRetrieval } from "@/lib/orchestrator/retrieval";
 import { buildRoutePlan } from "@/lib/orchestrator/route-plan";
+import { formatRuntimeSkillBlock, selectRuntimeSkills } from "@/lib/orchestrator/skills";
 import { runAssistantStreaming, runCollaborativeStreaming } from "@/lib/orchestrator/streaming";
 import { buildTaskGraph, shouldUseMultiAgent } from "@/lib/orchestrator/task-graph";
 import { formatSchoolNow } from "@/lib/timezone";
@@ -583,6 +590,7 @@ export async function runChatPipeline(request: NextRequest) {
   // Buffer events that fire before the Response is returned (no reader attached yet).
   // Flushed at the very start of the async IIFE producer.
   const earlyEventBuffer: Record<string, unknown>[] = [];
+  earlyEventBuffer.push({ type: "phase", phase: "routing" });
 
   // Auto mode selection: if user selected "auto", always use suggested mode;
   // also auto-detect from default modes.
@@ -831,8 +839,13 @@ export async function runChatPipeline(request: NextRequest) {
       ? String(chatData.chat.contextSummary)
       : undefined;
 
-  const scheduledCompaction = history.length > 20 && !existingSummary;
+  const scheduledCompaction = shouldScheduleCompaction({
+    history,
+    mode: effectiveMode,
+    hasExistingSummary: Boolean(existingSummary),
+  });
   if (scheduledCompaction) {
+    earlyEventBuffer.push({ type: "phase", phase: "compacting" });
     void maybeCompactHistory({
       actorClerkId: actor.clerkId,
       chatId,
@@ -899,6 +912,13 @@ export async function runChatPipeline(request: NextRequest) {
     routePlan.shouldWriteMemory = false;
     routePlan.allowedToolBundles = routePlan.allowedToolBundles.filter((bundle) => bundle !== "memory");
   }
+  const runtimeSkills = routePlan.allowedToolBundles.includes("skills")
+    ? selectRuntimeSkills({
+        message: auto.message,
+        mode: effectiveMode,
+        maxSkills: routePlan.responseBudget === "deep" ? 6 : 4,
+      })
+    : [];
 
   const retrievalPromise = routePlan.allowedToolBundles.includes("retrieval") && routePlan.retrievalScopes.length > 0
     ? runRagRetrieval({
@@ -931,12 +951,17 @@ export async function runChatPipeline(request: NextRequest) {
         text: "",
         urls: [] as string[],
         sources: [] as Array<{ url: string; title: string; domain: string }>,
+        provider: "error" as const,
       }))
     : Promise.resolve({
       text: "",
       urls: [] as string[],
       sources: [] as Array<{ url: string; title: string; domain: string }>,
+      provider: "disabled" as const,
     });
+  if (routePlan.shouldUseWebSearch) {
+    earlyEventBuffer.push({ type: "phase", phase: "searching" });
+  }
 
   const adaptiveQuizPromise: Promise<{
     currentLevel: number;
@@ -1014,6 +1039,7 @@ export async function runChatPipeline(request: NextRequest) {
   const searchBlock = webResult.text ?? "";
   const searchUrls = webResult.urls ?? [];
   let searchSources = webResult.sources ?? [];
+  const searchProvider = webResult.provider;
   if (routePlan.shouldUseWebSearch) {
     logger.info("web search complete", { urlCount: searchUrls.length });
   }
@@ -1071,10 +1097,18 @@ export async function runChatPipeline(request: NextRequest) {
   });
   const manualLockRequested = body.routerMode === "manual" && Boolean(body.manualModel) && !body.forcedModel;
   if (manualLockRequested && body.manualModel && route.primaryModel !== body.manualModel) {
+    const allowedAlternatives = route.trace.candidates
+      .filter((candidate) => candidate.allowed)
+      .map((candidate) => candidate.modelId)
+      .filter((modelId, index, source) => source.indexOf(modelId) === index)
+      .slice(0, 3);
     await rollbackPersistedUserMessage();
     return jsonError(409, {
       code: "MANUAL_MODEL_RESTRICTED",
-      message: "Selected model cannot be used under current tier limits. Choose a budget-safe model.",
+      message:
+        allowedAlternatives.length > 0
+          ? `Selected model cannot be used under current tier limits. Try: ${allowedAlternatives.join(", ")}.`
+          : "Selected model cannot be used under current tier limits. Choose a budget-safe model.",
       retryable: false,
     });
   }
@@ -1119,6 +1153,15 @@ export async function runChatPipeline(request: NextRequest) {
     route.trace.toolchain.push(`retrieval_${retrieval.diagnostics.status}`);
   }
   if (routePlan.shouldUseWebSearch) route.trace.toolchain.push("web_search");
+  if (routePlan.shouldUseWebSearch) {
+    if (searchProvider === "searxng") {
+      route.trace.toolchain.push("search_provider_searxng");
+    } else if (searchProvider === "model_fallback") {
+      route.trace.toolchain.push("search_provider_model_fallback");
+    } else if (searchProvider === "error") {
+      route.trace.toolchain.push("search_provider_error");
+    }
+  }
   if (agentSuggestion) route.trace.toolchain.push("agent_suggestion");
   if (explainDepth) route.trace.toolchain.push("explain_depth_detection");
   if (effectiveMode === "quiz" && featureEnabled(orgSettings.org?.adaptiveQuizEnabled)) {
@@ -1140,6 +1183,9 @@ export async function runChatPipeline(request: NextRequest) {
   if (existingSummary || scheduledCompaction) route.trace.toolchain.push("context_compaction");
   route.trace.toolchain.push("route_plan");
   route.trace.routePlan = routePlan;
+  if (runtimeSkills.length > 0) {
+    route.trace.toolchain.push("skill_fetch");
+  }
 
   const attachments = await normalizeAttachments({
     actorClerkId: actor.clerkId,
@@ -1332,6 +1378,11 @@ If sources exist, cite them inline where useful and finish with a compact source
 Do not invent tool calls that were not actually run.
 === END ROUTE PRIMITIVES ===`,
   );
+  const runtimeSkillBlock = formatRuntimeSkillBlock(runtimeSkills);
+  if (runtimeSkillBlock) {
+    systemPromptParts.push(runtimeSkillBlock);
+    route.trace.toolchain.push("skill_guidance_applied");
+  }
   if (routePlan.agentContract) {
     systemPromptParts.push(
       `=== AGENT CONTRACT ===
@@ -1383,22 +1434,33 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     route.trace.toolchain.push("multi_agent_collaboration");
   }
 
-  const collabWallTimeMs = effectiveMode === "research" ? 150_000 : 90_000;
+  const collabWallTimeMs =
+    routePlan.responseBudget === "deep"
+      ? (effectiveMode === "research" ? 210_000 : 170_000)
+      : effectiveMode === "research"
+        ? 170_000
+        : 120_000;
   const collabLimits =
     budget.tier === "free_only"
-      ? { maxSpecialists: 1, maxSubcalls: 2, maxTokensPerSpecialist: 600, includeCritic: false, maxWallTimeMs: collabWallTimeMs }
+      ? {
+          maxSpecialists: routePlan.responseBudget === "deep" ? 2 : 1,
+          maxSubcalls: routePlan.responseBudget === "deep" ? 3 : 2,
+          maxTokensPerSpecialist: routePlan.responseBudget === "deep" ? 750 : 600,
+          includeCritic: false,
+          maxWallTimeMs: collabWallTimeMs,
+        }
       : budget.tier === "cheap_only"
         ? {
-            maxSpecialists: effectiveMode === "research" ? 4 : 3,
-            maxSubcalls: effectiveMode === "research" ? 4 : 3,
-            maxTokensPerSpecialist: effectiveMode === "research" ? 1100 : 900,
+            maxSpecialists: effectiveMode === "research" ? (routePlan.responseBudget === "deep" ? 5 : 4) : 3,
+            maxSubcalls: effectiveMode === "research" ? (routePlan.responseBudget === "deep" ? 5 : 4) : 3,
+            maxTokensPerSpecialist: effectiveMode === "research" ? (routePlan.responseBudget === "deep" ? 1300 : 1100) : 900,
             includeCritic: false,
             maxWallTimeMs: collabWallTimeMs,
           }
         : {
-            maxSpecialists: effectiveMode === "research" ? 7 : 5,
-            maxSubcalls: effectiveMode === "research" ? 8 : 6,
-            maxTokensPerSpecialist: effectiveMode === "research" ? 1600 : 1200,
+            maxSpecialists: effectiveMode === "research" ? (routePlan.responseBudget === "deep" ? 8 : 7) : 5,
+            maxSubcalls: effectiveMode === "research" ? (routePlan.responseBudget === "deep" ? 9 : 8) : 6,
+            maxTokensPerSpecialist: effectiveMode === "research" ? (routePlan.responseBudget === "deep" ? 1850 : 1600) : 1200,
             includeCritic: true,
             maxWallTimeMs: collabWallTimeMs,
           };
@@ -1433,6 +1495,37 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         .filter((modelId) => modelId && modelId !== supportModel),
     ),
   ).slice(0, 4);
+  const synthesisModelSelection = pickModelAndFallbacks({
+    catalog: catalog.filter((model) => model.modelId !== "openrouter/auto"),
+    tier: budget.tier,
+    mode: effectiveMode,
+    messageLength: auto.message.length,
+    needsSearch: routePlan.shouldUseWebSearch,
+    preferFast: routePlan.responseBudget === "simple",
+    preferCheap: routePlan.responseBudget !== "deep",
+    preferredCapabilities:
+      routePlan.responseBudget === "deep"
+        ? ["reasoning", "search"]
+        : routePlan.shouldUseWebSearch
+          ? ["search"]
+          : ["reasoning"],
+    runtimeStats: runtimeStatMap,
+    maxFallbacks: 4,
+  });
+  const synthesisModel = synthesisModelSelection.selected?.modelId ?? supportModel;
+  const synthesisFallbackModels = Array.from(
+    new Set(
+      [
+        ...synthesisModelSelection.fallbacks,
+        ...supportFallbackModels,
+        route.primaryModel,
+        ...route.fallbackModels,
+      ].filter((candidate) => candidate && candidate !== synthesisModel),
+    ),
+  ).slice(0, 5);
+  if (multiAgentEnabled && synthesisModel !== route.primaryModel) {
+    route.trace.toolchain.push("synthesis_model_reselect");
+  }
 
   const messages = [
     { role: "system", content: systemPromptParts.join("\n\n") },
@@ -1797,6 +1890,8 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
             baseSystemPrompt: systemPromptParts.join("\n\n"),
             primaryModel,
             fallbackModels,
+            synthesisModel,
+            synthesisFallbackModels,
             catalog,
             modelRuntimeStats: runtimeStatMap,
             spendingTier: budget.tier,

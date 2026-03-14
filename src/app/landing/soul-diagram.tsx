@@ -124,7 +124,7 @@ export function SoulDiagram() {
             Personalised response
           </p>
           <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
-            Your response reflects your school's formal academic tone and your
+            Your response reflects your school&apos;s formal academic tone and your
             personal preference for concise, step-by-step explanations
             calibrated to Year 11 Biology.
           </p>

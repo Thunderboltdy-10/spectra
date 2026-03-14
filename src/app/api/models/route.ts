@@ -6,6 +6,7 @@ import { withRouteErrorHandling } from "@/lib/route-handler";
 import { fetchOpenRouterModels, openRouterEmbedding } from "@/lib/openrouter";
 import { MODEL_CONFIG } from "@/lib/model-config";
 import { featuredMeta } from "@/lib/featured-models";
+import { MAX_MODEL_COST_PER_MILLION } from "@/lib/model-policy";
 
 type MappedModel = {
   modelId: string;
@@ -75,11 +76,20 @@ function generateStrengthText(model: MappedModel): string {
 }
 
 function mapOpenRouterModels(limit: number, models: Awaited<ReturnType<typeof fetchOpenRouterModels>>): MappedModel[] {
-  return models.slice(0, limit).map((model) => {
+  const mapped: MappedModel[] = [];
+  for (const model of models) {
     const promptCost = parseFloat(model.pricing?.prompt ?? "");
     const completionCost = parseFloat(model.pricing?.completion ?? "");
     const promptPerM = Number.isFinite(promptCost) ? promptCost * 1_000_000 : undefined;
     const completionPerM = Number.isFinite(completionCost) ? completionCost * 1_000_000 : undefined;
+    const isFree = model.id.includes(":free") || (promptCost === 0 && completionCost === 0);
+    const hasKnownPricing =
+      typeof promptPerM === "number" && Number.isFinite(promptPerM)
+      && typeof completionPerM === "number" && Number.isFinite(completionPerM);
+    if (!isFree) {
+      if (!hasKnownPricing) continue;
+      if (promptPerM! > MAX_MODEL_COST_PER_MILLION || completionPerM! > MAX_MODEL_COST_PER_MILLION) continue;
+    }
     const avgCost = Number.isFinite((promptPerM ?? NaN) + (completionPerM ?? NaN))
       ? (promptPerM ?? 0) + (completionPerM ?? 0)
       : 10;
@@ -87,12 +97,11 @@ function mapOpenRouterModels(limit: number, models: Awaited<ReturnType<typeof fe
     const modality = model.architecture?.modality ?? "";
     const isMulti = modality.toLowerCase().includes("image") || modality.toLowerCase().includes("multimodal");
     const id = model.id;
-    const isFree = model.id.includes(":free") || (promptCost === 0 && completionCost === 0);
 
     const reasoningBoost = /(o3|o4|reason|deepseek|claude-3\.7|gpt-5|gemini-2\.5-pro)/i.test(id) ? 2 : 1;
     const isFast = /(flash|mini|lite|haiku)/i.test(id);
 
-    const mapped: MappedModel = {
+    mapped.push({
       modelId: id,
       name: model.name || id,
       provider: model.top_provider?.name || id.split("/")[0] || "Unknown",
@@ -104,7 +113,6 @@ function mapOpenRouterModels(limit: number, models: Awaited<ReturnType<typeof fe
         isMulti ? "vision" : "text",
         /(o3|o4|reason|deepseek)/i.test(id) ? "reasoning" : "general",
         /(math|science|stem|academic|education|edu)/i.test(id) ? "academic" : "general-purpose",
-        ...(isFree ? ["free"] : []),
       ],
       costRating: toRating(avgCost, [0.2, 3]),
       speedRating: isFast ? "high" : "medium",
@@ -120,11 +128,12 @@ function mapOpenRouterModels(limit: number, models: Awaited<ReturnType<typeof fe
         speed: isFast ? 9 : 5,
       },
       ...featuredMeta(id),
-    };
-
-    mapped.strengthText = generateStrengthText(mapped);
-    return mapped;
-  });
+      strengthText: "",
+    });
+    mapped[mapped.length - 1]!.strengthText = generateStrengthText(mapped[mapped.length - 1]!);
+    if (mapped.length >= limit) break;
+  }
+  return mapped;
 }
 
 export async function GET() {

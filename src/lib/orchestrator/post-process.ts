@@ -581,6 +581,11 @@ export async function maybeExtractMemory(params: {
       { key: "subject_preferences", regex: /\b(i (love|like|enjoy)|favorite subject|interested in)\b/i, confidence: 0.64 },
       { key: "struggles", regex: /\b(i struggle with|i find .* hard|i'm stuck on|confused about)\b/i, confidence: 0.74 },
       { key: "learning_style", regex: /\b(i prefer|please explain|step by step|simple terms|visual)\b/i, confidence: 0.58 },
+      { key: "timezone", regex: /\b(my timezone is|i am in|i'm in|based in|utc[+-]?\d{1,2})\b/i, confidence: 0.66 },
+      { key: "language", regex: /\b(i speak|my language is|please answer in|respond in)\b/i, confidence: 0.65 },
+      { key: "identity", regex: /\b(i am|i'm)\b.{0,48}\b(student|teacher|grade|year|college|university)\b/i, confidence: 0.67 },
+      { key: "communication_style", regex: /\b(be concise|short answers|detailed answers|more detail|less detail)\b/i, confidence: 0.62 },
+      { key: "memory_updates", regex: /\b(update my memory|remember this|save this|from now on)\b/i, confidence: 0.78 },
     ];
 
     for (const pattern of patterns) {

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
+import { useSearchParams } from "next/navigation";
 import { Clock, Mail, ArrowLeft, Search, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,8 +15,10 @@ type SchoolOption = {
   description?: string;
 };
 
-export default function NoAccessPage() {
+function NoAccessPageContent() {
   const { isLoaded, isSignedIn } = useUser();
+  const searchParams = useSearchParams();
+  const reason = searchParams.get("reason");
   const [query, setQuery] = useState("");
   const [message, setMessage] = useState("");
   const [schools, setSchools] = useState<SchoolOption[]>([]);
@@ -28,6 +31,11 @@ export default function NoAccessPage() {
   }>({ status: "idle" });
 
   useEffect(() => {
+    if (isLoaded && !isSignedIn) {
+      setSchools([]);
+      return;
+    }
+
     const trimmed = query.trim();
     if (trimmed.length < 2) {
       setSchools([]);
@@ -54,7 +62,7 @@ export default function NoAccessPage() {
       });
 
     return () => controller.abort();
-  }, [query]);
+  }, [isLoaded, isSignedIn, query]);
 
   async function submitRequest() {
     if (!selectedSchool?._id) {
@@ -121,7 +129,9 @@ export default function NoAccessPage() {
 
           <h1 className="text-center font-display text-3xl text-[var(--text-primary)]">Approval pending</h1>
           <p className="mx-auto mt-3 max-w-md text-center text-sm leading-relaxed text-[var(--text-secondary)]">
-            Your account is signed in, but it is not linked to a school yet. Use an invitation link if you have one, or request access below.
+            {reason === "inactive"
+              ? "Your school workspace is currently inactive. Contact your school administrator to reactivate access."
+              : "Your account is signed in, but it is not linked to a school yet. Use an invitation link if you have one, or request access below."}
           </p>
 
           <div className="mx-auto mt-8 grid gap-3">
@@ -228,15 +238,36 @@ export default function NoAccessPage() {
           </div>
 
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-          <Link href="/sign-in">
-            <Button variant="secondary" className="gap-2">
-              <ArrowLeft className="h-3.5 w-3.5" />
-              Sign in again
-            </Button>
-          </Link>
+            <Link href="/sign-in">
+              <Button variant="secondary" className="gap-2">
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Sign in again
+              </Button>
+            </Link>
           </div>
         </div>
       </div>
     </main>
+  );
+}
+
+function NoAccessPageFallback() {
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)] px-4">
+      <div className="w-full max-w-xl rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 shadow-[var(--shadow-soft)]">
+        <h1 className="text-center font-display text-3xl text-[var(--text-primary)]">Loading access details...</h1>
+        <p className="mx-auto mt-3 max-w-md text-center text-sm leading-relaxed text-[var(--text-secondary)]">
+          Checking your workspace access status.
+        </p>
+      </div>
+    </main>
+  );
+}
+
+export default function NoAccessPage() {
+  return (
+    <Suspense fallback={<NoAccessPageFallback />}>
+      <NoAccessPageContent />
+    </Suspense>
   );
 }

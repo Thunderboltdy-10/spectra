@@ -421,7 +421,7 @@ export const checkUserBudget = query({
             ? Math.min(100, monthlyEvents * 0.35)
             : 0;
 
-    const tier =
+    const budgetTier =
       effectiveCostCents >= hardLimitCents
         ? "free_only"
         : effectiveCostCents >= cheapOnlyLimitCents
@@ -429,6 +429,8 @@ export const checkUserBudget = query({
           : effectiveCostCents >= softLimitCents
             ? "expensive_blocked"
             : "normal";
+    const allowPaidModels = org.allowPaidModels ?? true;
+    const tier = allowPaidModels ? budgetTier : "free_only";
 
     return {
       totalSpentEur,

@@ -13,7 +13,15 @@ export async function GET() {
       { actorClerkId: actor.clerkId },
     );
 
-    return ok({ orgs });
+    const normalized = orgs.map((org) => {
+      const safeOrg = (org && typeof org === "object" ? org : {}) as Record<string, unknown>;
+      const maxStudents = safeOrg.maxStudents;
+      return {
+        ...safeOrg,
+        maxMembers: typeof maxStudents === "number" ? maxStudents : undefined,
+      };
+    });
+    return ok({ orgs: normalized });
   });
 }
 
@@ -28,6 +36,7 @@ export async function POST(request: NextRequest) {
       schoolType?: string;
       country?: string;
       timezone?: string;
+      maxMembers?: number;
       maxStudents?: number;
       adminEmail?: string;
     };
@@ -52,7 +61,7 @@ export async function POST(request: NextRequest) {
       schoolType: body.schoolType || undefined,
       country: body.country?.trim() || undefined,
       timezone: body.timezone?.trim() || undefined,
-      maxStudents: body.maxStudents || undefined,
+      maxStudents: body.maxMembers ?? body.maxStudents ?? undefined,
     });
 
     // If adminEmail provided, assign them as org admin

@@ -182,7 +182,7 @@ export default function BookmarksPage() {
                     </p>
                   </div>
                   <Link
-                    href={`/?chatId=${encodeURIComponent(group.chatId)}`}
+                    href={`/chat?chatId=${encodeURIComponent(group.chatId)}`}
                     className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] px-3 py-1.5 text-xs transition hover:bg-[var(--bg-hover)]"
                   >
                     Open chat

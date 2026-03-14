@@ -57,7 +57,7 @@ type GroupedChats = {
 const EMPTY_PINNED_IDS = new Set<string>();
 
 const BASE_PRIMARY_NAV_ITEMS = [
-  { href: "/", label: "Chat", icon: Sparkles },
+  { href: "/chat", label: "Chat", icon: Sparkles },
   { href: "/flashcards", label: "Flashcards", icon: BookOpen },
   { href: "/bookmarks", label: "Bookmarks", icon: Bookmark },
   { href: "/achievements", label: "Achievements", icon: Trophy },
@@ -132,7 +132,7 @@ function isNavActive(pathname: string, href: string) {
     return pathname === "/admin" || pathname.startsWith("/admin/");
   }
   if (href === "/super-admin") {
-    return pathname === "/super-admin";
+    return pathname === "/super-admin" || pathname.startsWith("/super-admin/");
   }
   if (href === "/super-admin/feedback") {
     return pathname === "/super-admin/feedback" || pathname.startsWith("/super-admin/feedback/");
@@ -432,7 +432,7 @@ export function ChatSidebar({
   }
 
   return (
-    <div className="chat-sidebar flex h-full flex-col border-r border-[var(--border-default)] p-3">
+    <div className="chat-sidebar flex h-full flex-col border-r border-[var(--border-default)] p-3" data-usage-percent={usagePercentLabel} data-usage-status={usageStatus}>
       <div className="mb-3 flex items-center gap-2.5">
         <div className="flex min-w-0 flex-1 items-center gap-2.5">
           {orgLogoUrl && orgLogoUrl.trim() && !logoLoadFailed ? (

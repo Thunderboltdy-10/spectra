@@ -386,10 +386,10 @@ export function ChatMessage({
                 <MarkdownRenderer content={renderedContent} citations={citations} mode={mode} onOpenCanvas={onOpenCanvas} onSubmitQuizAnswers={onSubmitQuizAnswers} />
               )}
               <CollaboratorsBadge collaborators={routeTrace?.collaborators} />
-              {mode === "research" && searchCitations.length > 0 && (
+              {searchCitations.length > 0 && (
                 <div className="mt-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2.5">
                   <p className="mb-1 text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-                    Web Evidence
+                    Live Sources
                   </p>
                   <div className="flex flex-wrap gap-1.5">
                     {searchCitations.slice(0, 4).map((citation, index) => {

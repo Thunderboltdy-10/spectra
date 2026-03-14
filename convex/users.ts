@@ -34,19 +34,31 @@ async function ensureSeatAvailableForRole(
   role: "student" | "teacher" | "admin",
   excludeUserId?: Id<"users">,
 ) {
-  if (role !== "student") return;
-
   const org = await ctx.db.get(orgId);
-  const maxStudents =
+  const maxMembers =
     typeof org?.maxStudents === "number" && Number.isFinite(org.maxStudents) && org.maxStudents > 0
       ? Math.floor(org.maxStudents)
       : null;
 
-  if (!maxStudents) return;
+  if (!maxMembers) return;
 
-  const currentStudents = await countStudentSeats(ctx, orgId, excludeUserId);
-  if (currentStudents >= maxStudents) {
-    throw new Error("SEAT_LIMIT_REACHED: No student seats are currently available for this school.");
+  if (role === "student") {
+    const currentStudents = await countStudentSeats(ctx, orgId, excludeUserId);
+    if (currentStudents >= maxMembers) {
+      throw new Error("SEAT_LIMIT_REACHED: No member seats are currently available for this school.");
+    }
+    return;
+  }
+
+  const members = await ctx.db
+    .query("users")
+    .withIndex("by_org", (q) => q.eq("orgId", orgId))
+    .collect();
+  const currentMembers = excludeUserId
+    ? members.filter((member) => member._id !== excludeUserId).length
+    : members.length;
+  if (currentMembers >= maxMembers) {
+    throw new Error("SEAT_LIMIT_REACHED: No member seats are currently available for this school.");
   }
 }
 
@@ -141,8 +153,12 @@ export const ensureUser = mutation({
   },
   handler: async (ctx, args) => {
     const existing = await getUserByClerkId(ctx, args.clerkId);
-    const orgId = existing?.orgId ?? (await getOrCreateDefaultOrg(ctx));
+    const orgId = existing?.orgId ?? (args.bootstrapAdmin ? await getOrCreateDefaultOrg(ctx) : undefined);
     const now = Date.now();
+
+    if (!orgId) {
+      throw new Error("INVITATION_TOKEN_REQUIRED: Account must be provisioned via invitation.");
+    }
 
     let role = normalizeRole(args.requestedRole);
     if (args.bootstrapAdmin) {
@@ -155,6 +171,7 @@ export const ensureUser = mutation({
         email: args.email,
         name: args.name,
         role: nextRole,
+        orgId,
         updatedAt: now,
       });
 
@@ -169,6 +186,10 @@ export const ensureUser = mutation({
       await ctx.runMutation(api.seed.migrateLegacyDemoCopy, { orgId });
 
       return { ...existing, role: nextRole, orgId };
+    }
+
+    if (!args.bootstrapAdmin) {
+      throw new Error("INVITATION_TOKEN_REQUIRED: Account must be provisioned via invitation.");
     }
 
     const userId = await ctx.db.insert("users", {
@@ -206,6 +227,30 @@ export const me = query({
   args: { clerkId: v.string() },
   handler: async (ctx, args) => {
     return getUserByClerkId(ctx, args.clerkId);
+  },
+});
+
+export const accessState = query({
+  args: { clerkId: v.string() },
+  handler: async (ctx, args) => {
+    const user = await getUserByClerkId(ctx, args.clerkId);
+    if (!user) {
+      return {
+        hasUser: false,
+        hasOrg: false,
+        orgActive: false,
+      };
+    }
+
+    const org = await ctx.db.get(user.orgId);
+    return {
+      hasUser: true,
+      hasOrg: Boolean(org),
+      orgActive: org ? (org.isActive !== false) : false,
+      role: user.role,
+      orgId: user.orgId,
+      userId: user._id,
+    };
   },
 });
 

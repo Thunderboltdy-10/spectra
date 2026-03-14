@@ -1,4 +1,5 @@
 import type { SpendingTier, StudyMode } from "@/types";
+import { CHEAP_MODEL_COST_PER_MILLION, MAX_MODEL_COST_PER_MILLION } from "@/lib/model-policy";
 
 export type CatalogModelEntry = {
   modelId: string;
@@ -57,8 +58,6 @@ type RankedModel = {
   score: number;
   reasons: string[];
 };
-
-const MAX_COST_PER_MILLION_EUR = 30;
 
 function clamp01(value: number) {
   return Math.max(0, Math.min(1, value));
@@ -145,17 +144,25 @@ function isImageGenerationModel(model: CatalogModelEntry) {
 
 export function isModelTooExpensivePerMillion(model: CatalogModelEntry) {
   if (isImageGenerationModel(model)) return false;
+  const freeLike = Boolean(model.isFree || model.modelId.includes(":free"));
+  if (freeLike) return false;
+  const hasKnownInput = typeof model.inputCostPerM === "number" && Number.isFinite(model.inputCostPerM);
+  const hasKnownOutput = typeof model.outputCostPerM === "number" && Number.isFinite(model.outputCostPerM);
+  // Keep policy explicit: unknown-priced paid models are not eligible for runtime routing.
+  if (!hasKnownInput || !hasKnownOutput) return true;
   return (
-    effectiveInputCost(model) > MAX_COST_PER_MILLION_EUR
-    || effectiveOutputCost(model) > MAX_COST_PER_MILLION_EUR
+    Math.max(0, model.inputCostPerM as number) > MAX_MODEL_COST_PER_MILLION
+    || Math.max(0, model.outputCostPerM as number) > MAX_MODEL_COST_PER_MILLION
   );
 }
 
 function costScore(model: CatalogModelEntry) {
   const inCost = effectiveInputCost(model);
-  if (inCost <= 0.05) return 1;
-  if (inCost <= 3) return 0.78;
-  if (inCost <= 8) return 0.48;
+  const outCost = effectiveOutputCost(model);
+  const blended = Math.max(inCost, outCost);
+  if (blended <= 0.05) return 1;
+  if (blended <= CHEAP_MODEL_COST_PER_MILLION) return 0.78;
+  if (blended <= 8) return 0.48;
   return 0.2;
 }
 
@@ -175,13 +182,16 @@ export function isModelAllowedInTier(model: CatalogModelEntry, tier: SpendingTie
     return freeLike;
   }
 
-  const cheapLike = freeLike || effectiveInputCost(model) <= 3;
+  const cheapLike =
+    freeLike
+    || (effectiveInputCost(model) <= CHEAP_MODEL_COST_PER_MILLION && effectiveOutputCost(model) <= CHEAP_MODEL_COST_PER_MILLION);
   if (tier === "cheap_only") {
     return cheapLike;
   }
 
-  // expensive_blocked: keep everything except clearly expensive models.
-  return effectiveInputCost(model) <= 12;
+  // expensive_blocked: enforce only the global 30/M cap and budget heuristics,
+  // do not silently apply a stricter hidden threshold.
+  return true;
 }
 
 export function buildRuntimeStatMap(rows: Array<{
@@ -281,6 +291,7 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
     const runtimeStats = params.runtimeStats?.[model.modelId];
     const reliability = runtimeReliabilityScore(runtimeStats);
     const latency = runtimeLatencyScore(runtimeStats);
+    const totalRuns = Math.max(0, (runtimeStats?.successCount ?? 0) + (runtimeStats?.failureCount ?? 0));
     const cost = costScore(model);
     const speed = speedScore(model);
     const reasoning = reasoningScore(model);
@@ -294,6 +305,14 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
     score += reasoning * 0.12;
     score += mode * 0.2;
     score += context * 0.1;
+
+    // Encourage diversity over very frequently used models so routing does not collapse
+    // into one repeated option when similarly strong alternatives exist.
+    if (totalRuns > 80) {
+      const reusePenalty = Math.min(0.08, Math.log10(totalRuns) * 0.02);
+      score -= reusePenalty;
+      reasons.push("diversity-balance");
+    }
 
     if (params.needsSearch && modelSupportsCapability(model, "search")) {
       score += 0.08;

@@ -14,7 +14,6 @@ const SEARCH_KEYWORDS = [
   "who won",
   "recent",
   "breaking",
-  "update",
   "last week",
   "this month",
   "live",
@@ -115,17 +114,25 @@ export function classifyExplainDepth(prompt: string, userMemory?: string): Expla
 
 export function detectSearchIntent(message: string) {
   const normalized = message.toLowerCase();
+  if (isLowSignalChitChat(message)) return false;
   if (SEARCH_OPT_OUT.some((phrase) => normalized.includes(phrase))) {
     return false;
   }
-  if (SEARCH_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
+  const recencyCue = SEARCH_KEYWORDS.some((keyword) => normalized.includes(keyword));
+  const factualTarget = /\b(news|weather|forecast|score|results|stock|price|election|ceo|president|law|regulation|release|version)\b/i.test(
+    normalized,
+  );
+  if (recencyCue && factualTarget) {
     return true;
   }
   if (/\b(search|look up|lookup|find online|web)\b/i.test(normalized)) {
     return true;
   }
   if (/\b(score|stock|price|weather|forecast|election|ceo|president)\b/i.test(normalized)) {
-    return true;
+    const historicalCue = /\b(history|historical|in\s+20\d{2}|in\s+19\d{2}|used to|was|were)\b/i.test(normalized);
+    if (!historicalCue) {
+      return true;
+    }
   }
 
   const currentYear = new Date().getUTCFullYear();
@@ -137,13 +144,18 @@ export function detectSearchIntent(message: string) {
 }
 
 export function detectThinkingLevel(message: string, fallback: ThinkingLevel): ThinkingLevel {
+  if (isLowSignalChitChat(message)) return "low";
+
   const normalized = message.toLowerCase();
+  const words = message.trim().split(/\s+/).filter(Boolean).length;
+  const veryShortPrompt = words > 0 && words <= 6 && message.trim().length <= 60;
   const longPrompt = message.length > 400;
   const highMarker = HIGH_THINKING_MARKERS.some((marker) => normalized.includes(marker));
 
   if (highMarker || longPrompt) return "high";
-  if (message.length > 160) return "medium";
-  return fallback;
+  if (veryShortPrompt) return "low";
+  if (message.length > 220) return "medium";
+  return fallback === "high" ? "medium" : fallback;
 }
 
 function detectQuestionType(message: string): QuestionType {

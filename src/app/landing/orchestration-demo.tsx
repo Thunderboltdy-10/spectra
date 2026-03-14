@@ -45,7 +45,7 @@ export function OrchestrationDemo() {
   const [activeScenario, setActiveScenario] = useState(0);
   const [animStep, setAnimStep] = useState(-1);
   const timeoutIds = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const lastInteraction = useRef<number>(0);
+  const idleIntervals = useRef(0);
 
   // Animation sequence
   useEffect(() => {
@@ -68,10 +68,12 @@ export function OrchestrationDemo() {
     };
   }, [activeScenario]);
 
-  // Auto-cycle when idle > 10s
+  // Auto-cycle after two idle intervals (about 16s)
   useEffect(() => {
     const interval = setInterval(() => {
-      if (Date.now() - lastInteraction.current > 10000) {
+      idleIntervals.current += 1;
+      if (idleIntervals.current >= 2) {
+        idleIntervals.current = 0;
         setActiveScenario((prev) => (prev + 1) % SCENARIOS.length);
       }
     }, 8000);
@@ -79,7 +81,7 @@ export function OrchestrationDemo() {
   }, []);
 
   function handleTabClick(i: number) {
-    lastInteraction.current = Date.now();
+    idleIntervals.current = 0;
     setActiveScenario(i);
   }
 

@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { useSidebar } from "@/context/sidebar-context";
 
-type OrgSettings = { name?: string; description?: string; schoolType?: string; timezone?: string; maxStudents?: number; monthlyBudgetCentsPerUser?: number; budgetMarginPercent?: number; soulEnabled?: boolean; orchestratorV2Enabled?: boolean; searxngEnabled?: boolean; adaptiveQuizEnabled?: boolean; spacedRepetitionEnabled?: boolean; agentModelBoostEnabled?: boolean };
+type OrgSettings = { name?: string; description?: string; schoolType?: string; timezone?: string; maxStudents?: number; maxResourceFileSizeBytes?: number; monthlyBudgetCentsPerUser?: number; budgetMarginPercent?: number; soulEnabled?: boolean; orchestratorV2Enabled?: boolean; searxngEnabled?: boolean; adaptiveQuizEnabled?: boolean; spacedRepetitionEnabled?: boolean; agentModelBoostEnabled?: boolean };
 type Member = { _id: string; name: string; email: string; role: "student" | "teacher" | "admin"; createdAt: number };
 type Invitation = { _id: string; email: string; role: "student" | "teacher" | "admin"; status: "pending" | "accepted" | "expired" | "cancelled"; expiresAt: number };
 type AccessRequest = { _id: string; email: string; name: string; message?: string; createdAt: number };
@@ -114,8 +114,8 @@ function AdminPageContent() {
     const needle = memberSearch.trim().toLowerCase();
     return needle ? members.filter((member) => (member.name?.toLowerCase() ?? "").includes(needle) || (member.email?.toLowerCase() ?? "").includes(needle)) : members;
   }, [memberSearch, members]);
-  const seatUsed = members.filter((member) => member.role === "student").length;
-  const pendingStudentInvites = invitations.filter((item) => item.role === "student" && item.status === "pending").length;
+  const seatUsed = members.length;
+  const pendingInvites = invitations.filter((item) => item.status === "pending").length;
 
   async function completeOnboarding() {
     const response = await fetch("/api/personal-soul", { method: "PATCH" });
@@ -253,8 +253,28 @@ function AdminPageContent() {
           <p className="mt-1 text-sm text-[var(--text-secondary)]">Manage your school settings, members, and usage.</p>
         </div>
 
+        <nav className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-xs text-[var(--text-secondary)]">
+          <span className="font-medium text-[var(--text-primary)]">Jump to</span>
+          {[
+            ["admin-section-soul", "Soul"],
+            ["admin-section-members", "Members"],
+            ["admin-section-usage", "Usage"],
+            ["admin-section-settings", "Settings"],
+            ["admin-section-notifications", "Notifications"],
+            ["admin-section-agents", "Agents"],
+          ].map(([id, label]) => (
+            <a
+              key={id}
+              href={`#${id}`}
+              className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-1 transition hover:bg-[var(--bg-hover)]"
+            >
+              {label}
+            </a>
+          ))}
+        </nav>
+
         {/* Section 1: Soul & Personality */}
-        <section className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
+        <section id="admin-section-soul" className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
           <div className="mb-1 flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-[var(--accent-cyan)]" />
             <h2 className="font-display text-xl">Soul & Personality</h2>
@@ -293,12 +313,12 @@ function AdminPageContent() {
         </section>
 
         {/* Section 2: Members */}
-        <section className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
+        <section id="admin-section-members" className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
           <div className="mb-1 flex items-center gap-2">
             <Users2 className="h-4 w-4 text-[var(--accent-cyan)]" />
             <h2 className="font-display text-xl">Members</h2>
           </div>
-          <p className="mb-5 mt-1 text-sm text-[var(--text-secondary)]">Invite students or teachers, manage roles, and keep seat usage visible.</p>
+          <p className="mb-5 mt-1 text-sm text-[var(--text-secondary)]">Invite students or teachers, manage roles, and keep allocation usage visible.</p>
 
           {/* Inline stat strip */}
           <div className="mb-6 flex flex-wrap items-stretch divide-x divide-[var(--border-default)] rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] text-sm">
@@ -315,10 +335,10 @@ function AdminPageContent() {
               <p className="mt-0.5 font-medium">{dashboard?.teacherCount ?? 0}</p>
             </div>
             <div className="px-4 py-2.5">
-              <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Seats</p>
+              <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Allocation</p>
               <p className="mt-0.5 font-medium">
                 {org?.maxStudents ? `${seatUsed}/${org.maxStudents}` : seatUsed}
-                {pendingStudentInvites > 0 && <span className="ml-1.5 text-xs font-normal text-[var(--text-tertiary)]">({pendingStudentInvites} pending)</span>}
+                {pendingInvites > 0 && <span className="ml-1.5 text-xs font-normal text-[var(--text-tertiary)]">({pendingInvites} pending)</span>}
               </p>
             </div>
           </div>
@@ -433,7 +453,7 @@ function AdminPageContent() {
         </section>
 
         {/* Section 3: Usage & Models */}
-        <section className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
+        <section id="admin-section-usage" className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
           <div className="mb-1 flex items-center gap-2">
             <BarChart3 className="h-4 w-4 text-[var(--accent-cyan)]" />
             <h2 className="font-display text-xl">Usage & Models</h2>
@@ -548,12 +568,35 @@ function AdminPageContent() {
         </section>
 
         {/* Section 4: Settings */}
-        <section className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
+        <section id="admin-section-settings" className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
           <div className="mb-1 flex items-center gap-2">
             <Cpu className="h-4 w-4 text-[var(--accent-cyan)]" />
             <h2 className="font-display text-xl">Settings</h2>
           </div>
           <p className="mb-5 mt-1 text-sm text-[var(--text-secondary)]">School-wide retrieval, quiz, flashcard, and orchestration switches.</p>
+
+          <div className="mb-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">
+              Max Resource File Size (MB)
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              step={0.5}
+              value={Math.round((((org?.maxResourceFileSizeBytes ?? (10 * 1024 * 1024)) / (1024 * 1024)) * 10)) / 10}
+              onChange={(event) => {
+                const parsed = Number(event.target.value);
+                if (!Number.isFinite(parsed)) return;
+                const clamped = Math.min(100, Math.max(1, parsed));
+                setOrg((prev) => prev ? { ...prev, maxResourceFileSizeBytes: Math.round(clamped * 1024 * 1024) } : prev);
+              }}
+              className="h-10 w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-sm text-[var(--text-primary)] outline-none transition focus:ring-2 focus:ring-[var(--accent-cyan)]"
+            />
+            <p className="mt-1 text-xs text-[var(--text-secondary)]">
+              Shared with super-admin policy. Applies to pack and personal resource uploads.
+            </p>
+          </div>
 
           <div className="divide-y divide-[var(--border-default)] rounded-xl border border-[var(--border-default)]">
             {[
@@ -582,7 +625,7 @@ function AdminPageContent() {
         </section>
 
         {/* Section 5: Notifications */}
-        <section className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
+        <section id="admin-section-notifications" className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
           <div className="mb-1 flex items-center gap-2">
             <BellRing className="h-4 w-4 text-[var(--accent-cyan)]" />
             <h2 className="font-display text-xl">Notifications</h2>
@@ -685,7 +728,7 @@ function AdminPageContent() {
 
         {/* Section 6: Public Agents */}
         {schoolAgents.length > 0 && (
-          <section className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
+        <section id="admin-section-agents" className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
             <div className="mb-1 flex items-center gap-2">
               <Bot className="h-4 w-4 text-[var(--accent-cyan)]" />
               <h2 className="font-display text-xl">School Agents</h2>

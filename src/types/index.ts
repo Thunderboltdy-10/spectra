@@ -81,10 +81,11 @@ export type ToolBundle =
   | "retrieval"
   | "search"
   | "artifact"
+  | "skills"
   | "vision"
   | "multi_agent";
 
-export type ArtifactFormat = "docx" | "pdf" | "pptx";
+export type ArtifactFormat = "docx" | "pdf" | "pptx" | "html";
 
 export type MemoryScope = "user_global" | "project" | "chat" | "none";
 export type RetrievalScope = "pack" | "personal" | "agent" | "org";

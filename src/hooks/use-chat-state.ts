@@ -1644,7 +1644,8 @@ export function useChatState() {
               | "notice"
               | "rag_used"
               | "soul_update"
-              | "agent_summoned";
+              | "agent_summoned"
+              | "phase";
             content?: string;
             message?: string;
             error?: string | { message?: string };
@@ -1677,6 +1678,7 @@ export function useChatState() {
             tokensUsed?: number;
             model?: string;
             reason?: string;
+            phase?: StreamPhase;
             agentSuggestion?: AgentSuggestion;
             unlockedAchievements?: AchievementToastData[];
             sources?: Array<{ filename: string; page?: number; sourceType: string }>;
@@ -1825,6 +1827,10 @@ export function useChatState() {
               thinkingLevel: prev?.thinkingLevel ?? thinkingLevel,
               promptEnhanced: prev?.promptEnhanced ?? false,
             }));
+          }
+
+          if (payload.type === "phase" && payload.phase) {
+            setStreamPhase(payload.phase);
           }
 
           if (payload.type === "done") {

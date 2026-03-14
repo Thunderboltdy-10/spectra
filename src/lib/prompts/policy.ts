@@ -169,6 +169,7 @@ BACK: [answer or definition]
   - study_guide: { "type": "study_guide", "title": string, "summary"?: string, "highlights"?: string[], "terms"?: [{ "term": string, "definition": string }], "sections": [{ "heading": string, "content": string }] }
   - timeline: { "type": "timeline", "title": string, "events": [{ "date": string, "title": string, "detail": string }] }
   - comparison_table: { "type": "comparison_table", "title": string, "columns": string[], "rows": string[][] }
+  - webpage: { "type": "webpage", "title": string, "summary"?: string, "html": string }
 - You may include concise commentary outside the delimiters, but the JSON inside must be valid and complete.
 - Use clear academic structure and polished headings.`
       : "";
@@ -297,11 +298,10 @@ ${clarificationInstruction}
 ${preambleInstruction}
 ${agentRules}
 
-Output format:
-1) Short answer or next step.
-2) Explanation.
-3) Include compact inline numeric references when sourcing facts, like [1], [2]. Do not include filename-style brackets like [filename p.X].
-4) Why this response (one sentence).
+Response style:
+- Match response length to prompt complexity (very short for simple chat, detailed for complex tasks).
+- Use clear structure only when it helps readability; avoid rigid templates.
+- Include compact inline numeric references when sourcing facts, like [1], [2]. Do not include filename-style brackets like [filename p.X].
 
 SOURCES:
 ${params.sourceBlock || "No retrieved sources."}`;

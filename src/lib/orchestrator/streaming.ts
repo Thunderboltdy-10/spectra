@@ -197,6 +197,8 @@ export async function runCollaborativeStreaming(params: {
   baseSystemPrompt: string;
   primaryModel: string;
   fallbackModels: string[];
+  synthesisModel?: string;
+  synthesisFallbackModels?: string[];
   catalog?: CatalogModelEntry[];
   modelRuntimeStats?: Record<string, ModelRuntimeStat>;
   spendingTier?: SpendingTier;
@@ -358,10 +360,10 @@ export async function runCollaborativeStreaming(params: {
   let responseText = "";
   let usageIn = 0;
   let usageOut = 0;
-  let modelUsed = params.primaryModel;
+  let modelUsed = params.synthesisModel ?? params.primaryModel;
   for await (const event of openRouterStreamChat({
-    model: params.primaryModel,
-    fallbackModels: params.fallbackModels,
+    model: params.synthesisModel ?? params.primaryModel,
+    fallbackModels: params.synthesisFallbackModels ?? params.fallbackModels,
     messages: [
       { role: "system", content: params.baseSystemPrompt },
       {

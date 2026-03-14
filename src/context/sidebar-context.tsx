@@ -205,8 +205,8 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
         await refreshBootstrap();
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to load sidebar data";
-        if (message.startsWith("AUTH_NO_ACCESS")) {
-          window.location.href = "/no-access";
+        if (message.startsWith("AUTH_NO_ACCESS") || message.startsWith("AUTH_ORG_INACTIVE")) {
+          window.location.href = message.startsWith("AUTH_ORG_INACTIVE") ? "/no-access?reason=inactive" : "/no-access";
           return;
         }
         if (!message.startsWith("AUTH_NOT_SIGNED_IN")) {

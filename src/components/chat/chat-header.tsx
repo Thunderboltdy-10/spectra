@@ -48,7 +48,6 @@ export function ChatHeader({
   streamPhase,
   onStop,
   onCompact,
-  onCompactWithDepth,
   onToggleMobileSidebar,
   onOpenSettings,
   onOpenOrchestration,

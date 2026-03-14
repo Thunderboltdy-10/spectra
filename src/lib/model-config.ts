@@ -49,13 +49,9 @@ export function getDefaultImageModel(): string {
 export type ModelConfigKey = keyof typeof MODEL_CONFIG;
 export type ModelId = (typeof MODEL_CONFIG)[ModelConfigKey];
 
-export const MODEL_COST_BLOCK_LIST = new Set<string>([
-  "anthropic/claude-opus-4.1",
-  "anthropic/claude-opus-4.1:thinking",
-  "anthropic/claude-opus-4.6",
-  "anthropic/claude-opus-4.6-fast",
-  "google/gemini-2.5-pro-preview-06-05",
-]);
+// Deprecated: static ban lists introduce opaque routing bias.
+// Keep export for backward compatibility in tests/callers, but leave empty.
+export const MODEL_COST_BLOCK_LIST = new Set<string>();
 
 export const ROUTER_FALLBACKS: Record<string, string[]> = {
   [MODEL_CONFIG.tutorFast]: [MODEL_CONFIG.marker, MODEL_CONFIG.gptOss],

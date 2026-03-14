@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { useCompactSheet } from "@/hooks/use-compact-sheet";
 import { useRightPanelDock } from "@/hooks/use-right-panel-dock";
 import { rightPanelSurfaceClassName } from "@/components/ui/right-panel-surface";
+import { formatToolchainLabel } from "@/lib/orchestrator/trace-labels";
 
 type RouteTraceDrawerProps = {
   open: boolean;
@@ -217,7 +218,7 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
                   key={tool}
                   className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[11px] text-[var(--text-secondary)]"
                 >
-                  {tool}
+                  {formatToolchainLabel(tool)}
                 </span>
               ))
             ) : (

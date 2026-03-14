@@ -17,7 +17,20 @@ export async function GET(
       { actorClerkId: actor.clerkId, orgId: id },
     );
 
-    return ok(detail);
+    const normalized = (() => {
+      if (!detail || typeof detail !== "object") return detail;
+      const payload = detail as { org?: { maxStudents?: number } };
+      if (!payload.org) return detail;
+      return {
+        ...payload,
+        org: {
+          ...payload.org,
+          maxMembers: payload.org.maxStudents,
+        },
+      };
+    })();
+
+    return ok(normalized);
   });
 }
 
@@ -35,6 +48,7 @@ export async function PATCH(
       role?: "student" | "teacher" | "admin";
       monthlyBudgetCentsPerUser?: number;
       budgetMarginPercent?: number;
+      maxMembers?: number;
       maxResourceFileSizeBytes?: number;
       [key: string]: unknown;
     };
@@ -100,10 +114,16 @@ export async function PATCH(
       return ok(result);
     }
 
+    const orgPatch = { ...body } as Record<string, unknown>;
+    if (typeof orgPatch.maxMembers === "number" && !Number.isNaN(orgPatch.maxMembers)) {
+      orgPatch.maxStudents = orgPatch.maxMembers;
+    }
+    delete orgPatch.maxMembers;
+
     await convexMutation("superAdmin:updateOrg", {
       actorClerkId: actor.clerkId,
       orgId: id,
-      ...body,
+      ...orgPatch,
     });
 
     return ok({ ok: true });

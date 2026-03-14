@@ -2,6 +2,7 @@ import { requireActor } from "@/lib/auth-server";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 import { ok } from "@/lib/http";
 import { fetchOpenRouterModels } from "@/lib/openrouter";
+import { MAX_MODEL_COST_PER_MILLION } from "@/lib/model-policy";
 
 type LiveModel = {
   id: string;
@@ -44,12 +45,15 @@ function mapTags(id: string, provider: string, modality?: string) {
   return [...tags];
 }
 
-function shouldExclude(modality: string, promptCost?: number) {
+function shouldExclude(modelId: string, modality: string, promptCost?: number, completionCost?: number) {
   const lower = modality.toLowerCase();
   const audioOnly = lower.includes("audio") && !lower.includes("text") && !lower.includes("image");
   const speechOnly = lower.includes("speech") && !lower.includes("text");
   if (audioOnly || speechOnly) return true;
-  if ((promptCost ?? 0) > 60) return true;
+  const freeLike = modelId.includes(":free") || ((promptCost ?? 0) === 0 && (completionCost ?? 0) === 0);
+  if (!freeLike && (typeof promptCost !== "number" || typeof completionCost !== "number")) return true;
+  if ((promptCost ?? 0) > MAX_MODEL_COST_PER_MILLION) return true;
+  if ((completionCost ?? 0) > MAX_MODEL_COST_PER_MILLION) return true;
   return false;
 }
 
@@ -73,7 +77,7 @@ export async function GET() {
       const completion = parsePrice(model.pricing?.completion);
       const modality = model.architecture?.modality ?? "text";
 
-      if (shouldExclude(modality, prompt)) continue;
+      if (shouldExclude(model.id, modality, prompt, completion)) continue;
 
       const provider = model.top_provider?.name || model.id.split("/")[0] || "Unknown";
       mapped.push({

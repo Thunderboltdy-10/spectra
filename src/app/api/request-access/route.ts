@@ -6,6 +6,10 @@ import { withRouteErrorHandling } from "@/lib/route-handler";
 
 export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
+    const { userId } = await auth();
+    if (!userId) {
+      throw new Error("AUTH_NOT_SIGNED_IN: Sign in to search schools.");
+    }
     const query = request.nextUrl.searchParams.get("query") ?? "";
     const schools = await convexQuery("accessRequests:searchSchools", { query });
     return ok({ schools });

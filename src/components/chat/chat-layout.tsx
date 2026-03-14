@@ -273,7 +273,15 @@ export function ChatLayout() {
   );
 
   useEffect(() => {
-    const shouldAutoOpen = chat.sending && liveProgressAutoOpen;
+    const meaningfulOrchestration =
+      chat.activeCollaborators.length > 0
+      || chat.collaboratorPhase !== "idle"
+      || chat.streamPhase === "routing"
+      || chat.streamPhase === "searching"
+      || chat.streamPhase === "compacting"
+      || chat.streamPhase === "thinking"
+      || chat.streamPhase === "synthesizing";
+    const shouldAutoOpen = chat.sending && liveProgressAutoOpen && meaningfulOrchestration;
 
     if (
       shouldAutoOpen &&
@@ -291,11 +299,9 @@ export function ChatLayout() {
     }
   }, [
     chat.activeCollaborators.length,
-    chat.autoSearch,
     chat.collaboratorPhase,
-    chat.lastAutoResult?.searchEnabled,
+    chat.streamPhase,
     chat.sending,
-    chat.thinkingLevel,
     liveProgressAutoOpen,
     openPanel,
     panelActiveView,
@@ -762,12 +768,13 @@ export function ChatLayout() {
       />
 
       <UnifiedPanel
-        settingsProps={{
-          models: chat.models,
-          routerMode: chat.routerMode,
-          manualModel: chat.manualModel,
-          activeModelUsed: lastModelUsed,
-          usePersonalResources: chat.usePersonalResources,
+          settingsProps={{
+            models: chat.models,
+            routerMode: chat.routerMode,
+            manualModel: chat.manualModel,
+            activeModelUsed: lastModelUsed,
+            showCostDetails: chat.isSuperAdmin,
+            usePersonalResources: chat.usePersonalResources,
           autoSaveConversationFilesToLibrary: chat.autoSaveConversationFilesToLibrary,
           personalResources: chat.personalResources,
           userSpending: chat.userSpending,

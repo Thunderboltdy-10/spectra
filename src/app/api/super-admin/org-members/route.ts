@@ -3,6 +3,7 @@ import { requireSuperAdmin } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
+import type { Id } from "../../../../../convex/_generated/dataModel";
 
 export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
@@ -14,7 +15,7 @@ export async function GET(request: NextRequest) {
 
     const result = await convexQuery("superAdmin:listOrgMembers", {
       actorClerkId: actor.clerkId,
-      orgId,
+      orgId: orgId as Id<"orgs">,
     });
 
     return ok(result);
@@ -30,7 +31,7 @@ export async function DELETE(request: NextRequest) {
 
     await convexMutation("superAdmin:removeAnyMember", {
       actorClerkId: actor.clerkId,
-      userId: body.userId,
+      userId: body.userId as Id<"users">,
     });
 
     return ok({ ok: true });

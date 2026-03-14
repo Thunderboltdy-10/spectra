@@ -1,4 +1,4 @@
-import { CHEAP_MODEL_DEFAULTS, MODEL_CONFIG, MODEL_COST_BLOCK_LIST, ROUTER_FALLBACKS } from "@/lib/model-config";
+import { CHEAP_MODEL_DEFAULTS, MODEL_CONFIG, ROUTER_FALLBACKS } from "@/lib/model-config";
 import {
   isModelAllowedInTier,
   modelSupportsCapability,
@@ -62,10 +62,6 @@ function allowsPaidTier(tier: ModelRouteInput["spendingTier"]) {
 function eliminationReason(modelId: string, tier: ModelRouteInput["spendingTier"]) {
   if (isBudgetGuardedTier(tier) && modelId === MODEL_CONFIG.autoRouter) {
     return "openrouter_auto disabled under budget guard";
-  }
-
-  if (isBudgetGuardedTier(tier) && MODEL_COST_BLOCK_LIST.has(modelId)) {
-    return "blocked by MODEL_COST_BLOCK_LIST";
   }
 
   if (tier === "free_only" && !isFreeModel(modelId)) {
@@ -228,7 +224,6 @@ function isReasoningHeavyModel(modelId: string) {
 }
 
 function isExpensiveModel(modelId: string) {
-  if (MODEL_COST_BLOCK_LIST.has(modelId)) return true;
   if (modelId.includes(":free")) return false;
   if (CHEAP_MODEL_DEFAULTS.has(modelId)) return false;
   return /(opus|o3|o4|sonar-pro|gemini-2\.5-pro|gpt-5|claude-4)/i.test(modelId);
@@ -243,6 +238,22 @@ function modelProviderKey(modelId: string) {
 
 function isLikelyVisionModel(modelId: string) {
   return /(vision|multimodal|image|pixtral|llava|gpt-4o|gemini|claude-3|claude-4|qwen.*vl)/i.test(modelId);
+}
+
+function isLowSignalSimpleTurn(params: {
+  input: ModelRouteInput;
+  complexPrompt: boolean;
+  multimodalNeeded: boolean;
+}) {
+  const { input } = params;
+  if (params.complexPrompt || params.multimodalNeeded) return false;
+  if (input.needsSearch || input.needsRag) return false;
+  if (input.thinkingLevel !== "low") return false;
+  if (input.messageLength > 110) return false;
+  if (input.mode === "research" || input.mode === "marker" || input.mode === "exam" || input.mode === "document") {
+    return false;
+  }
+  return true;
 }
 
 function modelScoreBreakdown(params: {
@@ -510,16 +521,20 @@ function dynamicRouteFromCatalog(params: {
     params.input.agentPreferredModel,
     ...(params.input.agentTopModels ?? []).map((item) => item.modelId),
   ].filter((value): value is string => Boolean(value));
+  const lowSignalSimpleTurn = isLowSignalSimpleTurn({
+    input: params.input,
+    complexPrompt: params.complexPrompt,
+    multimodalNeeded: params.multimodalNeeded,
+  });
   const shouldRotateAwayFromPrevious =
     params.input.routerMode === "auto"
     && Boolean(params.input.previousModelUsed)
-    && !params.complexPrompt
-    && !params.multimodalNeeded
-    && !params.input.needsSearch
-    && !params.input.needsRag
-    && params.input.mode !== "research"
-    && params.input.mode !== "marker"
-    && params.input.mode !== "exam";
+    && lowSignalSimpleTurn;
+  const lowSignalAvoidModels = lowSignalSimpleTurn
+    ? catalogWithoutAuto
+      .filter((model) => isReasoningHeavyModel(model.modelId) || isExpensiveModel(model.modelId))
+      .map((model) => model.modelId)
+    : [];
 
   const pickParams = {
     catalog: catalogWithoutAuto,
@@ -530,19 +545,26 @@ function dynamicRouteFromCatalog(params: {
     preferCheap:
       params.input.mode === "quiz"
       || params.input.mode === "flashcard"
-      || (!params.complexPrompt && (params.input.mode === "general" || params.input.mode === "tutor")),
+      || (!params.complexPrompt && (params.input.mode === "general" || params.input.mode === "tutor"))
+      || lowSignalSimpleTurn,
     preferFast:
       params.input.mode === "tutor"
       || params.input.mode === "general"
-      || !params.complexPrompt,
+      || !params.complexPrompt
+      || lowSignalSimpleTurn,
     requiredCapabilities,
     preferredCapabilities,
     preferredModelIds,
-    avoidModels: shouldRotateAwayFromPrevious ? [params.input.previousModelUsed as string] : [],
+    avoidModels: Array.from(
+      new Set([
+        ...(shouldRotateAwayFromPrevious ? [params.input.previousModelUsed as string] : []),
+        ...lowSignalAvoidModels,
+      ]),
+    ),
     runtimeStats: params.input.modelRuntimeStats,
   } as const;
 
-  let reason = "Catalog-driven adaptive routing";
+  let reason = lowSignalSimpleTurn ? "Lightweight short-turn route" : "Catalog-driven adaptive routing";
   let primaryModel = "";
   let fallbackModels: string[] = [];
 

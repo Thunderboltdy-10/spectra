@@ -74,7 +74,7 @@ export default function CreateSchoolPage() {
   const [schoolType, setSchoolType] = useState("");
   const [country, setCountry] = useState("");
   const [timezone, setTimezone] = useState("UTC");
-  const [maxStudents, setMaxStudents] = useState("");
+  const [maxMembers, setMaxMembers] = useState("");
   const [adminEmail, setAdminEmail] = useState("");
 
   // Auto-generate slug from name unless the user has manually edited it
@@ -104,7 +104,7 @@ export default function CreateSchoolPage() {
           schoolType: schoolType || undefined,
           country: country.trim() || undefined,
           timezone,
-          maxStudents: maxStudents ? parseInt(maxStudents, 10) : undefined,
+          maxMembers: maxMembers ? parseInt(maxMembers, 10) : undefined,
           adminEmail: adminEmail.trim(),
         }),
       });
@@ -236,14 +236,14 @@ export default function CreateSchoolPage() {
                   Limits
                 </p>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Max Students" hint="Leave blank for unlimited.">
+                  <Field label="Member Allocation" hint="Leave blank for unlimited.">
                     <input
                       className={inputClass}
                       type="number"
                       min="1"
                       placeholder="500"
-                      value={maxStudents}
-                      onChange={(e) => setMaxStudents(e.target.value)}
+                      value={maxMembers}
+                      onChange={(e) => setMaxMembers(e.target.value)}
                     />
                   </Field>
                 </div>

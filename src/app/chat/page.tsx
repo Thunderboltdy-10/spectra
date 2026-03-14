@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { ChatLayout } from "@/components/chat/chat-layout";
 import { requireActor } from "@/lib/auth-server";
 
+export const dynamic = "force-dynamic";
+
 export default async function ChatPage() {
   try {
     await requireActor();

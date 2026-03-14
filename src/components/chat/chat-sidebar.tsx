@@ -432,7 +432,7 @@ export function ChatSidebar({
   }
 
   return (
-    <div className="chat-sidebar flex h-full flex-col border-r border-[var(--border-default)] p-3">
+    <div className="chat-sidebar flex h-full flex-col border-r border-[var(--border-default)] p-3" data-usage-percent={usagePercentLabel} data-usage-status={usageStatus}>
       <div className="mb-3 flex items-center gap-2.5">
         <div className="flex min-w-0 flex-1 items-center gap-2.5">
           {orgLogoUrl && orgLogoUrl.trim() && !logoLoadFailed ? (

@@ -13,7 +13,6 @@ import {
   Medal,
   RefreshCw,
   SearchCheck,
-  Star,
   Trophy,
 } from "lucide-react";
 import { toast } from "sonner";

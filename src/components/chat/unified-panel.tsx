@@ -703,6 +703,7 @@ type OrchestrationViewProps = {
   routeTrace?: RouteTrace;
   lastModelUsed?: string;
   searchEnabled?: boolean;
+  routerMode?: RouterMode;
 };
 
 function orchestrationStage(params: {
@@ -734,7 +735,10 @@ function OrchestrationView({
   routeTrace,
   lastModelUsed,
   searchEnabled,
+  routerMode,
 }: OrchestrationViewProps) {
+  const isManual = routerMode === "manual";
+
   const roleLabel = (value: string) =>
     value
       .replace(/_/g, " ")
@@ -755,43 +759,73 @@ function OrchestrationView({
     searchEnabled,
     hasFinishedWork: Boolean(routeTrace || lastModelUsed),
   });
-  const steps = ["idle", "compacting", "routing", "searching", "thinking", "generating", "synthesizing", "complete"] as const;
-  const stageIndex = steps.indexOf(stage);
+
+  // Track which steps have been seen during this session
+  const [seenSteps, setSeenSteps] = useState<Set<string>>(new Set(["idle"]));
+  useEffect(() => {
+    if (stage && stage !== "idle") {
+      setSeenSteps((prev) => new Set([...prev, stage]));
+    }
+    if (stage === "complete") {
+      setSeenSteps((prev) => new Set([...prev, "complete"]));
+    }
+  }, [stage]);
+
+  // Build the ordered list of steps to display: only steps seen or currently active
+  const allSteps = ["idle", "compacting", "routing", "searching", "thinking", "generating", "synthesizing", "complete"] as const;
+  // When in manual mode, suppress routing step
+  const visibleStepSet = new Set(seenSteps);
+  if (stage !== "idle") visibleStepSet.add(stage);
+  if (sending) visibleStepSet.add("complete"); // always show "complete" while streaming
+  const displaySteps = allSteps.filter((s) => {
+    if (s === "idle") return false; // always hide "idle" — it's implied
+    if (s === "routing" && isManual) return false;
+    if (s === "searching" && !searchEnabled && !visibleStepSet.has("searching")) return false;
+    if (s === "compacting" && !visibleStepSet.has("compacting")) return false;
+    if (s === "synthesizing" && visibleCollaborators.length === 0 && !visibleStepSet.has("synthesizing")) return false;
+    return visibleStepSet.has(s) || s === "complete";
+  });
+
+  const stageIndex = displaySteps.indexOf(stage as typeof displaySteps[number]);
   const selectedModel = routeTrace?.selected.modelId || lastModelUsed;
   const selectedReason =
     routeTrace?.selected.reason ||
-    (sending
-      ? "Final model reason will appear when this response finishes."
-      : "No route trace captured yet for this chat.");
+    (isManual
+      ? "Model was manually selected — no routing decision made."
+      : sending
+        ? "Final model reason will appear when this response finishes."
+        : "No route trace captured yet for this chat.");
 
   return (
     <div className="space-y-4">
       <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
         <div className="flex items-center justify-between gap-2">
           <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Current phase</p>
-          <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+          <span className={`rounded-full border border-[var(--border-default)] px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] ${sending ? "bg-[color-mix(in_oklab,var(--success)_12%,var(--bg-secondary))] text-[var(--success)]" : "bg-[var(--bg-secondary)] text-[var(--text-secondary)]"}`}>
             {sending ? "Live" : "Idle"}
           </span>
         </div>
-        <p className="mt-1 text-sm font-medium capitalize text-[var(--text-primary)]">{stage}</p>
+        <p className="mt-1 text-sm font-medium capitalize text-[var(--text-primary)]">{stage === "idle" ? (sending ? "starting…" : "waiting") : stage}</p>
       </section>
 
       <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-        <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Orchestration tree</p>
+        <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">{isManual ? "Execution" : "Orchestration tree"}</p>
         <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5">
           <div className="flex items-center justify-between gap-2">
-            <p className="text-sm font-medium text-[var(--text-primary)]">Orchestrator agent</p>
+            <p className="text-sm font-medium text-[var(--text-primary)]">{isManual ? "Direct model call" : "Orchestrator agent"}</p>
             <span className="rounded-full border border-[var(--border-default)] px-1.5 py-0.5 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
               {sending ? "running" : "idle"}
             </span>
           </div>
           <p className="mt-1 text-xs text-[var(--text-secondary)]">
-            Plans specialist calls, validates outputs, and composes the final response.
+            {isManual
+              ? "Sending directly to your selected model — no automatic routing."
+              : "Plans specialist calls, validates outputs, and composes the final response."}
           </p>
         </div>
 
         {visibleCollaborators.length === 0 ? (
-          <p className="mt-2 text-xs text-[var(--text-secondary)]">No specialist sub-agents active right now.</p>
+          <p className="mt-2 text-xs text-[var(--text-secondary)]">{isManual ? "" : "No specialist sub-agents active right now."}</p>
         ) : (
           <div className="relative mt-3 pl-4">
             <div className="absolute bottom-2 left-[7px] top-0 w-px bg-[var(--border-default)]" />
@@ -821,38 +855,38 @@ function OrchestrationView({
         )}
       </section>
 
-      <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-        <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Progress</p>
-        <ol className="space-y-1.5">
-          {steps.map((item, index) => {
-            const isComplete = stage === "complete";
-            const done = isComplete
-              ? index > 0 && index < steps.length - 1
-              : stage !== "idle" && index > 0 && index < stageIndex;
-            const active = stage !== "idle" && stage !== "complete" && index === stageIndex;
-            return (
-              <li key={item} className="flex items-center gap-2">
-                <span
-                  className={`h-2.5 w-2.5 rounded-full ${
-                    done
-                      ? "bg-[var(--success)]"
-                      : active
-                        ? "bg-[var(--accent-cyan)]"
-                        : "bg-[var(--border-default)]"
-                  }`}
-                />
-                <span className={`text-xs capitalize ${active ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
-                  {item === "idle"
-                    ? "Waiting"
-                    : item === "complete"
-                      ? (isComplete ? "Done" : "Completing")
+      {displaySteps.length > 0 && (
+        <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+          <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Progress</p>
+          <ol className="space-y-1.5">
+            {displaySteps.map((item, index) => {
+              const isComplete = stage === "complete";
+              const done = isComplete
+                ? index < displaySteps.length - 1
+                : stage !== "idle" && index < stageIndex;
+              const active = stage !== "idle" && stage !== "complete" && item === stage;
+              return (
+                <li key={item} className="flex items-center gap-2">
+                  <span
+                    className={`h-2 w-2 rounded-full transition-colors ${
+                      done
+                        ? "bg-[var(--success)]"
+                        : active
+                          ? "bg-[var(--accent-cyan)] animate-pulse"
+                          : "bg-[var(--border-default)]"
+                    }`}
+                  />
+                  <span className={`text-xs capitalize ${active ? "font-medium text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
+                    {item === "complete"
+                      ? (isComplete ? "Done" : "Completing…")
                       : item}
-                </span>
-              </li>
-            );
-          })}
-        </ol>
-      </section>
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+      )}
 
       <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
         <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Model decision</p>

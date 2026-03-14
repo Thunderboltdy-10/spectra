@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import {
   BarChart3,
@@ -17,7 +17,6 @@ import {
   ShieldCheck,
   Sparkles,
   Users2,
-  WalletCards,
   type LucideIcon,
 } from "lucide-react";
 import { StepContainer } from "@/components/onboarding/steps";
@@ -27,8 +26,6 @@ import { cn } from "@/lib/utils";
 
 type AdminOnboardingProps = {
   orgName: string;
-  monthlyBudgetCentsPerUser?: number | null;
-  budgetMarginPercent?: number | null;
   onComplete: () => Promise<void>;
   onSkip: () => Promise<void>;
 };
@@ -48,17 +45,8 @@ const STEP_META: Array<{ title: string; subtitle: string; icon: LucideIcon }> = 
   { title: "School Soul", subtitle: "Behavior and policy", icon: BookOpen },
   { title: "Members", subtitle: "Invite your team", icon: Users2 },
   { title: "Analytics", subtitle: "Track engagement", icon: BarChart3 },
-  { title: "Budget", subtitle: "Usage guardrails", icon: WalletCards },
 ];
 
-function formatMoney(cents: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(cents / 100);
-}
 
 function ProgressRail({ currentStep }: { currentStep: number }) {
   return (
@@ -109,8 +97,6 @@ function ProgressRail({ currentStep }: { currentStep: number }) {
 
 export function AdminOnboarding({
   orgName,
-  monthlyBudgetCentsPerUser,
-  budgetMarginPercent,
   onComplete,
   onSkip,
 }: AdminOnboardingProps) {
@@ -148,38 +134,6 @@ export function AdminOnboarding({
       }
     })();
   }, []);
-
-  const budgetInfo = useMemo(() => {
-    const hardLimitCents =
-      typeof monthlyBudgetCentsPerUser === "number" &&
-      Number.isFinite(monthlyBudgetCentsPerUser) &&
-      monthlyBudgetCentsPerUser > 0
-        ? Math.round(monthlyBudgetCentsPerUser)
-        : 900;
-
-    const marginPercent = Math.min(
-      40,
-      Math.max(
-        5,
-        typeof budgetMarginPercent === "number" && Number.isFinite(budgetMarginPercent)
-          ? budgetMarginPercent
-          : 20,
-      ),
-    );
-    const softLimitCents = Math.max(0, Math.floor(hardLimitCents * (1 - marginPercent / 100)));
-    const cheapOnlyLimitCents = Math.max(0, Math.floor(hardLimitCents * 0.9));
-
-    return {
-      configured:
-        typeof monthlyBudgetCentsPerUser === "number" &&
-        Number.isFinite(monthlyBudgetCentsPerUser) &&
-        monthlyBudgetCentsPerUser > 0,
-      marginPercent,
-      hardLimitCents,
-      softLimitCents,
-      cheapOnlyLimitCents,
-    };
-  }, [budgetMarginPercent, monthlyBudgetCentsPerUser]);
 
   const atLastStep = step === STEP_META.length - 1;
 
@@ -587,53 +541,6 @@ export function AdminOnboarding({
             >
               Open analytics dashboard <ExternalLink className="h-3.5 w-3.5" />
             </Link>
-          </StepContainer>
-        )}
-
-        {step === 5 && (
-          <StepContainer>
-            <h2 className="text-2xl font-bold text-[var(--text-primary)]">Budget Guardrails</h2>
-            <p className="mb-5 mt-1 text-sm text-[var(--text-secondary)]">
-              Understand when model access tiers tighten as monthly usage grows.
-            </p>
-
-            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
-              {budgetInfo.configured ? (
-                <p className="text-sm text-[var(--text-primary)]">
-                  Your school has a configured monthly per-user budget. Limits below are active now.
-                </p>
-              ) : (
-                <p className="text-sm text-[var(--text-primary)]">
-                  No custom monthly budget is configured, so platform defaults are active.
-                </p>
-              )}
-              <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                Margin: {budgetInfo.marginPercent}% &middot; calculations run per user per month.
-              </p>
-            </div>
-
-            <div className="mt-3 grid gap-3 sm:grid-cols-3">
-              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
-                <p className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Expensive blocked</p>
-                <p className="mt-1 text-lg font-semibold text-[var(--text-primary)]">{formatMoney(budgetInfo.softLimitCents)}</p>
-                <p className="mt-1 text-xs text-[var(--text-secondary)]">High-cost models stop first.</p>
-              </div>
-              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
-                <p className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Cheap-only mode</p>
-                <p className="mt-1 text-lg font-semibold text-[var(--text-primary)]">{formatMoney(budgetInfo.cheapOnlyLimitCents)}</p>
-                <p className="mt-1 text-xs text-[var(--text-secondary)]">Only low-cost models remain.</p>
-              </div>
-              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
-                <p className="text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">Hard limit</p>
-                <p className="mt-1 text-lg font-semibold text-[var(--text-primary)]">{formatMoney(budgetInfo.hardLimitCents)}</p>
-                <p className="mt-1 text-xs text-[var(--text-secondary)]">System moves to free-only.</p>
-              </div>
-            </div>
-
-            <div className="mt-4 flex items-center gap-2 rounded-xl border border-[color-mix(in_oklab,var(--success)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_10%,var(--bg-elevated))] px-3 py-2 text-sm text-[var(--text-primary)]">
-              <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />
-              On completion, onboarding is marked done and the admin console opens.
-            </div>
           </StepContainer>
         )}
 

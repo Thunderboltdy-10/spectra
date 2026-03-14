@@ -769,7 +769,7 @@ export function ChatMessages({
                       <span className="thinking-wave">{streamingStatus}</span>
                     </div>
                     {hasRealThinking && draftThinking ? (
-                      <ThinkingBlock content={draftThinking} streaming />
+                      <ThinkingBlock content={draftThinking} streaming={streamPhase === "thinking"} />
                     ) : null}
                     {renderDraftMarkdown(visibleDraftResponse)}
                     {showStreamCursor ? (
@@ -803,7 +803,7 @@ export function ChatMessages({
                       <span className="thinking-wave">{streamingStatus}</span>
                     </div>
                     {hasRealThinking && draftThinking ? (
-                      <ThinkingBlock content={draftThinking} streaming />
+                      <ThinkingBlock content={draftThinking} streaming={streamPhase === "thinking"} />
                     ) : null}
                     {!hasRealThinking && activeCollaborators.length === 0 ? (
                       <div className="space-y-2">

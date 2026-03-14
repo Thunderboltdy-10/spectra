@@ -707,6 +707,8 @@ button:disabled {
 .chat-markdown pre {
   overflow-x: auto;
   border-radius: var(--radius-input);
+  /* bg-code is always dark (#0f1724); force light text in both modes */
+  color: #d9e3f3;
 }
 
 .chat-markdown code {

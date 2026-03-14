@@ -242,7 +242,7 @@ function AdminPageContent() {
   }
 
   if (sidebarLoading || !hasAdminAccess || loading) return <AppShell><div className="flex items-center justify-center p-8"><div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--border-default)] border-t-[var(--accent-cyan)]" /></div></AppShell>;
-  if (!onboardingComplete) return <AppShell><AdminOnboarding orgName={org?.name ?? "AI School"} monthlyBudgetCentsPerUser={org?.monthlyBudgetCentsPerUser ?? null} budgetMarginPercent={org?.budgetMarginPercent ?? null} onComplete={completeOnboarding} onSkip={completeOnboarding} /></AppShell>;
+  if (!onboardingComplete) return <AppShell><AdminOnboarding orgName={org?.name ?? "AI School"} onComplete={completeOnboarding} onSkip={completeOnboarding} /></AppShell>;
 
   return (
     <AppShell fullBleed contentClassName="2xl:px-14">

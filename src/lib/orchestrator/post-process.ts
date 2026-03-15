@@ -28,6 +28,7 @@ async function selectUtilityModel(params: {
   preferredCapabilities?: Array<"reasoning" | "vision" | "code" | "search" | "image_generation">;
   preferFast?: boolean;
   preferCheap?: boolean;
+  preferFree?: boolean;
 }): Promise<UtilityModelSelection> {
   const [dbCatalog, runtimeStats, budget] = await Promise.all([
     convexQuery("models:listModels", {
@@ -96,6 +97,7 @@ async function selectUtilityModel(params: {
     preferredCapabilities: params.preferredCapabilities,
     preferFast: params.preferFast ?? true,
     preferCheap: params.preferCheap ?? true,
+    preferFree: params.preferFree ?? false,
     runtimeStats: buildRuntimeStatMap(
       runtimeStats as Array<{ modelId: string; successCount: number; failureCount: number; avgLatencyMs?: number }>,
     ),
@@ -449,41 +451,80 @@ function normalizeTitle(candidate: string, fallbackSource: string) {
   return title || heuristicTitle(fallbackSource);
 }
 
-async function generateTitleFromSnippet(source: string, fallbackSource: string, actorClerkId: string) {
+async function generateTitleFromSnippet(
+  source: string,
+  fallbackSource: string,
+  actorClerkId: string,
+  options?: {
+    chatId?: string;
+    onModelCall?: (call: {
+      model: string;
+      usage?: {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        total_tokens?: number;
+        cost?: number;
+      };
+      durationMs?: number;
+    }) => void;
+  },
+) {
   const utility = await selectUtilityModel({
     actorClerkId,
     preferredCapabilities: ["reasoning"],
     preferFast: true,
     preferCheap: true,
+    preferFree: true,
   });
+  const startedAt = Date.now();
+  const completionPromise = openRouterChatCompletion({
+    model: utility.model,
+    fallbackModels: utility.fallbackModels,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Generate a conversation title in 2 to 6 words. Keep the same language as the user when possible. Return plain title text only with no quotes.",
+      },
+      {
+        role: "user",
+        content: source.slice(0, 700),
+      },
+    ],
+    temperature: 0.1,
+    maxTokens: 24,
+  });
+  let usageRecorded = false;
+  const recordUsage = async (completion: Awaited<typeof completionPromise>) => {
+    if (usageRecorded) return;
+    usageRecorded = true;
+    const model = completion.model ?? utility.model;
+    const usage = completion.usage;
+    const durationMs = Date.now() - startedAt;
+    await recordOpenRouterUsage({
+      actorClerkId,
+      chatId: options?.chatId,
+      model,
+      usage,
+    }).catch(() => {});
+    options?.onModelCall?.({
+      model,
+      usage,
+      durationMs,
+    });
+  };
+  void completionPromise.then((completion) => {
+    void recordUsage(completion);
+  }).catch(() => {});
+
   const completion = await withTimeout(
-    openRouterChatCompletion({
-      model: utility.model,
-      fallbackModels: utility.fallbackModels,
-      messages: [
-        {
-          role: "system",
-          content:
-            "Generate a conversation title in 2 to 6 words. Keep the same language as the user when possible. Return plain title text only with no quotes.",
-        },
-        {
-          role: "user",
-          content: source.slice(0, 700),
-        },
-      ],
-      temperature: 0.1,
-      maxTokens: 24,
-    }),
+    completionPromise,
     4500,
   );
 
   const raw = completion?.choices?.[0]?.message?.content ?? "";
   if (completion) {
-    await recordOpenRouterUsage({
-      actorClerkId,
-      model: completion.model ?? utility.model,
-      usage: completion.usage,
-    }).catch(() => {});
+    await recordUsage(completion);
   }
   return normalizeTitle(raw, fallbackSource);
 }
@@ -493,11 +534,29 @@ export async function maybeGenerateTitle(params: {
   actorClerkId: string;
   userMessage: string;
   assistantMessage: string;
+  onModelCall?: (call: {
+    model: string;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+      cost?: number;
+    };
+    durationMs?: number;
+  }) => void;
 }): Promise<string | undefined> {
   try {
     const source = `User: ${params.userMessage}\nAssistant: ${params.assistantMessage.slice(0, 260)}`;
     const fallbackSource = compactText(`${params.userMessage} ${params.assistantMessage.slice(0, 180)}`);
-    const title = await generateTitleFromSnippet(source, fallbackSource || params.userMessage, params.actorClerkId);
+    const title = await generateTitleFromSnippet(
+      source,
+      fallbackSource || params.userMessage,
+      params.actorClerkId,
+      {
+        chatId: params.chatId,
+        onModelCall: params.onModelCall,
+      },
+    );
 
     await convexMutation("chats:setChatTitle", {
       actorClerkId: params.actorClerkId,
@@ -514,6 +573,16 @@ export async function maybeGenerateTitleFromUserPrompt(params: {
   chatId: string;
   actorClerkId: string;
   userMessage: string;
+  onModelCall?: (call: {
+    model: string;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+      cost?: number;
+    };
+    durationMs?: number;
+  }) => void;
 }): Promise<string | undefined> {
   try {
     const fallbackSource = compactText(params.userMessage);
@@ -521,6 +590,10 @@ export async function maybeGenerateTitleFromUserPrompt(params: {
       params.userMessage,
       fallbackSource || heuristicTitle(params.userMessage),
       params.actorClerkId,
+      {
+        chatId: params.chatId,
+        onModelCall: params.onModelCall,
+      },
     );
 
     await convexMutation("chats:setChatTitle", {
@@ -536,9 +609,20 @@ export async function maybeGenerateTitleFromUserPrompt(params: {
 
 export async function maybeExtractMemory(params: {
   actorClerkId: string;
+  chatId?: string;
   existingEntries: MemoryEntry[];
   userMessage: string;
   assistantResponse: string;
+  onModelCall?: (call: {
+    model: string;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+      cost?: number;
+    };
+    durationMs?: number;
+  }) => void;
 }): Promise<MemoryEntry[]> {
   const snippet = `User: ${params.userMessage.slice(0, 500)}\nAssistant: ${params.assistantResponse.slice(0, 500)}`;
   const utility = await selectUtilityModel({
@@ -546,25 +630,51 @@ export async function maybeExtractMemory(params: {
     preferredCapabilities: ["reasoning"],
     preferFast: true,
     preferCheap: true,
+    preferFree: true,
   });
 
+  const startedAt = Date.now();
+  const completionPromise = openRouterChatCompletion({
+    model: utility.model,
+    fallbackModels: utility.fallbackModels,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Extract durable student facts. Focus on: name, grade/year, school, timezone/location, languages, subjects, goals, weaknesses, interests, study habits, communication preferences, learning style, and personality traits. Return JSON array of {key,value,confidence}. Only include facts likely to help future tutoring.",
+      },
+      {
+        role: "user",
+        content: snippet,
+      },
+    ],
+    temperature: 0,
+  });
+  let usageRecorded = false;
+  const recordUsage = async (completion: Awaited<typeof completionPromise>) => {
+    if (usageRecorded) return;
+    usageRecorded = true;
+    const model = completion.model ?? utility.model;
+    const usage = completion.usage;
+    const durationMs = Date.now() - startedAt;
+    await recordOpenRouterUsage({
+      actorClerkId: params.actorClerkId,
+      chatId: params.chatId,
+      model,
+      usage,
+    }).catch(() => {});
+    params.onModelCall?.({
+      model,
+      usage,
+      durationMs,
+    });
+  };
+  void completionPromise.then((completion) => {
+    void recordUsage(completion);
+  }).catch(() => {});
+
   const completion = await withTimeout(
-    openRouterChatCompletion({
-      model: utility.model,
-      fallbackModels: utility.fallbackModels,
-      messages: [
-        {
-          role: "system",
-          content:
-            "Extract durable student facts. Focus on: name, grade/year, school, timezone/location, languages, subjects, goals, weaknesses, interests, study habits, communication preferences, learning style, and personality traits. Return JSON array of {key,value,confidence}. Only include facts likely to help future tutoring.",
-        },
-        {
-          role: "user",
-          content: snippet,
-        },
-      ],
-      temperature: 0,
-    }),
+    completionPromise,
     5000,
   );
 
@@ -602,11 +712,7 @@ export async function maybeExtractMemory(params: {
   extracted.push(...heuristics);
 
   if (completion) {
-    await recordOpenRouterUsage({
-      actorClerkId: params.actorClerkId,
-      model: completion.model ?? utility.model,
-      usage: completion.usage,
-    }).catch(() => {});
+    await recordUsage(completion);
     const raw = completion.choices?.[0]?.message?.content ?? "[]";
     const jsonMatch = raw.match(/\[[\s\S]*\]/) ?? raw.match(/\{[\s\S]*\}/);
 

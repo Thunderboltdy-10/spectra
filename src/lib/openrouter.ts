@@ -15,9 +15,11 @@ export type OpenRouterStreamEvent =
   | { type: "thinking"; content: string }
   | {
       type: "done";
+      id?: string;
       model?: string;
       inputTokens?: number;
       outputTokens?: number;
+      usage?: OpenRouterUsage;
       raw?: unknown;
     }
   | { type: "error"; error: string };
@@ -31,10 +33,27 @@ export type OpenRouterMessage = {
   content: string | OpenRouterMessageContentPart[];
 };
 
+export type OpenRouterUsage = {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  cost?: number;
+};
+
+export type OpenRouterChatCompletionResult = {
+  id?: string;
+  model?: string;
+  provider?: string;
+  usage?: OpenRouterUsage;
+  choices?: Array<{ message?: { content?: string } }>;
+  [key: string]: unknown;
+};
+
 export type OpenRouterImageResult = {
   imageUrl: string;
   modelUsed: string;
   text?: string;
+  usage?: OpenRouterUsage;
   raw?: unknown;
 };
 
@@ -157,7 +176,36 @@ function imageUrlFromCompletionPayload(payload: unknown) {
   return undefined;
 }
 
-export async function openRouterEmbedding(input: string, model: string) {
+function toFiniteNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function parseUsage(payload: unknown): OpenRouterUsage | undefined {
+  const raw = (payload as { usage?: Record<string, unknown> } | null)?.usage;
+  if (!raw || typeof raw !== "object") return undefined;
+  const usage: OpenRouterUsage = {
+    prompt_tokens: toFiniteNumber(raw.prompt_tokens),
+    completion_tokens: toFiniteNumber(raw.completion_tokens),
+    total_tokens: toFiniteNumber(raw.total_tokens),
+    cost: toFiniteNumber(raw.cost),
+  };
+  if (
+    usage.prompt_tokens === undefined &&
+    usage.completion_tokens === undefined &&
+    usage.total_tokens === undefined &&
+    usage.cost === undefined
+  ) {
+    return undefined;
+  }
+  return usage;
+}
+
+export async function openRouterEmbeddingRequest(input: string, model: string) {
   const response = await fetchWithTimeout(`${OPENROUTER_BASE_URL}/embeddings`, {
     method: "POST",
     headers: openRouterHeaders(),
@@ -172,6 +220,9 @@ export async function openRouterEmbedding(input: string, model: string) {
   }
 
   const json = (await response.json()) as {
+    id?: string;
+    model?: string;
+    usage?: Record<string, unknown>;
     data?: Array<{ embedding?: number[] }>;
   };
 
@@ -179,7 +230,19 @@ export async function openRouterEmbedding(input: string, model: string) {
   if (!embedding) {
     throw new Error("Embedding response missing vector data");
   }
-  return embedding;
+
+  return {
+    id: json.id,
+    model: json.model ?? model,
+    usage: parseUsage(json),
+    embedding,
+    raw: json,
+  };
+}
+
+export async function openRouterEmbedding(input: string, model: string) {
+  const result = await openRouterEmbeddingRequest(input, model);
+  return result.embedding;
 }
 
 export async function openRouterChatCompletion(params: {
@@ -189,7 +252,7 @@ export async function openRouterChatCompletion(params: {
   temperature?: number;
   maxTokens?: number;
   onFallback?: (event: RouteTraceFallback) => void;
-}) {
+}): Promise<OpenRouterChatCompletionResult> {
   const candidates = uniqueModelList(params.model, params.fallbackModels);
   const errors: string[] = [];
 
@@ -225,11 +288,11 @@ export async function openRouterChatCompletion(params: {
         continue;
       }
 
-      return response.json() as Promise<{
-        model?: string;
-        usage?: { prompt_tokens?: number; completion_tokens?: number };
-        choices?: Array<{ message?: { content?: string } }>;
-      }>;
+      const json = (await response.json()) as OpenRouterChatCompletionResult;
+      return {
+        ...json,
+        usage: parseUsage(json),
+      };
     } catch (error) {
       const errorText = error instanceof Error ? error.message : "Unknown model request failure";
       errors.push(`${model}: ${errorText}`);
@@ -310,6 +373,7 @@ export async function openRouterGenerateImage(params: {
         imageUrl,
         modelUsed: model,
         text: typeof text === "string" ? text : undefined,
+        usage: parseUsage(json),
         raw: json,
       };
     } catch (error) {
@@ -377,7 +441,9 @@ export async function* openRouterStreamChat(params: {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let finalId: string | undefined;
       let finalModel: string | undefined;
+      let usage: OpenRouterUsage | undefined;
       let inputTokens: number | undefined;
       let outputTokens: number | undefined;
       let raw: unknown;
@@ -397,8 +463,9 @@ export async function* openRouterStreamChat(params: {
 
           try {
             const json = JSON.parse(data) as {
+              id?: string;
               model?: string;
-              usage?: { prompt_tokens?: number; completion_tokens?: number };
+              usage?: Record<string, unknown>;
               choices?: Array<{
                 delta?: {
                   content?: string;
@@ -414,12 +481,20 @@ export async function* openRouterStreamChat(params: {
             };
 
             raw = json;
+            if (json.id) {
+              finalId = json.id;
+            }
             if (json.model) {
               finalModel = json.model;
             }
-            if (json.usage) {
-              inputTokens = json.usage.prompt_tokens ?? inputTokens;
-              outputTokens = json.usage.completion_tokens ?? outputTokens;
+            const nextUsage = parseUsage(json);
+            if (nextUsage) {
+              usage = {
+                ...usage,
+                ...nextUsage,
+              };
+              inputTokens = nextUsage.prompt_tokens ?? inputTokens;
+              outputTokens = nextUsage.completion_tokens ?? outputTokens;
             }
 
             const delta = json.choices?.[0]?.delta?.content;
@@ -446,9 +521,11 @@ export async function* openRouterStreamChat(params: {
 
       yield {
         type: "done",
+        id: finalId,
         model: finalModel ?? model,
         inputTokens,
         outputTokens,
+        usage,
         raw,
       };
       return;

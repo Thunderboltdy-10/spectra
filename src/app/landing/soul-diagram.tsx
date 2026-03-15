@@ -1,347 +1,244 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { BookOpen, GraduationCap, FileText, Brain, BarChart3, MessageCircle, Sparkles } from "lucide-react";
+import { Sparkles, GraduationCap, FileText, BookOpen, Network, Brain, BarChart3, MessageCircle } from "lucide-react";
 
-const CX = 200;
-const CY = 200;
-const OUTER_R = 160;
-const INNER_R = 98;
+// ── Concentric 3D cross-section onion ────────────────────────
 
 const OUTER_ITEMS = [
-  { Icon: GraduationCap, label: "Curriculum standards", desc: "Answers stay on-syllabus & grade-appropriate", angle: 0 },
-  { Icon: FileText, label: "Class materials", desc: "Your uploaded notes & resources", angle: 120 },
-  { Icon: BookOpen, label: "Academic values", desc: "School-set tone, style & guidelines", angle: 240 },
+  { Icon: GraduationCap, label: "Curriculum standards", desc: "Answers stay on-syllabus", angle: 15 },
+  { Icon: FileText, label: "Class materials", desc: "Uploaded notes & resources", angle: 105 },
+  { Icon: BookOpen, label: "School guidelines", desc: "Academic integrity rules", angle: 195 },
+  { Icon: Network, label: "School Ontology", desc: "Mappings to school taxonomy", angle: 285 },
 ];
 
 const INNER_ITEMS = [
-  { Icon: Brain, label: "Learning style", desc: "How explanations are shaped for you", angle: 60 },
-  { Icon: BarChart3, label: "Knowledge gaps", desc: "What to reinforce next", angle: 180 },
-  { Icon: MessageCircle, label: "Session memory", desc: "Progress & context across sessions", angle: 300 },
+  { Icon: Brain, label: "Learning style", desc: "How explanations are shaped", angle: 60 },
+  { Icon: BarChart3, label: "Knowledge gaps", desc: "What to reinforce", angle: 150 },
+  { Icon: MessageCircle, label: "Session memory", desc: "Context across sessions", angle: 240 },
+  { Icon: Sparkles, label: "Personalized tone", desc: "Adaptable language model", angle: 330 },
 ];
 
+const CX = 275; // Increased size to 550x550
+const CY = 275;
+const OUTER_R = 220;
+const INNER_R = 140;
+const CORE_R = 50;
+
+// ── Holographic 3D Sphere Component ──────────────────────────────────────
+function HologramSphere({ radius, color, rotation = 0 }: { radius: number, color: string, rotation?: number }) {
+  const rings = [];
+  // Render rings from 90 to 360 to leave a 90-degree slice open
+  for (let a = 90; a <= 360; a += 15) {
+    rings.push(
+      <div
+        key={a}
+        className="absolute left-1/2 top-1/2 rounded-full pointer-events-none"
+        style={{
+          width: radius * 2,
+          height: radius * 2,
+          marginLeft: -radius,
+          marginTop: -radius,
+          border: `1px solid ${color}`,
+          opacity: a % 30 === 0 ? 0.3 : 0.1,
+          transform: `rotateY(${a}deg)`,
+        }}
+      />
+    );
+  }
+
+  // Cross-section planes
+  const Plane = ({ angle }: { angle: number }) => (
+    <div
+      className="absolute left-1/2 top-1/2 rounded-full pointer-events-none"
+      style={{
+        width: radius * 2,
+        height: radius * 2,
+        marginLeft: -radius,
+        marginTop: -radius,
+        background: `color-mix(in oklab, ${color} 15%, transparent)`,
+        borderRight: `2px solid ${color}`,
+        borderTop: `2px solid ${color}`,
+        borderBottom: `2px solid ${color}`,
+        clipPath: "polygon(50% 0%, 100% 0%, 100% 100%, 50% 100%)",
+        transform: `rotateY(${angle}deg)`,
+      }}
+    >
+      {/* Inner grid lines for holographic effect */}
+      <div className="absolute inset-0" style={{ backgroundImage: `linear-gradient(${color}20 1px, transparent 1px), linear-gradient(90deg, ${color}20 1px, transparent 1px)`, backgroundSize: '24px 24px', clipPath: "polygon(50% 0%, 100% 0%, 100% 100%, 50% 100%)" }} />
+    </div>
+  );
+
+  return (
+    <div className="absolute inset-0" style={{ transformStyle: "preserve-3d", transform: `rotateY(${rotation}deg)` }}>
+      {rings}
+      <Plane angle={0} />
+      <Plane angle={90} />
+      {/* Equator ring */}
+      <div
+        className="absolute left-1/2 top-1/2 rounded-full pointer-events-none"
+        style={{
+          width: radius * 2,
+          height: radius * 2,
+          marginLeft: -radius,
+          marginTop: -radius,
+          border: `2px solid ${color}`,
+          opacity: 0.5,
+          transform: "rotateX(90deg)",
+        }}
+      />
+    </div>
+  );
+}
+
 export function SoulDiagram() {
-  const [angle, setAngle] = useState(0);
-  const [hoveredOuter, setHoveredOuter] = useState<number | null>(null);
-  const [hoveredInner, setHoveredInner] = useState<number | null>(null);
+  const [rotY, setRotY] = useState(0);
+  const [rotX, setRotX] = useState(25); // Tilt
   const rafRef = useRef<number>(0);
-  const prevTimeRef = useRef<number>(0);
+  const prevTimeRef = useRef(0);
 
   useEffect(() => {
-    const animate = (time: number) => {
+    const animate = (t: number) => {
       if (prevTimeRef.current > 0) {
-        const delta = time - prevTimeRef.current;
-        setAngle((prev) => (prev + delta * 0.014) % 360);
+        const dt = t - prevTimeRef.current;
+        setRotY((v) => (v + dt * 0.012) % 360);
       }
-      prevTimeRef.current = time;
+      prevTimeRef.current = t;
       rafRef.current = requestAnimationFrame(animate);
     };
     rafRef.current = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(rafRef.current);
   }, []);
 
-  const getPos = (baseAngle: number, radius: number, rotation: number) => {
-    const rad = ((baseAngle + rotation) * Math.PI) / 180;
-    return { x: CX + Math.cos(rad) * radius, y: CY + Math.sin(rad) * radius };
-  };
-
-  const outerPositions = OUTER_ITEMS.map((it) => getPos(it.angle, OUTER_R, angle));
-  const innerPositions = INNER_ITEMS.map((it) => getPos(it.angle, INNER_R, -angle * 0.65));
-
   return (
-    <div className="flex flex-col xl:flex-row gap-10 items-center w-full">
-      {/* ── Onion SVG ── */}
-      <div className="relative shrink-0" style={{ width: 400, height: 400 }}>
-        {/* Ambient glow behind rings */}
+    <div className="flex flex-col xl:flex-row gap-16 items-center w-full">
+      {/* ── 3D Hologram Cake Visualisation ── */}
+      <div
+        className="relative shrink-0 flex items-center justify-center group"
+        style={{ width: 550, height: 550, perspective: "1400px" }}
+      >
+        {/* Ambient glow */}
         <div
-          className="absolute pointer-events-none"
+          className="absolute inset-0 pointer-events-none"
           style={{
-            inset: 0,
             background:
-              "radial-gradient(ellipse 65% 65% at 50% 50%, color-mix(in oklab, var(--brand-primary) 10%, transparent), transparent 70%)",
+              "radial-gradient(ellipse 60% 60% at 50% 50%, color-mix(in oklab, var(--brand-primary) 15%, transparent), transparent 70%)",
+            filter: "blur(60px)",
           }}
         />
 
-        <svg
-          width={400}
-          height={400}
-          className="absolute inset-0"
-          style={{ overflow: "visible" }}
-          aria-hidden
-        >
-          <defs>
-            {/* Glow filters */}
-            <filter id="glow-acc" x="-50%" y="-50%" width="200%" height="200%">
-              <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-            <filter id="glow-pri" x="-50%" y="-50%" width="200%" height="200%">
-              <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-            {/* Scanline gradient */}
-            <linearGradient id="scan-grad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="var(--brand-primary)" stopOpacity="0" />
-              <stop offset="50%" stopColor="var(--brand-primary)" stopOpacity="0.12" />
-              <stop offset="100%" stopColor="var(--brand-primary)" stopOpacity="0" />
-            </linearGradient>
-          </defs>
-
-          {/* Outer ring: thick glow halo */}
-          <circle cx={CX} cy={CY} r={OUTER_R} fill="none" stroke="var(--brand-accent)" strokeWidth="6" strokeOpacity="0.08" />
-          {/* Outer ring: dashed main stroke */}
-          <circle
-            cx={CX}
-            cy={CY}
-            r={OUTER_R}
-            fill="none"
-            stroke="var(--brand-accent)"
-            strokeWidth="1.5"
-            strokeDasharray="9 6"
-            strokeOpacity="0.75"
-            filter="url(#glow-acc)"
-          />
-          {/* Outer fill */}
-          <circle cx={CX} cy={CY} r={OUTER_R} fill="var(--brand-accent)" fillOpacity="0.035" />
-
-          {/* Inner ring: thick glow halo */}
-          <circle cx={CX} cy={CY} r={INNER_R} fill="none" stroke="var(--brand-primary)" strokeWidth="6" strokeOpacity="0.1" />
-          {/* Inner ring: solid main stroke */}
-          <circle
-            cx={CX}
-            cy={CY}
-            r={INNER_R}
-            fill="none"
-            stroke="var(--brand-primary)"
-            strokeWidth="2"
-            strokeOpacity="0.8"
-            filter="url(#glow-pri)"
-          />
-          {/* Inner fill */}
-          <circle cx={CX} cy={CY} r={INNER_R} fill="var(--brand-primary)" fillOpacity="0.06" />
-
-          {/* Center core */}
-          <circle cx={CX} cy={CY} r={28} fill="var(--brand-primary)" fillOpacity="0.18" />
-          <circle
-            cx={CX}
-            cy={CY}
-            r={28}
-            fill="none"
-            stroke="var(--brand-primary)"
-            strokeWidth="1.5"
-            strokeOpacity="0.5"
-            strokeDasharray="3 2"
-          />
-          <circle cx={CX} cy={CY} r={28} fill="none" stroke="var(--brand-primary)" strokeWidth="5" strokeOpacity="0.08" />
-
-          {/* Hover connector lines */}
-          {outerPositions.map(
-            (p, i) =>
-              hoveredOuter === i && (
-                <line
-                  key={`ol-${i}`}
-                  x1={CX}
-                  y1={CY}
-                  x2={p.x}
-                  y2={p.y}
-                  stroke="var(--brand-accent)"
-                  strokeWidth="0.75"
-                  strokeOpacity="0.4"
-                  strokeDasharray="4 3"
-                />
-              ),
-          )}
-          {innerPositions.map(
-            (p, i) =>
-              hoveredInner === i && (
-                <line
-                  key={`il-${i}`}
-                  x1={CX}
-                  y1={CY}
-                  x2={p.x}
-                  y2={p.y}
-                  stroke="var(--brand-primary)"
-                  strokeWidth="0.75"
-                  strokeOpacity="0.4"
-                  strokeDasharray="4 3"
-                />
-              ),
-          )}
-
-          {/* Scan line animation */}
-          <rect
-            x={CX - OUTER_R - 10}
-            y={0}
-            width={OUTER_R * 2 + 20}
-            height={60}
-            fill="url(#scan-grad)"
-            style={{ animation: "scan-line 4s linear infinite" }}
-          />
-
-          {/* Ring labels (static) */}
-          <text
-            x={CX}
-            y={CY - OUTER_R - 14}
-            textAnchor="middle"
-            fontSize={9}
-            fontWeight="bold"
-            fill="var(--brand-accent)"
-            opacity={0.8}
-            style={{ letterSpacing: "0.15em", textTransform: "uppercase" }}
-          >
-            SCHOOL CONTEXT
-          </text>
-          <text
-            x={CX}
-            y={CY - INNER_R - 10}
-            textAnchor="middle"
-            fontSize={9}
-            fontWeight="bold"
-            fill="var(--brand-primary)"
-            opacity={0.7}
-            style={{ letterSpacing: "0.15em" }}
-          >
-            STUDENT MEMORY
-          </text>
-        </svg>
-
-        {/* Outer orbiting item badges */}
-        {outerPositions.map((p, i) => {
-          const item = OUTER_ITEMS[i];
-          const Icon = item.Icon;
-          const active = hoveredOuter === i;
-          return (
-            <div
-              key={item.label}
-              className="absolute transition-all duration-200"
-              style={{
-                left: p.x - 18,
-                top: p.y - 18,
-                width: 36,
-                height: 36,
-                borderRadius: 10,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background: active ? "var(--brand-accent)" : "var(--bg-elevated)",
-                border: `1px solid color-mix(in oklab, var(--brand-accent) ${active ? "60%" : "35%"}, transparent)`,
-                color: active ? "white" : "var(--brand-accent)",
-                boxShadow: active
-                  ? "0 0 20px color-mix(in oklab, var(--brand-accent) 50%, transparent)"
-                  : "0 0 8px color-mix(in oklab, var(--brand-accent) 20%, transparent)",
-                cursor: "default",
-                zIndex: 10,
-              }}
-              onMouseEnter={() => setHoveredOuter(i)}
-              onMouseLeave={() => setHoveredOuter(null)}
-            >
-              <Icon size={15} strokeWidth={1.5} />
-            </div>
-          );
-        })}
-
-        {/* Inner orbiting item badges */}
-        {innerPositions.map((p, i) => {
-          const item = INNER_ITEMS[i];
-          const Icon = item.Icon;
-          const active = hoveredInner === i;
-          return (
-            <div
-              key={item.label}
-              className="absolute transition-all duration-200"
-              style={{
-                left: p.x - 15,
-                top: p.y - 15,
-                width: 30,
-                height: 30,
-                borderRadius: 8,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background: active ? "var(--brand-primary)" : "var(--bg-elevated)",
-                border: `1px solid color-mix(in oklab, var(--brand-primary) ${active ? "60%" : "35%"}, transparent)`,
-                color: active ? "white" : "var(--brand-primary)",
-                boxShadow: active
-                  ? "0 0 20px color-mix(in oklab, var(--brand-primary) 50%, transparent)"
-                  : "0 0 6px color-mix(in oklab, var(--brand-primary) 20%, transparent)",
-                cursor: "default",
-                zIndex: 10,
-              }}
-              onMouseEnter={() => setHoveredInner(i)}
-              onMouseLeave={() => setHoveredInner(null)}
-            >
-              <Icon size={13} strokeWidth={1.5} />
-            </div>
-          );
-        })}
-
-        {/* Center sparkle */}
+        {/* 3D container */}
         <div
-          className="absolute"
+          className="absolute inset-0"
           style={{
-            left: CX - 16,
-            top: CY - 16,
-            width: 32,
-            height: 32,
-            borderRadius: "50%",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "color-mix(in oklab, var(--brand-primary) 20%, transparent)",
-            color: "var(--brand-primary)",
+            transformStyle: "preserve-3d",
+            transform: `rotateX(${-rotX}deg) rotateZ(0deg) rotateY(${rotY}deg)`,
           }}
         >
-          <Sparkles size={16} />
+          {/* Outer Layer (School Context) */}
+          <HologramSphere radius={OUTER_R} color="var(--brand-accent)" />
+
+          {/* Middle Layer (Student Memory) */}
+          <HologramSphere radius={INNER_R} color="var(--brand-primary)" rotation={-45} />
+
+          {/* Inner Core (Files & Memory) */}
+          <div
+            className="absolute rounded-full"
+            style={{
+              left: CX - CORE_R,
+              top: CY - CORE_R,
+              width: CORE_R * 2,
+              height: CORE_R * 2,
+              background: "radial-gradient(circle at 30% 30%, var(--brand-primary), var(--bg-primary))",
+              boxShadow: "0 0 60px var(--brand-primary), inset 0 0 30px white",
+              transform: `translateZ(0px) rotateY(${-rotY}deg) rotateX(${rotX}deg)`,
+              transformStyle: "preserve-3d"
+            }}
+          >
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Sparkles size={32} color="white" className="animate-pulse" />
+            </div>
+          </div>
+
+          {/* Floating Labels that face the camera */}
+          
+          {/* School Layer Label */}
+          <div
+            className="absolute flex flex-col items-center justify-center pointer-events-none transition-opacity duration-300"
+            style={{
+              left: CX - 100,
+              top: CY - 30,
+              width: 200,
+              // Orbit positioned along the outer edge
+              transform: `translateX(${Math.cos(45 * Math.PI / 180) * (OUTER_R + 60)}px) translateZ(${Math.sin(45 * Math.PI / 180) * (OUTER_R + 60)}px) rotateY(${-rotY}deg) rotateX(${rotX}deg)`,
+              transformStyle: "preserve-3d",
+            }}
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-1.5 h-1.5 rounded-full bg-[var(--brand-accent)] shadow-[0_0_8px_var(--brand-accent)]" />
+              <span className="font-display font-bold text-lg tracking-wide uppercase text-[var(--brand-accent)]" style={{ textShadow: "0 4px 20px rgba(0,0,0,0.8)" }}>School Layer</span>
+            </div>
+            <div className="h-px w-full bg-gradient-to-r from-transparent via-[var(--brand-accent)] to-transparent opacity-60" />
+            <span className="text-xs font-semibold text-[var(--text-secondary)] mt-2 bg-[var(--bg-elevated)] px-3 py-1 rounded-full border border-[var(--brand-accent)]/30 backdrop-blur-md">External Constraints</span>
+          </div>
+
+          {/* Personal Memory Label */}
+          <div
+            className="absolute flex flex-col items-center justify-center pointer-events-none transition-opacity duration-300"
+            style={{
+              left: CX - 100,
+              top: CY - 30,
+              width: 200,
+              // Orbit positioned along the inner edge
+              transform: `translateX(${Math.cos(225 * Math.PI / 180) * (INNER_R + 60)}px) translateZ(${Math.sin(225 * Math.PI / 180) * (INNER_R + 60)}px) rotateY(${-rotY}deg) rotateX(${rotX}deg)`,
+              transformStyle: "preserve-3d",
+            }}
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-1.5 h-1.5 rounded-full bg-[var(--brand-primary)] shadow-[0_0_8px_var(--brand-primary)]" />
+              <span className="font-display font-bold text-lg tracking-wide uppercase text-[var(--brand-primary)]" style={{ textShadow: "0 4px 20px rgba(0,0,0,0.8)" }}>Personal Memory</span>
+            </div>
+            <div className="h-px w-full bg-gradient-to-r from-transparent via-[var(--brand-primary)] to-transparent opacity-60" />
+            <span className="text-xs font-semibold text-[var(--text-secondary)] mt-2 bg-[var(--bg-elevated)] px-3 py-1 rounded-full border border-[var(--brand-primary)]/30 backdrop-blur-md">Internal Adaptive Core</span>
+          </div>
         </div>
       </div>
 
       {/* ── Side panel ── */}
-      <div className="flex-1 space-y-8 min-w-0">
+      <div className="flex-1 space-y-10 min-w-0 py-8">
         {/* Outer layer */}
-        <div>
-          <div className="flex items-center gap-2.5 mb-4">
+        <div className="group">
+          <div className="flex items-center gap-3 mb-5">
             <div
-              className="w-4 h-4 rounded-full flex-shrink-0"
+              className="w-5 h-5 rounded-full shrink-0 flex items-center justify-center"
               style={{
-                border: "1.5px dashed var(--brand-accent)",
-                background: "color-mix(in oklab, var(--brand-accent) 10%, transparent)",
+                border: "2px solid var(--brand-accent)",
+                background: "color-mix(in oklab, var(--brand-accent) 15%, transparent)",
+                boxShadow: "0 0 15px var(--brand-accent)",
               }}
-            />
-            <p className="text-sm font-bold" style={{ color: "var(--brand-accent)" }}>
-              School context
+            >
+              <div className="w-2 h-2 rounded-full bg-[var(--brand-accent)]" />
+            </div>
+            <p className="text-xl font-bold uppercase tracking-widest" style={{ color: "var(--brand-accent)" }}>
+              School Layer
             </p>
-            <span className="text-[10px] text-[var(--text-tertiary)]">— set by administration</span>
+            <span className="text-xs font-mono text-[var(--text-tertiary)] opacity-0 group-hover:opacity-100 transition-opacity">— External Constraints</span>
           </div>
-          <div className="space-y-1.5">
+          <div className="grid grid-cols-2 gap-3">
             {OUTER_ITEMS.map((item, i) => {
               const Icon = item.Icon;
               return (
                 <div
                   key={item.label}
-                  className="flex gap-3 px-4 py-3 rounded-xl cursor-default transition-all duration-200"
+                  className="flex gap-3 px-5 py-4 rounded-2xl cursor-default transition-all duration-300 border border-transparent hover:-translate-y-1 hover:shadow-[0_10px_20px_rgba(0,0,0,0.1)]"
                   style={{
-                    background: hoveredOuter === i
-                      ? "color-mix(in oklab, var(--brand-accent) 10%, var(--bg-secondary))"
-                      : "var(--bg-secondary)",
-                    borderLeft: `2px solid ${hoveredOuter === i ? "var(--brand-accent)" : "transparent"}`,
+                    background: "var(--bg-secondary)",
                   }}
-                  onMouseEnter={() => setHoveredOuter(i)}
-                  onMouseLeave={() => setHoveredOuter(null)}
                 >
-                  <Icon
-                    size={14}
-                    strokeWidth={1.5}
-                    style={{ color: "var(--brand-accent)", flexShrink: 0, marginTop: 2 }}
-                  />
+                  <Icon size={18} strokeWidth={2} style={{ color: "var(--brand-accent)", flexShrink: 0, marginTop: 2 }} />
                   <div>
-                    <p className="text-xs font-semibold text-[var(--text-primary)]">{item.label}</p>
-                    <p className="text-[10px] mt-0.5 text-[var(--text-tertiary)]">{item.desc}</p>
+                    <p className="text-sm font-bold text-[var(--text-primary)] mb-1">{item.label}</p>
+                    <p className="text-xs text-[var(--text-tertiary)] leading-tight">{item.desc}</p>
                   </div>
                 </div>
               );
@@ -350,70 +247,43 @@ export function SoulDiagram() {
         </div>
 
         {/* Inner layer */}
-        <div>
-          <div className="flex items-center gap-2.5 mb-4">
+        <div className="group">
+          <div className="flex items-center gap-3 mb-5">
             <div
-              className="w-4 h-4 rounded-full flex-shrink-0"
+              className="w-5 h-5 rounded-full shrink-0 flex items-center justify-center"
               style={{
-                border: "1.5px solid var(--brand-primary)",
-                background: "color-mix(in oklab, var(--brand-primary) 12%, transparent)",
+                border: "2px solid var(--brand-primary)",
+                background: "color-mix(in oklab, var(--brand-primary) 15%, transparent)",
+                boxShadow: "0 0 15px var(--brand-primary)",
               }}
-            />
-            <p className="text-sm font-bold" style={{ color: "var(--brand-primary)" }}>
-              Student memory
+            >
+              <div className="w-2 h-2 rounded-full bg-[var(--brand-primary)]" />
+            </div>
+            <p className="text-xl font-bold uppercase tracking-widest" style={{ color: "var(--brand-primary)" }}>
+              Personal Layer
             </p>
-            <span className="text-[10px] text-[var(--text-tertiary)]">— unique per learner</span>
+            <span className="text-xs font-mono text-[var(--text-tertiary)] opacity-0 group-hover:opacity-100 transition-opacity">— Internal Adaptive Core</span>
           </div>
-          <div className="space-y-1.5">
+          <div className="grid grid-cols-2 gap-3">
             {INNER_ITEMS.map((item, i) => {
               const Icon = item.Icon;
               return (
                 <div
                   key={item.label}
-                  className="flex gap-3 px-4 py-3 rounded-xl cursor-default transition-all duration-200"
+                  className="flex gap-3 px-5 py-4 rounded-2xl cursor-default transition-all duration-300 border border-transparent hover:-translate-y-1 hover:shadow-[0_10px_20px_rgba(0,0,0,0.1)]"
                   style={{
-                    background: hoveredInner === i
-                      ? "color-mix(in oklab, var(--brand-primary) 10%, var(--bg-secondary))"
-                      : "var(--bg-secondary)",
-                    borderLeft: `2px solid ${hoveredInner === i ? "var(--brand-primary)" : "transparent"}`,
+                    background: "var(--bg-secondary)",
                   }}
-                  onMouseEnter={() => setHoveredInner(i)}
-                  onMouseLeave={() => setHoveredInner(null)}
                 >
-                  <Icon
-                    size={14}
-                    strokeWidth={1.5}
-                    style={{ color: "var(--brand-primary)", flexShrink: 0, marginTop: 2 }}
-                  />
+                  <Icon size={18} strokeWidth={2} style={{ color: "var(--brand-primary)", flexShrink: 0, marginTop: 2 }} />
                   <div>
-                    <p className="text-xs font-semibold text-[var(--text-primary)]">{item.label}</p>
-                    <p className="text-[10px] mt-0.5 text-[var(--text-tertiary)]">{item.desc}</p>
+                    <p className="text-sm font-bold text-[var(--text-primary)] mb-1">{item.label}</p>
+                    <p className="text-xs text-[var(--text-tertiary)] leading-tight">{item.desc}</p>
                   </div>
                 </div>
               );
             })}
           </div>
-        </div>
-
-        {/* Synthesis */}
-        <div
-          className="rounded-2xl border p-5 transition-all duration-500"
-          style={{
-            background: "var(--bg-elevated)",
-            borderColor: "color-mix(in oklab, var(--brand-primary) 25%, var(--border-default))",
-            boxShadow: "0 0 32px -12px color-mix(in oklab, var(--brand-primary) 20%, transparent)",
-          }}
-        >
-          <div className="flex items-center gap-2 mb-2">
-            <Sparkles size={14} style={{ color: "var(--brand-primary)" }} />
-            <p className="text-xs font-bold" style={{ color: "var(--brand-primary)" }}>
-              Combined → Personalised response
-            </p>
-          </div>
-          <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
-            Both layers merge at response time — every answer fits the school&apos;s curriculum and
-            the student&apos;s personal journey. Neither layer is ever visible to the learner.
-          </p>
         </div>
       </div>
     </div>

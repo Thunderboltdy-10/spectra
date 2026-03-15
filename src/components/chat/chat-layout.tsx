@@ -10,7 +10,6 @@ import { ChatMessages } from "@/components/chat/chat-messages";
 import { UnifiedPanel } from "@/components/chat/unified-panel";
 import { ChatSidebar } from "@/components/chat/chat-sidebar";
 import { ChatWelcome } from "@/components/chat/chat-welcome";
-import { GlobalUtilityDock } from "@/components/global-utility-dock";
 import { KeyboardShortcutsRegistrar } from "@/components/keyboard-shortcuts";
 import type { GuidedTourStep } from "@/components/ui/guided-tour";
 import { useChatState } from "@/hooks/use-chat-state";
@@ -276,10 +275,8 @@ export function ChatLayout() {
     const meaningfulOrchestration =
       chat.activeCollaborators.length > 0
       || chat.collaboratorPhase !== "idle"
-      || chat.streamPhase === "routing"
       || chat.streamPhase === "searching"
       || chat.streamPhase === "compacting"
-      || chat.streamPhase === "thinking"
       || chat.streamPhase === "synthesizing";
     const shouldAutoOpen = chat.sending && liveProgressAutoOpen && meaningfulOrchestration;
 
@@ -827,7 +824,6 @@ export function ChatLayout() {
         }}
       />
 
-      {!chat.sidebarOpen ? <GlobalUtilityDock placement="floating" /> : null}
 
       <GuidedTour
         open={tourOpen}

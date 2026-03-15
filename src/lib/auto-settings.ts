@@ -92,6 +92,17 @@ export type AutoSettingsResult = {
   questionType: QuestionType;
   isMultipart: boolean;
   suggestedMode: string | null;
+  promptEnhancementCall?: {
+    model?: string;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+      cost?: number;
+    };
+    durationMs?: number;
+    improved: boolean;
+  };
 };
 
 export function classifyExplainDepth(prompt: string, userMemory?: string): ExplainDepth {
@@ -445,25 +456,51 @@ export async function maybeEnhancePrompt(message: string, actorClerkId?: string)
   const fallback = {
     prompt: message,
     improvements: [] as string[],
+    model: undefined as string | undefined,
+    usage: undefined as
+      | {
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          total_tokens?: number;
+          cost?: number;
+        }
+      | undefined,
+    durationMs: undefined as number | undefined,
   };
 
+  const startedAt = Date.now();
+  const completionPromise = openRouterChatCompletion({
+    model: MODEL_CONFIG.promptEnhance,
+    fallbackModels: [MODEL_CONFIG.tutorFast],
+    messages: [
+      {
+        role: "system",
+        content:
+          "Rewrite the student prompt to be clearer and more specific while preserving intent. Return JSON: {\"prompt\": string, \"improvements\": string[]}",
+      },
+      {
+        role: "user",
+        content: message,
+      },
+    ],
+    temperature: 0.2,
+  });
+  let usageRecorded = false;
+  const recordUsage = async (result: Awaited<typeof completionPromise>) => {
+    if (!actorClerkId || usageRecorded) return;
+    usageRecorded = true;
+    await recordOpenRouterUsage({
+      actorClerkId,
+      model: result.model ?? MODEL_CONFIG.promptEnhance,
+      usage: result.usage,
+    }).catch(() => {});
+  };
+  void completionPromise.then((result) => {
+    void recordUsage(result);
+  }).catch(() => {});
+
   const result = await withTimeout(
-    openRouterChatCompletion({
-      model: MODEL_CONFIG.promptEnhance,
-      fallbackModels: [MODEL_CONFIG.tutorFast],
-      messages: [
-        {
-          role: "system",
-          content:
-            "Rewrite the student prompt to be clearer and more specific while preserving intent. Return JSON: {\"prompt\": string, \"improvements\": string[]}",
-        },
-        {
-          role: "user",
-          content: message,
-        },
-      ],
-      temperature: 0.2,
-    }),
+    completionPromise,
     2000,
     null,
   );
@@ -472,13 +509,11 @@ export async function maybeEnhancePrompt(message: string, actorClerkId?: string)
     return fallback;
   }
 
-  if (actorClerkId) {
-    await recordOpenRouterUsage({
-      actorClerkId,
-      model: MODEL_CONFIG.promptEnhance,
-      usage: result.usage,
-    }).catch(() => {});
-  }
+  const model = result.model ?? MODEL_CONFIG.promptEnhance;
+  const usage = result.usage;
+  const durationMs = Date.now() - startedAt;
+
+  await recordUsage(result);
 
   const raw = result.choices?.[0]?.message?.content ?? "";
   const match = raw.match(/\{[\s\S]*\}/);
@@ -492,9 +527,17 @@ export async function maybeEnhancePrompt(message: string, actorClerkId?: string)
     return {
       prompt: normalizedPrompt,
       improvements: Array.isArray(parsed.improvements) ? parsed.improvements.slice(0, 4) : [],
+      model,
+      usage,
+      durationMs,
     };
   } catch {
-    return fallback;
+    return {
+      ...fallback,
+      model,
+      usage,
+      durationMs,
+    };
   }
 }
 
@@ -524,6 +567,7 @@ export async function runAutoSettingsPipeline(input: AutoSettingsInput): Promise
 
   let message = input.message;
   let promptEnhanced = false;
+  let promptEnhancementCall: AutoSettingsResult["promptEnhancementCall"];
   const allowAutoEnhancement = !isLowSignalChitChat(input.message);
 
   const forceLocalEnhancement = (raw: string) => {
@@ -541,6 +585,14 @@ export async function runAutoSettingsPipeline(input: AutoSettingsInput): Promise
 
   if (input.autoEnhancePrompt && enhanceMode !== "off" && !input.skipModelCalls && (enhanceMode === "on" || allowAutoEnhancement)) {
     const enhanced = await maybeEnhancePrompt(input.message, input.actorClerkId);
+    if (enhanced.model || enhanced.usage) {
+      promptEnhancementCall = {
+        model: enhanced.model,
+        usage: enhanced.usage,
+        durationMs: enhanced.durationMs,
+        improved: enhanced.prompt.trim() !== input.message.trim(),
+      };
+    }
     if (enhanced.prompt.trim() && enhanced.prompt.trim() !== input.message.trim()) {
       message = enhanced.prompt.trim();
       promptEnhanced = true;
@@ -567,5 +619,6 @@ export async function runAutoSettingsPipeline(input: AutoSettingsInput): Promise
     questionType,
     isMultipart,
     suggestedMode,
+    ...(promptEnhancementCall ? { promptEnhancementCall } : {}),
   };
 }

@@ -5,7 +5,6 @@ import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ChatSidebar } from "@/components/chat/chat-sidebar";
-import { GlobalUtilityDock } from "@/components/global-utility-dock";
 import { useSidebar } from "@/context/sidebar-context";
 import { cn } from "@/lib/utils";
 import type { GuidedTourStep } from "@/components/ui/guided-tour";
@@ -392,7 +391,6 @@ export function AppShell({
         </main>
       </div>
 
-      {!sidebar.sidebarOpen ? <GlobalUtilityDock placement="floating" /> : null}
 
       {pageTourSteps.length > 0 ? (
         <GuidedTour

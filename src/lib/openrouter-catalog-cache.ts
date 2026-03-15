@@ -28,6 +28,7 @@ function mapLiveModel(model: {
   id: string;
   name?: string;
   description?: string;
+  created?: number;
   context_length?: number;
   pricing?: { prompt?: string; completion?: string };
   architecture?: { modality?: string };
@@ -55,6 +56,8 @@ function mapLiveModel(model: {
     provider: model.top_provider?.name || model.id.split("/")[0] || "Unknown",
     description: model.description || "",
     contextLength: model.context_length,
+    releaseDate: typeof model.created === "number" ? new Date(model.created * 1000).toISOString() : undefined,
+    createdAt: typeof model.created === "number" ? model.created * 1000 : undefined,
     inputCostPerM: promptCost,
     outputCostPerM: completionCost,
     isFree: model.id.includes(":free") || (inCost === 0 && outCost === 0),

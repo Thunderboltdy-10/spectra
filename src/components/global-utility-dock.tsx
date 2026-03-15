@@ -248,19 +248,21 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
   const captureAutoScreenshot = useCallback(async (options?: { silent?: boolean }) => {
     try {
       const html2canvas = (await import("html2canvas")).default;
-      await new Promise((resolve) => setTimeout(resolve, 120));
+      await new Promise((resolve) => setTimeout(resolve, 300));
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const root = document.documentElement;
+      const bgColor = getComputedStyle(document.body).backgroundColor || null;
       const canvas = await html2canvas(root, {
-        backgroundColor: "#ffffff",
+        backgroundColor: bgColor || null,
         scale: Math.min(window.devicePixelRatio || 1, 1),
         logging: false,
         useCORS: true,
-        allowTaint: false,
+        allowTaint: true,
         scrollX: window.scrollX,
         scrollY: window.scrollY,
         windowWidth: root.clientWidth,
         windowHeight: root.clientHeight,
+        ignoreElements: (el: Element) => el.hasAttribute("data-html2canvas-ignore"),
       });
 
       const qualityCandidates = [0.8, 0.72, 0.64, 0.56, 0.48];
@@ -658,7 +660,9 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
         >
           <div className="group/utility-btn relative w-fit" onClickCapture={() => setActivePanel("none")}>
             <NotificationBell
-              buttonClassName="h-9.5 w-9.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]"
+              buttonClassName={inProfileBar
+                ? "h-9.5 w-9.5 rounded-xl bg-transparent hover:bg-[var(--bg-hover)]"
+                : "h-9.5 w-9.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]"}
               contentClassName="z-[98]"
               align={inProfileBar ? "start" : "end"}
               side={inProfileBar || desktopViewport ? "left" : "top"}
@@ -681,7 +685,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
             icon={<Timer className="h-4 w-4" />}
             dataTour="utility-timer"
             ariaLabel={timerOpen ? "Close focus timer" : "Open focus timer"}
-            buttonClassName="rounded-xl"
+            buttonClassName={inProfileBar ? "rounded-xl border-0 bg-transparent hover:bg-[var(--bg-hover)]" : "rounded-xl"}
           />
 
           <UtilityActionButton
@@ -691,7 +695,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
             icon={<MessageSquare className="h-4 w-4" />}
             dataTour="utility-feedback"
             ariaLabel={feedbackOpen ? "Close feedback form" : "Open feedback form"}
-            buttonClassName="rounded-xl"
+            buttonClassName={inProfileBar ? "rounded-xl border-0 bg-transparent hover:bg-[var(--bg-hover)]" : "rounded-xl"}
           />
 
           <UtilityActionButton
@@ -701,7 +705,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
             icon={<CircleHelp className="h-4 w-4" />}
             dataTour="utility-tour"
             ariaLabel={infoOpen ? "Close info panel" : "Open info panel"}
-            buttonClassName="rounded-xl"
+            buttonClassName={inProfileBar ? "rounded-xl border-0 bg-transparent hover:bg-[var(--bg-hover)]" : "rounded-xl"}
           />
         </div>
 

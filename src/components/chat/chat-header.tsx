@@ -64,7 +64,7 @@ export function ChatHeader({
 
   return (
     <header className="sticky top-0 z-20 shadow-[0_1px_0_var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_92%,transparent)] backdrop-blur-xl min-h-[56px]">
-      <div className="px-3 py-2.5 sm:px-6 lg:px-10">
+      <div className="px-3 pb-3 pt-2.5 sm:px-6 lg:px-10">
         <div className="mx-auto flex w-full max-w-6xl items-center gap-2">
           <Button
             type="button"
@@ -123,14 +123,13 @@ export function ChatHeader({
               <Button
                 type="button"
                 variant="secondary"
-                size={sending ? "icon" : "sm"}
-                className={sending ? "h-9 w-9" : "h-9 gap-1.5"}
+                size="icon"
+                className="h-9 w-9"
                 onClick={onOpenOrchestration}
                 aria-label="Open orchestration panel"
                 title="Open orchestration panel"
               >
                 <Bot className={`h-3.5 w-3.5 ${orchestrationActive ? "text-[var(--accent-cyan)]" : ""}`} />
-                {!sending ? "Trace" : null}
               </Button>
             ) : null}
             {sending ? (

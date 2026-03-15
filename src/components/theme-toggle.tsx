@@ -10,7 +10,7 @@ export function ThemeToggle({ className }: { className?: string }) {
   return (
     <Button
       type="button"
-      variant="secondary"
+      variant="ghost"
       size="icon"
       className={className}
       onClick={toggleTheme}

@@ -80,15 +80,6 @@ function providerFromModelId(value: string) {
     .join(" ");
 }
 
-function formatSpendCents(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(Math.max(0, value) / 100);
-}
-
 function resourceStatusMeta(status: PersonalResource["status"], updatedAt?: number, attempts?: number) {
   if (status === "uploaded") {
     return {
@@ -283,7 +274,6 @@ export function SettingsView({
   routerMode,
   manualModel,
   activeModelUsed,
-  showCostDetails = false,
   usePersonalResources,
   autoSaveConversationFilesToLibrary,
   personalResources,
@@ -568,21 +558,6 @@ export function SettingsView({
                 ? "No tracked activity yet"
                 : `${percentUsed > 0 && percentUsed < 1 ? "<1" : Number.isInteger(percentUsed) ? percentUsed.toFixed(0) : percentUsed.toFixed(1)}% utilization`}
             </p>
-            {userSpending ? (
-              <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
-                {[
-                  typeof userSpending.monthlyTokens === "number"
-                    ? `${Math.max(0, userSpending.monthlyTokens).toLocaleString()} tokens`
-                    : null,
-                  showCostDetails && typeof userSpending.totalCostCents === "number"
-                    ? `${formatSpendCents(userSpending.totalCostCents)} this month`
-                    : null,
-                  showCostDetails && (userSpending.estimatedUnpricedCostCents ?? 0) > 0
-                    ? "includes estimated cost for unpriced events"
-                    : null,
-                ].filter(Boolean).join(" · ")}
-              </p>
-            ) : null}
           </section>
         </TabsContent>
       </Tabs>
@@ -727,6 +702,30 @@ function orchestrationStage(params: {
   return "thinking";
 }
 
+function phaseLabelForId(id: string) {
+  const labels: Record<string, string> = {
+    routing: "Plan route",
+    retrieval: "Use your files",
+    search: "Check live sources",
+    planning: "Split work",
+    analysis: "Analyze",
+    authoring: "Draft response",
+    synthesis: "Merge specialists",
+    verification: "Verify claims",
+    repair: "Polish format",
+    memory: "Update memory",
+    title: "Name chat",
+  };
+  return labels[id] ?? id.replace(/_/g, " ");
+}
+
+function phaseStatusTone(status: string) {
+  if (status === "completed") return "text-[var(--success)]";
+  if (status === "running") return "text-[var(--accent-cyan)]";
+  if (status === "failed") return "text-[var(--danger)]";
+  return "text-[var(--text-secondary)]";
+}
+
 function OrchestrationView({
   sending,
   collaboratorPhase,
@@ -808,52 +807,77 @@ function OrchestrationView({
         <p className="mt-1 text-sm font-medium capitalize text-[var(--text-primary)]">{stage === "idle" ? (sending ? "starting…" : "waiting") : stage}</p>
       </section>
 
-      <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-        <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">{isManual ? "Execution" : "Orchestration tree"}</p>
-        <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-sm font-medium text-[var(--text-primary)]">{isManual ? "Direct model call" : "Orchestrator agent"}</p>
-            <span className="rounded-full border border-[var(--border-default)] px-1.5 py-0.5 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
-              {sending ? "running" : "idle"}
-            </span>
-          </div>
-          <p className="mt-1 text-xs text-[var(--text-secondary)]">
-            {isManual
-              ? "Sending directly to your selected model — no automatic routing."
-              : "Plans specialist calls, validates outputs, and composes the final response."}
-          </p>
-        </div>
+      {routeTrace?.phasePlan && routeTrace.phasePlan.length > 0 ? (
+        <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+          <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Executed phases</p>
+          <ol className="space-y-2">
+            {routeTrace.phasePlan.map((phase) => (
+              <li key={phase.id} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-medium text-[var(--text-primary)]">{phase.label || phaseLabelForId(phase.id)}</p>
+                  <span className={`text-[10px] uppercase tracking-[0.08em] ${phaseStatusTone(phase.status)}`}>
+                    {phase.status}
+                  </span>
+                </div>
+                {phase.model ? <p className="mt-1 break-all font-mono text-[10px] text-[var(--text-secondary)]">{sanitizeModelId(phase.model)}</p> : null}
+                {phase.detail ? <p className="mt-1 text-[11px] text-[var(--text-secondary)]">{phase.detail}</p> : null}
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
 
-        {visibleCollaborators.length === 0 ? (
-          <p className="mt-2 text-xs text-[var(--text-secondary)]">{isManual ? "" : "No specialist sub-agents active right now."}</p>
-        ) : (
-          <div className="relative mt-3 pl-4">
-            <div className="absolute bottom-2 left-[7px] top-0 w-px bg-[var(--border-default)]" />
-            <ol className="space-y-2">
-              {visibleCollaborators.map((agent) => (
-                <li
-                  key={agent.role}
-                  className="relative rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2"
-                >
-                  <div className="absolute -left-4 top-1/2 w-3 border-t border-[var(--border-default)]" />
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs font-medium text-[var(--text-primary)]">{roleLabel(agent.role)}</p>
-                    <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">{statusLabel(agent.status)}</span>
-                  </div>
-                  {agent.model ? (
-                    <p className="mt-1 font-mono text-[10px] text-[var(--text-secondary)]">
-                      {sanitizeModelId(agent.model)}
-                    </p>
-                  ) : null}
-                  {typeof agent.tokensUsed === "number" && agent.tokensUsed > 0 ? (
-                    <p className="mt-0.5 text-[10px] text-[var(--text-secondary)]">{agent.tokensUsed} tokens</p>
-                  ) : null}
-                </li>
-              ))}
-            </ol>
-          </div>
-        )}
-      </section>
+      {routeTrace?.subcalls && routeTrace.subcalls.length > 0 ? (
+        <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+          <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Billable subcalls</p>
+          <ol className="space-y-2">
+            {routeTrace.subcalls.slice(0, 12).map((call) => (
+              <li key={call.id} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-medium text-[var(--text-primary)]">{call.label}</p>
+                  <span className={`text-[10px] uppercase tracking-[0.08em] ${call.status === "ok" ? "text-[var(--success)]" : "text-[var(--danger)]"}`}>
+                    {call.status}
+                  </span>
+                </div>
+                {call.modelUsed ? <p className="mt-1 break-all font-mono text-[10px] text-[var(--text-secondary)]">{sanitizeModelId(call.modelUsed)}</p> : null}
+                <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+                  {typeof call.inputTokens === "number" || typeof call.outputTokens === "number"
+                    ? `${call.inputTokens ?? 0} in • ${call.outputTokens ?? 0} out`
+                    : "token metrics unavailable"}
+                </p>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : (
+        <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+          <p className="text-xs text-[var(--text-secondary)]">
+            {sending ? "Waiting for billable subcall details..." : "No billable subcalls were captured for this response."}
+          </p>
+        </section>
+      )}
+
+      {visibleCollaborators.length > 0 ? (
+        <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+          <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Specialists</p>
+          <ol className="space-y-2">
+            {visibleCollaborators.map((agent) => (
+              <li key={agent.role} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-medium text-[var(--text-primary)]">{roleLabel(agent.role)}</p>
+                  <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">{statusLabel(agent.status)}</span>
+                </div>
+                {agent.model ? (
+                  <p className="mt-1 break-all font-mono text-[10px] text-[var(--text-secondary)]">{sanitizeModelId(agent.model)}</p>
+                ) : null}
+                {typeof agent.tokensUsed === "number" ? (
+                  <p className="mt-0.5 text-[10px] text-[var(--text-secondary)]">{agent.tokensUsed} tokens</p>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
 
       {displaySteps.length > 0 && (
         <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
@@ -1216,7 +1240,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
         }
       >
         <div
-          className={`flex items-center justify-between ${docked ? "min-h-[56px] shadow-[0_1px_0_var(--border-default)] px-5 py-2.5" : "min-h-[56px] mb-4"}`}
+          className={`flex items-center justify-between ${docked ? "min-h-[56px] shadow-[0_1px_0_var(--border-default)] px-5 pb-3 pt-2.5" : "min-h-[56px] mb-4"}`}
         >
           <div className="min-w-0">
             <p className="text-[9px] uppercase tracking-[0.14em] text-[var(--text-secondary)] truncate">{current.subtitle}</p>

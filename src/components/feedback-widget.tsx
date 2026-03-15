@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
-import { Bug, Loader2, MessageSquare, ShieldAlert, Sparkles, Upload, X } from "lucide-react";
+import { AlertTriangle, Bug, ImagePlus, Loader2, MessageSquare, Send, ShieldAlert, Sparkles, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 
@@ -38,11 +38,13 @@ function wait(ms: number) {
 
 export function FeedbackWidget() {
   const pathname = usePathname();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [category, setCategory] = useState<FeedbackCategory>("bug");
   const [message, setMessage] = useState("");
   const [screenshot, setScreenshot] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [noEvidenceWarning, setNoEvidenceWarning] = useState(false);
   const traceId = useMemo(
     () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `trace-${Date.now()}`),
     [],
@@ -54,6 +56,7 @@ export function FeedbackWidget() {
     setCategory("bug");
     setMessage("");
     setScreenshot(null);
+    setNoEvidenceWarning(false);
   }
 
   async function compressCanvasToFile(canvas: HTMLCanvasElement): Promise<File | null> {
@@ -73,12 +76,11 @@ export function FeedbackWidget() {
   async function captureScreenshot(): Promise<File | null> {
     try {
       const { default: html2canvas } = await import("html2canvas");
-      await wait(180);
+      await wait(220);
       await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
       await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
 
-      const target = document.body;
-      const canvas = await html2canvas(target, {
+      const canvas = await html2canvas(document.body, {
         backgroundColor: getComputedStyle(document.body).backgroundColor || "#f7f4ec",
         useCORS: true,
         allowTaint: false,
@@ -96,57 +98,23 @@ export function FeedbackWidget() {
     }
   }
 
-  async function submitFeedback(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const trimmed = message.trim();
-    if (!trimmed) {
-      toast.error("Please describe your feedback.");
-      return;
-    }
-    if (trimmed.length > MAX_MESSAGE_LENGTH) {
-      toast.error(`Feedback must be ${MAX_MESSAGE_LENGTH} characters or fewer.`);
-      return;
-    }
-
-    if (screenshot) {
-      if (!screenshot.type.startsWith("image/")) {
-        toast.error("Screenshot must be an image.");
-        return;
-      }
-      if (screenshot.size > MAX_SCREENSHOT_BYTES) {
-        toast.error("Screenshot must be 2MB or smaller.");
-        return;
-      }
-    }
-
+  async function doSubmit(screenshotFile: File | null) {
     setSubmitting(true);
-    const previousOpen = open;
+    setNoEvidenceWarning(false);
     setOpen(false);
     try {
       const form = new FormData();
       form.set("category", category);
-      form.set("message", trimmed);
+      form.set("message", message.trim());
       form.set("page", pathname);
       form.set("device", navigator.userAgent);
       form.set("traceId", traceId);
 
       const mode = inferModeFromPath(pathname);
-      if (mode) {
-        form.set("mode", mode);
-      }
+      if (mode) form.set("mode", mode);
+      if (screenshotFile) form.set("screenshot", screenshotFile);
 
-      let screenshotToSend = screenshot;
-      if (!screenshotToSend) {
-        screenshotToSend = await captureScreenshot();
-      }
-      if (screenshotToSend) {
-        form.set("screenshot", screenshotToSend);
-      }
-
-      const response = await fetch("/api/feedback", {
-        method: "POST",
-        body: form,
-      });
+      const response = await fetch("/api/feedback", { method: "POST", body: form });
 
       if (!response.ok) {
         const errorPayload = (await response.json().catch(() => null)) as
@@ -162,13 +130,48 @@ export function FeedbackWidget() {
       toast.success("Feedback sent. Thank you.");
       resetForm();
     } catch (error) {
-      if (previousOpen) {
-        setOpen(true);
-      }
+      setOpen(true);
       toast.error(error instanceof Error ? error.message : "Failed to submit feedback");
     } finally {
       setSubmitting(false);
     }
+  }
+
+  async function submitFeedback(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmed = message.trim();
+    if (!trimmed) {
+      toast.error("Please describe your feedback.");
+      return;
+    }
+    if (trimmed.length > MAX_MESSAGE_LENGTH) {
+      toast.error(`Feedback must be ${MAX_MESSAGE_LENGTH} characters or fewer.`);
+      return;
+    }
+    if (screenshot) {
+      if (!screenshot.type.startsWith("image/")) {
+        toast.error("Screenshot must be an image.");
+        return;
+      }
+      if (screenshot.size > MAX_SCREENSHOT_BYTES) {
+        toast.error("Screenshot must be 2MB or smaller.");
+        return;
+      }
+      await doSubmit(screenshot);
+      return;
+    }
+
+    // No file attached — close widget and attempt auto-capture
+    setOpen(false);
+    const autoShot = await captureScreenshot();
+    if (autoShot) {
+      await doSubmit(autoShot);
+      return;
+    }
+
+    // Auto-capture failed — reopen with warning
+    setOpen(true);
+    setNoEvidenceWarning(true);
   }
 
   if (!open) {
@@ -194,7 +197,7 @@ export function FeedbackWidget() {
         </div>
         <button
           type="button"
-          onClick={() => setOpen(false)}
+          onClick={() => { setOpen(false); setNoEvidenceWarning(false); }}
           className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
           aria-label="Close feedback form"
         >
@@ -238,7 +241,10 @@ export function FeedbackWidget() {
           <textarea
             id="feedback-message"
             value={message}
-            onChange={(event) => setMessage(event.target.value.slice(0, MAX_MESSAGE_LENGTH))}
+            onChange={(event) => {
+              setMessage(event.target.value.slice(0, MAX_MESSAGE_LENGTH));
+              if (noEvidenceWarning) setNoEvidenceWarning(false);
+            }}
             placeholder="What happened, what did you expect, and how can we improve?"
             className="max-h-[190px] min-h-[100px] w-full resize-none overflow-y-auto rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
             required
@@ -257,12 +263,14 @@ export function FeedbackWidget() {
               {screenshot ? screenshot.name : "Attach image up to 2MB"}
             </span>
             <input
+              ref={fileInputRef}
               type="file"
               accept="image/*"
               className="hidden"
               onChange={(event) => {
                 const file = event.target.files?.[0] ?? null;
                 setScreenshot(file);
+                if (file) setNoEvidenceWarning(false);
                 event.currentTarget.value = "";
               }}
             />
@@ -270,20 +278,56 @@ export function FeedbackWidget() {
           </label>
         </div>
 
+        {/* No-evidence warning banner */}
+        {noEvidenceWarning ? (
+          <div className="rounded-xl border border-[color-mix(in_oklab,var(--warning)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_8%,var(--bg-secondary))] p-3">
+            <div className="mb-2 flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--warning)]" />
+              <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
+                <span className="font-semibold text-[var(--text-primary)]">No screenshot captured.</span>{" "}
+                Adding a screenshot or attachment helps us reproduce the issue faster.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setNoEvidenceWarning(false);
+                  window.setTimeout(() => fileInputRef.current?.click(), 50);
+                }}
+                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]"
+              >
+                <ImagePlus className="h-3.5 w-3.5" />
+                Attach
+              </button>
+              <button
+                type="button"
+                onClick={() => void doSubmit(null)}
+                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-inverse)] transition hover:brightness-105"
+              >
+                <Send className="h-3.5 w-3.5" />
+                Send anyway
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         <div className="rounded-lg bg-[var(--bg-secondary)] px-2.5 py-2 text-[11px] text-[var(--text-secondary)]">
           Auto-context: <span className="font-medium text-[var(--text-primary)]">{pathname}</span>
         </div>
 
-        <Button type="submit" className="w-full gap-2" disabled={submitting}>
-          {submitting ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Sending...
-            </>
-          ) : (
-            "Send feedback"
-          )}
-        </Button>
+        {!noEvidenceWarning ? (
+          <Button type="submit" className="w-full gap-2" disabled={submitting}>
+            {submitting ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Sending...
+              </>
+            ) : (
+              "Send feedback"
+            )}
+          </Button>
+        ) : null}
       </form>
     </aside>
   );

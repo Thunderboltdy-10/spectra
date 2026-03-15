@@ -3,6 +3,17 @@ import { markerVerificationPrompt } from "@/lib/prompts/policy";
 import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 import type { RouteTraceFallback } from "@/types";
 
+export type VerificationSubcall = {
+  label: string;
+  modelUsed?: string;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+    cost?: number;
+  };
+};
+
 export function parseVerificationJson(value: string) {
   try {
     const json = JSON.parse(value.match(/\{[\s\S]*\}/)?.[0] ?? "{}");
@@ -32,7 +43,9 @@ export async function runMarkerVerificationPipeline(params: {
   let modelUsed = params.primaryModel;
   let usageIn = 0;
   let usageOut = 0;
+  let usageCost = 0;
   let verificationPassed: boolean | undefined;
+  const subcalls: VerificationSubcall[] = [];
 
   const initial = await openRouterChatCompletion({
     model: params.primaryModel,
@@ -46,6 +59,20 @@ export async function runMarkerVerificationPipeline(params: {
   modelUsed = initial.model ?? modelUsed;
   usageIn = initial.usage?.prompt_tokens ?? usageIn;
   usageOut = initial.usage?.completion_tokens ?? usageOut;
+  usageCost += initial.usage?.cost ?? 0;
+  subcalls.push({
+    label: "Marker draft generation",
+    modelUsed: initial.model ?? params.primaryModel,
+    usage: initial.usage,
+  });
+  if (params.actorClerkId) {
+    await recordOpenRouterUsage({
+      actorClerkId: params.actorClerkId,
+      chatId: params.chatId,
+      model: initial.model ?? params.primaryModel,
+      usage: initial.usage,
+    }).catch(() => {});
+  }
 
   if (params.verificationModel) {
     const verify = await openRouterChatCompletion({
@@ -60,6 +87,8 @@ export async function runMarkerVerificationPipeline(params: {
     });
 
     const parsed = parseVerificationJson(verify.choices?.[0]?.message?.content ?? "{}");
+    usageIn += verify.usage?.prompt_tokens ?? 0;
+    usageOut += verify.usage?.completion_tokens ?? 0;
     if (params.actorClerkId) {
       await recordOpenRouterUsage({
         actorClerkId: params.actorClerkId,
@@ -68,6 +97,12 @@ export async function runMarkerVerificationPipeline(params: {
         usage: verify.usage,
       }).catch(() => {});
     }
+    usageCost += verify.usage?.cost ?? 0;
+    subcalls.push({
+      label: "Marker verification pass",
+      modelUsed: verify.model ?? params.verificationModel,
+      usage: verify.usage,
+    });
     verificationPassed = parsed.pass;
     params.logger?.info("marker verification complete", {
       verificationPassed,
@@ -94,6 +129,20 @@ export async function runMarkerVerificationPipeline(params: {
       modelUsed = retry.model ?? modelUsed;
       usageIn += retry.usage?.prompt_tokens ?? 0;
       usageOut += retry.usage?.completion_tokens ?? 0;
+      usageCost += retry.usage?.cost ?? 0;
+      subcalls.push({
+        label: "Marker retry generation",
+        modelUsed: retry.model ?? params.primaryModel,
+        usage: retry.usage,
+      });
+      if (params.actorClerkId) {
+        await recordOpenRouterUsage({
+          actorClerkId: params.actorClerkId,
+          chatId: params.chatId,
+          model: retry.model ?? params.primaryModel,
+          usage: retry.usage,
+        }).catch(() => {});
+      }
     }
   }
 
@@ -102,6 +151,13 @@ export async function runMarkerVerificationPipeline(params: {
     modelUsed,
     usageIn,
     usageOut,
+    usage: {
+      prompt_tokens: usageIn,
+      completion_tokens: usageOut,
+      total_tokens: usageIn + usageOut,
+      cost: usageCost > 0 ? usageCost : undefined,
+    },
     verificationPassed,
+    subcalls,
   };
 }

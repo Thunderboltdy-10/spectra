@@ -1,4 +1,5 @@
-import { pickModelAndFallbacks, type CatalogModelEntry, type ModelRuntimeStat } from "@/lib/model-selection";
+import type { CatalogModelEntry, ModelRuntimeStat } from "@/lib/model-selection";
+import { selectModelForPhase } from "@/lib/routing/phase-router";
 import type { SpendingTier } from "@/types";
 import type { TaskRole } from "@/lib/orchestrator/task-graph";
 
@@ -65,26 +66,33 @@ export function getSpecialist(
   const explicitModel = roleOverride ?? defaultModel;
   const requirements = roleRequirements(role);
 
-  const picked = catalog.length > 0
-    ? pickModelAndFallbacks({
-        catalog: catalog.filter((model) => model.modelId !== "openrouter/auto"),
-        tier,
+  const decision = catalog.length > 0
+    ? selectModelForPhase({
+        phaseId: `specialist_${role}`,
+        phaseLabel: role.replace(/_/g, " "),
+        mode: "research",
+        routerMode: "auto",
+        spendingTier: tier,
+        thinkingLevel: role === "retriever" || role === "web_researcher" ? "low" : "medium",
+        stakes: role === "critic" || role === "fact_checker" ? "high" : "medium",
+        messageLength: 900,
+        needsSearch: role === "web_researcher" || role === "fact_checker",
         requiredCapabilities: [...requirements.required],
         preferredCapabilities: [...requirements.preferred],
         preferredModelIds: explicitModel ? [explicitModel] : undefined,
-        avoidModels: options?.avoidModels,
-        preferCheap: role === "retriever" || role === "pedagogy_coach",
-        preferFast: role === "retriever" || role === "web_researcher",
-        runtimeStats: options?.runtimeStats,
-        maxFallbacks: 4,
+        previousModelUsed: options?.avoidModels?.at(-1),
+        recentModels: options?.avoidModels ?? [],
+        modelCatalog: catalog.filter((model) => model.modelId !== "openrouter/auto"),
+        modelRuntimeStats: options?.runtimeStats,
+        seedKey: `${role}:${options?.avoidModels?.join(",") ?? ""}`,
       })
-    : { selected: undefined, fallbacks: [] as string[] };
+    : undefined;
 
-  const model = picked.selected?.modelId ?? explicitModel ?? options?.fallbackModels?.[0] ?? "openrouter/auto";
+  const model = decision?.selectedModel ?? explicitModel ?? options?.fallbackModels?.[0] ?? "openrouter/auto";
   const fallbackModels = Array.from(
     new Set(
       [
-        ...picked.fallbacks,
+        ...(decision?.fallbackModels ?? []),
         ...(options?.fallbackModels ?? []),
       ].filter((candidate) => candidate && candidate !== model),
     ),

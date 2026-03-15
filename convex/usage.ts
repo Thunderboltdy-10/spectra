@@ -197,6 +197,7 @@ export const recordUsageWithCost = mutation({
     model: v.string(),
     inputTokens: v.number(),
     outputTokens: v.number(),
+    openRouterCost: v.optional(v.number()),
     inputCostPerM: v.optional(v.number()),
     outputCostPerM: v.optional(v.number()),
   },
@@ -241,14 +242,26 @@ export const recordUsageWithCost = mutation({
       (typeof inPrice === "number" && Number.isFinite(inPrice)) ||
       (typeof outPrice === "number" && Number.isFinite(outPrice));
 
+    const openRouterCost =
+      typeof args.openRouterCost === "number" && Number.isFinite(args.openRouterCost)
+        ? Math.max(0, args.openRouterCost)
+        : undefined;
+
     const inputPricePerM = typeof inPrice === "number" && Number.isFinite(inPrice) ? inPrice : 0;
     const outputPricePerM = typeof outPrice === "number" && Number.isFinite(outPrice) ? outPrice : 0;
-    const rawCostCents =
+    const estimatedRawCostCents =
       (
         ((args.inputTokens / 1_000_000) * inputPricePerM) +
         ((args.outputTokens / 1_000_000) * outputPricePerM)
       ) * 100;
-    const costCents = Math.max(0, Number(rawCostCents.toFixed(6)));
+    const directCostCents =
+      openRouterCost !== undefined
+        ? Number((openRouterCost * 100).toFixed(6))
+        : undefined;
+    const costCents = Math.max(
+      0,
+      Number((directCostCents ?? estimatedRawCostCents).toFixed(6)),
+    );
 
     const existingDaily = await ctx.db
       .query("usageDaily")
@@ -283,7 +296,12 @@ export const recordUsageWithCost = mutation({
       outputTokens: args.outputTokens,
       totalTokens,
       costCents,
-      pricingNote: hasKnownPricing ? undefined : "Pricing unknown at record time; cost defaulted to zero.",
+      pricingNote:
+        openRouterCost !== undefined
+          ? "Cost sourced directly from OpenRouter usage."
+          : hasKnownPricing
+            ? undefined
+            : "Pricing unknown at record time; cost defaulted to zero.",
       day,
       createdAt: now,
     });

@@ -1,7 +1,12 @@
-import { openRouterChatCompletion, openRouterStreamChat, type OpenRouterMessage } from "@/lib/openrouter";
+import {
+  openRouterChatCompletion,
+  openRouterStreamChat,
+  type OpenRouterMessage,
+  type OpenRouterUsage,
+} from "@/lib/openrouter";
 import { executeGraph, synthesize, type TaskNode } from "@/lib/orchestrator/task-graph";
 import { getSpecialist } from "@/lib/orchestrator/specialists";
-import { runMarkerVerificationPipeline } from "@/lib/orchestrator/verification";
+import { runMarkerVerificationPipeline, type VerificationSubcall } from "@/lib/orchestrator/verification";
 import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 import type { CatalogModelEntry, ModelRuntimeStat } from "@/lib/model-selection";
 import type { RouteTraceFallback, SpendingTier } from "@/types";
@@ -30,8 +35,10 @@ export async function runAssistantStreaming(params: {
   let modelUsed = params.primaryModel;
   let usageIn = 0;
   let usageOut = 0;
+  let usage: OpenRouterUsage | undefined;
   let verificationPassed: boolean | undefined;
   let thinkingContent = "";
+  let verificationSubcalls: VerificationSubcall[] | undefined;
 
   if (!params.shouldVerify) {
     for await (const event of openRouterStreamChat({
@@ -53,6 +60,7 @@ export async function runAssistantStreaming(params: {
         modelUsed = event.model ?? modelUsed;
         usageIn = event.inputTokens ?? usageIn;
         usageOut = event.outputTokens ?? usageOut;
+        usage = event.usage ?? usage;
       }
       if (event.type === "error") {
         throw new Error(event.error);
@@ -75,7 +83,9 @@ export async function runAssistantStreaming(params: {
     modelUsed = verified.modelUsed;
     usageIn = verified.usageIn;
     usageOut = verified.usageOut;
+    usage = verified.usage;
     verificationPassed = verified.verificationPassed;
+    verificationSubcalls = verified.subcalls;
 
     for (const chunk of chunkString(responseText, 24)) {
       await params.send({ type: "delta", content: chunk });
@@ -87,12 +97,14 @@ export async function runAssistantStreaming(params: {
     modelUsed,
     usageIn,
     usageOut,
+    usage,
     verificationPassed,
     thinkingContent,
     sourceHints: [] as SearchSourceHint[],
     collaborators: undefined as
       | Array<{ role: string; model: string; tokensUsed: number; durationMs: number }>
       | undefined,
+    verificationSubcalls,
   };
 }
 
@@ -360,6 +372,7 @@ export async function runCollaborativeStreaming(params: {
   let responseText = "";
   let usageIn = 0;
   let usageOut = 0;
+  let usage: OpenRouterUsage | undefined;
   let modelUsed = params.synthesisModel ?? params.primaryModel;
   for await (const event of openRouterStreamChat({
     model: params.synthesisModel ?? params.primaryModel,
@@ -393,6 +406,7 @@ export async function runCollaborativeStreaming(params: {
       modelUsed = event.model ?? modelUsed;
       usageIn = event.inputTokens ?? usageIn;
       usageOut = event.outputTokens ?? usageOut;
+      usage = event.usage ?? usage;
     }
     if (event.type === "error") {
       throw new Error(event.error);
@@ -427,9 +441,11 @@ export async function runCollaborativeStreaming(params: {
     modelUsed,
     usageIn,
     usageOut,
+    usage,
     thinkingContent: "",
     sourceHints: [...sourceHintsByUrl.values()].slice(0, 12),
     verificationPassed: undefined,
     collaborators,
+    verificationSubcalls: undefined as VerificationSubcall[] | undefined,
   };
 }

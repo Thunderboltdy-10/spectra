@@ -4,7 +4,7 @@ import { convexQuery } from "@/lib/convex-server";
 import { ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 import { runAutoSettingsPipeline } from "@/lib/auto-settings";
-import { chooseModelRoute } from "@/lib/routing/heuristic";
+import { selectModelForPhase } from "@/lib/routing/phase-router";
 import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
 import { safeStudyMode, type StudyMode } from "@/types";
 
@@ -112,27 +112,65 @@ export async function POST(request: NextRequest) {
       skipModelCalls: true,
     });
 
-    const route = chooseModelRoute({
+    const routingMode = autoSettings.autoModel ? body.routerMode : "manual";
+    const routingManualModel = autoSettings.autoModel ? body.manualModel : fallbackManualModel;
+    const phaseStake =
+      auto.complexity === "complex"
+        ? "high"
+        : auto.complexity === "simple"
+          ? "low"
+          : "medium";
+    const routeDecision = selectModelForPhase({
+      phaseId: "analysis",
+      phaseLabel: "Primary response",
       mode: safeMode,
-      thinkingLevel: auto.thinkingLevel,
-      hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
-      attachmentTypes: body.attachmentTypes ?? [],
-      messageLength: auto.message.length,
-      teacherStrictness: "medium",
-      routerMode: autoSettings.autoModel ? body.routerMode : "manual",
-      manualModel: autoSettings.autoModel ? body.manualModel : fallbackManualModel,
-      studentSeemsStuck: false,
+      routerMode: routingMode,
+      manualModel: routingManualModel,
       spendingTier: budget.tier,
+      thinkingLevel: auto.thinkingLevel,
+      stakes: phaseStake,
+      messageLength: auto.message.length,
       needsSearch: auto.searchEnabled,
-      needsRag: Boolean(body.usePersonalResources),
-      promptEnhanced: auto.promptEnhanced,
-      promptCategory: auto.promptCategory,
-      questionType: auto.questionType,
-      isMultipart: auto.isMultipart,
+      hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
+      requiredCapabilities: (body.attachmentTypes?.length ?? 0) > 0 ? ["vision"] : [],
+      preferredCapabilities: auto.searchEnabled ? ["reasoning", "search"] : ["reasoning"],
       modelCatalog: catalog,
       modelRuntimeStats: runtimeStatMap,
+      seedKey: `dry-run:${actor.clerkId}:${normalizedMessage}`,
     });
 
-    return ok({ routeTrace: route.trace });
+    return ok({
+      routeTrace: {
+        inputs: {
+          routerMode: routingMode,
+          manualModel: routingManualModel,
+          mode: safeMode,
+          thinkingLevel: auto.thinkingLevel,
+          complexPrompt: auto.complexity === "complex",
+          promptCategory: auto.promptCategory,
+          questionType: auto.questionType,
+          isMultipart: auto.isMultipart,
+          needsSearch: auto.searchEnabled,
+          needsRag: Boolean(body.usePersonalResources),
+          needsVision: (body.attachmentTypes?.length ?? 0) > 0,
+          needsTabular: false,
+          spendingTier: budget.tier,
+          hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
+          attachmentTypes: body.attachmentTypes ?? [],
+          promptEnhanced: auto.promptEnhanced,
+          messageLength: auto.message.length,
+        },
+        candidates: routeDecision.candidates,
+        selected: {
+          modelId: routeDecision.selectedModel,
+          reason: routeDecision.reason,
+        },
+        toolchain: ["phase_router"],
+        fallbacks: [],
+        routingDurationMs: routeDecision.routingDurationMs,
+        phasePlan: [routeDecision.phase],
+        subcalls: [],
+      },
+    });
   });
 }

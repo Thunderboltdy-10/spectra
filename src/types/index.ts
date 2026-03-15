@@ -217,6 +217,38 @@ export type RouteTraceFallback = {
   attemptIndex: number;
 };
 
+export type RouteTracePhaseStatus = "planned" | "running" | "completed" | "skipped" | "failed";
+
+export type RouteTracePhase = {
+  id: string;
+  label: string;
+  status: RouteTracePhaseStatus;
+  detail?: string;
+  thinkingLevel?: import("@/lib/contracts/studyModes").ThinkingLevel;
+  model?: string;
+  startedAt?: number;
+  finishedAt?: number;
+};
+
+export type RouteTraceSubcall = {
+  id: string;
+  phaseId: string;
+  label: string;
+  endpoint: "chat.completions" | "embeddings";
+  status: "ok" | "error";
+  modelRequested?: string;
+  modelUsed?: string;
+  provider?: string;
+  lane?: "stable" | "fresh" | "challenger";
+  inputTokens?: number;
+  outputTokens?: number;
+  costCents?: number;
+  durationMs?: number;
+  reason?: string;
+  startedAt?: number;
+  finishedAt?: number;
+};
+
 export type RouteTrace = {
   inputs: {
     routerMode: import("@/lib/contracts/studyModes").RouterMode;
@@ -246,10 +278,13 @@ export type RouteTrace = {
     reason: string;
   };
   routePlan?: RoutePlan;
+  phasePlan?: RouteTracePhase[];
+  subcalls?: RouteTraceSubcall[];
   toolchain: string[];
   fallbacks: RouteTraceFallback[];
   routingDurationMs: number;
   totalDurationMs?: number;
+  totalCostCents?: number;
   collaborators?: Array<{ role: string; model: string; tokensUsed: number; durationMs: number }>;
 };
 

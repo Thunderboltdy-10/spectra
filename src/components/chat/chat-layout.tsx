@@ -276,10 +276,8 @@ export function ChatLayout() {
     const meaningfulOrchestration =
       chat.activeCollaborators.length > 0
       || chat.collaboratorPhase !== "idle"
-      || chat.streamPhase === "routing"
       || chat.streamPhase === "searching"
       || chat.streamPhase === "compacting"
-      || chat.streamPhase === "thinking"
       || chat.streamPhase === "synthesizing";
     const shouldAutoOpen = chat.sending && liveProgressAutoOpen && meaningfulOrchestration;
 

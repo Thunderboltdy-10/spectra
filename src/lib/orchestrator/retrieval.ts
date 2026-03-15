@@ -1,7 +1,7 @@
 import { convexAction, convexQuery } from "@/lib/convex-server";
 import { MODEL_CONFIG } from "@/lib/model-config";
 import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
-import { openRouterChatCompletion, openRouterEmbedding } from "@/lib/openrouter";
+import { openRouterChatCompletion, openRouterEmbeddingRequest } from "@/lib/openrouter";
 import { withTimeout } from "@/lib/orchestrator/history";
 import { pickModelAndFallbacks, type CatalogModelEntry, type ModelRuntimeStat } from "@/lib/model-selection";
 import { searxngSearch } from "@/lib/search/searxng";
@@ -29,6 +29,14 @@ export type RetrievalResult = {
       | "retrieved"
       | "failed";
     reason: string;
+    embeddingModel?: string;
+    embeddingUsage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+      cost?: number;
+    };
+    embeddingDurationMs?: number;
   };
 };
 
@@ -45,6 +53,21 @@ export type WebSearchSource = {
   title: string;
   domain: string;
   snippet?: string;
+};
+
+export type WebSearchResult = {
+  text: string;
+  urls: string[];
+  sources: WebSearchSource[];
+  provider: "searxng" | "model_fallback" | "disabled" | "error";
+  modelUsed?: string;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+    cost?: number;
+  };
+  durationMs?: number;
 };
 
 const MAX_WEB_SOURCES = 6;
@@ -310,7 +333,7 @@ export async function maybeSearchWeb(
     modelRuntimeStats?: Record<string, ModelRuntimeStat>;
     searxngEnabled?: boolean;
   },
-) {
+): Promise<WebSearchResult> {
   const searxngResults = options?.searxngEnabled === false
     ? []
     : await searxngSearch(message, {
@@ -360,34 +383,49 @@ export async function maybeSearchWeb(
   const searchModel = searchModelSelection.selected?.modelId
     ?? liveCatalog.find((model) => model.modelId !== "openrouter/auto")?.modelId
     ?? "openrouter/auto";
-  const completion = await withTimeout(
-    openRouterChatCompletion({
-      model: searchModel,
-      fallbackModels: searchModelSelection.fallbacks,
-      messages: [
-        {
-          role: "system",
-          content:
-            "Provide a concise up-to-date briefing with explicit source URLs for key claims. Keep under 180 words.",
-        },
-        {
-          role: "user",
-          content: message,
-        },
-      ],
-      temperature: 0.2,
-    }),
-    8000,
-  );
-
-  const text = completion?.choices?.[0]?.message?.content?.trim() ?? "";
-  if (completion && options?.actorClerkId) {
+  const startedAt = Date.now();
+  const completionPromise = openRouterChatCompletion({
+    model: searchModel,
+    fallbackModels: searchModelSelection.fallbacks,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Provide a concise up-to-date briefing with explicit source URLs for key claims. Keep under 180 words.",
+      },
+      {
+        role: "user",
+        content: message,
+      },
+    ],
+    temperature: 0.2,
+  });
+  let usageRecorded = false;
+  const recordUsage = async (completion: Awaited<typeof completionPromise>) => {
+    if (!options?.actorClerkId || usageRecorded) return;
+    usageRecorded = true;
     await recordOpenRouterUsage({
       actorClerkId: options.actorClerkId,
       chatId: options.chatId,
       model: completion.model ?? searchModel,
       usage: completion.usage,
     }).catch(() => {});
+  };
+  void completionPromise.then((completion) => {
+    void recordUsage(completion);
+  }).catch(() => {});
+
+  const completion = await withTimeout(
+    completionPromise,
+    8000,
+  );
+
+  const text = completion?.choices?.[0]?.message?.content?.trim() ?? "";
+  const modelUsed = completion?.model ?? searchModel;
+  const usage = completion?.usage;
+  const durationMs = Date.now() - startedAt;
+  if (completion) {
+    await recordUsage(completion);
   }
   const extractedUrls = extractUrls(text);
   const sources = await resolveWebSearchSources(extractedUrls);
@@ -406,17 +444,31 @@ export async function maybeSearchWeb(
     urls: sources.map((source) => source.url),
     sources,
     provider: "model_fallback" as const,
+    modelUsed,
+    usage,
+    durationMs,
   };
 }
 
 export async function runRagRetrieval(params: {
   actorClerkId: string;
+  chatId?: string;
   packId?: string;
   usePersonalResources: boolean;
   selectedAgentId?: string;
   message: string;
   logger?: { info: (message: string, context?: Record<string, unknown>) => void; warn: (message: string) => void };
 }): Promise<RetrievalResult> {
+  let embeddingModel: string | undefined;
+  let embeddingUsage:
+    | {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        total_tokens?: number;
+        cost?: number;
+      }
+    | undefined;
+  let embeddingDurationMs: number | undefined;
   let retrieval: RetrievalResult = {
     citations: [],
     sourceBlock: "No retrieved sources.",
@@ -455,7 +507,19 @@ export async function runRagRetrieval(params: {
     ];
     const hasRetrievalSources = packResources.length > 0 || personalResources.length > 0 || agentResources.length > 0;
     if (hasRetrievalSources) {
-      const queryEmbedding = await openRouterEmbedding(params.message, MODEL_CONFIG.embedding);
+      const embeddingStartedAt = Date.now();
+      const embeddingResult = await openRouterEmbeddingRequest(params.message, MODEL_CONFIG.embedding);
+      embeddingDurationMs = Date.now() - embeddingStartedAt;
+      embeddingModel = embeddingResult.model ?? MODEL_CONFIG.embedding;
+      embeddingUsage = embeddingResult.usage;
+      const queryEmbedding = embeddingResult.embedding;
+      await recordOpenRouterUsage({
+        actorClerkId: params.actorClerkId,
+        chatId: params.chatId,
+        model: embeddingModel,
+        usage: embeddingUsage,
+        skipIfZeroTokens: false,
+      }).catch(() => {});
       const rawRetrieval = (await convexAction("rag:retrieve", {
         actorClerkId: params.actorClerkId,
         packId: params.packId,
@@ -473,6 +537,9 @@ export async function runRagRetrieval(params: {
           retrieval.citations.length > 0
             ? "Retrieved scoped resource evidence."
             : "Scoped retrieval returned no high-confidence matches.",
+        embeddingModel,
+        embeddingUsage,
+        embeddingDurationMs,
       };
       params.logger?.info("RAG retrieval complete", {
         sourceCount: retrieval.citations.length,
@@ -490,6 +557,9 @@ export async function runRagRetrieval(params: {
           scopesAttempted.length === 0
             ? "No retrieval scopes were allowed for this route."
             : "No uploaded resources were available inside the allowed scopes.",
+        embeddingModel,
+        embeddingUsage,
+        embeddingDurationMs,
       };
     }
   } catch {
@@ -504,6 +574,9 @@ export async function runRagRetrieval(params: {
         ],
         status: "failed",
         reason: "Retrieval failed during embedding or vector search.",
+        embeddingModel,
+        embeddingUsage,
+        embeddingDurationMs,
       },
     };
     params.logger?.warn("RAG retrieval failed; using fallback source block");

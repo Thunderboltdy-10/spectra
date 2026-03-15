@@ -7,6 +7,8 @@ export type CatalogModelEntry = {
   provider?: string;
   description?: string;
   contextLength?: number;
+  releaseDate?: string;
+  createdAt?: number;
   inputCostPerM?: number;
   outputCostPerM?: number;
   tags?: string[];

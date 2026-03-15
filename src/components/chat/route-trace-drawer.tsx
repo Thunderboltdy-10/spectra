@@ -203,6 +203,45 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
           </div>
             </section>
 
+            {trace.phasePlan && trace.phasePlan.length > 0 ? (
+              <section className="mb-5">
+                <h4 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Executed Phases</h4>
+                <div className="space-y-2">
+                  {trace.phasePlan.map((phase, index) => (
+                    <div key={`${phase.id}-${index}`} className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-medium text-[var(--text-primary)]">{phase.label || phase.id}</p>
+                        <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">{phase.status}</span>
+                      </div>
+                      {phase.model ? <p className="mt-1 break-all font-mono text-[11px] text-[var(--text-secondary)]">{sanitizeModelId(phase.model)}</p> : null}
+                      {phase.detail ? <p className="mt-1 text-xs text-[var(--text-secondary)]">{phase.detail}</p> : null}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {trace.subcalls && trace.subcalls.length > 0 ? (
+              <section className="mb-5">
+                <h4 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Billable Subcalls</h4>
+                <div className="space-y-2">
+                  {trace.subcalls.slice(0, 14).map((call) => (
+                    <div key={call.id} className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-medium text-[var(--text-primary)]">{call.label}</p>
+                        <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">{call.status}</span>
+                      </div>
+                      {call.modelUsed ? <p className="mt-1 break-all font-mono text-[11px] text-[var(--text-secondary)]">{sanitizeModelId(call.modelUsed)}</p> : null}
+                      <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                        {(call.inputTokens ?? 0)} in • {(call.outputTokens ?? 0)} out
+                        {typeof call.costCents === "number" ? ` • $${(call.costCents / 100).toFixed(4)}` : ""}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
             <section className="mb-5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
           <h4 className="mb-1 text-sm font-semibold text-[var(--text-primary)]">Selected</h4>
           <p className="break-all font-mono text-xs text-[var(--text-primary)]">{sanitizeModelId(trace.selected.modelId)}</p>

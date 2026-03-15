@@ -139,6 +139,16 @@ export async function maybeCompactHistory(params: {
   actorClerkId: string;
   chatId: string;
   history: ChatMessage[];
+  onModelCall?: (call: {
+    model: string;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+      cost?: number;
+    };
+    durationMs?: number;
+  }) => void;
 }) {
   if (!shouldScheduleCompaction({ history: params.history, hasExistingSummary: false })) return;
 
@@ -148,34 +158,54 @@ export async function maybeCompactHistory(params: {
     .join("\n\n")
     .slice(0, 12000);
 
+  const startedAt = Date.now();
+  const completionPromise = openRouterChatCompletion({
+    model: MODEL_CONFIG.tutorFast,
+    fallbackModels: [MODEL_CONFIG.marker],
+    messages: [
+      {
+        role: "system",
+        content:
+          "Summarize this study conversation for memory compaction. Output plain text with headings: Goals, Attempts, Key Guidance, Outstanding Questions, Next Steps. Use concise bullet points and keep total length between 120 and 220 words.",
+      },
+      {
+        role: "user",
+        content: source,
+      },
+    ],
+    temperature: 0.1,
+  });
+  let usageRecorded = false;
+  const recordUsage = async (completion: Awaited<typeof completionPromise>) => {
+    if (usageRecorded) return;
+    usageRecorded = true;
+    const model = completion.model ?? MODEL_CONFIG.tutorFast;
+    const usage = completion.usage;
+    const durationMs = Date.now() - startedAt;
+    await recordOpenRouterUsage({
+      actorClerkId: params.actorClerkId,
+      chatId: params.chatId,
+      model,
+      usage,
+    }).catch(() => {});
+    params.onModelCall?.({
+      model,
+      usage,
+      durationMs,
+    });
+  };
+  void completionPromise.then((completion) => {
+    void recordUsage(completion);
+  }).catch(() => {});
+
   const completion = await withTimeout(
-    openRouterChatCompletion({
-      model: MODEL_CONFIG.tutorFast,
-      fallbackModels: [MODEL_CONFIG.marker],
-      messages: [
-        {
-          role: "system",
-          content:
-            "Summarize this study conversation for memory compaction. Output plain text with headings: Goals, Attempts, Key Guidance, Outstanding Questions, Next Steps. Use concise bullet points and keep total length between 120 and 220 words.",
-        },
-        {
-          role: "user",
-          content: source,
-        },
-      ],
-      temperature: 0.1,
-    }),
+    completionPromise,
     5000,
   );
 
   const summary = completion?.choices?.[0]?.message?.content?.trim() ?? fallbackCompactSummary(olderHistory);
   if (completion) {
-    await recordOpenRouterUsage({
-      actorClerkId: params.actorClerkId,
-      chatId: params.chatId,
-      model: completion.model ?? MODEL_CONFIG.tutorFast,
-      usage: completion.usage,
-    }).catch(() => {});
+    await recordUsage(completion);
   }
   if (!summary) return;
 

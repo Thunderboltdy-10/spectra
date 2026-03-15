@@ -38,6 +38,7 @@ const TOOLCHAIN_LABELS: Record<string, string> = {
   skill_fetch: 'Runtime skills selected',
   skill_guidance_applied: 'Skill guidance applied',
   retry_model_override: 'Retry model override',
+  phase_router: 'Phase-based routing',
   route_trace: 'Route trace',
   route_model: 'Model route emitted',
   openrouter_auto_unresolved_model: 'Provider did not disclose final delegated model',

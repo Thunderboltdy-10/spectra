@@ -11,6 +11,7 @@ type CompletionLike = {
   usage?: {
     prompt_tokens?: number;
     completion_tokens?: number;
+    cost?: number;
   };
 };
 
@@ -40,6 +41,7 @@ export async function recordModelUsage(params: {
   model?: string;
   inputTokens?: number;
   outputTokens?: number;
+  openRouterCost?: number;
   pricing?: UsagePricing;
   skipIfZeroTokens?: boolean;
 }) {
@@ -47,9 +49,13 @@ export async function recordModelUsage(params: {
   const model = params.model?.trim();
   const inputTokens = Math.max(0, Math.round(params.inputTokens ?? 0));
   const outputTokens = Math.max(0, Math.round(params.outputTokens ?? 0));
+  const openRouterCost =
+    typeof params.openRouterCost === "number" && Number.isFinite(params.openRouterCost)
+      ? Math.max(0, params.openRouterCost)
+      : undefined;
   const skipIfZeroTokens = params.skipIfZeroTokens ?? true;
   if (!actorClerkId || !model) return false;
-  if (skipIfZeroTokens && inputTokens + outputTokens <= 0) return false;
+  if (skipIfZeroTokens && inputTokens + outputTokens <= 0 && !openRouterCost) return false;
 
   const pricing = await resolveUsagePricing({
     actorClerkId,
@@ -64,6 +70,7 @@ export async function recordModelUsage(params: {
     model,
     inputTokens,
     outputTokens,
+    openRouterCost,
     inputCostPerM: pricing.inputCostPerM,
     outputCostPerM: pricing.outputCostPerM,
   });
@@ -103,7 +110,9 @@ export async function recordOpenRouterUsage(params: {
   usage?: {
     prompt_tokens?: number;
     completion_tokens?: number;
+    cost?: number;
   } | null;
+  openRouterCost?: number;
   pricing?: UsagePricing;
   skipIfZeroTokens?: boolean;
 }) {
@@ -114,6 +123,11 @@ export async function recordOpenRouterUsage(params: {
     model: params.model,
     inputTokens: params.inputTokens ?? params.usage?.prompt_tokens,
     outputTokens: params.outputTokens ?? params.usage?.completion_tokens,
+    openRouterCost:
+      params.openRouterCost
+      ?? (typeof params.usage?.cost === "number" && Number.isFinite(params.usage.cost)
+        ? params.usage.cost
+        : undefined),
     pricing: params.pricing,
     skipIfZeroTokens: params.skipIfZeroTokens,
   });

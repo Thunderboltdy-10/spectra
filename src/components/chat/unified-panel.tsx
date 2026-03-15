@@ -80,15 +80,6 @@ function providerFromModelId(value: string) {
     .join(" ");
 }
 
-function formatSpendCents(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(Math.max(0, value) / 100);
-}
-
 function resourceStatusMeta(status: PersonalResource["status"], updatedAt?: number, attempts?: number) {
   if (status === "uploaded") {
     return {
@@ -283,7 +274,6 @@ export function SettingsView({
   routerMode,
   manualModel,
   activeModelUsed,
-  showCostDetails = false,
   usePersonalResources,
   autoSaveConversationFilesToLibrary,
   personalResources,
@@ -568,21 +558,6 @@ export function SettingsView({
                 ? "No tracked activity yet"
                 : `${percentUsed > 0 && percentUsed < 1 ? "<1" : Number.isInteger(percentUsed) ? percentUsed.toFixed(0) : percentUsed.toFixed(1)}% utilization`}
             </p>
-            {userSpending ? (
-              <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
-                {[
-                  typeof userSpending.monthlyTokens === "number"
-                    ? `${Math.max(0, userSpending.monthlyTokens).toLocaleString()} tokens`
-                    : null,
-                  showCostDetails && typeof userSpending.totalCostCents === "number"
-                    ? `${formatSpendCents(userSpending.totalCostCents)} this month`
-                    : null,
-                  showCostDetails && (userSpending.estimatedUnpricedCostCents ?? 0) > 0
-                    ? "includes estimated cost for unpriced events"
-                    : null,
-                ].filter(Boolean).join(" · ")}
-              </p>
-            ) : null}
           </section>
         </TabsContent>
       </Tabs>
@@ -869,7 +844,6 @@ function OrchestrationView({
                   {typeof call.inputTokens === "number" || typeof call.outputTokens === "number"
                     ? `${call.inputTokens ?? 0} in • ${call.outputTokens ?? 0} out`
                     : "token metrics unavailable"}
-                  {typeof call.costCents === "number" ? ` • ${formatSpendCents(call.costCents)}` : ""}
                 </p>
               </li>
             ))}
@@ -1266,7 +1240,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
         }
       >
         <div
-          className={`flex items-center justify-between ${docked ? "min-h-[56px] shadow-[0_1px_0_var(--border-default)] px-5 py-2.5" : "min-h-[56px] mb-4"}`}
+          className={`flex items-center justify-between ${docked ? "min-h-[56px] shadow-[0_1px_0_var(--border-default)] px-5 pb-3 pt-2.5" : "min-h-[56px] mb-4"}`}
         >
           <div className="min-w-0">
             <p className="text-[9px] uppercase tracking-[0.14em] text-[var(--text-secondary)] truncate">{current.subtitle}</p>

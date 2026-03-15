@@ -414,6 +414,15 @@ export async function runCollaborativeStreaming(params: {
   }
   const synthesisDurationMs = Date.now() - synthesisStartedAt;
 
+  if (params.actorClerkId) {
+    await recordOpenRouterUsage({
+      actorClerkId: params.actorClerkId,
+      chatId: params.chatId,
+      model: modelUsed,
+      usage,
+    }).catch(() => {});
+  }
+
   const collaborators: CollaboratorTrace[] = executed
     .filter((node) => node.status !== "skipped")
     .map((node) => {

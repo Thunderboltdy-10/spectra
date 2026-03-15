@@ -48,6 +48,7 @@ type RankParams = {
   needsSearch?: boolean;
   preferFast?: boolean;
   preferCheap?: boolean;
+  preferFree?: boolean;
   requiredCapabilities?: ModelCapability[];
   preferredCapabilities?: ModelCapability[];
   avoidModels?: string[];
@@ -326,6 +327,10 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
     }
     if (params.preferCheap) {
       score += cost * 0.06;
+    }
+    if (params.preferFree) {
+      const freeLike = Boolean(model.isFree || model.modelId.includes(":free") || effectiveInputCost(model) === 0);
+      if (freeLike) score += 0.18;
     }
 
     for (const capability of preferredCapabilities) {

@@ -368,7 +368,7 @@ export function ChatComposer(props: ChatComposerProps) {
     const filtered = sorted.filter((model) => {
       if (!clean) return true;
       const haystack = normalizeModelSearch(`${model.name} ${model.modelId} ${model.provider}`);
-      const score = fuzzyScore(normalized, {
+      const score = fuzzyScore(clean, {
         name: model.name,
         modelId: model.modelId,
         provider: model.provider,
@@ -379,8 +379,8 @@ export function ChatComposer(props: ChatComposerProps) {
 
     if (clean) {
       filtered.sort((a, b) => {
-        const scoreA = fuzzyScore(normalized, { name: a.name, modelId: a.modelId, provider: a.provider, description: a.description });
-        const scoreB = fuzzyScore(normalized, { name: b.name, modelId: b.modelId, provider: b.provider, description: b.description });
+        const scoreA = fuzzyScore(clean, { name: a.name, modelId: a.modelId, provider: a.provider, description: a.description });
+        const scoreB = fuzzyScore(clean, { name: b.name, modelId: b.modelId, provider: b.provider, description: b.description });
         return scoreB - scoreA;
       });
     }
@@ -393,7 +393,9 @@ export function ChatComposer(props: ChatComposerProps) {
         if (model.contextLength && estimatedTokens > model.contextLength) {
           cautions.push("Context too small");
         }
-        const restrictionReason = restrictionReasonForTier(model, userSpending?.tier);
+        const hasKnownCost = typeof model.inputCostPerM === "number" || typeof model.outputCostPerM === "number";
+        const expensiveBlock = hasKnownCost && isExpensiveModel(model) ? "Model exceeds the maximum cost limit." : null;
+        const restrictionReason = expensiveBlock ?? restrictionReasonForTier(model, userSpending?.tier);
         return {
           model,
           recommended: recommendedModelIds.has(model.modelId),
@@ -937,7 +939,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 </button>
 
                 {showModelSelector && (
-                  <div className="absolute bottom-full left-1/2 z-[340] mb-2 max-h-[480px] w-[min(92vw,32rem)] -translate-x-[48%] overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-soft)]">
+                  <div className="absolute bottom-full left-1/2 z-[600] mb-2 max-h-[480px] w-[min(92vw,32rem)] -translate-x-[48%] overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-soft)]">
                     <div className="mb-2 flex items-center justify-between">
                       <p className="text-xs font-medium text-[var(--text-primary)]">Choose model</p>
                       <button

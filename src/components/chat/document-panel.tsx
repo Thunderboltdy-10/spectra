@@ -109,25 +109,29 @@ export function DocumentPanel({ content }: DocumentPanelProps) {
         </div>
       </div>
 
-      <div ref={previewRef} className="space-y-4 rounded-2xl border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_88%,white)] p-4">
+      <div ref={previewRef} className="max-h-[calc(100svh-12rem)] overflow-y-auto space-y-4 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
         {documentData.type === "presentation" ? (
-          <div className="space-y-4">
+          <div className="space-y-3">
             {documentData.slides.map((slide, index) => (
               <article
                 key={`${slide.title || "slide"}-${index}`}
-                className="grid gap-4 overflow-hidden rounded-[28px] border border-[var(--border-default)] bg-[#f8f4ea] p-0 shadow-[var(--shadow-soft)] md:grid-cols-[10px_minmax(0,1fr)]"
+                className="overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-soft)]"
+                style={{ aspectRatio: "16/9", display: "grid", gridTemplateRows: "auto 1fr" }}
               >
-                <div style={{ background: toneForSlide(slide, index) }} />
-                <div className="p-6">
-                  <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-secondary)]">Slide {index + 1}</p>
-                  <h4 className="mt-2 font-display text-2xl text-[var(--text-primary)]">{slide.title || documentData.title}</h4>
-                  {slide.body ? <p className="mt-3 text-sm leading-7 text-[var(--text-secondary)]">{slide.body}</p> : null}
+                {/* Slide header bar */}
+                <div className="flex items-center justify-between px-5 py-3" style={{ background: toneForSlide(slide, index) }}>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/80">Slide {index + 1}</p>
+                  {slide.accent ? null : <div className="flex gap-1"><span className="h-2 w-2 rounded-full bg-white/30" /><span className="h-2 w-2 rounded-full bg-white/30" /><span className="h-2 w-2 rounded-full bg-white/30" /></div>}
+                </div>
+                <div className="flex flex-col justify-center px-7 py-5">
+                  <h4 className="font-display text-xl font-semibold leading-tight text-[var(--text-primary)]">{slide.title || documentData.title}</h4>
+                  {slide.body ? <p className="mt-2.5 text-sm leading-relaxed text-[var(--text-secondary)]">{slide.body}</p> : null}
                   {slide.bullets?.length ? (
-                    <ul className="mt-4 space-y-2 text-sm text-[var(--text-primary)]">
+                    <ul className="mt-3 space-y-1.5 text-sm text-[var(--text-primary)]">
                       {slide.bullets.map((bullet, bulletIndex) => (
-                        <li key={`${bullet}-${bulletIndex}`} className="flex gap-3">
-                          <span className="mt-2 h-1.5 w-1.5 rounded-full bg-[var(--accent-cyan)]" />
-                          <span>{bullet}</span>
+                        <li key={`${bullet}-${bulletIndex}`} className="flex gap-2.5">
+                          <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: toneForSlide(slide, index) }} />
+                          <span className="leading-relaxed">{bullet}</span>
                         </li>
                       ))}
                     </ul>
@@ -139,22 +143,33 @@ export function DocumentPanel({ content }: DocumentPanelProps) {
         ) : null}
 
         {documentData.type === "word" ? (
-          <article className="mx-auto max-w-3xl space-y-4 rounded-[24px] border border-[var(--border-default)] bg-white p-8 shadow-[var(--shadow-soft)]">
-            {documentData.sections.map((section, index) => (
-              <div key={`${section.heading}-${index}`} className="space-y-2">
-                <h4 className={`font-display text-[var(--text-primary)] ${section.level === 1 ? "text-2xl" : section.level === 2 ? "text-xl" : "text-lg"}`}>
-                  {section.heading}
-                </h4>
-                <p className="text-sm leading-7 text-[var(--text-secondary)]">{section.content}</p>
-              </div>
-            ))}
-          </article>
+          <div className="rounded-2xl bg-[var(--bg-elevated)] shadow-[var(--shadow-soft)] ring-1 ring-[var(--border-default)]">
+            {/* Word-like toolbar chrome */}
+            <div className="flex items-center gap-1.5 border-b border-[var(--border-default)] px-4 py-2">
+              <div className="h-3 w-3 rounded-full bg-[#f8615a]" />
+              <div className="h-3 w-3 rounded-full bg-[#febc2e]" />
+              <div className="h-3 w-3 rounded-full bg-[#28c840]" />
+              <span className="ml-2 text-[11px] text-[var(--text-tertiary)]">{documentData.title}.docx</span>
+            </div>
+            <article className="mx-auto max-w-2xl space-y-5 px-12 py-10 text-[var(--text-primary)]">
+              <h1 className="font-display text-3xl font-bold leading-tight text-[var(--text-primary)]">{documentData.title}</h1>
+              <div className="h-px bg-[var(--border-default)]" />
+              {documentData.sections.map((section, index) => (
+                <div key={`${section.heading}-${index}`} className="space-y-2">
+                  <h2 className={`font-display font-semibold text-[var(--text-primary)] ${section.level === 1 ? "text-xl" : section.level === 2 ? "text-lg" : "text-base"}`}>
+                    {section.heading}
+                  </h2>
+                  <p className="text-[0.875rem] leading-7 text-[var(--text-secondary)]">{section.content}</p>
+                </div>
+              ))}
+            </article>
+          </div>
         ) : null}
 
         {documentData.type === "study_guide" ? (
-          <article className="space-y-5 rounded-[24px] border border-[var(--border-default)] bg-white p-6 shadow-[var(--shadow-soft)]">
+          <article className="space-y-5 rounded-[24px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 shadow-[var(--shadow-soft)]">
             {documentData.summary ? (
-              <div className="rounded-2xl border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,white)] p-4 text-sm leading-7 text-[var(--text-secondary)]">
+              <div className="rounded-2xl border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-elevated))] p-4 text-sm leading-7 text-[var(--text-secondary)]">
                 {documentData.summary}
               </div>
             ) : null}
@@ -189,7 +204,7 @@ export function DocumentPanel({ content }: DocumentPanelProps) {
         {documentData.type === "timeline" ? (
           <div className="space-y-4">
             {documentData.events.map((event, index) => (
-              <article key={`${event.date}-${event.title}-${index}`} className="grid gap-3 rounded-[24px] border border-[var(--border-default)] bg-white p-5 shadow-[var(--shadow-soft)] md:grid-cols-[160px_minmax(0,1fr)]">
+              <article key={`${event.date}-${event.title}-${index}`} className="grid gap-3 rounded-[24px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[var(--shadow-soft)] md:grid-cols-[160px_minmax(0,1fr)]">
                 <div className="font-mono text-sm text-[var(--text-secondary)]">{event.date}</div>
                 <div>
                   <h4 className="font-display text-xl text-[var(--text-primary)]">{event.title}</h4>
@@ -201,7 +216,7 @@ export function DocumentPanel({ content }: DocumentPanelProps) {
         ) : null}
 
         {documentData.type === "comparison_table" ? (
-          <div className="overflow-hidden rounded-[24px] border border-[var(--border-default)] bg-white shadow-[var(--shadow-soft)]">
+          <div className="overflow-hidden rounded-[24px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-soft)]">
             <table className="w-full border-collapse text-left text-sm">
               <thead className="bg-[var(--bg-secondary)] text-[var(--text-primary)]">
                 <tr>
@@ -224,7 +239,7 @@ export function DocumentPanel({ content }: DocumentPanelProps) {
         ) : null}
 
         {documentData.type === "webpage" ? (
-          <article className="overflow-hidden rounded-[24px] border border-[var(--border-default)] bg-white shadow-[var(--shadow-soft)]">
+          <article className="overflow-hidden rounded-[24px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-soft)]">
             <div className="border-b border-[var(--border-default)] px-4 py-3 text-xs text-[var(--text-secondary)]">
               Live webpage preview
             </div>
@@ -232,7 +247,7 @@ export function DocumentPanel({ content }: DocumentPanelProps) {
               title={documentData.title}
               srcDoc={buildHtmlArtifact(documentData)}
               sandbox="allow-scripts allow-popups allow-forms"
-              className="h-[540px] w-full bg-white"
+              className="h-[540px] w-full bg-[var(--bg-elevated)]"
             />
           </article>
         ) : null}

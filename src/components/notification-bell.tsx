@@ -165,7 +165,7 @@ export function NotificationBell({
       <DropdownMenuTrigger asChild>
         <Button
           type="button"
-          variant="secondary"
+          variant="ghost"
           size="icon"
           className={cn("relative", buttonClassName)}
           aria-label="Open notifications"

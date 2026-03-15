@@ -28,6 +28,7 @@ async function selectUtilityModel(params: {
   preferredCapabilities?: Array<"reasoning" | "vision" | "code" | "search" | "image_generation">;
   preferFast?: boolean;
   preferCheap?: boolean;
+  preferFree?: boolean;
 }): Promise<UtilityModelSelection> {
   const [dbCatalog, runtimeStats, budget] = await Promise.all([
     convexQuery("models:listModels", {
@@ -96,6 +97,7 @@ async function selectUtilityModel(params: {
     preferredCapabilities: params.preferredCapabilities,
     preferFast: params.preferFast ?? true,
     preferCheap: params.preferCheap ?? true,
+    preferFree: params.preferFree ?? false,
     runtimeStats: buildRuntimeStatMap(
       runtimeStats as Array<{ modelId: string; successCount: number; failureCount: number; avgLatencyMs?: number }>,
     ),
@@ -472,6 +474,7 @@ async function generateTitleFromSnippet(
     preferredCapabilities: ["reasoning"],
     preferFast: true,
     preferCheap: true,
+    preferFree: true,
   });
   const startedAt = Date.now();
   const completionPromise = openRouterChatCompletion({
@@ -627,6 +630,7 @@ export async function maybeExtractMemory(params: {
     preferredCapabilities: ["reasoning"],
     preferFast: true,
     preferCheap: true,
+    preferFree: true,
   });
 
   const startedAt = Date.now();

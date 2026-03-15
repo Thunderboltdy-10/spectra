@@ -8,7 +8,6 @@ import { useClerk, useUser } from "@clerk/nextjs";
 import { formatDistanceToNow } from "date-fns";
 import {
   BarChart3,
-  Bell,
   Bookmark,
   BookOpen,
   Bot,
@@ -37,6 +36,7 @@ import {
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { GlobalUtilityDock } from "@/components/global-utility-dock";
+import { NotificationBell } from "@/components/notification-bell";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -293,12 +293,6 @@ export function ChatSidebar({
   const visibleGrouped = grouped;
   const collapsedUtilityActions = [
     {
-      id: "notifications",
-      title: "Notifications",
-      Icon: Bell,
-      action: () => window.dispatchEvent(new Event("ai-school:open-notifications")),
-    },
-    {
       id: "timer",
       title: "Focus timer",
       Icon: Timer,
@@ -373,13 +367,20 @@ export function ChatSidebar({
 
         <div className="mt-3 flex flex-col items-center gap-2">
           <div className="mb-1 flex flex-col gap-1.5">
+            <NotificationBell
+              buttonClassName="h-9.5 w-9.5 rounded-xl bg-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+              contentClassName="z-[98]"
+              align="start"
+              side="right"
+              sideOffset={10}
+            />
             {collapsedUtilityActions.map((item) => (
               <button
                 key={item.id}
                 type="button"
                 title={item.title}
                 onClick={item.action}
-                className="inline-flex h-9.5 w-9.5 cursor-pointer items-center justify-center rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                className="inline-flex h-9.5 w-9.5 cursor-pointer items-center justify-center rounded-xl text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               >
                 <item.Icon className="h-4 w-4" />
               </button>
@@ -397,7 +398,7 @@ export function ChatSidebar({
           </div>
           <Button
             type="button"
-            variant="secondary"
+            variant="ghost"
             size="icon"
             className="h-9.5 w-9.5 rounded-xl"
             onClick={onOpenSettings}
@@ -425,7 +426,7 @@ export function ChatSidebar({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <ThemeToggle />
+          <ThemeToggle className="h-9.5 w-9.5 rounded-xl bg-transparent hover:bg-[var(--bg-hover)]" />
         </div>
       </div>
     );
@@ -699,9 +700,9 @@ export function ChatSidebar({
               </span>
             </div>
           </div>
-          <ThemeToggle />
-          <Button type="button" variant="secondary" size="icon" className="h-8 w-8" onClick={onOpenSettings} title="Open global settings">
-            <Settings2 className="h-3.5 w-3.5" />
+          <ThemeToggle className="rounded-xl bg-transparent hover:bg-[var(--bg-hover)]" />
+          <Button type="button" variant="ghost" size="icon" className="h-9 w-9 rounded-xl" onClick={onOpenSettings} title="Open global settings">
+            <Settings2 className="h-4 w-4" />
           </Button>
         </div>
       </div>

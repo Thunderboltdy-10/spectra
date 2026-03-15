@@ -234,7 +234,6 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
                       {call.modelUsed ? <p className="mt-1 break-all font-mono text-[11px] text-[var(--text-secondary)]">{sanitizeModelId(call.modelUsed)}</p> : null}
                       <p className="mt-1 text-xs text-[var(--text-secondary)]">
                         {(call.inputTokens ?? 0)} in • {(call.outputTokens ?? 0)} out
-                        {typeof call.costCents === "number" ? ` • $${(call.costCents / 100).toFixed(4)}` : ""}
                       </p>
                     </div>
                   ))}

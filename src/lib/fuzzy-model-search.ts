@@ -27,13 +27,13 @@ export function fuzzyScore(
   const nq = normalizeQuery(query);
   if (!nq) return 0;
 
-  const target = normalizeQuery(
-    `${model.name} ${model.modelId} ${model.provider} ${model.description ?? ""}`,
-  );
+  const rawTarget = `${model.name} ${model.modelId} ${model.provider} ${model.description ?? ""}`;
+  const target = normalizeQuery(rawTarget);
 
   const tokens = nq.split(" ").filter(Boolean);
   const queryVersions = extractVersionTokens(query);
-  const targetVersions = extractVersionTokens(target);
+  // Extract versions from the raw (non-normalized) target to preserve dots in version numbers
+  const targetVersions = extractVersionTokens(rawTarget);
   let matched = 0;
   for (const token of tokens) {
     if (target.includes(token)) matched += 1;

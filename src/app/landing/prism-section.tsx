@@ -26,13 +26,13 @@ function spectrumRGB(t: number): string {
 // ── Mode labels mapped to spectrum positions ─────────────────────────────────
 
 const MODES = [
-  { label: "Tutor", t: 0.05 },
-  { label: "Quiz", t: 0.19 },
-  { label: "Essay Coach", t: 0.33 },
-  { label: "Research", t: 0.48 },
-  { label: "Exam Prep", t: 0.62 },
-  { label: "Flashcard", t: 0.77 },
-  { label: "Explain", t: 0.93 },
+  { label: "Researcher", t: 0.05 },
+  { label: "Retrieval", t: 0.19 },
+  { label: "Synthesiser", t: 0.33 },
+  { label: "Marker", t: 0.48 },
+  { label: "Validator", t: 0.62 },
+  { label: "Extractor", t: 0.77 },
+  { label: "Reviewer", t: 0.93 },
 ];
 
 const NUM_BANDS = 32;
@@ -266,10 +266,10 @@ export function PrismAnimation() {
         })}
 
         {/* ── Mode labels — appear after spectrum expands ── */}
-        {MODES.map((mode, i) => {
+        {MODES.map((mode) => {
           const y = getFanY(mode.t);
           const color = spectrumRGB(mode.t);
-          const delay = 1.4 + i * 0.1;
+          const delay = 1.15 + mode.t * (NUM_BANDS - 1) * 0.02;
           return (
             <g key={mode.label}>
               <circle

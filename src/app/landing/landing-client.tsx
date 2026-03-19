@@ -529,7 +529,7 @@ function HowItWorksTimeline() {
       />
       
       {/* Horizontal timeline line */}
-      <div className="absolute top-[28px] left-8 right-8 h-[2px] hidden md:block" aria-hidden>
+      <div className="absolute top-[28px] left-[12.5%] right-[12.5%] h-[2px] hidden md:block" aria-hidden>
         <div className="absolute inset-0" style={{ background: "var(--border-default)", opacity: 0.5 }} />
         <div 
           className="absolute inset-y-0 left-0 transition-all duration-1000 ease-out"
@@ -541,13 +541,13 @@ function HowItWorksTimeline() {
         />
       </div>
 
-      <div className="grid md:grid-cols-4 gap-8 md:gap-4 relative z-10">
+      <div className="grid md:grid-cols-4 gap-12 md:gap-4 relative z-10">
         {HOW_IT_WORKS.map(({ num, title, body, Icon }, i) => {
           const isVisible = activeStep >= i;
           return (
             <div
               key={num}
-              className="relative flex flex-col items-center md:items-start text-center md:text-left group"
+              className="relative flex flex-col items-center text-center group"
               style={{
                 opacity: isVisible ? 1 : 0,
                 transform: isVisible ? "none" : "translateY(20px)",
@@ -556,7 +556,7 @@ function HowItWorksTimeline() {
             >
               {/* Node perfectly aligned with the line at top: 28px center means h-14 (56px) needs top 0 */}
               <div 
-                className="w-14 h-14 rounded-full flex items-center justify-center shrink-0 mb-6 relative z-10 transition-all duration-500 mx-auto md:mx-0"
+                className="w-14 h-14 rounded-full flex items-center justify-center shrink-0 mb-6 relative z-10 transition-all duration-500 mx-auto"
                 style={{
                   background: isVisible ? "var(--bg-elevated)" : "var(--bg-secondary)",
                   border: `2px solid ${isVisible ? "var(--brand-primary)" : "var(--border-default)"}`,
@@ -569,15 +569,17 @@ function HowItWorksTimeline() {
                 {isVisible && (
                   <div className="absolute inset-0 rounded-full opacity-20" style={{ background: "var(--brand-primary)", animation: "ping 1.5s cubic-bezier(0, 0, 0.2, 1) forwards" }} />
                 )}
+                {/* Step Number Badge */}
+                <div 
+                  className="absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white transition-opacity duration-500"
+                  style={{ background: "var(--brand-primary)", opacity: isVisible ? 1 : 0 }}
+                >
+                  {num}
+                </div>
               </div>
 
               {/* Step Content */}
-              <div className="px-2">
-                <div className="flex items-center gap-2 justify-center md:justify-start mb-2">
-                  <span className="font-mono text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: "color-mix(in oklab, var(--brand-primary) 10%, transparent)", color: "var(--brand-primary)" }}>
-                    Step {num}
-                  </span>
-                </div>
+              <div className="px-4">
                 <h3 className="font-display text-lg font-bold mb-2 group-hover:text-[var(--brand-primary)] transition-colors">
                   {title}
                 </h3>
@@ -611,14 +613,16 @@ function ContactForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
-      const data = (await res.json()) as { status?: string; error?: string; mailto?: string };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = (await res.json()) as any;
       if (data.status === "sent") {
         setStatus("sent");
       } else if (data.status === "fallback" && data.mailto) {
         setFallbackUrl(data.mailto);
         setStatus("fallback");
       } else {
-        setErrorMsg(data.error || "Something went wrong.");
+        const errMsg = typeof data.error === "string" ? data.error : data.error?.message || "Something went wrong.";
+        setErrorMsg(errMsg);
         setStatus("error");
       }
     } catch {
@@ -1574,6 +1578,25 @@ export function LandingClient() {
         </div>
       </section>
 
+      <WaveA />
+
+      {/* ── Contact section ── */}
+      <section
+        id="contact"
+        className="py-24"
+        style={{ background: "var(--bg-secondary)" }}
+      >
+        <div className="max-w-xl mx-auto px-6">
+          <div className="text-center mb-10" data-reveal>
+            <h2 className="font-display text-2xl font-bold mb-2">Get in touch</h2>
+            <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+              Want to bring Spectra to your school? Have questions about our custom AI agents? We&apos;d love to hear from you.
+            </p>
+          </div>
+          <ContactForm />
+        </div>
+      </section>
+
       {/* ── DoubleWaveDown ── */}
       <DoubleWaveDown />
 
@@ -1633,23 +1656,6 @@ export function LandingClient() {
               Sign in
             </Link>
           </div>
-        </div>
-      </section>
-
-      {/* ── Contact section ── */}
-      <section
-        id="contact"
-        className="py-20 border-t border-[var(--border-default)]"
-        style={{ background: "var(--bg-secondary)" }}
-      >
-        <div className="max-w-xl mx-auto px-6">
-          <div className="text-center mb-10" data-reveal>
-            <h2 className="font-display text-2xl font-bold mb-2">Get in touch</h2>
-            <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-              Have questions about Spectra? We&apos;d love to hear from you.
-            </p>
-          </div>
-          <ContactForm />
         </div>
       </section>
 

@@ -26,42 +26,44 @@ const INNER_R = 140;
 const CORE_R = 50;
 
 // ── Holographic 3D Sphere Component ──────────────────────────────────────
-function HologramSphere({ radius, color, rotation = 0 }: { radius: number, color: string, rotation?: number }) {
+function HologramSphere({ radius, color, rotation = 0, isActive, isFaded }: { radius: number, color: string, rotation?: number, isActive?: boolean, isFaded?: boolean }) {
   const rings = [];
   // Render rings from 90 to 360 to leave a 90-degree slice open
   for (let a = 90; a <= 360; a += 15) {
+    const baseOpacity = a % 30 === 0 ? 0.3 : 0.1;
     rings.push(
       <div
         key={a}
-        className="absolute left-1/2 top-1/2 rounded-full pointer-events-none"
+        className="absolute left-1/2 top-1/2 rounded-full pointer-events-none transition-opacity duration-300"
         style={{
           width: radius * 2,
           height: radius * 2,
           marginLeft: -radius,
           marginTop: -radius,
           border: `1px solid ${color}`,
-          opacity: a % 30 === 0 ? 0.3 : 0.1,
+          opacity: isFaded ? 0.05 : isActive ? (baseOpacity * 1.5) : baseOpacity,
           transform: `rotateY(${a}deg)`,
         }}
       />
     );
   }
 
-  // Cross-section planes
-  const Plane = ({ angle }: { angle: number }) => (
+  const renderPlane = (angle: number) => (
     <div
-      className="absolute left-1/2 top-1/2 rounded-full pointer-events-none"
+      key={`plane-${angle}`}
+      className="absolute left-1/2 top-1/2 rounded-full pointer-events-none transition-opacity duration-300"
       style={{
         width: radius * 2,
         height: radius * 2,
         marginLeft: -radius,
         marginTop: -radius,
-        background: `color-mix(in oklab, ${color} 15%, transparent)`,
+        background: `color-mix(in oklab, ${color} ${isActive ? '25%' : '15%'}, transparent)`,
         borderRight: `2px solid ${color}`,
         borderTop: `2px solid ${color}`,
         borderBottom: `2px solid ${color}`,
         clipPath: "polygon(50% 0%, 100% 0%, 100% 100%, 50% 100%)",
         transform: `rotateY(${angle}deg)`,
+        opacity: isFaded ? 0.1 : 1,
       }}
     >
       {/* Inner grid lines for holographic effect */}
@@ -72,18 +74,18 @@ function HologramSphere({ radius, color, rotation = 0 }: { radius: number, color
   return (
     <div className="absolute inset-0" style={{ transformStyle: "preserve-3d", transform: `rotateY(${rotation}deg)` }}>
       {rings}
-      <Plane angle={0} />
-      <Plane angle={90} />
+      {renderPlane(0)}
+      {renderPlane(90)}
       {/* Equator ring */}
       <div
-        className="absolute left-1/2 top-1/2 rounded-full pointer-events-none"
+        className="absolute left-1/2 top-1/2 rounded-full pointer-events-none transition-opacity duration-300"
         style={{
           width: radius * 2,
           height: radius * 2,
           marginLeft: -radius,
           marginTop: -radius,
           border: `2px solid ${color}`,
-          opacity: 0.5,
+          opacity: isFaded ? 0.1 : isActive ? 0.8 : 0.5,
           transform: "rotateX(90deg)",
         }}
       />
@@ -93,7 +95,8 @@ function HologramSphere({ radius, color, rotation = 0 }: { radius: number, color
 
 export function SoulDiagram() {
   const [rotY, setRotY] = useState(0);
-  const [rotX, setRotX] = useState(25); // Tilt
+  const [rotX] = useState(25); // Tilt
+  const [activeLayer, setActiveLayer] = useState<"school" | "personal" | null>(null);
   const rafRef = useRef<number>(0);
   const prevTimeRef = useRef(0);
 
@@ -119,11 +122,12 @@ export function SoulDiagram() {
       >
         {/* Ambient glow */}
         <div
-          className="absolute inset-0 pointer-events-none"
+          className="absolute inset-0 pointer-events-none transition-opacity duration-300"
           style={{
             background:
               "radial-gradient(ellipse 60% 60% at 50% 50%, color-mix(in oklab, var(--brand-primary) 15%, transparent), transparent 70%)",
             filter: "blur(60px)",
+            opacity: activeLayer ? 0.3 : 1,
           }}
         />
 
@@ -136,14 +140,14 @@ export function SoulDiagram() {
           }}
         >
           {/* Outer Layer (School Context) */}
-          <HologramSphere radius={OUTER_R} color="var(--brand-accent)" />
+          <HologramSphere radius={OUTER_R} color="var(--brand-accent)" isActive={activeLayer === "school"} isFaded={activeLayer === "personal"} />
 
           {/* Middle Layer (Student Memory) */}
-          <HologramSphere radius={INNER_R} color="var(--brand-primary)" rotation={-45} />
+          <HologramSphere radius={INNER_R} color="var(--brand-primary)" rotation={-45} isActive={activeLayer === "personal"} isFaded={activeLayer === "school"} />
 
           {/* Inner Core (Files & Memory) */}
           <div
-            className="absolute rounded-full"
+            className="absolute rounded-full transition-opacity duration-300"
             style={{
               left: CX - CORE_R,
               top: CY - CORE_R,
@@ -152,11 +156,12 @@ export function SoulDiagram() {
               background: "radial-gradient(circle at 30% 30%, var(--brand-primary), var(--bg-primary))",
               boxShadow: "0 0 60px var(--brand-primary), inset 0 0 30px white",
               transform: `translateZ(0px) rotateY(${-rotY}deg) rotateX(${rotX}deg)`,
-              transformStyle: "preserve-3d"
+              transformStyle: "preserve-3d",
+              opacity: activeLayer === "school" ? 0.3 : 1,
             }}
           >
             <div className="absolute inset-0 flex items-center justify-center">
-              <Sparkles size={32} color="white" className="animate-pulse" />
+              <Sparkles size={32} color="white" />
             </div>
           </div>
 
@@ -172,6 +177,7 @@ export function SoulDiagram() {
               // Orbit positioned along the outer edge
               transform: `translateX(${Math.cos(45 * Math.PI / 180) * (OUTER_R + 60)}px) translateZ(${Math.sin(45 * Math.PI / 180) * (OUTER_R + 60)}px) rotateY(${-rotY}deg) rotateX(${rotX}deg)`,
               transformStyle: "preserve-3d",
+              opacity: activeLayer === "personal" ? 0.1 : 1,
             }}
           >
             <div className="flex items-center gap-2 mb-1">
@@ -192,6 +198,7 @@ export function SoulDiagram() {
               // Orbit positioned along the inner edge
               transform: `translateX(${Math.cos(225 * Math.PI / 180) * (INNER_R + 60)}px) translateZ(${Math.sin(225 * Math.PI / 180) * (INNER_R + 60)}px) rotateY(${-rotY}deg) rotateX(${rotX}deg)`,
               transformStyle: "preserve-3d",
+              opacity: activeLayer === "school" ? 0.1 : 1,
             }}
           >
             <div className="flex items-center gap-2 mb-1">
@@ -207,8 +214,12 @@ export function SoulDiagram() {
       {/* ── Side panel ── */}
       <div className="flex-1 space-y-10 min-w-0 py-8">
         {/* Outer layer */}
-        <div className="group">
-          <div className="flex items-center gap-3 mb-5">
+        <div 
+          className="group"
+          onMouseEnter={() => setActiveLayer("school")}
+          onMouseLeave={() => setActiveLayer(null)}
+        >
+          <div className="flex items-center gap-3 mb-5 transition-opacity duration-300" style={{ opacity: activeLayer === "personal" ? 0.3 : 1 }}>
             <div
               className="w-5 h-5 rounded-full shrink-0 flex items-center justify-center"
               style={{
@@ -224,8 +235,8 @@ export function SoulDiagram() {
             </p>
             <span className="text-xs font-mono text-[var(--text-tertiary)] opacity-0 group-hover:opacity-100 transition-opacity">— External Constraints</span>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            {OUTER_ITEMS.map((item, i) => {
+          <div className="grid grid-cols-2 gap-3 transition-opacity duration-300" style={{ opacity: activeLayer === "personal" ? 0.3 : 1 }}>
+            {OUTER_ITEMS.map((item) => {
               const Icon = item.Icon;
               return (
                 <div
@@ -233,6 +244,7 @@ export function SoulDiagram() {
                   className="flex gap-3 px-5 py-4 rounded-2xl cursor-default transition-all duration-300 border border-transparent hover:-translate-y-1 hover:shadow-[0_10px_20px_rgba(0,0,0,0.1)]"
                   style={{
                     background: "var(--bg-secondary)",
+                    borderColor: activeLayer === "school" ? "var(--brand-accent)" : "transparent",
                   }}
                 >
                   <Icon size={18} strokeWidth={2} style={{ color: "var(--brand-accent)", flexShrink: 0, marginTop: 2 }} />
@@ -247,8 +259,12 @@ export function SoulDiagram() {
         </div>
 
         {/* Inner layer */}
-        <div className="group">
-          <div className="flex items-center gap-3 mb-5">
+        <div 
+          className="group"
+          onMouseEnter={() => setActiveLayer("personal")}
+          onMouseLeave={() => setActiveLayer(null)}
+        >
+          <div className="flex items-center gap-3 mb-5 transition-opacity duration-300" style={{ opacity: activeLayer === "school" ? 0.3 : 1 }}>
             <div
               className="w-5 h-5 rounded-full shrink-0 flex items-center justify-center"
               style={{
@@ -264,8 +280,8 @@ export function SoulDiagram() {
             </p>
             <span className="text-xs font-mono text-[var(--text-tertiary)] opacity-0 group-hover:opacity-100 transition-opacity">— Internal Adaptive Core</span>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            {INNER_ITEMS.map((item, i) => {
+          <div className="grid grid-cols-2 gap-3 transition-opacity duration-300" style={{ opacity: activeLayer === "school" ? 0.3 : 1 }}>
+            {INNER_ITEMS.map((item) => {
               const Icon = item.Icon;
               return (
                 <div
@@ -273,6 +289,7 @@ export function SoulDiagram() {
                   className="flex gap-3 px-5 py-4 rounded-2xl cursor-default transition-all duration-300 border border-transparent hover:-translate-y-1 hover:shadow-[0_10px_20px_rgba(0,0,0,0.1)]"
                   style={{
                     background: "var(--bg-secondary)",
+                    borderColor: activeLayer === "personal" ? "var(--brand-primary)" : "transparent",
                   }}
                 >
                   <Icon size={18} strokeWidth={2} style={{ color: "var(--brand-primary)", flexShrink: 0, marginTop: 2 }} />

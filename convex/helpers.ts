@@ -14,7 +14,7 @@ export async function getOrCreateDefaultOrg(ctx: MutationCtx): Promise<Id<"orgs"
   }
   const now = Date.now();
   const orgId = await ctx.db.insert("orgs", {
-    name: "AI School Demo Workspace",
+    name: "Spectra Demo Workspace",
     slug: DEFAULT_ORG_SLUG,
     tokenBudgetDaily: LIMITS.defaultTokenBudgetPerOrgDaily,
     verifyMarkerPassEnabled: false,

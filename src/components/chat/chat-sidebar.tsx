@@ -452,8 +452,11 @@ export function ChatSidebar({
             </div>
           )}
           <div className="min-w-0 flex-1">
-            <p className="font-display text-lg leading-none">{orgName ?? "AI School"}</p>
-            <p className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">studio</p>
+            <p className="text-lg leading-none">
+              <span className="font-display">{orgName ?? "School"}</span>{" "}
+              <span className="font-medium" style={{ color: "var(--brand-primary)" }}>Spectra</span>
+            </p>
+            <p className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">spectra</p>
           </div>
         </div>
         <Button type="button" variant="ghost" size="icon" onClick={onToggleCollapse} aria-label="Collapse sidebar">

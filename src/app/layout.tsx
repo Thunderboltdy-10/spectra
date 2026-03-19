@@ -25,8 +25,18 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI School Assistant",
-  description: "School AI assistant for students and teachers with live model routing, memory, and personalized study support.",
+  title: "Spectra — The AI School Platform",
+  description: "Spectra routes every question to the right AI — the right model, the right mode, the right context. Purpose-built for schools.",
+  icons: {
+    icon: [
+      { url: "/favicon.svg", type: "image/svg+xml" },
+    ],
+  },
+  openGraph: {
+    title: "Spectra — The AI School Platform",
+    description: "Spectra routes every question to the right AI — the right model, the right mode, the right context. Purpose-built for schools.",
+    siteName: "Spectra",
+  },
 };
 
 const themeInitScript = `

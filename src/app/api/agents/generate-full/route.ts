@@ -131,7 +131,7 @@ export async function POST(request: NextRequest) {
       return ok(fallback);
     }
 
-    const systemInstruction = `You are an expert AI agent designer for an educational platform called AI School.
+    const systemInstruction = `You are an expert AI agent designer for an educational platform called Spectra.
 Given specifications from a user, generate a complete agent configuration that must stay faithful to the provided intent.
 Do not invent a different storyline or domain than what is requested.
 Output ONLY valid JSON with these exact keys:

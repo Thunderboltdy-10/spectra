@@ -26,8 +26,10 @@ import {
   Pencil,
 } from "lucide-react";
 import { MODE_REGISTRY, COMING_SOON_MODES } from "@/lib/modes";
-import { OrchestrationDemo } from "./orchestration-demo";
 import { SoulDiagram } from "./soul-diagram";
+import { PrismAnimation } from "./prism-section";
+import { PricingSection } from "./pricing-section";
+import { SpectraLogo } from "@/components/spectra-logo";
 
 // ── Data ─────────────────────────────────────────────────────────────────────
 
@@ -142,8 +144,8 @@ const STAKEHOLDERS = [
     points: [
       "9 distinct learning modes, automatically selected",
       "Personal memory that builds across sessions",
-      "Every answer shaped by your school's materials",
-      "Guided discovery — not just the answer handed over",
+      "Every response anchored to your school's culture, values, and curriculum",
+      "Guided discovery — builds AI literacy alongside subject knowledge",
     ],
   },
   {
@@ -380,7 +382,7 @@ function HeroDemo() {
             <div key={i} className="w-3.5 h-3.5 rounded-full opacity-80" style={{ background: c }} />
           ))}
           <span className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--text-tertiary)] mx-auto">
-            AI School Routing
+            Spectra Routing
           </span>
         </div>
 
@@ -527,7 +529,7 @@ function HowItWorksTimeline() {
       />
       
       {/* Horizontal timeline line */}
-      <div className="absolute top-[28px] left-8 right-8 h-[2px] hidden md:block" aria-hidden>
+      <div className="absolute top-[28px] left-[12.5%] right-[12.5%] h-[2px] hidden md:block" aria-hidden>
         <div className="absolute inset-0" style={{ background: "var(--border-default)", opacity: 0.5 }} />
         <div 
           className="absolute inset-y-0 left-0 transition-all duration-1000 ease-out"
@@ -539,13 +541,13 @@ function HowItWorksTimeline() {
         />
       </div>
 
-      <div className="grid md:grid-cols-4 gap-8 md:gap-4 relative z-10">
+      <div className="grid md:grid-cols-4 gap-12 md:gap-4 relative z-10">
         {HOW_IT_WORKS.map(({ num, title, body, Icon }, i) => {
           const isVisible = activeStep >= i;
           return (
             <div
               key={num}
-              className="relative flex flex-col items-center md:items-start text-center md:text-left group"
+              className="relative flex flex-col items-center text-center group"
               style={{
                 opacity: isVisible ? 1 : 0,
                 transform: isVisible ? "none" : "translateY(20px)",
@@ -554,7 +556,7 @@ function HowItWorksTimeline() {
             >
               {/* Node perfectly aligned with the line at top: 28px center means h-14 (56px) needs top 0 */}
               <div 
-                className="w-14 h-14 rounded-full flex items-center justify-center shrink-0 mb-6 relative z-10 transition-all duration-500 mx-auto md:mx-0"
+                className="w-14 h-14 rounded-full flex items-center justify-center shrink-0 mb-6 relative z-10 transition-all duration-500 mx-auto"
                 style={{
                   background: isVisible ? "var(--bg-elevated)" : "var(--bg-secondary)",
                   border: `2px solid ${isVisible ? "var(--brand-primary)" : "var(--border-default)"}`,
@@ -567,15 +569,17 @@ function HowItWorksTimeline() {
                 {isVisible && (
                   <div className="absolute inset-0 rounded-full opacity-20" style={{ background: "var(--brand-primary)", animation: "ping 1.5s cubic-bezier(0, 0, 0.2, 1) forwards" }} />
                 )}
+                {/* Step Number Badge */}
+                <div 
+                  className="absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white transition-opacity duration-500"
+                  style={{ background: "var(--brand-primary)", opacity: isVisible ? 1 : 0 }}
+                >
+                  {num}
+                </div>
               </div>
 
               {/* Step Content */}
-              <div className="px-2">
-                <div className="flex items-center gap-2 justify-center md:justify-start mb-2">
-                  <span className="font-mono text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: "color-mix(in oklab, var(--brand-primary) 10%, transparent)", color: "var(--brand-primary)" }}>
-                    Step {num}
-                  </span>
-                </div>
+              <div className="px-4">
                 <h3 className="font-display text-lg font-bold mb-2 group-hover:text-[var(--brand-primary)] transition-colors">
                   {title}
                 </h3>
@@ -588,6 +592,132 @@ function HowItWorksTimeline() {
         })}
       </div>
     </div>
+  );
+}
+
+// ── Contact Form ─────────────────────────────────────────────────────────────
+
+function ContactForm() {
+  const [form, setForm] = useState({ name: "", email: "", school: "", role: "", message: "" });
+  const [status, setStatus] = useState<"idle" | "sending" | "sent" | "fallback" | "error">("idle");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [fallbackUrl, setFallbackUrl] = useState("");
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setStatus("sending");
+    setErrorMsg("");
+    try {
+      const res = await fetch("/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = (await res.json()) as any;
+      if (data.status === "sent") {
+        setStatus("sent");
+      } else if (data.status === "fallback" && data.mailto) {
+        setFallbackUrl(data.mailto);
+        setStatus("fallback");
+      } else {
+        const errMsg = typeof data.error === "string" ? data.error : data.error?.message || "Something went wrong.";
+        setErrorMsg(errMsg);
+        setStatus("error");
+      }
+    } catch {
+      setErrorMsg("Network error. Please try again.");
+      setStatus("error");
+    }
+  }
+
+  if (status === "sent") {
+    return (
+      <div className="text-center py-12" data-reveal>
+        <p className="font-display text-xl font-bold mb-2">Thanks for reaching out.</p>
+        <p className="text-sm" style={{ color: "var(--text-secondary)" }}>We&apos;ll get back to you soon.</p>
+      </div>
+    );
+  }
+
+  if (status === "fallback") {
+    return (
+      <div className="text-center py-12" data-reveal>
+        <p className="font-display text-xl font-bold mb-2">Almost there</p>
+        <p className="text-sm mb-4" style={{ color: "var(--text-secondary)" }}>Click below to send your message via email.</p>
+        <a
+          href={fallbackUrl}
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-white font-bold text-sm"
+          style={{ background: "var(--brand-primary)" }}
+        >
+          Open email client
+        </a>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4" data-reveal>
+      <div className="grid sm:grid-cols-2 gap-4">
+        <input
+          required
+          value={form.name}
+          onChange={(e) => setForm({ ...form, name: e.target.value })}
+          placeholder="Name *"
+          className="w-full rounded-[var(--radius-input)] border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none transition focus:border-[var(--brand-primary)] placeholder:text-[var(--text-tertiary)]"
+        />
+        <input
+          required
+          type="email"
+          value={form.email}
+          onChange={(e) => setForm({ ...form, email: e.target.value })}
+          placeholder="Email *"
+          className="w-full rounded-[var(--radius-input)] border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none transition focus:border-[var(--brand-primary)] placeholder:text-[var(--text-tertiary)]"
+        />
+      </div>
+      <div className="grid sm:grid-cols-2 gap-4">
+        <input
+          value={form.school}
+          onChange={(e) => setForm({ ...form, school: e.target.value })}
+          placeholder="School / Institution"
+          className="w-full rounded-[var(--radius-input)] border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none transition focus:border-[var(--brand-primary)] placeholder:text-[var(--text-tertiary)]"
+        />
+        <select
+          value={form.role}
+          onChange={(e) => setForm({ ...form, role: e.target.value })}
+          className="w-full rounded-[var(--radius-input)] border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none transition focus:border-[var(--brand-primary)]"
+          style={{ color: form.role ? "var(--text-primary)" : "var(--text-tertiary)" }}
+        >
+          <option value="">Role</option>
+          <option value="Student">Student</option>
+          <option value="Teacher">Teacher</option>
+          <option value="Administrator">Administrator</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+      <textarea
+        required
+        value={form.message}
+        onChange={(e) => setForm({ ...form, message: e.target.value })}
+        placeholder="Message *"
+        rows={4}
+        className="w-full rounded-[var(--radius-input)] border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3 text-sm text-[var(--text-primary)] outline-none transition focus:border-[var(--brand-primary)] placeholder:text-[var(--text-tertiary)] resize-none"
+      />
+      {status === "error" && errorMsg && (
+        <p className="text-sm text-[var(--danger)]">{errorMsg}</p>
+      )}
+      <button
+        type="submit"
+        disabled={status === "sending"}
+        className="w-full px-6 py-3.5 rounded-xl text-white font-bold text-sm transition-all hover:-translate-y-0.5 disabled:opacity-60"
+        style={{
+          background: "var(--brand-primary)",
+          boxShadow: "0 4px 16px color-mix(in oklab, var(--brand-primary) 25%, transparent)",
+        }}
+      >
+        {status === "sending" ? "Sending..." : "Send message"}
+      </button>
+    </form>
   );
 }
 
@@ -746,6 +876,27 @@ export function LandingClient() {
         .agent-card:hover .agent-default { opacity: 0; transform: translateY(-6px); }
         .agent-card:hover .agent-snippet { opacity: 1; transform: none; pointer-events: auto; }
 
+        /* Pricing slider */
+        .pricing-slider::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          width: 24px; height: 24px;
+          border-radius: 50%;
+          background: var(--bg-elevated);
+          border: 3px solid var(--brand-primary);
+          box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+          cursor: pointer;
+          transition: transform 0.15s ease;
+        }
+        .pricing-slider::-webkit-slider-thumb:hover { transform: scale(1.15); }
+        .pricing-slider::-moz-range-thumb {
+          width: 24px; height: 24px;
+          border-radius: 50%;
+          background: var(--bg-elevated);
+          border: 3px solid var(--brand-primary);
+          box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+          cursor: pointer;
+        }
+
         @media (prefers-reduced-motion: reduce) {
           [data-reveal], .hero-in-1, .hero-in-2, .hero-in-3, .hero-in-4, .hero-in-5 {
             animation: none !important; transition: none !important; opacity: 1 !important; transform: none !important;
@@ -767,17 +918,9 @@ export function LandingClient() {
       >
         <div className="max-w-7xl mx-auto px-6 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div
-              className="w-8 h-8 rounded-xl flex items-center justify-center text-white"
-              style={{
-                background: "var(--brand-primary)",
-                boxShadow: "0 4px 14px color-mix(in oklab, var(--brand-primary) 30%, transparent)",
-              }}
-            >
-              <Sparkles size={15} />
-            </div>
+            <SpectraLogo size={30} />
             <span className="font-display text-xl tracking-tight" style={{ color: "var(--text-primary)" }}>
-              AI School
+              Spectra
             </span>
           </div>
           <div className="flex items-center gap-4">
@@ -853,7 +996,7 @@ export function LandingClient() {
                   className="w-1.5 h-1.5 rounded-full"
                   style={{ background: "var(--success)", animation: "subtle-pulse 2s ease-in-out infinite" }}
                 />
-                School-grade AI assistant
+                Spectra · School-grade AI
               </div>
 
               <h1
@@ -869,9 +1012,9 @@ export function LandingClient() {
                 className="hero-in-3 text-lg leading-relaxed mb-8"
                 style={{ color: "var(--text-secondary)", maxWidth: "32rem" }}
               >
-                A structured AI assistant for schools — with 9 learning modes, automatic model
-                routing, and context from your curriculum. Students already use AI. Now their
-                school can make sure it actually helps them learn.
+                Spectra is a structured AI platform for schools — with 9 learning modes, automatic model
+                routing, and context from your curriculum. Students already use AI — often without
+                structure. Now their school can guide that, and teach them to use it better in the process.
               </p>
 
               <div className="hero-in-4 flex flex-wrap items-center gap-4">
@@ -883,7 +1026,7 @@ export function LandingClient() {
                     boxShadow: "0 6px 20px color-mix(in oklab, var(--brand-primary) 28%, transparent)",
                   }}
                 >
-                  Get started free
+                  Get started
                   <ArrowRight size={15} />
                 </Link>
                 <a
@@ -972,32 +1115,32 @@ export function LandingClient() {
       {/* ── WaveB ── */}
       <WaveB />
 
-      {/* ── Orchestration demo ── */}
+      {/* ── Prism / spectral routing ── */}
       <section
-        className="py-32"
+        className="py-32 overflow-hidden"
         style={{ background: "var(--bg-primary)" }}
       >
         <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center mb-12" data-reveal>
+          <div className="text-center mb-14" data-reveal>
             <p
               className="text-[9px] font-bold uppercase tracking-[0.28em] mb-3"
               style={{ color: "var(--text-tertiary)" }}
             >
-              See it in action
+              Spectral routing
             </p>
             <h2
               className="font-display font-bold mb-3"
               style={{ fontSize: "clamp(1.875rem, 4vw, 2.75rem)" }}
             >
-              Orchestration in{" "}
-              <span style={{ color: "var(--brand-primary)" }}>action</span>
+              One question.{" "}
+              <span style={{ color: "var(--brand-primary)" }}>The right intelligence.</span>
             </h2>
-            <p className="text-base max-w-sm mx-auto" style={{ color: "var(--text-secondary)" }}>
-              Click a scenario or press ← → to explore. Auto-advances every 6 seconds.
+            <p className="text-base max-w-lg mx-auto" style={{ color: "var(--text-secondary)" }}>
+              Spectra decomposes every request and routes it to a purpose-built agent — the right model, the right context, the right mode.
             </p>
           </div>
           <div data-reveal>
-            <OrchestrationDemo />
+            <PrismAnimation />
           </div>
         </div>
       </section>
@@ -1403,6 +1546,57 @@ export function LandingClient() {
         </div>
       </section>
 
+      {/* ── ChevronUp ── */}
+      <ChevronUp />
+
+      {/* ── Pricing ── */}
+      <section
+        className="py-32"
+        style={{ background: "var(--bg-primary)" }}
+      >
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="text-center mb-14" data-reveal>
+            <p
+              className="text-[9px] font-bold uppercase tracking-[0.28em] mb-3"
+              style={{ color: "var(--text-tertiary)" }}
+            >
+              Transparent pricing
+            </p>
+            <h2
+              className="font-display font-bold mb-3"
+              style={{ fontSize: "clamp(1.875rem, 4vw, 2.75rem)" }}
+            >
+              Simple, <span style={{ color: "var(--brand-primary)" }}>flexible</span> pricing
+            </h2>
+            <p className="text-base max-w-md mx-auto" style={{ color: "var(--text-secondary)" }}>
+              Schools set their own per-student budget. More budget means more AI inference for every student. No hidden fees.
+            </p>
+          </div>
+          <div data-reveal>
+            <PricingSection />
+          </div>
+        </div>
+      </section>
+
+      <WaveA />
+
+      {/* ── Contact section ── */}
+      <section
+        id="contact"
+        className="py-24"
+        style={{ background: "var(--bg-secondary)" }}
+      >
+        <div className="max-w-xl mx-auto px-6">
+          <div className="text-center mb-10" data-reveal>
+            <h2 className="font-display text-2xl font-bold mb-2">Get in touch</h2>
+            <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+              Want to bring Spectra to your school? Have questions about our custom AI agents? We&apos;d love to hear from you.
+            </p>
+          </div>
+          <ContactForm />
+        </div>
+      </section>
+
       {/* ── DoubleWaveDown ── */}
       <DoubleWaveDown />
 
@@ -1452,7 +1646,7 @@ export function LandingClient() {
                 boxShadow: "0 8px 24px color-mix(in oklab, var(--brand-primary) 28%, transparent)",
               }}
             >
-              Get started free
+              Get started
               <ArrowRight size={16} />
             </Link>
             <Link
@@ -1472,13 +1666,8 @@ export function LandingClient() {
       >
         <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-8">
           <div className="flex items-center gap-2.5">
-            <div
-              className="w-7 h-7 rounded-lg flex items-center justify-center text-white"
-              style={{ background: "var(--brand-primary)" }}
-            >
-              <Sparkles size={13} />
-            </div>
-            <span className="font-display text-base tracking-tight">AI School</span>
+            <SpectraLogo size={24} />
+            <span className="font-display text-base tracking-tight">Spectra</span>
           </div>
           <div
             className="flex gap-7 text-[10px] font-bold uppercase tracking-widest"
@@ -1493,9 +1682,15 @@ export function LandingClient() {
                 {l}
               </Link>
             ))}
+            <a
+              href="#contact"
+              className="transition-colors hover:text-[var(--text-primary)]"
+            >
+              Contact
+            </a>
           </div>
           <p className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
-            © {new Date().getFullYear()} AI School
+            © {new Date().getFullYear()} Spectra
           </p>
         </div>
       </footer>

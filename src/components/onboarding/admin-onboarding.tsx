@@ -320,7 +320,7 @@ export function AdminOnboarding({
           <StepContainer>
             <h2 className="text-2xl font-bold text-[var(--text-primary)]">School Setup</h2>
             <p className="mb-5 mt-1 text-sm text-[var(--text-secondary)]">
-              Set logo, colors, and a welcome message students see when they open AI School.
+              Set logo, colors, and a welcome message students see when they open Spectra.
             </p>
 
             <div className="grid gap-5 lg:grid-cols-[1.1fr_1fr]">

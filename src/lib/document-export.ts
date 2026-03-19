@@ -352,7 +352,7 @@ export async function buildPptxBytes(documentData: GeneratedDocument) {
   const template = pickTemplate(documentData);
   const pptx = new PptxGenJS();
   pptx.layout = "LAYOUT_WIDE";
-  pptx.author = "AI School";
+  pptx.author = "Spectra";
   pptx.subject = documentData.title;
   pptx.title = documentData.title;
 

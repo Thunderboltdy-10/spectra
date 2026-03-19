@@ -199,7 +199,7 @@ function JoinPageContent() {
               </div>
             )}
             <h1 className="font-display text-2xl text-[var(--text-primary)]">
-              {data.orgName ?? "AI School"}
+              {data.orgName ?? "Spectra"}
             </h1>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">
               You&apos;ve been invited to join

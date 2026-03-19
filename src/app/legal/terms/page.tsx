@@ -5,7 +5,7 @@ export default function TermsPage() {
     <main className="mx-auto max-w-3xl px-4 py-8 text-[var(--text-primary)] sm:px-6">
       <h1 className="font-display text-4xl">Terms of Service</h1>
       <p className="mt-3 text-sm text-[var(--text-secondary)]">
-        These terms govern usage of AI School services and features.
+        These terms govern usage of Spectra services and features.
       </p>
 
       <section className="mt-6 space-y-2">

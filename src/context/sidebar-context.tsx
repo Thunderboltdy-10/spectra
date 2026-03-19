@@ -113,7 +113,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [userSpending, setUserSpending] = useState<SidebarSpending | null>(null);
   const [userMemorySummary, setUserMemorySummary] = useState("");
   const [orgSettings, setOrgSettings] = useState<BootstrapResponse["orgSettings"] | undefined>(undefined);
-  const [orgName, setOrgName] = useState("AI School");
+  const [orgName, setOrgName] = useState("Spectra");
   const [orgLogoUrl, setOrgLogoUrl] = useState<string | undefined>(undefined);
   const [orgWelcomeMessage, setOrgWelcomeMessage] = useState("");
   const [search, setSearch] = useState("");
@@ -154,7 +154,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     setUserMemorySummary(data.userMemory?.summary ?? "");
     setOrgSettings(data.orgSettings);
     setOrgWelcomeMessage(data.orgSettings?.org?.welcomeMessage ?? "");
-    setOrgName(data.orgSettings?.org?.name ?? "AI School");
+    setOrgName(data.orgSettings?.org?.name ?? "Spectra");
     setOrgLogoUrl(data.orgSettings?.org?.logoUrl);
 
     if (typeof document !== "undefined") {

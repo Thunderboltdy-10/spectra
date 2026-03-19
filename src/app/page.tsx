@@ -6,9 +6,9 @@ import { requireActor } from "@/lib/auth-server";
 import { hasClerkServerConfig } from "@/lib/clerk-config";
 
 export const metadata: Metadata = {
-  title: "AI School — The right tool for the right task",
+  title: "Spectra — The right AI for the right task",
   description:
-    "Automatic AI orchestration for students and teachers. Every question routed to the right model, mode, and agent — instantly.",
+    "Spectra routes every question to the right AI — the right model, the right mode, the right context. 9 learning modes, school context, personal memory. Purpose-built for schools.",
 };
 
 function toQueryString(searchParams: Record<string, string | string[] | undefined>) {

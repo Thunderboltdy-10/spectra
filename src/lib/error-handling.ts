@@ -104,7 +104,7 @@ export function formatErrorForDisplay(error: unknown): { title: string; message:
     if (error.message.includes("AUTH_NOT_SIGNED_IN")) {
       return {
         title: "Sign in required",
-        message: "Please sign in to continue using AI School.",
+        message: "Please sign in to continue using Spectra.",
         action: "Sign In",
       };
     }

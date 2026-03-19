@@ -5,7 +5,7 @@ export default function PrivacyNoticePage() {
     <main className="mx-auto max-w-3xl px-4 py-8 text-[var(--text-primary)] sm:px-6">
       <h1 className="font-display text-4xl">Privacy Notice</h1>
       <p className="mt-3 text-sm text-[var(--text-secondary)]">
-        This notice explains what data AI School processes and why.
+        This notice explains what data Spectra processes and why.
       </p>
 
       <section className="mt-6 space-y-2">

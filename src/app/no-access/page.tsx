@@ -244,6 +244,12 @@ function NoAccessPageContent() {
                 Sign in again
               </Button>
             </Link>
+            <a
+              href="/#contact"
+              className="text-sm font-medium transition-colors text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            >
+              Contact us
+            </a>
           </div>
         </div>
       </div>

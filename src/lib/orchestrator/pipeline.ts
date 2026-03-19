@@ -1551,7 +1551,7 @@ export async function runChatPipeline(request: NextRequest) {
         : "web search allowed for this route but returned no usable results")
     : "web search not enabled for this route";
   const runtimeContextBlock = [
-    `School: ${orgSettings.org?.name ?? "AI School"}`,
+    `School: ${orgSettings.org?.name ?? "Spectra"}`,
     `Timezone: ${schoolNow.timeZone}`,
     `Current date: ${schoolNow.label}`,
     `Allowed tool bundles: ${routePlan.allowedToolBundles.join(", ") || "none"}`,

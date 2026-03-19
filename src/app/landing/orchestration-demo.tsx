@@ -178,7 +178,7 @@ export function OrchestrationDemo() {
         <div className="flex items-center gap-2 ml-4">
           <Cpu size={14} style={{ color: "var(--brand-primary)" }} />
           <span className="text-[11px] font-mono font-bold uppercase tracking-[0.2em] text-[var(--text-tertiary)]">
-            AI School · Orchestration Engine
+            Spectra · Orchestration Engine
           </span>
         </div>
         <div className="ml-auto flex items-center gap-2">

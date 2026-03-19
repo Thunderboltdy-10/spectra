@@ -5,7 +5,7 @@ export default function CookiePolicyPage() {
     <main className="mx-auto max-w-3xl px-4 py-8 text-[var(--text-primary)] sm:px-6">
       <h1 className="font-display text-4xl">Cookie Policy</h1>
       <p className="mt-3 text-sm text-[var(--text-secondary)]">
-        AI School uses a consent-based cookie model with required and optional categories.
+        Spectra uses a consent-based cookie model with required and optional categories.
       </p>
 
       <section className="mt-6 space-y-2">

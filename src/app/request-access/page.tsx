@@ -258,7 +258,7 @@ function RequestAccessForm() {
             <h2 className="text-sm font-semibold text-[var(--text-primary)]">How this works</h2>
             <div className="mt-4 space-y-3 text-sm text-[var(--text-secondary)]">
               <p>1. Search for your school and submit a short access request.</p>
-              <p>2. A school admin receives a notification inside AI School.</p>
+              <p>2. A school admin receives a notification inside Spectra.</p>
               <p>3. Once approved, they send you a normal invitation email with your join link.</p>
               <p>4. Use that invitation to finish joining the workspace.</p>
             </div>

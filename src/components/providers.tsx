@@ -7,6 +7,7 @@ import { GlobalSettingsDrawer } from "@/components/global-settings-drawer";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SidebarProvider } from "@/context/sidebar-context";
 import { PanelProvider } from "@/context/panel-context";
+import { DynamicFavicon } from "@/components/spectra-logo";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
@@ -15,6 +16,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         <PanelProvider>
           <CommandPaletteProvider>
             {children}
+            <DynamicFavicon />
             <GlobalSettingsDrawer />
             <CookieConsentManager />
             <Toaster

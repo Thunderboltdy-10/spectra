@@ -412,7 +412,7 @@ export default function OnboardingPage() {
             boxShadow: "var(--shadow-soft)",
           }}
         >
-          {step === 0 && <WelcomeStep orgName={orgName || "AI School"} />}
+          {step === 0 && <WelcomeStep orgName={orgName || "Spectra"} />}
           {step === 1 && <ModesStep />}
           {step === 2 && <NavigationStep />}
           {step === 3 && <AIFeaturesStep />}

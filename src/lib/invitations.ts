@@ -11,13 +11,13 @@ export type InviteEmailResult =
   | { status: "failed"; reason: string };
 
 function inviteEmailHtml(params: InviteEmailParams) {
-  const schoolName = params.orgName?.trim() || "AI School";
+  const schoolName = params.orgName?.trim() || "Spectra";
   const roleLabel = params.role.trim();
   return `
     <div style="margin:0;padding:24px;background:#f5efe2;font-family:Georgia,'Times New Roman',serif;color:#1f2937;">
       <div style="max-width:560px;margin:0 auto;background:#fffaf1;border:1px solid #d9cfbd;border-radius:24px;overflow:hidden;">
         <div style="padding:24px 28px;background:linear-gradient(135deg,#0f766e,#d97706);color:#fffaf1;">
-          <div style="font-size:12px;letter-spacing:0.18em;text-transform:uppercase;opacity:0.8;">AI School</div>
+          <div style="font-size:12px;letter-spacing:0.18em;text-transform:uppercase;opacity:0.8;">Spectra</div>
           <h1 style="margin:12px 0 0;font-size:28px;line-height:1.1;font-weight:700;">You have been invited to ${schoolName}</h1>
         </div>
         <div style="padding:28px;">
@@ -52,7 +52,7 @@ export async function sendInvitationEmail(params: InviteEmailParams): Promise<In
       body: JSON.stringify({
         from: process.env.INVITE_FROM_EMAIL,
         to: [params.to],
-        subject: `Your ${params.orgName?.trim() || "AI School"} invitation`,
+        subject: `Your ${params.orgName?.trim() || "Spectra"} invitation`,
         html: inviteEmailHtml(params),
       }),
     });

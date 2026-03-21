@@ -151,9 +151,10 @@ function phaseFit(params: {
   return Math.min(1, score);
 }
 
-function costFit(costPerM: number, stakes: StakeLevel) {
+function costFit(costPerM: number, stakes: StakeLevel, isFree: boolean) {
+  if (isFree) return 0.7;
   const target = stakes === "low" ? 2.2 : stakes === "medium" ? 8.5 : 18;
-  if (costPerM <= 0.02) return 1;
+  if (costPerM <= 0.02) return 0.92;
   if (costPerM <= target) return 0.92;
   if (costPerM <= target * 1.6) return 0.65;
   if (costPerM <= target * 2.8) return 0.4;
@@ -196,17 +197,14 @@ function selectLane(weights: ReturnType<typeof laneWeights>, seed: number): Rout
 function repetitionPenalty(modelId: string, recentModels: string[]) {
   const hits = recentModels.filter((item) => item === modelId).length;
   if (hits <= 0) return 0;
-  return Math.min(0.18, hits * 0.06);
+  return Math.min(0.35, hits * 0.12);
 }
 
-function providerStreakPenalty(provider: string, recentProviders: string[]) {
-  let streak = 0;
-  for (let i = recentProviders.length - 1; i >= 0; i -= 1) {
-    if (recentProviders[i] !== provider) break;
-    streak += 1;
-  }
-  if (streak <= 1) return 0;
-  return Math.min(0.12, (streak - 1) * 0.04);
+function providerDiversityPenalty(provider: string, recentProviders: string[]) {
+  if (recentProviders.length < 3) return 0;
+  const providerHits = recentProviders.filter((item) => item === provider).length;
+  const share = providerHits / recentProviders.length;
+  return share > 0.35 ? 0.1 : 0;
 }
 
 export function buildPhasePlan(params: {
@@ -255,7 +253,6 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
     input.modelCatalog.some((model) => model.modelId === input.manualModel && isModelAllowedInTier(model, input.spendingTier));
 
   if (allowedManual && input.manualModel) {
-    const manualProvider = providerFromModelId(input.manualModel);
     const candidates: RouteTraceCandidate[] = [
       {
         modelId: input.manualModel,
@@ -330,26 +327,26 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
     const latency = latencyScore(stat);
     const freshness = freshnessScore(model);
     const context = contextFit(model, input.messageLength);
-    const cost = costFit(normalizeCost(model), input.stakes);
+    const cost = costFit(normalizeCost(model), input.stakes, Boolean(model.isFree || model.modelId.includes(":free")));
     const totalRuns = Math.max(0, (stat?.successCount ?? 0) + (stat?.failureCount ?? 0));
     const lane = laneForCandidate({ reliability, freshness, totalRuns });
     const provider = providerFromModelId(model.modelId);
 
     const repeatPenalty = repetitionPenalty(model.modelId, recentModels);
-    const providerPenalty = providerStreakPenalty(provider, recentProviders);
+    const providerPenalty = providerDiversityPenalty(provider, recentProviders);
     const previousPenalty = input.previousModelUsed && input.previousModelUsed === model.modelId ? 0.08 : 0;
     const antiLockIn = Math.max(0, 1 - repeatPenalty - providerPenalty - previousPenalty);
     const laneBoost = lane === selectLane(weights, seed) ? 0.08 : lane === "fresh" ? 0.03 : 0;
     const preferredBoost = preferredIds.has(model.modelId) ? 0.05 : 0;
 
     const score =
-      fit * 0.24 +
-      reliability * 0.17 +
+      fit * 0.2 +
+      reliability * 0.16 +
       freshness * 0.13 +
-      cost * 0.16 +
+      cost * 0.15 +
       latency * 0.1 +
       context * 0.1 +
-      antiLockIn * 0.1 +
+      antiLockIn * 0.16 +
       laneBoost +
       preferredBoost;
 
@@ -371,6 +368,7 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
         `latencyFit ${latency.toFixed(2)}`,
         `contextFit ${context.toFixed(2)}`,
         `antiLockIn ${antiLockIn.toFixed(2)}`,
+        providerPenalty > 0 ? `providerDiversityPenalty ${providerPenalty.toFixed(2)}` : "providerDiversityPenalty 0.00",
       ],
     });
   }
@@ -378,7 +376,15 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
   scored.sort((a, b) => b.score - a.score || a.modelId.localeCompare(b.modelId));
   const preferredLane = selectLane(weights, seed);
   const laneRows = scored.filter((row) => row.lane === preferredLane);
-  const selected = laneRows[0] ?? scored[0];
+  const primaryPool = (laneRows.length > 0 ? laneRows : scored).slice(0, 5);
+  const explorationSeed = hashToUnit(`${input.seedKey}:${input.phaseId}:epsilon`);
+  const shouldExplore = primaryPool.length > 1 && explorationSeed < 0.1;
+  let selected = laneRows[0] ?? scored[0];
+  if (shouldExplore) {
+    const pickSeed = hashToUnit(`${input.seedKey}:${input.phaseId}:epsilon-pick`);
+    const randomIndex = Math.min(primaryPool.length - 1, Math.floor(pickSeed * primaryPool.length));
+    selected = primaryPool[randomIndex];
+  }
 
   if (!selected) {
     const fallbackModel = input.manualModel || "openrouter/auto";
@@ -418,7 +424,9 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
     scoreBreakdown: row.breakdown,
   }));
 
-  const reason = `Phase router selected ${selected.modelId} in ${preferredLane} lane for ${input.phaseLabel.toLowerCase()}`;
+  const reason = shouldExplore
+    ? `Phase router selected ${selected.modelId} via exploration from top candidates for ${input.phaseLabel.toLowerCase()}`
+    : `Phase router selected ${selected.modelId} in ${preferredLane} lane for ${input.phaseLabel.toLowerCase()}`;
   return {
     selectedModel: selected.modelId,
     fallbackModels,

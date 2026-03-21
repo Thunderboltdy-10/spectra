@@ -3,7 +3,8 @@ import { requireActor } from "@/lib/auth-server";
 import { convexQuery } from "@/lib/convex-server";
 import { ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
-import { classifyRequest, runAutoSettingsPipeline } from "@/lib/auto-settings";
+import { classifyComplexity, classifyRequest, runAutoSettingsPipeline } from "@/lib/auto-settings";
+import { PipelineController } from "@/lib/orchestrator/pipeline-controller";
 import { selectModelForPhase } from "@/lib/routing/phase-router";
 import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
 import { safeStudyMode, type StudyMode } from "@/types";
@@ -99,21 +100,45 @@ export async function POST(request: NextRequest) {
       searchMode: body.autoSettings?.searchMode ?? "auto",
     };
 
-    const auto = await runAutoSettingsPipeline({
+    const earlyComplexity = classifyComplexity(normalizedMessage);
+    const earlyClassification = classifyRequest({
       message: normalizedMessage,
+      complexity: earlyComplexity,
       mode: safeMode,
       hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
       isFirstMessage: false,
-      currentThinkingLevel: body.thinkingLevel,
       spendingTier: budget.tier,
-      autoEnhancePrompt: autoSettings.enhancePrompt,
-      autoThinking: autoSettings.autoThinking,
-      autoSearch: autoSettings.autoSearch,
-      enhanceMode: autoSettings.enhanceMode,
-      thinkingMode: autoSettings.thinkingMode,
-      searchMode: autoSettings.searchMode,
-      skipModelCalls: true,
     });
+    const auto: Awaited<ReturnType<typeof runAutoSettingsPipeline>> =
+      earlyClassification.requestClass === "T0"
+        ? {
+            message: normalizedMessage,
+            promptEnhanced: false,
+            searchEnabled: false,
+            thinkingLevel: "low",
+            complexity: earlyComplexity,
+            requestClass: earlyClassification.requestClass,
+            classificationReason: earlyClassification.reason,
+            promptCategory: "general",
+            questionType: "other",
+            isMultipart: false,
+            suggestedMode: null,
+          }
+        : await runAutoSettingsPipeline({
+            message: normalizedMessage,
+            mode: safeMode,
+            hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
+            isFirstMessage: false,
+            currentThinkingLevel: body.thinkingLevel,
+            spendingTier: budget.tier,
+            autoEnhancePrompt: autoSettings.enhancePrompt,
+            autoThinking: autoSettings.autoThinking,
+            autoSearch: autoSettings.autoSearch,
+            enhanceMode: autoSettings.enhanceMode,
+            thinkingMode: autoSettings.thinkingMode,
+            searchMode: autoSettings.searchMode,
+            skipModelCalls: true,
+          });
     const requestClassification = classifyRequest({
       message: auto.message,
       complexity: auto.complexity,
@@ -124,6 +149,20 @@ export async function POST(request: NextRequest) {
     });
     auto.requestClass = requestClassification.requestClass;
     auto.classificationReason = requestClassification.reason;
+    const pipelineController = new PipelineController({
+      requestClass: requestClassification.requestClass,
+      classificationReason: requestClassification.reason,
+    });
+    const costGates = pipelineController.applyCostGates({
+      allowSearch: auto.searchEnabled,
+      allowRag: Boolean(body.usePersonalResources),
+      allowMultiAgent: false,
+      spendingTier: budget.tier,
+      forceMultiAgentRequested: false,
+      orchestratorEnabled: true,
+      budgetSoftLimited: false,
+    });
+    pipelineController.markStageCompleted("modelSelection");
 
     const routingMode = autoSettings.autoModel ? body.routerMode : "manual";
     const routingManualModel = autoSettings.autoModel ? body.manualModel : fallbackManualModel;
@@ -143,7 +182,7 @@ export async function POST(request: NextRequest) {
       thinkingLevel: auto.thinkingLevel,
       stakes: phaseStake,
       messageLength: auto.message.length,
-      needsSearch: auto.searchEnabled,
+      needsSearch: costGates.searchEnabled,
       hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
       requiredCapabilities: (body.attachmentTypes?.length ?? 0) > 0 ? ["vision"] : [],
       preferredCapabilities: auto.searchEnabled ? ["reasoning", "search"] : ["reasoning"],
@@ -163,8 +202,8 @@ export async function POST(request: NextRequest) {
           promptCategory: auto.promptCategory,
           questionType: auto.questionType,
           isMultipart: auto.isMultipart,
-          needsSearch: auto.searchEnabled,
-          needsRag: Boolean(body.usePersonalResources),
+          needsSearch: costGates.searchEnabled,
+          needsRag: costGates.ragEnabled,
           needsVision: (body.attachmentTypes?.length ?? 0) > 0,
           needsTabular: false,
           spendingTier: budget.tier,
@@ -185,6 +224,15 @@ export async function POST(request: NextRequest) {
         routingDurationMs: routeDecision.routingDurationMs,
         phasePlan: [routeDecision.phase],
         subcalls: [],
+        requestClass: auto.requestClass,
+        classificationReason: auto.classificationReason,
+        stepsExecuted: pipelineController.getState().completedStages,
+        stepsSkipped: pipelineController.getState().skippedStages.map((row) => ({
+          step: row.step,
+          reason: row.reason,
+        })),
+        searchStatus: costGates.searchEnabled ? "real_search" : "skipped",
+        costBudgetUsd: costGates.costBudgetUsd,
       },
     });
   });

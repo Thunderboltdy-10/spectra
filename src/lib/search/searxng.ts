@@ -22,7 +22,7 @@ const DEFAULT_SEARXNG_INSTANCES = [
   "https://search.ononoki.org",
 ];
 
-const DEFAULT_TIMEOUT_MS = 6500;
+const DEFAULT_TIMEOUT_MS = 4000;
 const MAX_TIMEOUT_MS = 15000;
 const MIN_TIMEOUT_MS = 2500;
 
@@ -67,6 +67,130 @@ function configuredTimeoutMs() {
   return Math.min(MAX_TIMEOUT_MS, Math.max(MIN_TIMEOUT_MS, envValue));
 }
 
+type InstanceOutcome =
+  | { kind: "success"; instance: string; results: SearxngResult[] }
+  | { kind: "empty"; instance: string }
+  | { kind: "failed"; instance: string; error: string }
+  | { kind: "aborted"; instance: string };
+
+async function queryInstance(params: {
+  instance: string;
+  query: string;
+  language: string;
+  limit: number;
+  timeoutMs: number;
+  controller: AbortController;
+}): Promise<InstanceOutcome> {
+  const { instance, query, language, limit, timeoutMs, controller } = params;
+  let timedOut = false;
+  const timeoutHandle = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    const response = await fetch(
+      `${instance}/search?q=${encodeURIComponent(query)}&format=json&language=${encodeURIComponent(language)}&safesearch=1`,
+      {
+        signal: controller.signal,
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "AI-School-Search/1.0",
+        },
+      },
+    );
+    if (!response.ok) {
+      console.warn(`[searxng] ${instance} returned ${response.status}`);
+      markInstanceFailed(instance);
+      return { kind: "failed", instance, error: `HTTP ${response.status}` };
+    }
+    const payload = (await response.json()) as { results?: Array<Record<string, unknown>> };
+    const results = (payload.results ?? [])
+      .map((item) => ({
+        url: typeof item.url === "string" ? item.url : "",
+        title: typeof item.title === "string" ? item.title : "",
+        content: typeof item.content === "string" ? item.content : "",
+        engine: typeof item.engine === "string" ? item.engine : "",
+      }))
+      .filter((item) => item.url && item.title)
+      .slice(0, limit);
+    if (results.length > 0) {
+      return { kind: "success", instance, results };
+    }
+    console.warn(`[searxng] ${instance} returned 0 results for "${query.slice(0, 60)}"`);
+    return { kind: "empty", instance };
+  } catch (error) {
+    if (controller.signal.aborted) {
+      if (timedOut) {
+        markInstanceFailed(instance);
+        return { kind: "failed", instance, error: "timeout" };
+      }
+      return { kind: "aborted", instance };
+    }
+    const msg = error instanceof Error ? error.message : String(error);
+    console.warn(`[searxng] ${instance} failed: ${msg}`);
+    markInstanceFailed(instance);
+    return { kind: "failed", instance, error: msg };
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+}
+
+async function runParallelBatch(params: {
+  instances: string[];
+  query: string;
+  language: string;
+  limit: number;
+  timeoutMs: number;
+}) {
+  const controllers = new Map<string, AbortController>();
+  for (const instance of params.instances) {
+    controllers.set(instance, new AbortController());
+  }
+
+  let resolved = false;
+  let completed = 0;
+  const outcomes: InstanceOutcome[] = [];
+
+  return new Promise<{ winner?: { instance: string; results: SearxngResult[] }; outcomes: InstanceOutcome[] }>((resolve) => {
+    for (const instance of params.instances) {
+      const controller = controllers.get(instance);
+      if (!controller) continue;
+      void queryInstance({
+        instance,
+        query: params.query,
+        language: params.language,
+        limit: params.limit,
+        timeoutMs: params.timeoutMs,
+        controller,
+      }).then((outcome) => {
+        outcomes.push(outcome);
+        completed += 1;
+
+        if (!resolved && outcome.kind === "success") {
+          resolved = true;
+          for (const [candidate, candidateController] of controllers.entries()) {
+            if (candidate !== outcome.instance) candidateController.abort();
+          }
+          resolve({
+            winner: {
+              instance: outcome.instance,
+              results: outcome.results,
+            },
+            outcomes,
+          });
+          return;
+        }
+
+        if (!resolved && completed === params.instances.length) {
+          resolved = true;
+          resolve({ outcomes });
+        }
+      });
+    }
+  });
+}
+
 export async function searxngSearch(query: string, options: SearxngOptions = {}): Promise<SearxngResult[]> {
   const instances = configuredInstances();
   const timeoutMs = Math.min(
@@ -80,43 +204,17 @@ export async function searxngSearch(query: string, options: SearxngOptions = {})
   const healthy = instances.filter(isInstanceHealthy);
   const unhealthy = instances.filter((i) => !isInstanceHealthy(i));
   const ordered = [...healthy, ...unhealthy];
-
-  for (const instance of ordered) {
-    try {
-      const response = await fetch(
-        `${instance}/search?q=${encodeURIComponent(query)}&format=json&language=${encodeURIComponent(language)}&safesearch=1`,
-        {
-          signal: AbortSignal.timeout(timeoutMs),
-          headers: {
-            Accept: "application/json",
-            "User-Agent": "AI-School-Search/1.0",
-          },
-        },
-      );
-      if (!response.ok) {
-        console.warn(`[searxng] ${instance} returned ${response.status}`);
-        markInstanceFailed(instance);
-        continue;
-      }
-      const payload = (await response.json()) as { results?: Array<Record<string, unknown>> };
-      const results = (payload.results ?? [])
-        .map((item) => ({
-          url: typeof item.url === "string" ? item.url : "",
-          title: typeof item.title === "string" ? item.title : "",
-          content: typeof item.content === "string" ? item.content : "",
-          engine: typeof item.engine === "string" ? item.engine : "",
-        }))
-        .filter((item) => item.url && item.title)
-        .slice(0, limit);
-      if (results.length > 0) {
-        return results;
-      }
-      // Empty results — instance works but query yielded nothing, try next
-      console.warn(`[searxng] ${instance} returned 0 results for "${query.slice(0, 60)}"`);
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.warn(`[searxng] ${instance} failed: ${msg}`);
-      markInstanceFailed(instance);
+  for (let i = 0; i < ordered.length; i += 3) {
+    const batch = ordered.slice(i, i + 3);
+    const { winner } = await runParallelBatch({
+      instances: batch,
+      query,
+      language,
+      limit,
+      timeoutMs,
+    });
+    if (winner?.results?.length) {
+      return winner.results;
     }
   }
 

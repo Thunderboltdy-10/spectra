@@ -285,6 +285,12 @@ export type RouteTrace = {
   toolchain: string[];
   fallbacks: RouteTraceFallback[];
   routingDurationMs: number;
+  requestClass?: "T0" | "T1" | "T2" | "T3";
+  classificationReason?: string;
+  stepsExecuted?: string[];
+  stepsSkipped?: Array<{ step: string; reason: string }>;
+  searchStatus?: "real_search" | "model_knowledge" | "skipped" | "error";
+  costBudgetUsd?: number;
   totalDurationMs?: number;
   totalCostCents?: number;
   collaborators?: Array<{ role: string; model: string; tokensUsed: number; durationMs: number }>;

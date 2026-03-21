@@ -1365,3 +1365,25 @@ Status: Implemented in codebase for the Phase 0 checklist in `CODEX.md`.
 - Targeted test command attempted: `npm run test:run -- src/lib/__tests__/auto-settings.test.ts`.
 - Test execution is blocked in this environment: npm launches through Windows `CMD.EXE` (UNC-path failure) and local Vitest also fails because `node` is not available in PATH.
 - See `PHASE_0_IMPLEMENTATION_REPORT.md` for detailed file-level change log and attempted test commands.
+
+## Phase 1 Implementation Update (2026-03-21)
+
+Status: Implemented in codebase for the Phase 1 checklist in `CODEX.md`.
+
+### Completed
+- Added `PipelineController` + `PipelineState` foundation with class-based execution plans (`T0/T1/T2/T3`) and stage-level skip/completion tracking.
+- Integrated controller-driven routing gates in chat pipeline, including an early T0 fast path that skips auto-settings model work.
+- Enforced cost gates for lower classes: search, RAG retrieval, and multi-agent orchestration are skipped for `T0/T1`.
+- Added force-multi-agent guardrails (tier, org feature, request class, budget) with explicit denial handling in route trace/toolchain context.
+- Rebalanced phase-router model scoring: updated weight mix, free-model score ceiling, stronger repetition penalties, provider diversity penalty, and epsilon exploration.
+- Parallelized SearxNG querying (batch-of-3 first-success behavior) and reduced default timeout to `4000ms`.
+- Gated RAG execution on processed resources only; retrieval now transparently skips when resources exist but are still unprocessed.
+- Updated utility-model selection for memory extraction to prefer cheap paid-capable utility routing (`preferCheap`) without forcing free-only behavior.
+- Enhanced route trace structure with request-class metadata, stage execution/skips, search status, and cost-budget envelope fields.
+- Added focused Phase 1 tests for controller gating/guardrail behavior.
+
+### Verification Notes
+- Targeted tests were attempted but remain blocked in this environment due Node runtime constraints (same failure mode observed in Phase 0):
+  - `npm` execution delegates to Windows `CMD.EXE` and fails on UNC working path.
+  - Direct Vitest binary invocation fails because `node` is unavailable in PATH.
+- See `PHASE_1_IMPLEMENTATION_REPORT.md` for full file-level change log and test command outputs.

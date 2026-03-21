@@ -13,7 +13,14 @@ import {
   summarizeWhyResponse,
   toOpenRouterMessages,
 } from "@/lib/orchestrator/compose";
-import { classifyExplainDepth, classifyRequest, parseUserDirectives, runAutoSettingsPipeline, suggestMode } from "@/lib/auto-settings";
+import {
+  classifyComplexity,
+  classifyExplainDepth,
+  classifyRequest,
+  parseUserDirectives,
+  runAutoSettingsPipeline,
+  suggestMode,
+} from "@/lib/auto-settings";
 import { matchAgentToMessage } from "@/lib/agent-matching";
 import { countFlashcardPairs, isFlashcardDeckStructured, normalizeFlashcardDeck } from "@/lib/flashcard-format";
 import { safeStudyMode } from "@/lib/contracts/studyModes";
@@ -43,6 +50,7 @@ import {
 } from "@/lib/orchestrator/post-process";
 import { buildResearchEvidenceBlock, maybeSearchWeb, runRagRetrieval } from "@/lib/orchestrator/retrieval";
 import { buildRoutePlan } from "@/lib/orchestrator/route-plan";
+import { PipelineController } from "@/lib/orchestrator/pipeline-controller";
 import { formatRuntimeSkillBlock, selectRuntimeSkills } from "@/lib/orchestrator/skills";
 import { runAssistantStreaming, runCollaborativeStreaming } from "@/lib/orchestrator/streaming";
 import { buildTaskGraph, shouldUseMultiAgent } from "@/lib/orchestrator/task-graph";
@@ -600,22 +608,47 @@ export async function runChatPipeline(request: NextRequest) {
     searchMode: body.autoSettings?.searchMode ?? "auto",
   };
 
-  const auto = await runAutoSettingsPipeline({
-    actorClerkId: actor.clerkId,
+  const earlyComplexity = classifyComplexity(normalizedMessage);
+  const earlyClassification = classifyRequest({
     message: normalizedMessage,
+    complexity: earlyComplexity,
     mode: safeMode,
     hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
     isFirstMessage: !body.chatId,
     multiAgentRequested: Boolean(body.forceMultiAgent),
-    currentThinkingLevel: body.thinkingLevel,
     spendingTier: budget.tier,
-    autoEnhancePrompt: autoSettings.enhancePrompt,
-    autoThinking: autoSettings.autoThinking,
-    autoSearch: autoSettings.autoSearch,
-    enhanceMode: autoSettings.enhanceMode,
-    thinkingMode: autoSettings.thinkingMode,
-    searchMode: autoSettings.searchMode,
   });
+  const skipAutoSettingsForT0 = earlyClassification.requestClass === "T0";
+  const auto: Awaited<ReturnType<typeof runAutoSettingsPipeline>> = skipAutoSettingsForT0
+    ? {
+        message: normalizedMessage,
+        promptEnhanced: false,
+        searchEnabled: false,
+        thinkingLevel: "low",
+        complexity: earlyComplexity,
+        requestClass: earlyClassification.requestClass,
+        classificationReason: earlyClassification.reason,
+        promptCategory: "general",
+        questionType: "other",
+        isMultipart: false,
+        suggestedMode: null,
+      }
+    : await runAutoSettingsPipeline({
+        actorClerkId: actor.clerkId,
+        message: normalizedMessage,
+        mode: safeMode,
+        hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
+        isFirstMessage: !body.chatId,
+        multiAgentRequested: Boolean(body.forceMultiAgent),
+        currentThinkingLevel: body.thinkingLevel,
+        spendingTier: budget.tier,
+        autoEnhancePrompt: autoSettings.enhancePrompt,
+        autoThinking: autoSettings.autoThinking,
+        autoSearch: autoSettings.autoSearch,
+        enhanceMode: autoSettings.enhanceMode,
+        thinkingMode: autoSettings.thinkingMode,
+        searchMode: autoSettings.searchMode,
+      });
   const userDirectives = parseUserDirectives(normalizedMessage);
   if (userDirectives.forcedModel) {
     logger.info("user directive: forced model", { model: userDirectives.forcedModel });
@@ -629,6 +662,7 @@ export async function runChatPipeline(request: NextRequest) {
   }
 
   logger.info("auto-settings complete", {
+    skippedForT0: skipAutoSettingsForT0,
     promptEnhanced: auto.promptEnhanced,
     searchEnabled: auto.searchEnabled,
     promptCategory: auto.promptCategory,
@@ -888,6 +922,18 @@ export async function runChatPipeline(request: NextRequest) {
   });
   auto.requestClass = requestClassification.requestClass;
   auto.classificationReason = requestClassification.reason;
+  const pipelineController = new PipelineController({
+    requestClass: requestClassification.requestClass,
+    classificationReason: requestClassification.reason,
+  });
+  if (skipAutoSettingsForT0) {
+    pipelineController.markStageSkipped("autoSettings", "Skipped for T0 request class.");
+  } else {
+    pipelineController.markStageCompleted("autoSettings");
+  }
+  if (pipelineController.shouldRun("clarificationCheck")) {
+    pipelineController.markStageCompleted("clarificationCheck");
+  }
 
   let agentSuggestion:
     | {
@@ -1007,6 +1053,35 @@ export async function runChatPipeline(request: NextRequest) {
     routePlan.shouldWriteMemory = false;
     routePlan.allowedToolBundles = routePlan.allowedToolBundles.filter((bundle) => bundle !== "memory");
   }
+  pipelineController.markStageCompleted("buildRoutePlan");
+  const costGates = pipelineController.applyCostGates({
+    allowSearch: routePlan.shouldUseWebSearch,
+    allowRag: routePlan.allowedToolBundles.includes("retrieval") && routePlan.retrievalScopes.length > 0,
+    allowMultiAgent: routePlan.allowSubAgents,
+    spendingTier: budget.tier,
+    forceMultiAgentRequested: Boolean(body.forceMultiAgent),
+    orchestratorEnabled: featureEnabled(orgSettings.org?.orchestratorV2Enabled),
+    budgetSoftLimited: Boolean(budget.softLimitReached || budget.hardLimitReached),
+  });
+  if (!costGates.searchEnabled) {
+    routePlan.shouldUseWebSearch = false;
+    routePlan.allowedToolBundles = routePlan.allowedToolBundles.filter((bundle) => bundle !== "search");
+  }
+  if (!costGates.ragEnabled) {
+    routePlan.retrievalScopes = [];
+    routePlan.allowedToolBundles = routePlan.allowedToolBundles.filter((bundle) => bundle !== "retrieval");
+  }
+  if (!costGates.multiAgentEnabled) {
+    routePlan.shouldUseMultiStep = false;
+    routePlan.allowSubAgents = false;
+    routePlan.allowedToolBundles = routePlan.allowedToolBundles.filter((bundle) => bundle !== "multi_agent");
+  }
+  const forceMultiAgentAllowed = costGates.forceMultiAgentAllowed;
+  const forceMultiAgentDeniedReason =
+    costGates.forceDeniedReasons.length > 0
+      ? costGates.forceDeniedReasons.join("; ")
+      : undefined;
+
   const runtimeSkills = routePlan.allowedToolBundles.includes("skills")
     ? selectRuntimeSkills({
         message: auto.message,
@@ -1136,6 +1211,24 @@ export async function runChatPipeline(request: NextRequest) {
   const searchUrls = webResult.urls ?? [];
   let searchSources = webResult.sources ?? [];
   const searchProvider = webResult.provider;
+  const routeTraceSearchStatus =
+    !routePlan.shouldUseWebSearch
+      ? "skipped"
+      : searchProvider === "searxng"
+        ? "real_search"
+        : searchProvider === "model_fallback"
+          ? "model_knowledge"
+          : "error";
+  if (routePlan.retrievalScopes.length > 0) {
+    pipelineController.markStageCompleted("ragRetrieval");
+  } else {
+    pipelineController.markStageSkipped("ragRetrieval", "No retrieval scope enabled after cost and route gating.");
+  }
+  if (routePlan.shouldUseWebSearch) {
+    pipelineController.markStageCompleted("webSearch");
+  } else {
+    pipelineController.markStageSkipped("webSearch", "Web search disabled after request-class and route gating.");
+  }
   const diag = retrieval.diagnostics as any;
   if (diag?.embeddingModel || diag?.embeddingUsage) {
     deferSubcall({
@@ -1240,6 +1333,8 @@ export async function runChatPipeline(request: NextRequest) {
     modelRuntimeStats: runtimeStatMap,
     seedKey: `${chatId}:${normalizedMessage}`,
   });
+  pipelineController.markStageCompleted("modelSelection");
+  const pipelineSnapshot = pipelineController.getState();
   const route = {
     primaryModel: routeDecision.selectedModel,
     fallbackModels: routeDecision.fallbackModels,
@@ -1283,6 +1378,15 @@ export async function runChatPipeline(request: NextRequest) {
       routingDurationMs: routeDecision.routingDurationMs,
       phasePlan: [routeDecision.phase],
       subcalls: deferredSubcalls,
+      requestClass: auto.requestClass,
+      classificationReason: auto.classificationReason,
+      stepsExecuted: pipelineSnapshot.completedStages,
+      stepsSkipped: pipelineSnapshot.skippedStages.map((row) => ({
+        step: row.step,
+        reason: row.reason,
+      })),
+      searchStatus: routeTraceSearchStatus,
+      costBudgetUsd: pipelineSnapshot.costBudgetUsd,
     },
   };
   const appendSubcall = (entry: {
@@ -1608,6 +1712,11 @@ export async function runChatPipeline(request: NextRequest) {
     memoryProfile,
   });
   const useMemoryProfile = routePlan.shouldConsultMemory && Boolean(personalSoulExcerpt);
+  if (routePlan.shouldConsultMemory) {
+    pipelineController.markStageCompleted("memoryRead");
+  } else {
+    pipelineController.markStageSkipped("memoryRead", "Memory read disabled for this route.");
+  }
   if (useMemoryProfile) {
     route.trace.toolchain.push("memory_injection");
   }
@@ -1720,24 +1829,48 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     shouldUseMultiAgentResult: shouldUseMultiAgent(auto.message, effectiveMode, auto.complexity),
     complexity: auto.complexity,
     effectiveMode,
+    requestClass: auto.requestClass,
     forceMultiAgent: body.forceMultiAgent,
+    forceMultiAgentAllowed,
+    forceMultiAgentDeniedReason,
   };
   logger.info("multi-agent gate evaluation", multiAgentGateDebug);
 
-  const multiAgentEnabled =
-    (body.forceMultiAgent === true) || (
-      budget.tier !== "free_only"
-      && routePlan.allowSubAgents
-      && featureEnabled(orgSettings.org?.orchestratorV2Enabled)
-      && (
-        routePlan.shouldUseWebSearch
-        || retrieval.citations.length > 0
-        || shouldUseMultiAgent(auto.message, effectiveMode, auto.complexity)
-      )
+  const tierAllowsMultiAgent = budget.tier !== "free_only" && budget.tier !== "cheap_only";
+  const requestClassAllowsMultiAgent = auto.requestClass === "T2" || auto.requestClass === "T3";
+  const autoMultiAgentEligible =
+    tierAllowsMultiAgent
+    && routePlan.allowSubAgents
+    && featureEnabled(orgSettings.org?.orchestratorV2Enabled)
+    && requestClassAllowsMultiAgent
+    && !budget.softLimitReached
+    && !budget.hardLimitReached
+    && (
+      routePlan.shouldUseWebSearch
+      || retrieval.citations.length > 0
+      || shouldUseMultiAgent(auto.message, effectiveMode, auto.complexity)
     );
+  const multiAgentEnabled = forceMultiAgentAllowed || autoMultiAgentEligible;
+  if (body.forceMultiAgent && !forceMultiAgentAllowed && forceMultiAgentDeniedReason) {
+    route.trace.toolchain.push("force_multi_agent_denied");
+  }
   if (multiAgentEnabled) {
     route.trace.toolchain.push("multi_agent_collaboration");
+    pipelineController.markStageCompleted("multiAgent");
+  } else {
+    pipelineController.markStageSkipped(
+      "multiAgent",
+      forceMultiAgentDeniedReason
+        ? `forceMultiAgent denied: ${forceMultiAgentDeniedReason}.`
+        : "Multi-agent not eligible for this request.",
+    );
   }
+  const gatedPipelineSnapshot = pipelineController.getState();
+  route.trace.stepsExecuted = gatedPipelineSnapshot.completedStages;
+  route.trace.stepsSkipped = gatedPipelineSnapshot.skippedStages.map((row) => ({
+    step: row.step,
+    reason: row.reason,
+  }));
 
   const collabWallTimeMs =
     routePlan.responseBudget === "deep"
@@ -2219,6 +2352,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         if (route.trace.phasePlan?.some((phase) => phase.id === "authoring")) {
           await emitPhaseUpdate("authoring", "completed", "Image generated successfully.");
         }
+        pipelineController.markStageCompleted("generation");
         (route.trace as any).totalCostCents = Number(
           ((route.trace.subcalls ?? []).reduce((sum, call) => sum + (call.costCents ?? 0), 0)).toFixed(4),
         );
@@ -2370,6 +2504,13 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           titleUpdated: Boolean(generatedTitle),
           repaired: false,
         });
+        pipelineController.markStageCompleted("postProcess");
+        const imagePipelineSnapshot = pipelineController.getState();
+        route.trace.stepsExecuted = imagePipelineSnapshot.completedStages;
+        route.trace.stepsSkipped = imagePipelineSnapshot.skippedStages.map((row) => ({
+          step: row.step,
+          reason: row.reason,
+        }));
         (route.trace as any).totalCostCents = Number(
           ((route.trace.subcalls ?? []).reduce((sum, call) => sum + (call.costCents ?? 0), 0)).toFixed(4),
         );
@@ -2973,6 +3114,7 @@ BACK: [answer or definition]`,
         usageOut: finalUsageOut,
         fallbackCount: route.trace.fallbacks.length,
       });
+      pipelineController.markStageCompleted("generation");
 
       const appended = await appendAssistantMessageWithCitationFallback({
         actorClerkId: actor.clerkId,
@@ -3175,6 +3317,13 @@ BACK: [answer or definition]`,
         titleUpdated: Boolean(generatedTitle),
         repaired: route.trace.toolchain.some((tool) => tool.includes("repair")),
       });
+      pipelineController.markStageCompleted("postProcess");
+      const finalPipelineSnapshot = pipelineController.getState();
+      route.trace.stepsExecuted = finalPipelineSnapshot.completedStages;
+      route.trace.stepsSkipped = finalPipelineSnapshot.skippedStages.map((row) => ({
+        step: row.step,
+        reason: row.reason,
+      }));
       (route.trace as any).totalCostCents = Number(
         ((route.trace.subcalls ?? []).reduce((sum, call) => sum + (call.costCents ?? 0), 0)).toFixed(4),
       );

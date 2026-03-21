@@ -655,7 +655,7 @@ export async function maybeExtractMemory(params: {
     preferredCapabilities: ["reasoning"],
     preferFast: true,
     preferCheap: true,
-    preferFree: true,
+    preferFree: false,
   });
 
   const startedAt = Date.now();

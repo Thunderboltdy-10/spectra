@@ -25,6 +25,11 @@ function normalizeLanguage(value?: string) {
   return raw;
 }
 
+function sanitizeVersionLabel(value: unknown, fallback: string) {
+  const normalized = String(value ?? "").trim();
+  return normalized || fallback;
+}
+
 function buildPreviewDocument(code: string, language: string) {
   if (language === "html") return code;
   if (language === "css") {
@@ -51,7 +56,7 @@ export function useCanvasState() {
     const timestamp = Date.now();
     const version: CanvasVersion = {
       id: `${timestamp}-${Math.random().toString(36).slice(2, 8)}`,
-      label: label?.trim() || `Version ${versions.length + 1}`,
+      label: sanitizeVersionLabel(label, `Version ${versions.length + 1}`),
       code,
       language,
       createdAt: timestamp,
@@ -75,7 +80,7 @@ export function useCanvasState() {
     const timestamp = Date.now();
     const initial: CanvasVersion = {
       id: `${timestamp}-initial`,
-      label: payload.label?.trim() || "Initial import",
+      label: sanitizeVersionLabel(payload.label, "Initial import"),
       code: nextCode,
       language: nextLanguage,
       createdAt: timestamp,

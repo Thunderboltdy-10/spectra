@@ -63,8 +63,10 @@ export function NotificationBell({
       const payload = (await response.json()) as NotificationsPayload;
       setNotifications(payload.notifications ?? []);
       setUnreadCount(payload.unreadCount ?? 0);
+      return payload;
     } catch {
       // Keep bell non-blocking when notifications are unavailable.
+      return null;
     } finally {
       setLoading(false);
     }
@@ -73,7 +75,7 @@ export function NotificationBell({
   useEffect(() => {
     let mounted = true;
     void (async () => {
-      await refreshNotifications();
+      const initialPayload = await refreshNotifications();
       // Show a toast for missed notifications on session start
       if (!mounted) return;
       try {
@@ -81,24 +83,21 @@ export function NotificationBell({
         if (shown === "1") return;
         window.sessionStorage.setItem("ai-school:missed-notif-shown", "1");
       } catch { return; }
-      // Check unread count after initial fetch
-      const response = await fetch("/api/notifications?limit=3");
-      if (!response.ok) return;
-      const payload = (await response.json()) as NotificationsPayload;
-      if (!mounted) return;
-      const unread = (payload.notifications ?? []).filter((n) => !n.read);
+      const unread = (initialPayload?.notifications ?? []).filter((n) => !n.read);
       if (unread.length === 0) return;
       if (unread.length === 1) {
         toast(unread[0].title, { description: unread[0].body });
       } else {
-        toast(`${payload.unreadCount} unread notification${payload.unreadCount > 1 ? "s" : ""}`, {
+        const unreadCountLabel = initialPayload?.unreadCount ?? unread.length;
+        toast(`${unreadCountLabel} unread notification${unreadCountLabel > 1 ? "s" : ""}`, {
           description: unread[0].title,
         });
       }
     })();
     const interval = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
       void refreshNotifications({ silent: true });
-    }, 60_000);
+    }, 180_000);
     return () => { mounted = false; window.clearInterval(interval); };
   }, [refreshNotifications]);
 

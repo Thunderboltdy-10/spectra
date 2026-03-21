@@ -365,7 +365,7 @@ export function ChatSidebar({
           })}
         </div>
 
-        <div className="mt-3 flex min-h-0 flex-col items-center gap-2 overflow-y-auto [mask-image:linear-gradient(to_bottom,black_85%,transparent)]">
+        <div className="mt-3 flex min-h-0 flex-col items-center gap-2 overflow-visible">
           <div className="mb-1 flex flex-col gap-1.5">
             <NotificationBell
               buttonClassName="h-9.5 w-9.5 rounded-xl bg-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
@@ -386,7 +386,7 @@ export function ChatSidebar({
               </button>
             ))}
           </div>
-          <div className="mb-1 flex items-center gap-2 text-[10px] text-[var(--text-secondary)]">
+          <div className="mb-1 flex flex-col items-center gap-1 text-[10px] text-[var(--text-secondary)]">
             <span className="inline-flex items-center gap-1" title="Current streak">
               <Flame className={cn("h-3 w-3", gamification.currentStreak > 0 ? "animate-pulse text-[#ef4444]" : "text-[var(--text-secondary)]")} />
               {gamification.currentStreak}
@@ -455,6 +455,7 @@ export function ChatSidebar({
             <p className="text-lg leading-none">
               <span className="font-display">{orgName ?? "School"}</span>
             </p>
+            <p className="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Spectra</p>
           </div>
         </div>
         <Button type="button" variant="ghost" size="icon" onClick={onToggleCollapse} aria-label="Collapse sidebar">

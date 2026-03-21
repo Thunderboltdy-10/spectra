@@ -70,6 +70,19 @@ export type ExplainDepth = "introductory" | "intermediate" | "advanced";
 export type UserDirectives = {
   forcedModel?: string;
   forceMultiAgent?: boolean;
+  memoryActions?: Array<
+    | { type: "forget"; target?: string }
+    | { type: "negative_topic"; topic: string; target?: string }
+    | { type: "remember"; statement: string }
+    | { type: "update_profile"; statement: string }
+  >;
+};
+
+export type RequestClass = "T0" | "T1" | "T2" | "T3";
+
+export type RequestClassification = {
+  requestClass: RequestClass;
+  reason: string;
 };
 
 const MODEL_ALIASES: Record<string, string> = {
@@ -94,6 +107,7 @@ const MODEL_ALIASES: Record<string, string> = {
 export function parseUserDirectives(message: string): UserDirectives {
   const result: UserDirectives = {};
   const lower = message.toLowerCase();
+  const memoryActions: NonNullable<UserDirectives["memoryActions"]> = [];
 
   // Detect model requests like "use Claude", "with GPT-4", "use Gemini"
   const modelMatch = lower.match(/(?:use|with|via|switch to|try)\s+([\w\s-]+?)(?:\s+(?:model|for|to|$)|[.,!?]|$)/i);
@@ -110,12 +124,75 @@ export function parseUserDirectives(message: string): UserDirectives {
     result.forceMultiAgent = true;
   }
 
+  const forgetMatch =
+    lower.match(/\bforget about\s+(.+?)(?:[.!?]|$)/i)
+    ?? lower.match(/\bforget\s+(.+?)(?:[.!?]|$)/i);
+  if (forgetMatch?.[1]) {
+    const target = forgetMatch[1]
+      .replace(/\b(?:in|from)\s+(?:my\s+)?memory\b/gi, "")
+      .replace(/\bfrom now on\b/gi, "")
+      .trim();
+    if (target && target !== "this") {
+      memoryActions.push({ type: "forget", target });
+    } else {
+      memoryActions.push({ type: "forget" });
+    }
+  } else if (/\bforget this\b/i.test(lower)) {
+    memoryActions.push({ type: "forget" });
+  }
+
+  if (/\bthis association is wrong\b/i.test(lower)) {
+    const topic = lower.match(/\bfor\s+(.+?)(?:[.!?]|$)/i)?.[1]?.trim() ?? "this topic";
+    memoryActions.push({ type: "negative_topic", topic });
+  }
+
+  const dontBringForMatch = lower.match(/\bdon'?t bring this up for\s+(.+?)(?:[.!?]|$)/i);
+  if (dontBringForMatch?.[1]) {
+    memoryActions.push({
+      type: "negative_topic",
+      topic: dontBringForMatch[1].trim(),
+    });
+  }
+
+  const rememberMatch = message.match(/\bremember(?:\s+that)?\s+i\s+(.+?)(?:[.!?]|$)/i);
+  if (rememberMatch?.[1]) {
+    memoryActions.push({
+      type: "remember",
+      statement: `I ${rememberMatch[1].trim()}`,
+    });
+  } else {
+    const rememberGenericMatch = message.match(/\bremember(?:\s+that)?\s+(.+?)(?:[.!?]|$)/i);
+    const statement = rememberGenericMatch?.[1]?.trim();
+    if (statement && /\b(i|my|me|mine)\b/i.test(statement)) {
+      memoryActions.push({
+        type: "remember",
+        statement,
+      });
+    }
+  }
+
+  const profileMatch = message.match(/\bupdate my profile\b[:\s-]*(.+?)(?:[.!?]|$)/i);
+  if (profileMatch?.[1]) {
+    memoryActions.push({
+      type: "update_profile",
+      statement: profileMatch[1].trim(),
+    });
+  }
+
+  if (memoryActions.length > 0) {
+    result.memoryActions = memoryActions;
+  }
+
   return result;
 }
 
 export type AutoSettingsInput = {
   actorClerkId?: string;
   message: string;
+  mode?: StudyMode;
+  hasAttachments?: boolean;
+  isFirstMessage?: boolean;
+  multiAgentRequested?: boolean;
   currentThinkingLevel: ThinkingLevel;
   spendingTier: SpendingTier;
   autoEnhancePrompt: boolean;
@@ -134,6 +211,8 @@ export type AutoSettingsResult = {
   searchEnabled: boolean;
   thinkingLevel: ThinkingLevel;
   complexity: "simple" | "medium" | "complex";
+  requestClass: RequestClass;
+  classificationReason: string;
   promptCategory: PromptCategory;
   questionType: QuestionType;
   isMultipart: boolean;
@@ -213,6 +292,72 @@ export function detectThinkingLevel(message: string, fallback: ThinkingLevel): T
   if (veryShortPrompt) return "low";
   if (message.length > 220) return "medium";
   return fallback === "high" ? "medium" : fallback;
+}
+
+function hasExplicitSearchDirective(message: string) {
+  return /\b(research|search|look up|lookup|find sources|cite sources|find papers|web search|browse)\b/i.test(
+    message,
+  );
+}
+
+export function classifyRequest(params: {
+  message: string;
+  complexity?: "simple" | "medium" | "complex";
+  mode?: StudyMode;
+  hasAttachments?: boolean;
+  isFirstMessage?: boolean;
+  multiAgentRequested?: boolean;
+  spendingTier: SpendingTier;
+}): RequestClassification {
+  const complexity = params.complexity ?? classifyComplexity(params.message);
+  const normalizedMessage = params.message.trim();
+  const mode = params.mode ?? "general";
+  const hasAttachments = Boolean(params.hasAttachments);
+  const isFirstMessage = Boolean(params.isFirstMessage);
+  const explicitSearchDirective = hasExplicitSearchDirective(normalizedMessage);
+  const isSearchMode = mode === "research";
+  const isEnhanced =
+    complexity === "complex"
+    || isSearchMode
+    || mode === "marker"
+    || mode === "exam"
+    || hasAttachments
+    || explicitSearchDirective;
+
+  const t0Eligible =
+    complexity === "simple"
+    && normalizedMessage.length < 30
+    && !hasAttachments
+    && (mode === "auto" || mode === "general" || mode === "tutor")
+    && !isFirstMessage
+    && !explicitSearchDirective;
+
+  const tierAllowsT3 = params.spendingTier !== "cheap_only" && params.spendingTier !== "free_only";
+  if (params.multiAgentRequested && tierAllowsT3 && isEnhanced) {
+    return {
+      requestClass: "T3",
+      reason: "Complex request with multi-agent intent under a tier that allows advanced orchestration.",
+    };
+  }
+
+  if (t0Eligible) {
+    return {
+      requestClass: "T0",
+      reason: "Short, simple follow-up with no attachments or search intent.",
+    };
+  }
+
+  if (isEnhanced) {
+    return {
+      requestClass: "T2",
+      reason: "Complexity, mode, attachments, or explicit research/search intent requires enhanced execution.",
+    };
+  }
+
+  return {
+    requestClass: "T1",
+    reason: "Standard request with no explicit enhanced-routing triggers.",
+  };
 }
 
 function detectQuestionType(message: string): QuestionType {
@@ -589,6 +734,15 @@ export async function maybeEnhancePrompt(message: string, actorClerkId?: string)
 
 export async function runAutoSettingsPipeline(input: AutoSettingsInput): Promise<AutoSettingsResult> {
   const complexity = classifyComplexity(input.message);
+  const requestClassification = classifyRequest({
+    message: input.message,
+    complexity,
+    mode: input.mode,
+    hasAttachments: input.hasAttachments,
+    isFirstMessage: input.isFirstMessage,
+    multiAgentRequested: input.multiAgentRequested,
+    spendingTier: input.spendingTier,
+  });
   const promptCategory = classifyPromptCategory(input.message);
   const questionType = detectQuestionType(input.message);
   const isMultipart = detectMultipart(input.message);
@@ -661,6 +815,8 @@ export async function runAutoSettingsPipeline(input: AutoSettingsInput): Promise
     searchEnabled,
     thinkingLevel,
     complexity,
+    requestClass: requestClassification.requestClass,
+    classificationReason: requestClassification.reason,
     promptCategory,
     questionType,
     isMultipart,

@@ -19,6 +19,7 @@ export type RetrievedCitation = {
 export type RetrievalResult = {
   citations: RetrievedCitation[];
   sourceBlock: string;
+  queryEmbedding?: number[];
   diagnostics?: {
     scopesAttempted: string[];
     status:
@@ -391,7 +392,7 @@ export async function maybeSearchWeb(
       {
         role: "system",
         content:
-          "Provide a concise up-to-date briefing with explicit source URLs for key claims. Keep under 180 words.",
+          "Provide a concise briefing from your training knowledge ONLY. DO NOT fabricate, invent, or guess any URLs. Begin with: 'Note: Web search was unavailable.' Keep under 180 words.",
       },
       {
         role: "user",
@@ -427,10 +428,13 @@ export async function maybeSearchWeb(
   if (completion) {
     await recordUsage(completion);
   }
-  const extractedUrls = extractUrls(text);
+  const prefixedText = text.startsWith("Note: Web search was unavailable.")
+    ? text
+    : `Note: Web search was unavailable. ${text}`.trim();
+  const extractedUrls = extractUrls(prefixedText);
   const sources = await resolveWebSearchSources(extractedUrls);
   const validUrlSet = new Set(sources.map((source) => source.url));
-  const sanitizedText = text
+  const sanitizedText = prefixedText
     .replace(/https?:\/\/[^\s)\]>"']+/g, (rawUrl) => {
       const parsed = parseHttpUrl(rawUrl);
       if (!parsed) return "";
@@ -440,7 +444,7 @@ export async function maybeSearchWeb(
     .replace(/\s{2,}/g, " ")
     .trim();
   return {
-    text: sanitizedText || text,
+    text: sanitizedText || prefixedText,
     urls: sources.map((source) => source.url),
     sources,
     provider: "model_fallback" as const,
@@ -460,6 +464,7 @@ export async function runRagRetrieval(params: {
   logger?: { info: (message: string, context?: Record<string, unknown>) => void; warn: (message: string) => void };
 }): Promise<RetrievalResult> {
   let embeddingModel: string | undefined;
+  let queryEmbedding: number[] | undefined;
   let embeddingUsage:
     | {
         prompt_tokens?: number;
@@ -480,6 +485,11 @@ export async function runRagRetrieval(params: {
   };
 
   try {
+    const isProcessedResource = (value: unknown): value is { status: "processed" } => {
+      if (!value || typeof value !== "object") return false;
+      const status = (value as { status?: string }).status;
+      return status === "processed";
+    };
     const [packResources, personalResources, agentResources] = await Promise.all([
       params.packId
         ? (convexQuery("resources:listPackResources", {
@@ -505,14 +515,20 @@ export async function runRagRetrieval(params: {
       ...(params.usePersonalResources ? ["personal"] : []),
       ...(params.selectedAgentId ? ["agent"] : []),
     ];
-    const hasRetrievalSources = packResources.length > 0 || personalResources.length > 0 || agentResources.length > 0;
+    const processedPackResources = packResources.filter(isProcessedResource);
+    const processedPersonalResources = personalResources.filter(isProcessedResource);
+    const processedAgentResources = agentResources.filter(isProcessedResource);
+    const hasRetrievalSources =
+      processedPackResources.length > 0
+      || processedPersonalResources.length > 0
+      || processedAgentResources.length > 0;
     if (hasRetrievalSources) {
       const embeddingStartedAt = Date.now();
       const embeddingResult = await openRouterEmbeddingRequest(params.message, MODEL_CONFIG.embedding);
       embeddingDurationMs = Date.now() - embeddingStartedAt;
       embeddingModel = embeddingResult.model ?? MODEL_CONFIG.embedding;
       embeddingUsage = embeddingResult.usage;
-      const queryEmbedding = embeddingResult.embedding;
+      queryEmbedding = embeddingResult.embedding;
       await recordOpenRouterUsage({
         actorClerkId: params.actorClerkId,
         chatId: params.chatId,
@@ -523,13 +539,14 @@ export async function runRagRetrieval(params: {
       const rawRetrieval = (await convexAction("rag:retrieve", {
         actorClerkId: params.actorClerkId,
         packId: params.packId,
-        agentId: params.selectedAgentId,
-        includePack: Boolean(params.packId),
-        includePersonal: params.usePersonalResources,
+        agentId: processedAgentResources.length > 0 ? params.selectedAgentId : undefined,
+        includePack: processedPackResources.length > 0 && Boolean(params.packId),
+        includePersonal: processedPersonalResources.length > 0 && params.usePersonalResources,
         embedding: queryEmbedding,
         topK: 8,
       })) as RetrievalResult;
       retrieval = limitRagRetrievalSources(rawRetrieval);
+      retrieval.queryEmbedding = queryEmbedding;
       retrieval.diagnostics = {
         scopesAttempted,
         status: retrieval.citations.length > 0 ? "retrieved" : "no_high_confidence_matches",
@@ -550,17 +567,21 @@ export async function runRagRetrieval(params: {
         params.logger?.warn("RAG retrieval returned zero high-confidence sources");
       }
     } else {
+      const hasAnyScopedResources = packResources.length > 0 || personalResources.length > 0 || agentResources.length > 0;
       retrieval.diagnostics = {
         scopesAttempted,
         status: scopesAttempted.length === 0 ? "not_requested" : "no_sources_available",
         reason:
           scopesAttempted.length === 0
             ? "No retrieval scopes were allowed for this route."
-            : "No uploaded resources were available inside the allowed scopes.",
+            : hasAnyScopedResources
+              ? "Retrieval skipped: resources exist but none are fully processed yet."
+              : "No uploaded resources were available inside the allowed scopes.",
         embeddingModel,
         embeddingUsage,
         embeddingDurationMs,
       };
+      retrieval.queryEmbedding = queryEmbedding;
     }
   } catch {
     retrieval = {

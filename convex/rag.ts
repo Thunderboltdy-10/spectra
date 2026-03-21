@@ -28,10 +28,31 @@ export const getChunksByIds = internalQuery({
     ids: v.array(v.id("chunks")),
   },
   handler: async (ctx, args) => {
-    const docs: Array<Record<string, unknown>> = [];
+    const docs: Array<{
+      _id: string;
+      scope?: unknown;
+      ownerUserId?: unknown;
+      packId?: unknown;
+      agentId?: unknown;
+      resourceId?: unknown;
+      filename?: unknown;
+      page?: unknown;
+      text?: unknown;
+    }> = [];
     for (const id of args.ids) {
       const doc = await ctx.db.get(id);
-      if (doc) docs.push(doc as Record<string, unknown>);
+      if (!doc) continue;
+      docs.push({
+        _id: String(doc._id),
+        scope: doc.scope,
+        ownerUserId: doc.ownerUserId,
+        packId: doc.packId,
+        agentId: doc.agentId,
+        resourceId: doc.resourceId,
+        filename: doc.filename,
+        page: doc.page,
+        text: doc.text,
+      });
     }
     return docs;
   },

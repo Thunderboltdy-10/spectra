@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  classifyRequest,
   classifyComplexity,
   classifyExplainDepth,
   detectSearchIntent,
   detectSuggestedMode,
+  parseUserDirectives,
   runAutoSettingsPipeline,
 } from "@/lib/auto-settings";
 
@@ -100,5 +102,88 @@ describe("auto-settings prompt analysis", () => {
       skipModelCalls: true,
     });
     expect(result.suggestedMode).toBe("quiz");
+  });
+
+  it("classifies short follow-ups as T0 when eligible", () => {
+    const classified = classifyRequest({
+      message: "thanks",
+      complexity: "simple",
+      mode: "general",
+      hasAttachments: false,
+      isFirstMessage: false,
+      spendingTier: "normal",
+    });
+    expect(classified.requestClass).toBe("T0");
+  });
+
+  it("classifies research and attachment-heavy prompts as T2", () => {
+    const researchClass = classifyRequest({
+      message: "Research climate policy updates and cite sources.",
+      mode: "research",
+      hasAttachments: false,
+      isFirstMessage: true,
+      spendingTier: "normal",
+    });
+    expect(researchClass.requestClass).toBe("T2");
+
+    const attachmentClass = classifyRequest({
+      message: "Summarize this file.",
+      mode: "general",
+      hasAttachments: true,
+      isFirstMessage: false,
+      spendingTier: "normal",
+    });
+    expect(attachmentClass.requestClass).toBe("T2");
+  });
+
+  it("classifies multi-agent intents as T3 when tier allows", () => {
+    const t3 = classifyRequest({
+      message: "Research and compare three strategies deeply.",
+      complexity: "complex",
+      mode: "research",
+      hasAttachments: false,
+      isFirstMessage: false,
+      multiAgentRequested: true,
+      spendingTier: "normal",
+    });
+    expect(t3.requestClass).toBe("T3");
+
+    const capped = classifyRequest({
+      message: "Research and compare three strategies deeply.",
+      complexity: "complex",
+      mode: "research",
+      hasAttachments: false,
+      isFirstMessage: false,
+      multiAgentRequested: true,
+      spendingTier: "cheap_only",
+    });
+    expect(capped.requestClass).toBe("T2");
+  });
+
+  it("parses memory correction directives", () => {
+    const directives = parseUserDirectives("Forget about WWII. Don't bring this up for French vocabulary.");
+    const forgetWithSuffix = parseUserDirectives("Forget about WWII in my memory.");
+    expect(directives.memoryActions).toEqual([
+      { type: "forget", target: "wwii" },
+      { type: "negative_topic", topic: "french vocabulary" },
+    ]);
+    expect(forgetWithSuffix.memoryActions).toEqual([
+      { type: "forget", target: "wwii" },
+    ]);
+  });
+
+  it("parses explicit remember/profile directives", () => {
+    const remember = parseUserDirectives("Remember that I study IB HL.");
+    const rememberGeneric = parseUserDirectives("Remember that World War II is my strongest history topic.");
+    const update = parseUserDirectives("Update my profile: I prefer concise explanations.");
+    expect(remember.memoryActions).toEqual([
+      { type: "remember", statement: "I study IB HL" },
+    ]);
+    expect(rememberGeneric.memoryActions).toEqual([
+      { type: "remember", statement: "World War II is my strongest history topic" },
+    ]);
+    expect(update.memoryActions).toEqual([
+      { type: "update_profile", statement: "I prefer concise explanations" },
+    ]);
   });
 });

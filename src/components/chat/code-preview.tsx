@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { AlertTriangle, Maximize2, Minimize2, RefreshCw } from "lucide-react";
 import { buildSrcdoc, type PreviewLanguage } from "@/lib/code-sandbox";
 
@@ -15,18 +15,20 @@ export function CodePreview({ code, language }: CodePreviewProps) {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [key, setKey] = useState(0);
+  const frameId = useId();
 
-  const srcdoc = buildSrcdoc(code, language);
+  const srcdoc = buildSrcdoc(code, language, frameId);
 
   const handleMessage = useCallback((event: MessageEvent) => {
     const data = event.data as Record<string, unknown>;
+    if (data?.frameId !== frameId) return;
     if (data?.type === "spectra-sandbox-resize" && typeof data.height === "number") {
       setHeight(Math.min(Math.max(100, data.height + 24), expanded ? 800 : 480));
     }
     if (data?.type === "spectra-sandbox-error" && typeof data.message === "string") {
       setError(data.message);
     }
-  }, [expanded]);
+  }, [expanded, frameId]);
 
   useEffect(() => {
     window.addEventListener("message", handleMessage);

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Image from "next/image";
-import { Bookmark, BookmarkCheck, Code2, Copy, FileText, GitBranch, Globe, Info, MoreHorizontal, Paperclip, Pencil, RefreshCw, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Bookmark, BookmarkCheck, ChevronLeft, ChevronRight, Code2, Copy, FileText, GitBranch, Globe, Info, MoreHorizontal, Paperclip, Pencil, RefreshCw, ThumbsDown, ThumbsUp } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -55,6 +55,9 @@ type ChatMessageProps = {
   onToggleBookmark?: () => void;
   isBookmarked?: boolean;
   bookmarking?: boolean;
+  siblingIndex?: number;
+  siblingCount?: number;
+  onNavigateSibling?: (direction: "prev" | "next") => void;
   animateIn?: boolean;
   children?: React.ReactNode;
 };
@@ -89,9 +92,9 @@ function CitationCards({ citations, onOpen }: { citations: Citation[]; onOpen: (
   ).slice(0, 5);
 
   return (
-    <section className="mt-8 border-t border-[var(--border-default)] pt-4">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <p className="text-sm font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Sources</p>
+    <section className="mt-6 border-t border-[var(--border-default)] pt-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)]">Sources</p>
         <button
           type="button"
           onClick={onOpen}
@@ -101,11 +104,11 @@ function CitationCards({ citations, onOpen }: { citations: Citation[]; onOpen: (
         </button>
       </div>
       {ragFiles.length > 0 ? (
-        <p className="mb-3 text-[11px] text-[var(--text-secondary)]">
+        <p className="mb-2 text-[10px] text-[var(--text-secondary)]">
           Files used: {ragFiles.join(", ")}
         </p>
       ) : null}
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="flex flex-wrap gap-1.5">
         {citations.map((citation, idx) => {
           const isSearch = citation.sourceType === "search";
           const href = sanitizeNavigationHref(
@@ -125,22 +128,15 @@ function CitationCards({ citations, onOpen }: { citations: Citation[]; onOpen: (
               }}
               target={href ? "_blank" : undefined}
               rel={href ? "noreferrer" : undefined}
-              className={`flex min-h-[4.75rem] max-w-full cursor-pointer items-start gap-2 rounded-md border px-2.5 py-2 text-[11px] transition hover:bg-[var(--bg-hover)] ${
+              className={`inline-flex max-w-[280px] cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] transition hover:bg-[var(--bg-hover)] ${
                 isSearch
                   ? "border-[color-mix(in_oklab,var(--accent-cyan)_38%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_10%,transparent)]"
                   : "border-[var(--border-default)] bg-[var(--bg-secondary)]"
               }`}
               title={label}
             >
-              {isSearch ? <Globe className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : <Code2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
-              <span className="min-w-0">
-                <span className="line-clamp-2 block font-medium text-[var(--text-primary)]">
-                  Source {idx + 1}: {label}
-                </span>
-                {isSearch && domain ? (
-                  <span className="mt-1 block truncate text-[10px] text-[var(--text-secondary)]">{domain}</span>
-                ) : null}
-              </span>
+              {isSearch ? <Globe className="h-3 w-3 shrink-0" /> : <Code2 className="h-3 w-3 shrink-0" />}
+              <span className="truncate font-medium text-[var(--text-primary)]">{domain || label}</span>
             </a>
           );
         })}
@@ -178,6 +174,9 @@ export function ChatMessage({
   onToggleBookmark,
   isBookmarked = false,
   bookmarking = false,
+  siblingIndex,
+  siblingCount,
+  onNavigateSibling,
   animateIn = true,
   children,
 }: ChatMessageProps) {
@@ -196,7 +195,12 @@ export function ChatMessage({
   const activeProvider = activeModelId?.split("/")[0] ?? "openrouter";
   const renderedContent = content;
   const parsedDocument = useMemo(() => parseGeneratedDocument(renderedContent), [renderedContent]);
-  const directTokens = (usageIn ?? 0) + (usageOut ?? 0);
+  const subcallInputTokens = routeTrace?.subcalls?.reduce((sum, item) => sum + (item.inputTokens ?? 0), 0) ?? 0;
+  const subcallOutputTokens = routeTrace?.subcalls?.reduce((sum, item) => sum + (item.outputTokens ?? 0), 0) ?? 0;
+  const hasSubcallTotals = subcallInputTokens + subcallOutputTokens > 0;
+  const directTokens = hasSubcallTotals
+    ? subcallInputTokens + subcallOutputTokens
+    : (usageIn ?? 0) + (usageOut ?? 0);
   const collaboratorExtraTokens =
     routeTrace?.collaborators
       ?.filter((item) => item.role !== "synthesizer")
@@ -204,7 +208,7 @@ export function ChatMessage({
   const collaboratorTotalTokens = routeTrace?.collaborators?.reduce((sum, item) => sum + (item.tokensUsed ?? 0), 0) ?? 0;
   const totalTokens =
     directTokens > 0
-      ? directTokens + collaboratorExtraTokens
+      ? (hasSubcallTotals ? directTokens : directTokens + collaboratorExtraTokens)
       : collaboratorTotalTokens;
   const timeLabel = useMemo(() => formatRelativeTime(createdAt), [createdAt]);
   const hasEnhanced = Boolean(enhancedContent && enhancedContent.trim());
@@ -366,6 +370,29 @@ export function ChatMessage({
                   whyThisResponse={whyThisResponse}
                   routeTrace={routeTrace}
                 />
+                {typeof siblingCount === "number" && siblingCount > 1 && typeof siblingIndex === "number" ? (
+                  <span className="inline-flex items-center gap-0.5 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1 text-[10px] text-[var(--text-secondary)]">
+                    <button
+                      type="button"
+                      disabled={siblingIndex <= 0}
+                      onClick={() => onNavigateSibling?.("prev")}
+                      className="inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded transition hover:bg-[var(--bg-hover)] disabled:cursor-default disabled:opacity-30"
+                      aria-label="Previous version"
+                    >
+                      <ChevronLeft className="h-3 w-3" />
+                    </button>
+                    <span className="tabular-nums">{siblingIndex + 1}/{siblingCount}</span>
+                    <button
+                      type="button"
+                      disabled={siblingIndex >= siblingCount - 1}
+                      onClick={() => onNavigateSibling?.("next")}
+                      className="inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded transition hover:bg-[var(--bg-hover)] disabled:cursor-default disabled:opacity-30"
+                      aria-label="Next version"
+                    >
+                      <ChevronRight className="h-3 w-3" />
+                    </button>
+                  </span>
+                ) : null}
               </div>
 
               <ThinkingBlock content={thinkingContent ?? ""} />

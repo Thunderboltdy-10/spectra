@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -31,6 +31,9 @@ type FlashcardRevealProps = {
   content: string;
   onSaveDeck?: (payload: { title: string; cards: FlashcardCard[] }) => Promise<void> | void;
   onRateCard?: (payload: { cardHash: string; quality: number }) => Promise<void> | void;
+  onEditCard?: (
+    payload: { cardHash: string; front: string; back: string },
+  ) => Promise<{ updatedCardHash?: string; previousCardHash?: string; hashChanged?: boolean } | void> | void;
   onFollowUp?: (message: string) => void;
 };
 
@@ -151,10 +154,14 @@ function ViewTabs({ active, onChange, total }: ViewTabProps) {
 type CardsViewProps = {
   cards: FlashcardCard[];
   onRateCard?: (payload: { cardHash: string; quality: number }) => Promise<void> | void;
+  onEditCard?: (
+    payload: { cardHash: string; front: string; back: string },
+  ) => Promise<{ updatedCardHash?: string; previousCardHash?: string; hashChanged?: boolean } | void> | void;
+  onUpdateCard?: (payload: { cardHash: string; updatedCardHash: string; front: string; back: string }) => void;
   onLearningCountChange?: (count: number) => void;
 };
 
-function CardsView({ cards, onRateCard, onLearningCountChange }: CardsViewProps) {
+function CardsView({ cards, onRateCard, onEditCard, onUpdateCard, onLearningCountChange }: CardsViewProps) {
   const [order, setOrder] = useState<number[]>(() => cards.map((_, i) => i));
   const [currentPos, setCurrentPos] = useState(0);
   const [flipped, setFlipped] = useState(false);
@@ -165,6 +172,10 @@ function CardsView({ cards, onRateCard, onLearningCountChange }: CardsViewProps)
   const [busyRating, setBusyRating] = useState(false);
   const [isShuffled, setIsShuffled] = useState(false);
   const [shuffleNotice, setShuffleNotice] = useState(false);
+  const [editingCardHash, setEditingCardHash] = useState<string | null>(null);
+  const [editFront, setEditFront] = useState("");
+  const [editBack, setEditBack] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const currentIndex = order[currentPos] ?? 0;
   const current = cards[currentIndex];
@@ -210,6 +221,45 @@ function CardsView({ cards, onRateCard, onLearningCountChange }: CardsViewProps)
     setIsShuffled((prev) => !prev);
     setShuffleNotice(true);
     window.setTimeout(() => setShuffleNotice(false), 900);
+  }
+
+  function beginEdit() {
+    if (!current) return;
+    setEditingCardHash(current.cardHash);
+    setEditFront(current.front);
+    setEditBack(current.back);
+  }
+
+  function cancelEdit() {
+    setEditingCardHash(null);
+    setEditFront("");
+    setEditBack("");
+  }
+
+  async function saveEdit() {
+    if (!current || !editingCardHash || savingEdit) return;
+    const nextFront = editFront.trim();
+    const nextBack = editBack.trim();
+    if (!nextFront || !nextBack) return;
+    setSavingEdit(true);
+    try {
+      const editResult = await onEditCard?.({
+        cardHash: editingCardHash,
+        front: nextFront,
+        back: nextBack,
+      });
+      const updatedCardHash = (editResult as { updatedCardHash?: string } | undefined)?.updatedCardHash?.trim()
+        || hashCard(nextFront, nextBack);
+      onUpdateCard?.({
+        cardHash: editingCardHash,
+        updatedCardHash,
+        front: nextFront,
+        back: nextBack,
+      });
+      cancelEdit();
+    } finally {
+      setSavingEdit(false);
+    }
   }
 
   async function handleRate(quality: number, markKnown: boolean) {
@@ -294,18 +344,10 @@ function CardsView({ cards, onRateCard, onLearningCountChange }: CardsViewProps)
 
   if (!current) return null;
 
-  const progressPct = total > 0 ? (currentPos / total) * 100 : 0;
+  const isEditingCurrent = editingCardHash === current.cardHash;
 
   return (
     <div className="space-y-4">
-      {/* Progress bar */}
-      <div className="h-1 w-full overflow-hidden rounded-full bg-[var(--border-default)]">
-        <div
-          className="h-full rounded-full bg-[var(--mode-flashcard)] transition-all duration-300"
-          style={{ width: `${progressPct}%` }}
-        />
-      </div>
-
       {/* Counter + shuffle */}
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium text-[var(--text-secondary)]">
@@ -328,6 +370,13 @@ function CardsView({ cards, onRateCard, onLearningCountChange }: CardsViewProps)
           >
             <Shuffle className="h-3 w-3" />
             Shuffle
+          </button>
+          <button
+            type="button"
+            onClick={beginEdit}
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-pill)] border border-[var(--border-default)] px-2.5 py-1 text-xs text-[var(--text-secondary)] transition hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]"
+          >
+            Edit card
           </button>
         </div>
       </div>
@@ -373,8 +422,42 @@ function CardsView({ cards, onRateCard, onLearningCountChange }: CardsViewProps)
         </div>
       </div>
 
+      {isEditingCurrent ? (
+        <div className="space-y-2 rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+            Edit Card
+          </p>
+          <label className="space-y-1 text-xs text-[var(--text-secondary)]">
+            <span>Front</span>
+            <textarea
+              value={editFront}
+              onChange={(event) => setEditFront(event.target.value)}
+              className="w-full rounded-[var(--radius-input)] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-sm text-[var(--text-primary)]"
+              rows={2}
+            />
+          </label>
+          <label className="space-y-1 text-xs text-[var(--text-secondary)]">
+            <span>Back</span>
+            <textarea
+              value={editBack}
+              onChange={(event) => setEditBack(event.target.value)}
+              className="w-full rounded-[var(--radius-input)] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-sm text-[var(--text-primary)]"
+              rows={3}
+            />
+          </label>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" size="sm" variant="secondary" onClick={cancelEdit} disabled={savingEdit}>
+              Cancel
+            </Button>
+            <Button type="button" size="sm" onClick={() => void saveEdit()} disabled={savingEdit || !editFront.trim() || !editBack.trim()}>
+              Save
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       {/* Navigation + rating */}
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center justify-between gap-2 pt-4">
         <Button variant="secondary" size="sm" onClick={() => queueMove("prev")} disabled={currentPos === 0} className="cursor-pointer">
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -829,15 +912,60 @@ function FollowUpBar({ cards, onFollowUp, stillLearningCount = 0 }: FollowUpBarP
 
 // ── Main component ─────────────────────────────────────────────────────────
 
-export function FlashcardReveal({ content, onSaveDeck, onRateCard, onFollowUp }: FlashcardRevealProps) {
-  const cards = useMemo(() => parseFlashcards(content), [content]);
+export function FlashcardReveal({ content, onSaveDeck, onRateCard, onEditCard, onFollowUp }: FlashcardRevealProps) {
+  const parsedCards = useMemo(() => parseFlashcards(content), [content]);
+  const [cardOverrides, setCardOverrides] = useState<
+    Record<string, { front: string; back: string; cardHash?: string }>
+  >({});
+  const cards = useMemo(
+    () =>
+      parsedCards.map((card) => {
+        const override = cardOverrides[card.cardHash];
+        return override
+          ? {
+              ...card,
+              front: override.front,
+              back: override.back,
+              cardHash: override.cardHash ?? card.cardHash,
+            }
+          : card;
+      }),
+    [parsedCards, cardOverrides],
+  );
   const [viewMode, setViewMode] = useState<StudyViewMode>("cards");
   const [stillLearningCount, setStillLearningCount] = useState(0);
   const saveSignatureRef = useRef<string | null>(null);
 
   useEffect(() => {
+    const hashes = new Set(parsedCards.map((card) => card.cardHash));
+    setCardOverrides((prev) => {
+      const next: Record<string, { front: string; back: string; cardHash?: string }> = {};
+      let changed = false;
+      for (const [hash, values] of Object.entries(prev)) {
+        if (!hashes.has(hash)) {
+          changed = true;
+          continue;
+        }
+        next[hash] = values;
+      }
+      return changed ? next : prev;
+    });
+  }, [parsedCards]);
+
+  const applyCardOverride = useCallback((payload: { cardHash: string; updatedCardHash: string; front: string; back: string }) => {
+    setCardOverrides((prev) => ({
+      ...prev,
+      [payload.cardHash]: {
+        cardHash: payload.updatedCardHash,
+        front: payload.front,
+        back: payload.back,
+      },
+    }));
+  }, []);
+
+  useEffect(() => {
     if (!onSaveDeck || cards.length === 0) return;
-    const signature = cards.map((card) => card.cardHash).join("|");
+    const signature = cards.map((card) => `${card.cardHash}:${card.front}:${card.back}`).join("|");
     if (saveSignatureRef.current === signature) return;
     saveSignatureRef.current = signature;
     void onSaveDeck({ title: inferDeckTitle(cards), cards });
@@ -863,7 +991,13 @@ export function FlashcardReveal({ content, onSaveDeck, onRateCard, onFollowUp }:
 
       {/* View content */}
       {viewMode === "cards" && (
-        <CardsView cards={cards} onRateCard={onRateCard} onLearningCountChange={setStillLearningCount} />
+        <CardsView
+          cards={cards}
+          onRateCard={onRateCard}
+          onEditCard={onEditCard}
+          onUpdateCard={applyCardOverride}
+          onLearningCountChange={setStillLearningCount}
+        />
       )}
       {viewMode === "grid" && <GridView cards={cards} />}
       {viewMode === "test" && <TestView cards={cards} onFollowUp={onFollowUp} />}

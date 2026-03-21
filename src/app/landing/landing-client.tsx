@@ -142,8 +142,8 @@ const STAKEHOLDERS = [
     color: "var(--mode-tutor)",
     tagline: "Structured help, not shortcuts",
     points: [
-      "9 distinct learning modes, automatically selected",
-      "Personal memory that builds across sessions",
+      "12 learning modes (8 live + 4 staged), with auto-routing",
+      "Two-layer memory fabric that builds across sessions",
       "Every response anchored to your school's culture, values, and curriculum",
       "Guided discovery — builds AI literacy alongside subject knowledge",
     ],
@@ -157,7 +157,7 @@ const STAKEHOLDERS = [
       "Upload class notes, rubrics, and past papers",
       "Custom AI agents per subject or topic",
       "See how students are using AI — and what they're asking",
-      "AI that reflects your pedagogy, not a generic chatbot",
+      "AI that reflects your pedagogy, not a generic chatbot shell",
     ],
   },
 ];
@@ -278,7 +278,7 @@ const HERO_SCENARIOS = [
   {
     user: "Can you quiz me on the causes of World War I?",
     mode: { label: "Practice mode", color: "var(--mode-exam)" },
-    model: { label: "Gemini 2.5 Pro", color: "var(--brand-accent)" },
+    model: { label: "Gemini", color: "var(--brand-accent)" },
     agent: { label: "History agent", color: "var(--mode-research)" },
     reply: "Ready? Q1: What event in Sarajevo triggered the war \u2014 and which alliance did it activate first?",
     tag: "Active recall \u00b7 spaced retrieval",
@@ -286,7 +286,7 @@ const HERO_SCENARIOS = [
   {
     user: "Give me feedback on my essay introduction.",
     mode: { label: "Coach mode", color: "var(--mode-draft_coach)" },
-    model: { label: "Claude Sonnet", color: "var(--accent-coral)" },
+    model: { label: "Claude", color: "var(--accent-coral)" },
     agent: { label: "Essay Coach", color: "var(--accent-mint)" },
     reply: "Your opening line is strong. Before I go further \u2014 what\u2019s your central argument? I\u2019ll give you sharper feedback once I know your claim.",
     tag: "Process writing \u00b7 iterative revision",
@@ -449,8 +449,8 @@ function HeroDemo() {
 // ── Stat strip ────────────────────────────────────────────────────────────────
 
 function StatStrip() {
-  const [modes, modesRef] = useCountUp(9);
-  const [models, modelsRef] = useCountUp(400);
+  const [modes, modesRef] = useCountUp(12);
+  const [models, modelsRef] = useCountUp(260);
 
   return (
     <div style={{ background: "var(--bg-secondary)", borderTop: "1px solid var(--border-default)", borderBottom: "1px solid var(--border-default)" }}>
@@ -458,7 +458,7 @@ function StatStrip() {
         <div className="flex divide-x divide-[var(--border-default)]">
           {[
             { ref: modesRef, display: String(modes), label: "learning modes", sub: "each with a distinct pedagogy" },
-            { ref: modelsRef, display: `${models}+`, label: "AI models", sub: "routed automatically per task" },
+            { ref: modelsRef, display: `${models}+`, label: "active AI models", sub: "continuously refreshed routing catalog" },
             { ref: null, display: "2-layer", label: "personalisation", sub: "school context + personal memory" },
           ].map((s, i) => (
             <div
@@ -825,10 +825,10 @@ export function LandingClient() {
 
         .mode-card .mode-label-container {
           transition: all 0.5s cubic-bezier(0.22,1,0.36,1);
-          transform-origin: top center;
+          transform-origin: center center;
         }
         .mode-card:hover .mode-label-container {
-          transform: scale(1.15) translateY(-54px);
+          transform: scale(1.0) translateY(-54px);
           justify-content: center;
           width: 100%;
         }
@@ -1012,9 +1012,10 @@ export function LandingClient() {
                 className="hero-in-3 text-lg leading-relaxed mb-8"
                 style={{ color: "var(--text-secondary)", maxWidth: "32rem" }}
               >
-                Spectra is a structured AI platform for schools — with 9 learning modes, automatic model
-                routing, and context from your curriculum. Students already use AI — often without
-                structure. Now their school can guide that, and teach them to use it better in the process.
+                Spectra is an AI School Studio platform for schools: mode-aware orchestration,
+                evidence-first responses, and memory grounded in your curriculum. Routing stays
+                fresh from a live model catalog, reliability fallbacks prevent empty responses,
+                and every workflow remains budget-aware by design.
               </p>
 
               <div className="hero-in-4 flex flex-wrap items-center gap-4">
@@ -1169,8 +1170,8 @@ export function LandingClient() {
               <span style={{ color: "var(--brand-primary)" }}>agents</span> for learning
             </h2>
             <p className="text-lg leading-relaxed max-w-lg" style={{ color: "var(--text-secondary)" }}>
-              Beyond a generic chatbot — specialist agents trained for specific subjects and
-              pedagogical tasks. Each one knows how to teach, not just answer.
+              Beyond a generic chatbot: specialist agents, clarification interrupts, and route-trace
+              visibility for subject-specific pedagogy. Each agent is built to teach, not just answer.
             </p>
           </div>
 
@@ -1261,11 +1262,15 @@ export function LandingClient() {
           {/* Feature pills */}
           <div className="mt-14 flex flex-wrap gap-3 justify-center" data-reveal>
             {[
-              { Icon: Bot, label: "400+ AI models" },
+              { Icon: Bot, label: "260+ active models" },
               { Icon: Zap, label: "Sub-second routing" },
-              { Icon: Database, label: "Personal memory" },
+              { Icon: Database, label: "2-layer memory fabric" },
               { Icon: ShieldCheck, label: "School guardrails" },
               { Icon: Network, label: "Multi-agent" },
+              { Icon: Search, label: "Evidence-first citations" },
+              { Icon: Layers, label: "Clarify + resume context" },
+              { Icon: ArrowRight, label: "Branch + regenerate paths" },
+              { Icon: Sparkles, label: "Length-safe fallback chain" },
               { Icon: FlaskConical, label: "Subject specialists" },
               { Icon: Pencil, label: "Writing coaches" },
               { Icon: BookOpen, label: "Spaced repetition" },
@@ -1303,11 +1308,11 @@ export function LandingClient() {
               className="font-display font-bold mb-4"
               style={{ fontSize: "clamp(2rem, 4.5vw, 3rem)" }}
             >
-              9 ways to <span style={{ color: "var(--brand-primary)" }}>learn</span>
+              12 modes to <span style={{ color: "var(--brand-primary)" }}>learn</span>
             </h2>
             <p className="text-lg leading-relaxed max-w-lg" style={{ color: "var(--text-secondary)" }}>
-              Each mode has a distinct pedagogical pattern — automatically selected, or manually
-              chosen. Hover to explore.
+              Eight modes are live now, with four staged releases. Each has a distinct pedagogy and
+              can be auto-selected or manually locked.
             </p>
           </div>
 
@@ -1635,7 +1640,7 @@ export function LandingClient() {
             <span style={{ color: "var(--brand-primary)" }}>that actually teaches.</span>
           </h2>
           <p className="text-lg mb-10 leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-            Structured modes. School context. Personal memory. Full oversight.
+            Mode orchestration. School context. Evidence layer. Memory fabric. Full oversight.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link

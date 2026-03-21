@@ -253,17 +253,18 @@ function SettingPill({
   title: string;
   icon: React.ReactNode;
 }) {
-  const isActive = value === "on";
+  const pillClass =
+    value === "on"
+      ? "border-[color-mix(in_oklab,var(--accent-cyan)_50%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_16%,transparent)] text-[var(--accent-cyan)]"
+      : value === "auto"
+        ? "auto-pill-active border-[color-mix(in_oklab,var(--accent-cyan)_30%,var(--border-default))] bg-[var(--bg-secondary)] text-[var(--text-primary)]"
+        : "border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-tertiary)] opacity-60 hover:opacity-100 hover:bg-[var(--bg-hover)]";
   return (
     <button
       type="button"
       onClick={() => onChange(nextPreference(value))}
       title={`${label}: ${preferenceLabel(value)} — ${title}`}
-      className={`group/pill inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border transition-all hover:w-auto hover:px-3 ${
-        isActive
-          ? "border-[color-mix(in_oklab,var(--accent-cyan)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_10%,transparent)] text-[var(--accent-cyan)]"
-          : "border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-      }`}
+      className={`group/pill inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border transition-all hover:w-auto hover:px-3 ${pillClass}`}
     >
       <span className="shrink-0">{icon}</span>
       <span className="max-w-0 overflow-hidden whitespace-nowrap text-[11px] font-medium opacity-0 transition-all duration-300 ease-[var(--ease-standard)] group-hover/pill:ml-2 group-hover/pill:max-w-[100px] group-hover/pill:opacity-100">
@@ -736,7 +737,7 @@ export function ChatComposer(props: ChatComposerProps) {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div className="mx-auto w-full max-w-6xl">
+      <div className="mx-auto w-full max-w-[680px]">
         {slashActive ? (
           <SlashCommandMenu
             query={message.trim()}

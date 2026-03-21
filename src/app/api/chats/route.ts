@@ -9,9 +9,12 @@ export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();
     const packId = request.nextUrl.searchParams.get("packId") ?? undefined;
+    const limitRaw = Number.parseInt(request.nextUrl.searchParams.get("limit") ?? "", 10);
+    const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(limitRaw, 300)) : 120;
     const chats = await convexQuery("chats:listChats", {
       actorClerkId: actor.clerkId,
       packId,
+      limit,
     });
     return ok({ chats });
   });

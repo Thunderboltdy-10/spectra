@@ -8,6 +8,16 @@ export type CuratedModelMeta = {
 };
 
 export const CURATED_MODEL_REGISTRY: Record<string, CuratedModelMeta> = {
+  "openai/gpt-5.4-nano": {
+    releaseDate: "2026-03",
+    knowledgeCutoff: "2025-06",
+    curatedNotes: "Very low-cost utility and tutoring route with strong instruction following.",
+  },
+  "openai/gpt-5.4-mini": {
+    releaseDate: "2026-03",
+    knowledgeCutoff: "2025-06",
+    curatedNotes: "Balanced high-quality route for reasoning-heavy school tasks at moderate cost.",
+  },
   "openai/gpt-4.1-mini": {
     releaseDate: "2025-04",
     knowledgeCutoff: "2024-06",
@@ -31,6 +41,34 @@ export const CURATED_MODEL_REGISTRY: Record<string, CuratedModelMeta> = {
     benchmarkMMLU: 87.2,
     benchmarkHumanEval: 91.5,
     arenaElo: 1290,
+  },
+  "anthropic/claude-sonnet-4.5": {
+    releaseDate: "2025-09",
+    knowledgeCutoff: "2025-03",
+    curatedNotes: "High-quality long-form reasoning and writing coherence.",
+    benchmarkMMLU: 87.2,
+    benchmarkHumanEval: 91.5,
+    arenaElo: 1290,
+  },
+  "stepfun/step-3.5-flash:free": {
+    releaseDate: "2026-02",
+    knowledgeCutoff: "2025-03",
+    curatedNotes: "Fast free route for routine tutoring turns and short-form guidance.",
+  },
+  "openai/gpt-oss-120b:free": {
+    releaseDate: "2026-02",
+    knowledgeCutoff: "2025-03",
+    curatedNotes: "Large open model with strong free-tier reasoning depth.",
+  },
+  "qwen/qwen3-next-80b-a3b-instruct:free": {
+    releaseDate: "2026-01",
+    knowledgeCutoff: "2025-02",
+    curatedNotes: "Free reasoning-focused model suitable for grading and exam prep.",
+  },
+  "nvidia/nemotron-3-super-120b-a12b:free": {
+    releaseDate: "2026-03",
+    knowledgeCutoff: "2025-04",
+    curatedNotes: "High-capacity free model optimized for robust instruction following.",
   },
   "anthropic/claude-opus-4.1:thinking": {
     releaseDate: "2025-09",

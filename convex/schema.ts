@@ -37,6 +37,9 @@ export default defineSchema({
     description: v.optional(v.string()),
     schoolType: v.optional(v.string()),
     country: v.optional(v.string()),
+    curriculum: v.optional(v.string()),
+    examBoard: v.optional(v.string()),
+    gradeLevels: v.optional(v.array(v.string())),
     timezone: v.optional(v.string()),
     maxStudents: v.optional(v.number()),
     isActive: v.optional(v.boolean()),
@@ -180,6 +183,7 @@ export default defineSchema({
     agentId: v.optional(v.id("agents")),
     ownerUserId: v.id("users"),
     title: v.string(),
+    latestUserPrompt: v.optional(v.string()),
     pinned: v.optional(v.boolean()),
     mode: vStudyMode,
     thinkingLevel: vThinkingLevel,
@@ -187,6 +191,9 @@ export default defineSchema({
     manualModel: v.optional(v.string()),
     usePersonalResources: v.boolean(),
     contextSummary: v.optional(v.string()),
+    learningContext: v.optional(v.string()),
+    recentContext: v.optional(v.string()),
+    recentContextAt: v.optional(v.number()),
     compactedUntilMessageId: v.optional(v.id("messages")),
     compactedAt: v.optional(v.number()),
     contextSummaryVersion: v.optional(v.number()),
@@ -195,6 +202,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_owner", ["ownerUserId"])
+    .index("by_owner_updated", ["ownerUserId", "updatedAt"])
     .index("by_org", ["orgId"]),
 
   messages: defineTable({
@@ -218,12 +226,16 @@ export default defineSchema({
     verificationPassed: v.optional(v.boolean()),
     thinkingContent: v.optional(v.string()),
     routeTrace: vRouteTrace,
+    parentMessageId: v.optional(v.id("messages")),
+    siblingIndex: v.optional(v.number()),
+    siblingCount: v.optional(v.number()),
     createdAt: v.number(),
   })
     .index("by_chat", ["chatId"])
     .index("by_chat_client_message", ["chatId", "clientMessageId"])
     .index("by_user_created", ["userId", "createdAt"])
     .index("by_org", ["orgId"])
+    .index("by_parent_message", ["parentMessageId"])
     .searchIndex("search_content", {
       searchField: "content",
       filterFields: ["userId"],
@@ -282,6 +294,39 @@ export default defineSchema({
   })
     .index("by_user", ["userId"])
     .index("by_user_org", ["userId", "orgId"]),
+
+  userMemoryEntries: defineTable({
+    userId: v.id("users"),
+    orgId: v.id("orgs"),
+    key: v.string(),
+    text: v.string(),
+    embedding: v.array(v.float64()),
+    category: v.union(
+      v.literal("identity"),
+      v.literal("academic"),
+      v.literal("preference"),
+      v.literal("topic"),
+      v.literal("artifact"),
+      v.literal("correction"),
+    ),
+    confidence: v.number(),
+    status: v.union(v.literal("pending"), v.literal("confirmed")),
+    sourceType: v.union(v.literal("extraction"), v.literal("user_explicit"), v.literal("correction")),
+    sourceChatId: v.optional(v.id("chats")),
+    relatedArtifacts: v.optional(v.array(v.string())),
+    negativeTopicLinks: v.optional(v.array(v.string())),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_user_org", ["userId", "orgId"])
+    .index("by_user_org_category", ["userId", "orgId", "category"])
+    .index("by_user_org_status", ["userId", "orgId", "status"])
+    .index("by_source_chat", ["sourceChatId"])
+    .vectorIndex("by_embedding", {
+      vectorField: "embedding",
+      dimensions: EMBEDDING_DIMENSIONS,
+      filterFields: ["userId", "orgId"],
+    }),
 
   studentAnalytics: defineTable({
     orgId: v.id("orgs"),
@@ -342,6 +387,10 @@ export default defineSchema({
     longestStreak: v.number(),
     lastActiveDate: v.string(),
     totalXp: v.number(),
+    chatTurns: v.optional(v.number()),
+    tutorSessions: v.optional(v.number()),
+    researchSessionsWithSources: v.optional(v.number()),
+    imageResponses: v.optional(v.number()),
   }).index("by_user", ["userId"]),
 
   studyTimers: defineTable({

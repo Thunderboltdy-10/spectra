@@ -13,7 +13,14 @@ import {
   summarizeWhyResponse,
   toOpenRouterMessages,
 } from "@/lib/orchestrator/compose";
-import { classifyExplainDepth, parseUserDirectives, runAutoSettingsPipeline, suggestMode } from "@/lib/auto-settings";
+import {
+  classifyComplexity,
+  classifyExplainDepth,
+  classifyRequest,
+  parseUserDirectives,
+  runAutoSettingsPipeline,
+  suggestMode,
+} from "@/lib/auto-settings";
 import { matchAgentToMessage } from "@/lib/agent-matching";
 import { countFlashcardPairs, isFlashcardDeckStructured, normalizeFlashcardDeck } from "@/lib/flashcard-format";
 import { safeStudyMode } from "@/lib/contracts/studyModes";
@@ -33,19 +40,47 @@ import {
   type MemoryEntry,
 } from "@/lib/orchestrator/history";
 import {
-  buildRelevantMemoryProfile,
+  buildDirectiveMemoryEntries,
   inferCitations,
   maybeExtractMemory,
   maybeGenerateTitle,
   maybeGenerateTitleFromUserPrompt,
+  planMemoryRead,
+  routeMemoryWrite,
   rewriteCitationMarkers,
   stripOrphanCitations,
 } from "@/lib/orchestrator/post-process";
-import { buildResearchEvidenceBlock, maybeSearchWeb, runRagRetrieval } from "@/lib/orchestrator/retrieval";
+import {
+  buildResearchEvidenceBlock,
+  maybeSearchWeb,
+  runRagRetrieval,
+  type RetrievalResult,
+  type WebSearchResult,
+} from "@/lib/orchestrator/retrieval";
 import { buildRoutePlan } from "@/lib/orchestrator/route-plan";
+import { PipelineController } from "@/lib/orchestrator/pipeline-controller";
 import { formatRuntimeSkillBlock, selectRuntimeSkills } from "@/lib/orchestrator/skills";
 import { runAssistantStreaming, runCollaborativeStreaming } from "@/lib/orchestrator/streaming";
 import { buildTaskGraph, shouldUseMultiAgent } from "@/lib/orchestrator/task-graph";
+import {
+  buildModeSuggestions,
+  buildModeTransformGuidance,
+  formatLearningContextForPrompt,
+  isFlashcardAppendIntent,
+  mergeLearningContexts,
+  parseLearningContext,
+  serializeLearningContext,
+  type LearningContext,
+} from "@/lib/orchestrator/learning-context";
+import {
+  buildRecentContextSnapshot,
+  formatClarificationAsText,
+  isClarificationFollowUpMessage,
+  needsClarification,
+  parseRecentContext,
+  serializeRecentContext,
+  type ClarificationBlock,
+} from "@/lib/orchestrator/clarification";
 import { formatSchoolNow } from "@/lib/timezone";
 import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 import type { StudyMode } from "@/types";
@@ -316,9 +351,16 @@ function isLegacyCitationValidatorError(error: unknown) {
   return lower.includes("argumentvalidationerror") && lower.includes("citations");
 }
 
+function isParentMessageValidatorError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const lower = message.toLowerCase();
+  return lower.includes("argumentvalidationerror") && lower.includes("parentmessageid");
+}
+
 async function appendAssistantMessageWithCitationFallback(params: {
   actorClerkId: string;
   chatId: string;
+  parentMessageId?: string;
   content: string;
   mode: StudyMode;
   attachments?: string[];
@@ -346,6 +388,7 @@ async function appendAssistantMessageWithCitationFallback(params: {
     actorClerkId: params.actorClerkId,
     chatId: params.chatId,
     role: "assistant" as const,
+    parentMessageId: params.parentMessageId,
     content: params.content,
     attachments: params.attachments,
     attachmentResourceIds: params.attachmentResourceIds,
@@ -364,11 +407,13 @@ async function appendAssistantMessageWithCitationFallback(params: {
   try {
     return await convexMutation("chats:appendMessage", baseArgs) as { messageId: string };
   } catch (error) {
-    if (!isLegacyCitationValidatorError(error)) {
+    const citationCompatError = isLegacyCitationValidatorError(error);
+    const parentCompatError = isParentMessageValidatorError(error);
+    if (!citationCompatError && !parentCompatError) {
       throw error;
     }
 
-    return await convexMutation("chats:appendMessage", {
+    const normalizedCitationArgs = {
       ...baseArgs,
       citations: params.citations.map((citation) => ({
         filename: citation.filename,
@@ -378,7 +423,28 @@ async function appendAssistantMessageWithCitationFallback(params: {
         resourceId: citation.resourceId,
         snippet: citation.snippet,
       })),
-    }) as { messageId: string };
+    };
+    const withoutParent = {
+      ...baseArgs,
+      parentMessageId: undefined,
+    };
+    const withoutParentNormalizedCitations = {
+      ...normalizedCitationArgs,
+      parentMessageId: undefined,
+    };
+
+    if (citationCompatError && parentCompatError) {
+      return await convexMutation("chats:appendMessage", withoutParentNormalizedCitations) as { messageId: string };
+    }
+    if (citationCompatError) {
+      return await convexMutation("chats:appendMessage", normalizedCitationArgs) as { messageId: string };
+    }
+    try {
+      return await convexMutation("chats:appendMessage", withoutParent) as { messageId: string };
+    } catch (retryError) {
+      if (!isLegacyCitationValidatorError(retryError)) throw retryError;
+      return await convexMutation("chats:appendMessage", withoutParentNormalizedCitations) as { messageId: string };
+    }
   }
 }
 
@@ -525,6 +591,10 @@ export async function runChatPipeline(request: NextRequest) {
     failureCount: number;
     avgLatencyMs?: number;
   }>;
+  const globalRecentAssistantModels = (await convexQuery("chats:listRecentAssistantModels", {
+    actorClerkId: actor.clerkId,
+    limit: 30,
+  })) as string[];
   const runtimeStatMap = Object.fromEntries(
     runtimeStats.map((row) => [row.modelId, row]),
   ) as Record<string, { successCount: number; failureCount: number; avgLatencyMs?: number }>;
@@ -600,18 +670,47 @@ export async function runChatPipeline(request: NextRequest) {
     searchMode: body.autoSettings?.searchMode ?? "auto",
   };
 
-  const auto = await runAutoSettingsPipeline({
-    actorClerkId: actor.clerkId,
+  const earlyComplexity = classifyComplexity(normalizedMessage);
+  const earlyClassification = classifyRequest({
     message: normalizedMessage,
-    currentThinkingLevel: body.thinkingLevel,
+    complexity: earlyComplexity,
+    mode: safeMode,
+    hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
+    isFirstMessage: !body.chatId,
+    multiAgentRequested: Boolean(body.forceMultiAgent),
     spendingTier: budget.tier,
-    autoEnhancePrompt: autoSettings.enhancePrompt,
-    autoThinking: autoSettings.autoThinking,
-    autoSearch: autoSettings.autoSearch,
-    enhanceMode: autoSettings.enhanceMode,
-    thinkingMode: autoSettings.thinkingMode,
-    searchMode: autoSettings.searchMode,
   });
+  const skipAutoSettingsForT0 = earlyClassification.requestClass === "T0";
+  const auto: Awaited<ReturnType<typeof runAutoSettingsPipeline>> = skipAutoSettingsForT0
+    ? {
+        message: normalizedMessage,
+        promptEnhanced: false,
+        searchEnabled: false,
+        thinkingLevel: "low",
+        complexity: earlyComplexity,
+        requestClass: earlyClassification.requestClass,
+        classificationReason: earlyClassification.reason,
+        promptCategory: "general",
+        questionType: "other",
+        isMultipart: false,
+        suggestedMode: null,
+      }
+    : await runAutoSettingsPipeline({
+        actorClerkId: actor.clerkId,
+        message: normalizedMessage,
+        mode: safeMode,
+        hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
+        isFirstMessage: !body.chatId,
+        multiAgentRequested: Boolean(body.forceMultiAgent),
+        currentThinkingLevel: body.thinkingLevel,
+        spendingTier: budget.tier,
+        autoEnhancePrompt: autoSettings.enhancePrompt,
+        autoThinking: autoSettings.autoThinking,
+        autoSearch: autoSettings.autoSearch,
+        enhanceMode: autoSettings.enhanceMode,
+        thinkingMode: autoSettings.thinkingMode,
+        searchMode: autoSettings.searchMode,
+      });
   const userDirectives = parseUserDirectives(normalizedMessage);
   if (userDirectives.forcedModel) {
     logger.info("user directive: forced model", { model: userDirectives.forcedModel });
@@ -620,11 +719,17 @@ export async function runChatPipeline(request: NextRequest) {
     logger.info("user directive: force multi-agent");
     (body as Record<string, unknown>).forceMultiAgent = true;
   }
+  if (userDirectives.memoryActions?.length) {
+    logger.info("user directive: memory actions", {
+      actions: userDirectives.memoryActions.map((action) => action.type),
+    });
+  }
   if (userDirectives.forcedModel && !body.forcedModel) {
     (body as Record<string, unknown>).forcedModel = userDirectives.forcedModel;
   }
 
   logger.info("auto-settings complete", {
+    skippedForT0: skipAutoSettingsForT0,
     promptEnhanced: auto.promptEnhanced,
     searchEnabled: auto.searchEnabled,
     promptCategory: auto.promptCategory,
@@ -648,9 +753,26 @@ export async function runChatPipeline(request: NextRequest) {
   const stream = new TransformStream();
   const writer = stream.writable.getWriter();
   const encoder = new TextEncoder();
+  let streamClosed = false;
 
   const send = async (payload: Record<string, unknown>) => {
-    await writer.write(encoder.encode(`${JSON.stringify(payload)}\n`));
+    if (streamClosed) return;
+    try {
+      await writer.write(encoder.encode(`${JSON.stringify(payload)}\n`));
+    } catch (error) {
+      streamClosed = true;
+      const err = error as { code?: string; message?: string } | undefined;
+      const message = err?.message ?? "";
+      const isClosedStreamError =
+        err?.code === "ERR_INVALID_STATE"
+        || /writablestream is closed/i.test(message)
+        || /invalid state/i.test(message);
+      if (!isClosedStreamError) {
+        logger.warn("stream write failed", {
+          error: message || String(error),
+        });
+      }
+    }
   };
 
   // Buffer events that fire before the Response is returned (no reader attached yet).
@@ -741,12 +863,7 @@ export async function runChatPipeline(request: NextRequest) {
     }).catch(() => {});
   };
 
-  if (isRegenerate) {
-    await convexMutation("chats:deleteLastAssistantMessage", {
-      actorClerkId: actor.clerkId,
-      chatId,
-    });
-  } else if (shouldPersistUserMessage) {
+  if (!isRegenerate && shouldPersistUserMessage) {
     const appendedUser = (await convexMutation("chats:appendMessage", {
       actorClerkId: actor.clerkId,
       chatId,
@@ -779,6 +896,11 @@ export async function runChatPipeline(request: NextRequest) {
     convexQuery("admin:getOrgSettings", { actorClerkId: actor.clerkId }) as Promise<{
       org: {
         name?: string;
+        schoolType?: string;
+        country?: string;
+        curriculum?: string;
+        examBoard?: string;
+        gradeLevels?: string[];
         timezone?: string;
         verifyMarkerPassEnabled: boolean;
         orchestratorV2Enabled?: boolean;
@@ -824,8 +946,114 @@ export async function runChatPipeline(request: NextRequest) {
   }
 
   const history = toChatMessageShape(chatData.messages);
+  const storedLearningContext = parseLearningContext((chatData.chat as { learningContext?: unknown }).learningContext);
+  const recentContextCache = parseRecentContext({
+    raw: (chatData.chat as { recentContext?: unknown }).recentContext,
+    savedAt: (chatData.chat as { recentContextAt?: unknown }).recentContextAt,
+  });
+  const lastAssistantMessage = [...history].reverse().find((message) => message.role === "assistant");
+  const lastClarificationBlock = (
+    lastAssistantMessage?.routeTrace as { clarificationBlock?: ClarificationBlock } | undefined
+  )?.clarificationBlock;
+  const lastAssistantWasClarification = Boolean(lastClarificationBlock);
+  const clarificationFollowUp = isClarificationFollowUpMessage({
+    message: normalizedMessage,
+    block: lastClarificationBlock,
+  });
+  const shouldReuseRecentContext = Boolean(
+    recentContextCache
+    && lastAssistantWasClarification
+    && clarificationFollowUp,
+  );
+  if (recentContextCache && lastAssistantWasClarification) {
+    void convexMutation("chats:setRecentContext", {
+      actorClerkId: actor.clerkId,
+      chatId,
+      recentContext: undefined,
+      recentContextAt: undefined,
+    }).catch(() => {});
+  }
+  const latestUserMessageInHistory = [...history].reverse().find((message) => message.role === "user");
+  const currentTurnParentMessageId = persistedUserMessageId ?? latestUserMessageInHistory?._id;
+  const resolvedUserMessageId = persistedUserMessageId ?? currentTurnParentMessageId;
+  const historyForTurn = (() => {
+    if (!isRegenerate) return history;
+    for (let i = history.length - 1; i >= 0; i -= 1) {
+      if (history[i]?.role === "user") {
+        return history.slice(0, i + 1);
+      }
+    }
+    return history;
+  })();
   const isFirstAssistantTurn = history.every((message) => message.role !== "assistant");
   const attemptStats = extractAttemptStats(history);
+  const directiveMemorySummary = {
+    forgotten: 0,
+    negativeLinks: 0,
+    written: 0,
+  };
+
+  if (userDirectives.memoryActions?.length) {
+    for (const action of userDirectives.memoryActions) {
+      if (action.type === "forget") {
+        const result = await convexMutation<
+          { actorClerkId: string; target?: string; sourceChatId?: string },
+          { deleted?: number }
+        >("memory:forgetMemoryEntriesByQuery", {
+          actorClerkId: actor.clerkId,
+          target: action.target,
+          sourceChatId: action.target ? undefined : chatId,
+        }).catch(() => ({ deleted: 0 }));
+        logger.info("memory directive applied: forget", {
+          target: action.target,
+          deleted: result.deleted ?? 0,
+        });
+        directiveMemorySummary.forgotten += result.deleted ?? 0;
+        continue;
+      }
+
+      if (action.type === "negative_topic") {
+        const result = await convexMutation<
+          { actorClerkId: string; topic: string; target?: string; sourceChatId?: string },
+          { updated?: number }
+        >("memory:addNegativeTopicLink", {
+          actorClerkId: actor.clerkId,
+          topic: action.topic,
+          target: action.target,
+          sourceChatId: action.target ? undefined : chatId,
+        }).catch(() => ({ updated: 0 }));
+        directiveMemorySummary.negativeLinks += result.updated ?? 0;
+        continue;
+      }
+
+      if (action.type === "remember" || action.type === "update_profile") {
+        const explicitEntries = buildDirectiveMemoryEntries({
+          statement: action.statement,
+          directiveType: action.type,
+        });
+        const routed = await routeMemoryWrite({
+          actorClerkId: actor.clerkId,
+          chatId,
+          entries: explicitEntries,
+          sourceType: "user_explicit",
+          onModelCall: (call) => {
+            deferSubcall({
+              phaseId: "memory",
+              label: "Directive memory embedding",
+              endpoint: "embeddings",
+              status: "ok",
+              modelUsed: call.model,
+              inputTokens: call.usage?.prompt_tokens,
+              outputTokens: call.usage?.completion_tokens,
+              costCents: costCentsFromUsage(call.usage),
+              durationMs: call.durationMs,
+            });
+          },
+        }).catch(() => ({ written: 0, promoted: 0 }));
+        directiveMemorySummary.written += routed.written;
+      }
+    }
+  }
 
   // Conversation-aware mode refinement: now that we have history, run suggestMode
   // again with full context and optionally override the initial effectiveMode.
@@ -873,6 +1101,27 @@ export async function runChatPipeline(request: NextRequest) {
     normalizedMessage.split(/\s+/).length < 4 &&
     !/\b(about|on|for|regarding|the|topic)\b/i.test(normalizedMessage);
 
+  const requestClassification = classifyRequest({
+    message: auto.message,
+    complexity: auto.complexity,
+    mode: effectiveMode,
+    hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
+    isFirstMessage: isFirstAssistantTurn,
+    multiAgentRequested: Boolean(body.forceMultiAgent),
+    spendingTier: budget.tier,
+  });
+  auto.requestClass = requestClassification.requestClass;
+  auto.classificationReason = requestClassification.reason;
+  const pipelineController = new PipelineController({
+    requestClass: requestClassification.requestClass,
+    classificationReason: requestClassification.reason,
+  });
+  if (skipAutoSettingsForT0) {
+    pipelineController.markStageSkipped("autoSettings", "Skipped for T0 request class.");
+  } else {
+    pipelineController.markStageCompleted("autoSettings");
+  }
+
   let agentSuggestion:
     | {
         id: string;
@@ -906,7 +1155,7 @@ export async function runChatPipeline(request: NextRequest) {
       : undefined;
 
   const scheduledCompaction = shouldScheduleCompaction({
-    history,
+    history: historyForTurn,
     mode: effectiveMode,
     hasExistingSummary: Boolean(existingSummary),
   });
@@ -915,7 +1164,7 @@ export async function runChatPipeline(request: NextRequest) {
     void maybeCompactHistory({
       actorClerkId: actor.clerkId,
       chatId,
-      history,
+      history: historyForTurn,
       onModelCall: (call) => {
         deferSubcall({
           phaseId: "planning",
@@ -936,7 +1185,7 @@ export async function runChatPipeline(request: NextRequest) {
     effectiveMode === "quiz" || effectiveMode === "exam" || effectiveMode === "flashcard"
       ? 14
       : 8;
-  const recentHistory = existingSummary ? history.slice(-compactedWindow) : history;
+  const recentHistory = existingSummary ? historyForTurn.slice(-compactedWindow) : historyForTurn;
   const historyForModel = recentHistory.map((message, index) => {
     const isLast = index === recentHistory.length - 1;
     if (isLast && message.role === "user" && auto.promptEnhanced) {
@@ -991,6 +1240,35 @@ export async function runChatPipeline(request: NextRequest) {
     routePlan.shouldWriteMemory = false;
     routePlan.allowedToolBundles = routePlan.allowedToolBundles.filter((bundle) => bundle !== "memory");
   }
+  pipelineController.markStageCompleted("buildRoutePlan");
+  const costGates = pipelineController.applyCostGates({
+    allowSearch: routePlan.shouldUseWebSearch,
+    allowRag: routePlan.allowedToolBundles.includes("retrieval") && routePlan.retrievalScopes.length > 0,
+    allowMultiAgent: routePlan.allowSubAgents,
+    spendingTier: budget.tier,
+    forceMultiAgentRequested: Boolean(body.forceMultiAgent),
+    orchestratorEnabled: featureEnabled(orgSettings.org?.orchestratorV2Enabled),
+    budgetSoftLimited: Boolean(budget.softLimitReached || budget.hardLimitReached),
+  });
+  if (!costGates.searchEnabled) {
+    routePlan.shouldUseWebSearch = false;
+    routePlan.allowedToolBundles = routePlan.allowedToolBundles.filter((bundle) => bundle !== "search");
+  }
+  if (!costGates.ragEnabled) {
+    routePlan.retrievalScopes = [];
+    routePlan.allowedToolBundles = routePlan.allowedToolBundles.filter((bundle) => bundle !== "retrieval");
+  }
+  if (!costGates.multiAgentEnabled) {
+    routePlan.shouldUseMultiStep = false;
+    routePlan.allowSubAgents = false;
+    routePlan.allowedToolBundles = routePlan.allowedToolBundles.filter((bundle) => bundle !== "multi_agent");
+  }
+  const forceMultiAgentAllowed = costGates.forceMultiAgentAllowed;
+  const forceMultiAgentDeniedReason =
+    costGates.forceDeniedReasons.length > 0
+      ? costGates.forceDeniedReasons.join("; ")
+      : undefined;
+
   const runtimeSkills = routePlan.allowedToolBundles.includes("skills")
     ? selectRuntimeSkills({
         message: auto.message,
@@ -998,48 +1276,100 @@ export async function runChatPipeline(request: NextRequest) {
         maxSkills: routePlan.responseBudget === "deep" ? 6 : 4,
       })
     : [];
-
-  const retrievalPromise = routePlan.allowedToolBundles.includes("retrieval") && routePlan.retrievalScopes.length > 0
-    ? runRagRetrieval({
+  const flashcardAppendIntent = effectiveMode === "flashcard" && isFlashcardAppendIntent(normalizedMessage);
+  const latestDeckPromise: Promise<{
+    title: string;
+    cards: Array<{ front: string; back: string; cardHash: string }>;
+  } | null> = flashcardAppendIntent
+    ? convexQuery<
+      { actorClerkId: string; chatId: string },
+      {
+        title: string;
+        cards: Array<{ front: string; back: string; cardHash: string }>;
+      } | null
+    >("flashcards:getLatestDeckForChat", {
         actorClerkId: actor.clerkId,
         chatId,
-        packId: routePlan.retrievalScopes.includes("pack") ? activePackId : undefined,
-        usePersonalResources: routePlan.retrievalScopes.includes("personal") && body.usePersonalResources,
-        selectedAgentId: routePlan.retrievalScopes.includes("agent") ? selectedAgent?._id : undefined,
-        message: auto.message,
-        logger,
-      })
-    : Promise.resolve({
-        citations: [],
-        sourceBlock: "No retrieved sources.",
+      }).catch(() => null)
+    : Promise.resolve(null);
+
+  const defaultRetrievalResult: RetrievalResult = {
+    citations: [],
+    sourceBlock: "No retrieved sources.",
+    queryEmbedding: undefined,
+    diagnostics: {
+      scopesAttempted: [],
+      status: "not_requested" as const,
+      reason: "Retrieval not enabled by the route plan.",
+      embeddingModel: undefined,
+    },
+  };
+  const defaultSearchResult: WebSearchResult = {
+    text: "",
+    urls: [],
+    sources: [],
+    provider: "disabled" as const,
+    modelUsed: undefined,
+    usage: undefined,
+    durationMs: undefined,
+  };
+  const hasReusableRecentContext =
+    shouldReuseRecentContext
+    && Boolean(recentContextCache?.retrieval || recentContextCache?.search);
+
+  const retrievalPromise = hasReusableRecentContext
+    ? Promise.resolve({
+        citations: recentContextCache?.retrieval.citations ?? [],
+        sourceBlock: recentContextCache?.retrieval.sourceBlock ?? "Reused cached retrieval context.",
+        queryEmbedding: undefined,
         diagnostics: {
-          scopesAttempted: [],
-          status: "not_requested" as const,
-          reason: "Retrieval not enabled by the route plan.",
+          scopesAttempted: recentContextCache?.retrieval.diagnostics?.scopesAttempted ?? [],
+          status: recentContextCache?.retrieval.diagnostics?.status ?? ("retrieved" as const),
+          reason: recentContextCache?.retrieval.diagnostics?.reason ?? "Loaded from recent clarification context cache.",
+          embeddingModel: recentContextCache?.retrieval.diagnostics?.embeddingModel,
         },
-      });
+      })
+    : routePlan.allowedToolBundles.includes("retrieval") && routePlan.retrievalScopes.length > 0
+      ? runRagRetrieval({
+          actorClerkId: actor.clerkId,
+          chatId,
+          packId: routePlan.retrievalScopes.includes("pack") ? activePackId : undefined,
+          usePersonalResources: routePlan.retrievalScopes.includes("personal") && body.usePersonalResources,
+          selectedAgentId: routePlan.retrievalScopes.includes("agent") ? selectedAgent?._id : undefined,
+          message: auto.message,
+          logger,
+        })
+      : Promise.resolve(defaultRetrievalResult);
 
-  const searchPromise = routePlan.shouldUseWebSearch
-    ? maybeSearchWeb(auto.message, auto.thinkingLevel, {
-        actorClerkId: actor.clerkId,
-        chatId,
-        modelCatalog: catalog,
-        spendingTier: budget.tier,
-        modelRuntimeStats: runtimeStatMap,
-        searxngEnabled,
-      }).catch(() => ({
-        text: "",
-        urls: [] as string[],
-        sources: [] as Array<{ url: string; title: string; domain: string }>,
-        provider: "error" as const,
-      }))
-    : Promise.resolve({
-      text: "",
-      urls: [] as string[],
-      sources: [] as Array<{ url: string; title: string; domain: string }>,
-      provider: "disabled" as const,
-    });
-  if (routePlan.shouldUseWebSearch) {
+  const searchPromise = hasReusableRecentContext
+    ? Promise.resolve({
+        text: recentContextCache?.search.text ?? "",
+        urls: recentContextCache?.search.urls ?? [],
+        sources: recentContextCache?.search.sources ?? [],
+        provider: recentContextCache?.search.provider ?? ("disabled" as const),
+        modelUsed: undefined,
+        usage: undefined,
+        durationMs: undefined,
+      })
+    : routePlan.shouldUseWebSearch
+      ? maybeSearchWeb(auto.message, auto.thinkingLevel, {
+          actorClerkId: actor.clerkId,
+          chatId,
+          modelCatalog: catalog,
+          spendingTier: budget.tier,
+          modelRuntimeStats: runtimeStatMap,
+          searxngEnabled,
+        }).catch(() => ({
+          text: "",
+          urls: [] as string[],
+          sources: [] as Array<{ url: string; title: string; domain: string }>,
+          provider: "error" as const,
+          modelUsed: undefined,
+          usage: undefined,
+          durationMs: undefined,
+        }))
+      : Promise.resolve(defaultSearchResult);
+  if (routePlan.shouldUseWebSearch || hasReusableRecentContext) {
     earlyEventBuffer.push({ type: "phase", phase: "searching" });
   }
 
@@ -1110,16 +1440,38 @@ export async function runChatPipeline(request: NextRequest) {
     ? classifyExplainDepth(auto.message, userMemory.rawMemoryText)
     : undefined;
 
-  const [retrieval, webResult, quizAdaptive] = await Promise.all([
+  const [retrieval, webResult, quizAdaptive, latestDeck] = await Promise.all([
     retrievalPromise,
     searchPromise,
     adaptiveQuizPromise,
+    latestDeckPromise,
   ]);
 
   const searchBlock = webResult.text ?? "";
   const searchUrls = webResult.urls ?? [];
   let searchSources = webResult.sources ?? [];
   const searchProvider = webResult.provider;
+  const usedRecentContextCache = hasReusableRecentContext;
+  const routeTraceSearchStatus =
+    !routePlan.shouldUseWebSearch && !usedRecentContextCache
+      ? "skipped"
+      : searchProvider === "searxng"
+        ? "real_search"
+        : searchProvider === "model_fallback"
+          ? "model_knowledge"
+          : searchProvider === "disabled"
+            ? "skipped"
+          : "error";
+  if (usedRecentContextCache || routePlan.retrievalScopes.length > 0) {
+    pipelineController.markStageCompleted("ragRetrieval");
+  } else {
+    pipelineController.markStageSkipped("ragRetrieval", "No retrieval scope enabled after cost and route gating.");
+  }
+  if (usedRecentContextCache || routePlan.shouldUseWebSearch) {
+    pipelineController.markStageCompleted("webSearch");
+  } else {
+    pipelineController.markStageSkipped("webSearch", "Web search disabled after request-class and route gating.");
+  }
   const diag = retrieval.diagnostics as any;
   if (diag?.embeddingModel || diag?.embeddingUsage) {
     deferSubcall({
@@ -1147,12 +1499,27 @@ export async function runChatPipeline(request: NextRequest) {
       durationMs: webResult.durationMs,
     });
   }
-  if (routePlan.shouldUseWebSearch) {
+  if (routePlan.shouldUseWebSearch || usedRecentContextCache) {
     logger.info("web search complete", { urlCount: searchUrls.length });
+    if (searchProvider === "model_fallback") {
+      earlyEventBuffer.push({ type: "search_status", status: "model_fallback" });
+    } else if (searchProvider === "searxng") {
+      earlyEventBuffer.push({ type: "search_status", status: "real_search" });
+    } else if (searchProvider === "error") {
+      earlyEventBuffer.push({ type: "search_status", status: "error" });
+    }
   }
 
-  const quizDifficultyLevel = clampQuizDifficultyLevel(quizAdaptive.level);
-  const quizDifficultyLabel = quizAdaptive.label;
+  const contextQuizDifficulty =
+    storedLearningContext && Number.isFinite(storedLearningContext.difficultyLevel)
+      ? Math.max(1, Math.min(3, Math.round(storedLearningContext.difficultyLevel / 2)))
+      : undefined;
+  const quizDifficultyLevel = clampQuizDifficultyLevel(
+    effectiveMode === "quiz" && typeof contextQuizDifficulty === "number"
+      ? contextQuizDifficulty
+      : quizAdaptive.level,
+  );
+  const quizDifficultyLabel = toQuizDifficultyLabel(quizDifficultyLevel);
   const quizDifficultyAdjusted = quizAdaptive.level !== quizAdaptive.currentLevel;
   if (effectiveMode === "quiz" && featureEnabled(orgSettings.org?.adaptiveQuizEnabled)) {
     void convexMutation("analytics:setQuizDifficultySignal", {
@@ -1172,6 +1539,17 @@ export async function runChatPipeline(request: NextRequest) {
   const previousAssistantModel = [...history]
     .reverse()
     .find((message) => message.role === "assistant" && message.modelUsed)?.modelUsed;
+  const chatRecentAssistantModels = history
+    .filter((message) => message.role === "assistant")
+    .map((message) => message.modelUsed)
+    .filter((model): model is string => Boolean(model))
+    .slice(-20);
+  const combinedRecentAssistantModels = Array.from(
+    new Set([
+      ...chatRecentAssistantModels,
+      ...globalRecentAssistantModels.filter((model): model is string => Boolean(model && model.trim())),
+    ]),
+  ).slice(-30);
 
   const fallbackManualModel =
     body.manualModel
@@ -1201,7 +1579,7 @@ export async function runChatPipeline(request: NextRequest) {
     thinkingLevel: phaseThinkingLevel,
     stakes: phaseStake,
     messageLength: auto.message.length,
-    needsSearch: routePlan.shouldUseWebSearch,
+    needsSearch: routePlan.shouldUseWebSearch || usedRecentContextCache,
     hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
     requiredCapabilities: routePlan.candidateModelRequirements.required,
     preferredCapabilities: routePlan.candidateModelRequirements.preferred,
@@ -1209,21 +1587,20 @@ export async function runChatPipeline(request: NextRequest) {
       selectedAgent?.preferredModel,
     ].filter((value): value is string => Boolean(value)),
     previousModelUsed: previousAssistantModel,
-    recentModels: history
-      .filter((message) => message.role === "assistant")
-      .map((message) => message.modelUsed)
-      .filter((model): model is string => Boolean(model)),
+    recentModels: combinedRecentAssistantModels,
     modelCatalog: catalog,
     modelRuntimeStats: runtimeStatMap,
     seedKey: `${chatId}:${normalizedMessage}`,
   });
+  pipelineController.markStageCompleted("modelSelection");
+  const pipelineSnapshot = pipelineController.getState();
   const route = {
     primaryModel: routeDecision.selectedModel,
     fallbackModels: routeDecision.fallbackModels,
     verificationModel: undefined as string | undefined,
     reason: routeDecision.reason,
     autoEnhanced: routingMode !== "manual",
-    searchEnabled: routePlan.shouldUseWebSearch,
+    searchEnabled: routePlan.shouldUseWebSearch || usedRecentContextCache,
     trace: {
       inputs: {
         routerMode: routingMode,
@@ -1234,7 +1611,7 @@ export async function runChatPipeline(request: NextRequest) {
         promptCategory: auto.promptCategory,
         questionType: auto.questionType,
         isMultipart: auto.isMultipart,
-        needsSearch: routePlan.shouldUseWebSearch,
+        needsSearch: routePlan.shouldUseWebSearch || usedRecentContextCache,
         needsRag: retrieval.citations.length > 0,
         needsVision: (body.attachmentTypes?.length ?? 0) > 0,
         needsTabular: false,
@@ -1244,6 +1621,8 @@ export async function runChatPipeline(request: NextRequest) {
         promptEnhanced: auto.promptEnhanced,
         messageLength: auto.message.length,
         conversationLength: history.length,
+        requestClass: auto.requestClass,
+        classificationReason: auto.classificationReason,
         previousModelUsed: previousAssistantModel,
         agentPreferredModel: selectedAgent?.preferredModel,
       },
@@ -1258,6 +1637,15 @@ export async function runChatPipeline(request: NextRequest) {
       routingDurationMs: routeDecision.routingDurationMs,
       phasePlan: [routeDecision.phase],
       subcalls: deferredSubcalls,
+      requestClass: auto.requestClass,
+      classificationReason: auto.classificationReason,
+      stepsExecuted: pipelineSnapshot.completedStages,
+      stepsSkipped: pipelineSnapshot.skippedStages.map((row) => ({
+        step: row.step,
+        reason: row.reason,
+      })),
+      searchStatus: routeTraceSearchStatus,
+      costBudgetUsd: pipelineSnapshot.costBudgetUsd,
     },
   };
   const appendSubcall = (entry: {
@@ -1407,8 +1795,11 @@ export async function runChatPipeline(request: NextRequest) {
   if (retrieval.diagnostics?.status) {
     route.trace.toolchain.push(`retrieval_${retrieval.diagnostics.status}`);
   }
-  if (routePlan.shouldUseWebSearch) route.trace.toolchain.push("web_search");
-  if (routePlan.shouldUseWebSearch) {
+  if (usedRecentContextCache) {
+    route.trace.toolchain.push("recent_context_reused");
+  }
+  if (routePlan.shouldUseWebSearch || usedRecentContextCache) route.trace.toolchain.push("web_search");
+  if (routePlan.shouldUseWebSearch || usedRecentContextCache) {
     if (searchProvider === "searxng") {
       route.trace.toolchain.push("search_provider_searxng");
     } else if (searchProvider === "model_fallback") {
@@ -1558,36 +1949,164 @@ export async function runChatPipeline(request: NextRequest) {
     retrieval.citations.length > 0
       ? `scoped retrieval available (${retrieval.citations.length} source${retrieval.citations.length === 1 ? "" : "s"})`
       : retrieval.diagnostics?.reason ?? "not used";
-  const searchStatus = routePlan.shouldUseWebSearch
+  const searchStatus = routePlan.shouldUseWebSearch || usedRecentContextCache
     ? (searchBlock.trim()
         ? "web search already run; use the provided web context and do not claim browsing is unavailable"
         : "web search allowed for this route but returned no usable results")
     : "web search not enabled for this route";
+  const shouldPlanMemoryRead = memoryEnabled && pipelineController.shouldRun("memoryRead");
+  const memoryPlan = shouldPlanMemoryRead
+    ? await planMemoryRead({
+        actorClerkId: actor.clerkId,
+        chatId,
+        message: auto.message,
+        includeTopicMemory: routePlan.shouldConsultMemory,
+        personalSoulPreferences: personalSoulPrefs,
+        rawMemoryText: userMemory.rawMemoryText,
+        existingEmbedding: retrieval.queryEmbedding
+          ? {
+              embedding: retrieval.queryEmbedding,
+              model: (retrieval.diagnostics as { embeddingModel?: string } | undefined)?.embeddingModel,
+            }
+          : undefined,
+        onEmbeddingCall: (call) => {
+          appendSubcall({
+            phaseId: "memory",
+            label: "Memory retrieval embedding",
+            endpoint: "embeddings",
+            status: "ok",
+            modelUsed: call.model,
+            inputTokens: call.usage?.prompt_tokens,
+            outputTokens: call.usage?.completion_tokens,
+            costCents: costCentsFromUsage(call.usage),
+            durationMs: call.durationMs,
+          });
+        },
+      })
+    : {
+        profileText: "",
+        layer2Text: "",
+        layer3Text: "",
+        layer2Count: 0,
+        layer3Count: 0,
+        retrievedTopicEntries: [],
+      };
+  if (shouldPlanMemoryRead) {
+    pipelineController.markStageCompleted("memoryRead");
+  } else if (!memoryEnabled) {
+    pipelineController.markStageSkipped("memoryRead", "Memory disabled by user preference.");
+  }
+
+  const memoryStatus = memoryPlan.profileText
+    ? `global ${memoryPlan.layer2Count} fact(s), topic ${memoryPlan.layer3Count} match(es)`
+    : "no relevant memory entries";
+  const directiveStatus = directiveMemorySummary.forgotten > 0
+    || directiveMemorySummary.negativeLinks > 0
+    || directiveMemorySummary.written > 0
+    ? `forget=${directiveMemorySummary.forgotten}, blockedLinks=${directiveMemorySummary.negativeLinks}, explicitWrites=${directiveMemorySummary.written}`
+    : "none";
+  const learningContextPrompt = formatLearningContextForPrompt(storedLearningContext);
+  const modeTransformGuidance = buildModeTransformGuidance({
+    mode: effectiveMode,
+    message: normalizedMessage,
+    learningContext: storedLearningContext,
+    existingFlashcardFronts: latestDeck?.cards.map((card) => card.front) ?? [],
+  });
+  const learningContextStatus = storedLearningContext
+    ? `topics=${storedLearningContext.topics.length}, facts=${storedLearningContext.keyFacts.length}, cards=${storedLearningContext.flashcardCandidates.length}`
+    : "none";
+  const clarificationDecision = pipelineController.shouldRun("clarificationCheck")
+    ? needsClarification({
+        requestClass: auto.requestClass,
+        mode: effectiveMode,
+        message: normalizedMessage,
+        userDirectives,
+        lastAssistantWasClarification,
+      })
+    : null;
+  if (pipelineController.shouldRun("clarificationCheck")) {
+    pipelineController.markStageCompleted("clarificationCheck");
+  }
+  const clarificationBlock = clarificationDecision?.block ?? null;
+  const clarificationText = clarificationBlock ? formatClarificationAsText(clarificationBlock) : null;
+  if (clarificationBlock) {
+    route.trace.toolchain.push("clarification_interrupt");
+    (route.trace as { clarificationBlock?: ClarificationBlock }).clarificationBlock = clarificationBlock;
+  } else if (pipelineController.shouldRun("clarificationCheck")) {
+    route.trace.toolchain.push("clarification_not_needed");
+  }
+  if (
+    clarificationBlock
+    && (auto.requestClass === "T2" || auto.requestClass === "T3")
+    && (retrieval.citations.length > 0 || searchSources.length > 0 || searchBlock.trim().length > 0)
+  ) {
+    const recentContextSnapshot = buildRecentContextSnapshot({
+      requestClass: auto.requestClass,
+      mode: effectiveMode,
+      retrieval: {
+        citations: retrieval.citations,
+        sourceBlock: retrieval.sourceBlock,
+        diagnostics: retrieval.diagnostics
+          ? {
+              scopesAttempted: retrieval.diagnostics.scopesAttempted,
+              status: retrieval.diagnostics.status,
+              reason: retrieval.diagnostics.reason,
+              embeddingModel: retrieval.diagnostics.embeddingModel,
+            }
+          : undefined,
+      },
+      search: {
+        text: searchBlock,
+        urls: searchUrls,
+        sources: searchSources,
+        provider: searchProvider,
+      },
+      clarification: clarificationBlock,
+    });
+    await convexMutation("chats:setRecentContext", {
+      actorClerkId: actor.clerkId,
+      chatId,
+      recentContext: serializeRecentContext(recentContextSnapshot),
+      recentContextAt: recentContextSnapshot.createdAt,
+    }).catch(() => {});
+    route.trace.toolchain.push("recent_context_cached");
+  }
+
   const runtimeContextBlock = [
     `School: ${orgSettings.org?.name ?? "Spectra"}`,
+    `School type: ${orgSettings.org?.schoolType ?? "unspecified"}`,
+    `Country: ${orgSettings.org?.country ?? "unspecified"}`,
+    `Curriculum: ${orgSettings.org?.curriculum ?? "unspecified"}`,
+    `Exam board: ${orgSettings.org?.examBoard ?? "unspecified"}`,
+    `Grade levels: ${orgSettings.org?.gradeLevels?.join(", ") || "unspecified"}`,
     `Timezone: ${schoolNow.timeZone}`,
     `Current date: ${schoolNow.label}`,
     `Allowed tool bundles: ${routePlan.allowedToolBundles.join(", ") || "none"}`,
     `Retrieval: ${retrievalStatus}`,
     `Web search: ${searchStatus}`,
+    `Memory profile: ${memoryStatus}`,
+    `Memory directives applied: ${directiveStatus}`,
+    `Learning context: ${learningContextStatus}`,
   ].join("\n");
-  const memoryProfile = memoryEnabled
-    ? buildRelevantMemoryProfile({
-        message: auto.message,
-        entries: userMemory.entries,
-        rawMemoryText: userMemory.rawMemoryText,
-      })
-    : "";
   const personalSoulExcerpt = buildPersonalSoulExcerpt({
-    preferences: memoryEnabled ? personalSoulPrefs : null,
-    memoryProfile,
+    preferences: null,
+    memoryProfile: memoryEnabled ? memoryPlan.profileText : "",
   });
-  const useMemoryProfile = routePlan.shouldConsultMemory && Boolean(personalSoulExcerpt);
+  const useMemoryProfile = memoryEnabled && Boolean(personalSoulExcerpt);
   if (useMemoryProfile) {
     route.trace.toolchain.push("memory_injection");
   }
+  if (directiveStatus !== "none") {
+    route.trace.toolchain.push("memory_directives");
+  }
   if (schoolSoulCapsule.capsule.trim()) {
     route.trace.toolchain.push("school_soul_capsule");
+  }
+  if (learningContextPrompt) {
+    route.trace.toolchain.push("learning_context_injection");
+  }
+  if (modeTransformGuidance) {
+    route.trace.toolchain.push("mode_transform_guidance");
   }
 
   const systemPromptParts = [buildSystemPrompt({
@@ -1621,6 +2140,12 @@ export async function runChatPipeline(request: NextRequest) {
   })];
 
   systemPromptParts.push(`=== RUNTIME CONTEXT ===\n${runtimeContextBlock}\n=== END RUNTIME CONTEXT ===`);
+  if (learningContextPrompt) {
+    systemPromptParts.push(`=== LEARNING CONTEXT ===\n${learningContextPrompt}\n=== END LEARNING CONTEXT ===`);
+  }
+  if (modeTransformGuidance) {
+    systemPromptParts.push(`=== MODE TRANSFORM GUIDANCE ===\n${modeTransformGuidance}\n=== END MODE TRANSFORM GUIDANCE ===`);
+  }
   systemPromptParts.push(
     `=== MODE CONTRACT ===
 Pedagogy: ${routePlan.modeContract.pedagogy}
@@ -1633,9 +2158,9 @@ Validator: ${routePlan.modeContract.validator}
   );
   systemPromptParts.push(
     `=== ROUTE PRIMITIVES ===
-Web search bundle: ${routePlan.shouldUseWebSearch ? "enabled" : "disabled"}.
+Web search bundle: ${routePlan.shouldUseWebSearch || usedRecentContextCache ? "enabled" : "disabled"}.
 Retrieved school resources: ${retrieval.citations.length > 0 ? `${retrieval.citations.length} source(s) available` : routePlan.retrievalScopes.length > 0 ? "enabled but no high-confidence sources found" : "disabled"}.
-Memory bundle: ${useMemoryProfile ? "relevant memory injected" : routePlan.shouldConsultMemory ? "eligible but no relevant memory injected" : "disabled"}.
+Memory bundle: ${useMemoryProfile ? "layered memory injected (global + topic-aware)" : memoryEnabled ? "enabled but no relevant memory injected" : "disabled"}.
 Multi-agent collaboration: ${routePlan.allowSubAgents ? "allowed only if the route earns it" : "disabled"}.
 If web search is enabled, use the provided search briefing and sources instead of claiming you lack web access.
 If retrieval is enabled, ground claims in the provided classroom sources instead of saying files are unavailable.
@@ -1661,9 +2186,9 @@ Allowed bundles: ${routePlan.agentContract.toolBundles.join(", ") || "none"}
   systemPromptParts.push(
     `=== TOOL EXECUTION CONTEXT ===
 Route-approved bundles: ${routePlan.allowedToolBundles.join(", ") || "none"}
-Search route enabled: ${routePlan.shouldUseWebSearch ? "yes" : "no"}
+Search route enabled: ${routePlan.shouldUseWebSearch || usedRecentContextCache ? "yes" : "no"}
 Retrieval scopes enabled: ${routePlan.retrievalScopes.join(", ") || "none"}
-Memory route enabled: ${routePlan.shouldConsultMemory ? "yes" : "no"}
+Memory route enabled: ${memoryEnabled ? "yes" : "no"}
 Web results provided below: ${searchSources.length > 0 ? "yes" : "no"}
 Retrieved classroom/personal sources provided below: ${retrieval.citations.length > 0 ? "yes" : "no"}
 If a route-approved capability returned no results, say that no usable results were found.
@@ -1695,24 +2220,48 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     shouldUseMultiAgentResult: shouldUseMultiAgent(auto.message, effectiveMode, auto.complexity),
     complexity: auto.complexity,
     effectiveMode,
+    requestClass: auto.requestClass,
     forceMultiAgent: body.forceMultiAgent,
+    forceMultiAgentAllowed,
+    forceMultiAgentDeniedReason,
   };
   logger.info("multi-agent gate evaluation", multiAgentGateDebug);
 
-  const multiAgentEnabled =
-    (body.forceMultiAgent === true) || (
-      budget.tier !== "free_only"
-      && routePlan.allowSubAgents
-      && featureEnabled(orgSettings.org?.orchestratorV2Enabled)
-      && (
-        routePlan.shouldUseWebSearch
-        || retrieval.citations.length > 0
-        || shouldUseMultiAgent(auto.message, effectiveMode, auto.complexity)
-      )
+  const tierAllowsMultiAgent = budget.tier !== "free_only" && budget.tier !== "cheap_only";
+  const requestClassAllowsMultiAgent = auto.requestClass === "T2" || auto.requestClass === "T3";
+  const autoMultiAgentEligible =
+    tierAllowsMultiAgent
+    && routePlan.allowSubAgents
+    && featureEnabled(orgSettings.org?.orchestratorV2Enabled)
+    && requestClassAllowsMultiAgent
+    && !budget.softLimitReached
+    && !budget.hardLimitReached
+    && (
+      routePlan.shouldUseWebSearch
+      || retrieval.citations.length > 0
+      || shouldUseMultiAgent(auto.message, effectiveMode, auto.complexity)
     );
+  const multiAgentEnabled = forceMultiAgentAllowed || autoMultiAgentEligible;
+  if (body.forceMultiAgent && !forceMultiAgentAllowed && forceMultiAgentDeniedReason) {
+    route.trace.toolchain.push("force_multi_agent_denied");
+  }
   if (multiAgentEnabled) {
     route.trace.toolchain.push("multi_agent_collaboration");
+    pipelineController.markStageCompleted("multiAgent");
+  } else {
+    pipelineController.markStageSkipped(
+      "multiAgent",
+      forceMultiAgentDeniedReason
+        ? `forceMultiAgent denied: ${forceMultiAgentDeniedReason}.`
+        : "Multi-agent not eligible for this request.",
+    );
   }
+  const gatedPipelineSnapshot = pipelineController.getState();
+  route.trace.stepsExecuted = gatedPipelineSnapshot.completedStages;
+  route.trace.stepsSkipped = gatedPipelineSnapshot.skippedStages.map((row) => ({
+    step: row.step,
+    reason: row.reason,
+  }));
 
   const collabWallTimeMs =
     routePlan.responseBudget === "deep"
@@ -1773,10 +2322,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     preferredCapabilities: ["reasoning"],
     preferredModelIds: [route.primaryModel],
     previousModelUsed: route.primaryModel,
-    recentModels: history
-      .filter((message) => message.role === "assistant")
-      .map((message) => message.modelUsed)
-      .filter((model): model is string => Boolean(model)),
+    recentModels: combinedRecentAssistantModels,
     modelCatalog: catalog,
     modelRuntimeStats: runtimeStatMap,
     seedKey: `${chatId}:${normalizedMessage}:support`,
@@ -1806,10 +2352,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         : ["reasoning"],
     preferredModelIds: [selectedAgent?.preferredModel, route.primaryModel].filter((value): value is string => Boolean(value)),
     previousModelUsed: route.primaryModel,
-    recentModels: history
-      .filter((message) => message.role === "assistant")
-      .map((message) => message.modelUsed)
-      .filter((model): model is string => Boolean(model)),
+    recentModels: combinedRecentAssistantModels,
     modelCatalog: catalog,
     modelRuntimeStats: runtimeStatMap,
     seedKey: `${chatId}:${normalizedMessage}:synthesis`,
@@ -1854,10 +2397,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
       preferredCapabilities: ["reasoning"],
       preferredModelIds: [supportModel, route.primaryModel],
       previousModelUsed: route.primaryModel,
-      recentModels: history
-        .filter((message) => message.role === "assistant")
-        .map((message) => message.modelUsed)
-        .filter((model): model is string => Boolean(model)),
+      recentModels: combinedRecentAssistantModels,
       modelCatalog: catalog,
       modelRuntimeStats: runtimeStatMap,
       seedKey: `${chatId}:${normalizedMessage}:verification`,
@@ -1866,7 +2406,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
   }
   route.trace.phasePlan = buildPhasePlan({
     routeNeedsRetrieval: retrieval.citations.length > 0 || routePlan.retrievalScopes.length > 0,
-    routeNeedsSearch: routePlan.shouldUseWebSearch,
+    routeNeedsSearch: routePlan.shouldUseWebSearch || usedRecentContextCache,
     multiAgentEnabled,
     shouldVerify,
     shouldRepair: effectiveMode === "quiz" || effectiveMode === "flashcard",
@@ -1888,6 +2428,77 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     if (phase.id === "retrieval") return { ...phase, model: (retrieval.diagnostics as any)?.embeddingModel };
     if (phase.id === "search") return { ...phase, model: (webResult as any).modelUsed };
     return phase;
+  });
+  type PhaseUpdateStatus = "planned" | "in_progress" | "completed" | "skipped" | "failed";
+  const toPhaseTraceStatus = (status: PhaseUpdateStatus) => (status === "in_progress" ? "running" : status);
+  const applyPhaseUpdate = (phaseId: string, status: PhaseUpdateStatus, detail?: string) => {
+    const now = Date.now();
+    route.trace.phasePlan = (route.trace.phasePlan ?? []).map((phase) => {
+      if (phase.id !== phaseId) return phase;
+      return {
+        ...phase,
+        status: toPhaseTraceStatus(status),
+        detail: detail ?? phase.detail,
+        startedAt: status === "in_progress" ? phase.startedAt ?? now : phase.startedAt,
+        finishedAt: status === "completed" || status === "skipped" || status === "failed" ? now : phase.finishedAt,
+      };
+    });
+    return route.trace.phasePlan;
+  };
+  const queuePhaseUpdate = (phaseId: string, status: PhaseUpdateStatus, detail?: string) => {
+    const phasePlan = applyPhaseUpdate(phaseId, status, detail);
+    earlyEventBuffer.push({
+      type: "phase_update",
+      phaseId,
+      status,
+      detail,
+      phasePlan,
+    });
+  };
+  const emitPhaseUpdate = async (phaseId: string, status: PhaseUpdateStatus, detail?: string) => {
+    const phasePlan = applyPhaseUpdate(phaseId, status, detail);
+    await send({
+      type: "phase_update",
+      phaseId,
+      status,
+      detail,
+      phasePlan,
+    });
+  };
+  const subcallTokenTotals = () => {
+    const subcalls = route.trace.subcalls ?? [];
+    return subcalls.reduce(
+      (sum, call) => ({
+        input: sum.input + (call.inputTokens ?? 0),
+        output: sum.output + (call.outputTokens ?? 0),
+      }),
+      { input: 0, output: 0 },
+    );
+  };
+  if (route.trace.phasePlan?.some((phase) => phase.id === "retrieval")) {
+    if (!routePlan.retrievalScopes.length) {
+      queuePhaseUpdate("retrieval", "skipped", "No retrieval scope enabled.");
+    } else if (retrieval.citations.length > 0) {
+      queuePhaseUpdate("retrieval", "completed", `Used ${retrieval.citations.length} source(s).`);
+    } else {
+      queuePhaseUpdate("retrieval", "completed", retrieval.diagnostics?.reason ?? "No high-confidence retrieval match.");
+    }
+  }
+  if (route.trace.phasePlan?.some((phase) => phase.id === "search")) {
+    if (!routePlan.shouldUseWebSearch && !usedRecentContextCache) {
+      queuePhaseUpdate("search", "skipped", "Web search not required.");
+    } else {
+      const sourceCount = searchSources.length || searchUrls.length;
+      queuePhaseUpdate(
+        "search",
+        "completed",
+        searchBlock.trim() ? `Captured ${sourceCount} web source(s).` : "No usable web results.",
+      );
+    }
+  }
+  earlyEventBuffer.push({
+    type: "phase_update",
+    phasePlan: route.trace.phasePlan,
   });
   if (shouldVerify) {
     route.trace.toolchain.push("marker_verification");
@@ -1982,8 +2593,93 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         });
       });
 
+      if (clarificationBlock && clarificationText) {
+        await send({
+          type: "phase_update",
+          phaseId: "clarificationCheck",
+          status: "in_progress",
+          detail: "Checking whether additional scope details are needed.",
+        });
+        await send({
+          type: "phase_update",
+          phaseId: "clarificationCheck",
+          status: "completed",
+          detail: clarificationDecision?.reason ?? "Clarification required before generation.",
+        });
+
+        pipelineController.markStageSkipped("generation", "Clarification required before response generation.");
+        pipelineController.markStageSkipped("postProcess", "Waiting for user clarification before post-processing.");
+        route.trace.phasePlan = (route.trace.phasePlan ?? []).map((phase) => {
+          if (phase.status === "completed" || phase.status === "skipped" || phase.status === "failed") {
+            return phase;
+          }
+          return {
+            ...phase,
+            status: "skipped",
+            detail: phase.detail ?? "Deferred until clarification answers are provided.",
+          };
+        });
+        const clarificationSnapshot = pipelineController.getState();
+        route.trace.stepsExecuted = clarificationSnapshot.completedStages;
+        route.trace.stepsSkipped = clarificationSnapshot.skippedStages.map((row) => ({
+          step: row.step,
+          reason: row.reason,
+        }));
+        (route.trace as any).totalDurationMs = Date.now() - requestStartedAt;
+
+        const appended = await appendAssistantMessageWithCitationFallback({
+          actorClerkId: actor.clerkId,
+          chatId,
+          parentMessageId: currentTurnParentMessageId,
+          content: clarificationText,
+          mode: effectiveMode,
+          citations: [],
+          modelRequested: undefined,
+          modelUsed: undefined,
+          whyThisResponse: "Additional clarification required before executing the full workflow.",
+          usageIn: undefined,
+          usageOut: undefined,
+          verificationPassed: undefined,
+          thinkingContent: undefined,
+          routeTrace: route.trace,
+        });
+        assistantPersisted = true;
+
+        await send({
+          type: "done",
+          content: clarificationText,
+          chatId,
+          userMessageId: resolvedUserMessageId,
+          messageId: appended.messageId,
+          modelUsed: undefined,
+          modelRequested: route.primaryModel,
+          whyThisResponse: "Clarification requested before executing the expensive stages.",
+          citations: [],
+          routeTrace: route.trace,
+          autoResult: {
+            modelUsed: undefined,
+            searchEnabled: route.searchEnabled || routePlan.shouldUseWebSearch || usedRecentContextCache,
+            thinkingLevel: effectiveThinkingLevel,
+            promptEnhanced: auto.promptEnhanced,
+          },
+          enhancedPrompt: auto.promptEnhanced ? auto.message : undefined,
+          effectiveMode,
+          suggestedMode: effectiveMode !== safeMode ? effectiveMode : undefined,
+          userSelectedMode: safeMode,
+          agentSuggestion,
+        });
+        return;
+      }
+
       if (effectiveMode === "image") {
+        if (route.trace.phasePlan?.some((phase) => phase.id === "analysis")) {
+          await emitPhaseUpdate("analysis", "in_progress");
+          await emitPhaseUpdate("analysis", "completed", "Prepared image generation context.");
+        }
         route.trace.toolchain.push("image_prompt_refinement");
+        if (route.trace.phasePlan?.some((phase) => phase.id === "planning")) {
+          await emitPhaseUpdate("planning", "in_progress");
+        }
         const promptRefinementStartedAt = Date.now();
         const promptRefinement = await openRouterChatCompletion({
           model: primaryModel,
@@ -2020,11 +2716,17 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
             pricing: resolveCatalogPricing(promptRefinement.model ?? primaryModel),
           }).catch(() => {});
         }
+        if (route.trace.phasePlan?.some((phase) => phase.id === "planning")) {
+          await emitPhaseUpdate("planning", "completed", "Image prompt refined.");
+        }
 
         const refinedPrompt =
           promptRefinement?.choices?.[0]?.message?.content?.trim() || auto.message;
 
         route.trace.toolchain.push("image_generation");
+        if (route.trace.phasePlan?.some((phase) => phase.id === "authoring")) {
+          await emitPhaseUpdate("authoring", "in_progress");
+        }
         const imageModelSelection = pickModelAndFallbacks({
           catalog: catalog.filter((model) => model.modelId !== "openrouter/auto"),
           tier: budget.tier,
@@ -2095,6 +2797,9 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         const modelUsed = imageModel;
         const usageIn = imageResult.usage?.prompt_tokens ?? 0;
         const usageOut = imageResult.usage?.completion_tokens ?? 0;
+        const imageSubcallTotals = subcallTokenTotals();
+        const finalUsageIn = imageSubcallTotals.input > 0 ? imageSubcallTotals.input : usageIn;
+        const finalUsageOut = imageSubcallTotals.output > 0 ? imageSubcallTotals.output : usageOut;
         const citations: Array<{
           filename: string;
           url?: string;
@@ -2104,6 +2809,10 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         }> = [];
 
         route.trace.toolchain = [...new Set(route.trace.toolchain)];
+        if (route.trace.phasePlan?.some((phase) => phase.id === "authoring")) {
+          await emitPhaseUpdate("authoring", "completed", "Image generated successfully.");
+        }
+        pipelineController.markStageCompleted("generation");
         (route.trace as any).totalCostCents = Number(
           ((route.trace.subcalls ?? []).reduce((sum, call) => sum + (call.costCents ?? 0), 0)).toFixed(4),
         );
@@ -2112,14 +2821,15 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         const appended = await appendAssistantMessageWithCitationFallback({
           actorClerkId: actor.clerkId,
           chatId,
+          parentMessageId: currentTurnParentMessageId,
           content: finalizedResponse,
           mode: effectiveMode,
           citations,
           modelRequested,
           modelUsed,
           whyThisResponse,
-          usageIn,
-          usageOut,
+          usageIn: finalUsageIn,
+          usageOut: finalUsageOut,
           verificationPassed: undefined,
           thinkingContent: undefined,
           routeTrace: route.trace,
@@ -2144,8 +2854,8 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           messageId: appended.messageId,
           model: modelUsed,
           usage: imageResult.usage,
-          inputTokens: usageIn,
-          outputTokens: usageOut,
+          inputTokens: finalUsageIn,
+          outputTokens: finalUsageOut,
           pricing,
           skipIfZeroTokens: false,
         });
@@ -2165,7 +2875,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           actorClerkId: actor.clerkId,
           mode: effectiveMode,
           model: modelUsed,
-          tokensUsed: usageIn + usageOut,
+          tokensUsed: finalUsageIn + finalUsageOut,
           topic: normalizedMessage.slice(0, 60),
         }).catch(() => {});
 
@@ -2187,6 +2897,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
             activityType: string;
             modeUsed: StudyMode;
             currentStreak?: number;
+            hasCitations?: boolean;
           },
           {
             xpAwarded: number;
@@ -2198,6 +2909,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           activityType: gamificationActivityType(effectiveMode),
           modeUsed: effectiveMode,
           currentStreak: streakUpdate?.currentStreak,
+          hasCitations: citations.length > 0,
         }).catch(() => null);
 
         const unlockedAchievements = mergeUnlockedAchievements(
@@ -2219,6 +2931,9 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         }
 
         const assistantCount = history.filter((message) => message.role === "assistant").length;
+        if (route.trace.phasePlan?.some((phase) => phase.id === "title")) {
+          await emitPhaseUpdate("title", "in_progress");
+        }
         const generatedTitle = await resolveFirstTurnTitle({
           assistantCount,
           chatId,
@@ -2240,11 +2955,25 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           },
           logger,
         });
+        if (route.trace.phasePlan?.some((phase) => phase.id === "title")) {
+          await emitPhaseUpdate(
+            "title",
+            generatedTitle ? "completed" : "skipped",
+            generatedTitle ? "Chat title updated." : "Title unchanged.",
+          );
+        }
         finalizePhasePlan({
           memoryUpdated: false,
           titleUpdated: Boolean(generatedTitle),
           repaired: false,
         });
+        pipelineController.markStageCompleted("postProcess");
+        const imagePipelineSnapshot = pipelineController.getState();
+        route.trace.stepsExecuted = imagePipelineSnapshot.completedStages;
+        route.trace.stepsSkipped = imagePipelineSnapshot.skippedStages.map((row) => ({
+          step: row.step,
+          reason: row.reason,
+        }));
         (route.trace as any).totalCostCents = Number(
           ((route.trace.subcalls ?? []).reduce((sum, call) => sum + (call.costCents ?? 0), 0)).toFixed(4),
         );
@@ -2254,12 +2983,12 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           type: "done",
           content: finalizedResponse,
           chatId,
-          userMessageId: persistedUserMessageId,
+          userMessageId: resolvedUserMessageId,
           messageId: appended.messageId,
           modelUsed,
           modelRequested,
-          usageIn,
-          usageOut,
+          usageIn: finalUsageIn,
+          usageOut: finalUsageOut,
           whyThisResponse,
           citations,
           verificationPassed: undefined,
@@ -2297,6 +3026,22 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         (route.trace.fallbacks as any).push(event);
       };
 
+      if (route.trace.phasePlan?.some((phase) => phase.id === "analysis")) {
+        await emitPhaseUpdate("analysis", "in_progress");
+      }
+      if (route.trace.phasePlan?.some((phase) => phase.id === "planning")) {
+        await emitPhaseUpdate("planning", "in_progress");
+      }
+      if (route.trace.phasePlan?.some((phase) => phase.id === "synthesis") && multiAgentEnabled) {
+        await emitPhaseUpdate("synthesis", "in_progress");
+      }
+      if (route.trace.phasePlan?.some((phase) => phase.id === "authoring") && !multiAgentEnabled) {
+        await emitPhaseUpdate("authoring", "in_progress");
+      }
+      if (route.trace.phasePlan?.some((phase) => phase.id === "verification") && shouldVerify) {
+        await emitPhaseUpdate("verification", "in_progress");
+      }
+
       const streamed = multiAgentEnabled
         ? await runCollaborativeStreaming({
             actorClerkId: actor.clerkId,
@@ -2333,6 +3078,25 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
             onFallback,
             logger,
           });
+      if (route.trace.phasePlan?.some((phase) => phase.id === "planning")) {
+        await emitPhaseUpdate(
+          "planning",
+          multiAgentEnabled ? "completed" : "skipped",
+          multiAgentEnabled ? "Specialist plan executed." : "Single-pass route selected.",
+        );
+      }
+      if (route.trace.phasePlan?.some((phase) => phase.id === "analysis")) {
+        await emitPhaseUpdate("analysis", "completed");
+      }
+      if (route.trace.phasePlan?.some((phase) => phase.id === "authoring") && !multiAgentEnabled) {
+        await emitPhaseUpdate("authoring", "completed");
+      }
+      if (route.trace.phasePlan?.some((phase) => phase.id === "synthesis") && multiAgentEnabled) {
+        await emitPhaseUpdate("synthesis", "completed", "Specialist outputs synthesized.");
+      }
+      if (route.trace.phasePlan?.some((phase) => phase.id === "verification") && shouldVerify) {
+        await emitPhaseUpdate("verification", "completed");
+      }
 
       if (streamed.sourceHints?.length) {
         const deduped = new Map<string, { url: string; title: string; domain: string }>();
@@ -2434,6 +3198,9 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         effectiveMode === "flashcard" &&
         (!isFlashcardDeckStructured(correctedResponse) || flashcardCount < MIN_FLASHCARD_PAIRS);
       if (needsQuizRepair || needsFlashcardRepair) {
+        if (route.trace.phasePlan?.some((phase) => phase.id === "repair")) {
+          await emitPhaseUpdate("repair", "in_progress");
+        }
         const repairStartedAt = Date.now();
         const repaired = await openRouterChatCompletion({
           model: supportModel,
@@ -2505,6 +3272,9 @@ BACK: ...`,
             }
           }
         }
+        if (route.trace.phasePlan?.some((phase) => phase.id === "repair")) {
+          await emitPhaseUpdate("repair", "completed", "Output formatting repaired.");
+        }
       }
 
       if (!isVagueRequest && effectiveMode === "flashcard") {
@@ -2525,6 +3295,9 @@ BACK: ...`,
         (!isFlashcardDeckStructured(correctedResponse) || countFlashcardPairs(correctedResponse) < MIN_FLASHCARD_PAIRS);
 
       if (stillNeedsQuizRepair || stillNeedsFlashcardRepair) {
+        if (route.trace.phasePlan?.some((phase) => phase.id === "repair")) {
+          await emitPhaseUpdate("repair", "in_progress");
+        }
         const regenerateRepairStartedAt = Date.now();
         const regenerated = await openRouterChatCompletion({
           model: supportModel,
@@ -2601,6 +3374,9 @@ BACK: ...`,
             }
           }
         }
+        if (route.trace.phasePlan?.some((phase) => phase.id === "repair")) {
+          await emitPhaseUpdate("repair", "completed", "Regenerated response with strict format.");
+        }
       }
 
       const finalQuizRepairNeeded =
@@ -2608,6 +3384,9 @@ BACK: ...`,
         effectiveMode === "quiz" &&
         (!isQuizStructured(correctedResponse) || countQuizQuestions(correctedResponse) < MIN_QUIZ_QUESTIONS);
       if (finalQuizRepairNeeded) {
+        if (route.trace.phasePlan?.some((phase) => phase.id === "repair")) {
+          await emitPhaseUpdate("repair", "in_progress");
+        }
         const finalQuizRepairStartedAt = Date.now();
         const finalRepair = await openRouterChatCompletion({
           model: supportModel,
@@ -2666,6 +3445,9 @@ Correct: [A|B|C|D]
           correctedResponse = finalCandidate;
           route.trace.toolchain.push("quiz_final_repair");
         }
+        if (route.trace.phasePlan?.some((phase) => phase.id === "repair")) {
+          await emitPhaseUpdate("repair", "completed", "Final quiz format pass completed.");
+        }
       }
 
       const finalFlashcardRepairNeeded =
@@ -2673,6 +3455,9 @@ Correct: [A|B|C|D]
         effectiveMode === "flashcard" &&
         (!isFlashcardDeckStructured(correctedResponse) || countFlashcardPairs(correctedResponse) < MIN_FLASHCARD_PAIRS);
       if (finalFlashcardRepairNeeded) {
+        if (route.trace.phasePlan?.some((phase) => phase.id === "repair")) {
+          await emitPhaseUpdate("repair", "in_progress");
+        }
         const finalFlashcardRepairStartedAt = Date.now();
         const finalFlashcardRepair = await openRouterChatCompletion({
           model: supportModel,
@@ -2723,6 +3508,9 @@ BACK: [answer or definition]`,
         if (normalizedFinalFlashcards && countFlashcardPairs(normalizedFinalFlashcards) >= MIN_FLASHCARD_PAIRS) {
           correctedResponse = normalizedFinalFlashcards;
           route.trace.toolchain.push("flashcard_final_repair");
+        }
+        if (route.trace.phasePlan?.some((phase) => phase.id === "repair")) {
+          await emitPhaseUpdate("repair", "completed", "Final flashcard format pass completed.");
         }
       }
 
@@ -2776,20 +3564,25 @@ BACK: [answer or definition]`,
         }
       }
       const whyThisResponse = summarizeWhyResponse(effectiveMode, route.reason);
+      const finalSubcallTotals = subcallTokenTotals();
+      const finalUsageIn = finalSubcallTotals.input > 0 ? finalSubcallTotals.input : usageIn;
+      const finalUsageOut = finalSubcallTotals.output > 0 ? finalSubcallTotals.output : usageOut;
       (route.trace as any).totalCostCents = Number(
         ((route.trace.subcalls ?? []).reduce((sum, call) => sum + (call.costCents ?? 0), 0)).toFixed(4),
       );
       (route.trace as any).totalDurationMs = Date.now() - requestStartedAt;
       logger.info("streaming complete", {
         modelUsed,
-        usageIn,
-        usageOut,
+        usageIn: finalUsageIn,
+        usageOut: finalUsageOut,
         fallbackCount: route.trace.fallbacks.length,
       });
+      pipelineController.markStageCompleted("generation");
 
       const appended = await appendAssistantMessageWithCitationFallback({
         actorClerkId: actor.clerkId,
         chatId,
+        parentMessageId: currentTurnParentMessageId,
         content: finalizedResponse,
         mode: effectiveMode,
         attachments: generatedArtifactAttachments,
@@ -2798,8 +3591,8 @@ BACK: [answer or definition]`,
         modelRequested,
         modelUsed,
         whyThisResponse,
-        usageIn,
-        usageOut,
+        usageIn: finalUsageIn,
+        usageOut: finalUsageOut,
         verificationPassed,
         thinkingContent: thinkingContent || undefined,
         routeTrace: route.trace,
@@ -2825,8 +3618,8 @@ BACK: [answer or definition]`,
           messageId: appended.messageId,
           model: modelUsed,
           usage,
-          inputTokens: usageIn,
-          outputTokens: usageOut,
+          inputTokens: finalUsageIn,
+          outputTokens: finalUsageOut,
           pricing,
         });
       }
@@ -2855,7 +3648,7 @@ BACK: [answer or definition]`,
         actorClerkId: actor.clerkId,
         mode: effectiveMode,
         model: modelUsed,
-        tokensUsed: usageIn + usageOut,
+        tokensUsed: finalUsageIn + finalUsageOut,
         topic: normalizedMessage.slice(0, 60),
       }).catch(() => {});
 
@@ -2877,6 +3670,7 @@ BACK: [answer or definition]`,
           activityType: string;
           modeUsed: StudyMode;
           currentStreak?: number;
+          hasCitations?: boolean;
         },
         {
           xpAwarded: number;
@@ -2888,6 +3682,7 @@ BACK: [answer or definition]`,
         activityType: gamificationActivityType(effectiveMode),
         modeUsed: effectiveMode,
         currentStreak: streakUpdate?.currentStreak,
+        hasCitations: citations.length > 0,
       }).catch(() => null);
 
       const unlockedAchievements = mergeUnlockedAchievements(
@@ -2908,13 +3703,32 @@ BACK: [answer or definition]`,
         }).catch(() => {});
       }
 
-      const extractedMemory = routePlan.shouldWriteMemory
+      if (route.trace.phasePlan?.some((phase) => phase.id === "memory") && routePlan.shouldWriteMemory) {
+        await emitPhaseUpdate("memory", "in_progress");
+      }
+      const shouldExtractLearningContext =
+        [
+          "tutor",
+          "explain",
+          "quiz",
+          "flashcard",
+          "exam",
+          "research",
+          "general",
+        ].includes(effectiveMode)
+        && finalizedResponse.trim().length >= 120;
+      let extractedLearningContext: LearningContext | null = null;
+      const extractedMemory = (routePlan.shouldWriteMemory || shouldExtractLearningContext)
         ? await maybeExtractMemory({
             actorClerkId: actor.clerkId,
             chatId,
             existingEntries: userMemory.entries,
             userMessage: normalizedMessage,
             assistantResponse: finalizedResponse,
+            persistMemory: routePlan.shouldWriteMemory,
+            onLearningContextExtracted: (context) => {
+              extractedLearningContext = context;
+            },
             onModelCall: (call) => {
               appendSubcall({
                 phaseId: "memory",
@@ -2930,6 +3744,38 @@ BACK: [answer or definition]`,
             },
           }).catch(() => [] as Array<{ key: string; value: string; confidence: number; extractedAt: number }>)
         : [];
+      const routedMemoryWrite = routePlan.shouldWriteMemory
+        ? await routeMemoryWrite({
+            actorClerkId: actor.clerkId,
+            chatId,
+            entries: extractedMemory,
+            sourceType: "extraction",
+            onModelCall: (call) => {
+              appendSubcall({
+                phaseId: "memory",
+                label: "Memory entry embedding",
+                endpoint: "embeddings",
+                status: "ok",
+                modelUsed: call.model,
+                inputTokens: call.usage?.prompt_tokens,
+                outputTokens: call.usage?.completion_tokens,
+                costCents: costCentsFromUsage(call.usage),
+                durationMs: call.durationMs,
+              });
+            },
+          }).catch(() => ({ written: 0, promoted: 0 }))
+        : { written: 0, promoted: 0 };
+      if (route.trace.phasePlan?.some((phase) => phase.id === "memory") && routePlan.shouldWriteMemory) {
+        await emitPhaseUpdate(
+          "memory",
+          routedMemoryWrite.written > 0 || extractedMemory.length > 0 ? "completed" : "skipped",
+          routedMemoryWrite.written > 0
+            ? `Layered memory updated (${routedMemoryWrite.written} write(s), ${routedMemoryWrite.promoted} promoted).`
+            : extractedMemory.length > 0
+              ? "Legacy memory updated; layered memory write skipped."
+              : "No durable memory update extracted.",
+        );
+      }
       if (extractedMemory.length > 0) {
         await send({
           type: "soul_update",
@@ -2940,8 +3786,33 @@ BACK: [answer or definition]`,
           })),
         });
       }
+      const mergedLearningContext = mergeLearningContexts(storedLearningContext, extractedLearningContext);
+      const nextLearningContext = serializeLearningContext(mergedLearningContext);
+      const previousLearningContext = typeof (chatData.chat as { learningContext?: unknown }).learningContext === "string"
+        ? String((chatData.chat as { learningContext?: unknown }).learningContext)
+        : undefined;
+      if (nextLearningContext && nextLearningContext !== previousLearningContext) {
+        await convexMutation("chats:setLearningContext", {
+          actorClerkId: actor.clerkId,
+          chatId,
+          learningContext: nextLearningContext,
+        }).catch(() => {});
+        route.trace.toolchain.push("learning_context_updated");
+      }
+      const modeSuggestions = buildModeSuggestions({
+        mode: effectiveMode,
+        response: finalizedResponse,
+        learningContext: mergedLearningContext,
+      });
+      if (modeSuggestions.length > 0) {
+        (route.trace as { modeSuggestions?: Array<{ mode: StudyMode; label: string; prompt: string }> }).modeSuggestions = modeSuggestions;
+        route.trace.toolchain.push("mode_switch_chips");
+      }
 
       const assistantCount = history.filter((message) => message.role === "assistant").length;
+      if (route.trace.phasePlan?.some((phase) => phase.id === "title")) {
+        await emitPhaseUpdate("title", "in_progress");
+      }
       const generatedTitle = await resolveFirstTurnTitle({
         assistantCount,
         chatId,
@@ -2963,11 +3834,25 @@ BACK: [answer or definition]`,
         },
         logger,
       });
+      if (route.trace.phasePlan?.some((phase) => phase.id === "title")) {
+        await emitPhaseUpdate(
+          "title",
+          generatedTitle ? "completed" : "skipped",
+          generatedTitle ? "Chat title updated." : "Title unchanged.",
+        );
+      }
       finalizePhasePlan({
         memoryUpdated: extractedMemory.length > 0,
         titleUpdated: Boolean(generatedTitle),
         repaired: route.trace.toolchain.some((tool) => tool.includes("repair")),
       });
+      pipelineController.markStageCompleted("postProcess");
+      const finalPipelineSnapshot = pipelineController.getState();
+      route.trace.stepsExecuted = finalPipelineSnapshot.completedStages;
+      route.trace.stepsSkipped = finalPipelineSnapshot.skippedStages.map((row) => ({
+        step: row.step,
+        reason: row.reason,
+      }));
       (route.trace as any).totalCostCents = Number(
         ((route.trace.subcalls ?? []).reduce((sum, call) => sum + (call.costCents ?? 0), 0)).toFixed(4),
       );
@@ -2977,12 +3862,12 @@ BACK: [answer or definition]`,
         type: "done",
         content: finalizedResponse,
         chatId,
-        userMessageId: persistedUserMessageId,
+        userMessageId: resolvedUserMessageId,
         messageId: appended.messageId,
         modelUsed,
         modelRequested,
-        usageIn,
-        usageOut,
+        usageIn: finalUsageIn,
+        usageOut: finalUsageOut,
         whyThisResponse,
         citations,
         attachments: generatedArtifactAttachments,
@@ -3023,6 +3908,14 @@ BACK: [answer or definition]`,
         "chat stream failed",
         error instanceof Error ? error : new Error("Unknown stream failure"),
       );
+      for (const phase of route.trace.phasePlan ?? []) {
+        if (phase.status !== "running") continue;
+        await emitPhaseUpdate(
+          phase.id,
+          "failed",
+          error instanceof Error ? error.message : "Phase failed during streaming.",
+        );
+      }
       await recordModelRuntime(route.primaryModel, false, Date.now() - requestStartedAt);
       if (shouldPersistUserMessage && !assistantPersisted) {
         await convexMutation("chats:deleteLastUserMessage", {
@@ -3041,7 +3934,9 @@ BACK: [answer or definition]`,
         },
       });
     } finally {
-      await writer.close();
+      if (!streamClosed) {
+        await writer.close().catch(() => {});
+      }
     }
   })();
 

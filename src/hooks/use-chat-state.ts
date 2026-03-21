@@ -65,6 +65,9 @@ export type Message = {
   usageOut?: number;
   createdAt?: number;
   mode?: StudyMode;
+  parentMessageId?: string;
+  siblingIndex?: number;
+  siblingCount?: number;
 };
 
 export type FileStatus = "pending" | "uploading" | "processing" | "ready" | "error";
@@ -131,6 +134,46 @@ export type UserSpending = {
 
 export type AutoPreference = "auto" | "on" | "off";
 type StreamPhase = "idle" | "compacting" | "routing" | "searching" | "thinking" | "generating" | "synthesizing";
+type SearchStatusBanner = "model_knowledge" | "real_search" | "error" | null;
+type ProactiveBanner = {
+  id: string;
+  kind: "reminder_flashcards_due" | "reminder_streak_risk" | "reminder_study_plan" | "continuation_chat";
+  title: string;
+  body: string;
+  actionLabel: string;
+  chatId?: string;
+  mode?: StudyMode;
+  followUpMessage?: string;
+  actionUrl?: string;
+};
+
+type ApiNotification = {
+  _id: string;
+  type: string;
+  title: string;
+  body: string;
+  actionUrl?: string;
+  read: boolean;
+  createdAt: number;
+};
+
+function normalizePhaseStatus(value?: string): "planned" | "running" | "completed" | "skipped" | "failed" {
+  if (value === "in_progress" || value === "running") return "running";
+  if (value === "completed") return "completed";
+  if (value === "skipped") return "skipped";
+  if (value === "failed") return "failed";
+  return "planned";
+}
+
+function streamPhaseFromPhaseId(phaseId?: string): StreamPhase | undefined {
+  if (!phaseId) return undefined;
+  if (phaseId === "routing" || phaseId === "planning") return "routing";
+  if (phaseId === "retrieval" || phaseId === "search") return "searching";
+  if (phaseId === "analysis" || phaseId === "verification" || phaseId === "memory" || phaseId === "title") return "thinking";
+  if (phaseId === "authoring" || phaseId === "repair") return "generating";
+  if (phaseId === "synthesis") return "synthesizing";
+  return undefined;
+}
 
 const AUTO_COMPACTION_MIN_MESSAGES = 10;
 const AUTO_COMPACTION_KEEP_LATEST = 6;
@@ -140,6 +183,11 @@ const LAST_ACTIVE_CHAT_ID_KEY = "ai-school:lastActiveChatId";
 const CHAT_SESSION_WINDOW_MS = 12 * 60 * 60 * 1000;
 const MEMORY_ENABLED_KEY = "ai-school:memory-enabled";
 const SEARXNG_ENABLED_KEY = "ai-school:searxng-enabled";
+const PROACTIVE_BANNER_DISMISSED_KEY = "ai-school:proactive-banner-dismissed-v1";
+const PERSONAL_RESOURCES_POLL_MIN_MS = 4_000;
+const PERSONAL_RESOURCES_POLL_MAX_MS = 30_000;
+const PERSONAL_RESOURCES_POLL_BACKOFF = 1.7;
+const PROACTIVE_NOTIFICATIONS_CACHE_MS = 120_000;
 
 type LiveModel = {
   id: string;
@@ -523,6 +571,9 @@ export function useChatState() {
   const sending = activeStreamIds.has(selectedChatId);
   const [activeCollaborators, setActiveCollaborators] = useState<ActiveCollaboratorState[]>([]);
   const [streamPhase, setStreamPhase] = useState<StreamPhase>("idle");
+  const [livePhasePlan, setLivePhasePlan] = useState<NonNullable<RouteTrace["phasePlan"]>>([]);
+  const [searchStatusBanner, setSearchStatusBanner] = useState<SearchStatusBanner>(null);
+  const [proactiveBanner, setProactiveBanner] = useState<ProactiveBanner | null>(null);
   const [collaboratorPhase, setCollaboratorPhase] = useState<"idle" | "running" | "synthesizing">("idle");
   const [fileList, setFileList] = useState<File[]>([]);
   const [fileUploadState, setFileUploadState] = useState<
@@ -559,6 +610,13 @@ export function useChatState() {
   const sendingRef = useRef(false);
   const shownAchievementToastsRef = useRef<Set<string>>(new Set());
   const lastPersonalRetryFailureRef = useRef("");
+  const dismissedProactiveIdsRef = useRef<Set<string>>(new Set());
+  const proactiveNotificationsCacheRef = useRef<{
+    fetchedAt: number;
+    notifications: ApiNotification[];
+  } | null>(null);
+  const personalResourcesPollMsRef = useRef(PERSONAL_RESOURCES_POLL_MIN_MS);
+  const personalResourcesRefreshInFlightRef = useRef<Promise<void> | null>(null);
 
   const refreshBookmarks = useCallback(async (chatId = selectedChatIdRef.current) => {
     if (!chatId) {
@@ -707,6 +765,18 @@ export function useChatState() {
   }, [chats, search, searchHits]);
 
   useEffect(() => {
+    try {
+      const raw = window.sessionStorage.getItem(PROACTIVE_BANNER_DISMISSED_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as string[];
+      if (!Array.isArray(parsed)) return;
+      dismissedProactiveIdsRef.current = new Set(parsed.filter((id) => typeof id === "string" && id.trim().length > 0));
+    } catch {
+      dismissedProactiveIdsRef.current = new Set();
+    }
+  }, []);
+
+  useEffect(() => {
     if (sidebar.loading || initializedRef.current) return;
     initializedRef.current = true;
 
@@ -784,7 +854,10 @@ export function useChatState() {
     const pendingResources = personalResources.filter(
       (resource) => resource.status === "uploaded" || resource.status === "processing",
     );
-    if (pendingResources.length === 0) return;
+    if (pendingResources.length === 0) {
+      personalResourcesPollMsRef.current = PERSONAL_RESOURCES_POLL_MIN_MS;
+      return;
+    }
 
     const now = Date.now();
     const staleResourceIds = pendingResources
@@ -799,6 +872,7 @@ export function useChatState() {
       .map((resource) => resource._id);
 
     if (staleResourceIds.length > 0) {
+      personalResourcesPollMsRef.current = PERSONAL_RESOURCES_POLL_MIN_MS;
       void retryPendingPersonalResources(staleResourceIds)
         .then(() => refreshPersonalResources())
         .catch((error) => {
@@ -811,9 +885,21 @@ export function useChatState() {
         });
     }
 
+    const nextPollMs =
+      staleResourceIds.length > 0
+        ? PERSONAL_RESOURCES_POLL_MIN_MS
+        : Math.min(
+            PERSONAL_RESOURCES_POLL_MAX_MS,
+            Math.max(
+              PERSONAL_RESOURCES_POLL_MIN_MS,
+              Math.round(personalResourcesPollMsRef.current * PERSONAL_RESOURCES_POLL_BACKOFF),
+            ),
+          );
+    personalResourcesPollMsRef.current = nextPollMs;
+
     const timer = window.setTimeout(() => {
       void refreshPersonalResources().catch(() => {});
-    }, staleResourceIds.length > 0 ? 4000 : 3500);
+    }, nextPollMs);
     return () => window.clearTimeout(timer);
   }, [personalResources]);
 
@@ -824,6 +910,8 @@ export function useChatState() {
     if (selectedChatId) {
       markChatActive(selectedChatId);
     }
+    setLivePhasePlan([]);
+    setSearchStatusBanner(null);
   }, [selectedChatId, markChatActive, syncChatIdToUrl]);
 
   useEffect(() => {
@@ -1035,6 +1123,7 @@ export function useChatState() {
       setLastFailedMessage(null);
       setLastAutoResult(null);
       setAgentSuggestion(null);
+      setProactiveBanner(null);
       setMobileSidebarOpen(false);
       setStreamPhase("idle");
       pendingLocalUserMessageIdsRef.current.clear();
@@ -1056,6 +1145,29 @@ export function useChatState() {
     },
     [clearRecentChatActivity],
   );
+
+  const persistDismissedProactiveIds = useCallback(() => {
+    try {
+      window.sessionStorage.setItem(
+        PROACTIVE_BANNER_DISMISSED_KEY,
+        JSON.stringify([...dismissedProactiveIdsRef.current]),
+      );
+    } catch {
+      // Ignore storage failures.
+    }
+  }, []);
+
+  const markProactiveDismissed = useCallback((id: string) => {
+    if (!id.trim()) return;
+    dismissedProactiveIdsRef.current.add(id);
+    persistDismissedProactiveIds();
+  }, [persistDismissedProactiveIds]);
+
+  const dismissProactiveBanner = useCallback(() => {
+    if (!proactiveBanner) return;
+    markProactiveDismissed(proactiveBanner.id);
+    setProactiveBanner(null);
+  }, [markProactiveDismissed, proactiveBanner]);
 
   useEffect(() => {
     const clean = search.trim();
@@ -1079,6 +1191,107 @@ export function useChatState() {
 
     return () => window.clearTimeout(timeout);
   }, [search]);
+
+  useEffect(() => {
+    if (sending || messages.length > 0) {
+      setProactiveBanner(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const collectBannerCandidates = async () => {
+      const candidates: ProactiveBanner[] = [];
+      const now = Date.now();
+      const cached = proactiveNotificationsCacheRef.current;
+      let unread: ApiNotification[] = [];
+
+      if (cached && (now - cached.fetchedAt) < PROACTIVE_NOTIFICATIONS_CACHE_MS) {
+        unread = [...cached.notifications]
+          .filter((row) => !row.read)
+          .sort((a, b) => b.createdAt - a.createdAt);
+      } else {
+        try {
+          const response = await fetch("/api/notifications?read=false&limit=20");
+          if (response.ok) {
+            const payload = (await response.json()) as { notifications?: ApiNotification[] };
+            const fresh = payload.notifications ?? [];
+            proactiveNotificationsCacheRef.current = {
+              fetchedAt: now,
+              notifications: fresh,
+            };
+            unread = [...fresh]
+              .filter((row) => !row.read)
+              .sort((a, b) => b.createdAt - a.createdAt);
+          }
+        } catch {
+          // Keep proactive banner non-blocking.
+        }
+      }
+
+      for (const notification of unread) {
+        if (notification.type === "reminder_flashcards_due") {
+          candidates.push({
+            id: `notif:${notification._id}`,
+            kind: "reminder_flashcards_due",
+            title: notification.title,
+            body: notification.body,
+            actionLabel: "Open flashcards",
+            actionUrl: notification.actionUrl ?? "/flashcards",
+          });
+          continue;
+        }
+        if (notification.type === "reminder_streak_risk") {
+          candidates.push({
+            id: `notif:${notification._id}`,
+            kind: "reminder_streak_risk",
+            title: notification.title,
+            body: notification.body,
+            actionLabel: "Protect streak",
+            mode: "tutor",
+            followUpMessage: "Give me a focused 10-minute study drill I can do right now to keep my streak alive today.",
+          });
+          continue;
+        }
+        if (notification.type === "reminder_study_plan") {
+          candidates.push({
+            id: `notif:${notification._id}`,
+            kind: "reminder_study_plan",
+            title: notification.title,
+            body: notification.body,
+            actionLabel: "Build plan",
+            mode: "tutor",
+            followUpMessage: "Build an actionable study plan for today based on my recent performance.",
+          });
+        }
+      }
+
+      if (!selectedChatId) {
+        const recencyWindowMs = 14 * 24 * 60 * 60 * 1000;
+        const recentChat = chats.find((chat) => Date.now() - chat.updatedAt <= recencyWindowMs);
+        if (recentChat) {
+          candidates.push({
+            id: `continue:${recentChat._id}`,
+            kind: "continuation_chat",
+            title: "Continue previous thread",
+            body: `Jump back into \"${recentChat.title}\" to keep momentum.`,
+            actionLabel: "Resume",
+            chatId: recentChat._id,
+          });
+        }
+      }
+
+      const next = candidates.find((candidate) => !dismissedProactiveIdsRef.current.has(candidate.id)) ?? null;
+      if (!cancelled) {
+        setProactiveBanner(next);
+      }
+    };
+
+    void collectBannerCandidates();
+    return () => {
+      cancelled = true;
+    };
+  }, [chats, messages.length, selectedChatId, sending]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1161,6 +1374,37 @@ export function useChatState() {
     },
     [],
   );
+
+  const applyProactiveBanner = useCallback(async () => {
+    const banner = proactiveBanner;
+    if (!banner) return;
+
+    markProactiveDismissed(banner.id);
+    setProactiveBanner(null);
+
+    if (banner.kind === "continuation_chat" && banner.chatId) {
+      setSelectedChatId(banner.chatId);
+      markChatActive(banner.chatId);
+      return;
+    }
+
+    if (banner.actionUrl && banner.actionUrl.startsWith("/")) {
+      window.location.href = banner.actionUrl;
+      return;
+    }
+
+    if (banner.mode && banner.mode !== mode) {
+      setMode(banner.mode);
+      const activeChatId = selectedChatIdRef.current;
+      if (activeChatId) {
+        await updateChatSettingsById(activeChatId, { mode: banner.mode }).catch(() => {});
+      }
+    }
+
+    if (banner.followUpMessage && banner.followUpMessage.trim().length > 0) {
+      setMessage(banner.followUpMessage.trim());
+    }
+  }, [markProactiveDismissed, markChatActive, mode, proactiveBanner, updateChatSettingsById]);
 
   useEffect(() => {
     const handleNewChat = () => startNewChat(selectedAgentId);
@@ -1353,6 +1597,8 @@ export function useChatState() {
     setActiveCollaborators([]);
     setCollaboratorPhase("idle");
     setStreamPhase("idle");
+    setLivePhasePlan([]);
+    setSearchStatusBanner(null);
     setStreamError(null);
     setSearch("");
     if (retryAttempt === 0) {
@@ -1645,7 +1891,9 @@ export function useChatState() {
               | "rag_used"
               | "soul_update"
               | "agent_summoned"
-              | "phase";
+              | "phase"
+              | "phase_update"
+              | "search_status";
             content?: string;
             message?: string;
             error?: string | { message?: string };
@@ -1673,12 +1921,25 @@ export function useChatState() {
             suggestedMode?: string;
             agents?: string[];
             agent?: string;
-            status?: "pending" | "running" | "done" | "failed" | "skipped";
             preview?: string;
             tokensUsed?: number;
             model?: string;
             reason?: string;
             phase?: StreamPhase;
+            phaseId?: string;
+            detail?: string;
+            phasePlan?: Array<{
+              id: string;
+              label: string;
+              status: "planned" | "running" | "completed" | "skipped" | "failed" | "in_progress";
+              detail?: string;
+              model?: string;
+              thinkingLevel?: ThinkingLevel;
+              startedAt?: number;
+              finishedAt?: number;
+            }>;
+            status?: "pending" | "running" | "done" | "failed" | "skipped" | "planned" | "in_progress" | "completed";
+            searchStatus?: "model_fallback" | "real_search" | "error";
             agentSuggestion?: AgentSuggestion;
             unlockedAchievements?: AchievementToastData[];
             sources?: Array<{ filename: string; page?: number; sourceType: string }>;
@@ -1746,8 +2007,16 @@ export function useChatState() {
 
           if (payload.type === "collab_progress" && payload.agent) {
             const agentRole = payload.agent;
+            const collaboratorStatus =
+              payload.status === "pending"
+              || payload.status === "running"
+              || payload.status === "done"
+              || payload.status === "failed"
+              || payload.status === "skipped"
+                ? payload.status
+                : "running";
             pushThinkingNote(
-              `${agentRole.replace(/_/g, " ")} ${payload.status === "done" ? "completed" : "is running"}${
+              `${agentRole.replace(/_/g, " ")} ${collaboratorStatus === "done" ? "completed" : "is running"}${
                 payload.model ? ` with ${payload.model}` : ""
               }${payload.preview ? `: ${payload.preview}` : ""}`,
             );
@@ -1760,7 +2029,7 @@ export function useChatState() {
                     ...prev,
                     {
                       role: agentRole,
-                      status: payload.status ?? "running",
+                      status: collaboratorStatus,
                       model: payload.model,
                       preview: payload.preview,
                     },
@@ -1770,7 +2039,7 @@ export function useChatState() {
                   item.role === agentRole
                     ? {
                         ...item,
-                        status: payload.status ?? "running",
+                        status: collaboratorStatus,
                         model: payload.model ?? item.model,
                         preview: payload.preview ?? item.preview,
                       }
@@ -1829,6 +2098,56 @@ export function useChatState() {
             }));
           }
 
+          if (payload.type === "search_status") {
+            const status = payload.searchStatus ?? payload.status;
+            if (status === "model_fallback") {
+              setSearchStatusBanner("model_knowledge");
+              pushThinkingNote("Web search was unavailable. Response used model knowledge fallback.");
+            } else if (status === "real_search") {
+              setSearchStatusBanner("real_search");
+            } else if (status === "error") {
+              setSearchStatusBanner("error");
+            }
+          }
+
+          if (payload.type === "phase_update") {
+            if (Array.isArray(payload.phasePlan) && payload.phasePlan.length > 0) {
+              const normalized = payload.phasePlan.map((phase) => ({
+                ...phase,
+                status: normalizePhaseStatus(phase.status),
+              }));
+              setLivePhasePlan(normalized);
+            } else if (payload.phaseId) {
+              const normalizedStatus = normalizePhaseStatus(payload.status);
+              setLivePhasePlan((prev) => {
+                const existingIndex = prev.findIndex((phase) => phase.id === payload.phaseId);
+                if (existingIndex < 0) {
+                  return [
+                    ...prev,
+                    {
+                      id: payload.phaseId!,
+                      label: payload.phaseId!,
+                      status: normalizedStatus,
+                      detail: payload.detail,
+                    },
+                  ];
+                }
+                const next = [...prev];
+                next[existingIndex] = {
+                  ...next[existingIndex],
+                  status: normalizedStatus,
+                  detail: payload.detail ?? next[existingIndex].detail,
+                };
+                return next;
+              });
+            }
+
+            const nextPhase = streamPhaseFromPhaseId(payload.phaseId);
+            if ((payload.status === "in_progress" || payload.status === "running") && nextPhase) {
+              setStreamPhase(nextPhase);
+            }
+          }
+
           if (payload.type === "phase" && payload.phase) {
             setStreamPhase(payload.phase);
           }
@@ -1869,6 +2188,9 @@ export function useChatState() {
                     },
                   }
                 : payload.routeTrace;
+            if (normalizedTrace?.phasePlan?.length) {
+              setLivePhasePlan(normalizedTrace.phasePlan);
+            }
 
             const nextFinalMeta: typeof finalMeta = {
               messageId: payload.messageId,
@@ -2154,17 +2476,6 @@ export function useChatState() {
     const lastUser = [...messages].reverse().find((item) => item.role === "user");
     if (!lastUser || sending) return;
 
-    setMessages((prev) => {
-      const next = [...prev];
-      for (let i = next.length - 1; i >= 0; i -= 1) {
-        if (next[i]?.role === "assistant") {
-          next.splice(i, 1);
-          break;
-        }
-      }
-      return next;
-    });
-
     await sendMessage(lastUser.content, {
       regenerate: true,
       skipLocalUser: true,
@@ -2268,9 +2579,13 @@ export function useChatState() {
       if (!response.ok) {
         throw new Error(await response.text());
       }
-      const result = (await response.json()) as { updated?: boolean; created?: boolean };
+      const result = (await response.json()) as { updated?: boolean; created?: boolean; appended?: number };
       if (result.updated) {
-        toast.message("Flashcard deck updated");
+        if (typeof result.appended === "number" && result.appended > 0) {
+          toast.success(`Added ${result.appended} new flashcard${result.appended === 1 ? "" : "s"}`);
+        } else {
+          toast.message("Flashcard deck updated");
+        }
       } else {
         toast.success("Flashcard deck saved");
       }
@@ -2298,13 +2613,58 @@ export function useChatState() {
     }
   }
 
+  async function editFlashcardCard(payload: { cardHash: string; front: string; back: string }) {
+    if (!selectedChatId) return;
+    try {
+      const response = await fetch("/api/flashcards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "edit_card",
+          chatId: selectedChatId,
+          cardHash: payload.cardHash,
+          front: payload.front,
+          back: payload.back,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      const result = (await response.json()) as {
+        updatedCardHash?: string;
+        previousCardHash?: string;
+        hashChanged?: boolean;
+      };
+      toast.success("Flashcard updated");
+      return result;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update flashcard");
+      throw error;
+    }
+  }
+
   async function refreshPersonalResources() {
-    const response = await fetch("/api/resources?scope=personal");
-    if (!response.ok) throw new Error(await response.text());
-    const data = (await response.json()) as { resources: PersonalResource[] };
-    setPersonalResources(
-      [...(data.resources ?? [])].sort((a, b) => b.createdAt - a.createdAt),
-    );
+    if (personalResourcesRefreshInFlightRef.current) {
+      return personalResourcesRefreshInFlightRef.current;
+    }
+
+    const refreshPromise = (async () => {
+      const response = await fetch("/api/resources?scope=personal");
+      if (!response.ok) throw new Error(await response.text());
+      const data = (await response.json()) as { resources: PersonalResource[] };
+      setPersonalResources(
+        [...(data.resources ?? [])].sort((a, b) => b.createdAt - a.createdAt),
+      );
+    })();
+
+    personalResourcesRefreshInFlightRef.current = refreshPromise;
+    try {
+      await refreshPromise;
+    } finally {
+      if (personalResourcesRefreshInFlightRef.current === refreshPromise) {
+        personalResourcesRefreshInFlightRef.current = null;
+      }
+    }
   }
 
   async function retryPendingPersonalResources(resourceIds: string[]) {
@@ -2349,15 +2709,8 @@ export function useChatState() {
       saveToLibrary: true,
     });
     await refreshPersonalResources();
+    personalResourcesPollMsRef.current = PERSONAL_RESOURCES_POLL_MIN_MS;
     const uploadedCount = (result.results ?? []).filter((item) => item.status === "uploaded" || item.status === "reused").length;
-    if (uploadedCount > 0) {
-      window.setTimeout(() => {
-        void refreshPersonalResources().catch(() => {});
-      }, 2500);
-      window.setTimeout(() => {
-        void refreshPersonalResources().catch(() => {});
-      }, 7000);
-    }
     const failure = (result.results ?? []).find((item) => item.status === "failed");
     if (failure) {
       if (uploadedCount > 0) {
@@ -2449,17 +2802,6 @@ export function useChatState() {
   async function regenerateWithModel(modelId: string) {
     const lastUser = [...messages].reverse().find((item) => item.role === "user");
     if (!lastUser || sending) return;
-
-    setMessages((prev) => {
-      const next = [...prev];
-      for (let i = next.length - 1; i >= 0; i -= 1) {
-        if (next[i]?.role === "assistant") {
-          next.splice(i, 1);
-          break;
-        }
-      }
-      return next;
-    });
 
     await sendMessage(lastUser.content, {
       regenerate: true,
@@ -2618,6 +2960,9 @@ export function useChatState() {
     draftThinking,
     hasRealThinking,
     streamPhase,
+    livePhasePlan,
+    searchStatusBanner,
+    proactiveBanner,
     activeCollaborators,
     collaboratorPhase,
     activeStreamIds,
@@ -2664,6 +3009,7 @@ export function useChatState() {
     submitQuizAnswers,
     saveFlashcardDeck,
     rateFlashcardCard,
+    editFlashcardCard,
     regenerateWithModel,
     editAndResend,
     branchFromMessage,
@@ -2675,6 +3021,8 @@ export function useChatState() {
     uploadPersonalResources,
     compactConversation,
     updateExistingChatSettings,
+    applyProactiveBanner,
+    dismissProactiveBanner,
     stopGeneration,
     pinChat,
     hasDraft,

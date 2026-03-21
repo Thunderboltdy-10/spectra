@@ -118,6 +118,7 @@ export async function purgeUserData(
 
   const [
     userMemoryRows,
+    userMemoryEntryRows,
     studentAnalyticsRows,
     weeklySummaryRows,
     nudgeRows,
@@ -143,6 +144,10 @@ export async function purgeUserData(
     privateAgentStatsByAgent,
   ] = await Promise.all([
     ctx.db.query("userMemory").withIndex("by_user", (q) => q.eq("userId", target._id)).collect(),
+    ctx.db
+      .query("userMemoryEntries")
+      .withIndex("by_user_org", (q) => q.eq("userId", target._id).eq("orgId", target.orgId))
+      .collect(),
     ctx.db.query("studentAnalytics").withIndex("by_user_day", (q) => q.eq("userId", target._id)).collect(),
     ctx.db.query("weeklySummaries").withIndex("by_user", (q) => q.eq("userId", target._id)).collect(),
     ctx.db.query("nudges").withIndex("by_user", (q) => q.eq("userId", target._id)).collect(),
@@ -247,7 +252,10 @@ export async function purgeUserData(
     }
   }
 
-  increment(summary, "userMemory", await deleteRows(ctx, userMemoryRows.map((row) => row._id)));
+  increment(summary, "userMemory", await deleteRows(
+    ctx,
+    [...userMemoryRows, ...userMemoryEntryRows].map((row) => row._id),
+  ));
   increment(summary, "studentAnalytics", await deleteRows(ctx, studentAnalyticsRows.map((row) => row._id)));
   increment(summary, "weeklySummaries", await deleteRows(ctx, weeklySummaryRows.map((row) => row._id)));
   increment(summary, "nudges", await deleteRows(ctx, nudgeRows.map((row) => row._id)));

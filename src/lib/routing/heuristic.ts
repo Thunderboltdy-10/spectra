@@ -563,6 +563,9 @@ function dynamicRouteFromCatalog(params: {
     ),
     runtimeStats: params.input.modelRuntimeStats,
   } as const;
+  const fallbackCatalogModelId =
+    catalogWithoutAuto.find((model) => !pickParams.avoidModels.includes(model.modelId))?.modelId
+    ?? catalogWithoutAuto[0]?.modelId;
 
   let reason = lowSignalSimpleTurn ? "Lightweight short-turn route" : "Catalog-driven adaptive routing";
   let primaryModel = "";
@@ -613,7 +616,7 @@ function dynamicRouteFromCatalog(params: {
       reason = "Manual model lock";
     } else {
       const picked = pickModelAndFallbacks({ ...pickParams, maxFallbacks: 4 });
-      primaryModel = picked.selected?.modelId ?? ranked[0]?.model.modelId ?? manualModelId;
+      primaryModel = picked.selected?.modelId ?? ranked[0]?.model.modelId ?? fallbackCatalogModelId ?? manualModelId;
       fallbackModels = picked.fallbacks;
       reason = manualMeta
         ? `Manual model restricted by ${params.input.spendingTier}; selected best allowed model`
@@ -633,13 +636,13 @@ function dynamicRouteFromCatalog(params: {
       reason = "OpenRouter auto-router mode";
     } else {
       const picked = pickModelAndFallbacks({ ...pickParams, maxFallbacks: 4 });
-      primaryModel = picked.selected?.modelId ?? ranked[0]?.model.modelId ?? catalogWithoutAuto[0]?.modelId ?? "openrouter/auto";
+      primaryModel = picked.selected?.modelId ?? ranked[0]?.model.modelId ?? fallbackCatalogModelId ?? "openrouter/auto";
       fallbackModels = picked.fallbacks;
       reason = "Auto-router unavailable under current tier; using catalog-ranked model";
     }
   } else {
     const picked = pickModelAndFallbacks({ ...pickParams, maxFallbacks: 4 });
-    primaryModel = picked.selected?.modelId ?? ranked[0]?.model.modelId ?? catalogWithoutAuto[0]?.modelId ?? "";
+    primaryModel = picked.selected?.modelId ?? ranked[0]?.model.modelId ?? fallbackCatalogModelId ?? "";
     fallbackModels = picked.fallbacks;
     reason = "Adaptive catalog route";
   }

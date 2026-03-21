@@ -7,18 +7,17 @@ import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { rightPanelSurfaceClassName } from "@/components/ui/right-panel-surface";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { hasClerkPublishableKey } from "@/lib/clerk-config";
 
-export function GlobalSettingsDrawer() {
-  const pathname = usePathname();
-  const { openUserProfile, signOut } = useClerk();
-  const [open, setOpen] = useState(false);
+type DrawerBodyProps = {
+  pathname: string;
+  open: boolean;
+  onClose: () => void;
+  onManageAccount?: () => void;
+  onSignOut?: () => void;
+};
 
-  useEffect(() => {
-    const onToggle = () => setOpen((prev) => !prev);
-    window.addEventListener("ai-school:toggle-settings", onToggle);
-    return () => window.removeEventListener("ai-school:toggle-settings", onToggle);
-  }, []);
-
+function DrawerBody({ pathname, open, onClose, onManageAccount, onSignOut }: DrawerBodyProps) {
   if (!open) return null;
 
   return (
@@ -27,12 +26,12 @@ export function GlobalSettingsDrawer() {
         type="button"
         className="absolute inset-0 bg-transparent"
         aria-label="Close settings"
-        onClick={() => setOpen(false)}
+        onClick={onClose}
       />
       <aside className={`${rightPanelSurfaceClassName()} absolute inset-y-0 right-0 w-[92vw] max-w-[400px] border-l p-4 shadow-[var(--shadow-soft)]`}>
         <div className="mb-5 flex items-center justify-between">
           <h3 className="font-display text-xl text-[var(--text-primary)]">Settings</h3>
-          <Button type="button" variant="ghost" size="icon" onClick={() => setOpen(false)} aria-label="Close settings">
+          <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="Close settings">
             <X className="h-4 w-4" />
           </Button>
         </div>
@@ -43,17 +42,23 @@ export function GlobalSettingsDrawer() {
             <ThemeToggle />
           </div>
 
-          <div className="space-y-2">
-            <h4 className="text-xs font-medium text-[var(--text-secondary)]">Account</h4>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" size="sm" variant="secondary" onClick={() => openUserProfile()}>
-                Manage account
-              </Button>
-              <Button type="button" size="sm" variant="ghost" onClick={() => signOut()}>
-                Sign out
-              </Button>
+          {onManageAccount && onSignOut ? (
+            <div className="space-y-2">
+              <h4 className="text-xs font-medium text-[var(--text-secondary)]">Account</h4>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" size="sm" variant="secondary" onClick={onManageAccount}>
+                  Manage account
+                </Button>
+                <Button type="button" size="sm" variant="ghost" onClick={onSignOut}>
+                  Sign out
+                </Button>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-xs text-[var(--text-secondary)]">
+              Local mode: account controls are unavailable.
+            </div>
+          )}
 
           {pathname !== "/" && (
             <div className="border-t border-[var(--border-default)] pt-3">
@@ -66,4 +71,38 @@ export function GlobalSettingsDrawer() {
       </aside>
     </div>
   );
+}
+
+function GlobalSettingsDrawerWithClerk(props: {
+  pathname: string;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const { openUserProfile, signOut } = useClerk();
+  return (
+    <DrawerBody
+      pathname={props.pathname}
+      open={props.open}
+      onClose={props.onClose}
+      onManageAccount={() => openUserProfile()}
+      onSignOut={() => void signOut()}
+    />
+  );
+}
+
+export function GlobalSettingsDrawer() {
+  const pathname = usePathname();
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    const onToggle = () => setOpen((prev) => !prev);
+    window.addEventListener("ai-school:toggle-settings", onToggle);
+    return () => window.removeEventListener("ai-school:toggle-settings", onToggle);
+  }, []);
+
+  if (hasClerkPublishableKey()) {
+    return <GlobalSettingsDrawerWithClerk pathname={pathname} open={open} onClose={() => setOpen(false)} />;
+  }
+
+  return <DrawerBody pathname={pathname} open={open} onClose={() => setOpen(false)} />;
 }

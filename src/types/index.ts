@@ -31,6 +31,24 @@ export type Citation = {
   snippet?: string;
 };
 
+export type ClarificationOption = {
+  id: string;
+  label: string;
+  description?: string;
+};
+
+export type ClarificationQuestion = {
+  id: string;
+  text: string;
+  type: "free_text" | "single_choice" | "multi_choice" | "confirmation";
+  options?: ClarificationOption[];
+};
+
+export type ClarificationBlock = {
+  context: string;
+  questions: ClarificationQuestion[];
+};
+
 export type Agent = {
   _id: string;
   name: string;
@@ -269,6 +287,8 @@ export type RouteTrace = {
     promptEnhanced: boolean;
     messageLength: number;
     conversationLength?: number;
+    requestClass?: "T0" | "T1" | "T2" | "T3";
+    classificationReason?: string;
     previousModelUsed?: string;
     agentPreferredModel?: string;
   };
@@ -283,8 +303,20 @@ export type RouteTrace = {
   toolchain: string[];
   fallbacks: RouteTraceFallback[];
   routingDurationMs: number;
+  requestClass?: "T0" | "T1" | "T2" | "T3";
+  classificationReason?: string;
+  stepsExecuted?: string[];
+  stepsSkipped?: Array<{ step: string; reason: string }>;
+  searchStatus?: "real_search" | "model_knowledge" | "skipped" | "error";
+  costBudgetUsd?: number;
   totalDurationMs?: number;
   totalCostCents?: number;
+  modeSuggestions?: Array<{
+    mode: import("@/lib/contracts/studyModes").StudyMode;
+    label: string;
+    prompt: string;
+  }>;
+  clarificationBlock?: ClarificationBlock;
   collaborators?: Array<{ role: string; model: string; tokensUsed: number; durationMs: number }>;
 };
 

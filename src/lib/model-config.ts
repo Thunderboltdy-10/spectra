@@ -1,41 +1,40 @@
 export const MODEL_CONFIG = {
-  tutorFast: "google/gemini-2.0-flash-exp:free",
-  tutorHigh: "deepseek/deepseek-r1-0528:free",
-  marker: "meta-llama/llama-3.3-70b-instruct:free",
-  markerHard: "deepseek/deepseek-r1-0528:free",
+  tutorFast: "stepfun/step-3.5-flash:free",
+  tutorHigh: "minimax/minimax-m2.5:free",
+  marker: "qwen/qwen3-next-80b-a3b-instruct:free",
+  markerHard: "nvidia/nemotron-3-super-120b-a12b:free",
   multimodal: "google/gemma-3-27b-vision:free",
-  verify: "google/gemini-2.0-flash-exp:free",
+  verify: "openai/gpt-5.4-mini",
   autoRouter: "openrouter/auto",
   embedding: "openai/text-embedding-3-large",
-  promptEnhance: "google/gemini-2.0-flash-exp:free",
+  promptEnhance: "openai/gpt-5.4-nano",
   glmAir: "z-ai/glm-4.5-air:free",
   gptOss: "openai/gpt-oss-120b:free",
 
   // Paid tier for normal spending.
-  smartPaid: "anthropic/claude-sonnet-4-5",
-  smartCheap: "openai/gpt-4.1-mini",
-  reasoningPaid: "google/gemini-2.5-pro",
+  smartPaid: "anthropic/claude-sonnet-4.5",
+  smartCheap: "openai/gpt-5.4-nano",
+  reasoningPaid: "openai/gpt-5.4-mini",
 
   // Search-focused routes.
   searchFast: "perplexity/sonar",
   searchDeep: "perplexity/sonar-pro",
 
   // Image generation.
-  imageGen: "google/gemini-3-pro-image-preview",
+  imageGen: "google/gemini-3.1-flash-image-preview",
 } as const;
 
 // Available image generation models
 export const IMAGE_GEN_MODELS = [
-  { id: "google/gemini-3-pro-image-preview", name: "Gemini 3 Pro Image", provider: "Google", recommended: true },
+  { id: "google/gemini-3.1-flash-image-preview", name: "Gemini 3.1 Flash Image", provider: "Google", recommended: true },
+  { id: "google/gemini-3-pro-image-preview", name: "Gemini 3 Pro Image", provider: "Google", recommended: false },
   { id: "google/gemini-2.5-flash-image", name: "Gemini 2.5 Flash Image", provider: "Google", recommended: false },
-  { id: "openai/gpt-image-1", name: "GPT Image 1", provider: "OpenAI", recommended: false },
-  { id: "recraft-ai/recraft-v3", name: "Recraft V3", provider: "Recraft", recommended: false },
 ] as const;
 
 export const IMAGE_GEN_FALLBACKS = [
+  "google/gemini-3.1-flash-image-preview",
   "google/gemini-3-pro-image-preview",
   "google/gemini-2.5-flash-image",
-  "openai/gpt-image-1",
 ] as const;
 
 export function getImageModelOptions() {
@@ -126,9 +125,9 @@ export const MODE_MODEL_RECOMMENDATIONS: Record<string, string[]> = {
     MODEL_CONFIG.tutorFast,
   ],
   image: [
+    "google/gemini-3.1-flash-image-preview",
     "google/gemini-3-pro-image-preview",
     "google/gemini-2.5-flash-image",
-    "openai/gpt-image-1",
   ],
   general: [
     MODEL_CONFIG.tutorFast,

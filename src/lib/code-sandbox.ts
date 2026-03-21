@@ -3,20 +3,26 @@
  * All execution happens client-side via srcdoc — no server involved.
  */
 
-const CSP_META = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob:; style-src 'unsafe-inline'; img-src data: blob:; font-src data:;">`;
+const CSP_META = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob: https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src data: blob:; font-src data:;">`;
 
-const RESIZE_SCRIPT = `
+function buildResizeScript(frameId: string): string {
+  return `
 <script>
+  const _frameId = ${JSON.stringify(frameId)};
   const sendHeight = () => {
     const h = Math.min(document.body.scrollHeight, 2000);
-    parent.postMessage({ type: 'spectra-sandbox-resize', height: h }, '*');
+    parent.postMessage({ type: 'spectra-sandbox-resize', height: h, frameId: _frameId }, '*');
   };
   new ResizeObserver(sendHeight).observe(document.body);
   window.addEventListener('load', sendHeight);
   window.onerror = (msg, src, line) => {
-    parent.postMessage({ type: 'spectra-sandbox-error', message: String(msg), line }, '*');
+    parent.postMessage({ type: 'spectra-sandbox-error', message: String(msg), line, frameId: _frameId }, '*');
   };
 </script>`;
+}
+
+// Keep backward compat for callers that don't use frameId
+const RESIZE_SCRIPT = buildResizeScript("");
 
 export type PreviewLanguage =
   | "html"
@@ -37,12 +43,14 @@ export function canPreview(language: string): boolean {
   ].includes(lower);
 }
 
-export function buildSrcdoc(code: string, language: PreviewLanguage): string {
+export function buildSrcdoc(code: string, language: PreviewLanguage, frameId?: string): string {
   const lang = language.toLowerCase().trim() as PreviewLanguage;
+
+  const fid = frameId ?? "";
 
   switch (lang) {
     case "html":
-      return wrapHtml(code);
+      return wrapHtml(code, fid);
 
     case "javascript":
     case "js":
@@ -53,7 +61,7 @@ export function buildSrcdoc(code: string, language: PreviewLanguage): string {
             document.getElementById('root').textContent = 'Error: ' + e.message;
           }
         </script>
-      `);
+      `, fid);
 
     case "css":
       return wrapHtml(`
@@ -66,14 +74,14 @@ export function buildSrcdoc(code: string, language: PreviewLanguage): string {
           <a href="#">Link</a>
           <ul><li>List item 1</li><li>List item 2</li></ul>
         </div>
-      `);
+      `, fid);
 
     case "svg":
       return wrapHtml(`
         <div style="display:flex;align-items:center;justify-content:center;min-height:200px;">
           ${code}
         </div>
-      `);
+      `, fid);
 
     case "mermaid":
       return wrapHtml(`
@@ -82,19 +90,19 @@ export function buildSrcdoc(code: string, language: PreviewLanguage): string {
         <script>
           mermaid.initialize({ startOnLoad: true, theme: 'neutral', securityLevel: 'loose' });
         </script>
-      `);
+      `, fid);
 
     case "jsx":
     case "tsx":
     case "react":
-      return buildReactSrcdoc(code);
+      return buildReactSrcdoc(code, fid);
 
     default:
-      return wrapHtml(`<pre><code>${escapeHtml(code)}</code></pre>`);
+      return wrapHtml(`<pre><code>${escapeHtml(code)}</code></pre>`, fid);
   }
 }
 
-function wrapHtml(body: string): string {
+function wrapHtml(body: string, frameId: string): string {
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -117,12 +125,12 @@ function wrapHtml(body: string): string {
 </head>
 <body>
   ${body}
-  ${RESIZE_SCRIPT}
+  ${buildResizeScript(frameId)}
 </body>
 </html>`;
 }
 
-function buildReactSrcdoc(code: string): string {
+function buildReactSrcdoc(code: string, frameId: string): string {
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -147,7 +155,7 @@ function buildReactSrcdoc(code: string): string {
       ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(_exports));
     }
   </script>
-  ${RESIZE_SCRIPT}
+  ${buildResizeScript(frameId)}
 </body>
 </html>`;
 }

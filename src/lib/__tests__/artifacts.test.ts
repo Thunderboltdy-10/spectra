@@ -21,11 +21,29 @@ class DocumentMock {
   constructor() {}
 }
 
+class TableMock {
+  constructor() {}
+}
+
+class TableCellMock {
+  constructor() {}
+}
+
+class TableRowMock {
+  constructor() {}
+}
+
 const PackerMock = {
   toBuffer: vi.fn(async () => Buffer.from("docx")),
 };
 
 vi.mock("docx", () => ({
+  AlignmentType: {
+    LEFT: "left",
+  },
+  BorderStyle: {
+    SINGLE: "single",
+  },
   Document: DocumentMock,
   HeadingLevel: {
     TITLE: "TITLE",
@@ -35,7 +53,13 @@ vi.mock("docx", () => ({
   },
   Packer: PackerMock,
   Paragraph: ParagraphMock,
+  Table: TableMock,
+  TableCell: TableCellMock,
+  TableRow: TableRowMock,
   TextRun: TextRunMock,
+  WidthType: {
+    PERCENTAGE: "percentage",
+  },
 }));
 
 class SlideMock {
@@ -72,6 +96,10 @@ class JsPdfMock {
   };
   setFont = vi.fn();
   setFontSize = vi.fn();
+  setFillColor = vi.fn();
+  setTextColor = vi.fn();
+  rect = vi.fn();
+  circle = vi.fn();
   splitTextToSize(value: string) {
     return [value];
   }

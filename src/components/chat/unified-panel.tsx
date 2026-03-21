@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Bot, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Loader2, Settings2, X, XCircle, FileText, Milestone } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Bot, Brain, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Loader2, Settings2, Trash2, X, XCircle, FileText, Milestone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ProviderLogo } from "@/components/provider-logo";
 import { Switch } from "@/components/ui/switch";
@@ -16,6 +16,7 @@ import type { AutoPreference, ModelOption, PersonalResource, UserSpending } from
 import type { Citation, RouteTrace, RouterMode } from "@/types";
 import { FILE_LIMITS } from "@/lib/file-limits";
 import { formatToolchainLabel } from "@/lib/orchestrator/trace-labels";
+import { RESOURCE_PROCESSING_STALE_MS } from "../../../shared/resource-processing";
 
 function AutoChoice({
   label,
@@ -30,20 +31,26 @@ function AutoChoice({
     <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2">
       <p className="mb-2 text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">{label}</p>
       <div className="grid grid-cols-3 gap-1">
-        {(["auto", "on", "off"] as const).map((item) => (
-          <button
-            key={item}
-            type="button"
-            onClick={() => onChange(item)}
-            className={`rounded-md px-2 py-1 text-xs transition ${
-              value === item
-                ? "bg-[var(--bg-primary)] text-[var(--text-primary)]"
-                : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-            }`}
-          >
-            {item === "auto" ? "Auto" : item === "on" ? "On" : "Off"}
-          </button>
-        ))}
+        {(["auto", "on", "off"] as const).map((item) => {
+          const isActive = value === item;
+          const pillClass = isActive
+            ? item === "auto"
+              ? "auto-pill-active bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[0_0_0_1.5px_var(--accent-cyan)]"
+              : item === "on"
+                ? "bg-[color-mix(in_oklab,var(--accent-cyan)_18%,var(--bg-primary))] text-[var(--accent-cyan)] shadow-[0_0_0_1.5px_var(--accent-cyan)]"
+                : "bg-[var(--bg-primary)] text-[var(--text-tertiary)]"
+            : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]";
+          return (
+            <button
+              key={item}
+              type="button"
+              onClick={() => onChange(item)}
+              className={`rounded-md px-2 py-1 text-xs font-medium transition-all duration-150 ${pillClass}`}
+            >
+              {item === "auto" ? "Auto" : item === "on" ? "On" : "Off"}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -80,6 +87,19 @@ function providerFromModelId(value: string) {
     .join(" ");
 }
 
+function confidenceBucket(value: number) {
+  if (value >= 0.75) return "high";
+  if (value >= 0.5) return "medium";
+  return "low";
+}
+
+function confidenceBadgeTone(value: number) {
+  const bucket = confidenceBucket(value);
+  if (bucket === "high") return "text-[var(--success)]";
+  if (bucket === "medium") return "text-[var(--accent-cyan)]";
+  return "text-[var(--text-secondary)]";
+}
+
 function resourceStatusMeta(status: PersonalResource["status"], updatedAt?: number, attempts?: number) {
   if (status === "uploaded") {
     return {
@@ -89,7 +109,7 @@ function resourceStatusMeta(status: PersonalResource["status"], updatedAt?: numb
     };
   }
   if (status === "processing") {
-    const stale = typeof updatedAt === "number" && Date.now() - updatedAt > 45_000;
+    const stale = typeof updatedAt === "number" && Date.now() - updatedAt > RESOURCE_PROCESSING_STALE_MS;
     const retryCount = Math.max(1, attempts ?? 1);
     return {
       label: stale
@@ -114,6 +134,21 @@ function resourceStatusMeta(status: PersonalResource["status"], updatedAt?: numb
     iconClassName: "text-[var(--danger)]",
   };
 }
+
+type MemoryPanelEntry = {
+  _id: string;
+  key: string;
+  text: string;
+  category: "identity" | "academic" | "preference" | "topic" | "artifact" | "correction";
+  confidence: number;
+  status: "pending" | "confirmed";
+  sourceType: "extraction" | "user_explicit" | "correction";
+  sourceChatId?: string;
+  relatedArtifacts: string[];
+  negativeTopicLinks: string[];
+  createdAt: number;
+  updatedAt: number;
+};
 
 export type SettingsViewProps = {
   models: ModelOption[];
@@ -299,6 +334,12 @@ export function SettingsView({
   const [documentModeEnabled, setDocumentModeEnabled] = useState(true);
   const [multiAgentVerbose, setMultiAgentVerbose] = useState(false);
   const [showSpecialists, setShowSpecialists] = useState(true);
+  const [memoryEntries, setMemoryEntries] = useState<MemoryPanelEntry[]>([]);
+  const [memoryLoading, setMemoryLoading] = useState(false);
+  const [memoryError, setMemoryError] = useState<string | null>(null);
+  const [memoryActionBusyId, setMemoryActionBusyId] = useState<string | null>(null);
+  const [forgetTopicInput, setForgetTopicInput] = useState("");
+  const [forgetTopicBusy, setForgetTopicBusy] = useState(false);
 
   useEffect(() => {
     try {
@@ -318,6 +359,78 @@ export function SettingsView({
       window.localStorage.setItem(key, value ? "1" : "0");
     } catch {
       // Ignore storage failures.
+    }
+  };
+
+  const refreshMemoryEntries = async () => {
+    setMemoryLoading(true);
+    setMemoryError(null);
+    try {
+      const response = await fetch("/api/memory", { method: "GET" });
+      if (!response.ok) {
+        throw new Error(`Failed to load memory (${response.status})`);
+      }
+      const payload = (await response.json()) as { entries?: MemoryPanelEntry[] };
+      setMemoryEntries(Array.isArray(payload.entries) ? payload.entries : []);
+    } catch (error) {
+      setMemoryError(error instanceof Error ? error.message : "Could not load memory");
+      setMemoryEntries([]);
+    } finally {
+      setMemoryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshMemoryEntries();
+  }, []);
+
+  const runMemoryAction = async (params: {
+    action: "confirm" | "dismiss" | "delete";
+    entryId: string;
+  }) => {
+    setMemoryActionBusyId(params.entryId);
+    try {
+      const response = await fetch("/api/memory", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: params.action,
+          entryId: params.entryId,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`Memory action failed (${response.status})`);
+      }
+      await refreshMemoryEntries();
+    } catch (error) {
+      setMemoryError(error instanceof Error ? error.message : "Memory action failed");
+    } finally {
+      setMemoryActionBusyId(null);
+    }
+  };
+
+  const forgetTopic = async () => {
+    const topic = forgetTopicInput.trim();
+    if (!topic) return;
+    setForgetTopicBusy(true);
+    try {
+      const response = await fetch("/api/memory", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "forget_topic",
+          topic,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`Forget topic failed (${response.status})`);
+      }
+      setForgetTopicInput("");
+      await refreshMemoryEntries();
+    } catch (error) {
+      setMemoryError(error instanceof Error ? error.message : "Forget topic failed");
+    } finally {
+      setForgetTopicBusy(false);
     }
   };
 
@@ -360,12 +473,20 @@ export function SettingsView({
     routerMode === "manual"
       ? (selectedManualModel?.tags ?? [])
       : (routedRecentModel?.tags ?? []);
+  const pendingEntries = memoryEntries.filter((entry) => entry.status === "pending");
+  const confirmedEntries = memoryEntries.filter((entry) => entry.status === "confirmed");
+  const groupedConfirmedEntries = {
+    high: confirmedEntries.filter((entry) => confidenceBucket(entry.confidence) === "high"),
+    medium: confirmedEntries.filter((entry) => confidenceBucket(entry.confidence) === "medium"),
+    low: confirmedEntries.filter((entry) => confidenceBucket(entry.confidence) === "low"),
+  };
 
   return (
     <div className="space-y-4">
       <Tabs defaultValue="assistant" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="assistant">Assistant</TabsTrigger>
+          <TabsTrigger value="memory">Memory</TabsTrigger>
           <TabsTrigger value="app">App &amp; Account</TabsTrigger>
         </TabsList>
 
@@ -535,6 +656,171 @@ export function SettingsView({
           </section>
         </TabsContent>
 
+        <TabsContent value="memory" className="space-y-4">
+          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xs font-medium text-[var(--text-secondary)]">Memory manager</h3>
+                <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+                  Layered memory with pending review and topic-specific recall.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-[11px]"
+                onClick={() => {
+                  void refreshMemoryEntries();
+                }}
+              >
+                <Brain className="mr-1 h-3.5 w-3.5" />
+                Refresh
+              </Button>
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                type="text"
+                value={forgetTopicInput}
+                onChange={(event) => setForgetTopicInput(event.target.value)}
+                placeholder="Forget all about topic (e.g. WWII)"
+                className="h-9 flex-1 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)] focus:border-[var(--accent-cyan)]"
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-9 px-3 text-xs"
+                disabled={forgetTopicBusy || !forgetTopicInput.trim()}
+                onClick={() => {
+                  void forgetTopic();
+                }}
+              >
+                {forgetTopicBusy ? "Forgetting..." : "Forget topic"}
+              </Button>
+            </div>
+            {memoryLoading ? (
+              <p className="mt-2 text-xs text-[var(--text-secondary)]">Loading memory...</p>
+            ) : null}
+            {memoryError ? (
+              <p className="mt-2 text-xs text-[var(--danger)]">{memoryError}</p>
+            ) : null}
+          </section>
+
+          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+            <h3 className="mb-2 text-xs font-medium text-[var(--text-secondary)]">Pending confirmation</h3>
+            {pendingEntries.length === 0 ? (
+              <p className="text-xs text-[var(--text-secondary)]">No pending entries.</p>
+            ) : (
+              <div className="space-y-2">
+                {pendingEntries.map((entry) => (
+                  <article key={entry._id} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-medium text-[var(--text-primary)]">{entry.key.replace(/_/g, " ")}</p>
+                      <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">{entry.category}</span>
+                    </div>
+                    <p className="mt-1 text-xs text-[var(--text-secondary)]">{entry.text}</p>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      {entry.sourceChatId ? (
+                        <a href={`/chat?chatId=${entry.sourceChatId}`} className="text-[11px] text-[var(--accent-cyan)] hover:underline">
+                          Open source chat
+                        </a>
+                      ) : (
+                        <span className="text-[11px] text-[var(--text-secondary)]">No source chat</span>
+                      )}
+                      <div className="flex items-center gap-1.5">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-[11px]"
+                          disabled={memoryActionBusyId === entry._id}
+                          onClick={() => {
+                            void runMemoryAction({ action: "confirm", entryId: entry._id });
+                          }}
+                        >
+                          Confirm
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2 text-[11px] text-[var(--danger)]"
+                          disabled={memoryActionBusyId === entry._id}
+                          onClick={() => {
+                            void runMemoryAction({ action: "dismiss", entryId: entry._id });
+                          }}
+                        >
+                          Dismiss
+                        </Button>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+            <h3 className="mb-2 text-xs font-medium text-[var(--text-secondary)]">Confirmed memory</h3>
+            {memoryEntries.length === 0 ? (
+              <p className="text-xs text-[var(--text-secondary)]">No memory entries yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {(["high", "medium", "low"] as const).map((bucket) => {
+                  const rows = groupedConfirmedEntries[bucket];
+                  if (rows.length === 0) return null;
+                  return (
+                    <div key={bucket}>
+                      <p className="mb-1 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                        {bucket} confidence
+                      </p>
+                      <div className="space-y-2">
+                        {rows.map((entry) => (
+                          <article key={entry._id} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-xs font-medium text-[var(--text-primary)]">{entry.key.replace(/_/g, " ")}</p>
+                              <div className="flex items-center gap-2">
+                                <span className={`text-[10px] uppercase tracking-[0.08em] ${confidenceBadgeTone(entry.confidence)}`}>
+                                  {(entry.confidence * 100).toFixed(0)}%
+                                </span>
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-6 w-6 text-[var(--danger)]"
+                                  disabled={memoryActionBusyId === entry._id}
+                                  onClick={() => {
+                                    void runMemoryAction({ action: "delete", entryId: entry._id });
+                                  }}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            </div>
+                            <p className="mt-1 text-xs text-[var(--text-secondary)]">{entry.text}</p>
+                            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-[var(--text-secondary)]">
+                              <span>{entry.category}</span>
+                              {entry.sourceChatId ? (
+                                <a href={`/chat?chatId=${entry.sourceChatId}`} className="text-[var(--accent-cyan)] hover:underline">
+                                  source chat
+                                </a>
+                              ) : null}
+                              {entry.negativeTopicLinks.length > 0 ? (
+                                <span>blocked for: {entry.negativeTopicLinks.join(", ")}</span>
+                              ) : null}
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        </TabsContent>
+
         <TabsContent value="app" className="space-y-4">
           <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
             <h3 className="mb-2 text-xs font-medium text-[var(--text-secondary)]">Color theme</h3>
@@ -675,6 +961,7 @@ type OrchestrationViewProps = {
   collaboratorPhase: "idle" | "running" | "synthesizing";
   activeCollaborators: ActiveCollaborator[];
   streamPhase?: "idle" | "compacting" | "routing" | "searching" | "thinking" | "generating" | "synthesizing";
+  livePhasePlan?: RouteTrace["phasePlan"];
   routeTrace?: RouteTrace;
   lastModelUsed?: string;
   searchEnabled?: boolean;
@@ -731,6 +1018,7 @@ function OrchestrationView({
   collaboratorPhase,
   activeCollaborators,
   streamPhase,
+  livePhasePlan,
   routeTrace,
   lastModelUsed,
   searchEnabled,
@@ -756,8 +1044,11 @@ function OrchestrationView({
     activeCollaborators,
     streamPhase,
     searchEnabled,
-    hasFinishedWork: Boolean(routeTrace || lastModelUsed),
+    hasFinishedWork: Boolean(routeTrace || livePhasePlan?.length || lastModelUsed),
   });
+  const displayedPhasePlan = livePhasePlan && livePhasePlan.length > 0
+    ? livePhasePlan
+    : routeTrace?.phasePlan;
 
   // Track which steps have been seen during this session
   const [seenSteps, setSeenSteps] = useState<Set<string>>(new Set(["idle"]));
@@ -807,11 +1098,11 @@ function OrchestrationView({
         <p className="mt-1 text-sm font-medium capitalize text-[var(--text-primary)]">{stage === "idle" ? (sending ? "starting…" : "waiting") : stage}</p>
       </section>
 
-      {routeTrace?.phasePlan && routeTrace.phasePlan.length > 0 ? (
+      {displayedPhasePlan && displayedPhasePlan.length > 0 ? (
         <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
           <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Executed phases</p>
           <ol className="space-y-2">
-            {routeTrace.phasePlan.map((phase) => (
+            {displayedPhasePlan.map((phase) => (
               <li key={phase.id} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-xs font-medium text-[var(--text-primary)]">{phase.label || phaseLabelForId(phase.id)}</p>
@@ -850,7 +1141,7 @@ function OrchestrationView({
       ) : null}
 
       {displaySteps.length > 0 && (
-        <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+        <section className={`rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 transition-all duration-300 ${stage === "complete" && !sending ? "opacity-60" : ""}`}>
           <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Progress</p>
           <ol className="space-y-1.5">
             {displaySteps.map((item, index) => {
@@ -859,18 +1150,21 @@ function OrchestrationView({
                 ? index < displaySteps.length - 1
                 : stage !== "idle" && index < stageIndex;
               const active = stage !== "idle" && stage !== "complete" && item === stage;
+              const skipped = !done && !active && stage !== "idle" && index < stageIndex;
               return (
                 <li key={item} className="flex items-center gap-2">
-                  <span
-                    className={`h-2 w-2 rounded-full transition-colors ${
-                      done
-                        ? "bg-[var(--success)]"
-                        : active
-                          ? "bg-[var(--accent-cyan)] animate-pulse"
-                          : "bg-[var(--border-default)]"
-                    }`}
-                  />
-                  <span className={`text-xs capitalize ${active ? "font-medium text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
+                  {done ? (
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[var(--success)]" />
+                  ) : active ? (
+                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--accent-cyan)]" />
+                  ) : skipped ? (
+                    <XCircle className="h-3.5 w-3.5 shrink-0 text-[var(--text-tertiary)]" />
+                  ) : (
+                    <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                      <span className="h-2 w-2 rounded-full bg-[var(--border-default)]" />
+                    </span>
+                  )}
+                  <span className={`text-xs capitalize ${active ? "font-medium text-[var(--text-primary)]" : done ? "text-[var(--text-secondary)]" : "text-[var(--text-tertiary)]"}`}>
                     {item === "complete"
                       ? (isComplete ? "Done" : "Completing…")
                       : item}
@@ -1160,9 +1454,20 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
     reserveLeftPx: 160,
   });
   const [collapsed, setCollapsed] = useState(false);
+  const [animateIn, setAnimateIn] = useState(false);
+  const prevViewRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (activeView) setCollapsed(false);
+    if (activeView) {
+      setCollapsed(false);
+      // Trigger slide-in animation when panel opens
+      if (!prevViewRef.current) {
+        requestAnimationFrame(() => setAnimateIn(true));
+      }
+    } else {
+      setAnimateIn(false);
+    }
+    prevViewRef.current = activeView;
   }, [activeView]);
 
   if (!activeView) return null;
@@ -1201,13 +1506,18 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
               ? "absolute bottom-3 left-3 right-3 max-h-[78vh] rounded-2xl border p-4"
               : "absolute inset-y-0 right-0 w-[92vw] border-l p-4"
         }`}
-        style={
-          docked
+        style={{
+          ...(docked
             ? { width: "100%", height: "100%" }
             : compact
-              ? undefined
-              : { maxWidth: `${maxWidthPx}px` }
-        }
+              ? {}
+              : { maxWidth: `${maxWidthPx}px` }),
+          ...(!docked ? {
+            transition: "transform 280ms cubic-bezier(0.16, 1, 0.3, 1), opacity 200ms ease",
+            transform: animateIn ? "translateX(0)" : compact ? "translateY(16px)" : "translateX(24px)",
+            opacity: animateIn ? 1 : 0,
+          } : {}),
+        }}
       >
         <div
           className={`flex items-center justify-between ${docked ? "min-h-[56px] shadow-[0_1px_0_var(--border-default)] px-5 pb-3 pt-2.5" : "min-h-[56px] mb-4"}`}

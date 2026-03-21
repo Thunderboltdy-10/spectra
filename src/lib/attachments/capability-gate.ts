@@ -1,4 +1,6 @@
 import { modelSupportsCapability, pickModelAndFallbacks, type CatalogModelEntry } from "@/lib/model-selection";
+import { MODEL_CONFIG } from "@/lib/model-config";
+import { canUseInTier } from "@/lib/routing/heuristic";
 
 const LEGACY_VISION_PATTERNS = [
   /vision/i,
@@ -79,19 +81,37 @@ export function gateCapabilities(params: {
   // Last resort: only select a prepass model that is explicitly vision-capable.
   // Never fall back to the selected text-only model for image prepass.
   const lastResortPrepass = params.fallbackModels.find((modelId) => isVisionCapable(modelId, modelCatalog));
-  if (!lastResortPrepass) {
+  if (lastResortPrepass) {
     return {
       finalModel: params.selectedModel,
       modelSwitched: false,
-      requiresPrepass: false,
-      userNotice: "No vision-capable model is available in your current tier for image attachments.",
+      requiresPrepass: true,
+      prepassModel: lastResortPrepass,
+      userNotice: "No vision-capable model found in current tier; image analysis may be limited.",
     };
   }
+
+  const defaultPrepassModel = canUseInTier(
+    MODEL_CONFIG.multimodal,
+    params.spendingTier ?? "normal",
+    modelCatalog,
+  )
+    ? MODEL_CONFIG.multimodal
+    : undefined;
+  if (defaultPrepassModel) {
+    return {
+      finalModel: params.selectedModel,
+      modelSwitched: false,
+      requiresPrepass: true,
+      prepassModel: defaultPrepassModel,
+      userNotice: "Primary model is text-only; running a vision prepass.",
+    };
+  }
+
   return {
     finalModel: params.selectedModel,
     modelSwitched: false,
-    requiresPrepass: true,
-    prepassModel: lastResortPrepass,
-    userNotice: "No vision-capable model found in current tier; image analysis may be limited.",
+    requiresPrepass: false,
+    userNotice: "No vision-capable model is available in your current tier for image attachments.",
   };
 }

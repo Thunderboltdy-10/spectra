@@ -12,6 +12,7 @@ const isPublicRoute = createRouteMatcher([
   "/no-access(.*)",
   "/api/join(.*)",
   "/api/request-access(.*)",
+  "/api/contact(.*)",
   "/api/invitations/(.*)",
   "/api/auth/access-state(.*)",
 ]);

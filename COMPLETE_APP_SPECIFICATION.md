@@ -20,6 +20,9 @@ This document provides exhaustive details about every feature, functionality, al
 14. [Agent System](#14-agent-system)
 15. [Analytics & Usage Tracking](#15-analytics--usage-tracking)
 16. [Configuration Files](#16-configuration-files)
+17. [Phase 3 Learning Object & Mode Integration](#17-phase-3-learning-object--mode-integration-2026-03-21)
+18. [Phase 4 Clarification & Proactive Continuity](#18-phase-4-clarification--proactive-continuity-2026-03-21)
+19. [Phase 5 UI/Product System](#19-phase-5-uiproduct-system-2026-03-21)
 
 ---
 
@@ -1341,3 +1344,408 @@ CSS variables in `globals.css`:
 ---
 
 This document represents the complete technical specification for the AI School Assistant application as of the codebase state.
+
+---
+
+## Phase 0 Implementation Update (2026-03-21)
+
+Status: Implemented in codebase for the Phase 0 checklist in `CODEX.md`.
+
+### Completed
+- Public auth passthrough for contact form endpoint (`/api/contact`) in middleware routing.
+- Search fallback hardening to model-knowledge-only responses (no fabricated URLs), with explicit fallback prefix and streamed `search_status` telemetry.
+- Frontend model-knowledge warning banner for search fallback responses.
+- File-processing stall retry threshold aligned to 90s with shared stale constant usage in UI status rendering.
+- Speech-to-text locale handling improved via dynamic recognition language selection.
+- Canvas version label handling hardened to avoid `label.trim is not a function` runtime failures.
+- Added request classification infrastructure (`classifyRequest`) with `T0/T1/T2/T3` output and classification reason metadata.
+- Added real-time `phase_update` stream events and live orchestration phase rendering support.
+- Token accounting now aggregates subcall token usage for done-event and persisted message token counts.
+- Title generation utility path now prefers cheap paid models over strict free preference and performs bounded retry when first title call is empty.
+- Added optional `learningContext` field to `chats` schema as Phase 3 preparation.
+
+### Verification Notes
+- Targeted test command attempted: `npm run test:run -- src/lib/__tests__/auto-settings.test.ts`.
+- Test execution is blocked in this environment: npm launches through Windows `CMD.EXE` (UNC-path failure) and local Vitest also fails because `node` is not available in PATH.
+- See `PHASE_0_IMPLEMENTATION_REPORT.md` for detailed file-level change log and attempted test commands.
+
+## Phase 1 Implementation Update (2026-03-21)
+
+Status: Implemented in codebase for the Phase 1 checklist in `CODEX.md`.
+
+### Completed
+- Added `PipelineController` + `PipelineState` foundation with class-based execution plans (`T0/T1/T2/T3`) and stage-level skip/completion tracking.
+- Integrated controller-driven routing gates in chat pipeline, including an early T0 fast path that skips auto-settings model work.
+- Enforced cost gates for lower classes: search, RAG retrieval, and multi-agent orchestration are skipped for `T0/T1`.
+- Added force-multi-agent guardrails (tier, org feature, request class, budget) with explicit denial handling in route trace/toolchain context.
+- Rebalanced phase-router model scoring: updated weight mix, free-model score ceiling, stronger repetition penalties, provider diversity penalty, and epsilon exploration.
+- Parallelized SearxNG querying (batch-of-3 first-success behavior) and reduced default timeout to `4000ms`.
+- Gated RAG execution on processed resources only; retrieval now transparently skips when resources exist but are still unprocessed.
+- Updated utility-model selection for memory extraction to prefer cheap paid-capable utility routing (`preferCheap`) without forcing free-only behavior.
+- Enhanced route trace structure with request-class metadata, stage execution/skips, search status, and cost-budget envelope fields.
+- Added focused Phase 1 tests for controller gating/guardrail behavior.
+
+### Verification Notes
+- Targeted tests were attempted but remain blocked in this environment due Node runtime constraints (same failure mode observed in Phase 0):
+  - `npm` execution delegates to Windows `CMD.EXE` and fails on UNC working path.
+  - Direct Vitest binary invocation fails because `node` is unavailable in PATH.
+- See `PHASE_1_IMPLEMENTATION_REPORT.md` for full file-level change log and test command outputs.
+
+## Phase 0/1 Verification Refresh (2026-03-21)
+
+Status: Re-verified in WSL using explicit bash invocation with Linux Node (`nvm`) to avoid prior `CMD.EXE` path failures.
+
+### Verification Commands
+- `bash -lc 'source ~/.nvm/nvm.sh && nvm use 24.12.0 >/dev/null && cd <local-workspace> && npx vitest run src/lib/__tests__/auto-settings.test.ts src/lib/__tests__/route-plan.test.ts src/lib/__tests__/pipeline-controller.test.ts'`
+- `bash -lc 'source ~/.nvm/nvm.sh && nvm use 24.12.0 >/dev/null && cd <local-workspace> && npx tsc --noEmit'`
+
+### Result
+- Targeted Phase 0/1 tests: passing.
+- TypeScript compile: passing.
+
+## Phase 2 Implementation Update (2026-03-21)
+
+Status: Implemented in codebase for the Phase 2 checklist in `CODEX.md`.
+
+### Completed
+- Added `userMemoryEntries` storage with vector index and pending/confirmed lifecycle.
+- Implemented semantic memory write router and read planner:
+  - Layer 2 profile aggregation (identity/academic/preferences)
+  - Layer 3 topic retrieval via embedding similarity with threshold gating
+  - negative topic-link filtering to reduce cross-topic contamination.
+- Integrated correction pathways from user directives:
+  - forget entries
+  - mark negative associations
+  - explicit remember/profile updates with immediate writes.
+- Extended runtime school context injection with `curriculum`, `examBoard`, `gradeLevels` (plus school type/country context lines in runtime block).
+- Added Memory Management UI in unified panel:
+  - pending confirm/dismiss
+  - delete
+  - confidence grouping
+  - source chat links
+  - forget-by-topic action.
+- Added `/api/memory` route for memory list/manage actions.
+- Added focused tests for directive parsing and memory directive entry routing.
+
+### Verification Notes
+- Phase 2 targeted tests (plus Phase 0/1 critical tests) pass via explicit WSL bash invocation:
+  - `bash -lc 'source ~/.nvm/nvm.sh && nvm use 24.12.0 >/dev/null && cd <local-workspace> && npx vitest run src/lib/__tests__/auto-settings.test.ts src/lib/__tests__/route-plan.test.ts src/lib/__tests__/pipeline-controller.test.ts src/lib/__tests__/post-process-memory-routing.test.ts'`
+- TypeScript compile passes:
+  - `bash -lc 'source ~/.nvm/nvm.sh && nvm use 24.12.0 >/dev/null && cd <local-workspace> && npx tsc --noEmit'`
+- Non-gating note: `src/lib/__tests__/memory-compaction.test.ts` has a pre-existing assertion mismatch (`<=20` expected while current implementation caps at `40`); not modified in this phase.
+
+---
+
+## 17. Phase 3 Learning Object & Mode Integration (2026-03-21)
+
+This section documents the Phase 3 implementation from `CODEX.md`.
+
+### 17.1 LearningContext Data Model
+
+A chat-scoped LearningContext is now used to maintain shared learning state across mode transitions.
+
+```typescript
+{
+  topics: string[];
+  keyFacts: Array<{ fact: string; source: "model" | "search" | "rag" | "user"; confidence: number }>;
+  misconceptions: string[];
+  quizableFacts: string[];
+  flashcardCandidates: Array<{ front: string; back: string }>;
+  difficultyLevel: number; // 1-5
+  uncertaintyGaps: string[];
+  nextSteps: string[];
+}
+```
+
+Storage:
+- `chats.learningContext` (JSON string)
+- mutation: `chats:setLearningContext`
+
+Core implementation:
+- `src/lib/orchestrator/learning-context.ts`
+
+### 17.2 LearningContext Extraction Pipeline
+
+LearningContext extraction is piggybacked on post-process memory extraction:
+
+- `maybeExtractMemory()` now requests structured JSON:
+  - `memory[]` for durable profile extraction
+  - `learningContext` for mode-transform continuity
+- Fallback LearningContext derivation runs from assistant response when structured JSON is absent.
+- Memory persistence can be disabled via `persistMemory` while still extracting LearningContext.
+
+File:
+- `src/lib/orchestrator/post-process.ts`
+
+### 17.3 Mode Transforms Using LearningContext
+
+`runChatPipeline` now injects:
+
+1. `=== LEARNING CONTEXT ===` block
+2. `=== MODE TRANSFORM GUIDANCE ===` block
+
+Transform behavior:
+- Quiz/Exam: targets `quizableFacts` and calibrates difficulty from context.
+- Flashcard: uses `flashcardCandidates`; on add-more intent, explicitly avoids duplicates using existing deck fronts.
+- Research: prioritizes `uncertaintyGaps` as research angles.
+- Explain: targets known `misconceptions`.
+
+File:
+- `src/lib/orchestrator/pipeline.ts`
+
+### 17.4 Flashcard Add-More Append Behavior
+
+Flashcard save behavior now supports true append semantics:
+
+- Save flow detects add-more intent from the preceding user message.
+- New cards append to the latest deck for the chat.
+- Dedupe is enforced by `cardHash` to avoid repeated cards.
+
+Files:
+- `convex/flashcards.ts`
+- `src/app/api/flashcards/route.ts`
+
+### 17.5 Manual Flashcard Editing
+
+Inline flashcard editing is now supported in chat flashcard reveal:
+
+- User can edit FRONT/BACK text directly in the card interface.
+- Backend mutation persists updates:
+  - `flashcards:editCard`
+  - API action `edit_card` (`POST /api/flashcards`)
+
+Files:
+- `src/components/chat/flashcard-reveal.tsx`
+- `src/components/chat/chat-messages.tsx`
+- `src/components/chat/chat-layout.tsx`
+- `src/hooks/use-chat-state.ts`
+- `convex/flashcards.ts`
+- `src/app/api/flashcards/route.ts`
+
+### 17.6 Flashcard UI Polish
+
+Card-mode flashcard UI adjustments:
+- Removed redundant top progress bar.
+- Added explicit spacing between main card and rating/navigation controls.
+
+File:
+- `src/components/chat/flashcard-reveal.tsx`
+
+### 17.7 Mode Suggestion Chips
+
+After substantive tutor/explain responses, route trace may include mode suggestion chips when LearningContext is rich enough:
+
+```typescript
+routeTrace.modeSuggestions?: Array<{
+  mode: StudyMode;
+  label: string;
+  prompt: string;
+}>;
+```
+
+Rendered in chat as clickable actions that:
+1. switch mode
+2. send a guided follow-up prompt
+
+Files:
+- `src/lib/orchestrator/pipeline.ts`
+- `src/types/index.ts`
+- `src/components/chat/chat-messages.tsx`
+
+### 17.8 Spaced Repetition Reminder Surface
+
+Spaced repetition reminders remain surfaced via notifications:
+- daily cron `generate-study-reminders`
+- notification type `reminder_flashcards_due`
+- user-facing NotificationBell in chat surfaces
+
+Files:
+- `convex/crons.ts`
+- `convex/notifications.ts`
+- `src/components/notification-bell.tsx`
+
+---
+
+## 18. Phase 4 Clarification & Proactive Continuity (2026-03-21)
+
+This section documents the Phase 4 implementation from `CODEX.md`.
+
+### 18.1 Generalized Clarification Decisioning
+
+A dedicated clarification module now drives generalized interrupt behavior for ambiguous T2/T3 requests:
+
+- `needsClarification()` evaluates:
+  - vague research scope
+  - enhanced requests lacking constraints
+  - conflicting directives (e.g., latest/current request + explicit no-search)
+- quiz/flashcard modes are excluded (existing mode-specific clarification remains authoritative)
+- clarification is suppressed if the previous assistant turn was already a clarification prompt (no back-to-back clarification loops).
+
+File:
+- `src/lib/orchestrator/clarification.ts`
+
+### 18.2 Clarification Interrupt in Pipeline Controller Flow
+
+`runChatPipeline` now integrates clarification as a true interrupt step:
+
+- executes clarification check under `clarificationCheck` stage policy
+- if clarification is required:
+  - emits clarification phase updates
+  - persists an assistant clarification message immediately (no full generation)
+  - marks `generation` and `postProcess` as skipped in pipeline stage tracking
+  - carries structured clarification metadata in `routeTrace.clarificationBlock`.
+
+Files:
+- `src/lib/orchestrator/pipeline.ts`
+- `src/types/index.ts`
+
+### 18.3 Recent Context Cache (5-Minute TTL)
+
+To prevent expensive re-execution between clarification turns, chat-level recent context cache is now implemented:
+
+Schema additions (`chats`):
+- `recentContext?: string` (JSON payload)
+- `recentContextAt?: number` (timestamp)
+
+Behavior:
+- when clarification is triggered after retrieval/search on T2/T3:
+  - cache compact retrieval + web-search context snapshot
+- on immediate follow-up turn after clarification:
+  - reuse cached context (if within 5 minutes)
+  - skip rerunning retrieval/search calls for that clarification-resume flow
+  - clear cache once consumed.
+
+Files:
+- `convex/schema.ts`
+- `convex/chats.ts` (`setRecentContext`)
+- `src/lib/orchestrator/clarification.ts`
+- `src/lib/orchestrator/pipeline.ts`
+
+### 18.4 ClarificationCard Frontend
+
+Structured clarification metadata is now rendered with a dedicated interactive UI:
+
+- new `ClarificationCard` supports:
+  - `free_text`
+  - `single_choice`
+  - `multi_choice`
+  - `confirmation`
+- submission composes answers into a normal user follow-up message, preserving the existing pipeline contract.
+
+Files:
+- `src/components/chat/clarification-card.tsx`
+- `src/components/chat/chat-messages.tsx`
+
+### 18.5 Proactive Continuity Banner
+
+A dismissible proactive banner is now surfaced in empty chat states:
+
+- reminder-driven suggestions from unread notifications:
+  - `reminder_flashcards_due`
+  - `reminder_streak_risk`
+  - `reminder_study_plan`
+- continuation suggestion on new chat:
+  - offers quick resume into the most recent active thread
+- session-level dismissal memory avoids repeated resurfacing in the same session.
+
+Files:
+- `src/hooks/use-chat-state.ts`
+- `src/components/chat/chat-messages.tsx`
+- `src/components/chat/chat-layout.tsx`
+
+---
+
+## 19. Phase 5 UI/Product System (2026-03-21)
+
+Phase 5 delivers premium feel, working previews, and branch navigation across the application.
+
+### 19.1 Chat Width Reduction
+Messages and composer constrained to `max-w-[680px]` with `mx-auto` centering. Creates generous side margins for readability and gives the right panel room without compressing chat content.
+
+### 19.2 Right Panel Slide Animation
+The unified panel (`unified-panel.tsx`) now slides in when opening in sheet mode:
+- Transform: `translateX(24px) → translateX(0)` (or `translateY(16px)` for compact/mobile)
+- Timing: `280ms cubic-bezier(0.16, 1, 0.3, 1)` for transform, `200ms ease` for opacity
+- Uses `requestAnimationFrame` to trigger after mount for proper CSS transition
+
+### 19.3 Setting Pill Visual States
+Setting pills in both the composer and unified panel now have three distinct visual states:
+- **Off**: Gray/dim with reduced opacity (60%), tertiary text color
+- **Auto**: Animated glow border using `auto-pill-glow` keyframes (2.4s infinite). Subtle cyan ring pulse
+- **On**: Solid accent fill — cyan-tinted background with cyan border ring
+- Composer pill size reduced from `h-9 w-9` to `h-8 w-8`
+
+### 19.4 Orchestrator Progress UI
+The progress timeline in the orchestration panel now uses proper semantic icons:
+- `CheckCircle2` for completed steps (green)
+- `Loader2` with spin animation for in-progress steps (cyan)
+- `XCircle` for skipped steps (tertiary)
+- Plain dot for pending steps
+- Section auto-fades to `opacity-60` when all steps complete
+
+### 19.5 Sidebar Collapsed Fixes
+- **Streak/XP**: Changed from horizontal to vertical stacking (`flex-col`)
+- **Utilities section**: Changed from `overflow-y-auto` with mask-image to `overflow-visible`, fixing clipped notification dropdowns and timer popovers
+- **Spectra branding**: Added "Spectra" label below school name in expanded sidebar
+
+### 19.6 Header Alignment
+- Shared `--header-height: 56px` CSS variable defined in globals.css
+- Main chat header uses `min-h-[var(--header-height)]` with consistent bottom shadow
+- Header content width aligned to `max-w-[680px]` to match messages column
+
+### 19.7 Model Display on Chat Switch
+When `selectedChatId` changes, a 600ms transition state clears `lastModelUsed` to `undefined`, naturally causing the header to show a loading/skeleton state until the new chat's messages load and reveal the model info.
+
+### 19.8 Source Cards Compact
+Citation cards redesigned from a 2-column grid with ~76px-tall cards to inline pill-style layout:
+- Horizontal flex-wrap with `gap-1.5`
+- Each card: single-line with icon + domain/title, truncated at 280px
+- Card height reduced ~60%
+- Section spacing tightened
+
+### 19.9 CSP Fix for Preview Sandbox
+Updated `Content-Security-Policy` meta tag in `code-sandbox.ts` to allow jsdelivr CDN:
+```
+script-src 'unsafe-inline' 'unsafe-eval' blob: https://cdn.jsdelivr.net
+```
+Unblocks Mermaid diagrams, React/ReactDOM, and Babel transpilation within sandboxed iframes. The iframe remains sandboxed with `sandbox="allow-scripts"` (no same-origin access).
+
+### 19.10 PostMessage Scoping
+Each `CodePreview` instance now generates a unique `frameId` via React `useId()`:
+- `frameId` is embedded in the iframe's resize/error scripts via `buildResizeScript(frameId)`
+- All `parent.postMessage()` events include `{ frameId }` in the payload
+- The `handleMessage` callback in `CodePreview` filters events by `frameId`
+- Prevents cross-iframe event leakage when multiple previews are rendered
+
+### 19.11 Branch Navigation
+**Schema changes** (`convex/schema.ts`):
+- `parentMessageId: v.optional(v.id("messages"))` — links to parent message
+- `siblingIndex: v.optional(v.number())` — 0-based position among siblings
+- `siblingCount: v.optional(v.number())` — total sibling count
+- New `by_parent_message` index for efficient sibling queries
+
+**UI** (`chat-message.tsx`):
+- Branch navigation indicator: `◀ 1/3 ▶` with prev/next buttons
+- Renders in assistant message header next to model routing badge
+- Only visible when `siblingCount > 1`
+- Disabled buttons at boundaries (first/last sibling)
+
+### 19.12 Landing Page Polish
+- **Model names**: Simplified from "Claude Sonnet", "Gemini 2.5 Pro", "GPT-4o" to "Claude", "Gemini", "GPT"
+- **Mode card animation**: `transform-origin` changed to `center center`, scale reduced to `1.0`
+- **Soul diagram**: AI Core element pulses with `soul-core-pulse` keyframe animation (3s breathing glow)
+- **Sidebar branding**: "Spectra" text added below school name
+
+### Key Files
+| File | Changes |
+|------|---------|
+| `src/app/globals.css` | CSS vars, keyframes |
+| `src/components/chat/chat-messages.tsx` | 680px width |
+| `src/components/chat/chat-composer.tsx` | 680px width, pill states |
+| `src/components/chat/chat-header.tsx` | Height alignment |
+| `src/components/chat/unified-panel.tsx` | Slide animation, pill states, progress icons |
+| `src/components/chat/chat-sidebar.tsx` | Collapsed fixes, branding |
+| `src/components/chat/chat-message.tsx` | Compact sources, branch nav |
+| `src/components/chat/code-preview.tsx` | frameId scoping |
+| `src/lib/code-sandbox.ts` | CSP fix, frameId |
+| `convex/schema.ts` | Branch navigation fields |

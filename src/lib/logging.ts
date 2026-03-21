@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import type { NextRequest } from "next/server";
+import { convexMutation } from "@/lib/convex-server";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -107,6 +108,21 @@ export class StructuredLogger {
       if (error) {
         writeLine(`  Error: ${error.message}`, "stderr");
       }
+    }
+
+    // Fire-and-forget DB persist for error/warn events
+    if (level === "error" || level === "warn") {
+      void convexMutation("errorEvents:log", {
+        level,
+        message: `${message}${error ? `: ${error.message}` : ""}`,
+        source: this._context.path ?? undefined,
+        stack: error?.stack?.slice(0, 4000),
+        metadata: metadata ? JSON.stringify(metadata).slice(0, 2000) : undefined,
+        actorClerkId: typeof this._context.userId === "string" ? this._context.userId : undefined,
+        chatId: typeof this._context.chatId === "string" ? (this._context.chatId as string) : undefined,
+      }).catch(() => {
+        // Never let error reporting break the main flow
+      });
     }
   }
   

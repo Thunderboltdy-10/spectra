@@ -154,6 +154,14 @@ BACK: [answer or definition]
 - Minimum deck size is 5 cards unless the student explicitly requests fewer.`
       : "";
 
+  const documentTypeSpec = `Supported document types:
+  - presentation: { "type": "presentation", "title": string, "slides": [{ "layout": "title" | "content" | "two-column" | "image" | "blank", "title"?: string, "body"?: string, "bullets"?: string[], "notes"?: string, "accent"?: string }] }
+  - word: { "type": "word", "title": string, "sections": [{ "heading": string, "level": 1 | 2 | 3, "content": string }] }
+  - study_guide: { "type": "study_guide", "title": string, "summary"?: string, "highlights"?: string[], "terms"?: [{ "term": string, "definition": string }], "sections": [{ "heading": string, "content": string }] }
+  - timeline: { "type": "timeline", "title": string, "events": [{ "date": string, "title": string, "detail": string }] }
+  - comparison_table: { "type": "comparison_table", "title": string, "columns": string[], "rows": string[][] }
+  - webpage: { "type": "webpage", "title": string, "summary"?: string, "html": string }`;
+
   const documentRules =
     params.mode === "document"
       ? `Document mode policy:
@@ -163,16 +171,14 @@ BACK: [answer or definition]
 <<DOCUMENT_START>>
 {...valid JSON...}
 <<DOCUMENT_END>>
-- Supported document types:
-  - presentation: { "type": "presentation", "title": string, "slides": [{ "layout": "title" | "content" | "two-column" | "image" | "blank", "title"?: string, "body"?: string, "bullets"?: string[], "notes"?: string, "accent"?: string }] }
-  - word: { "type": "word", "title": string, "sections": [{ "heading": string, "level": 1 | 2 | 3, "content": string }] }
-  - study_guide: { "type": "study_guide", "title": string, "summary"?: string, "highlights"?: string[], "terms"?: [{ "term": string, "definition": string }], "sections": [{ "heading": string, "content": string }] }
-  - timeline: { "type": "timeline", "title": string, "events": [{ "date": string, "title": string, "detail": string }] }
-  - comparison_table: { "type": "comparison_table", "title": string, "columns": string[], "rows": string[][] }
-  - webpage: { "type": "webpage", "title": string, "summary"?: string, "html": string }
+- ${documentTypeSpec}
 - You may include concise commentary outside the delimiters, but the JSON inside must be valid and complete.
 - Use clear academic structure and polished headings.`
-      : "";
+      : `Cross-mode document capability:
+- In any mode, if the user asks you to "create a document", "make a presentation", "build a study guide", "generate a timeline", or similar, you CAN emit a structured document.
+- Wrap the JSON payload exactly as: <<DOCUMENT_START>>{...valid JSON...}<<DOCUMENT_END>>
+- ${documentTypeSpec}
+- Only generate documents when explicitly requested or clearly beneficial. Normal conversational responses do not need documents.`;
 
   const researchRules =
     params.mode === "research"
@@ -302,6 +308,12 @@ Response style:
 - Match response length to prompt complexity (very short for simple chat, detailed for complex tasks).
 - Use clear structure only when it helps readability; avoid rigid templates.
 - Include compact inline numeric references when sourcing facts, like [1], [2]. Do not include filename-style brackets like [filename p.X].
+
+Visualization capability:
+- When explaining concepts that benefit from visual representation (processes, relationships, data comparisons, timelines, architectures), include a Mermaid diagram in a \`\`\`mermaid code block.
+- For interactive demonstrations (math visualizations, physics simulations, data charts), include JavaScript/HTML code in appropriate code blocks — these can be previewed live in the app.
+- Use SVG code blocks for simple graphics and icons.
+- Only include visualizations when they genuinely aid understanding — not for every response.
 
 SOURCES:
 ${params.sourceBlock || "No retrieved sources."}`;

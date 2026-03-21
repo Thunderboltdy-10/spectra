@@ -24,6 +24,7 @@ type ChatHeaderProps = {
   onExport: (format: "markdown" | "pdf" | "text") => void;
   showOrchestrationButton?: boolean;
   orchestrationActive?: boolean;
+  settingsActive?: boolean;
 };
 
 function formatRelativeTime(timestamp: number) {
@@ -55,6 +56,7 @@ export function ChatHeader({
   onExport,
   showOrchestrationButton = false,
   orchestrationActive = false,
+  settingsActive = false,
 }: ChatHeaderProps) {
   const { query } = useKBar();
   const responseAgo = lastResponseAt
@@ -65,7 +67,7 @@ export function ChatHeader({
   return (
     <header className="sticky top-0 z-20 shadow-[0_1px_0_var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_92%,transparent)] backdrop-blur-xl min-h-[56px]">
       <div className="px-3 pb-3 pt-2.5 sm:px-6 lg:px-10">
-        <div className="mx-auto flex w-full max-w-6xl items-center gap-2">
+        <div className="mx-auto flex w-full max-w-5xl items-center gap-2">
           <Button
             type="button"
             variant="secondary"
@@ -149,7 +151,7 @@ export function ChatHeader({
                   aria-label="Open settings"
                   title="Open settings"
                 >
-                  <Settings2 className="h-3.5 w-3.5" />
+                  <Settings2 className={`h-3.5 w-3.5 ${settingsActive ? "text-[var(--accent-cyan)]" : ""}`} />
                 </Button>
               </>
             )}
@@ -202,7 +204,7 @@ export function ChatHeader({
         </div>
 
         {showCompactTip ? (
-          <div className="mx-auto mt-2 w-full max-w-6xl">
+          <div className="mx-auto mt-2 w-full max-w-5xl">
             <ContextualTip
               tipId="chat-header-compact-tip"
               message="Use Compact to reduce context length."

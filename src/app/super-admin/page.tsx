@@ -220,6 +220,13 @@ export default function SuperAdminDashboard() {
   const [admins, setAdmins] = useState<AdminRow[]>([]);
   const [orgs, setOrgs] = useState<OrgOption[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
+  const [errorEvents, setErrorEvents] = useState<Array<{
+    _id: string;
+    level: string;
+    message: string;
+    source?: string;
+    createdAt: number;
+  }>>([]);
   const [loading, setLoading] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
   const [announcementAudience, setAnnouncementAudience] = useState<"all" | "org" | "email">("all");
@@ -322,6 +329,12 @@ export default function SuperAdminDashboard() {
         if (auditResponse.ok) {
           const auditData = (await auditResponse.json()) as { logs?: AuditLogRow[] };
           setAuditLogs(auditData.logs ?? []);
+        }
+
+        const errorsResponse = await fetch("/api/super-admin/errors?limit=20");
+        if (errorsResponse.ok) {
+          const errorsData = (await errorsResponse.json()) as { errors?: Array<{ _id: string; level: string; message: string; source?: string; createdAt: number }> };
+          setErrorEvents(errorsData.errors ?? []);
         }
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Failed to load stats");
@@ -1042,6 +1055,47 @@ export default function SuperAdminDashboard() {
             </table>
           )}
         </div>
+      </div>
+      {/* Recent Errors */}
+      <div className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5">
+        <h2 className="font-display text-lg text-[var(--text-primary)]">Recent Errors</h2>
+        <p className="mt-1 text-xs text-[var(--text-secondary)]">Server-side errors and warnings captured from the pipeline.</p>
+        {errorEvents.length === 0 ? (
+          <p className="mt-4 text-sm text-[var(--text-secondary)]">No errors recorded yet.</p>
+        ) : (
+          <div className="mt-4 max-h-[400px] overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-[var(--bg-elevated)]">
+                <tr className="border-b border-[var(--border-default)]">
+                  <th className="py-2 pr-3 text-left text-xs font-medium text-[var(--text-secondary)]">Time</th>
+                  <th className="py-2 pr-3 text-left text-xs font-medium text-[var(--text-secondary)]">Level</th>
+                  <th className="py-2 pr-3 text-left text-xs font-medium text-[var(--text-secondary)]">Source</th>
+                  <th className="py-2 text-left text-xs font-medium text-[var(--text-secondary)]">Message</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--border-default)]">
+                {errorEvents.map((event) => (
+                  <tr key={event._id}>
+                    <td className="py-2 pr-3 whitespace-nowrap text-xs text-[var(--text-secondary)]">
+                      {new Date(event.createdAt).toLocaleString()}
+                    </td>
+                    <td className="py-2 pr-3">
+                      <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-medium uppercase ${
+                        event.level === "error"
+                          ? "bg-[color-mix(in_oklab,var(--danger)_15%,transparent)] text-[var(--danger)]"
+                          : "bg-[color-mix(in_oklab,var(--warning)_15%,transparent)] text-[var(--warning)]"
+                      }`}>
+                        {event.level}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-3 text-xs text-[var(--text-secondary)] max-w-[120px] truncate">{event.source ?? "—"}</td>
+                    <td className="py-2 text-xs text-[var(--text-primary)] max-w-[400px] truncate">{event.message}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </AppShell>
   );

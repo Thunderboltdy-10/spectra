@@ -365,7 +365,7 @@ export function ChatSidebar({
           })}
         </div>
 
-        <div className="mt-3 flex flex-col items-center gap-2">
+        <div className="mt-3 flex min-h-0 flex-col items-center gap-2 overflow-y-auto [mask-image:linear-gradient(to_bottom,black_85%,transparent)]">
           <div className="mb-1 flex flex-col gap-1.5">
             <NotificationBell
               buttonClassName="h-9.5 w-9.5 rounded-xl bg-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
@@ -386,7 +386,7 @@ export function ChatSidebar({
               </button>
             ))}
           </div>
-          <div className="mb-1 flex flex-col items-center gap-1 text-[10px] text-[var(--text-secondary)]">
+          <div className="mb-1 flex items-center gap-2 text-[10px] text-[var(--text-secondary)]">
             <span className="inline-flex items-center gap-1" title="Current streak">
               <Flame className={cn("h-3 w-3", gamification.currentStreak > 0 ? "animate-pulse text-[#ef4444]" : "text-[var(--text-secondary)]")} />
               {gamification.currentStreak}
@@ -415,7 +415,7 @@ export function ChatSidebar({
                 </Avatar>
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
+            <DropdownMenuContent align="start" side="right">
               <DropdownMenuItem onSelect={() => openUserProfile()}>
                 <UserRound className="mr-2 h-4 w-4" />
                 Manage account
@@ -453,10 +453,8 @@ export function ChatSidebar({
           )}
           <div className="min-w-0 flex-1">
             <p className="text-lg leading-none">
-              <span className="font-display">{orgName ?? "School"}</span>{" "}
-              <span className="font-medium" style={{ color: "var(--brand-primary)" }}>Spectra</span>
+              <span className="font-display">{orgName ?? "School"}</span>
             </p>
-            <p className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-secondary)]">spectra</p>
           </div>
         </div>
         <Button type="button" variant="ghost" size="icon" onClick={onToggleCollapse} aria-label="Collapse sidebar">
@@ -704,7 +702,14 @@ export function ChatSidebar({
             </div>
           </div>
           <ThemeToggle className="rounded-xl bg-transparent hover:bg-[var(--bg-hover)]" />
-          <Button type="button" variant="ghost" size="icon" className="h-9 w-9 rounded-xl" onClick={onOpenSettings} title="Open global settings">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 rounded-xl"
+            onClick={onOpenSettings}
+            title="Open global settings"
+          >
             <Settings2 className="h-4 w-4" />
           </Button>
         </div>

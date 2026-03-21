@@ -17,11 +17,32 @@ const DEFAULT_SEARXNG_INSTANCES = [
   "https://searxng.world",
   "https://paulgo.io",
   "https://searx.tiekoetter.com",
+  "https://search.sapti.me",
+  "https://searx.nixnet.services",
+  "https://search.ononoki.org",
 ];
 
 const DEFAULT_TIMEOUT_MS = 6500;
 const MAX_TIMEOUT_MS = 15000;
 const MIN_TIMEOUT_MS = 2500;
+
+// Instance health tracking — skip recently-failed instances for 5 minutes
+const instanceFailures = new Map<string, number>();
+const FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
+
+function isInstanceHealthy(instance: string): boolean {
+  const failedAt = instanceFailures.get(instance);
+  if (!failedAt) return true;
+  if (Date.now() - failedAt > FAILURE_COOLDOWN_MS) {
+    instanceFailures.delete(instance);
+    return true;
+  }
+  return false;
+}
+
+function markInstanceFailed(instance: string) {
+  instanceFailures.set(instance, Date.now());
+}
 
 function normalizeInstance(value: string) {
   return value.trim().replace(/\/+$/, "");
@@ -55,7 +76,12 @@ export async function searxngSearch(query: string, options: SearxngOptions = {})
   const limit = Math.min(10, Math.max(3, options.limit ?? 6));
   const language = options.language ?? "en";
 
-  for (const instance of instances) {
+  // Prioritize healthy instances
+  const healthy = instances.filter(isInstanceHealthy);
+  const unhealthy = instances.filter((i) => !isInstanceHealthy(i));
+  const ordered = [...healthy, ...unhealthy];
+
+  for (const instance of ordered) {
     try {
       const response = await fetch(
         `${instance}/search?q=${encodeURIComponent(query)}&format=json&language=${encodeURIComponent(language)}&safesearch=1`,
@@ -67,7 +93,11 @@ export async function searxngSearch(query: string, options: SearxngOptions = {})
           },
         },
       );
-      if (!response.ok) continue;
+      if (!response.ok) {
+        console.warn(`[searxng] ${instance} returned ${response.status}`);
+        markInstanceFailed(instance);
+        continue;
+      }
       const payload = (await response.json()) as { results?: Array<Record<string, unknown>> };
       const results = (payload.results ?? [])
         .map((item) => ({
@@ -81,10 +111,15 @@ export async function searxngSearch(query: string, options: SearxngOptions = {})
       if (results.length > 0) {
         return results;
       }
-    } catch {
-      // Try the next public instance.
+      // Empty results — instance works but query yielded nothing, try next
+      console.warn(`[searxng] ${instance} returned 0 results for "${query.slice(0, 60)}"`);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.warn(`[searxng] ${instance} failed: ${msg}`);
+      markInstanceFailed(instance);
     }
   }
 
+  console.warn(`[searxng] all ${ordered.length} instances failed for "${query.slice(0, 80)}"`);
   return [];
 }

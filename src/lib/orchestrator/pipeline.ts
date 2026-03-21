@@ -13,7 +13,7 @@ import {
   summarizeWhyResponse,
   toOpenRouterMessages,
 } from "@/lib/orchestrator/compose";
-import { classifyExplainDepth, runAutoSettingsPipeline, suggestMode } from "@/lib/auto-settings";
+import { classifyExplainDepth, parseUserDirectives, runAutoSettingsPipeline, suggestMode } from "@/lib/auto-settings";
 import { matchAgentToMessage } from "@/lib/agent-matching";
 import { countFlashcardPairs, isFlashcardDeckStructured, normalizeFlashcardDeck } from "@/lib/flashcard-format";
 import { safeStudyMode } from "@/lib/contracts/studyModes";
@@ -81,6 +81,7 @@ type ChatRequestBody = {
     memoryEnabled?: boolean;
     searxngEnabled?: boolean;
   };
+  forceMultiAgent?: boolean;
 };
 
 type AgentSnapshot = {
@@ -611,6 +612,18 @@ export async function runChatPipeline(request: NextRequest) {
     thinkingMode: autoSettings.thinkingMode,
     searchMode: autoSettings.searchMode,
   });
+  const userDirectives = parseUserDirectives(normalizedMessage);
+  if (userDirectives.forcedModel) {
+    logger.info("user directive: forced model", { model: userDirectives.forcedModel });
+  }
+  if (userDirectives.forceMultiAgent) {
+    logger.info("user directive: force multi-agent");
+    (body as Record<string, unknown>).forceMultiAgent = true;
+  }
+  if (userDirectives.forcedModel && !body.forcedModel) {
+    (body as Record<string, unknown>).forcedModel = userDirectives.forcedModel;
+  }
+
   logger.info("auto-settings complete", {
     promptEnhanced: auto.promptEnhanced,
     searchEnabled: auto.searchEnabled,
@@ -1673,14 +1686,29 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     systemPromptParts.push(`IMAGE DESCRIPTION:\n${imageDescriptionBlock}`);
   }
 
+  const multiAgentGateDebug = {
+    budgetTier: budget.tier,
+    allowSubAgents: routePlan.allowSubAgents,
+    orchestratorV2Enabled: orgSettings.org?.orchestratorV2Enabled,
+    shouldUseWebSearch: routePlan.shouldUseWebSearch,
+    citationCount: retrieval.citations.length,
+    shouldUseMultiAgentResult: shouldUseMultiAgent(auto.message, effectiveMode, auto.complexity),
+    complexity: auto.complexity,
+    effectiveMode,
+    forceMultiAgent: body.forceMultiAgent,
+  };
+  logger.info("multi-agent gate evaluation", multiAgentGateDebug);
+
   const multiAgentEnabled =
-    budget.tier !== "free_only"
-    && routePlan.allowSubAgents
-    && featureEnabled(orgSettings.org?.orchestratorV2Enabled)
-    && (
-      routePlan.shouldUseWebSearch
-      || retrieval.citations.length > 0
-      || shouldUseMultiAgent(auto.message, effectiveMode, auto.complexity)
+    (body.forceMultiAgent === true) || (
+      budget.tier !== "free_only"
+      && routePlan.allowSubAgents
+      && featureEnabled(orgSettings.org?.orchestratorV2Enabled)
+      && (
+        routePlan.shouldUseWebSearch
+        || retrieval.citations.length > 0
+        || shouldUseMultiAgent(auto.message, effectiveMode, auto.complexity)
+      )
     );
   if (multiAgentEnabled) {
     route.trace.toolchain.push("multi_agent_collaboration");

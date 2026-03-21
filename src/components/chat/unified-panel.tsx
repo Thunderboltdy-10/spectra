@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bot, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Loader2, Settings2, X, XCircle, FileText, Milestone } from "lucide-react";
+import { Bot, Brain, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Loader2, Settings2, Trash2, X, XCircle, FileText, Milestone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ProviderLogo } from "@/components/provider-logo";
 import { Switch } from "@/components/ui/switch";
@@ -81,6 +81,19 @@ function providerFromModelId(value: string) {
     .join(" ");
 }
 
+function confidenceBucket(value: number) {
+  if (value >= 0.75) return "high";
+  if (value >= 0.5) return "medium";
+  return "low";
+}
+
+function confidenceBadgeTone(value: number) {
+  const bucket = confidenceBucket(value);
+  if (bucket === "high") return "text-[var(--success)]";
+  if (bucket === "medium") return "text-[var(--accent-cyan)]";
+  return "text-[var(--text-secondary)]";
+}
+
 function resourceStatusMeta(status: PersonalResource["status"], updatedAt?: number, attempts?: number) {
   if (status === "uploaded") {
     return {
@@ -115,6 +128,21 @@ function resourceStatusMeta(status: PersonalResource["status"], updatedAt?: numb
     iconClassName: "text-[var(--danger)]",
   };
 }
+
+type MemoryPanelEntry = {
+  _id: string;
+  key: string;
+  text: string;
+  category: "identity" | "academic" | "preference" | "topic" | "artifact" | "correction";
+  confidence: number;
+  status: "pending" | "confirmed";
+  sourceType: "extraction" | "user_explicit" | "correction";
+  sourceChatId?: string;
+  relatedArtifacts: string[];
+  negativeTopicLinks: string[];
+  createdAt: number;
+  updatedAt: number;
+};
 
 export type SettingsViewProps = {
   models: ModelOption[];
@@ -300,6 +328,12 @@ export function SettingsView({
   const [documentModeEnabled, setDocumentModeEnabled] = useState(true);
   const [multiAgentVerbose, setMultiAgentVerbose] = useState(false);
   const [showSpecialists, setShowSpecialists] = useState(true);
+  const [memoryEntries, setMemoryEntries] = useState<MemoryPanelEntry[]>([]);
+  const [memoryLoading, setMemoryLoading] = useState(false);
+  const [memoryError, setMemoryError] = useState<string | null>(null);
+  const [memoryActionBusyId, setMemoryActionBusyId] = useState<string | null>(null);
+  const [forgetTopicInput, setForgetTopicInput] = useState("");
+  const [forgetTopicBusy, setForgetTopicBusy] = useState(false);
 
   useEffect(() => {
     try {
@@ -319,6 +353,78 @@ export function SettingsView({
       window.localStorage.setItem(key, value ? "1" : "0");
     } catch {
       // Ignore storage failures.
+    }
+  };
+
+  const refreshMemoryEntries = async () => {
+    setMemoryLoading(true);
+    setMemoryError(null);
+    try {
+      const response = await fetch("/api/memory", { method: "GET" });
+      if (!response.ok) {
+        throw new Error(`Failed to load memory (${response.status})`);
+      }
+      const payload = (await response.json()) as { entries?: MemoryPanelEntry[] };
+      setMemoryEntries(Array.isArray(payload.entries) ? payload.entries : []);
+    } catch (error) {
+      setMemoryError(error instanceof Error ? error.message : "Could not load memory");
+      setMemoryEntries([]);
+    } finally {
+      setMemoryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshMemoryEntries();
+  }, []);
+
+  const runMemoryAction = async (params: {
+    action: "confirm" | "dismiss" | "delete";
+    entryId: string;
+  }) => {
+    setMemoryActionBusyId(params.entryId);
+    try {
+      const response = await fetch("/api/memory", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: params.action,
+          entryId: params.entryId,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`Memory action failed (${response.status})`);
+      }
+      await refreshMemoryEntries();
+    } catch (error) {
+      setMemoryError(error instanceof Error ? error.message : "Memory action failed");
+    } finally {
+      setMemoryActionBusyId(null);
+    }
+  };
+
+  const forgetTopic = async () => {
+    const topic = forgetTopicInput.trim();
+    if (!topic) return;
+    setForgetTopicBusy(true);
+    try {
+      const response = await fetch("/api/memory", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "forget_topic",
+          topic,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`Forget topic failed (${response.status})`);
+      }
+      setForgetTopicInput("");
+      await refreshMemoryEntries();
+    } catch (error) {
+      setMemoryError(error instanceof Error ? error.message : "Forget topic failed");
+    } finally {
+      setForgetTopicBusy(false);
     }
   };
 
@@ -361,12 +467,20 @@ export function SettingsView({
     routerMode === "manual"
       ? (selectedManualModel?.tags ?? [])
       : (routedRecentModel?.tags ?? []);
+  const pendingEntries = memoryEntries.filter((entry) => entry.status === "pending");
+  const confirmedEntries = memoryEntries.filter((entry) => entry.status === "confirmed");
+  const groupedConfirmedEntries = {
+    high: confirmedEntries.filter((entry) => confidenceBucket(entry.confidence) === "high"),
+    medium: confirmedEntries.filter((entry) => confidenceBucket(entry.confidence) === "medium"),
+    low: confirmedEntries.filter((entry) => confidenceBucket(entry.confidence) === "low"),
+  };
 
   return (
     <div className="space-y-4">
       <Tabs defaultValue="assistant" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="assistant">Assistant</TabsTrigger>
+          <TabsTrigger value="memory">Memory</TabsTrigger>
           <TabsTrigger value="app">App &amp; Account</TabsTrigger>
         </TabsList>
 
@@ -533,6 +647,171 @@ export function SettingsView({
               </div>
               <Switch checked={showSpecialists} onCheckedChange={(value) => persistToggle("ai-school:show-specialists", value, setShowSpecialists)} />
             </div>
+          </section>
+        </TabsContent>
+
+        <TabsContent value="memory" className="space-y-4">
+          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xs font-medium text-[var(--text-secondary)]">Memory manager</h3>
+                <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+                  Layered memory with pending review and topic-specific recall.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-[11px]"
+                onClick={() => {
+                  void refreshMemoryEntries();
+                }}
+              >
+                <Brain className="mr-1 h-3.5 w-3.5" />
+                Refresh
+              </Button>
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                type="text"
+                value={forgetTopicInput}
+                onChange={(event) => setForgetTopicInput(event.target.value)}
+                placeholder="Forget all about topic (e.g. WWII)"
+                className="h-9 flex-1 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)] focus:border-[var(--accent-cyan)]"
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-9 px-3 text-xs"
+                disabled={forgetTopicBusy || !forgetTopicInput.trim()}
+                onClick={() => {
+                  void forgetTopic();
+                }}
+              >
+                {forgetTopicBusy ? "Forgetting..." : "Forget topic"}
+              </Button>
+            </div>
+            {memoryLoading ? (
+              <p className="mt-2 text-xs text-[var(--text-secondary)]">Loading memory...</p>
+            ) : null}
+            {memoryError ? (
+              <p className="mt-2 text-xs text-[var(--danger)]">{memoryError}</p>
+            ) : null}
+          </section>
+
+          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+            <h3 className="mb-2 text-xs font-medium text-[var(--text-secondary)]">Pending confirmation</h3>
+            {pendingEntries.length === 0 ? (
+              <p className="text-xs text-[var(--text-secondary)]">No pending entries.</p>
+            ) : (
+              <div className="space-y-2">
+                {pendingEntries.map((entry) => (
+                  <article key={entry._id} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-medium text-[var(--text-primary)]">{entry.key.replace(/_/g, " ")}</p>
+                      <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">{entry.category}</span>
+                    </div>
+                    <p className="mt-1 text-xs text-[var(--text-secondary)]">{entry.text}</p>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      {entry.sourceChatId ? (
+                        <a href={`/chat?chatId=${entry.sourceChatId}`} className="text-[11px] text-[var(--accent-cyan)] hover:underline">
+                          Open source chat
+                        </a>
+                      ) : (
+                        <span className="text-[11px] text-[var(--text-secondary)]">No source chat</span>
+                      )}
+                      <div className="flex items-center gap-1.5">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-[11px]"
+                          disabled={memoryActionBusyId === entry._id}
+                          onClick={() => {
+                            void runMemoryAction({ action: "confirm", entryId: entry._id });
+                          }}
+                        >
+                          Confirm
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2 text-[11px] text-[var(--danger)]"
+                          disabled={memoryActionBusyId === entry._id}
+                          onClick={() => {
+                            void runMemoryAction({ action: "dismiss", entryId: entry._id });
+                          }}
+                        >
+                          Dismiss
+                        </Button>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+            <h3 className="mb-2 text-xs font-medium text-[var(--text-secondary)]">Confirmed memory</h3>
+            {memoryEntries.length === 0 ? (
+              <p className="text-xs text-[var(--text-secondary)]">No memory entries yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {(["high", "medium", "low"] as const).map((bucket) => {
+                  const rows = groupedConfirmedEntries[bucket];
+                  if (rows.length === 0) return null;
+                  return (
+                    <div key={bucket}>
+                      <p className="mb-1 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                        {bucket} confidence
+                      </p>
+                      <div className="space-y-2">
+                        {rows.map((entry) => (
+                          <article key={entry._id} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-xs font-medium text-[var(--text-primary)]">{entry.key.replace(/_/g, " ")}</p>
+                              <div className="flex items-center gap-2">
+                                <span className={`text-[10px] uppercase tracking-[0.08em] ${confidenceBadgeTone(entry.confidence)}`}>
+                                  {(entry.confidence * 100).toFixed(0)}%
+                                </span>
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-6 w-6 text-[var(--danger)]"
+                                  disabled={memoryActionBusyId === entry._id}
+                                  onClick={() => {
+                                    void runMemoryAction({ action: "delete", entryId: entry._id });
+                                  }}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            </div>
+                            <p className="mt-1 text-xs text-[var(--text-secondary)]">{entry.text}</p>
+                            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-[var(--text-secondary)]">
+                              <span>{entry.category}</span>
+                              {entry.sourceChatId ? (
+                                <a href={`/chat?chatId=${entry.sourceChatId}`} className="text-[var(--accent-cyan)] hover:underline">
+                                  source chat
+                                </a>
+                              ) : null}
+                              {entry.negativeTopicLinks.length > 0 ? (
+                                <span>blocked for: {entry.negativeTopicLinks.join(", ")}</span>
+                              ) : null}
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </section>
         </TabsContent>
 

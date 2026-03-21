@@ -882,3 +882,10 @@ Run all scenario tests (Section 12). Fix issues found.
 | `src/components/chat/code-preview.tsx` | Preview iframe → frameId scoping |
 | `src/hooks/use-chat-state.ts` | State management → controller integration |
 | `src/proxy.ts` | Auth middleware → contact form fix |
+
+Run tests via WSL bash with the full nvm wrapper.
+
+Blueprint:
+bash -lc 'source ~/.nvm/nvm.sh && nvm use 24.12.0 >/dev/null && cd <local-workspace> && node -v && npm -v && npx vitest run ...'
+
+Always use this structure for tests. Do not call npm or vitest directly.

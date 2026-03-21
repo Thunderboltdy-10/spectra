@@ -19,6 +19,7 @@ export type RetrievedCitation = {
 export type RetrievalResult = {
   citations: RetrievedCitation[];
   sourceBlock: string;
+  queryEmbedding?: number[];
   diagnostics?: {
     scopesAttempted: string[];
     status:
@@ -463,6 +464,7 @@ export async function runRagRetrieval(params: {
   logger?: { info: (message: string, context?: Record<string, unknown>) => void; warn: (message: string) => void };
 }): Promise<RetrievalResult> {
   let embeddingModel: string | undefined;
+  let queryEmbedding: number[] | undefined;
   let embeddingUsage:
     | {
         prompt_tokens?: number;
@@ -526,7 +528,7 @@ export async function runRagRetrieval(params: {
       embeddingDurationMs = Date.now() - embeddingStartedAt;
       embeddingModel = embeddingResult.model ?? MODEL_CONFIG.embedding;
       embeddingUsage = embeddingResult.usage;
-      const queryEmbedding = embeddingResult.embedding;
+      queryEmbedding = embeddingResult.embedding;
       await recordOpenRouterUsage({
         actorClerkId: params.actorClerkId,
         chatId: params.chatId,
@@ -544,6 +546,7 @@ export async function runRagRetrieval(params: {
         topK: 8,
       })) as RetrievalResult;
       retrieval = limitRagRetrievalSources(rawRetrieval);
+      retrieval.queryEmbedding = queryEmbedding;
       retrieval.diagnostics = {
         scopesAttempted,
         status: retrieval.citations.length > 0 ? "retrieved" : "no_high_confidence_matches",
@@ -578,6 +581,7 @@ export async function runRagRetrieval(params: {
         embeddingUsage,
         embeddingDurationMs,
       };
+      retrieval.queryEmbedding = queryEmbedding;
     }
   } catch {
     retrieval = {

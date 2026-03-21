@@ -1,7 +1,8 @@
-import { convexMutation, convexQuery } from "@/lib/convex-server";
+import { convexAction, convexMutation, convexQuery } from "@/lib/convex-server";
+import { MODEL_CONFIG } from "@/lib/model-config";
 import { buildRuntimeStatMap, pickModelAndFallbacks } from "@/lib/model-selection";
 import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
-import { openRouterChatCompletion } from "@/lib/openrouter";
+import { openRouterChatCompletion, openRouterEmbeddingRequest } from "@/lib/openrouter";
 import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 import { extractCitationsFromText } from "@/lib/orchestrator/compose";
 import type { WebSearchSource } from "@/lib/orchestrator/retrieval";
@@ -16,10 +17,58 @@ const MEMORY_DECAY_CONFIDENCE = 0.3;
 const MEMORY_DECAY_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const MEMORY_PROFILE_MAX_ENTRIES = 8;
 const MEMORY_PROFILE_MIN_SCORE = 0.08;
+const MEMORY_TOPIC_SIMILARITY_MIN = 0.52;
+const MEMORY_TOPIC_MAX_ENTRIES = 5;
 
 type UtilityModelSelection = {
   model: string;
   fallbackModels: string[];
+};
+
+type MemoryEntryCategory = "identity" | "academic" | "preference" | "topic" | "artifact" | "correction";
+type MemoryEntrySourceType = "extraction" | "user_explicit" | "correction";
+
+type RoutedMemoryEntry = {
+  key: string;
+  text: string;
+  confidence: number;
+  category: MemoryEntryCategory;
+  sourceType: MemoryEntrySourceType;
+  status?: "pending" | "confirmed";
+  relatedArtifacts?: string[];
+  negativeTopicLinks?: string[];
+};
+
+type MemoryDirectiveEntry = {
+  key: string;
+  text: string;
+  category: "identity" | "academic" | "preference";
+};
+
+export type PlannedMemoryProfile = {
+  profileText: string;
+  layer2Text: string;
+  layer3Text: string;
+  layer2Count: number;
+  layer3Count: number;
+  retrievedTopicEntries: Array<{
+    key: string;
+    text: string;
+    category: "topic" | "artifact" | "correction";
+    confidence: number;
+    score: number;
+    sourceChatId?: string;
+  }>;
+  embeddingCall?: {
+    model?: string;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+      cost?: number;
+    };
+    durationMs?: number;
+  };
 };
 
 async function selectUtilityModel(params: {
@@ -122,6 +171,53 @@ function canonicalMemoryKey(rawKey: string) {
   if (/goal|objective|target/.test(normalized)) return "goals";
   if (/subject.*prefer|favorite_subject|subject_interest/.test(normalized)) return "subject_preferences";
   return normalized;
+}
+
+function normalizeMemoryLine(value: string) {
+  return value.replace(/\s+/g, " ").trim().slice(0, 700);
+}
+
+function inferMemoryCategory(params: {
+  key: string;
+  value: string;
+  sourceType: MemoryEntrySourceType;
+}): MemoryEntryCategory {
+  const key = params.key.toLowerCase();
+  const value = params.value.toLowerCase();
+  if (params.sourceType === "correction") return "correction";
+  if (/(name|grade|year|school|timezone|country|location|language|identity|role)/.test(key)) return "identity";
+  if (/(learning_style|communication|difficulty|preference|tone|study_habit)/.test(key)) return "preference";
+  if (/(prefer|preference|concise|detailed|step by step|visual|communication style)/.test(value)) return "preference";
+  if (/(subject|strength|weakness|struggle|goal|academic|exam|curriculum)/.test(key)) return "academic";
+  if (/(flashcard|deck|quiz|artifact|worksheet|notes?)/.test(key) || /(flashcard|quiz|deck|worksheet)/.test(value)) {
+    return "artifact";
+  }
+  return "topic";
+}
+
+function isOneOffMemoryCandidate(value: string) {
+  return /\b(today|tomorrow|tonight|this week|next week|submit|deadline|due by|assignment due|homework due)\b/i.test(
+    value,
+  );
+}
+
+function toLayer2Label(category: string) {
+  if (category === "identity") return "Identity";
+  if (category === "academic") return "Academic Profile";
+  if (category === "preference") return "Learning Preferences";
+  return "Profile";
+}
+
+function dedupeProfileLines(lines: string[]) {
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const line of lines) {
+    const normalized = line.toLowerCase();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    output.push(line);
+  }
+  return output;
 }
 
 function trimMemoryText(value: string) {
@@ -258,6 +354,335 @@ export function buildRelevantMemoryProfile(params: {
   const profile = formatMemory(shortlisted);
   if (profile) return profile;
   return params.rawMemoryText ? params.rawMemoryText.slice(0, MEMORY_MAX_RAW_CHARS) : "";
+}
+
+function normalizeDirectiveStatement(rawValue: string) {
+  return normalizeMemoryLine(
+    rawValue
+      .replace(/^remember\s+(that\s+)?/i, "")
+      .replace(/^update\s+my\s+profile\s*:?\s*/i, "")
+      .replace(/^i\s+/i, "I "),
+  );
+}
+
+export function buildDirectiveMemoryEntries(params: {
+  statement: string;
+  directiveType: "remember" | "update_profile";
+}): MemoryDirectiveEntry[] {
+  const statement = normalizeDirectiveStatement(params.statement);
+  if (!statement) return [];
+  const key = params.directiveType === "update_profile" ? "profile_update" : "explicit_memory";
+  const lower = statement.toLowerCase();
+  const category = inferMemoryCategory({
+    key,
+    value: lower,
+    sourceType: "user_explicit",
+  });
+  const layer2Category = (category === "topic" || category === "artifact" || category === "correction")
+    ? "academic"
+    : category;
+
+  return [{
+    key,
+    text: statement,
+    category: layer2Category,
+  }];
+}
+
+function coerceRoutedMemoryEntries(params: {
+  entries: Array<MemoryEntry | MemoryDirectiveEntry>;
+  sourceType: MemoryEntrySourceType;
+}): RoutedMemoryEntry[] {
+  const routed: RoutedMemoryEntry[] = [];
+
+  for (const rawEntry of params.entries) {
+    const key = canonicalMemoryKey(rawEntry.key);
+    const text = normalizeMemoryLine("value" in rawEntry ? rawEntry.value : rawEntry.text);
+    if (!text || isOneOffMemoryCandidate(text)) continue;
+
+    const category = "category" in rawEntry
+      ? rawEntry.category
+      : inferMemoryCategory({
+          key,
+          value: text,
+          sourceType: params.sourceType,
+        });
+    const confidence = Math.max(
+      0,
+      Math.min(
+        1,
+        Number("confidence" in rawEntry ? rawEntry.confidence : 0.95),
+      ),
+    );
+    const confirmedByDefault =
+      params.sourceType !== "extraction"
+      || category === "identity"
+      || category === "academic"
+      || category === "preference";
+
+    routed.push({
+      key,
+      text,
+      confidence,
+      category,
+      sourceType: params.sourceType,
+      status: confirmedByDefault ? "confirmed" : undefined,
+    });
+  }
+
+  return routed;
+}
+
+export async function routeMemoryWrite(params: {
+  actorClerkId: string;
+  chatId?: string;
+  entries: Array<MemoryEntry | MemoryDirectiveEntry>;
+  sourceType?: MemoryEntrySourceType;
+  onModelCall?: (call: {
+    model: string;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+      cost?: number;
+    };
+    durationMs?: number;
+  }) => void;
+}): Promise<{ written: number; promoted: number }> {
+  const sourceType = params.sourceType ?? "extraction";
+  const routedEntries = coerceRoutedMemoryEntries({
+    entries: params.entries,
+    sourceType,
+  });
+  if (routedEntries.length === 0) {
+    return { written: 0, promoted: 0 };
+  }
+
+  const payloadEntries: Array<{
+    key: string;
+    text: string;
+    embedding: number[];
+    confidence: number;
+    category: MemoryEntryCategory;
+    sourceType: MemoryEntrySourceType;
+    status?: "pending" | "confirmed";
+    relatedArtifacts?: string[];
+    negativeTopicLinks?: string[];
+  }> = [];
+
+  for (const entry of routedEntries.slice(0, 12)) {
+    try {
+      const startedAt = Date.now();
+      const embeddingResult = await openRouterEmbeddingRequest(
+        `${entry.key}: ${entry.text}`,
+        MODEL_CONFIG.embedding,
+      );
+      await recordOpenRouterUsage({
+        actorClerkId: params.actorClerkId,
+        chatId: params.chatId,
+        model: embeddingResult.model ?? MODEL_CONFIG.embedding,
+        usage: embeddingResult.usage,
+        skipIfZeroTokens: false,
+      }).catch(() => {});
+      params.onModelCall?.({
+        model: embeddingResult.model ?? MODEL_CONFIG.embedding,
+        usage: embeddingResult.usage,
+        durationMs: Date.now() - startedAt,
+      });
+      payloadEntries.push({
+        key: entry.key,
+        text: entry.text,
+        embedding: embeddingResult.embedding,
+        confidence: entry.confidence,
+        category: entry.category,
+        sourceType: entry.sourceType,
+        status: entry.status,
+        relatedArtifacts: entry.relatedArtifacts,
+        negativeTopicLinks: entry.negativeTopicLinks,
+      });
+    } catch {
+      // Skip entries whose embedding request fails.
+    }
+  }
+
+  if (payloadEntries.length === 0) {
+    return { written: 0, promoted: 0 };
+  }
+
+  const result = await convexMutation<
+    {
+      actorClerkId: string;
+      sourceChatId?: string;
+      entries: typeof payloadEntries;
+    },
+    { inserted: number; updated: number; promoted: number }
+  >("memory:routeMemoryWrite", {
+    actorClerkId: params.actorClerkId,
+    sourceChatId: params.chatId,
+    entries: payloadEntries,
+  }).catch(() => ({ inserted: 0, updated: 0, promoted: 0 }));
+
+  return {
+    written: (result.inserted ?? 0) + (result.updated ?? 0),
+    promoted: result.promoted ?? 0,
+  };
+}
+
+export async function planMemoryRead(params: {
+  actorClerkId: string;
+  chatId?: string;
+  message: string;
+  includeTopicMemory: boolean;
+  personalSoulPreferences?: {
+    learningStyle?: string;
+    preferredDifficulty?: string;
+    interests?: string[];
+    weakAreas?: string[];
+    preferredModes?: string[];
+    communicationStyle?: string;
+    customGuidance?: string;
+  } | null;
+  rawMemoryText?: string;
+  existingEmbedding?: {
+    embedding: number[];
+    model?: string;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+      cost?: number;
+    };
+    durationMs?: number;
+  };
+  onEmbeddingCall?: (call: {
+    model: string;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+      cost?: number;
+    };
+    durationMs?: number;
+  }) => void;
+}): Promise<PlannedMemoryProfile> {
+  const [globalEntries] = await Promise.all([
+    convexQuery<
+      { actorClerkId: string },
+      Array<{ key: string; text: string; category: "identity" | "academic" | "preference"; confidence: number }>
+    >("memory:getGlobalProfileEntries", {
+      actorClerkId: params.actorClerkId,
+    }).catch(() => []),
+  ]);
+
+  const layer2Lines: string[] = [];
+  for (const entry of globalEntries.slice(0, 12)) {
+    const key = normalizeMemoryLine(entry.key.replace(/_/g, " "));
+    const text = normalizeMemoryLine(entry.text);
+    if (!text) continue;
+    layer2Lines.push(`${toLayer2Label(entry.category)} - ${key}: ${text}`);
+  }
+
+  const prefs = params.personalSoulPreferences;
+  if (prefs?.learningStyle) layer2Lines.push(`Learning Preferences - style: ${normalizeMemoryLine(prefs.learningStyle)}`);
+  if (prefs?.preferredDifficulty) {
+    layer2Lines.push(`Learning Preferences - difficulty: ${normalizeMemoryLine(prefs.preferredDifficulty)}`);
+  }
+  if (prefs?.communicationStyle) {
+    layer2Lines.push(`Learning Preferences - communication: ${normalizeMemoryLine(prefs.communicationStyle)}`);
+  }
+  if (prefs?.interests?.length) {
+    layer2Lines.push(`Academic Profile - interests: ${prefs.interests.slice(0, 6).map(normalizeMemoryLine).join(", ")}`);
+  }
+  if (prefs?.weakAreas?.length) {
+    layer2Lines.push(`Academic Profile - weak areas: ${prefs.weakAreas.slice(0, 6).map(normalizeMemoryLine).join(", ")}`);
+  }
+  if (prefs?.preferredModes?.length) {
+    layer2Lines.push(`Learning Preferences - preferred modes: ${prefs.preferredModes.slice(0, 5).join(", ")}`);
+  }
+  if (prefs?.customGuidance) {
+    layer2Lines.push(`Learning Preferences - guidance: ${normalizeMemoryLine(prefs.customGuidance)}`);
+  }
+
+  const dedupedLayer2 = dedupeProfileLines(layer2Lines).slice(0, 16);
+  const layer2Text = dedupedLayer2.map((line) => `- ${line}`).join("\n");
+
+  let embeddingCall: PlannedMemoryProfile["embeddingCall"];
+  let queryEmbedding = params.existingEmbedding?.embedding;
+  if (!queryEmbedding && params.includeTopicMemory && params.message.trim()) {
+    try {
+      const startedAt = Date.now();
+      const embeddingResult = await openRouterEmbeddingRequest(
+        params.message.slice(0, 3000),
+        MODEL_CONFIG.embedding,
+      );
+      queryEmbedding = embeddingResult.embedding;
+      embeddingCall = {
+        model: embeddingResult.model ?? MODEL_CONFIG.embedding,
+        usage: embeddingResult.usage,
+        durationMs: Date.now() - startedAt,
+      };
+      await recordOpenRouterUsage({
+        actorClerkId: params.actorClerkId,
+        chatId: params.chatId,
+        model: embeddingResult.model ?? MODEL_CONFIG.embedding,
+        usage: embeddingResult.usage,
+        skipIfZeroTokens: false,
+      }).catch(() => {});
+      params.onEmbeddingCall?.({
+        model: embeddingResult.model ?? MODEL_CONFIG.embedding,
+        usage: embeddingResult.usage,
+        durationMs: Date.now() - startedAt,
+      });
+    } catch {
+      queryEmbedding = undefined;
+    }
+  }
+
+  const retrievedTopicEntries = params.includeTopicMemory && queryEmbedding
+    ? await convexAction<
+      { actorClerkId: string; embedding: number[]; message: string; topK: number; minScore: number },
+      Array<{
+        key: string;
+        text: string;
+        category: "topic" | "artifact" | "correction";
+        confidence: number;
+        score: number;
+        sourceChatId?: string;
+      }>
+    >("memory:retrieveRelevantEntries", {
+      actorClerkId: params.actorClerkId,
+      embedding: queryEmbedding,
+      message: params.message,
+      topK: MEMORY_TOPIC_MAX_ENTRIES,
+      minScore: MEMORY_TOPIC_SIMILARITY_MIN,
+    }).catch(() => [])
+    : [];
+
+  const layer3Lines = retrievedTopicEntries
+    .slice(0, MEMORY_TOPIC_MAX_ENTRIES)
+    .map((entry) => `- ${entry.key.replace(/_/g, " ")}: ${normalizeMemoryLine(entry.text)}`);
+  const layer3Text = layer3Lines.join("\n");
+
+  const sections: string[] = [];
+  if (layer2Text.trim()) {
+    sections.push(`Global profile facts:\n${layer2Text}`);
+  }
+  if (layer3Text.trim()) {
+    sections.push(`Topic memory relevant to this prompt:\n${layer3Text}`);
+  }
+  if (sections.length === 0 && params.rawMemoryText?.trim()) {
+    sections.push(params.rawMemoryText.trim().slice(0, MEMORY_MAX_RAW_CHARS));
+  }
+
+  return {
+    profileText: sections.join("\n\n").trim(),
+    layer2Text,
+    layer3Text,
+    layer2Count: dedupedLayer2.length,
+    layer3Count: retrievedTopicEntries.length,
+    retrievedTopicEntries,
+    embeddingCall,
+  };
 }
 
 export function inferCitations(

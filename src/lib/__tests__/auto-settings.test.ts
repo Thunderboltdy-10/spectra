@@ -5,6 +5,7 @@ import {
   classifyExplainDepth,
   detectSearchIntent,
   detectSuggestedMode,
+  parseUserDirectives,
   runAutoSettingsPipeline,
 } from "@/lib/auto-settings";
 
@@ -157,5 +158,24 @@ describe("auto-settings prompt analysis", () => {
       spendingTier: "cheap_only",
     });
     expect(capped.requestClass).toBe("T2");
+  });
+
+  it("parses memory correction directives", () => {
+    const directives = parseUserDirectives("Forget about WWII. Don't bring this up for French vocabulary.");
+    expect(directives.memoryActions).toEqual([
+      { type: "forget", target: "wwii" },
+      { type: "negative_topic", topic: "french vocabulary" },
+    ]);
+  });
+
+  it("parses explicit remember/profile directives", () => {
+    const remember = parseUserDirectives("Remember that I study IB HL.");
+    const update = parseUserDirectives("Update my profile: I prefer concise explanations.");
+    expect(remember.memoryActions).toEqual([
+      { type: "remember", statement: "I study IB HL" },
+    ]);
+    expect(update.memoryActions).toEqual([
+      { type: "update_profile", statement: "I prefer concise explanations" },
+    ]);
   });
 });

@@ -37,6 +37,9 @@ export default defineSchema({
     description: v.optional(v.string()),
     schoolType: v.optional(v.string()),
     country: v.optional(v.string()),
+    curriculum: v.optional(v.string()),
+    examBoard: v.optional(v.string()),
+    gradeLevels: v.optional(v.array(v.string())),
     timezone: v.optional(v.string()),
     maxStudents: v.optional(v.number()),
     isActive: v.optional(v.boolean()),
@@ -283,6 +286,39 @@ export default defineSchema({
   })
     .index("by_user", ["userId"])
     .index("by_user_org", ["userId", "orgId"]),
+
+  userMemoryEntries: defineTable({
+    userId: v.id("users"),
+    orgId: v.id("orgs"),
+    key: v.string(),
+    text: v.string(),
+    embedding: v.array(v.float64()),
+    category: v.union(
+      v.literal("identity"),
+      v.literal("academic"),
+      v.literal("preference"),
+      v.literal("topic"),
+      v.literal("artifact"),
+      v.literal("correction"),
+    ),
+    confidence: v.number(),
+    status: v.union(v.literal("pending"), v.literal("confirmed")),
+    sourceType: v.union(v.literal("extraction"), v.literal("user_explicit"), v.literal("correction")),
+    sourceChatId: v.optional(v.id("chats")),
+    relatedArtifacts: v.optional(v.array(v.string())),
+    negativeTopicLinks: v.optional(v.array(v.string())),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_user_org", ["userId", "orgId"])
+    .index("by_user_org_category", ["userId", "orgId", "category"])
+    .index("by_user_org_status", ["userId", "orgId", "status"])
+    .index("by_source_chat", ["sourceChatId"])
+    .vectorIndex("by_embedding", {
+      vectorField: "embedding",
+      dimensions: EMBEDDING_DIMENSIONS,
+      filterFields: ["userId", "orgId"],
+    }),
 
   studentAnalytics: defineTable({
     orgId: v.id("orgs"),

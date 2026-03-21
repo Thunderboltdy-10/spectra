@@ -542,7 +542,7 @@ export function useChatState() {
   const sending = activeStreamIds.has(selectedChatId);
   const [activeCollaborators, setActiveCollaborators] = useState<ActiveCollaboratorState[]>([]);
   const [streamPhase, setStreamPhase] = useState<StreamPhase>("idle");
-  const [livePhasePlan, setLivePhasePlan] = useState<RouteTrace["phasePlan"]>([]);
+  const [livePhasePlan, setLivePhasePlan] = useState<NonNullable<RouteTrace["phasePlan"]>>([]);
   const [searchStatusBanner, setSearchStatusBanner] = useState<SearchStatusBanner>(null);
   const [collaboratorPhase, setCollaboratorPhase] = useState<"idle" | "running" | "synthesizing">("idle");
   const [fileList, setFileList] = useState<File[]>([]);

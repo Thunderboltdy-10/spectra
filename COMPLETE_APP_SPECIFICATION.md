@@ -1387,3 +1387,46 @@ Status: Implemented in codebase for the Phase 1 checklist in `CODEX.md`.
   - `npm` execution delegates to Windows `CMD.EXE` and fails on UNC working path.
   - Direct Vitest binary invocation fails because `node` is unavailable in PATH.
 - See `PHASE_1_IMPLEMENTATION_REPORT.md` for full file-level change log and test command outputs.
+
+## Phase 0/1 Verification Refresh (2026-03-21)
+
+Status: Re-verified in WSL using explicit bash invocation with Linux Node (`nvm`) to avoid prior `CMD.EXE` path failures.
+
+### Verification Commands
+- `bash -lc 'source ~/.nvm/nvm.sh && nvm use 24.12.0 >/dev/null && cd <local-workspace> && npx vitest run src/lib/__tests__/auto-settings.test.ts src/lib/__tests__/route-plan.test.ts src/lib/__tests__/pipeline-controller.test.ts'`
+- `bash -lc 'source ~/.nvm/nvm.sh && nvm use 24.12.0 >/dev/null && cd <local-workspace> && npx tsc --noEmit'`
+
+### Result
+- Targeted Phase 0/1 tests: passing.
+- TypeScript compile: passing.
+
+## Phase 2 Implementation Update (2026-03-21)
+
+Status: Implemented in codebase for the Phase 2 checklist in `CODEX.md`.
+
+### Completed
+- Added `userMemoryEntries` storage with vector index and pending/confirmed lifecycle.
+- Implemented semantic memory write router and read planner:
+  - Layer 2 profile aggregation (identity/academic/preferences)
+  - Layer 3 topic retrieval via embedding similarity with threshold gating
+  - negative topic-link filtering to reduce cross-topic contamination.
+- Integrated correction pathways from user directives:
+  - forget entries
+  - mark negative associations
+  - explicit remember/profile updates with immediate writes.
+- Extended runtime school context injection with `curriculum`, `examBoard`, `gradeLevels` (plus school type/country context lines in runtime block).
+- Added Memory Management UI in unified panel:
+  - pending confirm/dismiss
+  - delete
+  - confidence grouping
+  - source chat links
+  - forget-by-topic action.
+- Added `/api/memory` route for memory list/manage actions.
+- Added focused tests for directive parsing and memory directive entry routing.
+
+### Verification Notes
+- Phase 2 targeted tests (plus Phase 0/1 critical tests) pass via explicit WSL bash invocation:
+  - `bash -lc 'source ~/.nvm/nvm.sh && nvm use 24.12.0 >/dev/null && cd <local-workspace> && npx vitest run src/lib/__tests__/auto-settings.test.ts src/lib/__tests__/route-plan.test.ts src/lib/__tests__/pipeline-controller.test.ts src/lib/__tests__/post-process-memory-routing.test.ts'`
+- TypeScript compile passes:
+  - `bash -lc 'source ~/.nvm/nvm.sh && nvm use 24.12.0 >/dev/null && cd <local-workspace> && npx tsc --noEmit'`
+- Non-gating note: `src/lib/__tests__/memory-compaction.test.ts` has a pre-existing assertion mismatch (`<=20` expected while current implementation caps at `40`); not modified in this phase.

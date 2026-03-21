@@ -40,11 +40,13 @@ import {
   type MemoryEntry,
 } from "@/lib/orchestrator/history";
 import {
-  buildRelevantMemoryProfile,
+  buildDirectiveMemoryEntries,
   inferCitations,
   maybeExtractMemory,
   maybeGenerateTitle,
   maybeGenerateTitleFromUserPrompt,
+  planMemoryRead,
+  routeMemoryWrite,
   rewriteCitationMarkers,
   stripOrphanCitations,
 } from "@/lib/orchestrator/post-process";
@@ -817,6 +819,11 @@ export async function runChatPipeline(request: NextRequest) {
     convexQuery("admin:getOrgSettings", { actorClerkId: actor.clerkId }) as Promise<{
       org: {
         name?: string;
+        schoolType?: string;
+        country?: string;
+        curriculum?: string;
+        examBoard?: string;
+        gradeLevels?: string[];
         timezone?: string;
         verifyMarkerPassEnabled: boolean;
         orchestratorV2Enabled?: boolean;
@@ -864,6 +871,69 @@ export async function runChatPipeline(request: NextRequest) {
   const history = toChatMessageShape(chatData.messages);
   const isFirstAssistantTurn = history.every((message) => message.role !== "assistant");
   const attemptStats = extractAttemptStats(history);
+  const directiveMemorySummary = {
+    forgotten: 0,
+    negativeLinks: 0,
+    written: 0,
+  };
+
+  if (userDirectives.memoryActions?.length) {
+    for (const action of userDirectives.memoryActions) {
+      if (action.type === "forget") {
+        const result = await convexMutation<
+          { actorClerkId: string; target?: string; sourceChatId?: string },
+          { deleted?: number }
+        >("memory:forgetMemoryEntriesByQuery", {
+          actorClerkId: actor.clerkId,
+          target: action.target,
+          sourceChatId: action.target ? undefined : chatId,
+        }).catch(() => ({ deleted: 0 }));
+        directiveMemorySummary.forgotten += result.deleted ?? 0;
+        continue;
+      }
+
+      if (action.type === "negative_topic") {
+        const result = await convexMutation<
+          { actorClerkId: string; topic: string; target?: string; sourceChatId?: string },
+          { updated?: number }
+        >("memory:addNegativeTopicLink", {
+          actorClerkId: actor.clerkId,
+          topic: action.topic,
+          target: action.target,
+          sourceChatId: action.target ? undefined : chatId,
+        }).catch(() => ({ updated: 0 }));
+        directiveMemorySummary.negativeLinks += result.updated ?? 0;
+        continue;
+      }
+
+      if (action.type === "remember" || action.type === "update_profile") {
+        const explicitEntries = buildDirectiveMemoryEntries({
+          statement: action.statement,
+          directiveType: action.type,
+        });
+        const routed = await routeMemoryWrite({
+          actorClerkId: actor.clerkId,
+          chatId,
+          entries: explicitEntries,
+          sourceType: "user_explicit",
+          onModelCall: (call) => {
+            deferSubcall({
+              phaseId: "memory",
+              label: "Directive memory embedding",
+              endpoint: "embeddings",
+              status: "ok",
+              modelUsed: call.model,
+              inputTokens: call.usage?.prompt_tokens,
+              outputTokens: call.usage?.completion_tokens,
+              costCents: costCentsFromUsage(call.usage),
+              durationMs: call.durationMs,
+            });
+          },
+        }).catch(() => ({ written: 0, promoted: 0 }));
+        directiveMemorySummary.written += routed.written;
+      }
+    }
+  }
 
   // Conversation-aware mode refinement: now that we have history, run suggestMode
   // again with full context and optionally override the initial effectiveMode.
@@ -1103,6 +1173,7 @@ export async function runChatPipeline(request: NextRequest) {
     : Promise.resolve({
         citations: [],
         sourceBlock: "No retrieved sources.",
+        queryEmbedding: undefined,
         diagnostics: {
           scopesAttempted: [],
           status: "not_requested" as const,
@@ -1692,33 +1763,82 @@ export async function runChatPipeline(request: NextRequest) {
         ? "web search already run; use the provided web context and do not claim browsing is unavailable"
         : "web search allowed for this route but returned no usable results")
     : "web search not enabled for this route";
+  const shouldPlanMemoryRead = memoryEnabled && pipelineController.shouldRun("memoryRead");
+  const memoryPlan = shouldPlanMemoryRead
+    ? await planMemoryRead({
+        actorClerkId: actor.clerkId,
+        chatId,
+        message: auto.message,
+        includeTopicMemory: routePlan.shouldConsultMemory,
+        personalSoulPreferences: personalSoulPrefs,
+        rawMemoryText: userMemory.rawMemoryText,
+        existingEmbedding: retrieval.queryEmbedding
+          ? {
+              embedding: retrieval.queryEmbedding,
+              model: (retrieval.diagnostics as { embeddingModel?: string } | undefined)?.embeddingModel,
+            }
+          : undefined,
+        onEmbeddingCall: (call) => {
+          appendSubcall({
+            phaseId: "memory",
+            label: "Memory retrieval embedding",
+            endpoint: "embeddings",
+            status: "ok",
+            modelUsed: call.model,
+            inputTokens: call.usage?.prompt_tokens,
+            outputTokens: call.usage?.completion_tokens,
+            costCents: costCentsFromUsage(call.usage),
+            durationMs: call.durationMs,
+          });
+        },
+      })
+    : {
+        profileText: "",
+        layer2Text: "",
+        layer3Text: "",
+        layer2Count: 0,
+        layer3Count: 0,
+        retrievedTopicEntries: [],
+      };
+  if (shouldPlanMemoryRead) {
+    pipelineController.markStageCompleted("memoryRead");
+  } else if (!memoryEnabled) {
+    pipelineController.markStageSkipped("memoryRead", "Memory disabled by user preference.");
+  }
+
+  const memoryStatus = memoryPlan.profileText
+    ? `global ${memoryPlan.layer2Count} fact(s), topic ${memoryPlan.layer3Count} match(es)`
+    : "no relevant memory entries";
+  const directiveStatus = directiveMemorySummary.forgotten > 0
+    || directiveMemorySummary.negativeLinks > 0
+    || directiveMemorySummary.written > 0
+    ? `forget=${directiveMemorySummary.forgotten}, blockedLinks=${directiveMemorySummary.negativeLinks}, explicitWrites=${directiveMemorySummary.written}`
+    : "none";
   const runtimeContextBlock = [
     `School: ${orgSettings.org?.name ?? "Spectra"}`,
+    `School type: ${orgSettings.org?.schoolType ?? "unspecified"}`,
+    `Country: ${orgSettings.org?.country ?? "unspecified"}`,
+    `Curriculum: ${orgSettings.org?.curriculum ?? "unspecified"}`,
+    `Exam board: ${orgSettings.org?.examBoard ?? "unspecified"}`,
+    `Grade levels: ${orgSettings.org?.gradeLevels?.join(", ") || "unspecified"}`,
     `Timezone: ${schoolNow.timeZone}`,
     `Current date: ${schoolNow.label}`,
     `Allowed tool bundles: ${routePlan.allowedToolBundles.join(", ") || "none"}`,
     `Retrieval: ${retrievalStatus}`,
     `Web search: ${searchStatus}`,
+    `Memory profile: ${memoryStatus}`,
+    `Memory directives applied: ${directiveStatus}`,
   ].join("\n");
-  const memoryProfile = memoryEnabled
-    ? buildRelevantMemoryProfile({
-        message: auto.message,
-        entries: userMemory.entries,
-        rawMemoryText: userMemory.rawMemoryText,
-      })
-    : "";
   const personalSoulExcerpt = buildPersonalSoulExcerpt({
-    preferences: memoryEnabled ? personalSoulPrefs : null,
-    memoryProfile,
+    preferences: null,
+    memoryProfile: memoryEnabled ? memoryPlan.profileText : "",
   });
-  const useMemoryProfile = routePlan.shouldConsultMemory && Boolean(personalSoulExcerpt);
-  if (routePlan.shouldConsultMemory) {
-    pipelineController.markStageCompleted("memoryRead");
-  } else {
-    pipelineController.markStageSkipped("memoryRead", "Memory read disabled for this route.");
-  }
+  const useMemoryProfile = memoryEnabled && Boolean(personalSoulExcerpt);
   if (useMemoryProfile) {
     route.trace.toolchain.push("memory_injection");
+  }
+  if (directiveStatus !== "none") {
+    route.trace.toolchain.push("memory_directives");
   }
   if (schoolSoulCapsule.capsule.trim()) {
     route.trace.toolchain.push("school_soul_capsule");
@@ -1769,7 +1889,7 @@ Validator: ${routePlan.modeContract.validator}
     `=== ROUTE PRIMITIVES ===
 Web search bundle: ${routePlan.shouldUseWebSearch ? "enabled" : "disabled"}.
 Retrieved school resources: ${retrieval.citations.length > 0 ? `${retrieval.citations.length} source(s) available` : routePlan.retrievalScopes.length > 0 ? "enabled but no high-confidence sources found" : "disabled"}.
-Memory bundle: ${useMemoryProfile ? "relevant memory injected" : routePlan.shouldConsultMemory ? "eligible but no relevant memory injected" : "disabled"}.
+Memory bundle: ${useMemoryProfile ? "layered memory injected (global + topic-aware)" : memoryEnabled ? "enabled but no relevant memory injected" : "disabled"}.
 Multi-agent collaboration: ${routePlan.allowSubAgents ? "allowed only if the route earns it" : "disabled"}.
 If web search is enabled, use the provided search briefing and sources instead of claiming you lack web access.
 If retrieval is enabled, ground claims in the provided classroom sources instead of saying files are unavailable.
@@ -1797,7 +1917,7 @@ Allowed bundles: ${routePlan.agentContract.toolBundles.join(", ") || "none"}
 Route-approved bundles: ${routePlan.allowedToolBundles.join(", ") || "none"}
 Search route enabled: ${routePlan.shouldUseWebSearch ? "yes" : "no"}
 Retrieval scopes enabled: ${routePlan.retrievalScopes.join(", ") || "none"}
-Memory route enabled: ${routePlan.shouldConsultMemory ? "yes" : "no"}
+Memory route enabled: ${memoryEnabled ? "yes" : "no"}
 Web results provided below: ${searchSources.length > 0 ? "yes" : "no"}
 Retrieved classroom/personal sources provided below: ${retrieval.citations.length > 0 ? "yes" : "no"}
 If a route-approved capability returned no results, say that no usable results were found.
@@ -3262,11 +3382,36 @@ BACK: [answer or definition]`,
             },
           }).catch(() => [] as Array<{ key: string; value: string; confidence: number; extractedAt: number }>)
         : [];
+      const routedMemoryWrite = routePlan.shouldWriteMemory
+        ? await routeMemoryWrite({
+            actorClerkId: actor.clerkId,
+            chatId,
+            entries: extractedMemory,
+            sourceType: "extraction",
+            onModelCall: (call) => {
+              appendSubcall({
+                phaseId: "memory",
+                label: "Memory entry embedding",
+                endpoint: "embeddings",
+                status: "ok",
+                modelUsed: call.model,
+                inputTokens: call.usage?.prompt_tokens,
+                outputTokens: call.usage?.completion_tokens,
+                costCents: costCentsFromUsage(call.usage),
+                durationMs: call.durationMs,
+              });
+            },
+          }).catch(() => ({ written: 0, promoted: 0 }))
+        : { written: 0, promoted: 0 };
       if (route.trace.phasePlan?.some((phase) => phase.id === "memory") && routePlan.shouldWriteMemory) {
         await emitPhaseUpdate(
           "memory",
-          extractedMemory.length > 0 ? "completed" : "skipped",
-          extractedMemory.length > 0 ? "User memory updated." : "No durable memory update extracted.",
+          routedMemoryWrite.written > 0 || extractedMemory.length > 0 ? "completed" : "skipped",
+          routedMemoryWrite.written > 0
+            ? `Layered memory updated (${routedMemoryWrite.written} write(s), ${routedMemoryWrite.promoted} promoted).`
+            : extractedMemory.length > 0
+              ? "Legacy memory updated; layered memory write skipped."
+              : "No durable memory update extracted.",
         );
       }
       if (extractedMemory.length > 0) {

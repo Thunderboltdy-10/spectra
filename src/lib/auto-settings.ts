@@ -70,6 +70,12 @@ export type ExplainDepth = "introductory" | "intermediate" | "advanced";
 export type UserDirectives = {
   forcedModel?: string;
   forceMultiAgent?: boolean;
+  memoryActions?: Array<
+    | { type: "forget"; target?: string }
+    | { type: "negative_topic"; topic: string; target?: string }
+    | { type: "remember"; statement: string }
+    | { type: "update_profile"; statement: string }
+  >;
 };
 
 export type RequestClass = "T0" | "T1" | "T2" | "T3";
@@ -101,6 +107,7 @@ const MODEL_ALIASES: Record<string, string> = {
 export function parseUserDirectives(message: string): UserDirectives {
   const result: UserDirectives = {};
   const lower = message.toLowerCase();
+  const memoryActions: NonNullable<UserDirectives["memoryActions"]> = [];
 
   // Detect model requests like "use Claude", "with GPT-4", "use Gemini"
   const modelMatch = lower.match(/(?:use|with|via|switch to|try)\s+([\w\s-]+?)(?:\s+(?:model|for|to|$)|[.,!?]|$)/i);
@@ -115,6 +122,53 @@ export function parseUserDirectives(message: string): UserDirectives {
   // Detect multi-agent requests
   if (/(?:use|launch|run|enable)\s+(?:sub[- ]?agents?|specialists?|multi[- ]?agent|collaborat)/i.test(lower)) {
     result.forceMultiAgent = true;
+  }
+
+  const forgetMatch =
+    lower.match(/\bforget about\s+(.+?)(?:[.!?]|$)/i)
+    ?? lower.match(/\bforget\s+(.+?)(?:[.!?]|$)/i);
+  if (forgetMatch?.[1]) {
+    const target = forgetMatch[1].trim();
+    if (target && target !== "this") {
+      memoryActions.push({ type: "forget", target });
+    } else {
+      memoryActions.push({ type: "forget" });
+    }
+  } else if (/\bforget this\b/i.test(lower)) {
+    memoryActions.push({ type: "forget" });
+  }
+
+  if (/\bthis association is wrong\b/i.test(lower)) {
+    const topic = lower.match(/\bfor\s+(.+?)(?:[.!?]|$)/i)?.[1]?.trim() ?? "this topic";
+    memoryActions.push({ type: "negative_topic", topic });
+  }
+
+  const dontBringForMatch = lower.match(/\bdon'?t bring this up for\s+(.+?)(?:[.!?]|$)/i);
+  if (dontBringForMatch?.[1]) {
+    memoryActions.push({
+      type: "negative_topic",
+      topic: dontBringForMatch[1].trim(),
+    });
+  }
+
+  const rememberMatch = message.match(/\bremember(?:\s+that)?\s+i\s+(.+?)(?:[.!?]|$)/i);
+  if (rememberMatch?.[1]) {
+    memoryActions.push({
+      type: "remember",
+      statement: `I ${rememberMatch[1].trim()}`,
+    });
+  }
+
+  const profileMatch = message.match(/\bupdate my profile\b[:\s-]*(.+?)(?:[.!?]|$)/i);
+  if (profileMatch?.[1]) {
+    memoryActions.push({
+      type: "update_profile",
+      statement: profileMatch[1].trim(),
+    });
+  }
+
+  if (memoryActions.length > 0) {
+    result.memoryActions = memoryActions;
   }
 
   return result;

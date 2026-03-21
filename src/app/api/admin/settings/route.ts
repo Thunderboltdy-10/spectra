@@ -29,6 +29,9 @@ export async function PATCH(request: NextRequest) {
       allowPaidModels?: boolean;
       description?: string;
       schoolType?: string;
+      curriculum?: string;
+      examBoard?: string;
+      gradeLevels?: string[];
       timezone?: string;
       maxStudents?: number;
       maxResourceFileSizeBytes?: number;
@@ -51,6 +54,11 @@ export async function PATCH(request: NextRequest) {
       allowPaidModels: body.allowPaidModels,
       description: safeString(body.description),
       schoolType: safeString(body.schoolType),
+      curriculum: safeString(body.curriculum),
+      examBoard: safeString(body.examBoard),
+      gradeLevels: Array.isArray(body.gradeLevels)
+        ? body.gradeLevels.map((value) => String(value).trim()).filter((value) => value.length > 0).slice(0, 24)
+        : undefined,
       timezone: safeString(body.timezone),
       maxStudents: safeNumber(body.maxStudents),
       maxResourceFileSizeBytes: safeNumber(body.maxResourceFileSizeBytes),

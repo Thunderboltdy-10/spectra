@@ -245,7 +245,7 @@ function NoAccessPageContent() {
               </Button>
             </Link>
             <a
-              href="/#contact"
+              href="mailto:pablo.martinez.dovale@gmail.com?subject=Spectra%20Access%20Request"
               className="text-sm font-medium transition-colors text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
             >
               Contact us

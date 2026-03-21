@@ -57,6 +57,73 @@ function SectionHeader({ icon: Icon, label }: { icon: typeof FileText; label: st
   );
 }
 
+function RichSectionContent({ text }: { text: string }) {
+  const lines = text.split("\n");
+  const elements: React.ReactNode[] = [];
+  let listItems: string[] = [];
+
+  const flushList = () => {
+    if (listItems.length > 0) {
+      elements.push(
+        <ul key={`list-${elements.length}`} className="mt-2 space-y-1 pl-4">
+          {listItems.map((item, i) => (
+            <li key={i} className="list-disc text-sm leading-7 text-[var(--text-secondary)]">
+              <InlineFormatted text={item} />
+            </li>
+          ))}
+        </ul>,
+      );
+      listItems = [];
+    }
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^[-*•]\s+/.test(trimmed)) {
+      listItems.push(trimmed.replace(/^[-*•]\s+/, ""));
+    } else if (/^\d+\.\s+/.test(trimmed)) {
+      listItems.push(trimmed.replace(/^\d+\.\s+/, ""));
+    } else {
+      flushList();
+      if (trimmed) {
+        elements.push(
+          <p key={`p-${elements.length}`} className="mt-2 text-sm leading-7 text-[var(--text-secondary)]">
+            <InlineFormatted text={trimmed} />
+          </p>,
+        );
+      }
+    }
+  }
+  flushList();
+
+  return <>{elements}</>;
+}
+
+function InlineFormatted({ text }: { text: string }) {
+  // Parse **bold** and *italic* inline
+  const parts: React.ReactNode[] = [];
+  const regex = /(\*\*(.+?)\*\*|\*(.+?)\*)/g;
+  let lastIndex = 0;
+  let match;
+  let key = 0;
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    if (match[2]) {
+      parts.push(<strong key={key++} className="font-semibold text-[var(--text-primary)]">{match[2]}</strong>);
+    } else if (match[3]) {
+      parts.push(<em key={key++}>{match[3]}</em>);
+    }
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+  return <>{parts}</>;
+}
+
 export function DocumentPanel({ content }: DocumentPanelProps) {
   const previewRef = useRef<HTMLDivElement | null>(null);
   const [exporting, setExporting] = useState<"" | "pptx" | "docx" | "pdf" | "html">("");
@@ -159,7 +226,7 @@ export function DocumentPanel({ content }: DocumentPanelProps) {
                   <h2 className={`font-display font-semibold text-[var(--text-primary)] ${section.level === 1 ? "text-xl" : section.level === 2 ? "text-lg" : "text-base"}`}>
                     {section.heading}
                   </h2>
-                  <p className="text-[0.875rem] leading-7 text-[var(--text-secondary)]">{section.content}</p>
+                  <RichSectionContent text={section.content} />
                 </div>
               ))}
             </article>
@@ -195,7 +262,7 @@ export function DocumentPanel({ content }: DocumentPanelProps) {
             {documentData.sections.map((section, index) => (
               <div key={`${section.heading}-${index}`}>
                 <h4 className="font-display text-xl text-[var(--text-primary)]">{section.heading}</h4>
-                <p className="mt-2 text-sm leading-7 text-[var(--text-secondary)]">{section.content}</p>
+                <RichSectionContent text={section.content} />
               </div>
             ))}
           </article>

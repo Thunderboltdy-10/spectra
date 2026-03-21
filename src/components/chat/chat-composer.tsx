@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { createPortal } from "react-dom";
 import Image from "next/image";
 import {
   AlertCircle,
@@ -252,15 +253,22 @@ function SettingPill({
   title: string;
   icon: React.ReactNode;
 }) {
+  const isActive = value === "on";
   return (
     <button
       type="button"
       onClick={() => onChange(nextPreference(value))}
-      title={title}
-      className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+      title={`${label}: ${preferenceLabel(value)} — ${title}`}
+      className={`group/pill inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border transition-all hover:w-auto hover:px-3 ${
+        isActive
+          ? "border-[color-mix(in_oklab,var(--accent-cyan)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_10%,transparent)] text-[var(--accent-cyan)]"
+          : "border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+      }`}
     >
-      {icon}
-      <span>{label}: {preferenceLabel(value)}</span>
+      <span className="shrink-0">{icon}</span>
+      <span className="max-w-0 overflow-hidden whitespace-nowrap text-[11px] font-medium opacity-0 transition-all duration-300 ease-[var(--ease-standard)] group-hover/pill:ml-2 group-hover/pill:max-w-[100px] group-hover/pill:opacity-100">
+        {preferenceLabel(value)}
+      </span>
     </button>
   );
 }
@@ -719,7 +727,7 @@ export function ChatComposer(props: ChatComposerProps) {
   return (
     <footer
       className={cn(
-        "sticky bottom-0 z-20 bg-[color-mix(in_oklab,var(--bg-primary)_94%,transparent)] px-3 pb-[calc(0.9rem+env(safe-area-inset-bottom))] pt-4 sm:px-6 lg:px-10",
+        "sticky bottom-0 z-20 px-3 pb-[calc(0.9rem+env(safe-area-inset-bottom))] pt-4 sm:px-6 lg:px-10",
         draggingFiles && "bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-primary))]",
       )}
       aria-label="Message composer"
@@ -825,7 +833,7 @@ export function ChatComposer(props: ChatComposerProps) {
           </div>
         )}
 
-        <div className="relative overflow-visible rounded-2xl border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_80%,transparent)]">
+        <div className="relative overflow-visible rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-soft)]">
           <div className="flex items-center justify-between gap-2 px-3 py-2">
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 pb-1">
               <div ref={modeMenuRef} className="relative">
@@ -938,8 +946,18 @@ export function ChatComposer(props: ChatComposerProps) {
                   <ChevronDown className="h-3.5 w-3.5" />
                 </button>
 
-                {showModelSelector && (
-                  <div className="absolute bottom-full left-1/2 z-[600] mb-2 max-h-[480px] w-[min(92vw,32rem)] -translate-x-[48%] overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-soft)]">
+                {showModelSelector && createPortal(
+                  <div
+                    className="fixed z-[9999] max-h-[480px] w-[min(92vw,32rem)] overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-soft)]"
+                    style={(() => {
+                      const rect = modelMenuRef.current?.getBoundingClientRect();
+                      if (!rect) return { top: 0, left: 0 };
+                      return {
+                        bottom: window.innerHeight - rect.top + 8,
+                        left: Math.max(8, rect.left + rect.width / 2 - 256),
+                      };
+                    })()}
+                  >
                     <div className="mb-2 flex items-center justify-between">
                       <p className="text-xs font-medium text-[var(--text-primary)]">Choose model</p>
                       <button
@@ -1100,7 +1118,8 @@ export function ChatComposer(props: ChatComposerProps) {
                         </div>
                       )}
                     </div>
-                  </div>
+                  </div>,
+                  document.body,
                 )}
               </div>
 
@@ -1265,7 +1284,8 @@ export function ChatComposer(props: ChatComposerProps) {
                 placeholder="Ask anything. For best results, include your context and goal."
                 data-tour="composer"
                 aria-label="Message input"
-                className="max-h-[220px] min-h-[70px] w-full resize-none appearance-none border-0 bg-transparent px-2 py-1 text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] shadow-none outline-none ring-0 focus:border-transparent focus:outline-none focus:ring-0 focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none"
+                rows={1}
+                className="max-h-[220px] min-h-[24px] w-full resize-none appearance-none border-0 bg-transparent px-2 py-0 text-[15px] leading-6 text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] shadow-none outline-none ring-0 focus:border-transparent focus:outline-none focus:ring-0 focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none"
                 onKeyDown={handleKeyDown}
               />
               {speech.isListening ? (

@@ -649,4 +649,16 @@ export default defineSchema({
   })
     .index("by_user", ["userId"])
     .index("by_org", ["orgId"]),
+
+  errorEvents: defineTable({
+    level: v.string(),
+    message: v.string(),
+    source: v.optional(v.string()),
+    stack: v.optional(v.string()),
+    metadata: v.optional(v.string()),
+    actorClerkId: v.optional(v.string()),
+    chatId: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_created", ["createdAt"]),
 });

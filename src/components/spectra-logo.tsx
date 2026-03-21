@@ -20,16 +20,30 @@ export function SpectraLogo({ size = 32, className }: SpectraLogoProps) {
       role="img"
     >
       <defs>
-        <linearGradient id="spectra-logo-grad" x1="30" y1="10" x2="70" y2="90" gradientUnits="userSpaceOnUse">
+        <linearGradient id="spectra-front" x1="30" y1="10" x2="70" y2="90" gradientUnits="userSpaceOnUse">
           <stop offset="0%" stopColor="var(--brand-primary, #0e8ee8)" />
-          <stop offset="45%" stopColor="var(--brand-accent, #20b8b2)" />
+          <stop offset="50%" stopColor="var(--brand-accent, #20b8b2)" />
           <stop offset="100%" stopColor="#ff8751" />
         </linearGradient>
+        <linearGradient id="spectra-shadow" x1="35" y1="20" x2="65" y2="80" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="var(--brand-primary, #0e8ee8)" stopOpacity="0.3" />
+          <stop offset="100%" stopColor="var(--brand-accent, #20b8b2)" stopOpacity="0.2" />
+        </linearGradient>
       </defs>
+
+      {/* Shadow/depth ribbon — offset slightly to create folded depth */}
       <path
-        d="M 30 27 C 30 10, 70 10, 70 38 C 70 50, 30 50, 30 62 C 30 90, 70 90, 70 73"
-        stroke="url(#spectra-logo-grad)"
-        strokeWidth="13"
+        d="M 64 14 C 40 14, 24 25, 24 39 C 24 52, 76 48, 76 61 C 76 75, 60 86, 36 86"
+        stroke="url(#spectra-shadow)"
+        strokeWidth="16"
+        strokeLinecap="round"
+      />
+
+      {/* Main ribbon S — wide, clean, standard S direction */}
+      <path
+        d="M 66 16 C 42 16, 26 26, 26 38 C 26 50, 74 50, 74 62 C 74 74, 58 84, 34 84"
+        stroke="url(#spectra-front)"
+        strokeWidth="14"
         strokeLinecap="round"
       />
     </svg>
@@ -48,7 +62,7 @@ export function DynamicFavicon() {
       const primary = styles.getPropertyValue("--brand-primary").trim() || "#0e8ee8";
       const accent = styles.getPropertyValue("--brand-accent").trim() || "#20b8b2";
 
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none"><defs><linearGradient id="fg" x1="9.6" y1="3" x2="22.4" y2="29" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="${primary}"/><stop offset="45%" stop-color="${accent}"/><stop offset="100%" stop-color="#ff8751"/></linearGradient></defs><path d="M 9.6 8.6 C 9.6 3.2, 22.4 3.2, 22.4 12.2 C 22.4 16, 9.6 16, 9.6 19.8 C 9.6 28.8, 22.4 28.8, 22.4 23.4" stroke="url(#fg)" stroke-width="4.2" stroke-linecap="round"/></svg>`;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none"><defs><linearGradient id="f" x1="9.6" y1="3" x2="22.4" y2="29" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="${primary}"/><stop offset="50%" stop-color="${accent}"/><stop offset="100%" stop-color="#ff8751"/></linearGradient></defs><path d="M 21 5 C 13.5 5, 8.3 8.2, 8.3 12.2 C 8.3 16, 23.7 16, 23.7 19.8 C 23.7 23.8, 18.5 27, 11 27" stroke="url(#f)" stroke-width="4.5" stroke-linecap="round"/></svg>`;
 
       const url = `data:image/svg+xml,${encodeURIComponent(svg)}`;
       let link = document.querySelector<HTMLLinkElement>('link[rel="icon"][type="image/svg+xml"]');

@@ -73,14 +73,9 @@ export function CodeCanvas({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[70]">
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/50"
-        aria-label="Close canvas"
-        onClick={onClose}
-      />
-      <aside className="absolute inset-y-0 right-0 w-full border-l border-[var(--border-default)] bg-[var(--bg-primary)] shadow-[var(--shadow-soft)] md:w-[60vw]">
+    <>
+      <div className="md:hidden fixed inset-0 z-[60] bg-black/50" aria-label="Close canvas" onClick={onClose} />
+      <aside className="fixed md:static inset-y-0 right-0 z-[70] w-full md:w-[60vw] lg:w-[50vw] xl:w-[50vw] shrink-0 border-l border-[var(--border-default)] bg-[var(--bg-primary)] shadow-[var(--shadow-soft)]">
         <header className="flex items-center justify-between border-b border-[var(--border-default)] px-4 py-3">
           <div>
             <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Canvas</p>
@@ -245,6 +240,6 @@ export function CodeCanvas({
           </footer>
         </div>
       </aside>
-    </div>
+    </>
   );
 }

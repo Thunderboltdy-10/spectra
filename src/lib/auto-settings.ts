@@ -67,6 +67,52 @@ export type PromptCategory =
 export type QuestionType = "what" | "why" | "how" | "evaluate" | "compare" | "other";
 export type ExplainDepth = "introductory" | "intermediate" | "advanced";
 
+export type UserDirectives = {
+  forcedModel?: string;
+  forceMultiAgent?: boolean;
+};
+
+const MODEL_ALIASES: Record<string, string> = {
+  "claude": "anthropic/claude-sonnet-4",
+  "claude sonnet": "anthropic/claude-sonnet-4",
+  "claude opus": "anthropic/claude-opus-4",
+  "claude haiku": "anthropic/claude-haiku-4",
+  "gpt-4": "openai/gpt-4.1",
+  "gpt-4o": "openai/gpt-4o",
+  "gpt4": "openai/gpt-4.1",
+  "gpt 4": "openai/gpt-4.1",
+  "gemini": "google/gemini-2.5-pro-preview",
+  "gemini pro": "google/gemini-2.5-pro-preview",
+  "gemini flash": "google/gemini-2.5-flash-preview",
+  "o3": "openai/o3",
+  "o4-mini": "openai/o4-mini",
+  "deepseek": "deepseek/deepseek-chat-v3-0324",
+  "llama": "meta-llama/llama-4-maverick",
+  "perplexity": "perplexity/sonar-reasoning-pro",
+};
+
+export function parseUserDirectives(message: string): UserDirectives {
+  const result: UserDirectives = {};
+  const lower = message.toLowerCase();
+
+  // Detect model requests like "use Claude", "with GPT-4", "use Gemini"
+  const modelMatch = lower.match(/(?:use|with|via|switch to|try)\s+([\w\s-]+?)(?:\s+(?:model|for|to|$)|[.,!?]|$)/i);
+  if (modelMatch) {
+    const requested = modelMatch[1]!.trim();
+    const alias = MODEL_ALIASES[requested];
+    if (alias) {
+      result.forcedModel = alias;
+    }
+  }
+
+  // Detect multi-agent requests
+  if (/(?:use|launch|run|enable)\s+(?:sub[- ]?agents?|specialists?|multi[- ]?agent|collaborat)/i.test(lower)) {
+    result.forceMultiAgent = true;
+  }
+
+  return result;
+}
+
 export type AutoSettingsInput = {
   actorClerkId?: string;
   message: string;

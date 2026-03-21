@@ -22,7 +22,7 @@
   --bg-elevated: #ffffff;
   --bg-hover: #e8e3db;
   --bg-overlay: rgba(12, 18, 28, 0.35);
-  --bg-code: #0f1724;
+  --bg-code: #f8f6f2;
 
   --text-primary: #1a1510;
   --text-secondary: #6b5f52;
@@ -707,7 +707,10 @@ button:disabled {
 .chat-markdown pre {
   overflow-x: auto;
   border-radius: var(--radius-input);
-  /* bg-code is always dark (#0f1724); force light text in both modes */
+  color: var(--text-primary);
+}
+
+:root[data-theme="dark"] .chat-markdown pre {
   color: #d9e3f3;
 }
 

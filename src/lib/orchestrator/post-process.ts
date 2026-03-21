@@ -434,7 +434,8 @@ function normalizeTitle(candidate: string, fallbackSource: string) {
     candidate
       .replace(/^title\s*:\s*/i, "")
       .replace(/[\n\r]+/g, " ")
-      .replace(/^['"`\s]+|['"`\s]+$/g, ""),
+      .replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, "")
+      .replace(/["'`*#_]/g, ""),
   );
 
   const words = tokenizeWords(cleaned).slice(0, TITLE_MAX_WORDS);

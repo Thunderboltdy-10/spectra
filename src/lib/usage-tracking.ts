@@ -63,17 +63,45 @@ export async function recordModelUsage(params: {
     pricing: params.pricing,
   });
 
-  await convexMutation("usage:recordUsageWithCost", {
-    actorClerkId,
-    chatId: params.chatId,
-    messageId: params.messageId,
-    model,
-    inputTokens,
-    outputTokens,
-    openRouterCost,
-    inputCostPerM: pricing.inputCostPerM,
-    outputCostPerM: pricing.outputCostPerM,
-  });
+  try {
+    await convexMutation("usage:recordUsageWithCost", {
+      actorClerkId,
+      chatId: params.chatId,
+      messageId: params.messageId,
+      model,
+      inputTokens,
+      outputTokens,
+      openRouterCost,
+      inputCostPerM: pricing.inputCostPerM,
+      outputCostPerM: pricing.outputCostPerM,
+    });
+  } catch (error) {
+    // If the mutation fails (e.g. validator rejects openRouterCost), retry without it
+    const isValidationError =
+      error instanceof Error &&
+      (error.message.includes("ArgumentValidationError") ||
+        error.message.includes("extra field"));
+    if (isValidationError && openRouterCost !== undefined) {
+      try {
+        await convexMutation("usage:recordUsageWithCost", {
+          actorClerkId,
+          chatId: params.chatId,
+          messageId: params.messageId,
+          model,
+          inputTokens,
+          outputTokens,
+          inputCostPerM: pricing.inputCostPerM,
+          outputCostPerM: pricing.outputCostPerM,
+        });
+      } catch {
+        // Usage recording must never block chat — silently drop
+        console.warn("[usage-tracking] retry without openRouterCost also failed");
+      }
+    } else {
+      // Non-validation errors: log and continue, never block chat
+      console.warn("[usage-tracking] recordUsageWithCost failed:", error);
+    }
+  }
 
   return true;
 }

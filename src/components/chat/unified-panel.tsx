@@ -827,36 +827,6 @@ function OrchestrationView({
         </section>
       ) : null}
 
-      {routeTrace?.subcalls && routeTrace.subcalls.length > 0 ? (
-        <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-          <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Billable subcalls</p>
-          <ol className="space-y-2">
-            {routeTrace.subcalls.slice(0, 12).map((call) => (
-              <li key={call.id} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs font-medium text-[var(--text-primary)]">{call.label}</p>
-                  <span className={`text-[10px] uppercase tracking-[0.08em] ${call.status === "ok" ? "text-[var(--success)]" : "text-[var(--danger)]"}`}>
-                    {call.status}
-                  </span>
-                </div>
-                {call.modelUsed ? <p className="mt-1 break-all font-mono text-[10px] text-[var(--text-secondary)]">{sanitizeModelId(call.modelUsed)}</p> : null}
-                <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
-                  {typeof call.inputTokens === "number" || typeof call.outputTokens === "number"
-                    ? `${call.inputTokens ?? 0} in • ${call.outputTokens ?? 0} out`
-                    : "token metrics unavailable"}
-                </p>
-              </li>
-            ))}
-          </ol>
-        </section>
-      ) : (
-        <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-          <p className="text-xs text-[var(--text-secondary)]">
-            {sending ? "Waiting for billable subcall details..." : "No billable subcalls were captured for this response."}
-          </p>
-        </section>
-      )}
-
       {visibleCollaborators.length > 0 ? (
         <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
           <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Specialists</p>

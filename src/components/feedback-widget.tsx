@@ -76,20 +76,21 @@ export function FeedbackWidget() {
   async function captureScreenshot(): Promise<File | null> {
     try {
       const { default: html2canvas } = await import("html2canvas");
-      await wait(220);
-      await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
-      await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
+      await wait(300);
+      await new Promise((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve(undefined))));
 
-      const canvas = await html2canvas(document.body, {
+      const root = document.documentElement;
+      const canvas = await html2canvas(root, {
         backgroundColor: getComputedStyle(document.body).backgroundColor || "#f7f4ec",
         useCORS: true,
-        allowTaint: false,
-        scale: Math.min(window.devicePixelRatio || 1, 1.8),
+        allowTaint: true,
+        scale: Math.min(window.devicePixelRatio || 1, 1),
         logging: false,
-        width: window.innerWidth,
-        height: window.innerHeight,
-        x: window.scrollX,
-        y: window.scrollY,
+        windowWidth: root.clientWidth,
+        windowHeight: root.clientHeight,
+        scrollX: window.scrollX,
+        scrollY: window.scrollY,
+        ignoreElements: (el: Element) => el.hasAttribute("data-html2canvas-ignore"),
       });
 
       return compressCanvasToFile(canvas);

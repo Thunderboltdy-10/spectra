@@ -17,6 +17,7 @@ export type TaskNode = {
   specialist: string;
   prompt: string;
   dependsOn: string[];
+  mode?: string;
   result?: string;
   tokens?: number;
   durationMs?: number;
@@ -54,14 +55,14 @@ export function shouldUseMultiAgent(
   const lower = prompt.toLowerCase();
   const multipart = /(^|\n)\s*(\d+\.|-|\*)\s+/.test(prompt) || /(first|second|finally|compare|contrast)/i.test(lower);
   const longPrompt = prompt.length > 520;
-  // Research mode: lower threshold — use multi-agent for anything non-simple
-  if (mode === "research" && normalizedComplexity > 0.3) return true;
-  // Explain mode: use multi-agent for complex prompts
-  if (mode === "explain" && normalizedComplexity > 0.58) return true;
-  if (mode === "exam" && multipart && normalizedComplexity > 0.58) return true;
-  if (mode === "draft_coach" && /evidence|citation|sources?|counter-argument/i.test(lower) && normalizedComplexity > 0.52) return true;
-  if ((mode === "tutor" || mode === "general") && multipart && normalizedComplexity >= 0.72) return true;
-  if ((mode === "tutor" || mode === "general" || mode === "marker") && longPrompt && normalizedComplexity >= 0.82) return true;
+  // Research mode: low threshold — use multi-agent for anything non-trivial
+  if (mode === "research" && normalizedComplexity > 0.15) return true;
+  // Explain mode: use multi-agent for moderately complex prompts
+  if (mode === "explain" && normalizedComplexity > 0.4) return true;
+  if (mode === "exam" && multipart && normalizedComplexity > 0.4) return true;
+  if (mode === "draft_coach" && /evidence|citation|sources?|counter-argument/i.test(lower) && normalizedComplexity > 0.35) return true;
+  if ((mode === "tutor" || mode === "general") && multipart && normalizedComplexity >= 0.45) return true;
+  if ((mode === "tutor" || mode === "general" || mode === "marker") && longPrompt && normalizedComplexity >= 0.55) return true;
   return false;
 }
 

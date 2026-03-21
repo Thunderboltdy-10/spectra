@@ -6,11 +6,13 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
-import { Check, Copy, ExternalLink } from "lucide-react";
+import { Check, Copy, ExternalLink, Eye, EyeOff } from "lucide-react";
 
 import { QuizReveal, isQuizContent, type QuizSubmitResult } from "@/components/chat/quiz-reveal";
 import { FlashcardReveal, isFlashcardContent } from "@/components/chat/flashcard-reveal";
 import { ImageReveal } from "@/components/chat/image-reveal";
+import { CodePreview } from "@/components/chat/code-preview";
+import { canPreview, type PreviewLanguage } from "@/lib/code-sandbox";
 import type { Citation } from "@/types";
 import type { StudyMode } from "@/types";
 
@@ -40,9 +42,11 @@ function normalizeCode(children: React.ReactNode) {
 
 function CodeBlock({ children, className, onOpenCanvas, ...props }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
-  const language = className?.replace("language-", "") || "";
+  const [showPreview, setShowPreview] = useState(false);
+  const language = className?.match(/language-(\S+)/)?.[1] || "";
   const codeText = useMemo(() => normalizeCode(children).trim(), [children]);
   const canOpenCanvas = Boolean(onOpenCanvas) && codeText.split("\n").length > 10;
+  const previewable = canPreview(language);
 
   function handleCopy() {
     void navigator.clipboard.writeText(codeText);
@@ -51,41 +55,61 @@ function CodeBlock({ children, className, onOpenCanvas, ...props }: CodeBlockPro
   }
 
   return (
-    <div className="group relative my-4 overflow-hidden rounded-b-xl border border-[var(--border-default)]">
-      <div className="flex items-center justify-between border-b border-[var(--border-default)] bg-[var(--bg-tertiary)] px-3 py-1.5">
+    <div className="group relative my-4 flex flex-col rounded-xl border border-[var(--border-default)] bg-[var(--bg-code)] shadow-sm dark:bg-[#0a0910]">
+      <div className="flex items-center justify-between rounded-t-xl border-b border-[var(--border-default)] bg-[var(--bg-tertiary)] px-3 py-1.5">
         <span className="font-mono text-[11px] font-medium uppercase tracking-wider text-[var(--text-secondary)]">
           {language || "code"}
         </span>
-        <button
-          type="button"
-          onClick={handleCopy}
-          className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
-        >
-          {copied ? (
-            <>
-              <Check className="h-3 w-3 text-[var(--success)]" />
-              <span className="text-[var(--success)]">Copied</span>
-            </>
-          ) : (
-            <>
-              <Copy className="h-3 w-3" />
-              <span>Copy</span>
-            </>
-          )}
-        </button>
-        {canOpenCanvas ? (
+        <div className="flex items-center gap-1">
+          {previewable ? (
+            <button
+              type="button"
+              onClick={() => setShowPreview((prev) => !prev)}
+              className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition hover:bg-[var(--bg-hover)] ${
+                showPreview ? "text-[var(--accent-cyan)]" : "text-[var(--text-secondary)]"
+              }`}
+            >
+              {showPreview ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+              <span>{showPreview ? "Code" : "Preview"}</span>
+            </button>
+          ) : null}
           <button
             type="button"
-            onClick={() => onOpenCanvas?.({ code: codeText, language: language || "text" })}
-            className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[11px] text-[var(--accent-cyan)] transition hover:bg-[var(--bg-hover)]"
+            onClick={handleCopy}
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
           >
-            Open in Canvas
+            {copied ? (
+              <>
+                <Check className="h-3 w-3 text-[var(--success)]" />
+                <span className="text-[var(--success)]">Copied</span>
+              </>
+            ) : (
+              <>
+                <Copy className="h-3 w-3" />
+                <span>Copy</span>
+              </>
+            )}
           </button>
-        ) : null}
+          {canOpenCanvas ? (
+            <button
+              type="button"
+              onClick={() => onOpenCanvas?.({ code: codeText, language: language || "text" })}
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[11px] text-[var(--accent-cyan)] transition hover:bg-[var(--bg-hover)]"
+            >
+              Open in Canvas
+            </button>
+          ) : null}
+        </div>
       </div>
-      <pre className="!m-0 overflow-x-auto bg-[var(--bg-code)] !p-4" {...props}>
-        <code className={className}>{children}</code>
-      </pre>
+      {showPreview && previewable ? (
+        <div className="rounded-b-xl overflow-hidden">
+          <CodePreview code={codeText} language={language as PreviewLanguage} />
+        </div>
+      ) : (
+        <pre className="!m-0 overflow-x-auto rounded-b-xl !p-4" {...props}>
+          <code className={className}>{children}</code>
+        </pre>
+      )}
     </div>
   );
 }

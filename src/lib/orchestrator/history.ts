@@ -16,6 +16,7 @@ export function shouldScheduleCompaction(params: {
   history: ChatMessage[];
   mode?: StudyMode;
   hasExistingSummary?: boolean;
+  contextWindowTokens?: number;
 }) {
   if (params.hasExistingSummary) return false;
   const turns = params.history.length;
@@ -27,6 +28,14 @@ export function shouldScheduleCompaction(params: {
     return sum + content + Math.min(800, thinking);
   }, 0);
 
+  // Context-aware compaction: if we know the model's context window, compact at ~75%
+  if (params.contextWindowTokens && params.contextWindowTokens > 0) {
+    const estimatedTokens = Math.ceil(totalChars / 4);
+    const threshold = Math.floor(params.contextWindowTokens * 0.75);
+    if (estimatedTokens >= threshold && turns > 10) return true;
+  }
+
+  // Fallback to turn-count heuristics
   const mode = params.mode ?? "general";
   const denseModes = mode === "research" || mode === "document" || mode === "exam";
   if (turns >= 24) return true;

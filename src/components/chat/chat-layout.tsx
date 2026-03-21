@@ -115,7 +115,7 @@ const TOUR_STEPS: GuidedTourStep[] = [
 export function ChatLayout() {
   const chat = useChatState();
   const canvas = useCanvasState();
-  const { activeView: panelActiveView, openPanel, closePanel } = usePanel();
+  const { activeView: panelActiveView, openPanel, closePanel, togglePanel } = usePanel();
   const [tourOpen, setTourOpen] = useState(false);
   const [activityCutoffTs, setActivityCutoffTs] = useState<number | null>(null);
   const [liveProgressAutoOpen, setLiveProgressAutoOpen] = useState(true);
@@ -422,7 +422,7 @@ export function ChatLayout() {
     onNewChat: () => chat.startNewChat(chat.selectedAgentId),
     onDeleteChat: (chatId: string) => void chat.handleDeleteChat(chatId),
     onRenameChat: (chatId: string, title: string) => void chat.renameChat(chatId, title),
-    onOpenSettings: () => openPanel("settings"),
+    onOpenSettings: () => togglePanel("settings"),
     onPinChat: handlePinChat,
     pinnedChatIds: chat.pinnedChatIds,
     role: chat.role,
@@ -452,10 +452,10 @@ export function ChatLayout() {
       <aside
         data-tour="sidebar"
         className={`hidden md:block transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${
-          chat.sidebarOpen ? "w-[clamp(220px,18vw,280px)]" : "w-[64px]"
+          chat.sidebarOpen && !canvas.isOpen ? "w-[clamp(220px,18vw,280px)]" : "w-[64px]"
         }`}
       >
-        <ChatSidebar {...sidebarProps} />
+        <ChatSidebar {...sidebarProps} collapsed={!chat.sidebarOpen || canvas.isOpen} />
       </aside>
 
       {chat.mobileSidebarOpen && (
@@ -503,11 +503,12 @@ export function ChatLayout() {
           onCompact={() => void chat.compactConversation()}
           onCompactWithDepth={(keepLatestMessages) => void chat.compactConversation(keepLatestMessages)}
           onToggleMobileSidebar={() => chat.setMobileSidebarOpen(true)}
-          onOpenSettings={() => openPanel("settings")}
-          onOpenOrchestration={() => openPanel("orchestration")}
+          onOpenSettings={() => togglePanel("settings")}
+          onOpenOrchestration={() => togglePanel("orchestration")}
           onNewChat={() => chat.startNewChat(chat.selectedAgentId)}
           showOrchestrationButton={canOpenOrchestration}
           orchestrationActive={panelActiveView === "orchestration"}
+          settingsActive={panelActiveView === "settings"}
           onExport={(format) => {
             if (format === "pdf") {
               const node = document.querySelector("[data-conversation-export]") ?? document.querySelector("main");

@@ -21,6 +21,15 @@ function sanitize(s: string, maxLen = 2000): string {
   return s.replace(/[<>]/g, "").trim().slice(0, maxLen);
 }
 
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 export async function POST(request: NextRequest) {
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
 
@@ -61,6 +70,13 @@ export async function POST(request: NextRequest) {
   const safeRole = role ? sanitize(role, 100) : "";
   const safeMessage = sanitize(message);
 
+  // HTML-encode all user values before interpolation into email body
+  const htmlName = escapeHtml(safeName);
+  const htmlEmail = escapeHtml(safeEmail);
+  const htmlSchool = escapeHtml(safeSchool);
+  const htmlRole = escapeHtml(safeRole);
+  const htmlMessage = escapeHtml(safeMessage);
+
   const apiKey = process.env.RESEND_API_KEY;
   const fromEmail = process.env.INVITE_FROM_EMAIL;
 
@@ -87,14 +103,14 @@ export async function POST(request: NextRequest) {
           <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;">
             <h2 style="color:#1a1510;margin:0 0 16px;">New contact form submission</h2>
             <table style="width:100%;border-collapse:collapse;">
-              <tr><td style="padding:8px 0;color:#6b5f52;width:120px;">Name</td><td style="padding:8px 0;color:#1a1510;">${safeName}</td></tr>
-              <tr><td style="padding:8px 0;color:#6b5f52;">Email</td><td style="padding:8px 0;"><a href="mailto:${safeEmail}" style="color:#0e8ee8;">${safeEmail}</a></td></tr>
-              ${safeSchool ? `<tr><td style="padding:8px 0;color:#6b5f52;">School</td><td style="padding:8px 0;color:#1a1510;">${safeSchool}</td></tr>` : ""}
-              ${safeRole ? `<tr><td style="padding:8px 0;color:#6b5f52;">Role</td><td style="padding:8px 0;color:#1a1510;">${safeRole}</td></tr>` : ""}
+              <tr><td style="padding:8px 0;color:#6b5f52;width:120px;">Name</td><td style="padding:8px 0;color:#1a1510;">${htmlName}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b5f52;">Email</td><td style="padding:8px 0;"><a href="mailto:${htmlEmail}" style="color:#0e8ee8;">${htmlEmail}</a></td></tr>
+              ${htmlSchool ? `<tr><td style="padding:8px 0;color:#6b5f52;">School</td><td style="padding:8px 0;color:#1a1510;">${htmlSchool}</td></tr>` : ""}
+              ${htmlRole ? `<tr><td style="padding:8px 0;color:#6b5f52;">Role</td><td style="padding:8px 0;color:#1a1510;">${htmlRole}</td></tr>` : ""}
             </table>
             <div style="margin-top:16px;padding:16px;background:#f5f3ef;border-radius:12px;">
               <p style="margin:0 0 4px;color:#6b5f52;font-size:12px;text-transform:uppercase;letter-spacing:0.1em;">Message</p>
-              <p style="margin:0;color:#1a1510;white-space:pre-wrap;">${safeMessage}</p>
+              <p style="margin:0;color:#1a1510;white-space:pre-wrap;">${htmlMessage}</p>
             </div>
           </div>
         `,

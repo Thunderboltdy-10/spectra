@@ -131,6 +131,25 @@ export type UserSpending = {
 
 export type AutoPreference = "auto" | "on" | "off";
 type StreamPhase = "idle" | "compacting" | "routing" | "searching" | "thinking" | "generating" | "synthesizing";
+type SearchStatusBanner = "model_knowledge" | "real_search" | "error" | null;
+
+function normalizePhaseStatus(value?: string): "planned" | "running" | "completed" | "skipped" | "failed" {
+  if (value === "in_progress" || value === "running") return "running";
+  if (value === "completed") return "completed";
+  if (value === "skipped") return "skipped";
+  if (value === "failed") return "failed";
+  return "planned";
+}
+
+function streamPhaseFromPhaseId(phaseId?: string): StreamPhase | undefined {
+  if (!phaseId) return undefined;
+  if (phaseId === "routing" || phaseId === "planning") return "routing";
+  if (phaseId === "retrieval" || phaseId === "search") return "searching";
+  if (phaseId === "analysis" || phaseId === "verification" || phaseId === "memory" || phaseId === "title") return "thinking";
+  if (phaseId === "authoring" || phaseId === "repair") return "generating";
+  if (phaseId === "synthesis") return "synthesizing";
+  return undefined;
+}
 
 const AUTO_COMPACTION_MIN_MESSAGES = 10;
 const AUTO_COMPACTION_KEEP_LATEST = 6;
@@ -523,6 +542,8 @@ export function useChatState() {
   const sending = activeStreamIds.has(selectedChatId);
   const [activeCollaborators, setActiveCollaborators] = useState<ActiveCollaboratorState[]>([]);
   const [streamPhase, setStreamPhase] = useState<StreamPhase>("idle");
+  const [livePhasePlan, setLivePhasePlan] = useState<RouteTrace["phasePlan"]>([]);
+  const [searchStatusBanner, setSearchStatusBanner] = useState<SearchStatusBanner>(null);
   const [collaboratorPhase, setCollaboratorPhase] = useState<"idle" | "running" | "synthesizing">("idle");
   const [fileList, setFileList] = useState<File[]>([]);
   const [fileUploadState, setFileUploadState] = useState<
@@ -824,6 +845,8 @@ export function useChatState() {
     if (selectedChatId) {
       markChatActive(selectedChatId);
     }
+    setLivePhasePlan([]);
+    setSearchStatusBanner(null);
   }, [selectedChatId, markChatActive, syncChatIdToUrl]);
 
   useEffect(() => {
@@ -1353,6 +1376,8 @@ export function useChatState() {
     setActiveCollaborators([]);
     setCollaboratorPhase("idle");
     setStreamPhase("idle");
+    setLivePhasePlan([]);
+    setSearchStatusBanner(null);
     setStreamError(null);
     setSearch("");
     if (retryAttempt === 0) {
@@ -1645,7 +1670,9 @@ export function useChatState() {
               | "rag_used"
               | "soul_update"
               | "agent_summoned"
-              | "phase";
+              | "phase"
+              | "phase_update"
+              | "search_status";
             content?: string;
             message?: string;
             error?: string | { message?: string };
@@ -1673,12 +1700,25 @@ export function useChatState() {
             suggestedMode?: string;
             agents?: string[];
             agent?: string;
-            status?: "pending" | "running" | "done" | "failed" | "skipped";
             preview?: string;
             tokensUsed?: number;
             model?: string;
             reason?: string;
             phase?: StreamPhase;
+            phaseId?: string;
+            detail?: string;
+            phasePlan?: Array<{
+              id: string;
+              label: string;
+              status: "planned" | "running" | "completed" | "skipped" | "failed" | "in_progress";
+              detail?: string;
+              model?: string;
+              thinkingLevel?: ThinkingLevel;
+              startedAt?: number;
+              finishedAt?: number;
+            }>;
+            status?: "pending" | "running" | "done" | "failed" | "skipped" | "planned" | "in_progress" | "completed";
+            searchStatus?: "model_fallback" | "real_search" | "error";
             agentSuggestion?: AgentSuggestion;
             unlockedAchievements?: AchievementToastData[];
             sources?: Array<{ filename: string; page?: number; sourceType: string }>;
@@ -1746,8 +1786,16 @@ export function useChatState() {
 
           if (payload.type === "collab_progress" && payload.agent) {
             const agentRole = payload.agent;
+            const collaboratorStatus =
+              payload.status === "pending"
+              || payload.status === "running"
+              || payload.status === "done"
+              || payload.status === "failed"
+              || payload.status === "skipped"
+                ? payload.status
+                : "running";
             pushThinkingNote(
-              `${agentRole.replace(/_/g, " ")} ${payload.status === "done" ? "completed" : "is running"}${
+              `${agentRole.replace(/_/g, " ")} ${collaboratorStatus === "done" ? "completed" : "is running"}${
                 payload.model ? ` with ${payload.model}` : ""
               }${payload.preview ? `: ${payload.preview}` : ""}`,
             );
@@ -1760,7 +1808,7 @@ export function useChatState() {
                     ...prev,
                     {
                       role: agentRole,
-                      status: payload.status ?? "running",
+                      status: collaboratorStatus,
                       model: payload.model,
                       preview: payload.preview,
                     },
@@ -1770,7 +1818,7 @@ export function useChatState() {
                   item.role === agentRole
                     ? {
                         ...item,
-                        status: payload.status ?? "running",
+                        status: collaboratorStatus,
                         model: payload.model ?? item.model,
                         preview: payload.preview ?? item.preview,
                       }
@@ -1829,6 +1877,56 @@ export function useChatState() {
             }));
           }
 
+          if (payload.type === "search_status") {
+            const status = payload.searchStatus ?? payload.status;
+            if (status === "model_fallback") {
+              setSearchStatusBanner("model_knowledge");
+              pushThinkingNote("Web search was unavailable. Response used model knowledge fallback.");
+            } else if (status === "real_search") {
+              setSearchStatusBanner("real_search");
+            } else if (status === "error") {
+              setSearchStatusBanner("error");
+            }
+          }
+
+          if (payload.type === "phase_update") {
+            if (Array.isArray(payload.phasePlan) && payload.phasePlan.length > 0) {
+              const normalized = payload.phasePlan.map((phase) => ({
+                ...phase,
+                status: normalizePhaseStatus(phase.status),
+              }));
+              setLivePhasePlan(normalized);
+            } else if (payload.phaseId) {
+              const normalizedStatus = normalizePhaseStatus(payload.status);
+              setLivePhasePlan((prev) => {
+                const existingIndex = prev.findIndex((phase) => phase.id === payload.phaseId);
+                if (existingIndex < 0) {
+                  return [
+                    ...prev,
+                    {
+                      id: payload.phaseId!,
+                      label: payload.phaseId!,
+                      status: normalizedStatus,
+                      detail: payload.detail,
+                    },
+                  ];
+                }
+                const next = [...prev];
+                next[existingIndex] = {
+                  ...next[existingIndex],
+                  status: normalizedStatus,
+                  detail: payload.detail ?? next[existingIndex].detail,
+                };
+                return next;
+              });
+            }
+
+            const nextPhase = streamPhaseFromPhaseId(payload.phaseId);
+            if ((payload.status === "in_progress" || payload.status === "running") && nextPhase) {
+              setStreamPhase(nextPhase);
+            }
+          }
+
           if (payload.type === "phase" && payload.phase) {
             setStreamPhase(payload.phase);
           }
@@ -1869,6 +1967,9 @@ export function useChatState() {
                     },
                   }
                 : payload.routeTrace;
+            if (normalizedTrace?.phasePlan?.length) {
+              setLivePhasePlan(normalizedTrace.phasePlan);
+            }
 
             const nextFinalMeta: typeof finalMeta = {
               messageId: payload.messageId,
@@ -2618,6 +2719,8 @@ export function useChatState() {
     draftThinking,
     hasRealThinking,
     streamPhase,
+    livePhasePlan,
+    searchStatusBanner,
     activeCollaborators,
     collaboratorPhase,
     activeStreamIds,

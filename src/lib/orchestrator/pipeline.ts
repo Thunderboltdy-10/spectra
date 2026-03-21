@@ -13,7 +13,7 @@ import {
   summarizeWhyResponse,
   toOpenRouterMessages,
 } from "@/lib/orchestrator/compose";
-import { classifyExplainDepth, parseUserDirectives, runAutoSettingsPipeline, suggestMode } from "@/lib/auto-settings";
+import { classifyExplainDepth, classifyRequest, parseUserDirectives, runAutoSettingsPipeline, suggestMode } from "@/lib/auto-settings";
 import { matchAgentToMessage } from "@/lib/agent-matching";
 import { countFlashcardPairs, isFlashcardDeckStructured, normalizeFlashcardDeck } from "@/lib/flashcard-format";
 import { safeStudyMode } from "@/lib/contracts/studyModes";
@@ -603,6 +603,10 @@ export async function runChatPipeline(request: NextRequest) {
   const auto = await runAutoSettingsPipeline({
     actorClerkId: actor.clerkId,
     message: normalizedMessage,
+    mode: safeMode,
+    hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
+    isFirstMessage: !body.chatId,
+    multiAgentRequested: Boolean(body.forceMultiAgent),
     currentThinkingLevel: body.thinkingLevel,
     spendingTier: budget.tier,
     autoEnhancePrompt: autoSettings.enhancePrompt,
@@ -872,6 +876,18 @@ export async function runChatPipeline(request: NextRequest) {
     (effectiveMode === "quiz" || effectiveMode === "flashcard") &&
     normalizedMessage.split(/\s+/).length < 4 &&
     !/\b(about|on|for|regarding|the|topic)\b/i.test(normalizedMessage);
+
+  const requestClassification = classifyRequest({
+    message: auto.message,
+    complexity: auto.complexity,
+    mode: effectiveMode,
+    hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
+    isFirstMessage: isFirstAssistantTurn,
+    multiAgentRequested: Boolean(body.forceMultiAgent),
+    spendingTier: budget.tier,
+  });
+  auto.requestClass = requestClassification.requestClass;
+  auto.classificationReason = requestClassification.reason;
 
   let agentSuggestion:
     | {
@@ -1149,6 +1165,13 @@ export async function runChatPipeline(request: NextRequest) {
   }
   if (routePlan.shouldUseWebSearch) {
     logger.info("web search complete", { urlCount: searchUrls.length });
+    if (searchProvider === "model_fallback") {
+      earlyEventBuffer.push({ type: "search_status", status: "model_fallback" });
+    } else if (searchProvider === "searxng") {
+      earlyEventBuffer.push({ type: "search_status", status: "real_search" });
+    } else if (searchProvider === "error") {
+      earlyEventBuffer.push({ type: "search_status", status: "error" });
+    }
   }
 
   const quizDifficultyLevel = clampQuizDifficultyLevel(quizAdaptive.level);
@@ -1244,6 +1267,8 @@ export async function runChatPipeline(request: NextRequest) {
         promptEnhanced: auto.promptEnhanced,
         messageLength: auto.message.length,
         conversationLength: history.length,
+        requestClass: auto.requestClass,
+        classificationReason: auto.classificationReason,
         previousModelUsed: previousAssistantModel,
         agentPreferredModel: selectedAgent?.preferredModel,
       },
@@ -1889,6 +1914,77 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     if (phase.id === "search") return { ...phase, model: (webResult as any).modelUsed };
     return phase;
   });
+  type PhaseUpdateStatus = "planned" | "in_progress" | "completed" | "skipped" | "failed";
+  const toPhaseTraceStatus = (status: PhaseUpdateStatus) => (status === "in_progress" ? "running" : status);
+  const applyPhaseUpdate = (phaseId: string, status: PhaseUpdateStatus, detail?: string) => {
+    const now = Date.now();
+    route.trace.phasePlan = (route.trace.phasePlan ?? []).map((phase) => {
+      if (phase.id !== phaseId) return phase;
+      return {
+        ...phase,
+        status: toPhaseTraceStatus(status),
+        detail: detail ?? phase.detail,
+        startedAt: status === "in_progress" ? phase.startedAt ?? now : phase.startedAt,
+        finishedAt: status === "completed" || status === "skipped" || status === "failed" ? now : phase.finishedAt,
+      };
+    });
+    return route.trace.phasePlan;
+  };
+  const queuePhaseUpdate = (phaseId: string, status: PhaseUpdateStatus, detail?: string) => {
+    const phasePlan = applyPhaseUpdate(phaseId, status, detail);
+    earlyEventBuffer.push({
+      type: "phase_update",
+      phaseId,
+      status,
+      detail,
+      phasePlan,
+    });
+  };
+  const emitPhaseUpdate = async (phaseId: string, status: PhaseUpdateStatus, detail?: string) => {
+    const phasePlan = applyPhaseUpdate(phaseId, status, detail);
+    await send({
+      type: "phase_update",
+      phaseId,
+      status,
+      detail,
+      phasePlan,
+    });
+  };
+  const subcallTokenTotals = () => {
+    const subcalls = route.trace.subcalls ?? [];
+    return subcalls.reduce(
+      (sum, call) => ({
+        input: sum.input + (call.inputTokens ?? 0),
+        output: sum.output + (call.outputTokens ?? 0),
+      }),
+      { input: 0, output: 0 },
+    );
+  };
+  if (route.trace.phasePlan?.some((phase) => phase.id === "retrieval")) {
+    if (!routePlan.retrievalScopes.length) {
+      queuePhaseUpdate("retrieval", "skipped", "No retrieval scope enabled.");
+    } else if (retrieval.citations.length > 0) {
+      queuePhaseUpdate("retrieval", "completed", `Used ${retrieval.citations.length} source(s).`);
+    } else {
+      queuePhaseUpdate("retrieval", "completed", retrieval.diagnostics?.reason ?? "No high-confidence retrieval match.");
+    }
+  }
+  if (route.trace.phasePlan?.some((phase) => phase.id === "search")) {
+    if (!routePlan.shouldUseWebSearch) {
+      queuePhaseUpdate("search", "skipped", "Web search not required.");
+    } else {
+      const sourceCount = searchSources.length || searchUrls.length;
+      queuePhaseUpdate(
+        "search",
+        "completed",
+        searchBlock.trim() ? `Captured ${sourceCount} web source(s).` : "No usable web results.",
+      );
+    }
+  }
+  earlyEventBuffer.push({
+    type: "phase_update",
+    phasePlan: route.trace.phasePlan,
+  });
   if (shouldVerify) {
     route.trace.toolchain.push("marker_verification");
   }
@@ -1983,7 +2079,14 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
       });
 
       if (effectiveMode === "image") {
+        if (route.trace.phasePlan?.some((phase) => phase.id === "analysis")) {
+          await emitPhaseUpdate("analysis", "in_progress");
+          await emitPhaseUpdate("analysis", "completed", "Prepared image generation context.");
+        }
         route.trace.toolchain.push("image_prompt_refinement");
+        if (route.trace.phasePlan?.some((phase) => phase.id === "planning")) {
+          await emitPhaseUpdate("planning", "in_progress");
+        }
         const promptRefinementStartedAt = Date.now();
         const promptRefinement = await openRouterChatCompletion({
           model: primaryModel,
@@ -2020,11 +2123,17 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
             pricing: resolveCatalogPricing(promptRefinement.model ?? primaryModel),
           }).catch(() => {});
         }
+        if (route.trace.phasePlan?.some((phase) => phase.id === "planning")) {
+          await emitPhaseUpdate("planning", "completed", "Image prompt refined.");
+        }
 
         const refinedPrompt =
           promptRefinement?.choices?.[0]?.message?.content?.trim() || auto.message;
 
         route.trace.toolchain.push("image_generation");
+        if (route.trace.phasePlan?.some((phase) => phase.id === "authoring")) {
+          await emitPhaseUpdate("authoring", "in_progress");
+        }
         const imageModelSelection = pickModelAndFallbacks({
           catalog: catalog.filter((model) => model.modelId !== "openrouter/auto"),
           tier: budget.tier,
@@ -2095,6 +2204,9 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         const modelUsed = imageModel;
         const usageIn = imageResult.usage?.prompt_tokens ?? 0;
         const usageOut = imageResult.usage?.completion_tokens ?? 0;
+        const imageSubcallTotals = subcallTokenTotals();
+        const finalUsageIn = imageSubcallTotals.input > 0 ? imageSubcallTotals.input : usageIn;
+        const finalUsageOut = imageSubcallTotals.output > 0 ? imageSubcallTotals.output : usageOut;
         const citations: Array<{
           filename: string;
           url?: string;
@@ -2104,6 +2216,9 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         }> = [];
 
         route.trace.toolchain = [...new Set(route.trace.toolchain)];
+        if (route.trace.phasePlan?.some((phase) => phase.id === "authoring")) {
+          await emitPhaseUpdate("authoring", "completed", "Image generated successfully.");
+        }
         (route.trace as any).totalCostCents = Number(
           ((route.trace.subcalls ?? []).reduce((sum, call) => sum + (call.costCents ?? 0), 0)).toFixed(4),
         );
@@ -2118,8 +2233,8 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           modelRequested,
           modelUsed,
           whyThisResponse,
-          usageIn,
-          usageOut,
+          usageIn: finalUsageIn,
+          usageOut: finalUsageOut,
           verificationPassed: undefined,
           thinkingContent: undefined,
           routeTrace: route.trace,
@@ -2144,8 +2259,8 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           messageId: appended.messageId,
           model: modelUsed,
           usage: imageResult.usage,
-          inputTokens: usageIn,
-          outputTokens: usageOut,
+          inputTokens: finalUsageIn,
+          outputTokens: finalUsageOut,
           pricing,
           skipIfZeroTokens: false,
         });
@@ -2165,7 +2280,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           actorClerkId: actor.clerkId,
           mode: effectiveMode,
           model: modelUsed,
-          tokensUsed: usageIn + usageOut,
+          tokensUsed: finalUsageIn + finalUsageOut,
           topic: normalizedMessage.slice(0, 60),
         }).catch(() => {});
 
@@ -2219,6 +2334,9 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         }
 
         const assistantCount = history.filter((message) => message.role === "assistant").length;
+        if (route.trace.phasePlan?.some((phase) => phase.id === "title")) {
+          await emitPhaseUpdate("title", "in_progress");
+        }
         const generatedTitle = await resolveFirstTurnTitle({
           assistantCount,
           chatId,
@@ -2240,6 +2358,13 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           },
           logger,
         });
+        if (route.trace.phasePlan?.some((phase) => phase.id === "title")) {
+          await emitPhaseUpdate(
+            "title",
+            generatedTitle ? "completed" : "skipped",
+            generatedTitle ? "Chat title updated." : "Title unchanged.",
+          );
+        }
         finalizePhasePlan({
           memoryUpdated: false,
           titleUpdated: Boolean(generatedTitle),
@@ -2258,8 +2383,8 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           messageId: appended.messageId,
           modelUsed,
           modelRequested,
-          usageIn,
-          usageOut,
+          usageIn: finalUsageIn,
+          usageOut: finalUsageOut,
           whyThisResponse,
           citations,
           verificationPassed: undefined,
@@ -2297,6 +2422,22 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         (route.trace.fallbacks as any).push(event);
       };
 
+      if (route.trace.phasePlan?.some((phase) => phase.id === "analysis")) {
+        await emitPhaseUpdate("analysis", "in_progress");
+      }
+      if (route.trace.phasePlan?.some((phase) => phase.id === "planning")) {
+        await emitPhaseUpdate("planning", "in_progress");
+      }
+      if (route.trace.phasePlan?.some((phase) => phase.id === "synthesis") && multiAgentEnabled) {
+        await emitPhaseUpdate("synthesis", "in_progress");
+      }
+      if (route.trace.phasePlan?.some((phase) => phase.id === "authoring") && !multiAgentEnabled) {
+        await emitPhaseUpdate("authoring", "in_progress");
+      }
+      if (route.trace.phasePlan?.some((phase) => phase.id === "verification") && shouldVerify) {
+        await emitPhaseUpdate("verification", "in_progress");
+      }
+
       const streamed = multiAgentEnabled
         ? await runCollaborativeStreaming({
             actorClerkId: actor.clerkId,
@@ -2333,6 +2474,25 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
             onFallback,
             logger,
           });
+      if (route.trace.phasePlan?.some((phase) => phase.id === "planning")) {
+        await emitPhaseUpdate(
+          "planning",
+          multiAgentEnabled ? "completed" : "skipped",
+          multiAgentEnabled ? "Specialist plan executed." : "Single-pass route selected.",
+        );
+      }
+      if (route.trace.phasePlan?.some((phase) => phase.id === "analysis")) {
+        await emitPhaseUpdate("analysis", "completed");
+      }
+      if (route.trace.phasePlan?.some((phase) => phase.id === "authoring") && !multiAgentEnabled) {
+        await emitPhaseUpdate("authoring", "completed");
+      }
+      if (route.trace.phasePlan?.some((phase) => phase.id === "synthesis") && multiAgentEnabled) {
+        await emitPhaseUpdate("synthesis", "completed", "Specialist outputs synthesized.");
+      }
+      if (route.trace.phasePlan?.some((phase) => phase.id === "verification") && shouldVerify) {
+        await emitPhaseUpdate("verification", "completed");
+      }
 
       if (streamed.sourceHints?.length) {
         const deduped = new Map<string, { url: string; title: string; domain: string }>();
@@ -2434,6 +2594,9 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         effectiveMode === "flashcard" &&
         (!isFlashcardDeckStructured(correctedResponse) || flashcardCount < MIN_FLASHCARD_PAIRS);
       if (needsQuizRepair || needsFlashcardRepair) {
+        if (route.trace.phasePlan?.some((phase) => phase.id === "repair")) {
+          await emitPhaseUpdate("repair", "in_progress");
+        }
         const repairStartedAt = Date.now();
         const repaired = await openRouterChatCompletion({
           model: supportModel,
@@ -2505,6 +2668,9 @@ BACK: ...`,
             }
           }
         }
+        if (route.trace.phasePlan?.some((phase) => phase.id === "repair")) {
+          await emitPhaseUpdate("repair", "completed", "Output formatting repaired.");
+        }
       }
 
       if (!isVagueRequest && effectiveMode === "flashcard") {
@@ -2525,6 +2691,9 @@ BACK: ...`,
         (!isFlashcardDeckStructured(correctedResponse) || countFlashcardPairs(correctedResponse) < MIN_FLASHCARD_PAIRS);
 
       if (stillNeedsQuizRepair || stillNeedsFlashcardRepair) {
+        if (route.trace.phasePlan?.some((phase) => phase.id === "repair")) {
+          await emitPhaseUpdate("repair", "in_progress");
+        }
         const regenerateRepairStartedAt = Date.now();
         const regenerated = await openRouterChatCompletion({
           model: supportModel,
@@ -2601,6 +2770,9 @@ BACK: ...`,
             }
           }
         }
+        if (route.trace.phasePlan?.some((phase) => phase.id === "repair")) {
+          await emitPhaseUpdate("repair", "completed", "Regenerated response with strict format.");
+        }
       }
 
       const finalQuizRepairNeeded =
@@ -2608,6 +2780,9 @@ BACK: ...`,
         effectiveMode === "quiz" &&
         (!isQuizStructured(correctedResponse) || countQuizQuestions(correctedResponse) < MIN_QUIZ_QUESTIONS);
       if (finalQuizRepairNeeded) {
+        if (route.trace.phasePlan?.some((phase) => phase.id === "repair")) {
+          await emitPhaseUpdate("repair", "in_progress");
+        }
         const finalQuizRepairStartedAt = Date.now();
         const finalRepair = await openRouterChatCompletion({
           model: supportModel,
@@ -2666,6 +2841,9 @@ Correct: [A|B|C|D]
           correctedResponse = finalCandidate;
           route.trace.toolchain.push("quiz_final_repair");
         }
+        if (route.trace.phasePlan?.some((phase) => phase.id === "repair")) {
+          await emitPhaseUpdate("repair", "completed", "Final quiz format pass completed.");
+        }
       }
 
       const finalFlashcardRepairNeeded =
@@ -2673,6 +2851,9 @@ Correct: [A|B|C|D]
         effectiveMode === "flashcard" &&
         (!isFlashcardDeckStructured(correctedResponse) || countFlashcardPairs(correctedResponse) < MIN_FLASHCARD_PAIRS);
       if (finalFlashcardRepairNeeded) {
+        if (route.trace.phasePlan?.some((phase) => phase.id === "repair")) {
+          await emitPhaseUpdate("repair", "in_progress");
+        }
         const finalFlashcardRepairStartedAt = Date.now();
         const finalFlashcardRepair = await openRouterChatCompletion({
           model: supportModel,
@@ -2723,6 +2904,9 @@ BACK: [answer or definition]`,
         if (normalizedFinalFlashcards && countFlashcardPairs(normalizedFinalFlashcards) >= MIN_FLASHCARD_PAIRS) {
           correctedResponse = normalizedFinalFlashcards;
           route.trace.toolchain.push("flashcard_final_repair");
+        }
+        if (route.trace.phasePlan?.some((phase) => phase.id === "repair")) {
+          await emitPhaseUpdate("repair", "completed", "Final flashcard format pass completed.");
         }
       }
 
@@ -2776,14 +2960,17 @@ BACK: [answer or definition]`,
         }
       }
       const whyThisResponse = summarizeWhyResponse(effectiveMode, route.reason);
+      const finalSubcallTotals = subcallTokenTotals();
+      const finalUsageIn = finalSubcallTotals.input > 0 ? finalSubcallTotals.input : usageIn;
+      const finalUsageOut = finalSubcallTotals.output > 0 ? finalSubcallTotals.output : usageOut;
       (route.trace as any).totalCostCents = Number(
         ((route.trace.subcalls ?? []).reduce((sum, call) => sum + (call.costCents ?? 0), 0)).toFixed(4),
       );
       (route.trace as any).totalDurationMs = Date.now() - requestStartedAt;
       logger.info("streaming complete", {
         modelUsed,
-        usageIn,
-        usageOut,
+        usageIn: finalUsageIn,
+        usageOut: finalUsageOut,
         fallbackCount: route.trace.fallbacks.length,
       });
 
@@ -2798,8 +2985,8 @@ BACK: [answer or definition]`,
         modelRequested,
         modelUsed,
         whyThisResponse,
-        usageIn,
-        usageOut,
+        usageIn: finalUsageIn,
+        usageOut: finalUsageOut,
         verificationPassed,
         thinkingContent: thinkingContent || undefined,
         routeTrace: route.trace,
@@ -2825,8 +3012,8 @@ BACK: [answer or definition]`,
           messageId: appended.messageId,
           model: modelUsed,
           usage,
-          inputTokens: usageIn,
-          outputTokens: usageOut,
+          inputTokens: finalUsageIn,
+          outputTokens: finalUsageOut,
           pricing,
         });
       }
@@ -2855,7 +3042,7 @@ BACK: [answer or definition]`,
         actorClerkId: actor.clerkId,
         mode: effectiveMode,
         model: modelUsed,
-        tokensUsed: usageIn + usageOut,
+        tokensUsed: finalUsageIn + finalUsageOut,
         topic: normalizedMessage.slice(0, 60),
       }).catch(() => {});
 
@@ -2908,6 +3095,9 @@ BACK: [answer or definition]`,
         }).catch(() => {});
       }
 
+      if (route.trace.phasePlan?.some((phase) => phase.id === "memory") && routePlan.shouldWriteMemory) {
+        await emitPhaseUpdate("memory", "in_progress");
+      }
       const extractedMemory = routePlan.shouldWriteMemory
         ? await maybeExtractMemory({
             actorClerkId: actor.clerkId,
@@ -2930,6 +3120,13 @@ BACK: [answer or definition]`,
             },
           }).catch(() => [] as Array<{ key: string; value: string; confidence: number; extractedAt: number }>)
         : [];
+      if (route.trace.phasePlan?.some((phase) => phase.id === "memory") && routePlan.shouldWriteMemory) {
+        await emitPhaseUpdate(
+          "memory",
+          extractedMemory.length > 0 ? "completed" : "skipped",
+          extractedMemory.length > 0 ? "User memory updated." : "No durable memory update extracted.",
+        );
+      }
       if (extractedMemory.length > 0) {
         await send({
           type: "soul_update",
@@ -2942,6 +3139,9 @@ BACK: [answer or definition]`,
       }
 
       const assistantCount = history.filter((message) => message.role === "assistant").length;
+      if (route.trace.phasePlan?.some((phase) => phase.id === "title")) {
+        await emitPhaseUpdate("title", "in_progress");
+      }
       const generatedTitle = await resolveFirstTurnTitle({
         assistantCount,
         chatId,
@@ -2963,6 +3163,13 @@ BACK: [answer or definition]`,
         },
         logger,
       });
+      if (route.trace.phasePlan?.some((phase) => phase.id === "title")) {
+        await emitPhaseUpdate(
+          "title",
+          generatedTitle ? "completed" : "skipped",
+          generatedTitle ? "Chat title updated." : "Title unchanged.",
+        );
+      }
       finalizePhasePlan({
         memoryUpdated: extractedMemory.length > 0,
         titleUpdated: Boolean(generatedTitle),
@@ -2981,8 +3188,8 @@ BACK: [answer or definition]`,
         messageId: appended.messageId,
         modelUsed,
         modelRequested,
-        usageIn,
-        usageOut,
+        usageIn: finalUsageIn,
+        usageOut: finalUsageOut,
         whyThisResponse,
         citations,
         attachments: generatedArtifactAttachments,
@@ -3023,6 +3230,14 @@ BACK: [answer or definition]`,
         "chat stream failed",
         error instanceof Error ? error : new Error("Unknown stream failure"),
       );
+      for (const phase of route.trace.phasePlan ?? []) {
+        if (phase.status !== "running") continue;
+        await emitPhaseUpdate(
+          phase.id,
+          "failed",
+          error instanceof Error ? error.message : "Phase failed during streaming.",
+        );
+      }
       await recordModelRuntime(route.primaryModel, false, Date.now() - requestStartedAt);
       if (shouldPersistUserMessage && !assistantPersisted) {
         await convexMutation("chats:deleteLastUserMessage", {

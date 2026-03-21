@@ -26,6 +26,7 @@ type ChatMessagesProps = {
   sending: boolean;
   streamPhase?: "idle" | "compacting" | "routing" | "searching" | "thinking" | "generating" | "synthesizing";
   streamError: string | null;
+  searchStatusBanner?: "model_knowledge" | "real_search" | "error" | null;
   chatId?: string;
   onRetry: () => void;
   onSubmitQuizAnswers?: (payload: { messageId: string; result: QuizSubmitResult }) => void;
@@ -74,6 +75,7 @@ export function ChatMessages({
   sending,
   streamPhase = "idle",
   streamError,
+  searchStatusBanner = null,
   chatId,
   onRetry,
   onSubmitQuizAnswers,
@@ -332,6 +334,11 @@ export function ChatMessages({
       >
         <div className="mx-auto w-full max-w-6xl space-y-8">
           {!hasContent && emptyState}
+          {searchStatusBanner === "model_knowledge" ? (
+            <div className="rounded-xl border border-[color-mix(in_oklab,var(--warning)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_10%,transparent)] px-3 py-2 text-xs text-[var(--warning)]">
+              Web search was unavailable for this response. The assistant used model knowledge instead.
+            </div>
+          ) : null}
 
           {visibleStartIndex > 0 ? (
             <div

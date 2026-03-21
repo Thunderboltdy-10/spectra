@@ -30,6 +30,15 @@ function hasMediaRecorder(): boolean {
   return typeof MediaRecorder !== "undefined" && typeof navigator?.mediaDevices?.getUserMedia === "function";
 }
 
+function detectPreferredSpeechLanguage() {
+  if (typeof window === "undefined") return "en-US";
+  const documentLang = document.documentElement.lang?.trim();
+  if (documentLang) return documentLang;
+  const navLang = navigator.language?.trim();
+  if (navLang) return navLang;
+  return "en-US";
+}
+
 async function transcribeAudioBlob(blob: Blob): Promise<string> {
   const form = new FormData();
   form.append("audio", blob, "recording.webm");
@@ -57,7 +66,7 @@ export function useSpeechToText() {
   const startNativeSpeech = useCallback(() => {
     if (!ctor || isListening) return;
     const recognition = new ctor();
-    recognition.lang = "en-US";
+    recognition.lang = detectPreferredSpeechLanguage();
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.onresult = (event) => {

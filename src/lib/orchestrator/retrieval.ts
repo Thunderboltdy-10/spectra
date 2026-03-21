@@ -391,7 +391,7 @@ export async function maybeSearchWeb(
       {
         role: "system",
         content:
-          "Provide a concise up-to-date briefing with explicit source URLs for key claims. Keep under 180 words.",
+          "Provide a concise briefing from your training knowledge ONLY. DO NOT fabricate, invent, or guess any URLs. Begin with: 'Note: Web search was unavailable.' Keep under 180 words.",
       },
       {
         role: "user",
@@ -427,10 +427,13 @@ export async function maybeSearchWeb(
   if (completion) {
     await recordUsage(completion);
   }
-  const extractedUrls = extractUrls(text);
+  const prefixedText = text.startsWith("Note: Web search was unavailable.")
+    ? text
+    : `Note: Web search was unavailable. ${text}`.trim();
+  const extractedUrls = extractUrls(prefixedText);
   const sources = await resolveWebSearchSources(extractedUrls);
   const validUrlSet = new Set(sources.map((source) => source.url));
-  const sanitizedText = text
+  const sanitizedText = prefixedText
     .replace(/https?:\/\/[^\s)\]>"']+/g, (rawUrl) => {
       const parsed = parseHttpUrl(rawUrl);
       if (!parsed) return "";
@@ -440,7 +443,7 @@ export async function maybeSearchWeb(
     .replace(/\s{2,}/g, " ")
     .trim();
   return {
-    text: sanitizedText || text,
+    text: sanitizedText || prefixedText,
     urls: sources.map((source) => source.url),
     sources,
     provider: "model_fallback" as const,

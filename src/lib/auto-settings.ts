@@ -72,6 +72,13 @@ export type UserDirectives = {
   forceMultiAgent?: boolean;
 };
 
+export type RequestClass = "T0" | "T1" | "T2" | "T3";
+
+export type RequestClassification = {
+  requestClass: RequestClass;
+  reason: string;
+};
+
 const MODEL_ALIASES: Record<string, string> = {
   "claude": "anthropic/claude-sonnet-4",
   "claude sonnet": "anthropic/claude-sonnet-4",
@@ -116,6 +123,10 @@ export function parseUserDirectives(message: string): UserDirectives {
 export type AutoSettingsInput = {
   actorClerkId?: string;
   message: string;
+  mode?: StudyMode;
+  hasAttachments?: boolean;
+  isFirstMessage?: boolean;
+  multiAgentRequested?: boolean;
   currentThinkingLevel: ThinkingLevel;
   spendingTier: SpendingTier;
   autoEnhancePrompt: boolean;
@@ -134,6 +145,8 @@ export type AutoSettingsResult = {
   searchEnabled: boolean;
   thinkingLevel: ThinkingLevel;
   complexity: "simple" | "medium" | "complex";
+  requestClass: RequestClass;
+  classificationReason: string;
   promptCategory: PromptCategory;
   questionType: QuestionType;
   isMultipart: boolean;
@@ -213,6 +226,72 @@ export function detectThinkingLevel(message: string, fallback: ThinkingLevel): T
   if (veryShortPrompt) return "low";
   if (message.length > 220) return "medium";
   return fallback === "high" ? "medium" : fallback;
+}
+
+function hasExplicitSearchDirective(message: string) {
+  return /\b(research|search|look up|lookup|find sources|cite sources|find papers|web search|browse)\b/i.test(
+    message,
+  );
+}
+
+export function classifyRequest(params: {
+  message: string;
+  complexity?: "simple" | "medium" | "complex";
+  mode?: StudyMode;
+  hasAttachments?: boolean;
+  isFirstMessage?: boolean;
+  multiAgentRequested?: boolean;
+  spendingTier: SpendingTier;
+}): RequestClassification {
+  const complexity = params.complexity ?? classifyComplexity(params.message);
+  const normalizedMessage = params.message.trim();
+  const mode = params.mode ?? "general";
+  const hasAttachments = Boolean(params.hasAttachments);
+  const isFirstMessage = Boolean(params.isFirstMessage);
+  const explicitSearchDirective = hasExplicitSearchDirective(normalizedMessage);
+  const isSearchMode = mode === "research";
+  const isEnhanced =
+    complexity === "complex"
+    || isSearchMode
+    || mode === "marker"
+    || mode === "exam"
+    || hasAttachments
+    || explicitSearchDirective;
+
+  const t0Eligible =
+    complexity === "simple"
+    && normalizedMessage.length < 30
+    && !hasAttachments
+    && (mode === "auto" || mode === "general" || mode === "tutor")
+    && !isFirstMessage
+    && !explicitSearchDirective;
+
+  const tierAllowsT3 = params.spendingTier !== "cheap_only" && params.spendingTier !== "free_only";
+  if (params.multiAgentRequested && tierAllowsT3 && isEnhanced) {
+    return {
+      requestClass: "T3",
+      reason: "Complex request with multi-agent intent under a tier that allows advanced orchestration.",
+    };
+  }
+
+  if (t0Eligible) {
+    return {
+      requestClass: "T0",
+      reason: "Short, simple follow-up with no attachments or search intent.",
+    };
+  }
+
+  if (isEnhanced) {
+    return {
+      requestClass: "T2",
+      reason: "Complexity, mode, attachments, or explicit research/search intent requires enhanced execution.",
+    };
+  }
+
+  return {
+    requestClass: "T1",
+    reason: "Standard request with no explicit enhanced-routing triggers.",
+  };
 }
 
 function detectQuestionType(message: string): QuestionType {
@@ -589,6 +668,15 @@ export async function maybeEnhancePrompt(message: string, actorClerkId?: string)
 
 export async function runAutoSettingsPipeline(input: AutoSettingsInput): Promise<AutoSettingsResult> {
   const complexity = classifyComplexity(input.message);
+  const requestClassification = classifyRequest({
+    message: input.message,
+    complexity,
+    mode: input.mode,
+    hasAttachments: input.hasAttachments,
+    isFirstMessage: input.isFirstMessage,
+    multiAgentRequested: input.multiAgentRequested,
+    spendingTier: input.spendingTier,
+  });
   const promptCategory = classifyPromptCategory(input.message);
   const questionType = detectQuestionType(input.message);
   const isMultipart = detectMultipart(input.message);
@@ -661,6 +749,8 @@ export async function runAutoSettingsPipeline(input: AutoSettingsInput): Promise
     searchEnabled,
     thinkingLevel,
     complexity,
+    requestClass: requestClassification.requestClass,
+    classificationReason: requestClassification.reason,
     promptCategory,
     questionType,
     isMultipart,

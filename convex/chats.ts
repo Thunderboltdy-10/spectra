@@ -140,6 +140,7 @@ export const createChat = mutation({
       manualModel: args.manualModel,
       usePersonalResources: args.usePersonalResources,
       contextSummary: undefined,
+      learningContext: undefined,
       createdAt: now,
       updatedAt: now,
     });

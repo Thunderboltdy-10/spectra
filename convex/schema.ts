@@ -187,6 +187,7 @@ export default defineSchema({
     manualModel: v.optional(v.string()),
     usePersonalResources: v.boolean(),
     contextSummary: v.optional(v.string()),
+    learningContext: v.optional(v.string()),
     compactedUntilMessageId: v.optional(v.id("messages")),
     compactedAt: v.optional(v.number()),
     contextSummaryVersion: v.optional(v.number()),

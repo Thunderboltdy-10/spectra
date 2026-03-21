@@ -1341,3 +1341,27 @@ CSS variables in `globals.css`:
 ---
 
 This document represents the complete technical specification for the AI School Assistant application as of the codebase state.
+
+---
+
+## Phase 0 Implementation Update (2026-03-21)
+
+Status: Implemented in codebase for the Phase 0 checklist in `CODEX.md`.
+
+### Completed
+- Public auth passthrough for contact form endpoint (`/api/contact`) in middleware routing.
+- Search fallback hardening to model-knowledge-only responses (no fabricated URLs), with explicit fallback prefix and streamed `search_status` telemetry.
+- Frontend model-knowledge warning banner for search fallback responses.
+- File-processing stall retry threshold aligned to 90s with shared stale constant usage in UI status rendering.
+- Speech-to-text locale handling improved via dynamic recognition language selection.
+- Canvas version label handling hardened to avoid `label.trim is not a function` runtime failures.
+- Added request classification infrastructure (`classifyRequest`) with `T0/T1/T2/T3` output and classification reason metadata.
+- Added real-time `phase_update` stream events and live orchestration phase rendering support.
+- Token accounting now aggregates subcall token usage for done-event and persisted message token counts.
+- Title generation utility path now prefers cheap paid models over strict free preference and performs bounded retry when first title call is empty.
+- Added optional `learningContext` field to `chats` schema as Phase 3 preparation.
+
+### Verification Notes
+- Targeted test command attempted: `npm run test:run -- src/lib/__tests__/auto-settings.test.ts`.
+- Test execution is blocked in this environment: npm launches through Windows `CMD.EXE` (UNC-path failure) and local Vitest also fails because `node` is not available in PATH.
+- See `PHASE_0_IMPLEMENTATION_REPORT.md` for detailed file-level change log and attempted test commands.

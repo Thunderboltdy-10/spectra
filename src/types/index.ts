@@ -269,6 +269,8 @@ export type RouteTrace = {
     promptEnhanced: boolean;
     messageLength: number;
     conversationLength?: number;
+    requestClass?: "T0" | "T1" | "T2" | "T3";
+    classificationReason?: string;
     previousModelUsed?: string;
     agentPreferredModel?: string;
   };

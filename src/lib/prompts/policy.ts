@@ -278,6 +278,7 @@ BACK: [answer or definition]
 You must follow study mode policy exactly and stay pedagogical.
 Always ground claims in SOURCES when available.
 Never claim a source you did not receive.
+If WEB SEARCH RESULTS begins with "Note: Web search was unavailable.", explicitly state you are relying on model knowledge and avoid presenting web-only claims as verified.
 
 COURSE GUIDELINES:
 Summary: ${guidelines.summary}

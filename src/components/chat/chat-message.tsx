@@ -196,7 +196,12 @@ export function ChatMessage({
   const activeProvider = activeModelId?.split("/")[0] ?? "openrouter";
   const renderedContent = content;
   const parsedDocument = useMemo(() => parseGeneratedDocument(renderedContent), [renderedContent]);
-  const directTokens = (usageIn ?? 0) + (usageOut ?? 0);
+  const subcallInputTokens = routeTrace?.subcalls?.reduce((sum, item) => sum + (item.inputTokens ?? 0), 0) ?? 0;
+  const subcallOutputTokens = routeTrace?.subcalls?.reduce((sum, item) => sum + (item.outputTokens ?? 0), 0) ?? 0;
+  const hasSubcallTotals = subcallInputTokens + subcallOutputTokens > 0;
+  const directTokens = hasSubcallTotals
+    ? subcallInputTokens + subcallOutputTokens
+    : (usageIn ?? 0) + (usageOut ?? 0);
   const collaboratorExtraTokens =
     routeTrace?.collaborators
       ?.filter((item) => item.role !== "synthesizer")
@@ -204,7 +209,7 @@ export function ChatMessage({
   const collaboratorTotalTokens = routeTrace?.collaborators?.reduce((sum, item) => sum + (item.tokensUsed ?? 0), 0) ?? 0;
   const totalTokens =
     directTokens > 0
-      ? directTokens + collaboratorExtraTokens
+      ? (hasSubcallTotals ? directTokens : directTokens + collaboratorExtraTokens)
       : collaboratorTotalTokens;
   const timeLabel = useMemo(() => formatRelativeTime(createdAt), [createdAt]);
   const hasEnhanced = Boolean(enhancedContent && enhancedContent.trim());

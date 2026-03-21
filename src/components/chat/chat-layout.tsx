@@ -541,6 +541,7 @@ export function ChatLayout() {
           sending={chat.sending}
           streamPhase={chat.streamPhase}
           streamError={chat.streamError}
+          searchStatusBanner={chat.searchStatusBanner}
           chatId={chat.selectedChatId}
           onRetry={() => void chat.retryLastMessage()}
           onSubmitQuizAnswers={(payload) => {
@@ -819,6 +820,7 @@ export function ChatLayout() {
           collaboratorPhase: chat.collaboratorPhase,
           activeCollaborators: chat.activeCollaborators,
           streamPhase: chat.streamPhase,
+          livePhasePlan: chat.livePhasePlan,
           routeTrace: latestRouteTrace,
           lastModelUsed,
           searchEnabled: chat.lastAutoResult?.searchEnabled,

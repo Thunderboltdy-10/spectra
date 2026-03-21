@@ -16,6 +16,7 @@ import type { AutoPreference, ModelOption, PersonalResource, UserSpending } from
 import type { Citation, RouteTrace, RouterMode } from "@/types";
 import { FILE_LIMITS } from "@/lib/file-limits";
 import { formatToolchainLabel } from "@/lib/orchestrator/trace-labels";
+import { RESOURCE_PROCESSING_STALE_MS } from "../../../shared/resource-processing";
 
 function AutoChoice({
   label,
@@ -89,7 +90,7 @@ function resourceStatusMeta(status: PersonalResource["status"], updatedAt?: numb
     };
   }
   if (status === "processing") {
-    const stale = typeof updatedAt === "number" && Date.now() - updatedAt > 45_000;
+    const stale = typeof updatedAt === "number" && Date.now() - updatedAt > RESOURCE_PROCESSING_STALE_MS;
     const retryCount = Math.max(1, attempts ?? 1);
     return {
       label: stale
@@ -675,6 +676,7 @@ type OrchestrationViewProps = {
   collaboratorPhase: "idle" | "running" | "synthesizing";
   activeCollaborators: ActiveCollaborator[];
   streamPhase?: "idle" | "compacting" | "routing" | "searching" | "thinking" | "generating" | "synthesizing";
+  livePhasePlan?: RouteTrace["phasePlan"];
   routeTrace?: RouteTrace;
   lastModelUsed?: string;
   searchEnabled?: boolean;
@@ -731,6 +733,7 @@ function OrchestrationView({
   collaboratorPhase,
   activeCollaborators,
   streamPhase,
+  livePhasePlan,
   routeTrace,
   lastModelUsed,
   searchEnabled,
@@ -756,8 +759,11 @@ function OrchestrationView({
     activeCollaborators,
     streamPhase,
     searchEnabled,
-    hasFinishedWork: Boolean(routeTrace || lastModelUsed),
+    hasFinishedWork: Boolean(routeTrace || livePhasePlan?.length || lastModelUsed),
   });
+  const displayedPhasePlan = livePhasePlan && livePhasePlan.length > 0
+    ? livePhasePlan
+    : routeTrace?.phasePlan;
 
   // Track which steps have been seen during this session
   const [seenSteps, setSeenSteps] = useState<Set<string>>(new Set(["idle"]));
@@ -807,11 +813,11 @@ function OrchestrationView({
         <p className="mt-1 text-sm font-medium capitalize text-[var(--text-primary)]">{stage === "idle" ? (sending ? "starting…" : "waiting") : stage}</p>
       </section>
 
-      {routeTrace?.phasePlan && routeTrace.phasePlan.length > 0 ? (
+      {displayedPhasePlan && displayedPhasePlan.length > 0 ? (
         <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
           <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Executed phases</p>
           <ol className="space-y-2">
-            {routeTrace.phasePlan.map((phase) => (
+            {displayedPhasePlan.map((phase) => (
               <li key={phase.id} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-xs font-medium text-[var(--text-primary)]">{phase.label || phaseLabelForId(phase.id)}</p>

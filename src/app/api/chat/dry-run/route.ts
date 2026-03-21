@@ -3,7 +3,7 @@ import { requireActor } from "@/lib/auth-server";
 import { convexQuery } from "@/lib/convex-server";
 import { ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
-import { runAutoSettingsPipeline } from "@/lib/auto-settings";
+import { classifyRequest, runAutoSettingsPipeline } from "@/lib/auto-settings";
 import { selectModelForPhase } from "@/lib/routing/phase-router";
 import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
 import { safeStudyMode, type StudyMode } from "@/types";
@@ -101,6 +101,9 @@ export async function POST(request: NextRequest) {
 
     const auto = await runAutoSettingsPipeline({
       message: normalizedMessage,
+      mode: safeMode,
+      hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
+      isFirstMessage: false,
       currentThinkingLevel: body.thinkingLevel,
       spendingTier: budget.tier,
       autoEnhancePrompt: autoSettings.enhancePrompt,
@@ -111,6 +114,16 @@ export async function POST(request: NextRequest) {
       searchMode: autoSettings.searchMode,
       skipModelCalls: true,
     });
+    const requestClassification = classifyRequest({
+      message: auto.message,
+      complexity: auto.complexity,
+      mode: safeMode,
+      hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
+      isFirstMessage: false,
+      spendingTier: budget.tier,
+    });
+    auto.requestClass = requestClassification.requestClass;
+    auto.classificationReason = requestClassification.reason;
 
     const routingMode = autoSettings.autoModel ? body.routerMode : "manual";
     const routingManualModel = autoSettings.autoModel ? body.manualModel : fallbackManualModel;
@@ -159,6 +172,8 @@ export async function POST(request: NextRequest) {
           attachmentTypes: body.attachmentTypes ?? [],
           promptEnhanced: auto.promptEnhanced,
           messageLength: auto.message.length,
+          requestClass: auto.requestClass,
+          classificationReason: auto.classificationReason,
         },
         candidates: routeDecision.candidates,
         selected: {

@@ -475,59 +475,83 @@ async function generateTitleFromSnippet(
     preferredCapabilities: ["reasoning"],
     preferFast: true,
     preferCheap: true,
-    preferFree: true,
+    preferFree: false,
   });
-  const startedAt = Date.now();
-  const completionPromise = openRouterChatCompletion({
+  const buildRequest = (model: string, fallbackModels: string[]) =>
+    openRouterChatCompletion({
+      model,
+      fallbackModels,
+      messages: [
+        {
+          role: "system",
+          content:
+            "Generate a conversation title in 2 to 6 words. Keep the same language as the user when possible. Return plain title text only with no quotes.",
+        },
+        {
+          role: "user",
+          content: source.slice(0, 700),
+        },
+      ],
+      temperature: 0.1,
+      maxTokens: 24,
+    });
+
+  const runAttempt = async (attempt: { model: string; fallbackModels: string[] }) => {
+    const startedAt = Date.now();
+    const completionPromise = buildRequest(attempt.model, attempt.fallbackModels);
+    let usageRecorded = false;
+    const recordUsage = async (completion: Awaited<typeof completionPromise>) => {
+      if (usageRecorded) return;
+      usageRecorded = true;
+      const model = completion.model ?? attempt.model;
+      const usage = completion.usage;
+      const durationMs = Date.now() - startedAt;
+      await recordOpenRouterUsage({
+        actorClerkId,
+        chatId: options?.chatId,
+        model,
+        usage,
+      }).catch(() => {});
+      options?.onModelCall?.({
+        model,
+        usage,
+        durationMs,
+      });
+    };
+    void completionPromise.then((completion) => {
+      void recordUsage(completion);
+    }).catch(() => {});
+
+    const completion = await withTimeout(completionPromise, 4500);
+    if (completion) {
+      await recordUsage(completion);
+    }
+    return completion;
+  };
+
+  const primaryAttempt = await runAttempt({
     model: utility.model,
     fallbackModels: utility.fallbackModels,
-    messages: [
-      {
-        role: "system",
-        content:
-          "Generate a conversation title in 2 to 6 words. Keep the same language as the user when possible. Return plain title text only with no quotes.",
-      },
-      {
-        role: "user",
-        content: source.slice(0, 700),
-      },
-    ],
-    temperature: 0.1,
-    maxTokens: 24,
   });
-  let usageRecorded = false;
-  const recordUsage = async (completion: Awaited<typeof completionPromise>) => {
-    if (usageRecorded) return;
-    usageRecorded = true;
-    const model = completion.model ?? utility.model;
-    const usage = completion.usage;
-    const durationMs = Date.now() - startedAt;
-    await recordOpenRouterUsage({
-      actorClerkId,
-      chatId: options?.chatId,
-      model,
-      usage,
-    }).catch(() => {});
-    options?.onModelCall?.({
-      model,
-      usage,
-      durationMs,
-    });
-  };
-  void completionPromise.then((completion) => {
-    void recordUsage(completion);
-  }).catch(() => {});
-
-  const completion = await withTimeout(
-    completionPromise,
-    4500,
-  );
-
-  const raw = completion?.choices?.[0]?.message?.content ?? "";
-  if (completion) {
-    await recordUsage(completion);
+  const primaryRaw = primaryAttempt?.choices?.[0]?.message?.content?.trim() ?? "";
+  if (primaryRaw) {
+    return normalizeTitle(primaryRaw, fallbackSource);
   }
-  return normalizeTitle(raw, fallbackSource);
+
+  const retryModel = utility.fallbackModels[0];
+  if (retryModel) {
+    const retryFallbacks = utility.fallbackModels.filter((candidate) => candidate !== retryModel);
+    const retryAttempt = await runAttempt({
+      model: retryModel,
+      fallbackModels: retryFallbacks,
+    });
+    const retryRaw = retryAttempt?.choices?.[0]?.message?.content?.trim() ?? "";
+    if (retryRaw) {
+      return normalizeTitle(retryRaw, fallbackSource);
+    }
+  }
+
+  return normalizeTitle("", fallbackSource);
 }
 
 export async function maybeGenerateTitle(params: {

@@ -1,221 +1,884 @@
-﻿# CODEX Review Ledger
+# Spectra V2 Master Overhaul Plan
 
-Updated: 2026-03-14T02:05:00+01:00
+## 0. Context & Diagnosis
 
-Legend:
-- `[ ]` Open
-- `[-]` In progress
-- `[x]` Fixed + locally verified
+Spectra is an AI educational chatbot routing across 300+ LLM models via OpenRouter, with study modes, two-layer personalization (school + student), and multi-agent orchestration. Built with Next.js 16 + React 19 + Convex + Clerk, deployed on Vercel.
 
-## Scope
-- Full product finalisation review (frontend, backend, auth, routing, orchestration, agents, tools, memory/RAG/compaction, search, docs, admin/super-admin, usage/cost, UX states).
-- This file is the live source of truth. Items are checked only after implementation + verification.
+### What works
+- Rich model catalog with live OpenRouter snapshot merging
+- Three-scope RAG retrieval (pack/personal/agent) with vector search on Convex
+- SM-2 spaced repetition with card hashing for cross-deck progress
+- Role-based access (student/teacher/admin) with org scoping
+- Multi-agent task graph with specialist roles and synthesis
+- Gamification layer (streaks, XP, achievements, analytics)
+- Budget enforcement with four spending tiers (normal → free_only)
+- Auto-settings pipeline with complexity classification, search intent detection, mode suggestion
+- Structured output parsing for quiz (`<<QUIZ_START>>`) and flashcards (`<<FLASHCARDS_START>>`)
+- Built-in vague-request detection for quiz/flashcard modes with `<<QUIZ_CLARIFY>>` / `<<FLASHCARD_CLARIFY>>`
 
-## Issue Ledger
-### A) Prompt-Mandated + Critical
-- [x] `I-001` Preserve at least one admin in super-admin deletion path (`convex/superAdmin.ts` `removeAnyMember` bypasses invariant).
-- [x] `I-002` Disable tainted screenshot capture (`src/components/global-utility-dock.tsx` uses `allowTaint: true` before `toDataURL`).
-- [x] `I-003` Preserve query params when redirecting home to `/chat` (`src/app/page.tsx`).
-- [x] `I-004` Standardize Clerk env checks across auth entry points (`src/app/page.tsx` mismatch vs `src/app/layout.tsx`/`src/lib/auth-server.ts`/`src/proxy.ts`).
-- [x] `I-005` Signed-in root redirect does not guard no-school users before entering app shell.
-- [x] `I-006` Legacy deep-link emitters still use root query links (`src/app/bookmarks/page.tsx`).
-- [x] `I-007` Models page still routes with `/?model=...` instead of `/chat?...` (`src/app/models/page.tsx`).
-- [x] `I-008` Super-admin nav highlight breaks on nested routes (`src/components/chat/chat-sidebar.tsx` exact match only).
-- [x] `I-009` Super-admin school usage tab is placeholder (`src/app/super-admin/schools/[id]/page.tsx`).
-- [x] `I-010` Super-admin school soul tab is placeholder (`src/app/super-admin/schools/[id]/page.tsx`).
-- [x] `I-011` Non-super-admin users can see cost in settings panel (`src/components/chat/unified-panel.tsx`).
-- [x] `I-012` Selected model in settings drawer incorrectly hardcodes auto model (`src/components/chat/chat-settings-drawer.tsx`).
-- [x] `I-013` Cost policy logic fragmented (hard block list vs 30/M cap vs 60/M live filter).
-- [x] `I-014` `allowPaidModels` policy not uniformly enforced in route/model selection path.
-- [x] `I-015` Capacity model tracks `maxStudents` only; requirement is max total org members.
-- [x] `I-016` Missing robust super-admin controls for per-school total allocation limits.
-- [x] `I-017` Invitation accept path does not enforce total-member allocation semantics.
-- [x] `I-018` Member role transfers can bypass capacity invariants (`updateOrgMemberRole`, `transferUser`).
-- [x] `I-019` `ensureUser` default-org fallback allows free-floating onboarding states (`convex/users.ts`).
-- [x] `I-020` Middleware does not enforce org membership/access state before app navigation.
+### What is broken or weak
+1. **Search hallucinates**: `retrieval.ts:386-450` model_fallback invents fake URLs
+2. **Memory is flat and leaky**: Single `userMemory` table, lexical scoring (0.58 weight), no topic isolation
+3. **Routing is static**: Free models get `costFit=1.0`. `repetitionPenalty` capped at 0.18. Same 2-3 models win
+4. **Phase progress is fake**: `finalizePhasePlan()` runs only at END. All phases jump to "done" simultaneously
+5. **File uploads stall**: Resources show "processing stalled" — background job fails silently
+6. **No branching**: `chatBranches` table exists but unused. Editing doesn't create branches
+7. **No general interrupt/resume**: Quiz/flashcard have `<<CLARIFY>>` patterns but nothing generalizable
+8. **Modes are disconnected**: Each mode is a separate prompt template. "Add more cards" regenerates entire deck
+9. **Chat too wide**: Messages fill available width, right panel compresses content
+10. **CDN scripts blocked**: Sandbox CSP `default-src 'none'` blocks Mermaid/React CDN scripts
+11. **Speech-to-text broken**: `chat-composer.tsx` doesn't watch `speech.transcript`
+12. **Contact form blocked**: `/api/contact` not in `isPublicRoute` in `proxy.ts`
+13. **Canvas errors**: `label.trim is not a function` in parent save flow
+14. **Cost discipline absent**: Simple "hello" runs same pipeline as deep research
+15. **School context shallow**: System prompt shows `School: [name]` but not schoolType/curriculum
 
-### B) Additional Architecture / Robustness Findings
-- [x] `I-021` Memory write trigger too narrow (`shouldWriteMemory` regex only remember/my goal).
-- [x] `I-022` Memory extraction policy misses many durable preference/identity updates.
-- [x] `I-023` Compaction trigger static (`>20` messages) with non-adaptive retention.
-- [x] `I-024` Compaction summary envelope fixed and can discard high-value context.
-- [x] `I-025` SearXNG relies on public instances + 3s timeout; high reliability risk.
-- [x] `I-026` SearXNG toggle is local-only and weakly governed at org policy layer.
-- [x] `I-027` OpenRouter timeout fixed at 30s; deep routes can fail prematurely.
-- [x] `I-028` Collaboration wall-time limits can truncate research without quality fallback.
-- [x] `I-029` `executeGraph` subcall counting in parallel batch can overshoot limits.
-- [x] `I-030` Task-graph dependency design too flat; limited staged/dependent orchestration.
-- [x] `I-031` System prompt enforces rigid output shape; conversational quality degrades.
-- [x] `I-032` Prompt asks explicit Why this response section; output feels artificial.
-- [x] `I-033` Orchestration panel auto-opens for any send, not only meaningful orchestration.
-- [x] `I-034` Right-panel entrance animation too abrupt (requested gradual behavior).
-- [x] `I-035` Orchestration progress marks all steps complete while idle (logic bug).
-- [x] `I-036` Phase derivation over-collapses into thinking/generating; weak state fidelity.
-- [x] `I-037` Current color picker is palette selector; lacks true primary/secondary controls.
-- [x] `I-038` Green/forest theme still present despite removal request.
-- [x] `I-039` Custom palette mostly modifies accent, not full UI secondary semantics.
-- [x] `I-040` Super-admin nested pages dont keep Super Admin nav state active.
-- [x] `I-041` Super-admin school detail lacks integrated soul/usage operational control.
-- [x] `I-042` Allow paid models semantics are vague for admins/super-admins.
-- [x] `I-043` Premium model filtering logic not transparently tied to strict 30/M in+out.
-- [x] `I-044` Heuristic fallback paths can still bias repeatedly to narrow model sets.
-- [x] `I-045` Dynamic model diversity remains weak when catalog route is not used.
-- [x] `I-046` Simple prompts can still trigger medium/high thinking in edge combinations.
-- [x] `I-047` `detectThinkingLevel` uses length-heavy heuristic; over-escalates easy asks.
-- [x] `I-048` Search-intent heuristics are broad; false-positive web search triggers possible.
-- [x] `I-049` Root redirect migration risks legacy query breakages on similar paths.
-- [x] `I-050` Join invalid/expired states link to `/chat`, creating poor no-access UX loops.
-- [x] `I-051` School search endpoint for access requests is unauthenticated (enumeration surface).
-- [x] `I-052` `listOrgMembers` accepts string cast for `orgId`; weak validation hygiene.
-- [x] `I-053` `maxStudents` naming/semantics mismatch product allocation language.
-- [x] `I-054` `updateOrgMemberRole` lacks explicit seat/capacity check paths.
-- [x] `I-055` `transferUser` lacks source-org/target-org invariant checks (admin/capacity).
-- [x] `I-056` Cost-like monthly messaging appears in user settings context (policy mismatch).
-- [x] `I-057` `:free` artifacts still leak into some model affordances/logic paths.
-- [x] `I-058` `/api/models/live` excludes by prompt cost only; output cost not symmetric.
-- [x] `I-059` Restriction thresholds differ across model discovery vs routing enforcement.
-- [x] `I-060` Manual-model restriction UX returns conflict but guidance is limited.
-- [x] `I-061` Auto/manual model wording remains misleading in some composer/settings states.
-- [x] `I-062` Settings controls duplicated across drawers/panels with behavior drift risk.
-- [x] `I-063` Admin/super-admin control surfaces fragmented and partially duplicated.
-- [x] `I-064` Navigation architecture still splits related controls across shallow panes.
-- [x] `I-065` Chat page has no server guard; no-access bounce handled only after client bootstrap.
-- [x] `I-066` Super-admin remove-member UI depends on backend errors without proactive UX constraints.
-- [x] `I-067` Max-resource-file-size control pathways differ in admin vs super-admin UX.
-- [x] `I-068` Artifact generation logic duplicated (`lib/artifacts` and `document-panel`) causing drift.
-- [x] `I-069` Doc/PDF/PPT exports are functional but below product-level design consistency.
-- [x] `I-070` No strong template system for high-quality presentations/documents.
-- [x] `I-071` Skills-as-tool-calls orchestration path not implemented.
-- [x] `I-072` No dynamic skill fetching layer in runtime orchestration.
-- [x] `I-073` Search usage surfacing (pills/sources) remains inconsistent by route.
-- [x] `I-074` Route toolchain labels are too technical for user-facing trust UX.
-- [x] `I-075` Task graph always includes retriever node; can waste budget on irrelevant prompts.
-- [x] `I-076` Final synthesis always uses primary route model; no dynamic synthesizer pick.
-- [x] `I-077` Feedback widget capture path still allowed tainted canvases; added taint-safe capture options.
-- [x] `I-078` `allowPaidModels` toggle did not affect runtime tiering; now enforced in budget tier calculation.
-- [x] `I-079` Models explorer treated unknown-cost models as budget-safe; now blocks unknown-priced models from safe tier assumptions.
-- [x] `I-080` Live panel auto-open skipped active thinking-only runs; meaningful-thinking stage now considered for auto-open.
+---
 
-## 112 Interaction Simulations (Mental QA Matrix)
-Status key: `FAIL` (confirmed defect), `RISK` (likely weak behavior), `PASS` (acceptable from current code read).
+## 1. Product Vision
 
-- [x] `F-001` hi with auto model should return one-line natural reply -> PASS
-- [x] `F-002` trivial gratitude message should avoid heavy reasoning model -> PASS
-- [x] `F-003` simple factual ask with no recency should avoid search -> PASS
-- [x] `F-004` latest-news ask should force live search and sources -> PASS
-- [x] `F-005` manual model selected should disable auto-routing copy -> PASS
-- [x] `F-006` switch manual->auto->manual mid-thread preserves state -> PASS
-- [x] `F-007` open `/?chatId=...` legacy bookmark preserves target chat -> PASS
-- [x] `F-008` open `/?model=...` from Models page preserves intended model -> PASS
-- [x] `F-009` root redirect with query params to `/chat` preserves params -> PASS
-- [x] `F-010` signed-in user with no org should land `/no-access`, not chat shell -> PASS
-- [x] `F-011` onboarding signup with valid invite auto-redeems -> PASS
-- [x] `F-012` signup without invite never grants school access -> PASS
-- [x] `F-013` invited admin logs in and must always have school link -> PASS
-- [x] `F-014` join expired token gives correct state -> PASS
-- [x] `F-015` join invalid token should not suggest chat entry path -> PASS
-- [x] `F-016` access-request flow from no-access page works signed-in -> PASS
-- [x] `F-017` access-request school search should avoid broad enumeration -> PASS
-- [x] `F-018` admin invite student respects seat limits -> PASS
-- [x] `F-019` super-admin remove org admin when last admin should block -> PASS
-- [x] `F-020` super-admin remove admin via global endpoint should block -> PASS
-- [x] `F-021` admin cannot remove admin via school-admin route -> PASS
-- [x] `F-022` super-admin role downgrade last admin should block -> PASS
-- [x] `F-023` transfer user between schools should preserve invariants -> PASS
-- [x] `F-024` assign admin to school with pending invitation works -> PASS
-- [x] `F-025` school member cap should be total users not only students -> PASS
-- [x] `F-026` accepted invitation should count toward school allocation -> PASS
-- [x] `F-027` super-admin should configure per-school allocation counts -> PASS
-- [x] `F-028` super-admin navigation highlight on `/super-admin/schools/...` -> PASS
-- [x] `F-029` super-admin feedback subpage keeps super-admin nav state -> PASS
-- [x] `F-030` school detail usage tab provides usable analytics -> PASS
-- [x] `F-031` school detail soul tab provides operational controls -> PASS
-- [x] `F-032` monthly cost visible only to super-admin -> PASS
-- [x] `F-033` user settings panel should hide direct currency cost -> PASS
-- [x] `F-034` model :free tags hidden across user surfaces -> PASS
-- [x] `F-035` premium model threshold strictly >30 in+out filtered -> PASS
-- [x] `F-036` allowPaidModels toggle behavior clear and deterministic -> PASS
-- [x] `F-037` auto prompt enhancement off respected end-to-end -> PASS
-- [x] `F-038` auto thinking off should keep low reasoning on simple prompts -> PASS
-- [x] `F-039` auto search off should suppress web route unless explicit user request -> PASS
-- [x] `F-040` conversation with long history triggers compaction gracefully -> PASS
-- [x] `F-041` compaction preserves unresolved user goal context -> PASS
-- [x] `F-042` compaction does not overwrite with low-quality summary -> PASS
-- [x] `F-043` memory writes when user states durable preference -> PASS
-- [x] `F-044` memory updates when preference changes over time -> PASS
-- [x] `F-045` memory retrieval relevance for personalized prompt -> PASS
-- [x] `F-046` memory off toggle fully suppresses memory writes/reads -> PASS
-- [x] `F-047` personal-file retrieval for my uploaded notes -> PASS
-- [x] `F-048` personal-file retrieval with no files gives graceful fallback -> PASS
-- [x] `F-049` mixed pack+personal+agent retrieval merges correctly -> PASS
-- [x] `F-050` retrieval citations kept aligned with inline references -> PASS
-- [x] `F-051` orphan citation markers removed from response -> PASS
-- [x] `F-052` searxng enabled path surfaces source links in response -> PASS
-- [x] `F-053` searxng failure falls back to model search with sources -> PASS
-- [x] `F-054` no-source search result handles gracefully without hallucinated links -> PASS
-- [x] `F-055` route-trace shows meaningful selected model reason -> PASS
-- [x] `F-056` route-trace should be less technical for end users -> PASS
-- [x] `F-057` orchestration panel should not auto-open if no thinking/orchestration -> PASS
-- [x] `F-058` orchestration stage changes correctly across phases -> PASS
-- [x] `F-059` orchestration progress while idle should not show full completion -> PASS
-- [x] `F-060` right panel animation should open smoothly/gradually -> PASS
-- [x] `F-061` screenshot auto-capture with 3rd-party images should not fail -> PASS
-- [x] `F-062` feedback submission with screenshot works in cross-origin pages -> PASS
-- [x] `F-063` non-vision selected + image upload should auto-orchestrate vision prepass -> PASS
-- [x] `F-064` manual non-vision + image upload should preserve lock + prepass if possible -> PASS
-- [x] `F-065` image upload with no available vision model gives clear notice -> PASS
-- [x] `F-066` image-generation mode chooses image-capable model -> PASS
-- [x] `F-067` document request picks document mode and artifact path -> PASS
-- [x] `F-068` docx export quality comparable to polished product output -> PASS
-- [x] `F-069` pdf export typography/spacing production-grade -> PASS
-- [x] `F-070` pptx export visual quality production-grade -> PASS
-- [x] `F-071` comparison-table generation visually coherent in preview/export -> PASS
-- [x] `F-072` timeline generation design consistency with product language -> PASS
-- [x] `F-073` generated artifacts should support live preview + download path -> PASS
-- [x] `F-074` duplicate artifact generation code paths remain consistent -> PASS
-- [x] `F-075` chat export markdown/text/pdf works on long thread -> PASS
-- [x] `F-076` route timeout for deep models >30s should not hard fail unnecessarily -> PASS
-- [x] `F-077` o4-mini-research intermittent non-response should trigger robust fallback -> PASS
-- [x] `F-078` model diversity across repeated calls should vary by task -> PASS
-- [x] `F-079` same specialist role across turns should vary model when appropriate -> PASS
-- [x] `F-080` multi-agent should support staged dependencies, not just flat fan-out -> PASS
-- [x] `F-081` collaborator limits should balance cost with quality dynamically -> PASS
-- [x] `F-082` thinking-time cap should avoid 1-minute truncation behavior -> PASS
-- [x] `F-083` route plan should combine modes when prompt spans multiple intents -> PASS
-- [x] `F-084` explicit selected mode should be preference, not hard wall -> PASS
-- [x] `F-085` explicit selected model should remain transparent in UI wording -> PASS
-- [x] `F-086` admin page controls should map to backend invariants uniformly -> PASS
-- [x] `F-087` admin member role change should enforce org policy constraints -> PASS
-- [x] `F-088` admin invitation resend/cancel updates reflected reliably -> PASS
-- [x] `F-089` admin notifications flow handles targeted recipients robustly -> PASS
-- [x] `F-090` no-access and request-access pages keep clear recovery paths -> PASS
-- [x] `F-091` super-admin school deactivation should reflect immediately in access paths -> PASS
-- [x] `F-092` middleware should block private app paths consistently when signed out -> PASS
-- [x] `F-093` middleware should preserve invitation token cookie journey reliably -> PASS
-- [x] `F-094` bootstrap errors should route users to proper auth/no-access pages -> PASS
-- [x] `F-095` settings color controls should update full UI immediately and consistently -> PASS
-- [x] `F-096` remove green theme while preserving instant update feel -> PASS
-- [x] `F-097` navigation consistency across admin/super-admin subpages -> PASS
-- [x] `F-098` one-page sectioned admin UX vs fragmented sub-tabs -> PASS
-- [x] `F-099` source pills/end-of-response references appear when search used -> PASS
-- [x] `F-100` citation drawer links/downloads behave correctly for mixed sources -> PASS
-- [x] `F-101` long chat + attachments + search + memory combination remains stable -> PASS
-- [x] `F-102` branch/edit message flows preserve state and bookmarks -> PASS
-- [x] `F-103` compaction during active stream is safely prevented/deferred -> PASS
-- [x] `F-104` regenerate with forced model after failure handles tier restrictions -> PASS
-- [x] `F-105` route trace candidate list should include manual lock constraints clearly -> PASS
-- [x] `F-106` auto-route should not repeatedly overuse one heavy model class -> PASS
-- [x] `F-107` user with manual model should not see smart model selection claims -> PASS
-- [x] `F-108` super-admin should inspect soul/usage from school detail with no dead ends -> PASS
-- [x] `F-109` invitation-only rule should prevent free-floating signed-in users in app -> PASS
-- [x] `F-110` deep links from old bookmarks should continue to work after root redirect migration -> PASS
-- [x] `F-111` searxng usage should be explicit in trace/sources for transparency -> PASS
-- [x] `F-112` generated websites/pages capability for diagrams/interactive outputs missing -> PASS
+Spectra should feel like a school-native intelligent study system — not a generic chatbot with drawers.
 
-## Implementation Log
-- `WAVE-1` Security/auth/routing invariants: completed
-- `WAVE-2` Model routing/orchestration behavior: completed
-- `WAVE-3` UI/UX consistency + animation + picker: completed
-- `WAVE-4` Admin/super-admin controls and invariants: completed
-- `WAVE-5` Document generation quality + output pipeline: completed
-- `WAVE-6` Orchestration dependency staging + admin/super-admin consolidation + export template system: completed
+**Core differentiators vs. ChatGPT/Claude:**
+- Hidden contextual continuity (no visible "Projects", system infers context automatically)
+- School-aware defaults (IB student gets IB-calibrated responses without saying "I study IB")
+- Study mode transforms over shared learning state (explain → quiz → flashcards in one flow)
+- Graduated cost discipline (simple stays cheap, complex gets rich orchestration)
+- Truthful tool behavior (never hallucinate search results, transparent when search fails)
+- Intelligent clarification (ask before guessing, resume naturally)
+- Multi-model variety with transparent routing and cost explanation
+
+**What Spectra is NOT:**
+- Not a ChatGPT clone with study mode tabs bolted on
+- Not a project management tool with explicit workspace creation
+- Not an agent framework where users configure workflows
+
+---
+
+## 2. Architecture: Hidden Context Fabric (Memory)
+
+### Current state
+- `userMemory`: flat `entries[]` with `{key, value, confidence, extractedAt}`, max 50, 1500 char raw text
+- `userSoulPreferences`: structured profile (learningStyle, interests, weakAreas)
+- `orgSoulDocs/Chunks`: org-level teaching guidelines with vector search
+- Scoring: `lexical * 0.58 + confidence * 0.26 + recency * 0.16` — recency fatally underweighted
+- Extraction via `maybeExtractMemory()` in `post-process.ts:611-762` — no topic isolation
+- No pending/confirmed states, no workstream concept, no negative links
+
+### Alternatives evaluated
+
+**A. Topic-tag based filtering**: Auto-generate topic tags per conversation. Filter memory entries by tag overlap.
+- Pro: Cheap (tags from title generation call), deterministic, debuggable
+- Con: Taxonomy drift ("world_war_2" vs "ww2_history"), misses semantic similarity ("French Revolution" ≠ "Napoleonic Wars" by tags), can't rank by relevance (only include/exclude), cross-cutting memories fail ("essay structure" relevant to History AND English)
+
+**B. Embedding-based semantic clustering**: Embed each memory entry. Retrieve by cosine similarity.
+- Pro: Handles semantic similarity, graceful degradation, already have Convex vector infrastructure
+- Con: No natural topic boundary (math memory retrieves all math-adjacent), latency (50-150ms), every memory needs an embedding
+
+**C. Hybrid structured + semantic** ← CHOSEN
+- Structured identity layer (always injected): name, grade, school, learning style, preferences
+- Semantic topic layer (retrieved by embedding similarity): subject-specific facts, misconceptions, progress
+- Pro: Reuses existing Convex vector indexes (same pattern as `chunks` table). Identity always available. Topic isolation via embedding threshold. Marginal embedding cost: ~$0.000002 per entry
+- Con: Slightly more complex than pure tags. Requires embedding each memory entry
+
+**D. Conversation-graph with decay**: Graph of topic nodes with edge-weighted decay.
+- Pro: Elegant temporal reasoning
+- Con: Convex has no graph query capability. Requires Neo4j/Memgraph alongside Convex. Graph maintenance needs LLM calls per conversation. Disproportionate complexity for the benefit
+
+### Why Hybrid wins
+- The `chunks` table already has a Convex vector index with `filterFields: ["orgId", "packId", "agentId", "ownerUserId", "scope"]`. Adding `"memory"` scope requires zero new infrastructure
+- ChatGPT's flat memory injection (everything into every request) causes documented cross-contamination with 300+ complaint threads. Retrieval-based selection is essential
+- Mem0's benchmark shows 26% improvement over flat injection via dual-store (structured + semantic)
+- The structured identity layer guarantees core personalization is never lost
+- Embedding-based retrieval naturally solves WWII/French contamination: similarity threshold filters irrelevant memories
+
+### Proposed: Three-layer memory architecture
+
+#### Layer 1: School/Org Context (static, admin-managed)
+- **Contains**: schoolType, country, curriculum, grading scale, pedagogical defaults, teaching guidelines (orgSoulDocs)
+- **Never contains**: individual student data
+- **Decay**: Never — admin-managed
+- **Retrieval**: Always injected for org members. Compact (~100 tokens)
+- **Files**: `pipeline.ts:1566-1573` (expand runtime context block), `convex/schema.ts` (add `curriculum`, `examBoard`, `gradeLevels` to `orgs`)
+
+#### Layer 2: Durable Global Profile (structured, always injected)
+- **Contains**: Identity (name, grade, role), academic profile (subjects, strengths, weaknesses), preferences (learning style, communication style, difficulty)
+- **Never contains**: One-off topics, homework tasks, specific flashcard content
+- **Decay**: Never expires. Overwritten only by explicit correction or confirmed update
+- **Retrieval**: Always injected (~200 tokens max)
+- **Implementation**: Unify `userMemory` identity entries + `userSoulPreferences` into a single structured profile. Add `category` field: `"identity" | "academic" | "preference"`. Entries with these categories are always injected regardless of topic.
+- **Conflict resolution**: Most recent confirmed value wins. User corrections override LLM extractions.
+
+#### Layer 3: Topic-Specific Memory (embedding-based, retrieved by relevance)
+- **Contains**: Subject-specific facts, per-topic misconceptions, study progress, material associations
+- **Never contains**: Cross-topic generalizations, one-off tasks, session-specific context
+- **Decay**: Active while topic active. Dormant after 30 days. Archived after 90 days
+- **Retrieval**: Embed current message → vector search `userMemoryEntries` → inject top 5 results above similarity threshold (≥0.52, matching existing RAG threshold)
+
+**New table: `userMemoryEntries`**
+```
+userId: id<"users">
+orgId: id<"orgs">
+text: string            // the memory content
+embedding: float64[]    // 3072-dim vector (same as chunks)
+category: "topic" | "artifact" | "correction"
+confidence: number      // 0-1
+status: "pending" | "confirmed"
+sourceType: "extraction" | "user_explicit" | "correction"
+sourceChatId: optional id<"chats">
+relatedArtifacts: optional string[]  // flashcard deck IDs, quiz IDs
+negativeTopicLinks: optional string[]  // "don't associate with X"
+createdAt, updatedAt: timestamps
+```
+Vector index: `by_embedding` with `filterFields: ["userId", "orgId"]`
+
+**Anti-contamination**: WWII memory has embedding distant from "French vocabulary" query → doesn't retrieve. No tags to drift.
+
+**Cross-cutting memories**: "Student struggles with essay structure" has embedding close to both "History essay" and "English essay" → retrieves for both. This is correct behavior.
+
+### Memory Write Router
+
+New function `routeMemoryWrite()` in `post-process.ts`, called after `maybeExtractMemory()`:
+
+```
+For each extracted fact:
+  1. Is it identity? (name, grade, school, curriculum) → Layer 2, immediate, high confidence
+  2. Is it a confirmed preference? (learning style, difficulty) → Layer 2, immediate
+  3. Is it topic-specific? (subject knowledge, misconception) → Layer 3
+     - First mention → status: "pending", confidence * 0.5
+     - Second mention in different chat → promote to "confirmed", full confidence
+  4. Is it an artifact reference? → Layer 3 with category: "artifact"
+  5. Is it a one-off task? → DISCARD (don't store)
+```
+
+### Memory Read Planner
+
+New function `planMemoryRead()` in pipeline.ts, replacing `buildRelevantMemoryProfile()`:
+
+```
+1. Always inject Layer 1 (org context, ~100 tokens)
+2. Always inject Layer 2 (global profile, ~200 tokens)
+3. Embed current message (reuse RAG embedding if available)
+4. Vector search userMemoryEntries filtered by userId+orgId
+5. Filter results: exclude entries with negativeTopicLinks matching query topic
+6. Filter results: only "confirmed" entries (skip "pending")
+7. Take top 5 above threshold (≥0.52)
+8. Format as bullet list, inject as memory block (~300 tokens max)
+Total injection: ~600 tokens max
+```
+
+### Correction Pathways
+Detect in `parseUserDirectives()` (`auto-settings.ts`):
+- **"forget this" / "forget about X"**: Delete matching entries from `userMemoryEntries`
+- **"this association is wrong"**: Add negative topic link to entry
+- **"don't bring this up for [topic]"**: Add negative topic link
+- **"remember that I..."**: Immediate high-confidence write, status: "confirmed", sourceType: "user_explicit"
+- **"update my profile"**: Direct Layer 2 update
+
+### Memory Management UI
+Add "Memory" tab in `unified-panel.tsx` settings:
+- Grouped by confidence (high → low)
+- Show source conversation link
+- Delete per entry, "forget all about [topic]" button
+- Show pending entries with confirm/dismiss
+
+---
+
+## 3. Architecture: Request Controller (Routing/Orchestration)
+
+### Current state
+- `pipeline.ts` is ~1500 lines of linear execution
+- `buildRoutePlan()` at line 967 determines which tool bundles activate
+- `runAutoSettingsPipeline()` at line 593 classifies complexity (simple/medium/complex)
+- `classifyComplexity()` in `auto-settings.ts:236-263` already scores: word count (35%), complex verbs (20%), multipart (18%), domain terms (20%), word length (5%), question type (5-12%)
+- Every request runs the same pipeline regardless of classification
+
+### Alternatives evaluated
+
+**A. Pipeline with conditional gates** (what exists now, slightly enhanced)
+- Pro: Simple, low risk, builds on existing code
+- Con: Still linear, hard to test stages in isolation, hard to add non-linear flows, 1500-line function keeps growing
+
+**B. State machine refactor** ← CHOSEN
+- Define `PipelineState` type, discrete stage functions, `PipelineController`
+- Each stage takes state, returns enriched state. Controller decides next stage
+- Pro: Testable, composable, enables interrupt/resume, positions for future LLM planner
+- Con: 2-3 days of refactoring effort
+- NOT a framework adoption (no LangGraph, no Semantic Kernel). Just restructuring existing code
+
+**C. Event-driven / reactive pipeline**
+- Pro: Decoupled, extensible
+- Con: Spectra's pipeline is request-response (HTTP streaming). Event-driven is for long-running background processes. Debugging is harder. Convex's reactive system already handles data events
+
+**D. Planner-executor with LLM planner**
+- Pro: Self-modifying plan, adapts to request
+- Con: Adds $0.0001 + 200-400ms latency to EVERY request including trivial ones. The planner must be correct — wrong routing silently degrades quality. Premature until heuristic misclassification >5%
+
+### Why State Machine wins
+- Formalizes the conditional logic that already exists in pipeline.ts into testable stages
+- Each stage is a pure function: `(PipelineState) → PipelineState` — unit testable
+- The controller replaces the linear flow with explicit decision points
+- Enables interrupt/resume: controller can pause between stages and resume later
+- Positions for future LLM planner as a drop-in replacement for the heuristic controller
+- LangGraph uses this exact pattern (directed graph with typed state) at production scale
+
+### Proposed: PipelineController with cost-tiered execution
+
+#### PipelineState type
+```typescript
+type PipelineState = {
+  // Input
+  message: string; mode: StudyMode; directives: UserDirectives;
+  // Classification
+  requestClass: "T0" | "T1" | "T2" | "T3";
+  complexity: "simple" | "medium" | "complex";
+  // Accumulated results
+  autoSettings?: AutoSettingsResult;
+  routePlan?: RoutePlan;
+  searchResults?: SearchResults;
+  ragResults?: RagResults;
+  memoryProfile?: string;
+  learningContext?: LearningContext;
+  modelSelection?: PhaseRoutingDecision;
+  // Execution
+  executionPlan: string[]; // which stages to run
+  completedStages: string[];
+  phaseUpdates: PhaseUpdate[];
+  // Cost
+  costAccumulator: number;
+  costBudget: number;
+};
+```
+
+#### Request Classification (extends existing `classifyComplexity()`)
+
+Map existing complexity to request classes using existing heuristic (NO new LLM call):
+
+| Class | Budget | Detection (extending auto-settings.ts:236-263) |
+|-------|--------|------------------------------------------------|
+| T0: Trivial | <$0.001 | complexity="simple" AND <30 chars AND no attachments AND mode∈{auto,general,tutor} AND not first message |
+| T1: Standard | <$0.01 | complexity="simple" or "medium" AND no explicit search/research directive |
+| T2: Enhanced | <$0.05 | complexity="complex" OR mode∈{research,marker,exam} OR has attachments OR explicit search |
+| T3: Complex | <$0.15 | multi-agent triggered (existing `shouldUseMultiAgent()`) AND tier allows AND budget permits |
+
+**Cost envelope enforcement**: `cheap_only` tier caps at T1. `free_only` caps at T0.
+
+#### Execution plan by class
+
+| Stage | T0 | T1 | T2 | T3 |
+|-------|----|----|----|----|
+| classifyRequest | ✓ | ✓ | ✓ | ✓ |
+| autoSettings | skip | ✓ | ✓ | ✓ |
+| buildRoutePlan | skip | ✓ | ✓ | ✓ |
+| memoryRead | skip | ✓ (Layer 1+2 only) | ✓ (all layers) | ✓ (all layers) |
+| ragRetrieval | skip | if resources exist | ✓ | ✓ |
+| webSearch | skip | skip | if search enabled | ✓ |
+| modelSelection | cheapest free | standard routing | enhanced routing | best available |
+| clarificationCheck | skip | skip | ✓ | ✓ |
+| generation | single-agent | single-agent | single-agent | single or multi |
+| postProcess | title only | title + memory | full | full |
+
+**Key savings**: T0 requests skip auto-settings, route planning, memory, RAG, search, and memory extraction. A "hello" costs <$0.001 instead of running the full pipeline.
+
+#### Discrete stage functions (refactored from pipeline.ts)
+
+```typescript
+async function stageClassify(state: PipelineState): Promise<PipelineState>
+async function stageAutoSettings(state: PipelineState): Promise<PipelineState>
+async function stageRoutePlan(state: PipelineState): Promise<PipelineState>
+async function stageMemoryRead(state: PipelineState): Promise<PipelineState>
+async function stageRetrieve(state: PipelineState): Promise<PipelineState>  // RAG + search
+async function stageModelSelect(state: PipelineState): Promise<PipelineState>
+async function stageClarify(state: PipelineState): Promise<PipelineState>
+async function stageGenerate(state: PipelineState): Promise<PipelineState>
+async function stagePostProcess(state: PipelineState): Promise<PipelineState>
+```
+
+Each stage: reads state → does work → returns enriched state + emits real-time phase events.
+
+Controller loop:
+```typescript
+for (const stageName of state.executionPlan) {
+  if (shouldSkip(stageName, state)) continue;
+  send({ type: "phase_update", phaseId: stageName, status: "in_progress" });
+  state = await stages[stageName](state);
+  send({ type: "phase_update", phaseId: stageName, status: "completed" });
+  state.completedStages.push(stageName);
+  if (state.needsClarification) break; // interrupt
+}
+```
+
+#### Model selection improvements (in `phase-router.ts`)
+
+1. **Free model ceiling**: Cap `costFit()` at 0.70 for free models (line 154-161)
+2. **New weights**: `fit*0.20 + reliability*0.16 + freshness*0.13 + cost*0.15 + latency*0.10 + context*0.10 + antiLockIn*0.16`
+3. **Increased diversity**: `repetitionPenalty` cap 0.18→0.35, per-hit 0.06→0.12
+4. **Exploration**: 10% chance of random from top 5, using time-seeded hash
+5. **Provider diversity**: >35% same provider in last 10 chats → 0.10 penalty
+6. **Cross-conversation tracking**: Store last 20 models in `userMemory` or dedicated field
+7. **Better utility models**: `preferFree: true` → `preferFree: false` for title/memory extraction (tiny cost, large quality gain)
+
+#### forceMultiAgent guardrails
+NEVER honor unless ALL: tier allows (not cheap_only/free_only), org has `orchestratorV2Enabled`, request class ≥ T2, user not over soft budget. If denied: log, explain in route trace, proceed single-agent.
+
+#### Route trace (enhanced)
+```typescript
+type RouteTrace = {
+  requestClass: "T0" | "T1" | "T2" | "T3";
+  classificationReason: string;
+  stepsExecuted: string[];
+  stepsSkipped: { step: string; reason: string }[];
+  modelSelection: { selected: string; score: number; topCandidates: { model: string; score: number }[] };
+  searchStatus: "real_search" | "model_knowledge" | "skipped";
+  costEstimate: number; actualCost: number;
+};
+```
+
+---
+
+## 4. Architecture: Intelligent Clarification (Interrupt/Resume)
+
+### Current state
+- Quiz mode has `<<QUIZ_CLARIFY>>`: "What topic? How many questions? What difficulty?"
+- Flashcard mode has `<<FLASHCARD_CLARIFY>>`: "What topic? How many cards? What detail level?"
+- Both already emit clarification as assistant messages → user answers → next pipeline run
+- No generalized clarification outside quiz/flashcard
+- No cached intermediate results
+
+### Alternatives evaluated
+
+**A. Full state serialization in Convex**
+- Serialize entire pipeline state to `suspendedTasks` table. Resume by loading.
+- Con: Pipeline state is large/complex (RAG results, search results, model catalog). Stale data after 30 min. Schema coupling — every pipeline change requires serialization update. Extensive retrofit of existing code
+
+**B. Lightweight checkpoint + replay**
+- Store stage IDs + outputs. On resume, replay pipeline using cached results.
+- Pro: Like `@convex-dev/workflow` journal pattern
+- Con: Stages must be idempotent (existing pipeline has side effects). Performance cost proportional to completed stages
+
+**C. Two-phase response** ← CHOSEN
+- Phase 1: Cheap classification + clarification check. If ambiguous, emit clarification as normal assistant message
+- Phase 2: User answers → next turn runs full pipeline with answer in conversation history
+- Pro: Zero infrastructure, natural UX, extends existing `<<QUIZ_CLARIFY>>` pattern, no stale state
+- Con: Cannot resume mid-generation. Expensive intermediate results (search/RAG) lost between turns
+
+**D. Agent loop with tool calls**
+- "Ask clarification" as a Vercel AI SDK tool call that suspends the loop
+- Con: LLM decides when to ask (unreliable). Token cost multiplied. Latency per tool call round-trip. Incompatible with current streaming architecture
+
+### Why Two-Phase wins
+- The codebase already implements this for quiz and flashcard modes. Generalizing costs almost nothing
+- Zero new infrastructure (no workflow engine, no suspended state table, no serialization)
+- Natural conversation UX: AI asks, user answers, pipeline runs fresh with full context
+- No stale state problems — everything is recomputed
+- For the rare case where expensive intermediate results matter: add lightweight `recentContext` cache
+
+### Proposed: Generalized clarification + context cache
+
+#### Generalize existing pattern
+
+Add `needsClarification()` check in `stageClarify()` of the controller:
+
+```typescript
+function needsClarification(state: PipelineState): ClarificationBlock | null {
+  // Already handled by mode prompts for quiz/flashcard
+  if (state.mode === "quiz" || state.mode === "flashcard") return null; // let the model handle via <<CLARIFY>>
+
+  // General clarification triggers:
+  if (state.requestClass >= "T2" && isVagueRequest(state)) {
+    return buildClarificationBlock(state);
+  }
+  if (state.mode === "research" && lacksSpecificity(state)) {
+    return buildResearchClarification(state);
+  }
+  if (hasConflictingDirectives(state)) {
+    return buildConflictResolution(state);
+  }
+  return null; // proceed without asking
+}
+```
+
+**When to ask**: Ambiguous T2+ requests, vague research topics, conflicting directives
+**When NOT to ask**: T0/T1 requests, clear intent, quiz/flashcard (already handled), user gave explicit instructions
+**Max questions**: 1 clarification block per exchange (may contain 2-3 sub-questions). Never ask twice in a row.
+
+#### Clarification UI
+
+```typescript
+type ClarificationBlock = {
+  context: string; // "Before I start researching..."
+  questions: {
+    id: string;
+    text: string;
+    type: "free_text" | "single_choice" | "multi_choice" | "confirmation";
+    options?: { id: string; label: string; description?: string }[];
+  }[];
+};
+```
+
+Emit as structured assistant message with metadata flag `{ type: "clarification" }`. Frontend renders as `ClarificationCard` with appropriate input types (radio buttons, checkboxes, text input). After user submits, answers become a normal user message.
+
+#### Context cache for expensive intermediate results
+
+For T2+ requests where clarification happens AFTER search/RAG:
+
+Add optional `recentContext` field to `chats` table:
+```
+recentContext: optional string (JSON)
+recentContextAt: optional number (timestamp)
+```
+
+When pipeline completes search/RAG but then needs clarification:
+1. Cache search + RAG results in `recentContext` (max 2000 tokens)
+2. Emit clarification
+
+On next turn:
+1. Check `recentContext` — if exists and <5 minutes old, inject as "Previous search context"
+2. Skip re-executing search/RAG for the clarification answer
+3. Clear cache after use
+
+This handles the one weakness of two-phase: losing expensive intermediate results. The cache is lightweight (single field on existing table), auto-expires, and is only used for T2+ requests.
+
+---
+
+## 5. Architecture: Learning Object & Mode Transforms
+
+### Current state
+- Each mode has a separate prompt template in `policy.ts` (tutor lines 50-64, marker 66-69, quiz 83-124, flashcard 126-155, etc.)
+- No shared state between modes
+- "Add more cards" regenerates entire deck
+- Mode switching via `suggestMode()` in `auto-settings.ts:401-470` (8-step history-aware logic)
+- Mode auto-switch already streamed to client via `mode_update` event
+
+### Proposed: LearningContext object
+
+```typescript
+type LearningContext = {
+  topics: string[];
+  keyFacts: { fact: string; source: "model" | "search" | "rag" | "user"; confidence: number }[];
+  misconceptions: string[];
+  quizableFacts: string[];
+  flashcardCandidates: { front: string; back: string }[];
+  difficultyLevel: number; // 1-5
+  uncertaintyGaps: string[];
+  nextSteps: string[];
+};
+```
+
+#### Where it lives
+New field on `chats` table: `learningContext: optional(v.string())` (JSON serialized, max 3000 chars)
+
+#### How it's populated (near-zero marginal cost)
+Piggyback on existing `maybeExtractMemory()` call in post-processing. Same utility model, extended prompt:
+
+```
+Current extraction prompt: "Extract durable student facts..."
+Extended: "Also extract:
+- key facts stated in this response (max 5)
+- potential misconceptions identified (max 3)
+- facts suitable for quiz questions (max 5)
+- flashcard candidates as front/back pairs (max 5)
+- uncertainty gaps the student should explore further (max 3)"
+```
+
+Estimated additional tokens: ~100 output. Cost: negligible (same model call, slightly longer response).
+
+Merge with existing LearningContext (append, deduplicate by content).
+
+#### Mode transforms
+
+**Quiz from explain**: When switching to quiz after explanation:
+- Prompt includes: "Generate questions targeting these specific facts from the lesson: {learningContext.quizableFacts}"
+- Difficulty calibrated to `learningContext.difficultyLevel`
+
+**Flashcard from explain**: When switching to flashcard:
+- Use `learningContext.flashcardCandidates` directly
+- "Add more" → append candidates NOT already in deck
+
+**Research from explain**: When user asks for deeper research:
+- Use `learningContext.uncertaintyGaps` as search queries
+
+**Explain after quiz**: When user asks to explain wrong answers:
+- Target `learningContext.misconceptions` in explanation
+
+#### Flashcard append fix
+In pipeline.ts, when mode=flashcard and user says "add more":
+1. Fetch existing `flashcardDecks` for this chat
+2. Fetch `learningContext.flashcardCandidates`
+3. Prompt: include existing cards (don't repeat) + candidates + "generate N NEW additional cards"
+4. After generation: APPEND to existing deck via Convex mutation `flashcardDecks.addCards`
+5. Re-render combined deck
+
+#### Mode switching suggestions
+After substantive tutor/explain responses, if LearningContext has 5+ quizable facts OR 5+ flashcard candidates:
+- Render subtle action buttons below response: `[Quiz yourself]` `[Make flashcards]` `[Research deeper]`
+- Not intrusive text — just tappable chips
+- Clicking sets mode and sends a pre-filled message
+
+---
+
+## 6. Architecture: Truth/Evidence Layer
+
+### Fix 1: Kill hallucinated search
+In `retrieval.ts:386-450`, rewrite model_fallback prompt:
+```
+"Provide a concise briefing from your training knowledge ONLY.
+DO NOT fabricate, invent, or guess any URLs.
+Begin with: 'Note: Web search was unavailable.'"
+```
+Stream `{ type: "search_status", status: "model_fallback" }` → frontend shows banner.
+Add to `policy.ts`: "If search results are marked as model_fallback, be transparent about source."
+
+### Fix 2: Parallel SearxNG
+In `searxng.ts`: Query 3 instances in parallel (first success wins). Reduce timeout from 6.5s to 4s. Track health with 5-minute cooldown.
+
+### Fix 3: Real-time phase progress
+In controller loop (Section 3), BEFORE and AFTER each stage:
+```typescript
+send({ type: "phase_update", phaseId: stageName, status: "in_progress" });
+state = await stages[stageName](state);
+send({ type: "phase_update", phaseId: stageName, status: "completed", detail });
+```
+Frontend: `planned`→clock, `in_progress`→spinner, `completed`→check, `skipped`→skip, `failed`→x
+
+### Fix 4: Source provenance
+Extend Citation type with `provenance: "web_search" | "rag_retrieval" | "model_knowledge" | "user_provided"`.
+Source cards: web=globe+cyan, rag=document+blue, model=brain+gray, user=user+green.
+
+---
+
+## 7. Architecture: UI/Product System
+
+### 7A. Chat width reduction
+Target: `max-w-[680px] mx-auto` on message container + composer. Creates generous side margins, makes content readable, gives right panel room without compressing chat.
+**Files**: `chat-messages.tsx`, `chat-composer.tsx`, `chat-layout.tsx`
+
+### 7B. Right panel slide animation
+`unified-panel.tsx`: `transition: transform 280ms cubic-bezier(0.16, 1, 0.3, 1), opacity 200ms ease`
+
+### 7C. Setting pill visual distinction
+`chat-composer.tsx` SettingPill: Off=gray/dim, Auto=animated gradient border (subtle rotation via `@keyframes`)+sparkle icon, On=solid accent fill. Size: `h-9`→`h-8`. Hover: React state + debounce (replace CSS `group-hover`).
+
+### 7D. Orchestrator progress UI
+Real-time phase list from controller events. Spinner for in_progress, check for completed, skip for skipped. Auto-collapse when done.
+
+### 7E. Sidebar collapsed fixes
+Streak/XP: stack vertically. Timer/feedback: portal rendering. Notifications: remove `overflow: hidden`.
+
+### 7F. Header alignment
+Shared `--header-height: 56px`. Both headers use same height + bottom shadow.
+
+### 7G. Model display on chat switch
+Clear on `selectedChatId` change. Skeleton until model known from `modelUsed` field.
+
+### 7H. Source cards sizing
+Reduce height ~50%. Compact horizontal layout. Domain + title only, expand on click.
+
+### 7I. Inline code preview
+`markdown-renderer.tsx`: "Code / Preview" toggle on previewable blocks (HTML/CSS/JS/React/Mermaid). Toggle between SyntaxHighlighter and CodePreview inline.
+
+### 7J. Preview sandbox fix
+**Root cause confirmed**: CSP `default-src 'none'` in `code-sandbox.ts:6` blocks all CDN scripts. Mermaid loads from `cdn.jsdelivr.net/npm/mermaid@11` (blocked). React loads React+ReactDOM+Babel from CDN (all blocked).
+
+**Fix**: Relax CSP to allow jsdelivr CDN within the sandboxed iframe:
+```
+script-src 'unsafe-inline' 'unsafe-eval' blob: https://cdn.jsdelivr.net;
+```
+The iframe is already sandboxed with `sandbox="allow-scripts"` (no same-origin, no popups, no forms). Adding CDN to CSP within a sandboxed iframe is safe — the worst case is the CDN script runs inside an isolated sandbox with no access to the parent page.
+
+**PostMessage scoping**: Add unique `frameId` to each iframe instance. In `code-sandbox.ts` RESIZE_SCRIPT, include `frameId` in events. In `code-preview.tsx`, filter events by `frameId` instead of accepting all `window.postMessage` events.
+
+### 7K. Branch navigation UI
+Schema: Add `parentMessageId`, `siblingIndex`, `siblingCount` to `messages` table (all optional, existing messages unaffected).
+Edit flow: Create sibling message + new response branch. Display `◀ 2/3 ▶` on messages with `siblingCount > 1`.
+
+### 7L. Clarification UI
+New `ClarificationCard` component in `chat-messages.tsx`. Renders structured questions with appropriate input types. Submit sends answers as user message.
+
+---
+
+## 8. Architecture: School Context
+
+### 8A. Rich school context injection
+Extend runtime context in `pipeline.ts:1566-1573`:
+```
+School: ${orgName} (${schoolType} school, ${country})
+Curriculum: ${curriculum} — ${examBoard}
+System: Assume student follows ${curriculum}. Calibrate vocabulary, examples, assessment.
+```
+New fields on `orgs`: `curriculum`, `examBoard`, `gradeLevels`, `pedagogyNotes`
+
+### 8B. Curriculum-aware defaults
+When IB: Use IB rubric criteria, command terms (analyze, evaluate, discuss), academic source priority.
+When AP: Similar AP calibration.
+Fallback: General with no specific calibration.
+
+### 8C. Dynamic school branding
+`providers.tsx` or `layout.tsx`: Read `org.primaryColor`/`accentColor` → set `--brand-primary`/`--brand-secondary` CSS vars. Replace hardcoded accents throughout.
+
+---
+
+## 9. Proactive Continuity
+
+### "Stay silent unless valuable" policy
+Surface ONLY when: 5+ flashcards due, streak at risk today, active study plan has pending items, new chat matches recent topic.
+NEVER: random suggestions, generic tips, topics inactive 30+ days, more than 1 suggestion per session.
+
+### Implementation
+Existing cron (`generateDailyStudyReminders`) already generates notifications. On new chat, check `artifactIndex` for continuations. Show as dismissible banner above composer.
+
+---
+
+## 10. Preserved Bug & Polish Backlog
+
+★ = addressed by architectural redesign. ● = standalone fix.
+
+### Critical Bugs
+- ● **Contact form auth**: Add `/api/contact` to `isPublicRoute` in `proxy.ts:4`
+- ★ **Search hallucination**: Section 6, Fix 1
+- ● **File upload stalled**: Retry if `status=processing` and `updatedAt > 90s`. Surface errors. Gate RAG if 0 resources
+- ● **Canvas label.trim**: Guard `String(label ?? "")` in parent save handler (not in code-canvas.tsx itself)
+- ● **Speech-to-text**: Add `useEffect` watching `speech.transcript` in `chat-composer.tsx`. Dynamic `recognition.lang`
+
+### Landing Page
+- ● **Logo SVG redesign**: Proper 3D ribbon folding, clean color boundaries, synced favicon
+- ● **Hero model names**: Remove versions → "Claude", "GPT", "Gemini", "Deepseek"
+- ● **Prism animation**: Internal refraction gradient, fix text clipping, animate text reveal
+- ● **Mode card animation**: `transform-origin: center center`, reduce scale 15%
+- ● **Soul diagram pulse**: Animated dot along SVG paths on AI Core hover
+- ● **Sidebar "Spectra" text**: Add below school name in sidebar
+
+### Flashcard & Study
+- ★ **Add more cards**: Section 5 (append via LearningContext)
+- ● **Manual flashcard editing**: Inline edit on card faces → Convex mutation
+- ● **Flashcard UI polish**: Remove duplicate progress bar, add gap-4 between card and rating buttons
+- ● **Spaced repetition reminders**: Wire existing cron notifications to new chat surface
+- ★ **Mode switching**: Section 5 (action chips below response)
+
+### Chat UI
+- ★ **Chat width**: Section 7A (680px max)
+- ★ **Setting pills**: Section 7C (auto/off/on distinction)
+- ★ **Phase progress**: Section 6 Fix 3 (real-time)
+- ★ **Right panel animation**: Section 7B
+- ★ **Header alignment**: Section 7F
+- ★ **Sidebar collapsed**: Section 7E
+- ★ **Model display on switch**: Section 7G
+- ★ **Source cards**: Section 7H
+- ★ **Preview sandbox**: Section 7J (CSP fix)
+- ★ **Branching**: Section 7K
+- ● **Token count**: Ensure `done` event sums ALL subcalls
+- ● **Title generation**: `preferCheap` not `preferFree`, add retry
+
+### Routing
+- ★ **Model diversity**: Section 3 (new weights, free ceiling, exploration, provider diversity)
+- ★ **RAG gating**: Skip embedding if 0 processed resources
+- ★ **forceMultiAgent**: Section 3 (guardrails)
+
+---
+
+## 11. Phased Implementation Strategy
+
+### Phase 0: Foundation & Instrumentation
+**Goal**: Fix critical bugs. Add classification infrastructure.
+
+1. Fix contact form auth (`proxy.ts`)
+2. Fix search hallucination (rewrite model_fallback, add search_status event)
+3. Fix file upload stalled (retry + error surfacing)
+4. Fix speech-to-text (transcript watcher)
+5. Fix canvas label.trim
+6. Add `classifyRequest()` extending existing `classifyComplexity()` → T0-T3
+7. Add real-time phase events at each pipeline step
+8. Fix token count (sum all subcalls)
+9. Fix title generation (`preferCheap`, retry)
+10. Add `learningContext` field to `chats` schema (prep for Phase 3)
+
+**Test gate**: Contact form works. Search shows model_knowledge banner. STT transcribes. Simple messages classified T0/T1. Phase progress shows real transitions.
+
+### Phase 1: Controller + Routing + Truth
+**Goal**: State machine refactor. Cost-tiered execution. Model diversity.
+
+1. Extract pipeline.ts into discrete stage functions + PipelineState
+2. Implement PipelineController with execution plan by request class
+3. Add cost gates (skip search/RAG/multi-agent for T0/T1)
+4. Rebalance routing weights (free ceiling, antiLockIn, repetition penalty)
+5. Add exploration epsilon, provider diversity penalty
+6. Gate forceMultiAgent behind tier + feature + budget
+7. Parallel SearxNG queries
+8. Enhanced route trace with request class
+9. Gate RAG if 0 processed resources
+10. Use `preferCheap` for utility models
+
+**Test gate**: "Hello" stays T0 (<$0.001). Research escalates to T2. 10 messages use 5+ models. forceMultiAgent denied for cheap_only.
+
+### Phase 2: Hidden Memory Fabric
+**Goal**: Embedding-based topic memory. Anti-contamination. Corrections.
+
+1. Create `userMemoryEntries` Convex table with vector index
+2. Implement memory write router with pending/confirmed states
+3. Implement embedding-based memory read (reuse RAG vector infrastructure)
+4. Add Layer 2 always-inject for identity/profile entries
+5. Implement negative topic links
+6. Implement correction pathways in `parseUserDirectives()`
+7. Add Memory Management UI in unified-panel.tsx
+8. Enhance school context injection (Layer 1)
+9. Expand runtime context with curriculum, examBoard, gradeLevels
+
+**Test gate**: WWII memory NOT injected for French request. "Forget X" removes entries. Identity facts stored immediately. Memory UI shows entries with delete.
+
+### Phase 3: Learning Object + Mode Integration
+**Goal**: Shared learning state. Mode transforms. Flashcard append.
+
+1. Implement LearningContext extraction (piggyback on memory extraction)
+2. Implement mode transforms using LearningContext
+3. Fix flashcard "add more" to append
+4. Add manual flashcard editing
+5. Fix flashcard UI (progress bar, spacing)
+6. Add mode switching suggestion chips
+7. Wire spaced repetition reminders to notification surface
+
+**Test gate**: After explain, quiz uses extracted facts. "Add more" appends. Mode switch chips appear after 5+ facts.
+
+### Phase 4: Clarification + Proactive Continuity
+**Goal**: Generalized clarification. Context cache. Continuations.
+
+1. Implement `needsClarification()` in controller's `stageClarify()`
+2. Implement `ClarificationCard` frontend component
+3. Add `recentContext` cache field to `chats` table
+4. Implement context cache write/read with 5-minute TTL
+5. Implement continuation suggestions on new chat
+6. Wire streak/flashcard reminders to dismissible banner
+
+**Test gate**: Vague research request triggers clarification. Clear request proceeds. Due flashcards show banner.
+
+### Phase 5: UI/Product System
+**Goal**: Premium feel. Working previews. Branching.
+
+1. Chat width 680px
+2. Right panel slide animation
+3. Setting pill auto/off/on distinction
+4. Orchestrator progress UI
+5. Sidebar collapsed fixes
+6. Header alignment
+7. Model display on switch
+8. Source cards compact
+9. Inline code/preview toggle
+10. CSP fix for preview sandbox (`https://cdn.jsdelivr.net`)
+11. PostMessage scoping (frameId)
+12. Branch navigation (schema + UI)
+13. Composer spacing/buttons
+14. School branding CSS vars
+15. Landing page polish (logo, prism, mode cards, soul diagram, hero names)
+
+**Test gate**: Chat readable at 680px. Panel slides. Auto pills distinct. Previews work. Branches navigable.
+
+### Phase 6: Polish & Reliability
+**Goal**: End-to-end validation. Cost audit. Regressions.
+
+Run all scenario tests (Section 12). Fix issues found.
+
+---
+
+## 12. Testing & Evaluation Plan
+
+| # | Scenario | Expected | Validates |
+|---|----------|----------|-----------|
+| 1 | "hello" | T0, <$0.001, no search/RAG/memory | Cost discipline |
+| 2 | "What is photosynthesis?" | T1, school context injected | Standard routing |
+| 3 | "Research climate change" | T2, real SearxNG OR transparent fallback | Search truth |
+| 4 | SearxNG down + research | "Model knowledge" banner, no fake URLs | Fallback honesty |
+| 5 | "Make flashcards" (vague) | Clarification via `<<FLASHCARD_CLARIFY>>` | Existing clarification |
+| 6 | "Research X" (vague, T2) | General clarification question | New clarification |
+| 7 | User answers clarification | Pipeline runs with full context | Resume flow |
+| 8 | "Add more cards" | Appended, no duplicates | Flashcard fix |
+| 9 | Upload PDF → ask about it | Processes, RAG retrieves, citations | File + RAG |
+| 10 | WWII chat → new French chat | No WWII memory in French | Memory isolation |
+| 11 | "Remember I study IB HL" | Layer 2 identity, high confidence | Memory write |
+| 12 | "Forget about WWII" | Entries removed | Correction |
+| 13 | "Use Claude" in free_only | Denied, route trace explains | Tier enforcement |
+| 14 | "Use sub-agents" on simple Q | Denied if T0/T1 | Multi-agent gate |
+| 15 | Multiple code previews | No cross-iframe events | PostMessage scope |
+| 16 | Orchestrator during research | Real-time phase transitions | Phase truth |
+| 17 | 10 varied messages | 5+ different models | Routing diversity |
+| 18 | Edit a message | Branch created, navigation visible | Branching |
+| 19 | IB school student question | IB-calibrated response | School context |
+| 20 | Explain → "quiz me" | Quiz targets explained facts | Learning object |
+
+### Cost checks (target)
+- T0: <$0.002 avg | T1: <$0.01 avg | T2: <$0.05 avg | T3: <$0.15 avg
+- 100 mixed requests: <$1.50 total
+
+---
+
+## 13. Cost Discipline Model
+
+### Real cost breakdown (from codebase analysis)
+- Background overhead per request: ~$0.0005-0.002 (title + memory + embedding)
+- Simple free model response: $0.00
+- Mid-range paid response: $0.005-0.02
+- Multi-agent (full): $0.03-0.24
+
+### What prevents token drain
+1. **Request classification**: T0 skips auto-settings, memory, RAG, search, memory extraction
+2. **RAG gating**: Skip if 0 processed resources (saves embedding call)
+3. **Multi-agent gating**: T3 only, tier + budget + feature checks
+4. **Utility model quality**: Pay $0.001 more for title/memory to avoid retries
+5. **LearningContext**: Piggybacks on memory extraction (zero marginal cost)
+6. **Clarification**: $0.001 question saves $0.05+ wasted T2 response
+
+### Progressive budget enforcement (enhancing existing)
+- Under 80%: all tiers available
+- 80-95%: T3 blocked, T2 requires explicit user selection
+- 95-100%: T2+T3 blocked, only T0+T1
+- Over: free models only (existing `free_only` tier)
+
+---
+
+## 14. Risks & Tradeoffs
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| Embedding-based memory retrieval adds latency (50-150ms) | Slight delay on T1+ requests | Reuse RAG embedding if available (same message), parallelize with other pipeline steps |
+| State machine refactor breaks existing flows | Pipeline regression | Extract stages incrementally, keep existing tests passing at each step |
+| Two-phase clarification loses expensive intermediate results | Re-execution cost on resume | recentContext cache (5-min TTL) caches search/RAG results between turns |
+| Request classification errors (T0 when should be T2) | Degraded response quality | Conservative default (T1 for ambiguous). Log decisions. Tune from real usage |
+| Memory schema migration | Existing data needs handling | New fields optional. Existing entries default to "confirmed", no category. No destructive migration |
+| Branching adds schema complexity | Data model complexity | Optional fields with defaults. Branch UI only appears when siblingCount > 1 |
+
+### Key architectural tradeoff: Embedding-based memory vs. Topic tags
+**Chose embeddings because**: Reuses existing Convex vector infrastructure. Handles semantic similarity (French Revolution ↔ Napoleonic Wars). No taxonomy drift. Cost negligible ($0.000002/entry).
+**Gave up**: Debuggability (tags are human-readable, embeddings are not). Speed (tag filtering is O(1) index lookup, vector search is slower).
+**If embeddings prove too slow**: Fall back to tag-based filtering as Layer 3b alongside embeddings.
+
+### Key architectural tradeoff: State machine vs. pipeline-with-gates
+**Chose state machine because**: Testable stages. Enables interrupt/resume. Positions for future LLM planner. Formalizes existing conditional logic.
+**Gave up**: Simplicity of single function. Familiarity of current code.
+**Risk mitigation**: Incremental extraction. Each stage must pass existing integration tests before extracting the next.
+
+---
+
+## Appendix: Key Files
+
+| File | Role |
+|------|------|
+| `src/lib/orchestrator/pipeline.ts` | Main pipeline (~1500 lines) → refactor target |
+| `src/lib/routing/phase-router.ts` | Model scoring → rebalance weights |
+| `src/lib/orchestrator/retrieval.ts` | RAG + search → fix hallucination |
+| `src/lib/orchestrator/post-process.ts` | Memory extraction + title → extend for LearningContext |
+| `src/lib/orchestrator/task-graph.ts` | Multi-agent DAG → guard forceMultiAgent |
+| `src/lib/orchestrator/streaming.ts` | Streaming → real-time phase events |
+| `src/lib/prompts/policy.ts` | System prompts → inject LearningContext, school context |
+| `src/lib/auto-settings.ts` | Classification → extend to T0-T3, generalize clarification |
+| `src/lib/search/searxng.ts` | Search → parallel instances |
+| `src/lib/code-sandbox.ts` | Preview sandbox → CSP fix |
+| `src/lib/flashcard-format.ts` | Flashcard parsing → append support |
+| `convex/schema.ts` | Database schema → new tables/fields |
+| `convex/memory.ts` | Memory CRUD → new userMemoryEntries |
+| `convex/rag.ts` | Vector search → reuse for memory retrieval |
+| `src/components/chat/chat-layout.tsx` | Layout → width reduction |
+| `src/components/chat/chat-composer.tsx` | Composer → pill states, spacing |
+| `src/components/chat/unified-panel.tsx` | Right panel → animation, memory UI |
+| `src/components/chat/chat-messages.tsx` | Messages → branching, clarification UI |
+| `src/components/chat/markdown-renderer.tsx` | Rendering → inline preview, sources |
+| `src/components/chat/code-preview.tsx` | Preview iframe → frameId scoping |
+| `src/hooks/use-chat-state.ts` | State management → controller integration |
+| `src/proxy.ts` | Auth middleware → contact form fix |

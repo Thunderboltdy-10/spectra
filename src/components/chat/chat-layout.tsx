@@ -556,6 +556,13 @@ export function ChatLayout() {
               quality: payload.quality,
             });
           }}
+          onEditFlashcardCard={(payload) => {
+            void chat.editFlashcardCard({
+              cardHash: payload.cardHash,
+              front: payload.front,
+              back: payload.back,
+            });
+          }}
           onFollowUp={(followUpMessage) => {
             void chat.sendMessage(followUpMessage, {
               chatIdOverride: chat.selectedChatId || undefined,

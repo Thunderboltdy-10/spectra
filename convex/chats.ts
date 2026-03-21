@@ -373,6 +373,7 @@ export const branchFromMessage = mutation({
       manualModel: sourceChat.manualModel,
       usePersonalResources: sourceChat.usePersonalResources,
       contextSummary: sourceChat.contextSummary,
+      learningContext: sourceChat.learningContext,
       createdAt: now,
       updatedAt: now,
     });
@@ -506,6 +507,32 @@ export const setContextSummary = mutation({
 
     await ctx.db.patch(chat._id, {
       contextSummary: args.contextSummary,
+      updatedAt: Date.now(),
+    });
+
+    return { ok: true };
+  },
+});
+
+export const setLearningContext = mutation({
+  args: {
+    actorClerkId: v.string(),
+    chatId: v.id("chats"),
+    learningContext: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const chat = await ctx.db.get(args.chatId);
+    if (!chat || chat.ownerUserId !== actor._id || chat.deletedAt) {
+      throw new Error("Chat not found");
+    }
+
+    await ctx.db.patch(chat._id, {
+      learningContext: args.learningContext,
       updatedAt: Date.now(),
     });
 

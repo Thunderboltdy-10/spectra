@@ -66,6 +66,13 @@ export async function POST(request: NextRequest) {
       | {
           action: "delete_deck";
           deckId?: string;
+        }
+      | {
+          action: "edit_card";
+          chatId?: string;
+          cardHash?: string;
+          front?: string;
+          back?: string;
         };
 
     if (body.action === "rate_card") {
@@ -87,6 +94,20 @@ export async function POST(request: NextRequest) {
       const result = await convexMutation("flashcards:deleteDeck", {
         actorClerkId: actor.clerkId,
         deckId: body.deckId,
+      });
+      return ok(result);
+    }
+
+    if (body.action === "edit_card") {
+      if (!body.chatId || !body.cardHash || !body.front || !body.back) {
+        throw new Error("Missing flashcard edit payload");
+      }
+      const result = await convexMutation("flashcards:editCard", {
+        actorClerkId: actor.clerkId,
+        chatId: body.chatId,
+        cardHash: body.cardHash,
+        front: body.front,
+        back: body.back,
       });
       return ok(result);
     }

@@ -20,6 +20,7 @@ This document provides exhaustive details about every feature, functionality, al
 14. [Agent System](#14-agent-system)
 15. [Analytics & Usage Tracking](#15-analytics--usage-tracking)
 16. [Configuration Files](#16-configuration-files)
+17. [Phase 3 Learning Object & Mode Integration](#17-phase-3-learning-object--mode-integration-2026-03-21)
 
 ---
 
@@ -1430,3 +1431,133 @@ Status: Implemented in codebase for the Phase 2 checklist in `CODEX.md`.
 - TypeScript compile passes:
   - `bash -lc 'source ~/.nvm/nvm.sh && nvm use 24.12.0 >/dev/null && cd <local-workspace> && npx tsc --noEmit'`
 - Non-gating note: `src/lib/__tests__/memory-compaction.test.ts` has a pre-existing assertion mismatch (`<=20` expected while current implementation caps at `40`); not modified in this phase.
+
+---
+
+## 17. Phase 3 Learning Object & Mode Integration (2026-03-21)
+
+This section documents the Phase 3 implementation from `CODEX.md`.
+
+### 17.1 LearningContext Data Model
+
+A chat-scoped LearningContext is now used to maintain shared learning state across mode transitions.
+
+```typescript
+{
+  topics: string[];
+  keyFacts: Array<{ fact: string; source: "model" | "search" | "rag" | "user"; confidence: number }>;
+  misconceptions: string[];
+  quizableFacts: string[];
+  flashcardCandidates: Array<{ front: string; back: string }>;
+  difficultyLevel: number; // 1-5
+  uncertaintyGaps: string[];
+  nextSteps: string[];
+}
+```
+
+Storage:
+- `chats.learningContext` (JSON string)
+- mutation: `chats:setLearningContext`
+
+Core implementation:
+- `src/lib/orchestrator/learning-context.ts`
+
+### 17.2 LearningContext Extraction Pipeline
+
+LearningContext extraction is piggybacked on post-process memory extraction:
+
+- `maybeExtractMemory()` now requests structured JSON:
+  - `memory[]` for durable profile extraction
+  - `learningContext` for mode-transform continuity
+- Fallback LearningContext derivation runs from assistant response when structured JSON is absent.
+- Memory persistence can be disabled via `persistMemory` while still extracting LearningContext.
+
+File:
+- `src/lib/orchestrator/post-process.ts`
+
+### 17.3 Mode Transforms Using LearningContext
+
+`runChatPipeline` now injects:
+
+1. `=== LEARNING CONTEXT ===` block
+2. `=== MODE TRANSFORM GUIDANCE ===` block
+
+Transform behavior:
+- Quiz/Exam: targets `quizableFacts` and calibrates difficulty from context.
+- Flashcard: uses `flashcardCandidates`; on add-more intent, explicitly avoids duplicates using existing deck fronts.
+- Research: prioritizes `uncertaintyGaps` as research angles.
+- Explain: targets known `misconceptions`.
+
+File:
+- `src/lib/orchestrator/pipeline.ts`
+
+### 17.4 Flashcard Add-More Append Behavior
+
+Flashcard save behavior now supports true append semantics:
+
+- Save flow detects add-more intent from the preceding user message.
+- New cards append to the latest deck for the chat.
+- Dedupe is enforced by `cardHash` to avoid repeated cards.
+
+Files:
+- `convex/flashcards.ts`
+- `src/app/api/flashcards/route.ts`
+
+### 17.5 Manual Flashcard Editing
+
+Inline flashcard editing is now supported in chat flashcard reveal:
+
+- User can edit FRONT/BACK text directly in the card interface.
+- Backend mutation persists updates:
+  - `flashcards:editCard`
+  - API action `edit_card` (`POST /api/flashcards`)
+
+Files:
+- `src/components/chat/flashcard-reveal.tsx`
+- `src/components/chat/chat-messages.tsx`
+- `src/components/chat/chat-layout.tsx`
+- `src/hooks/use-chat-state.ts`
+- `convex/flashcards.ts`
+- `src/app/api/flashcards/route.ts`
+
+### 17.6 Flashcard UI Polish
+
+Card-mode flashcard UI adjustments:
+- Removed redundant top progress bar.
+- Added explicit spacing between main card and rating/navigation controls.
+
+File:
+- `src/components/chat/flashcard-reveal.tsx`
+
+### 17.7 Mode Suggestion Chips
+
+After substantive tutor/explain responses, route trace may include mode suggestion chips when LearningContext is rich enough:
+
+```typescript
+routeTrace.modeSuggestions?: Array<{
+  mode: StudyMode;
+  label: string;
+  prompt: string;
+}>;
+```
+
+Rendered in chat as clickable actions that:
+1. switch mode
+2. send a guided follow-up prompt
+
+Files:
+- `src/lib/orchestrator/pipeline.ts`
+- `src/types/index.ts`
+- `src/components/chat/chat-messages.tsx`
+
+### 17.8 Spaced Repetition Reminder Surface
+
+Spaced repetition reminders remain surfaced via notifications:
+- daily cron `generate-study-reminders`
+- notification type `reminder_flashcards_due`
+- user-facing NotificationBell in chat surfaces
+
+Files:
+- `convex/crons.ts`
+- `convex/notifications.ts`
+- `src/components/notification-bell.tsx`

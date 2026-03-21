@@ -293,6 +293,11 @@ export type RouteTrace = {
   costBudgetUsd?: number;
   totalDurationMs?: number;
   totalCostCents?: number;
+  modeSuggestions?: Array<{
+    mode: import("@/lib/contracts/studyModes").StudyMode;
+    label: string;
+    prompt: string;
+  }>;
   collaborators?: Array<{ role: string; model: string; tokensUsed: number; durationMs: number }>;
 };
 

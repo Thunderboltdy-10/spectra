@@ -15,6 +15,12 @@ function normalizeDeckTitle(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+function isAppendFlashcardRequest(value: string) {
+  const normalized = value.toLowerCase();
+  return /\b(add|append|more|extra|another|new)\b[\s\S]{0,40}\b(card|cards|flashcard|flashcards|deck)\b/.test(normalized)
+    || /\bcontinue\b[\s\S]{0,20}\b(deck|flashcards?)\b/.test(normalized);
+}
+
 function calculateNextReview(
   quality: number,
   easeFactor: number,
@@ -85,6 +91,51 @@ export const saveDeck = mutation({
 
     const now = Date.now();
     const normalizedTitle = normalizeDeckTitle(args.title || "Untitled deck");
+    let appendIntent = false;
+
+    if (args.sourceMessageId) {
+      const sourceMessage = await ctx.db.get(args.sourceMessageId);
+      if (sourceMessage && sourceMessage.chatId === chat._id && sourceMessage.role === "assistant") {
+        const history = await ctx.db
+          .query("messages")
+          .withIndex("by_chat", (q) => q.eq("chatId", chat._id))
+          .collect();
+        const sorted = history.sort((a, b) => a.createdAt - b.createdAt);
+        const sourceIndex = sorted.findIndex((row) => row._id === sourceMessage._id);
+        for (let i = sourceIndex - 1; i >= 0; i -= 1) {
+          const row = sorted[i];
+          if (row?.role !== "user") continue;
+          appendIntent = isAppendFlashcardRequest(row.content);
+          break;
+        }
+      }
+    }
+
+    if (appendIntent) {
+      const latestDeck = await ctx.db
+        .query("flashcardDecks")
+        .withIndex("by_chat_updated", (q) => q.eq("chatId", chat._id))
+        .order("desc")
+        .first();
+      if (latestDeck && latestDeck.userId === actor._id && latestDeck.orgId === actor.orgId) {
+        const existingHashes = new Set(latestDeck.cards.map((card) => card.cardHash));
+        const appendedCards = cards.filter((card) => !existingHashes.has(card.cardHash));
+        const mergedCards = appendedCards.length > 0 ? [...latestDeck.cards, ...appendedCards] : latestDeck.cards;
+        await ctx.db.patch(latestDeck._id, {
+          title: latestDeck.title || args.title.trim() || "Untitled deck",
+          sourceMessageId: args.sourceMessageId ?? latestDeck.sourceMessageId,
+          cards: mergedCards,
+          updatedAt: now,
+        });
+        return {
+          deckId: latestDeck._id,
+          cardCount: mergedCards.length,
+          appended: appendedCards.length,
+          updated: true,
+        };
+      }
+    }
+
     const existingDecks = await ctx.db
       .query("flashcardDecks")
       .withIndex("by_user_updated", (q) => q.eq("userId", actor._id))
@@ -121,6 +172,33 @@ export const saveDeck = mutation({
     });
 
     return { deckId, cardCount: cards.length, created: true };
+  },
+});
+
+export const getLatestDeckForChat = query({
+  args: {
+    actorClerkId: v.string(),
+    chatId: v.id("chats"),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) throw new Error("Unauthorized");
+
+    const chat = await ctx.db.get(args.chatId);
+    if (!chat || chat.ownerUserId !== actor._id || chat.orgId !== actor.orgId || chat.deletedAt) {
+      throw new Error("Chat not found");
+    }
+
+    const deck = await ctx.db
+      .query("flashcardDecks")
+      .withIndex("by_chat_updated", (q) => q.eq("chatId", chat._id))
+      .order("desc")
+      .first();
+    if (!deck || deck.userId !== actor._id || deck.orgId !== actor.orgId) {
+      return null;
+    }
+
+    return deck;
   },
 });
 
@@ -331,5 +409,59 @@ export const rateCard = mutation({
     }
 
     return next;
+  },
+});
+
+export const editCard = mutation({
+  args: {
+    actorClerkId: v.string(),
+    chatId: v.id("chats"),
+    cardHash: v.string(),
+    front: v.string(),
+    back: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) throw new Error("Unauthorized");
+
+    const chat = await ctx.db.get(args.chatId);
+    if (!chat || chat.ownerUserId !== actor._id || chat.orgId !== actor.orgId || chat.deletedAt) {
+      throw new Error("Chat not found");
+    }
+
+    const cardHash = args.cardHash.trim();
+    const front = args.front.trim();
+    const back = args.back.trim();
+    if (!cardHash || !front || !back) {
+      throw new Error("Invalid flashcard payload");
+    }
+
+    const decks = await ctx.db
+      .query("flashcardDecks")
+      .withIndex("by_chat_updated", (q) => q.eq("chatId", chat._id))
+      .collect();
+    const scoped = decks
+      .filter((deck) => deck.userId === actor._id && deck.orgId === actor.orgId)
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+    const target = scoped.find((deck) => deck.cards.some((card) => card.cardHash === cardHash));
+    if (!target) {
+      throw new Error("Deck not found");
+    }
+
+    const nextCards = target.cards.map((card) =>
+      card.cardHash === cardHash
+        ? {
+            ...card,
+            front,
+            back,
+          }
+        : card,
+    );
+    await ctx.db.patch(target._id, {
+      cards: nextCards,
+      updatedAt: Date.now(),
+    });
+
+    return { ok: true, deckId: target._id };
   },
 });

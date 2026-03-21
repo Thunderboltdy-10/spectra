@@ -56,6 +56,16 @@ import { PipelineController } from "@/lib/orchestrator/pipeline-controller";
 import { formatRuntimeSkillBlock, selectRuntimeSkills } from "@/lib/orchestrator/skills";
 import { runAssistantStreaming, runCollaborativeStreaming } from "@/lib/orchestrator/streaming";
 import { buildTaskGraph, shouldUseMultiAgent } from "@/lib/orchestrator/task-graph";
+import {
+  buildModeSuggestions,
+  buildModeTransformGuidance,
+  formatLearningContextForPrompt,
+  isFlashcardAppendIntent,
+  mergeLearningContexts,
+  parseLearningContext,
+  serializeLearningContext,
+  type LearningContext,
+} from "@/lib/orchestrator/learning-context";
 import { formatSchoolNow } from "@/lib/timezone";
 import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 import type { StudyMode } from "@/types";
@@ -869,6 +879,7 @@ export async function runChatPipeline(request: NextRequest) {
   }
 
   const history = toChatMessageShape(chatData.messages);
+  const storedLearningContext = parseLearningContext((chatData.chat as { learningContext?: unknown }).learningContext);
   const isFirstAssistantTurn = history.every((message) => message.role !== "assistant");
   const attemptStats = extractAttemptStats(history);
   const directiveMemorySummary = {
@@ -1159,6 +1170,22 @@ export async function runChatPipeline(request: NextRequest) {
         maxSkills: routePlan.responseBudget === "deep" ? 6 : 4,
       })
     : [];
+  const flashcardAppendIntent = effectiveMode === "flashcard" && isFlashcardAppendIntent(normalizedMessage);
+  const latestDeckPromise: Promise<{
+    title: string;
+    cards: Array<{ front: string; back: string; cardHash: string }>;
+  } | null> = flashcardAppendIntent
+    ? convexQuery<
+      { actorClerkId: string; chatId: string },
+      {
+        title: string;
+        cards: Array<{ front: string; back: string; cardHash: string }>;
+      } | null
+    >("flashcards:getLatestDeckForChat", {
+        actorClerkId: actor.clerkId,
+        chatId,
+      }).catch(() => null)
+    : Promise.resolve(null);
 
   const retrievalPromise = routePlan.allowedToolBundles.includes("retrieval") && routePlan.retrievalScopes.length > 0
     ? runRagRetrieval({
@@ -1272,10 +1299,11 @@ export async function runChatPipeline(request: NextRequest) {
     ? classifyExplainDepth(auto.message, userMemory.rawMemoryText)
     : undefined;
 
-  const [retrieval, webResult, quizAdaptive] = await Promise.all([
+  const [retrieval, webResult, quizAdaptive, latestDeck] = await Promise.all([
     retrievalPromise,
     searchPromise,
     adaptiveQuizPromise,
+    latestDeckPromise,
   ]);
 
   const searchBlock = webResult.text ?? "";
@@ -1338,8 +1366,16 @@ export async function runChatPipeline(request: NextRequest) {
     }
   }
 
-  const quizDifficultyLevel = clampQuizDifficultyLevel(quizAdaptive.level);
-  const quizDifficultyLabel = quizAdaptive.label;
+  const contextQuizDifficulty =
+    storedLearningContext && Number.isFinite(storedLearningContext.difficultyLevel)
+      ? Math.max(1, Math.min(3, Math.round(storedLearningContext.difficultyLevel / 2)))
+      : undefined;
+  const quizDifficultyLevel = clampQuizDifficultyLevel(
+    effectiveMode === "quiz" && typeof contextQuizDifficulty === "number"
+      ? contextQuizDifficulty
+      : quizAdaptive.level,
+  );
+  const quizDifficultyLabel = toQuizDifficultyLabel(quizDifficultyLevel);
   const quizDifficultyAdjusted = quizAdaptive.level !== quizAdaptive.currentLevel;
   if (effectiveMode === "quiz" && featureEnabled(orgSettings.org?.adaptiveQuizEnabled)) {
     void convexMutation("analytics:setQuizDifficultySignal", {
@@ -1814,6 +1850,16 @@ export async function runChatPipeline(request: NextRequest) {
     || directiveMemorySummary.written > 0
     ? `forget=${directiveMemorySummary.forgotten}, blockedLinks=${directiveMemorySummary.negativeLinks}, explicitWrites=${directiveMemorySummary.written}`
     : "none";
+  const learningContextPrompt = formatLearningContextForPrompt(storedLearningContext);
+  const modeTransformGuidance = buildModeTransformGuidance({
+    mode: effectiveMode,
+    message: normalizedMessage,
+    learningContext: storedLearningContext,
+    existingFlashcardFronts: latestDeck?.cards.map((card) => card.front) ?? [],
+  });
+  const learningContextStatus = storedLearningContext
+    ? `topics=${storedLearningContext.topics.length}, facts=${storedLearningContext.keyFacts.length}, cards=${storedLearningContext.flashcardCandidates.length}`
+    : "none";
   const runtimeContextBlock = [
     `School: ${orgSettings.org?.name ?? "Spectra"}`,
     `School type: ${orgSettings.org?.schoolType ?? "unspecified"}`,
@@ -1828,6 +1874,7 @@ export async function runChatPipeline(request: NextRequest) {
     `Web search: ${searchStatus}`,
     `Memory profile: ${memoryStatus}`,
     `Memory directives applied: ${directiveStatus}`,
+    `Learning context: ${learningContextStatus}`,
   ].join("\n");
   const personalSoulExcerpt = buildPersonalSoulExcerpt({
     preferences: null,
@@ -1842,6 +1889,12 @@ export async function runChatPipeline(request: NextRequest) {
   }
   if (schoolSoulCapsule.capsule.trim()) {
     route.trace.toolchain.push("school_soul_capsule");
+  }
+  if (learningContextPrompt) {
+    route.trace.toolchain.push("learning_context_injection");
+  }
+  if (modeTransformGuidance) {
+    route.trace.toolchain.push("mode_transform_guidance");
   }
 
   const systemPromptParts = [buildSystemPrompt({
@@ -1875,6 +1928,12 @@ export async function runChatPipeline(request: NextRequest) {
   })];
 
   systemPromptParts.push(`=== RUNTIME CONTEXT ===\n${runtimeContextBlock}\n=== END RUNTIME CONTEXT ===`);
+  if (learningContextPrompt) {
+    systemPromptParts.push(`=== LEARNING CONTEXT ===\n${learningContextPrompt}\n=== END LEARNING CONTEXT ===`);
+  }
+  if (modeTransformGuidance) {
+    systemPromptParts.push(`=== MODE TRANSFORM GUIDANCE ===\n${modeTransformGuidance}\n=== END MODE TRANSFORM GUIDANCE ===`);
+  }
   systemPromptParts.push(
     `=== MODE CONTRACT ===
 Pedagogy: ${routePlan.modeContract.pedagogy}
@@ -3360,13 +3419,29 @@ BACK: [answer or definition]`,
       if (route.trace.phasePlan?.some((phase) => phase.id === "memory") && routePlan.shouldWriteMemory) {
         await emitPhaseUpdate("memory", "in_progress");
       }
-      const extractedMemory = routePlan.shouldWriteMemory
+      const shouldExtractLearningContext =
+        [
+          "tutor",
+          "explain",
+          "quiz",
+          "flashcard",
+          "exam",
+          "research",
+          "general",
+        ].includes(effectiveMode)
+        && finalizedResponse.trim().length >= 120;
+      let extractedLearningContext: LearningContext | null = null;
+      const extractedMemory = (routePlan.shouldWriteMemory || shouldExtractLearningContext)
         ? await maybeExtractMemory({
             actorClerkId: actor.clerkId,
             chatId,
             existingEntries: userMemory.entries,
             userMessage: normalizedMessage,
             assistantResponse: finalizedResponse,
+            persistMemory: routePlan.shouldWriteMemory,
+            onLearningContextExtracted: (context) => {
+              extractedLearningContext = context;
+            },
             onModelCall: (call) => {
               appendSubcall({
                 phaseId: "memory",
@@ -3423,6 +3498,28 @@ BACK: [answer or definition]`,
             confidence: entry.confidence,
           })),
         });
+      }
+      const mergedLearningContext = mergeLearningContexts(storedLearningContext, extractedLearningContext);
+      const nextLearningContext = serializeLearningContext(mergedLearningContext);
+      const previousLearningContext = typeof (chatData.chat as { learningContext?: unknown }).learningContext === "string"
+        ? String((chatData.chat as { learningContext?: unknown }).learningContext)
+        : undefined;
+      if (nextLearningContext && nextLearningContext !== previousLearningContext) {
+        await convexMutation("chats:setLearningContext", {
+          actorClerkId: actor.clerkId,
+          chatId,
+          learningContext: nextLearningContext,
+        }).catch(() => {});
+        route.trace.toolchain.push("learning_context_updated");
+      }
+      const modeSuggestions = buildModeSuggestions({
+        mode: effectiveMode,
+        response: finalizedResponse,
+        learningContext: mergedLearningContext,
+      });
+      if (modeSuggestions.length > 0) {
+        (route.trace as { modeSuggestions?: Array<{ mode: StudyMode; label: string; prompt: string }> }).modeSuggestions = modeSuggestions;
+        route.trace.toolchain.push("mode_switch_chips");
       }
 
       const assistantCount = history.filter((message) => message.role === "assistant").length;

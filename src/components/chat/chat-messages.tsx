@@ -32,6 +32,7 @@ type ChatMessagesProps = {
   onSubmitQuizAnswers?: (payload: { messageId: string; result: QuizSubmitResult }) => void;
   onSaveFlashcardDeck?: (payload: { messageId: string; title: string; cards: FlashcardCard[] }) => void;
   onRateFlashcardCard?: (payload: { messageId: string; cardHash: string; quality: number }) => void;
+  onEditFlashcardCard?: (payload: { messageId: string; cardHash: string; front: string; back: string }) => void;
   onRegenerate?: () => void;
   onRegenerateWithModel?: (modelId: string) => void;
   onAssistantFeedback?: (messageId: string, positive: boolean, modelId?: string) => void;
@@ -81,6 +82,7 @@ export function ChatMessages({
   onSubmitQuizAnswers,
   onSaveFlashcardDeck,
   onRateFlashcardCard,
+  onEditFlashcardCard,
   onRegenerate,
   onRegenerateWithModel,
   onAssistantFeedback,
@@ -289,6 +291,26 @@ export function ChatMessages({
     return "medium" as const;
   }
 
+  function getModeSuggestions(msg: Message): Array<{ mode: StudyMode; label: string; prompt: string }> {
+    const suggestions = msg.routeTrace?.modeSuggestions;
+    if (!Array.isArray(suggestions)) return [];
+    return suggestions
+      .map((row) => ({
+        mode: row?.mode,
+        label: row?.label,
+        prompt: row?.prompt,
+      }))
+      .filter(
+        (row): row is { mode: StudyMode; label: string; prompt: string } =>
+          typeof row.mode === "string"
+          && typeof row.label === "string"
+          && row.label.trim().length > 0
+          && typeof row.prompt === "string"
+          && row.prompt.trim().length > 0,
+      )
+      .slice(0, 3);
+  }
+
   const streamingStatus = (() => {
     switch (streamPhase) {
       case "compacting": return "Compacting context";
@@ -361,6 +383,7 @@ export function ChatMessages({
               msg.mode !== undefined;
             const assistantIsBookmarked = bookmarkedMessageIds.has(msg._id);
             const assistantBookmarking = bookmarkingMessageId === msg._id;
+            const modeSuggestions = msg.role === "assistant" ? getModeSuggestions(msg) : [];
             const quizDifficulty = inferQuizDifficulty(msg.routeTrace?.toolchain);
 
             if (msg.role === "assistant" && (msgMode === "quiz" || msgMode === "exam")) {
@@ -585,6 +608,14 @@ export function ChatMessages({
                             quality: payload.quality,
                           });
                         }}
+                        onEditCard={(payload) => {
+                          onEditFlashcardCard?.({
+                            messageId: msg._id,
+                            cardHash: payload.cardHash,
+                            front: payload.front,
+                            back: payload.back,
+                          });
+                        }}
                         onFollowUp={onFollowUp}
                       />
                     </ChatMessage>
@@ -728,6 +759,23 @@ export function ChatMessages({
                     onSubmitQuizAnswers?.({ messageId: msg._id, result });
                   }}
                 />
+                {msg.role === "assistant" && modeSuggestions.length > 0 ? (
+                  <div className="mt-2 ml-14 flex flex-wrap gap-2">
+                    {modeSuggestions.map((suggestion, suggestionIndex) => (
+                      <button
+                        key={`${msg._id}-mode-suggestion-${suggestionIndex}`}
+                        type="button"
+                        onClick={() => {
+                          onModeChange?.(suggestion.mode);
+                          onFollowUp?.(suggestion.prompt);
+                        }}
+                        className="inline-flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-pill)] border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs text-[var(--text-secondary)] transition hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]"
+                      >
+                        {suggestion.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             );
           })}

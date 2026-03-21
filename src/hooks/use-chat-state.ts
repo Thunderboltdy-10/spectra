@@ -2369,9 +2369,13 @@ export function useChatState() {
       if (!response.ok) {
         throw new Error(await response.text());
       }
-      const result = (await response.json()) as { updated?: boolean; created?: boolean };
+      const result = (await response.json()) as { updated?: boolean; created?: boolean; appended?: number };
       if (result.updated) {
-        toast.message("Flashcard deck updated");
+        if (typeof result.appended === "number" && result.appended > 0) {
+          toast.success(`Added ${result.appended} new flashcard${result.appended === 1 ? "" : "s"}`);
+        } else {
+          toast.message("Flashcard deck updated");
+        }
       } else {
         toast.success("Flashcard deck saved");
       }
@@ -2396,6 +2400,29 @@ export function useChatState() {
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to rate card");
+    }
+  }
+
+  async function editFlashcardCard(payload: { cardHash: string; front: string; back: string }) {
+    if (!selectedChatId) return;
+    try {
+      const response = await fetch("/api/flashcards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "edit_card",
+          chatId: selectedChatId,
+          cardHash: payload.cardHash,
+          front: payload.front,
+          back: payload.back,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      toast.success("Flashcard updated");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update flashcard");
     }
   }
 
@@ -2767,6 +2794,7 @@ export function useChatState() {
     submitQuizAnswers,
     saveFlashcardDeck,
     rateFlashcardCard,
+    editFlashcardCard,
     regenerateWithModel,
     editAndResend,
     branchFromMessage,

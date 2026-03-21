@@ -7,6 +7,11 @@ import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 import { extractCitationsFromText } from "@/lib/orchestrator/compose";
 import type { WebSearchSource } from "@/lib/orchestrator/retrieval";
 import { withTimeout, type MemoryEntry } from "@/lib/orchestrator/history";
+import {
+  coerceLearningContext,
+  deriveLearningContextFallback,
+  type LearningContext,
+} from "@/lib/orchestrator/learning-context";
 import type { Citation } from "@/types";
 
 const TITLE_MIN_WORDS = 2;
@@ -1063,6 +1068,8 @@ export async function maybeExtractMemory(params: {
   existingEntries: MemoryEntry[];
   userMessage: string;
   assistantResponse: string;
+  persistMemory?: boolean;
+  onLearningContextExtracted?: (context: LearningContext) => void;
   onModelCall?: (call: {
     model: string;
     usage?: {
@@ -1091,7 +1098,7 @@ export async function maybeExtractMemory(params: {
       {
         role: "system",
         content:
-          "Extract durable student facts. Focus on: name, grade/year, school, timezone/location, languages, subjects, goals, weaknesses, interests, study habits, communication preferences, learning style, and personality traits. Return JSON array of {key,value,confidence}. Only include facts likely to help future tutoring.",
+          "Extract durable student facts and lesson continuity context. Return JSON only in this shape: {\"memory\":[{\"key\":\"...\",\"value\":\"...\",\"confidence\":0.0}],\"learningContext\":{\"topics\":string[],\"keyFacts\":[{\"fact\":\"...\",\"source\":\"model|search|rag|user\",\"confidence\":0.0}],\"misconceptions\":string[],\"quizableFacts\":string[],\"flashcardCandidates\":[{\"front\":\"...\",\"back\":\"...\"}],\"difficultyLevel\":1-5,\"uncertaintyGaps\":string[],\"nextSteps\":string[]}}. For memory: include only durable student facts useful across future tutoring.",
       },
       {
         role: "user",
@@ -1160,6 +1167,7 @@ export async function maybeExtractMemory(params: {
     return inferred.slice(0, 4);
   })();
   extracted.push(...heuristics);
+  let extractedLearningContext: LearningContext | null = null;
 
   if (completion) {
     await recordUsage(completion);
@@ -1170,8 +1178,18 @@ export async function maybeExtractMemory(params: {
       try {
         const parsed = JSON.parse(jsonMatch[0]) as
           | Array<{ key?: string; value?: string; confidence?: number }>
-          | { key?: string; value?: string; confidence?: number };
-        const entries = Array.isArray(parsed) ? parsed : [parsed];
+          | {
+              key?: string;
+              value?: string;
+              confidence?: number;
+              memory?: Array<{ key?: string; value?: string; confidence?: number }>;
+              learningContext?: unknown;
+            };
+        const entries = Array.isArray(parsed)
+          ? parsed
+          : Array.isArray(parsed.memory)
+            ? parsed.memory
+            : [parsed];
         extracted.push(
           ...entries
             .filter((entry) => typeof entry.key === "string" && typeof entry.value === "string")
@@ -1183,10 +1201,27 @@ export async function maybeExtractMemory(params: {
               extractedAt: now,
             })),
         );
+        if (!Array.isArray(parsed)) {
+          extractedLearningContext = coerceLearningContext(parsed.learningContext);
+        }
       } catch {
         // Fallback to heuristic extraction only.
       }
     }
+  }
+
+  if (!extractedLearningContext) {
+    extractedLearningContext = deriveLearningContextFallback({
+      userMessage: params.userMessage,
+      assistantResponse: params.assistantResponse,
+    });
+  }
+  if (extractedLearningContext) {
+    params.onLearningContextExtracted?.(extractedLearningContext);
+  }
+
+  if (params.persistMemory === false) {
+    return extracted;
   }
 
   if (extracted.length === 0) return [];

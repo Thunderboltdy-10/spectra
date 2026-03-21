@@ -118,6 +118,28 @@ function freshnessScore(model: CatalogModelEntry) {
   return 0.32;
 }
 
+function ageDaysFromModel(model: CatalogModelEntry) {
+  const releaseTs = parseReleaseTime(model);
+  if (!releaseTs) return undefined;
+  return Math.max(0, (Date.now() - releaseTs) / (24 * 60 * 60 * 1000));
+}
+
+function stalenessPenalty(model: CatalogModelEntry) {
+  const ageDays = ageDaysFromModel(model);
+  if (typeof ageDays !== "number") return 0;
+  if (ageDays <= 365) return 0;
+  if (ageDays <= 720) return 0.05;
+  if (ageDays <= 1080) return 0.1;
+  return 0.16;
+}
+
+function deepResearchPenalty(modelId: string, mode: StudyMode, stakes: StakeLevel) {
+  if (!/deep[-_ ]?research/i.test(modelId)) return 0;
+  if (mode === "research" && stakes === "high") return 0.06;
+  if (mode === "research") return 0.14;
+  return 0.28;
+}
+
 function contextFit(model: CatalogModelEntry, messageLength: number) {
   if (!model.contextLength || model.contextLength <= 0) return 0.62;
   const ratio = messageLength / model.contextLength;
@@ -334,6 +356,8 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
 
     const repeatPenalty = repetitionPenalty(model.modelId, recentModels);
     const providerPenalty = providerDiversityPenalty(provider, recentProviders);
+    const agePenalty = stalenessPenalty(model);
+    const researchPenalty = deepResearchPenalty(model.modelId, input.mode, input.stakes);
     const previousPenalty = input.previousModelUsed && input.previousModelUsed === model.modelId ? 0.08 : 0;
     const antiLockIn = Math.max(0, 1 - repeatPenalty - providerPenalty - previousPenalty);
     const laneBoost = lane === selectLane(weights, seed) ? 0.08 : lane === "fresh" ? 0.03 : 0;
@@ -348,7 +372,9 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
       context * 0.1 +
       antiLockIn * 0.16 +
       laneBoost +
-      preferredBoost;
+      preferredBoost -
+      agePenalty -
+      researchPenalty;
 
     scored.push({
       model,
@@ -369,6 +395,8 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
         `contextFit ${context.toFixed(2)}`,
         `antiLockIn ${antiLockIn.toFixed(2)}`,
         providerPenalty > 0 ? `providerDiversityPenalty ${providerPenalty.toFixed(2)}` : "providerDiversityPenalty 0.00",
+        agePenalty > 0 ? `stalenessPenalty -${agePenalty.toFixed(2)}` : "stalenessPenalty 0.00",
+        researchPenalty > 0 ? `deepResearchPenalty -${researchPenalty.toFixed(2)}` : "deepResearchPenalty 0.00",
       ],
     });
   }

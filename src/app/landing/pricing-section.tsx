@@ -5,10 +5,13 @@ import Link from "next/link";
 import { ArrowRight, Check } from "lucide-react";
 
 const FEATURES = [
-  "All 9 learning modes",
-  "Intelligent model routing (400+ models)",
+  "12 study modes (8 live + 4 staged)",
+  "Intelligent routing across 260+ active models",
+  "Reliability fallback chain (including length-safe retries)",
+  "Clarification continuity + branchable responses",
   "School context layer (curriculum, materials, rules)",
-  "Personal learning layer (style, memory, adaptation)",
+  "Two-layer memory fabric (profile + topic memory)",
+  "Budget-aware orchestration and usage controls",
   "Teacher dashboard & analytics",
   "Priority support",
 ];

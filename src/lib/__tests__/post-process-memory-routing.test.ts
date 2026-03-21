@@ -8,8 +8,21 @@ describe("memory directive routing helpers", () => {
       directiveType: "remember",
     });
     expect(entries).toHaveLength(1);
+    expect(entries[0]?.key).toBe("remember_i_study_ib_hl_physics");
     expect(entries[0]?.category).toBe("academic");
     expect(entries[0]?.text).toBe("I study IB HL Physics");
+  });
+
+  it("derives distinct remember keys from each statement", () => {
+    const first = buildDirectiveMemoryEntries({
+      statement: "Remember that I love chemistry labs",
+      directiveType: "remember",
+    });
+    const second = buildDirectiveMemoryEntries({
+      statement: "Remember that World War II is my strongest topic",
+      directiveType: "remember",
+    });
+    expect(first[0]?.key).not.toBe(second[0]?.key);
   });
 
   it("normalizes profile updates into profile entries", () => {

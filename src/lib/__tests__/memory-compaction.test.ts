@@ -41,7 +41,7 @@ describe("memory consolidation", () => {
     expect(merged).toHaveLength(0);
   });
 
-  it("caps merged memory entries at 20", () => {
+  it("caps merged memory entries at 40", () => {
     const now = Date.now();
     const incoming: MemoryEntry[] = Array.from({ length: 30 }).map((_, index) => ({
       key: `key_${index}`,
@@ -51,7 +51,7 @@ describe("memory consolidation", () => {
     }));
 
     const merged = mergeMemoryEntries([], incoming);
-    expect(merged.length).toBeLessThanOrEqual(20);
+    expect(merged.length).toBeLessThanOrEqual(40);
   });
 
   it("keeps raw memory text under 1500 characters", () => {

@@ -75,6 +75,7 @@ import {
 import {
   buildRecentContextSnapshot,
   formatClarificationAsText,
+  isClarificationFollowUpMessage,
   needsClarification,
   parseRecentContext,
   serializeRecentContext,
@@ -350,9 +351,16 @@ function isLegacyCitationValidatorError(error: unknown) {
   return lower.includes("argumentvalidationerror") && lower.includes("citations");
 }
 
+function isParentMessageValidatorError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const lower = message.toLowerCase();
+  return lower.includes("argumentvalidationerror") && lower.includes("parentmessageid");
+}
+
 async function appendAssistantMessageWithCitationFallback(params: {
   actorClerkId: string;
   chatId: string;
+  parentMessageId?: string;
   content: string;
   mode: StudyMode;
   attachments?: string[];
@@ -380,6 +388,7 @@ async function appendAssistantMessageWithCitationFallback(params: {
     actorClerkId: params.actorClerkId,
     chatId: params.chatId,
     role: "assistant" as const,
+    parentMessageId: params.parentMessageId,
     content: params.content,
     attachments: params.attachments,
     attachmentResourceIds: params.attachmentResourceIds,
@@ -398,11 +407,13 @@ async function appendAssistantMessageWithCitationFallback(params: {
   try {
     return await convexMutation("chats:appendMessage", baseArgs) as { messageId: string };
   } catch (error) {
-    if (!isLegacyCitationValidatorError(error)) {
+    const citationCompatError = isLegacyCitationValidatorError(error);
+    const parentCompatError = isParentMessageValidatorError(error);
+    if (!citationCompatError && !parentCompatError) {
       throw error;
     }
 
-    return await convexMutation("chats:appendMessage", {
+    const normalizedCitationArgs = {
       ...baseArgs,
       citations: params.citations.map((citation) => ({
         filename: citation.filename,
@@ -412,7 +423,28 @@ async function appendAssistantMessageWithCitationFallback(params: {
         resourceId: citation.resourceId,
         snippet: citation.snippet,
       })),
-    }) as { messageId: string };
+    };
+    const withoutParent = {
+      ...baseArgs,
+      parentMessageId: undefined,
+    };
+    const withoutParentNormalizedCitations = {
+      ...normalizedCitationArgs,
+      parentMessageId: undefined,
+    };
+
+    if (citationCompatError && parentCompatError) {
+      return await convexMutation("chats:appendMessage", withoutParentNormalizedCitations) as { messageId: string };
+    }
+    if (citationCompatError) {
+      return await convexMutation("chats:appendMessage", normalizedCitationArgs) as { messageId: string };
+    }
+    try {
+      return await convexMutation("chats:appendMessage", withoutParent) as { messageId: string };
+    } catch (retryError) {
+      if (!isLegacyCitationValidatorError(retryError)) throw retryError;
+      return await convexMutation("chats:appendMessage", withoutParentNormalizedCitations) as { messageId: string };
+    }
   }
 }
 
@@ -559,6 +591,10 @@ export async function runChatPipeline(request: NextRequest) {
     failureCount: number;
     avgLatencyMs?: number;
   }>;
+  const globalRecentAssistantModels = (await convexQuery("chats:listRecentAssistantModels", {
+    actorClerkId: actor.clerkId,
+    limit: 30,
+  })) as string[];
   const runtimeStatMap = Object.fromEntries(
     runtimeStats.map((row) => [row.modelId, row]),
   ) as Record<string, { successCount: number; failureCount: number; avgLatencyMs?: number }>;
@@ -683,6 +719,11 @@ export async function runChatPipeline(request: NextRequest) {
     logger.info("user directive: force multi-agent");
     (body as Record<string, unknown>).forceMultiAgent = true;
   }
+  if (userDirectives.memoryActions?.length) {
+    logger.info("user directive: memory actions", {
+      actions: userDirectives.memoryActions.map((action) => action.type),
+    });
+  }
   if (userDirectives.forcedModel && !body.forcedModel) {
     (body as Record<string, unknown>).forcedModel = userDirectives.forcedModel;
   }
@@ -712,9 +753,26 @@ export async function runChatPipeline(request: NextRequest) {
   const stream = new TransformStream();
   const writer = stream.writable.getWriter();
   const encoder = new TextEncoder();
+  let streamClosed = false;
 
   const send = async (payload: Record<string, unknown>) => {
-    await writer.write(encoder.encode(`${JSON.stringify(payload)}\n`));
+    if (streamClosed) return;
+    try {
+      await writer.write(encoder.encode(`${JSON.stringify(payload)}\n`));
+    } catch (error) {
+      streamClosed = true;
+      const err = error as { code?: string; message?: string } | undefined;
+      const message = err?.message ?? "";
+      const isClosedStreamError =
+        err?.code === "ERR_INVALID_STATE"
+        || /writablestream is closed/i.test(message)
+        || /invalid state/i.test(message);
+      if (!isClosedStreamError) {
+        logger.warn("stream write failed", {
+          error: message || String(error),
+        });
+      }
+    }
   };
 
   // Buffer events that fire before the Response is returned (no reader attached yet).
@@ -805,12 +863,7 @@ export async function runChatPipeline(request: NextRequest) {
     }).catch(() => {});
   };
 
-  if (isRegenerate) {
-    await convexMutation("chats:deleteLastAssistantMessage", {
-      actorClerkId: actor.clerkId,
-      chatId,
-    });
-  } else if (shouldPersistUserMessage) {
+  if (!isRegenerate && shouldPersistUserMessage) {
     const appendedUser = (await convexMutation("chats:appendMessage", {
       actorClerkId: actor.clerkId,
       chatId,
@@ -899,11 +952,20 @@ export async function runChatPipeline(request: NextRequest) {
     savedAt: (chatData.chat as { recentContextAt?: unknown }).recentContextAt,
   });
   const lastAssistantMessage = [...history].reverse().find((message) => message.role === "assistant");
-  const lastAssistantWasClarification = Boolean(
-    (lastAssistantMessage?.routeTrace as { clarificationBlock?: unknown } | undefined)?.clarificationBlock,
+  const lastClarificationBlock = (
+    lastAssistantMessage?.routeTrace as { clarificationBlock?: ClarificationBlock } | undefined
+  )?.clarificationBlock;
+  const lastAssistantWasClarification = Boolean(lastClarificationBlock);
+  const clarificationFollowUp = isClarificationFollowUpMessage({
+    message: normalizedMessage,
+    block: lastClarificationBlock,
+  });
+  const shouldReuseRecentContext = Boolean(
+    recentContextCache
+    && lastAssistantWasClarification
+    && clarificationFollowUp,
   );
-  const shouldReuseRecentContext = Boolean(recentContextCache && lastAssistantWasClarification);
-  if (shouldReuseRecentContext) {
+  if (recentContextCache && lastAssistantWasClarification) {
     void convexMutation("chats:setRecentContext", {
       actorClerkId: actor.clerkId,
       chatId,
@@ -911,6 +973,18 @@ export async function runChatPipeline(request: NextRequest) {
       recentContextAt: undefined,
     }).catch(() => {});
   }
+  const latestUserMessageInHistory = [...history].reverse().find((message) => message.role === "user");
+  const currentTurnParentMessageId = persistedUserMessageId ?? latestUserMessageInHistory?._id;
+  const resolvedUserMessageId = persistedUserMessageId ?? currentTurnParentMessageId;
+  const historyForTurn = (() => {
+    if (!isRegenerate) return history;
+    for (let i = history.length - 1; i >= 0; i -= 1) {
+      if (history[i]?.role === "user") {
+        return history.slice(0, i + 1);
+      }
+    }
+    return history;
+  })();
   const isFirstAssistantTurn = history.every((message) => message.role !== "assistant");
   const attemptStats = extractAttemptStats(history);
   const directiveMemorySummary = {
@@ -930,6 +1004,10 @@ export async function runChatPipeline(request: NextRequest) {
           target: action.target,
           sourceChatId: action.target ? undefined : chatId,
         }).catch(() => ({ deleted: 0 }));
+        logger.info("memory directive applied: forget", {
+          target: action.target,
+          deleted: result.deleted ?? 0,
+        });
         directiveMemorySummary.forgotten += result.deleted ?? 0;
         continue;
       }
@@ -1077,7 +1155,7 @@ export async function runChatPipeline(request: NextRequest) {
       : undefined;
 
   const scheduledCompaction = shouldScheduleCompaction({
-    history,
+    history: historyForTurn,
     mode: effectiveMode,
     hasExistingSummary: Boolean(existingSummary),
   });
@@ -1086,7 +1164,7 @@ export async function runChatPipeline(request: NextRequest) {
     void maybeCompactHistory({
       actorClerkId: actor.clerkId,
       chatId,
-      history,
+      history: historyForTurn,
       onModelCall: (call) => {
         deferSubcall({
           phaseId: "planning",
@@ -1107,7 +1185,7 @@ export async function runChatPipeline(request: NextRequest) {
     effectiveMode === "quiz" || effectiveMode === "exam" || effectiveMode === "flashcard"
       ? 14
       : 8;
-  const recentHistory = existingSummary ? history.slice(-compactedWindow) : history;
+  const recentHistory = existingSummary ? historyForTurn.slice(-compactedWindow) : historyForTurn;
   const historyForModel = recentHistory.map((message, index) => {
     const isLast = index === recentHistory.length - 1;
     if (isLast && message.role === "user" && auto.promptEnhanced) {
@@ -1461,6 +1539,17 @@ export async function runChatPipeline(request: NextRequest) {
   const previousAssistantModel = [...history]
     .reverse()
     .find((message) => message.role === "assistant" && message.modelUsed)?.modelUsed;
+  const chatRecentAssistantModels = history
+    .filter((message) => message.role === "assistant")
+    .map((message) => message.modelUsed)
+    .filter((model): model is string => Boolean(model))
+    .slice(-20);
+  const combinedRecentAssistantModels = Array.from(
+    new Set([
+      ...chatRecentAssistantModels,
+      ...globalRecentAssistantModels.filter((model): model is string => Boolean(model && model.trim())),
+    ]),
+  ).slice(-30);
 
   const fallbackManualModel =
     body.manualModel
@@ -1498,10 +1587,7 @@ export async function runChatPipeline(request: NextRequest) {
       selectedAgent?.preferredModel,
     ].filter((value): value is string => Boolean(value)),
     previousModelUsed: previousAssistantModel,
-    recentModels: history
-      .filter((message) => message.role === "assistant")
-      .map((message) => message.modelUsed)
-      .filter((model): model is string => Boolean(model)),
+    recentModels: combinedRecentAssistantModels,
     modelCatalog: catalog,
     modelRuntimeStats: runtimeStatMap,
     seedKey: `${chatId}:${normalizedMessage}`,
@@ -2236,10 +2322,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     preferredCapabilities: ["reasoning"],
     preferredModelIds: [route.primaryModel],
     previousModelUsed: route.primaryModel,
-    recentModels: history
-      .filter((message) => message.role === "assistant")
-      .map((message) => message.modelUsed)
-      .filter((model): model is string => Boolean(model)),
+    recentModels: combinedRecentAssistantModels,
     modelCatalog: catalog,
     modelRuntimeStats: runtimeStatMap,
     seedKey: `${chatId}:${normalizedMessage}:support`,
@@ -2269,10 +2352,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         : ["reasoning"],
     preferredModelIds: [selectedAgent?.preferredModel, route.primaryModel].filter((value): value is string => Boolean(value)),
     previousModelUsed: route.primaryModel,
-    recentModels: history
-      .filter((message) => message.role === "assistant")
-      .map((message) => message.modelUsed)
-      .filter((model): model is string => Boolean(model)),
+    recentModels: combinedRecentAssistantModels,
     modelCatalog: catalog,
     modelRuntimeStats: runtimeStatMap,
     seedKey: `${chatId}:${normalizedMessage}:synthesis`,
@@ -2317,10 +2397,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
       preferredCapabilities: ["reasoning"],
       preferredModelIds: [supportModel, route.primaryModel],
       previousModelUsed: route.primaryModel,
-      recentModels: history
-        .filter((message) => message.role === "assistant")
-        .map((message) => message.modelUsed)
-        .filter((model): model is string => Boolean(model)),
+      recentModels: combinedRecentAssistantModels,
       modelCatalog: catalog,
       modelRuntimeStats: runtimeStatMap,
       seedKey: `${chatId}:${normalizedMessage}:verification`,
@@ -2550,14 +2627,12 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         }));
         (route.trace as any).totalDurationMs = Date.now() - requestStartedAt;
 
-        const appended = (await convexMutation("chats:appendMessage", {
+        const appended = await appendAssistantMessageWithCitationFallback({
           actorClerkId: actor.clerkId,
           chatId,
-          role: "assistant",
+          parentMessageId: currentTurnParentMessageId,
           content: clarificationText,
-          enhancedContent: undefined,
           mode: effectiveMode,
-          packId: body.packId,
           citations: [],
           modelRequested: undefined,
           modelUsed: undefined,
@@ -2567,14 +2642,14 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           verificationPassed: undefined,
           thinkingContent: undefined,
           routeTrace: route.trace,
-        })) as { messageId: string };
+        });
         assistantPersisted = true;
 
         await send({
           type: "done",
           content: clarificationText,
           chatId,
-          userMessageId: persistedUserMessageId,
+          userMessageId: resolvedUserMessageId,
           messageId: appended.messageId,
           modelUsed: undefined,
           modelRequested: route.primaryModel,
@@ -2746,6 +2821,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         const appended = await appendAssistantMessageWithCitationFallback({
           actorClerkId: actor.clerkId,
           chatId,
+          parentMessageId: currentTurnParentMessageId,
           content: finalizedResponse,
           mode: effectiveMode,
           citations,
@@ -2821,6 +2897,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
             activityType: string;
             modeUsed: StudyMode;
             currentStreak?: number;
+            hasCitations?: boolean;
           },
           {
             xpAwarded: number;
@@ -2832,6 +2909,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           activityType: gamificationActivityType(effectiveMode),
           modeUsed: effectiveMode,
           currentStreak: streakUpdate?.currentStreak,
+          hasCitations: citations.length > 0,
         }).catch(() => null);
 
         const unlockedAchievements = mergeUnlockedAchievements(
@@ -2905,7 +2983,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           type: "done",
           content: finalizedResponse,
           chatId,
-          userMessageId: persistedUserMessageId,
+          userMessageId: resolvedUserMessageId,
           messageId: appended.messageId,
           modelUsed,
           modelRequested,
@@ -3504,6 +3582,7 @@ BACK: [answer or definition]`,
       const appended = await appendAssistantMessageWithCitationFallback({
         actorClerkId: actor.clerkId,
         chatId,
+        parentMessageId: currentTurnParentMessageId,
         content: finalizedResponse,
         mode: effectiveMode,
         attachments: generatedArtifactAttachments,
@@ -3591,6 +3670,7 @@ BACK: [answer or definition]`,
           activityType: string;
           modeUsed: StudyMode;
           currentStreak?: number;
+          hasCitations?: boolean;
         },
         {
           xpAwarded: number;
@@ -3602,6 +3682,7 @@ BACK: [answer or definition]`,
         activityType: gamificationActivityType(effectiveMode),
         modeUsed: effectiveMode,
         currentStreak: streakUpdate?.currentStreak,
+        hasCitations: citations.length > 0,
       }).catch(() => null);
 
       const unlockedAchievements = mergeUnlockedAchievements(
@@ -3781,7 +3862,7 @@ BACK: [answer or definition]`,
         type: "done",
         content: finalizedResponse,
         chatId,
-        userMessageId: persistedUserMessageId,
+        userMessageId: resolvedUserMessageId,
         messageId: appended.messageId,
         modelUsed,
         modelRequested,
@@ -3853,7 +3934,9 @@ BACK: [answer or definition]`,
         },
       });
     } finally {
-      await writer.close();
+      if (!streamClosed) {
+        await writer.close().catch(() => {});
+      }
     }
   })();
 

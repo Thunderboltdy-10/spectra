@@ -347,6 +347,56 @@ function clampText(value: string, max: number) {
   return value.trim().slice(0, max);
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const CLARIFICATION_RESPONSE_PREFIX_RE = /^clarification answers\s*:/i;
+const CLARIFICATION_RESPONSE_CONTINUE_RE = /please continue with this scope\.?/i;
+const COMMAND_STYLE_FOLLOWUP_RE = /^(research|explain|write|create|generate|compare|summarize|summarise|analy[sz]e|tell me|give me|teach me|help me)\b/i;
+
+export function isClarificationFollowUpMessage(params: {
+  message: string;
+  block: ClarificationBlock | null | undefined;
+}) {
+  const message = params.message.trim();
+  if (!message || !params.block) return false;
+
+  if (CLARIFICATION_RESPONSE_PREFIX_RE.test(message) || CLARIFICATION_RESPONSE_CONTINUE_RE.test(message)) {
+    return true;
+  }
+
+  const questionIds = params.block.questions
+    .map((question) => question.id.trim())
+    .filter(Boolean);
+  if (questionIds.length > 0) {
+    for (const id of questionIds) {
+      const idAnswerRe = new RegExp(`(?:^|\\n)\\s*-\\s*${escapeRegExp(id)}\\s*:`, "i");
+      if (idAnswerRe.test(message)) {
+        return true;
+      }
+    }
+  }
+
+  if (/(?:^|\n)\s*\d+\s*[).:-]\s+\S+/m.test(message) && !message.includes("?")) {
+    return true;
+  }
+
+  const normalized = message.toLowerCase();
+  if (normalized.includes("?")) return false;
+  if (COMMAND_STYLE_FOLLOWUP_RE.test(normalized)) return false;
+
+  const optionLabels = params.block.questions
+    .flatMap((question) => question.options ?? [])
+    .map((option) => option.label.trim().toLowerCase())
+    .filter(Boolean);
+  if (optionLabels.some((label) => normalized.includes(label))) {
+    return true;
+  }
+
+  return false;
+}
+
 export function buildRecentContextSnapshot(params: {
   requestClass: RequestClass;
   mode: StudyMode;

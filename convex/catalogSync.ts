@@ -7,11 +7,11 @@ import { lookupCuratedModelMeta } from "./curatedModelRegistry";
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
 const FEATURED: Record<string, number> = {
-  "google/gemini-2.0-flash-exp:free": 1,
-  "deepseek/deepseek-r1-0528:free": 2,
-  "anthropic/claude-sonnet-4-5": 3,
-  "google/gemini-2.5-pro": 4,
-  "openai/gpt-4.1-mini": 5,
+  "stepfun/step-3.5-flash:free": 1,
+  "openai/gpt-oss-120b:free": 2,
+  "anthropic/claude-sonnet-4.5": 3,
+  "openai/gpt-5.4-mini": 4,
+  "openai/gpt-5.4-nano": 5,
   "google/gemma-3-27b-vision:free": 6,
 };
 

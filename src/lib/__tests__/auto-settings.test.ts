@@ -162,17 +162,25 @@ describe("auto-settings prompt analysis", () => {
 
   it("parses memory correction directives", () => {
     const directives = parseUserDirectives("Forget about WWII. Don't bring this up for French vocabulary.");
+    const forgetWithSuffix = parseUserDirectives("Forget about WWII in my memory.");
     expect(directives.memoryActions).toEqual([
       { type: "forget", target: "wwii" },
       { type: "negative_topic", topic: "french vocabulary" },
+    ]);
+    expect(forgetWithSuffix.memoryActions).toEqual([
+      { type: "forget", target: "wwii" },
     ]);
   });
 
   it("parses explicit remember/profile directives", () => {
     const remember = parseUserDirectives("Remember that I study IB HL.");
+    const rememberGeneric = parseUserDirectives("Remember that World War II is my strongest history topic.");
     const update = parseUserDirectives("Update my profile: I prefer concise explanations.");
     expect(remember.memoryActions).toEqual([
       { type: "remember", statement: "I study IB HL" },
+    ]);
+    expect(rememberGeneric.memoryActions).toEqual([
+      { type: "remember", statement: "World War II is my strongest history topic" },
     ]);
     expect(update.memoryActions).toEqual([
       { type: "update_profile", statement: "I prefer concise explanations" },

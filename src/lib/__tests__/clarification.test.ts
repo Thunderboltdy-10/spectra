@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildRecentContextSnapshot,
   formatClarificationAsText,
+  isClarificationFollowUpMessage,
   needsClarification,
   parseRecentContext,
   serializeRecentContext,
@@ -168,5 +169,43 @@ describe("formatClarificationAsText", () => {
     expect(formatted).toContain("Before I continue");
     expect(formatted).toContain("1. What scope should I use?");
     expect(formatted).toContain("Options: Short / Deep");
+  });
+});
+
+describe("isClarificationFollowUpMessage", () => {
+  const block = {
+    context: "Before I continue, I need your constraints.",
+    questions: [
+      {
+        id: "research_scope",
+        text: "What exact angle should I focus on?",
+        type: "free_text" as const,
+      },
+      {
+        id: "depth",
+        text: "How deep should I go?",
+        type: "single_choice" as const,
+        options: [
+          { id: "quick_brief", label: "Quick brief" },
+          { id: "deep_dive", label: "Deep dive" },
+        ],
+      },
+    ],
+  };
+
+  it("detects structured clarification card replies", () => {
+    const result = isClarificationFollowUpMessage({
+      message: "Clarification answers:\n- research_scope: Carbon policy in the EU\n- depth: deep_dive\nPlease continue with this scope.",
+      block,
+    });
+    expect(result).toBe(true);
+  });
+
+  it("does not treat unrelated new prompts as clarification replies", () => {
+    const result = isClarificationFollowUpMessage({
+      message: "Explain photosynthesis with examples.",
+      block,
+    });
+    expect(result).toBe(false);
   });
 });

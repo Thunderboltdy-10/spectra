@@ -112,7 +112,7 @@ export class StructuredLogger {
 
     // Fire-and-forget DB persist for error/warn events
     if (level === "error" || level === "warn") {
-      void convexMutation("errorEvents:log", {
+      const persistResult = convexMutation("errorEvents:log", {
         level,
         message: `${message}${error ? `: ${error.message}` : ""}`,
         source: this._context.path ?? undefined,
@@ -120,9 +120,12 @@ export class StructuredLogger {
         metadata: metadata ? JSON.stringify(metadata).slice(0, 2000) : undefined,
         actorClerkId: typeof this._context.userId === "string" ? this._context.userId : undefined,
         chatId: typeof this._context.chatId === "string" ? (this._context.chatId as string) : undefined,
-      }).catch(() => {
-        // Never let error reporting break the main flow
       });
+      if (persistResult && typeof (persistResult as { catch?: unknown }).catch === "function") {
+        void (persistResult as Promise<unknown>).catch(() => {
+          // Never let error reporting break the main flow
+        });
+      }
     }
   }
   

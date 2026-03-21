@@ -81,7 +81,7 @@ export const saveDeck = mutation({
       .map((card) => ({
         front: card.front.trim(),
         back: card.back.trim(),
-        cardHash: card.cardHash?.trim() || hashCard(card.front, card.back),
+        cardHash: hashCard(card.front, card.back),
       }))
       .filter((card) => card.front.length > 0 && card.back.length > 0);
 
@@ -217,6 +217,11 @@ export const listDecks = query({
       .query("flashcardDecks")
       .withIndex("by_user_updated", (q) => q.eq("userId", actor._id))
       .collect();
+    const allProgress = await ctx.db
+      .query("flashcardProgress")
+      .withIndex("by_user", (q) => q.eq("userId", actor._id))
+      .collect();
+    const progressByCardHash = new Map(allProgress.map((row) => [row.cardHash, row]));
 
     const now = Date.now();
     const filtered = decks
@@ -228,10 +233,7 @@ export const listDecks = query({
       filtered.map(async (deck) => {
         let dueCount = 0;
         for (const card of deck.cards) {
-          const progress = await ctx.db
-            .query("flashcardProgress")
-            .withIndex("by_user_card", (q) => q.eq("userId", actor._id).eq("cardHash", card.cardHash))
-            .unique();
+          const progress = progressByCardHash.get(card.cardHash);
           if (!progress || progress.nextReviewAt <= now) {
             dueCount += 1;
           }
@@ -265,6 +267,11 @@ export const getDueCards = query({
       .query("flashcardDecks")
       .withIndex("by_user_updated", (q) => q.eq("userId", actor._id))
       .collect();
+    const allProgress = await ctx.db
+      .query("flashcardProgress")
+      .withIndex("by_user", (q) => q.eq("userId", actor._id))
+      .collect();
+    const progressByCardHash = new Map(allProgress.map((row) => [row.cardHash, row]));
     const scopedDecks = args.deckId ? decks.filter((deck) => deck._id === args.deckId) : decks;
 
     const out: Array<{
@@ -284,10 +291,7 @@ export const getDueCards = query({
 
     for (const deck of scopedDecks) {
       for (const card of deck.cards) {
-        const progress = await ctx.db
-          .query("flashcardProgress")
-          .withIndex("by_user_card", (q) => q.eq("userId", actor._id).eq("cardHash", card.cardHash))
-          .unique();
+        const progress = progressByCardHash.get(card.cardHash) ?? null;
         const isDue = !progress || progress.nextReviewAt <= now;
         if (isDue || args.includeAll) {
           out.push({
@@ -435,6 +439,7 @@ export const editCard = mutation({
     if (!cardHash || !front || !back) {
       throw new Error("Invalid flashcard payload");
     }
+    const updatedCardHash = hashCard(front, back);
 
     const decks = await ctx.db
       .query("flashcardDecks")
@@ -448,12 +453,20 @@ export const editCard = mutation({
       throw new Error("Deck not found");
     }
 
+    if (
+      updatedCardHash !== cardHash
+      && target.cards.some((card) => card.cardHash === updatedCardHash && card.cardHash !== cardHash)
+    ) {
+      throw new Error("A flashcard with the same content already exists in this deck");
+    }
+
     const nextCards = target.cards.map((card) =>
       card.cardHash === cardHash
         ? {
             ...card,
             front,
             back,
+            cardHash: updatedCardHash,
           }
         : card,
     );
@@ -462,6 +475,22 @@ export const editCard = mutation({
       updatedAt: Date.now(),
     });
 
-    return { ok: true, deckId: target._id };
+    if (updatedCardHash !== cardHash) {
+      const previousProgress = await ctx.db
+        .query("flashcardProgress")
+        .withIndex("by_user_card", (q) => q.eq("userId", actor._id).eq("cardHash", cardHash))
+        .unique();
+      if (previousProgress) {
+        await ctx.db.delete(previousProgress._id);
+      }
+    }
+
+    return {
+      ok: true,
+      deckId: target._id,
+      previousCardHash: cardHash,
+      updatedCardHash,
+      hashChanged: updatedCardHash !== cardHash,
+    };
   },
 });

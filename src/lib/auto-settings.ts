@@ -128,7 +128,10 @@ export function parseUserDirectives(message: string): UserDirectives {
     lower.match(/\bforget about\s+(.+?)(?:[.!?]|$)/i)
     ?? lower.match(/\bforget\s+(.+?)(?:[.!?]|$)/i);
   if (forgetMatch?.[1]) {
-    const target = forgetMatch[1].trim();
+    const target = forgetMatch[1]
+      .replace(/\b(?:in|from)\s+(?:my\s+)?memory\b/gi, "")
+      .replace(/\bfrom now on\b/gi, "")
+      .trim();
     if (target && target !== "this") {
       memoryActions.push({ type: "forget", target });
     } else {
@@ -157,6 +160,15 @@ export function parseUserDirectives(message: string): UserDirectives {
       type: "remember",
       statement: `I ${rememberMatch[1].trim()}`,
     });
+  } else {
+    const rememberGenericMatch = message.match(/\bremember(?:\s+that)?\s+(.+?)(?:[.!?]|$)/i);
+    const statement = rememberGenericMatch?.[1]?.trim();
+    if (statement && /\b(i|my|me|mine)\b/i.test(statement)) {
+      memoryActions.push({
+        type: "remember",
+        statement,
+      });
+    }
   }
 
   const profileMatch = message.match(/\bupdate my profile\b[:\s-]*(.+?)(?:[.!?]|$)/i);

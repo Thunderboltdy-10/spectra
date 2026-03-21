@@ -609,7 +609,20 @@ export const listPersonalResources = query({
       .query("resources")
       .withIndex("by_owner_scope", (q) => q.eq("ownerUserId", actor._id).eq("scope", "personal"))
       .collect();
-    return rows.filter((row) => row.saveToLibrary !== false);
+    return rows
+      .filter((row) => row.saveToLibrary !== false)
+      .map((row) => ({
+        _id: row._id,
+        filename: row.filename,
+        mimeType: row.mimeType,
+        size: row.size,
+        status: row.status,
+        error: row.error,
+        processingAttempts: row.processingAttempts,
+        pinned: row.pinned,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      }));
   },
 });
 

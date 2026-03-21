@@ -178,7 +178,28 @@ function inferMemoryCategory(params: {
 function matchesTarget(target: string, entry: { key: string; text: string }) {
   const normalizedTarget = normalizeTopicLabel(target);
   if (!normalizedTarget) return false;
-  return entry.key.toLowerCase().includes(normalizedTarget) || entry.text.toLowerCase().includes(normalizedTarget);
+
+  const normalizedKey = normalizeTopicLabel(entry.key);
+  const normalizedText = normalizeTopicLabel(entry.text);
+  const searchable = `${normalizedKey} ${normalizedText}`.replace(/\s+/g, " ").trim();
+  const compactSearchable = searchable.replace(/\s+/g, "");
+  const aliases = new Set<string>([normalizedTarget]);
+  if (/\bwwii\b/.test(normalizedTarget)) aliases.add("world war ii");
+  if (normalizedTarget.includes("world war ii")) aliases.add("wwii");
+  if (/\bwwi\b/.test(normalizedTarget)) aliases.add("world war i");
+  if (normalizedTarget.includes("world war i")) aliases.add("wwi");
+
+  for (const alias of aliases) {
+    const compactAlias = alias.replace(/\s+/g, "");
+    if (
+      searchable.includes(alias)
+      || compactSearchable.includes(compactAlias)
+      || searchable.includes(alias.replace(/\s+/g, "_"))
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function hasNegativeTopicMatch(message: string, links?: string[]) {
@@ -565,14 +586,39 @@ export const forgetMemoryEntriesByQuery = mutation({
       .collect();
 
     const target = args.target?.trim();
+    const normalizedTarget = normalizeTopicLabel(target ?? "");
+    const targetAliases = new Set<string>();
+    if (normalizedTarget) {
+      targetAliases.add(normalizedTarget);
+      targetAliases.add(normalizedTarget.replace(/\s+/g, ""));
+      if (/\bwwii\b/.test(normalizedTarget) || normalizedTarget.includes("world war ii")) {
+        targetAliases.add("wwii");
+        targetAliases.add("world war ii");
+        targetAliases.add("worldwarii");
+      }
+      if (/\bwwi\b/.test(normalizedTarget) || normalizedTarget.includes("world war i")) {
+        targetAliases.add("wwi");
+        targetAliases.add("world war i");
+        targetAliases.add("worldwari");
+      }
+    }
+
     let deleted = 0;
     for (const row of rows) {
-      const shouldDelete =
-        target && target.length > 0
-          ? matchesTarget(target, row)
-          : args.sourceChatId
-            ? row.sourceChatId === args.sourceChatId
-            : false;
+      let shouldDelete = false;
+      if (target && target.length > 0) {
+        const searchable = normalizeTopicLabel(`${row.key} ${row.text}`);
+        const compactSearchable = searchable.replace(/\s+/g, "");
+        for (const alias of targetAliases) {
+          if (!alias) continue;
+          if (searchable.includes(alias) || compactSearchable.includes(alias.replace(/\s+/g, ""))) {
+            shouldDelete = true;
+            break;
+          }
+        }
+      } else if (args.sourceChatId) {
+        shouldDelete = row.sourceChatId === args.sourceChatId;
+      }
       if (!shouldDelete) continue;
       await ctx.db.delete(row._id);
       deleted += 1;

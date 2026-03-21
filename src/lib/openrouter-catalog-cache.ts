@@ -103,16 +103,43 @@ export async function getLiveCatalogSnapshot(params?: {
     const liveModels = await fetchOpenRouterModels();
     const mapped = liveModels
       .map((model) => mapLiveModel(model))
-      .filter((model) => Boolean(model.modelId))
-      .slice(0, 220);
+      .filter((model) => Boolean(model.modelId));
 
-    if (mapped.length > 0) {
+    const dedupedById = new Map<string, CatalogModelEntry>();
+    for (const model of mapped) {
+      const existing = dedupedById.get(model.modelId);
+      if (!existing) {
+        dedupedById.set(model.modelId, model);
+        continue;
+      }
+      const existingCreated = existing.createdAt ?? 0;
+      const nextCreated = model.createdAt ?? 0;
+      if (nextCreated >= existingCreated) {
+        dedupedById.set(model.modelId, {
+          ...existing,
+          ...model,
+          tags: [...new Set([...(existing.tags ?? []), ...(model.tags ?? [])])],
+        });
+      }
+    }
+
+    const ranked = [...dedupedById.values()].sort((a, b) => {
+      const createdDelta = (b.createdAt ?? 0) - (a.createdAt ?? 0);
+      if (createdDelta !== 0) return createdDelta;
+      const aCost = (a.inputCostPerM ?? 999) + (a.outputCostPerM ?? 999);
+      const bCost = (b.inputCostPerM ?? 999) + (b.outputCostPerM ?? 999);
+      if (aCost !== bCost) return aCost - bCost;
+      return a.modelId.localeCompare(b.modelId);
+    });
+    const selected = ranked.slice(0, 260);
+
+    if (selected.length > 0) {
       globalThis.__openRouterCatalogCache = {
         cachedAt: now,
-        models: mapped,
+        models: selected,
       };
       return {
-        models: mapped,
+        models: selected,
         source: "openrouter_live" as const,
       };
     }

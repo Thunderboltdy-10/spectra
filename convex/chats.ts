@@ -55,6 +55,7 @@ export const listChats = query({
   args: {
     actorClerkId: v.string(),
     packId: v.optional(v.id("packs")),
+    limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
@@ -62,32 +63,70 @@ export const listChats = query({
       throw new Error("Unauthorized");
     }
 
-    const chats = await ctx.db
+    const max = Math.max(1, Math.min(args.limit ?? 120, 300));
+    const indexedChats = await ctx.db
+      .query("chats")
+      .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id))
+      .order("desc")
+      .take(args.packId ? Math.max(max * 6, max) : max);
+
+    const orderedChats = (() => {
+      if (!args.packId) return indexedChats;
+      const filteredFromIndexed = indexedChats.filter((chat) => chat.packId === args.packId && !chat.deletedAt);
+      if (filteredFromIndexed.length >= max) return indexedChats;
+      // Fallback only for pack-scoped views when the initial indexed window is insufficient.
+      return null;
+    })();
+
+    const chats = orderedChats ?? (await ctx.db
       .query("chats")
       .withIndex("by_owner", (q) => q.eq("ownerUserId", actor._id))
-      .collect();
-
-    const sorted = chats
-      .filter((chat) => !chat.deletedAt)
-      .filter((chat) => (args.packId ? chat.packId === args.packId : true))
+      .collect())
       .sort((a, b) => b.updatedAt - a.updatedAt);
 
-    const withPrompt = await Promise.all(
-      sorted.map(async (chat) => {
-        const messages = await ctx.db
-          .query("messages")
-          .withIndex("by_chat", (q) => q.eq("chatId", chat._id))
-          .collect();
+    return chats
+      .filter((chat) => !chat.deletedAt)
+      .filter((chat) => (args.packId ? chat.packId === args.packId : true))
+      .slice(0, max)
+      .map((chat) => ({
+        _id: chat._id,
+        title: chat.title,
+        latestUserPrompt: chat.latestUserPrompt?.slice(0, 120),
+        mode: chat.mode,
+        packId: chat.packId,
+        agentId: chat.agentId,
+        pinned: chat.pinned,
+        updatedAt: chat.updatedAt,
+      }));
+  },
+});
 
-        const latestUser = [...messages].reverse().find((message) => message.role === "user");
-        return {
-          ...chat,
-          latestUserPrompt: latestUser?.content?.slice(0, 120),
-        };
-      }),
-    );
+export const listRecentAssistantModels = query({
+  args: {
+    actorClerkId: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
 
-    return withPrompt;
+    const limit = Math.max(1, Math.min(args.limit ?? 24, 80));
+    const rows = await ctx.db
+      .query("messages")
+      .withIndex("by_user_created", (q) => q.eq("userId", actor._id))
+      .order("desc")
+      .take(Math.max(limit * 4, 40));
+
+    const models: string[] = [];
+    for (const row of rows) {
+      if (row.role !== "assistant") continue;
+      if (!row.modelUsed || !row.modelUsed.trim()) continue;
+      models.push(row.modelUsed.trim());
+      if (models.length >= limit) break;
+    }
+    return models;
   },
 });
 
@@ -134,6 +173,7 @@ export const createChat = mutation({
       agentId,
       ownerUserId: actor._id,
       title: args.title ?? "New chat",
+      latestUserPrompt: undefined,
       mode: args.mode,
       thinkingLevel: args.thinkingLevel,
       routerMode: args.routerMode,
@@ -183,6 +223,7 @@ export const appendMessage = mutation({
     chatId: v.id("chats"),
     clientMessageId: v.optional(v.string()),
     role: v.union(v.literal("user"), v.literal("assistant"), v.literal("system")),
+    parentMessageId: v.optional(v.id("messages")),
     content: v.string(),
     attachments: v.optional(v.array(v.string())),
     attachmentResourceIds: v.optional(v.array(v.id("resources"))),
@@ -231,6 +272,30 @@ export const appendMessage = mutation({
       }
     }
 
+    let parentMessageId = undefined as typeof args.parentMessageId;
+    let siblingIndex: number | undefined;
+    let siblingCount: number | undefined;
+    let existingAssistantSiblings: Array<{ _id: NonNullable<typeof args.parentMessageId>; createdAt: number }> = [];
+
+    if (args.role === "assistant" && args.parentMessageId) {
+      const parent = await ctx.db.get(args.parentMessageId);
+      if (!parent || parent.chatId !== chat._id || parent.userId !== actor._id || parent.role !== "user") {
+        throw new Error("Invalid assistant parent message");
+      }
+
+      parentMessageId = parent._id;
+      const siblings = await ctx.db
+        .query("messages")
+        .withIndex("by_parent_message", (q) => q.eq("parentMessageId", parent._id))
+        .collect();
+      existingAssistantSiblings = siblings
+        .filter((row) => row.role === "assistant")
+        .sort((a, b) => a.createdAt - b.createdAt)
+        .map((row) => ({ _id: row._id, createdAt: row.createdAt }));
+      siblingIndex = existingAssistantSiblings.length;
+      siblingCount = existingAssistantSiblings.length + 1;
+    }
+
     const messageId = await ctx.db.insert("messages", {
       orgId: actor.orgId,
       packId: args.packId ?? chat.packId,
@@ -238,6 +303,9 @@ export const appendMessage = mutation({
       userId: actor._id,
       clientMessageId: args.role === "user" ? normalizedClientMessageId : undefined,
       role: args.role,
+      parentMessageId,
+      siblingIndex,
+      siblingCount,
       mode: args.mode,
       content: args.content,
       attachments: args.attachments,
@@ -255,12 +323,28 @@ export const appendMessage = mutation({
       createdAt: now,
     });
 
+    if (args.role === "assistant" && parentMessageId && typeof siblingCount === "number") {
+      const orderedAssistantSiblings = [...existingAssistantSiblings, { _id: messageId, createdAt: now }]
+        .sort((a, b) => a.createdAt - b.createdAt);
+      for (let i = 0; i < orderedAssistantSiblings.length; i += 1) {
+        const row = orderedAssistantSiblings[i]!;
+        await ctx.db.patch(row._id, {
+          siblingIndex: i,
+          siblingCount: orderedAssistantSiblings.length,
+        });
+      }
+    }
+
     await ctx.db.patch(chat._id, {
       updatedAt: now,
       title:
         chat.title === "New chat" && args.role === "user"
           ? summarizeChatTitle(args.content)
           : chat.title,
+      latestUserPrompt:
+        args.role === "user"
+          ? compactMessageText(args.content).slice(0, 120)
+          : chat.latestUserPrompt,
       mode: args.mode,
     });
 
@@ -318,6 +402,7 @@ export const editMessageAndPrune = mutation({
     await ctx.db.patch(chat._id, {
       updatedAt: Date.now(),
       title: summarizeChatTitle(clean) || chat.title,
+      latestUserPrompt: compactMessageText(clean).slice(0, 120),
     });
 
     return {
@@ -361,12 +446,14 @@ export const branchFromMessage = mutation({
     const now = Date.now();
     const branchedTitleBase = pivot.content.trim().slice(0, 56) || sourceChat.title;
     const branchedTitle = `${branchedTitleBase} (branch)`.slice(0, 80);
+    let latestUserPrompt: string | undefined;
     const chatId = await ctx.db.insert("chats", {
       orgId: sourceChat.orgId,
       packId: sourceChat.packId,
       agentId: sourceChat.agentId,
       ownerUserId: sourceChat.ownerUserId,
       title: branchedTitle,
+      latestUserPrompt: sourceChat.latestUserPrompt,
       mode: sourceChat.mode,
       thinkingLevel: sourceChat.thinkingLevel,
       routerMode: sourceChat.routerMode,
@@ -380,12 +467,18 @@ export const branchFromMessage = mutation({
 
     for (let i = 0; i <= pivotIndex; i += 1) {
       const row = sorted[i]!;
+      if (row.role === "user") {
+        latestUserPrompt = compactMessageText(row.content).slice(0, 120);
+      }
       await ctx.db.insert("messages", {
         orgId: row.orgId,
         packId: row.packId,
         chatId,
         userId: row.userId,
         role: row.role,
+        parentMessageId: row.parentMessageId,
+        siblingIndex: row.siblingIndex,
+        siblingCount: row.siblingCount,
         mode: row.mode,
         content: row.content,
         attachments: row.attachments,
@@ -401,6 +494,13 @@ export const branchFromMessage = mutation({
         thinkingContent: row.thinkingContent,
         routeTrace: row.routeTrace,
         createdAt: now + i,
+      });
+    }
+
+    if (latestUserPrompt) {
+      await ctx.db.patch(chatId, {
+        latestUserPrompt,
+        updatedAt: now + pivotIndex + 1,
       });
     }
 

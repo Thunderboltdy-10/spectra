@@ -329,10 +329,33 @@ const MODE_EXPLORER_TARGET_MODES = [
   "image",
 ];
 
+type ActivityCounters = {
+  chatTurns: number;
+  tutorSessions: number;
+  researchSessionsWithSources: number;
+  imageResponses: number;
+};
+
 async function requireActor(ctx: QueryCtx | MutationCtx, actorClerkId: string) {
   const actor = await getUserByClerkId(ctx, actorClerkId);
   if (!actor) throw new Error("Unauthorized");
   return actor;
+}
+
+function normalizeCounter(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.floor(value));
+}
+
+function countersFromStreakDoc(row: Doc<"userStreaks">): ActivityCounters {
+  return {
+    chatTurns: normalizeCounter((row as { chatTurns?: unknown }).chatTurns),
+    tutorSessions: normalizeCounter((row as { tutorSessions?: unknown }).tutorSessions),
+    researchSessionsWithSources: normalizeCounter(
+      (row as { researchSessionsWithSources?: unknown }).researchSessionsWithSources,
+    ),
+    imageResponses: normalizeCounter((row as { imageResponses?: unknown }).imageResponses),
+  };
 }
 
 function pickCanonicalStreakDoc(rows: Array<Doc<"userStreaks">>) {
@@ -384,12 +407,28 @@ async function reconcileDuplicateStreakDocs(
   );
   const mergedLongestStreak = Math.max(...rows.map((row) => row.longestStreak));
   const mergedTotalXp = Math.max(...rows.map((row) => row.totalXp));
+  const mergedChatTurns = Math.max(...rows.map((row) => normalizeCounter((row as { chatTurns?: unknown }).chatTurns)));
+  const mergedTutorSessions = Math.max(
+    ...rows.map((row) => normalizeCounter((row as { tutorSessions?: unknown }).tutorSessions)),
+  );
+  const mergedResearchSessions = Math.max(
+    ...rows.map((row) =>
+      normalizeCounter((row as { researchSessionsWithSources?: unknown }).researchSessionsWithSources),
+    ),
+  );
+  const mergedImageResponses = Math.max(
+    ...rows.map((row) => normalizeCounter((row as { imageResponses?: unknown }).imageResponses)),
+  );
 
   await ctx.db.patch(canonical._id, {
     currentStreak: Math.max(0, mergedCurrentStreak),
     longestStreak: Math.max(0, mergedLongestStreak),
     totalXp: Math.max(0, mergedTotalXp),
     lastActiveDate: byLatestDate.lastActiveDate,
+    chatTurns: mergedChatTurns,
+    tutorSessions: mergedTutorSessions,
+    researchSessionsWithSources: mergedResearchSessions,
+    imageResponses: mergedImageResponses,
   });
 
   const duplicateIds = rows
@@ -442,6 +481,10 @@ async function ensureUserStreakDoc(ctx: MutationCtx, actor: Doc<"users">) {
     longestStreak: 0,
     lastActiveDate: previousDay,
     totalXp: 0,
+    chatTurns: 0,
+    tutorSessions: 0,
+    researchSessionsWithSources: 0,
+    imageResponses: 0,
   });
 
   // This write creates a deterministic owner pointer on the user document.
@@ -588,6 +631,49 @@ async function listUserMessages(ctx: MutationCtx, userId: Doc<"users">["_id"]) {
     .collect();
 }
 
+async function ensureActivityCounters(
+  ctx: MutationCtx,
+  actor: Doc<"users">,
+  streakDoc: Doc<"userStreaks">,
+): Promise<ActivityCounters> {
+  const row = streakDoc as Doc<"userStreaks"> & {
+    chatTurns?: number;
+    tutorSessions?: number;
+    researchSessionsWithSources?: number;
+    imageResponses?: number;
+  };
+  const hasAllCounters = (
+    typeof row.chatTurns === "number"
+    && typeof row.tutorSessions === "number"
+    && typeof row.researchSessionsWithSources === "number"
+    && typeof row.imageResponses === "number"
+  );
+  if (hasAllCounters) {
+    return countersFromStreakDoc(streakDoc);
+  }
+
+  const messages = await listUserMessages(ctx, actor._id);
+  const counters: ActivityCounters = {
+    chatTurns: messages.filter((message) => message.role === "user").length,
+    tutorSessions: messages.filter((message) => message.role === "assistant" && message.mode === "tutor").length,
+    researchSessionsWithSources: messages.filter((message) =>
+      message.role === "assistant" &&
+      message.mode === "research" &&
+      message.citations.length > 0
+    ).length,
+    imageResponses: messages.filter((message) => message.role === "assistant" && message.mode === "image").length,
+  };
+
+  await ctx.db.patch(streakDoc._id, {
+    chatTurns: counters.chatTurns,
+    tutorSessions: counters.tutorSessions,
+    researchSessionsWithSources: counters.researchSessionsWithSources,
+    imageResponses: counters.imageResponses,
+  });
+
+  return counters;
+}
+
 async function countStudyTimerSeconds(ctx: MutationCtx, userId: Doc<"users">["_id"]) {
   const sessions = await ctx.db
     .query("studyTimers")
@@ -647,6 +733,7 @@ async function evaluateActivityAchievements(
     modeUsed?: string;
     currentStreak?: number;
     previousTotalXp: number;
+    counters: ActivityCounters;
   },
 ) {
   const {
@@ -656,18 +743,14 @@ async function evaluateActivityAchievements(
     modeUsed,
     currentStreak,
     previousTotalXp,
+    counters,
   } = params;
   const unlocked: AchievementPayload[] = [];
 
   let personalResourceCount: number | undefined;
   let quizResults: Array<Doc<"quizResults">> | undefined;
   let flashcardReviews: number | undefined;
-  let researchSessionsWithSources: number | undefined;
-  let userMessageTurns: number | undefined;
-  let tutorSessions: number | undefined;
-  let imageResponses: number | undefined;
   let totalStudySeconds: number | undefined;
-  let userMessages: Array<Doc<"messages">> | undefined;
 
   const hasAnyLockedAchievements = (...keys: Array<keyof typeof ACHIEVEMENTS>) =>
     keys.some((key) => !existingTypes.has(ACHIEVEMENTS[key].type));
@@ -687,12 +770,6 @@ async function evaluateActivityAchievements(
     return quizResults;
   };
 
-  const getUserMessages = async () => {
-    if (userMessages) return userMessages;
-    userMessages = await listUserMessages(ctx, actor._id);
-    return userMessages;
-  };
-
   const getFlashcardReviews = async () => {
     if (typeof flashcardReviews === "number") return flashcardReviews;
     flashcardReviews = await countFlashcardReviews(ctx, actor._id);
@@ -700,35 +777,19 @@ async function evaluateActivityAchievements(
   };
 
   const getResearchSessions = async () => {
-    if (typeof researchSessionsWithSources === "number") return researchSessionsWithSources;
-    const messages = await getUserMessages();
-    researchSessionsWithSources = messages.filter((message) =>
-      message.role === "assistant" &&
-      message.mode === "research" &&
-      message.citations.length > 0
-    ).length;
-    return researchSessionsWithSources;
+    return counters.researchSessionsWithSources;
   };
 
   const getUserMessageTurns = async () => {
-    if (typeof userMessageTurns === "number") return userMessageTurns;
-    const messages = await getUserMessages();
-    userMessageTurns = messages.filter((message) => message.role === "user").length;
-    return userMessageTurns;
+    return counters.chatTurns;
   };
 
   const getTutorSessions = async () => {
-    if (typeof tutorSessions === "number") return tutorSessions;
-    const messages = await getUserMessages();
-    tutorSessions = messages.filter((message) => message.role === "assistant" && message.mode === "tutor").length;
-    return tutorSessions;
+    return counters.tutorSessions;
   };
 
   const getImageResponses = async () => {
-    if (typeof imageResponses === "number") return imageResponses;
-    const messages = await getUserMessages();
-    imageResponses = messages.filter((message) => message.role === "assistant" && message.mode === "image").length;
-    return imageResponses;
+    return counters.imageResponses;
   };
 
   const getTotalStudySeconds = async () => {
@@ -771,7 +832,7 @@ async function evaluateActivityAchievements(
   }
 
   const shouldCheckTutorAchievements = (
-    modeUsed === "tutor" || activityType === "chat"
+    modeUsed === "tutor"
   ) && hasAnyLockedAchievements("first_tutor", "tutor_50", "tutor_200");
   if (shouldCheckTutorAchievements) {
     const tutorCount = await getTutorSessions();
@@ -1020,11 +1081,30 @@ export const awardXp = mutation({
     xp: v.optional(v.number()),
     modeUsed: v.optional(v.string()),
     currentStreak: v.optional(v.number()),
+    hasCitations: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
     const streakDoc = await ensureUserStreakDoc(ctx, actor);
     if (!streakDoc) throw new Error("Unable to initialize streak");
+
+    const baseCounters = await ensureActivityCounters(ctx, actor, streakDoc);
+    const counters: ActivityCounters = { ...baseCounters };
+    if (args.activityType === "chat") {
+      counters.chatTurns += 1;
+    }
+    if (args.modeUsed === "tutor") {
+      counters.tutorSessions += 1;
+    }
+    if (
+      (args.activityType === "research" || args.modeUsed === "research")
+      && Boolean(args.hasCitations)
+    ) {
+      counters.researchSessionsWithSources += 1;
+    }
+    if (shouldCheckImageAchievements({ activityType: args.activityType, modeUsed: args.modeUsed })) {
+      counters.imageResponses += 1;
+    }
 
     const existingAchievements = await listUserAchievements(ctx, actor._id);
     const existingTypes = new Set(existingAchievements.map((item) => item.type));
@@ -1036,13 +1116,24 @@ export const awardXp = mutation({
       modeUsed: args.modeUsed,
       currentStreak: args.currentStreak,
       previousTotalXp: streakDoc.totalXp,
+      counters,
     });
     const achievementXpEarned = unlockedAchievements.reduce((sum, achievement) => sum + achievement.xpEarned, 0);
 
     const totalXp = streakDoc.totalXp + xpAwarded + achievementXpEarned;
-    if (xpAwarded > 0 || achievementXpEarned > 0) {
+    const countersChanged = (
+      counters.chatTurns !== baseCounters.chatTurns
+      || counters.tutorSessions !== baseCounters.tutorSessions
+      || counters.researchSessionsWithSources !== baseCounters.researchSessionsWithSources
+      || counters.imageResponses !== baseCounters.imageResponses
+    );
+    if (xpAwarded > 0 || achievementXpEarned > 0 || countersChanged) {
       await ctx.db.patch(streakDoc._id, {
         totalXp,
+        chatTurns: counters.chatTurns,
+        tutorSessions: counters.tutorSessions,
+        researchSessionsWithSources: counters.researchSessionsWithSources,
+        imageResponses: counters.imageResponses,
       });
     }
 

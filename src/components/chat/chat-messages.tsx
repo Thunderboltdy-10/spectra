@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, RefreshCw, TriangleAlert, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChatMessage } from "@/components/chat/chat-message";
@@ -40,7 +40,9 @@ type ChatMessagesProps = {
   onSubmitQuizAnswers?: (payload: { messageId: string; result: QuizSubmitResult }) => void;
   onSaveFlashcardDeck?: (payload: { messageId: string; title: string; cards: FlashcardCard[] }) => void;
   onRateFlashcardCard?: (payload: { messageId: string; cardHash: string; quality: number }) => void;
-  onEditFlashcardCard?: (payload: { messageId: string; cardHash: string; front: string; back: string }) => void;
+  onEditFlashcardCard?: (
+    payload: { messageId: string; cardHash: string; front: string; back: string },
+  ) => Promise<{ updatedCardHash?: string; previousCardHash?: string; hashChanged?: boolean } | void> | void;
   onRegenerate?: () => void;
   onRegenerateWithModel?: (modelId: string) => void;
   onAssistantFeedback?: (messageId: string, positive: boolean, modelId?: string) => void;
@@ -49,7 +51,7 @@ type ChatMessagesProps = {
   onToggleBookmarkMessage?: (messageId: string) => Promise<void> | void;
   bookmarkedMessageIds?: Set<string>;
   bookmarkingMessageId?: string | null;
-  onFollowUp?: (message: string) => void;
+  onFollowUp?: (message: string, modeOverride?: StudyMode) => void;
   onModeChange?: (mode: string) => void;
   regenModels?: Array<{ modelId: string; name: string }>;
   emptyState?: React.ReactNode;
@@ -121,6 +123,7 @@ export function ChatMessages({
   const [showJumpButton, setShowJumpButton] = useState(false);
   const [showStreamCursor, setShowStreamCursor] = useState(false);
   const [visibleStartIndex, setVisibleStartIndex] = useState(() => Math.max(0, messages.length - 36));
+  const [activeSiblingByParent, setActiveSiblingByParent] = useState<Record<string, string>>({});
   const shouldAutoScrollRef = useRef(true);
   const stickyBottomRef = useRef(true);
   const lastScrollTopRef = useRef(0);
@@ -130,6 +133,107 @@ export function ChatMessages({
     () => messages.slice(visibleStartIndex),
     [messages, visibleStartIndex],
   );
+  const { siblingGroups, siblingGroupKeyByMessage } = useMemo(() => {
+    const groups = new Map<string, Message[]>();
+    const keyByMessage = new Map<string, string>();
+    let lastUserMessageId: string | undefined;
+
+    for (const message of messages) {
+      if (message.role === "user") {
+        lastUserMessageId = message._id;
+        continue;
+      }
+      if (message.role !== "assistant") continue;
+
+      const groupKey = message.parentMessageId
+        ? `parent:${message.parentMessageId}`
+        : (lastUserMessageId ? `implicit:${lastUserMessageId}` : undefined);
+      if (!groupKey) continue;
+
+      const list = groups.get(groupKey) ?? [];
+      list.push(message);
+      groups.set(groupKey, list);
+      keyByMessage.set(message._id, groupKey);
+    }
+
+    for (const [groupKey, list] of groups.entries()) {
+      const sorted = [...list].sort((a, b) => {
+        const aIndex = typeof a.siblingIndex === "number" ? a.siblingIndex : Number.MAX_SAFE_INTEGER;
+        const bIndex = typeof b.siblingIndex === "number" ? b.siblingIndex : Number.MAX_SAFE_INTEGER;
+        if (aIndex !== bIndex) return aIndex - bIndex;
+        return (a.createdAt ?? 0) - (b.createdAt ?? 0);
+      });
+      groups.set(groupKey, sorted);
+    }
+
+    return {
+      siblingGroups: groups,
+      siblingGroupKeyByMessage: keyByMessage,
+    };
+  }, [messages]);
+  const filteredVisibleMessages = useMemo(() => {
+    return visibleMessages.filter((message) => {
+      if (message.role !== "assistant") return true;
+      const groupKey = siblingGroupKeyByMessage.get(message._id);
+      if (!groupKey) return true;
+      const siblings = siblingGroups.get(groupKey);
+      if (!siblings || siblings.length <= 1) return true;
+      const fallback = siblings[siblings.length - 1]?._id;
+      const activeId = activeSiblingByParent[groupKey] ?? fallback;
+      return message._id === activeId;
+    });
+  }, [visibleMessages, siblingGroups, siblingGroupKeyByMessage, activeSiblingByParent]);
+
+  useEffect(() => {
+    setActiveSiblingByParent((prev) => {
+      const next: Record<string, string> = {};
+      let changed = false;
+      for (const [groupKey, siblings] of siblingGroups.entries()) {
+        if (siblings.length <= 1) continue;
+        const existing = prev[groupKey];
+        const activeStillExists = Boolean(existing && siblings.some((row) => row._id === existing));
+        const fallback = siblings[siblings.length - 1]?._id;
+        const selected = activeStillExists ? existing : fallback;
+        if (selected) next[groupKey] = selected;
+      }
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(next);
+      if (prevKeys.length !== nextKeys.length) {
+        changed = true;
+      } else {
+        for (const key of nextKeys) {
+          if (prev[key] !== next[key]) {
+            changed = true;
+            break;
+          }
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [siblingGroups]);
+
+  const navigateSibling = useCallback((message: Message, direction: "prev" | "next") => {
+    const groupKey = siblingGroupKeyByMessage.get(message._id);
+    if (!groupKey) return;
+    const siblings = siblingGroups.get(groupKey);
+    if (!siblings || siblings.length <= 1) return;
+
+    const fallback = siblings[siblings.length - 1]?._id;
+    const currentId = activeSiblingByParent[groupKey] ?? fallback;
+    const currentIndex = siblings.findIndex((row) => row._id === currentId);
+    if (currentIndex < 0) return;
+    const nextIndex =
+      direction === "prev"
+        ? Math.max(0, currentIndex - 1)
+        : Math.min(siblings.length - 1, currentIndex + 1);
+    const nextSibling = siblings[nextIndex];
+    if (!nextSibling || nextSibling._id === currentId) return;
+
+    setActiveSiblingByParent((prev) => ({
+      ...prev,
+      [groupKey]: nextSibling._id,
+    }));
+  }, [activeSiblingByParent, siblingGroups, siblingGroupKeyByMessage]);
 
   useEffect(() => {
     const chatChanged = previousChatIdRef.current !== chatId;
@@ -419,15 +523,35 @@ export function ChatMessages({
             </div>
           ) : null}
 
-          {visibleMessages.map((msg, localIndex) => {
-            const index = visibleStartIndex + localIndex;
-            const isLastAssistant = msg.role === "assistant" && index === messages.length - 1;
+          {filteredVisibleMessages.map((msg, index) => {
+            const isLastAssistant = msg.role === "assistant" && index === filteredVisibleMessages.length - 1;
             const msgMode = msg.mode ?? mode;
-            const prevMsg = messages[index - 1];
+            const prevMsg = filteredVisibleMessages[index - 1];
             const showModeTransition =
               index > 0 &&
               prevMsg?.mode !== msg.mode &&
               msg.mode !== undefined;
+            const siblingGroupKey = siblingGroupKeyByMessage.get(msg._id);
+            const siblingGroup = siblingGroupKey ? siblingGroups.get(siblingGroupKey) : undefined;
+            const fallbackSiblingIndex =
+              siblingGroup && siblingGroup.length > 1
+                ? siblingGroup.findIndex((row) => row._id === msg._id)
+                : -1;
+            const siblingNavigationProps = msg.role === "assistant"
+              ? {
+                  siblingIndex:
+                    typeof msg.siblingIndex === "number"
+                      ? msg.siblingIndex
+                      : (fallbackSiblingIndex >= 0 ? fallbackSiblingIndex : undefined),
+                  siblingCount:
+                    typeof msg.siblingCount === "number"
+                      ? msg.siblingCount
+                      : (siblingGroup && siblingGroup.length > 1 ? siblingGroup.length : undefined),
+                  onNavigateSibling: siblingGroup && siblingGroup.length > 1
+                    ? (direction: "prev" | "next") => navigateSibling(msg, direction)
+                    : undefined,
+                }
+              : {};
             const assistantIsBookmarked = bookmarkedMessageIds.has(msg._id);
             const assistantBookmarking = bookmarkingMessageId === msg._id;
             const modeSuggestions = msg.role === "assistant" ? getModeSuggestions(msg) : [];
@@ -447,6 +571,7 @@ export function ChatMessages({
                     </div>
                   )}
                   <ChatMessage
+                    {...siblingNavigationProps}
                     messageId={msg._id}
                     role={msg.role}
                     content=""
@@ -503,6 +628,7 @@ export function ChatMessages({
                       </div>
                     )}
                     <ChatMessage
+                      {...siblingNavigationProps}
                       messageId={msg._id}
                       role={msg.role}
                       content=""
@@ -566,6 +692,7 @@ export function ChatMessages({
                       </div>
                     )}
                     <ChatMessage
+                      {...siblingNavigationProps}
                       messageId={msg._id}
                       role={msg.role}
                       content={msg.content}
@@ -613,6 +740,7 @@ export function ChatMessages({
                     </div>
                   )}
                   <ChatMessage
+                    {...siblingNavigationProps}
                     messageId={msg._id}
                     role={msg.role}
                     content={msg.content}
@@ -664,6 +792,7 @@ export function ChatMessages({
                       </div>
                     )}
                     <ChatMessage
+                      {...siblingNavigationProps}
                       messageId={msg._id}
                       role={msg.role}
                       content=""
@@ -736,6 +865,7 @@ export function ChatMessages({
                     </div>
                   )}
                   <ChatMessage
+                    {...siblingNavigationProps}
                     messageId={msg._id}
                     role={msg.role}
                     content={msg.content}
@@ -783,6 +913,7 @@ export function ChatMessages({
                     </div>
                   )}
                   <ChatMessage
+                    {...siblingNavigationProps}
                     messageId={msg._id}
                     role={msg.role}
                     content=""
@@ -829,6 +960,7 @@ export function ChatMessages({
                   </div>
                 )}
                 <ChatMessage
+                  {...siblingNavigationProps}
                   messageId={msg._id}
                   role={msg.role}
                   content={msg.content}
@@ -869,7 +1001,7 @@ export function ChatMessages({
                         type="button"
                         onClick={() => {
                           onModeChange?.(suggestion.mode);
-                          onFollowUp?.(suggestion.prompt);
+                          onFollowUp?.(suggestion.prompt, suggestion.mode);
                         }}
                         className="inline-flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-pill)] border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs text-[var(--text-secondary)] transition hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]"
                       >

@@ -31,7 +31,9 @@ type FlashcardRevealProps = {
   content: string;
   onSaveDeck?: (payload: { title: string; cards: FlashcardCard[] }) => Promise<void> | void;
   onRateCard?: (payload: { cardHash: string; quality: number }) => Promise<void> | void;
-  onEditCard?: (payload: { cardHash: string; front: string; back: string }) => Promise<void> | void;
+  onEditCard?: (
+    payload: { cardHash: string; front: string; back: string },
+  ) => Promise<{ updatedCardHash?: string; previousCardHash?: string; hashChanged?: boolean } | void> | void;
   onFollowUp?: (message: string) => void;
 };
 
@@ -152,8 +154,10 @@ function ViewTabs({ active, onChange, total }: ViewTabProps) {
 type CardsViewProps = {
   cards: FlashcardCard[];
   onRateCard?: (payload: { cardHash: string; quality: number }) => Promise<void> | void;
-  onEditCard?: (payload: { cardHash: string; front: string; back: string }) => Promise<void> | void;
-  onUpdateCard?: (payload: { cardHash: string; front: string; back: string }) => void;
+  onEditCard?: (
+    payload: { cardHash: string; front: string; back: string },
+  ) => Promise<{ updatedCardHash?: string; previousCardHash?: string; hashChanged?: boolean } | void> | void;
+  onUpdateCard?: (payload: { cardHash: string; updatedCardHash: string; front: string; back: string }) => void;
   onLearningCountChange?: (count: number) => void;
 };
 
@@ -239,13 +243,16 @@ function CardsView({ cards, onRateCard, onEditCard, onUpdateCard, onLearningCoun
     if (!nextFront || !nextBack) return;
     setSavingEdit(true);
     try {
-      onUpdateCard?.({
+      const editResult = await onEditCard?.({
         cardHash: editingCardHash,
         front: nextFront,
         back: nextBack,
       });
-      await onEditCard?.({
+      const updatedCardHash = (editResult as { updatedCardHash?: string } | undefined)?.updatedCardHash?.trim()
+        || hashCard(nextFront, nextBack);
+      onUpdateCard?.({
         cardHash: editingCardHash,
+        updatedCardHash,
         front: nextFront,
         back: nextBack,
       });
@@ -907,12 +914,21 @@ function FollowUpBar({ cards, onFollowUp, stillLearningCount = 0 }: FollowUpBarP
 
 export function FlashcardReveal({ content, onSaveDeck, onRateCard, onEditCard, onFollowUp }: FlashcardRevealProps) {
   const parsedCards = useMemo(() => parseFlashcards(content), [content]);
-  const [cardOverrides, setCardOverrides] = useState<Record<string, { front: string; back: string }>>({});
+  const [cardOverrides, setCardOverrides] = useState<
+    Record<string, { front: string; back: string; cardHash?: string }>
+  >({});
   const cards = useMemo(
     () =>
       parsedCards.map((card) => {
         const override = cardOverrides[card.cardHash];
-        return override ? { ...card, ...override } : card;
+        return override
+          ? {
+              ...card,
+              front: override.front,
+              back: override.back,
+              cardHash: override.cardHash ?? card.cardHash,
+            }
+          : card;
       }),
     [parsedCards, cardOverrides],
   );
@@ -923,7 +939,7 @@ export function FlashcardReveal({ content, onSaveDeck, onRateCard, onEditCard, o
   useEffect(() => {
     const hashes = new Set(parsedCards.map((card) => card.cardHash));
     setCardOverrides((prev) => {
-      const next: Record<string, { front: string; back: string }> = {};
+      const next: Record<string, { front: string; back: string; cardHash?: string }> = {};
       let changed = false;
       for (const [hash, values] of Object.entries(prev)) {
         if (!hashes.has(hash)) {
@@ -936,10 +952,11 @@ export function FlashcardReveal({ content, onSaveDeck, onRateCard, onEditCard, o
     });
   }, [parsedCards]);
 
-  const applyCardOverride = useCallback((payload: { cardHash: string; front: string; back: string }) => {
+  const applyCardOverride = useCallback((payload: { cardHash: string; updatedCardHash: string; front: string; back: string }) => {
     setCardOverrides((prev) => ({
       ...prev,
       [payload.cardHash]: {
+        cardHash: payload.updatedCardHash,
         front: payload.front,
         back: payload.back,
       },

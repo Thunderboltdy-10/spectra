@@ -370,13 +370,23 @@ function normalizeDirectiveStatement(rawValue: string) {
   );
 }
 
+function directiveKeyFromStatement(statement: string) {
+  const slug = statement
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48);
+  if (!slug) return "explicit_memory";
+  return `remember_${slug}`;
+}
+
 export function buildDirectiveMemoryEntries(params: {
   statement: string;
   directiveType: "remember" | "update_profile";
 }): MemoryDirectiveEntry[] {
   const statement = normalizeDirectiveStatement(params.statement);
   if (!statement) return [];
-  const key = params.directiveType === "update_profile" ? "profile_update" : "explicit_memory";
+  const key = params.directiveType === "update_profile" ? "profile_update" : directiveKeyFromStatement(statement);
   const lower = statement.toLowerCase();
   const category = inferMemoryCategory({
     key,

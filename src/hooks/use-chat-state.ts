@@ -184,6 +184,10 @@ const CHAT_SESSION_WINDOW_MS = 12 * 60 * 60 * 1000;
 const MEMORY_ENABLED_KEY = "ai-school:memory-enabled";
 const SEARXNG_ENABLED_KEY = "ai-school:searxng-enabled";
 const PROACTIVE_BANNER_DISMISSED_KEY = "ai-school:proactive-banner-dismissed-v1";
+const PERSONAL_RESOURCES_POLL_MIN_MS = 4_000;
+const PERSONAL_RESOURCES_POLL_MAX_MS = 30_000;
+const PERSONAL_RESOURCES_POLL_BACKOFF = 1.7;
+const PROACTIVE_NOTIFICATIONS_CACHE_MS = 120_000;
 
 type LiveModel = {
   id: string;
@@ -607,6 +611,12 @@ export function useChatState() {
   const shownAchievementToastsRef = useRef<Set<string>>(new Set());
   const lastPersonalRetryFailureRef = useRef("");
   const dismissedProactiveIdsRef = useRef<Set<string>>(new Set());
+  const proactiveNotificationsCacheRef = useRef<{
+    fetchedAt: number;
+    notifications: ApiNotification[];
+  } | null>(null);
+  const personalResourcesPollMsRef = useRef(PERSONAL_RESOURCES_POLL_MIN_MS);
+  const personalResourcesRefreshInFlightRef = useRef<Promise<void> | null>(null);
 
   const refreshBookmarks = useCallback(async (chatId = selectedChatIdRef.current) => {
     if (!chatId) {
@@ -844,7 +854,10 @@ export function useChatState() {
     const pendingResources = personalResources.filter(
       (resource) => resource.status === "uploaded" || resource.status === "processing",
     );
-    if (pendingResources.length === 0) return;
+    if (pendingResources.length === 0) {
+      personalResourcesPollMsRef.current = PERSONAL_RESOURCES_POLL_MIN_MS;
+      return;
+    }
 
     const now = Date.now();
     const staleResourceIds = pendingResources
@@ -859,6 +872,7 @@ export function useChatState() {
       .map((resource) => resource._id);
 
     if (staleResourceIds.length > 0) {
+      personalResourcesPollMsRef.current = PERSONAL_RESOURCES_POLL_MIN_MS;
       void retryPendingPersonalResources(staleResourceIds)
         .then(() => refreshPersonalResources())
         .catch((error) => {
@@ -871,9 +885,21 @@ export function useChatState() {
         });
     }
 
+    const nextPollMs =
+      staleResourceIds.length > 0
+        ? PERSONAL_RESOURCES_POLL_MIN_MS
+        : Math.min(
+            PERSONAL_RESOURCES_POLL_MAX_MS,
+            Math.max(
+              PERSONAL_RESOURCES_POLL_MIN_MS,
+              Math.round(personalResourcesPollMsRef.current * PERSONAL_RESOURCES_POLL_BACKOFF),
+            ),
+          );
+    personalResourcesPollMsRef.current = nextPollMs;
+
     const timer = window.setTimeout(() => {
       void refreshPersonalResources().catch(() => {});
-    }, staleResourceIds.length > 0 ? 4000 : 3500);
+    }, nextPollMs);
     return () => window.clearTimeout(timer);
   }, [personalResources]);
 
@@ -1176,53 +1202,68 @@ export function useChatState() {
 
     const collectBannerCandidates = async () => {
       const candidates: ProactiveBanner[] = [];
-      try {
-        const response = await fetch("/api/notifications?read=false&limit=20");
-        if (response.ok) {
-          const payload = (await response.json()) as { notifications?: ApiNotification[] };
-          const unread = (payload.notifications ?? [])
-            .filter((row) => !row.read)
-            .sort((a, b) => b.createdAt - a.createdAt);
+      const now = Date.now();
+      const cached = proactiveNotificationsCacheRef.current;
+      let unread: ApiNotification[] = [];
 
-          for (const notification of unread) {
-            if (notification.type === "reminder_flashcards_due") {
-              candidates.push({
-                id: `notif:${notification._id}`,
-                kind: "reminder_flashcards_due",
-                title: notification.title,
-                body: notification.body,
-                actionLabel: "Open flashcards",
-                actionUrl: notification.actionUrl ?? "/flashcards",
-              });
-              continue;
-            }
-            if (notification.type === "reminder_streak_risk") {
-              candidates.push({
-                id: `notif:${notification._id}`,
-                kind: "reminder_streak_risk",
-                title: notification.title,
-                body: notification.body,
-                actionLabel: "Protect streak",
-                mode: "tutor",
-                followUpMessage: "Give me a focused 10-minute study drill I can do right now to keep my streak alive today.",
-              });
-              continue;
-            }
-            if (notification.type === "reminder_study_plan") {
-              candidates.push({
-                id: `notif:${notification._id}`,
-                kind: "reminder_study_plan",
-                title: notification.title,
-                body: notification.body,
-                actionLabel: "Build plan",
-                mode: "tutor",
-                followUpMessage: "Build an actionable study plan for today based on my recent performance.",
-              });
-            }
+      if (cached && (now - cached.fetchedAt) < PROACTIVE_NOTIFICATIONS_CACHE_MS) {
+        unread = [...cached.notifications]
+          .filter((row) => !row.read)
+          .sort((a, b) => b.createdAt - a.createdAt);
+      } else {
+        try {
+          const response = await fetch("/api/notifications?read=false&limit=20");
+          if (response.ok) {
+            const payload = (await response.json()) as { notifications?: ApiNotification[] };
+            const fresh = payload.notifications ?? [];
+            proactiveNotificationsCacheRef.current = {
+              fetchedAt: now,
+              notifications: fresh,
+            };
+            unread = [...fresh]
+              .filter((row) => !row.read)
+              .sort((a, b) => b.createdAt - a.createdAt);
           }
+        } catch {
+          // Keep proactive banner non-blocking.
         }
-      } catch {
-        // Keep proactive banner non-blocking.
+      }
+
+      for (const notification of unread) {
+        if (notification.type === "reminder_flashcards_due") {
+          candidates.push({
+            id: `notif:${notification._id}`,
+            kind: "reminder_flashcards_due",
+            title: notification.title,
+            body: notification.body,
+            actionLabel: "Open flashcards",
+            actionUrl: notification.actionUrl ?? "/flashcards",
+          });
+          continue;
+        }
+        if (notification.type === "reminder_streak_risk") {
+          candidates.push({
+            id: `notif:${notification._id}`,
+            kind: "reminder_streak_risk",
+            title: notification.title,
+            body: notification.body,
+            actionLabel: "Protect streak",
+            mode: "tutor",
+            followUpMessage: "Give me a focused 10-minute study drill I can do right now to keep my streak alive today.",
+          });
+          continue;
+        }
+        if (notification.type === "reminder_study_plan") {
+          candidates.push({
+            id: `notif:${notification._id}`,
+            kind: "reminder_study_plan",
+            title: notification.title,
+            body: notification.body,
+            actionLabel: "Build plan",
+            mode: "tutor",
+            followUpMessage: "Build an actionable study plan for today based on my recent performance.",
+          });
+        }
       }
 
       if (!selectedChatId) {
@@ -2435,17 +2476,6 @@ export function useChatState() {
     const lastUser = [...messages].reverse().find((item) => item.role === "user");
     if (!lastUser || sending) return;
 
-    setMessages((prev) => {
-      const next = [...prev];
-      for (let i = next.length - 1; i >= 0; i -= 1) {
-        if (next[i]?.role === "assistant") {
-          next.splice(i, 1);
-          break;
-        }
-      }
-      return next;
-    });
-
     await sendMessage(lastUser.content, {
       regenerate: true,
       skipLocalUser: true,
@@ -2600,19 +2630,41 @@ export function useChatState() {
       if (!response.ok) {
         throw new Error(await response.text());
       }
+      const result = (await response.json()) as {
+        updatedCardHash?: string;
+        previousCardHash?: string;
+        hashChanged?: boolean;
+      };
       toast.success("Flashcard updated");
+      return result;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to update flashcard");
+      throw error;
     }
   }
 
   async function refreshPersonalResources() {
-    const response = await fetch("/api/resources?scope=personal");
-    if (!response.ok) throw new Error(await response.text());
-    const data = (await response.json()) as { resources: PersonalResource[] };
-    setPersonalResources(
-      [...(data.resources ?? [])].sort((a, b) => b.createdAt - a.createdAt),
-    );
+    if (personalResourcesRefreshInFlightRef.current) {
+      return personalResourcesRefreshInFlightRef.current;
+    }
+
+    const refreshPromise = (async () => {
+      const response = await fetch("/api/resources?scope=personal");
+      if (!response.ok) throw new Error(await response.text());
+      const data = (await response.json()) as { resources: PersonalResource[] };
+      setPersonalResources(
+        [...(data.resources ?? [])].sort((a, b) => b.createdAt - a.createdAt),
+      );
+    })();
+
+    personalResourcesRefreshInFlightRef.current = refreshPromise;
+    try {
+      await refreshPromise;
+    } finally {
+      if (personalResourcesRefreshInFlightRef.current === refreshPromise) {
+        personalResourcesRefreshInFlightRef.current = null;
+      }
+    }
   }
 
   async function retryPendingPersonalResources(resourceIds: string[]) {
@@ -2657,15 +2709,8 @@ export function useChatState() {
       saveToLibrary: true,
     });
     await refreshPersonalResources();
+    personalResourcesPollMsRef.current = PERSONAL_RESOURCES_POLL_MIN_MS;
     const uploadedCount = (result.results ?? []).filter((item) => item.status === "uploaded" || item.status === "reused").length;
-    if (uploadedCount > 0) {
-      window.setTimeout(() => {
-        void refreshPersonalResources().catch(() => {});
-      }, 2500);
-      window.setTimeout(() => {
-        void refreshPersonalResources().catch(() => {});
-      }, 7000);
-    }
     const failure = (result.results ?? []).find((item) => item.status === "failed");
     if (failure) {
       if (uploadedCount > 0) {
@@ -2757,17 +2802,6 @@ export function useChatState() {
   async function regenerateWithModel(modelId: string) {
     const lastUser = [...messages].reverse().find((item) => item.role === "user");
     if (!lastUser || sending) return;
-
-    setMessages((prev) => {
-      const next = [...prev];
-      for (let i = next.length - 1; i >= 0; i -= 1) {
-        if (next[i]?.role === "assistant") {
-          next.splice(i, 1);
-          break;
-        }
-      }
-      return next;
-    });
 
     await sendMessage(lastUser.content, {
       regenerate: true,

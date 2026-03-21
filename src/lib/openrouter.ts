@@ -20,6 +20,7 @@ export type OpenRouterStreamEvent =
       inputTokens?: number;
       outputTokens?: number;
       usage?: OpenRouterUsage;
+      finishReason?: string;
       raw?: unknown;
     }
   | { type: "error"; error: string };
@@ -446,6 +447,8 @@ export async function* openRouterStreamChat(params: {
       let usage: OpenRouterUsage | undefined;
       let inputTokens: number | undefined;
       let outputTokens: number | undefined;
+      let finishReason: string | undefined;
+      let visibleOutputChars = 0;
       let raw: unknown;
 
       while (true) {
@@ -467,6 +470,7 @@ export async function* openRouterStreamChat(params: {
               model?: string;
               usage?: Record<string, unknown>;
               choices?: Array<{
+                finish_reason?: string;
                 delta?: {
                   content?: string;
                   reasoning?: string;
@@ -499,7 +503,13 @@ export async function* openRouterStreamChat(params: {
 
             const delta = json.choices?.[0]?.delta?.content;
             if (delta) {
+              visibleOutputChars += delta.length;
               yield { type: "delta", content: delta };
+            }
+
+            const chunkFinishReason = json.choices?.[0]?.finish_reason;
+            if (typeof chunkFinishReason === "string" && chunkFinishReason.trim()) {
+              finishReason = chunkFinishReason.trim();
             }
 
             const reasoningDelta =
@@ -519,6 +529,20 @@ export async function* openRouterStreamChat(params: {
         }
       }
 
+      const nextModel = candidates[idx + 1];
+      const endedByLength = finishReason === "length";
+      if (endedByLength && visibleOutputChars === 0 && nextModel) {
+        const errorText = `No visible output before length cutoff (${model})`;
+        errors.push(`${model}: ${errorText}`);
+        params.onFallback?.({
+          fromModel: model,
+          toModel: nextModel,
+          error: errorText,
+          attemptIndex: idx,
+        });
+        continue;
+      }
+
       yield {
         type: "done",
         id: finalId,
@@ -526,6 +550,7 @@ export async function* openRouterStreamChat(params: {
         inputTokens,
         outputTokens,
         usage,
+        finishReason,
         raw,
       };
       return;

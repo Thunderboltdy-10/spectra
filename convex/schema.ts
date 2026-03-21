@@ -183,6 +183,7 @@ export default defineSchema({
     agentId: v.optional(v.id("agents")),
     ownerUserId: v.id("users"),
     title: v.string(),
+    latestUserPrompt: v.optional(v.string()),
     pinned: v.optional(v.boolean()),
     mode: vStudyMode,
     thinkingLevel: vThinkingLevel,
@@ -201,6 +202,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_owner", ["ownerUserId"])
+    .index("by_owner_updated", ["ownerUserId", "updatedAt"])
     .index("by_org", ["orgId"]),
 
   messages: defineTable({
@@ -385,6 +387,10 @@ export default defineSchema({
     longestStreak: v.number(),
     lastActiveDate: v.string(),
     totalXp: v.number(),
+    chatTurns: v.optional(v.number()),
+    tutorSessions: v.optional(v.number()),
+    researchSessionsWithSources: v.optional(v.number()),
+    imageResponses: v.optional(v.number()),
   }).index("by_user", ["userId"]),
 
   studyTimers: defineTable({

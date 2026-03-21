@@ -577,17 +577,18 @@ export function ChatLayout() {
             });
           }}
           onEditFlashcardCard={(payload) => {
-            void chat.editFlashcardCard({
+            return chat.editFlashcardCard({
               cardHash: payload.cardHash,
               front: payload.front,
               back: payload.back,
             });
           }}
-          onFollowUp={(followUpMessage) => {
+          onFollowUp={(followUpMessage, modeOverride) => {
             void chat.sendMessage(followUpMessage, {
               chatIdOverride: chat.selectedChatId || undefined,
               skipLocalUser: false,
               retryAttempt: 0,
+              modeOverride,
             });
           }}
           onModeChange={(newMode) => {

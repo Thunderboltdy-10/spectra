@@ -191,6 +191,8 @@ export default defineSchema({
     usePersonalResources: v.boolean(),
     contextSummary: v.optional(v.string()),
     learningContext: v.optional(v.string()),
+    recentContext: v.optional(v.string()),
+    recentContextAt: v.optional(v.number()),
     compactedUntilMessageId: v.optional(v.id("messages")),
     compactedAt: v.optional(v.number()),
     contextSummaryVersion: v.optional(v.number()),
@@ -222,12 +224,16 @@ export default defineSchema({
     verificationPassed: v.optional(v.boolean()),
     thinkingContent: v.optional(v.string()),
     routeTrace: vRouteTrace,
+    parentMessageId: v.optional(v.id("messages")),
+    siblingIndex: v.optional(v.number()),
+    siblingCount: v.optional(v.number()),
     createdAt: v.number(),
   })
     .index("by_chat", ["chatId"])
     .index("by_chat_client_message", ["chatId", "clientMessageId"])
     .index("by_user_created", ["userId", "createdAt"])
     .index("by_org", ["orgId"])
+    .index("by_parent_message", ["parentMessageId"])
     .searchIndex("search_content", {
       searchField: "content",
       filterFields: ["userId"],

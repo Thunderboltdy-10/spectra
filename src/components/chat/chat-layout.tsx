@@ -201,10 +201,23 @@ export function ChatLayout() {
     }
   }
 
+  const [modelTransitioning, setModelTransitioning] = useState(false);
+  const prevSelectedChatRef = useRef(chat.selectedChatId);
+
+  useEffect(() => {
+    if (prevSelectedChatRef.current !== chat.selectedChatId) {
+      setModelTransitioning(true);
+      const timer = window.setTimeout(() => setModelTransitioning(false), 600);
+      prevSelectedChatRef.current = chat.selectedChatId;
+      return () => window.clearTimeout(timer);
+    }
+  }, [chat.selectedChatId]);
+
   const lastModelUsed = useMemo(() => {
+    if (modelTransitioning) return undefined;
     const lastAssistant = [...chat.messages].reverse().find((item) => item.role === "assistant");
     return lastAssistant?.modelUsed ?? chat.lastAutoResult?.modelUsed;
-  }, [chat.lastAutoResult?.modelUsed, chat.messages]);
+  }, [chat.lastAutoResult?.modelUsed, chat.messages, modelTransitioning]);
   const lastResponseAt = useMemo(() => {
     const lastAssistant = [...chat.messages].reverse().find((item) => item.role === "assistant");
     return lastAssistant?.createdAt;
@@ -542,8 +555,15 @@ export function ChatLayout() {
           streamPhase={chat.streamPhase}
           streamError={chat.streamError}
           searchStatusBanner={chat.searchStatusBanner}
+          proactiveBanner={chat.proactiveBanner}
           chatId={chat.selectedChatId}
           onRetry={() => void chat.retryLastMessage()}
+          onApplyProactiveBanner={() => {
+            void chat.applyProactiveBanner();
+          }}
+          onDismissProactiveBanner={() => {
+            chat.dismissProactiveBanner();
+          }}
           onSubmitQuizAnswers={(payload) => {
             void chat.submitQuizAnswers(payload);
           }}

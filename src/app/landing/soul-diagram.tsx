@@ -158,6 +158,7 @@ export function SoulDiagram() {
               transform: `translateZ(0px) rotateY(${-rotY}deg) rotateX(${rotX}deg)`,
               transformStyle: "preserve-3d",
               opacity: activeLayer === "school" ? 0.3 : 1,
+              animation: "soul-core-pulse 3s ease-in-out infinite",
             }}
           >
             <div className="absolute inset-0 flex items-center justify-center">

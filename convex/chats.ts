@@ -540,6 +540,34 @@ export const setLearningContext = mutation({
   },
 });
 
+export const setRecentContext = mutation({
+  args: {
+    actorClerkId: v.string(),
+    chatId: v.id("chats"),
+    recentContext: v.optional(v.string()),
+    recentContextAt: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const chat = await ctx.db.get(args.chatId);
+    if (!chat || chat.ownerUserId !== actor._id || chat.deletedAt) {
+      throw new Error("Chat not found");
+    }
+
+    await ctx.db.patch(chat._id, {
+      recentContext: args.recentContext,
+      recentContextAt: args.recentContextAt,
+      updatedAt: Date.now(),
+    } as any);
+
+    return { ok: true };
+  },
+});
+
 export const manualCompact = mutation({
   args: {
     actorClerkId: v.string(),

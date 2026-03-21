@@ -278,7 +278,7 @@ const HERO_SCENARIOS = [
   {
     user: "Can you quiz me on the causes of World War I?",
     mode: { label: "Practice mode", color: "var(--mode-exam)" },
-    model: { label: "Gemini 2.5 Pro", color: "var(--brand-accent)" },
+    model: { label: "Gemini", color: "var(--brand-accent)" },
     agent: { label: "History agent", color: "var(--mode-research)" },
     reply: "Ready? Q1: What event in Sarajevo triggered the war \u2014 and which alliance did it activate first?",
     tag: "Active recall \u00b7 spaced retrieval",
@@ -286,7 +286,7 @@ const HERO_SCENARIOS = [
   {
     user: "Give me feedback on my essay introduction.",
     mode: { label: "Coach mode", color: "var(--mode-draft_coach)" },
-    model: { label: "Claude Sonnet", color: "var(--accent-coral)" },
+    model: { label: "Claude", color: "var(--accent-coral)" },
     agent: { label: "Essay Coach", color: "var(--accent-mint)" },
     reply: "Your opening line is strong. Before I go further \u2014 what\u2019s your central argument? I\u2019ll give you sharper feedback once I know your claim.",
     tag: "Process writing \u00b7 iterative revision",
@@ -825,10 +825,10 @@ export function LandingClient() {
 
         .mode-card .mode-label-container {
           transition: all 0.5s cubic-bezier(0.22,1,0.36,1);
-          transform-origin: top center;
+          transform-origin: center center;
         }
         .mode-card:hover .mode-label-container {
-          transform: scale(1.15) translateY(-54px);
+          transform: scale(1.0) translateY(-54px);
           justify-content: center;
           width: 100%;
         }

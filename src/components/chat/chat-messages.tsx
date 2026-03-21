@@ -7,6 +7,7 @@ import { ChatMessage } from "@/components/chat/chat-message";
 import type { ActiveCollaborator } from "@/components/chat/collaborators-live";
 import { QuizReveal, isQuizContent, type QuizSubmitResult } from "@/components/chat/quiz-reveal";
 import { FlashcardReveal, isFlashcardContent, type FlashcardCard } from "@/components/chat/flashcard-reveal";
+import { ClarificationCard } from "@/components/chat/clarification-card";
 import { DocumentPanel } from "@/components/chat/document-panel";
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { ThinkingBlock } from "@/components/chat/thinking-block";
@@ -16,7 +17,7 @@ import { stripQuizMarkers } from "@/lib/quiz-parser";
 import { autoCloseMarkdown } from "@/lib/stream-markdown";
 import { getModeConfig } from "@/lib/modes";
 import type { Message } from "@/hooks/use-chat-state";
-import type { StudyMode } from "@/types";
+import type { ClarificationBlock, StudyMode } from "@/types";
 
 type ChatMessagesProps = {
   messages: Message[];
@@ -27,8 +28,15 @@ type ChatMessagesProps = {
   streamPhase?: "idle" | "compacting" | "routing" | "searching" | "thinking" | "generating" | "synthesizing";
   streamError: string | null;
   searchStatusBanner?: "model_knowledge" | "real_search" | "error" | null;
+  proactiveBanner?: {
+    title: string;
+    body: string;
+    actionLabel: string;
+  } | null;
   chatId?: string;
   onRetry: () => void;
+  onApplyProactiveBanner?: () => void;
+  onDismissProactiveBanner?: () => void;
   onSubmitQuizAnswers?: (payload: { messageId: string; result: QuizSubmitResult }) => void;
   onSaveFlashcardDeck?: (payload: { messageId: string; title: string; cards: FlashcardCard[] }) => void;
   onRateFlashcardCard?: (payload: { messageId: string; cardHash: string; quality: number }) => void;
@@ -77,8 +85,11 @@ export function ChatMessages({
   streamPhase = "idle",
   streamError,
   searchStatusBanner = null,
+  proactiveBanner = null,
   chatId,
   onRetry,
+  onApplyProactiveBanner,
+  onDismissProactiveBanner,
   onSubmitQuizAnswers,
   onSaveFlashcardDeck,
   onRateFlashcardCard,
@@ -311,6 +322,16 @@ export function ChatMessages({
       .slice(0, 3);
   }
 
+  function getClarificationBlock(msg: Message): ClarificationBlock | null {
+    const block = (msg.routeTrace as { clarificationBlock?: unknown } | undefined)?.clarificationBlock;
+    if (!block || typeof block !== "object") return null;
+    const cast = block as ClarificationBlock;
+    if (typeof cast.context !== "string" || !Array.isArray(cast.questions) || cast.questions.length === 0) {
+      return null;
+    }
+    return cast;
+  }
+
   const streamingStatus = (() => {
     switch (streamPhase) {
       case "compacting": return "Compacting context";
@@ -354,11 +375,37 @@ export function ChatMessages({
         aria-live="polite"
         aria-relevant="additions text"
       >
-        <div className="mx-auto w-full max-w-6xl space-y-8">
+        <div className="mx-auto w-full max-w-[680px] space-y-8">
           {!hasContent && emptyState}
           {searchStatusBanner === "model_knowledge" ? (
             <div className="rounded-xl border border-[color-mix(in_oklab,var(--warning)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_10%,transparent)] px-3 py-2 text-xs text-[var(--warning)]">
               Web search was unavailable for this response. The assistant used model knowledge instead.
+            </div>
+          ) : null}
+          {proactiveBanner ? (
+            <div className="rounded-xl border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-elevated))] px-3 py-2.5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--text-primary)]">{proactiveBanner.title}</p>
+                  <p className="text-xs text-[var(--text-secondary)]">{proactiveBanner.body}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={onDismissProactiveBanner}
+                    className="rounded-full border border-[var(--border-default)] px-2.5 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+                  >
+                    Dismiss
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onApplyProactiveBanner}
+                    className="rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_18%,var(--bg-primary))] px-2.5 py-1 text-[11px] font-medium text-[var(--text-primary)] transition hover:bg-[color-mix(in_oklab,var(--accent-cyan)_24%,var(--bg-primary))]"
+                  >
+                    {proactiveBanner.actionLabel}
+                  </button>
+                </div>
+              </div>
             </div>
           ) : null}
 
@@ -384,7 +431,62 @@ export function ChatMessages({
             const assistantIsBookmarked = bookmarkedMessageIds.has(msg._id);
             const assistantBookmarking = bookmarkingMessageId === msg._id;
             const modeSuggestions = msg.role === "assistant" ? getModeSuggestions(msg) : [];
+            const clarificationBlock = msg.role === "assistant" ? getClarificationBlock(msg) : null;
             const quizDifficulty = inferQuizDifficulty(msg.routeTrace?.toolchain);
+
+            if (msg.role === "assistant" && clarificationBlock) {
+              return (
+                <div key={msg._id}>
+                  {showModeTransition && (
+                    <div className="flex items-center gap-2 py-2">
+                      <div className="h-px flex-1 bg-[var(--border-default)]" />
+                      <span className="text-[10px] text-[var(--text-tertiary)]">
+                        Switched to {getModeConfig(msg.mode!)?.label ?? msg.mode} mode
+                      </span>
+                      <div className="h-px flex-1 bg-[var(--border-default)]" />
+                    </div>
+                  )}
+                  <ChatMessage
+                    messageId={msg._id}
+                    role={msg.role}
+                    content=""
+                    thinkingContent={msg.thinkingContent}
+                    enhancedContent={msg.enhancedContent}
+                    attachments={msg.attachments}
+                    attachmentResourceIds={msg.attachmentResourceIds}
+                    attachmentPreviews={msg.attachmentPreviews}
+                    modelUsed={msg.modelUsed}
+                    whyThisResponse={msg.whyThisResponse}
+                    routeTrace={msg.routeTrace}
+                    citations={msg.citations}
+                    mode={msgMode}
+                    isLastAssistant={isLastAssistant}
+                    animateIn={!isLastAssistant}
+                    onRegenerate={isLastAssistant ? onRegenerate : undefined}
+                    onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
+                    regenModels={regenModels}
+                    onEdit={undefined}
+                    onBranch={onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
+                    onToggleBookmark={onToggleBookmarkMessage ? () => void onToggleBookmarkMessage(msg._id) : undefined}
+                    isBookmarked={assistantIsBookmarked}
+                    bookmarking={assistantBookmarking}
+                    usageIn={msg.usageIn}
+                    usageOut={msg.usageOut}
+                    createdAt={msg.createdAt}
+                    onFeedback={onAssistantFeedback}
+                    onOpenCanvas={onOpenCanvas}
+                  >
+                    <ClarificationCard
+                      block={clarificationBlock}
+                      disabled={sending}
+                      onSubmit={(answerMessage) => {
+                        onFollowUp?.(answerMessage);
+                      }}
+                    />
+                  </ChatMessage>
+                </div>
+              );
+            }
 
             if (msg.role === "assistant" && (msgMode === "quiz" || msgMode === "exam")) {
               if (isQuizContent(msg.content)) {

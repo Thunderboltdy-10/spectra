@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Bot, Brain, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Loader2, Settings2, Trash2, X, XCircle, FileText, Milestone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ProviderLogo } from "@/components/provider-logo";
@@ -31,20 +31,26 @@ function AutoChoice({
     <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2">
       <p className="mb-2 text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">{label}</p>
       <div className="grid grid-cols-3 gap-1">
-        {(["auto", "on", "off"] as const).map((item) => (
-          <button
-            key={item}
-            type="button"
-            onClick={() => onChange(item)}
-            className={`rounded-md px-2 py-1 text-xs transition ${
-              value === item
-                ? "bg-[var(--bg-primary)] text-[var(--text-primary)]"
-                : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-            }`}
-          >
-            {item === "auto" ? "Auto" : item === "on" ? "On" : "Off"}
-          </button>
-        ))}
+        {(["auto", "on", "off"] as const).map((item) => {
+          const isActive = value === item;
+          const pillClass = isActive
+            ? item === "auto"
+              ? "auto-pill-active bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[0_0_0_1.5px_var(--accent-cyan)]"
+              : item === "on"
+                ? "bg-[color-mix(in_oklab,var(--accent-cyan)_18%,var(--bg-primary))] text-[var(--accent-cyan)] shadow-[0_0_0_1.5px_var(--accent-cyan)]"
+                : "bg-[var(--bg-primary)] text-[var(--text-tertiary)]"
+            : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]";
+          return (
+            <button
+              key={item}
+              type="button"
+              onClick={() => onChange(item)}
+              className={`rounded-md px-2 py-1 text-xs font-medium transition-all duration-150 ${pillClass}`}
+            >
+              {item === "auto" ? "Auto" : item === "on" ? "On" : "Off"}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -1135,7 +1141,7 @@ function OrchestrationView({
       ) : null}
 
       {displaySteps.length > 0 && (
-        <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+        <section className={`rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 transition-all duration-300 ${stage === "complete" && !sending ? "opacity-60" : ""}`}>
           <p className="mb-2 text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Progress</p>
           <ol className="space-y-1.5">
             {displaySteps.map((item, index) => {
@@ -1144,18 +1150,21 @@ function OrchestrationView({
                 ? index < displaySteps.length - 1
                 : stage !== "idle" && index < stageIndex;
               const active = stage !== "idle" && stage !== "complete" && item === stage;
+              const skipped = !done && !active && stage !== "idle" && index < stageIndex;
               return (
                 <li key={item} className="flex items-center gap-2">
-                  <span
-                    className={`h-2 w-2 rounded-full transition-colors ${
-                      done
-                        ? "bg-[var(--success)]"
-                        : active
-                          ? "bg-[var(--accent-cyan)] animate-pulse"
-                          : "bg-[var(--border-default)]"
-                    }`}
-                  />
-                  <span className={`text-xs capitalize ${active ? "font-medium text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}>
+                  {done ? (
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[var(--success)]" />
+                  ) : active ? (
+                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--accent-cyan)]" />
+                  ) : skipped ? (
+                    <XCircle className="h-3.5 w-3.5 shrink-0 text-[var(--text-tertiary)]" />
+                  ) : (
+                    <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                      <span className="h-2 w-2 rounded-full bg-[var(--border-default)]" />
+                    </span>
+                  )}
+                  <span className={`text-xs capitalize ${active ? "font-medium text-[var(--text-primary)]" : done ? "text-[var(--text-secondary)]" : "text-[var(--text-tertiary)]"}`}>
                     {item === "complete"
                       ? (isComplete ? "Done" : "Completing…")
                       : item}
@@ -1445,9 +1454,20 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
     reserveLeftPx: 160,
   });
   const [collapsed, setCollapsed] = useState(false);
+  const [animateIn, setAnimateIn] = useState(false);
+  const prevViewRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (activeView) setCollapsed(false);
+    if (activeView) {
+      setCollapsed(false);
+      // Trigger slide-in animation when panel opens
+      if (!prevViewRef.current) {
+        requestAnimationFrame(() => setAnimateIn(true));
+      }
+    } else {
+      setAnimateIn(false);
+    }
+    prevViewRef.current = activeView;
   }, [activeView]);
 
   if (!activeView) return null;
@@ -1486,13 +1506,18 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
               ? "absolute bottom-3 left-3 right-3 max-h-[78vh] rounded-2xl border p-4"
               : "absolute inset-y-0 right-0 w-[92vw] border-l p-4"
         }`}
-        style={
-          docked
+        style={{
+          ...(docked
             ? { width: "100%", height: "100%" }
             : compact
-              ? undefined
-              : { maxWidth: `${maxWidthPx}px` }
-        }
+              ? {}
+              : { maxWidth: `${maxWidthPx}px` }),
+          ...(!docked ? {
+            transition: "transform 280ms cubic-bezier(0.16, 1, 0.3, 1), opacity 200ms ease",
+            transform: animateIn ? "translateX(0)" : compact ? "translateY(16px)" : "translateX(24px)",
+            opacity: animateIn ? 1 : 0,
+          } : {}),
+        }}
       >
         <div
           className={`flex items-center justify-between ${docked ? "min-h-[56px] shadow-[0_1px_0_var(--border-default)] px-5 pb-3 pt-2.5" : "min-h-[56px] mb-4"}`}

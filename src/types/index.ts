@@ -31,6 +31,24 @@ export type Citation = {
   snippet?: string;
 };
 
+export type ClarificationOption = {
+  id: string;
+  label: string;
+  description?: string;
+};
+
+export type ClarificationQuestion = {
+  id: string;
+  text: string;
+  type: "free_text" | "single_choice" | "multi_choice" | "confirmation";
+  options?: ClarificationOption[];
+};
+
+export type ClarificationBlock = {
+  context: string;
+  questions: ClarificationQuestion[];
+};
+
 export type Agent = {
   _id: string;
   name: string;
@@ -298,6 +316,7 @@ export type RouteTrace = {
     label: string;
     prompt: string;
   }>;
+  clarificationBlock?: ClarificationBlock;
   collaborators?: Array<{ role: string; model: string; tokensUsed: number; durationMs: number }>;
 };
 

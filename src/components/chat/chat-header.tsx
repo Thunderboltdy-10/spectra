@@ -65,9 +65,9 @@ export function ChatHeader({
   const showCompactTip = messageCount > 8;
 
   return (
-    <header className="sticky top-0 z-20 shadow-[0_1px_0_var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_92%,transparent)] backdrop-blur-xl min-h-[56px]">
-      <div className="px-3 pb-3 pt-2.5 sm:px-6 lg:px-10">
-        <div className="mx-auto flex w-full max-w-5xl items-center gap-2">
+    <header className="sticky top-0 z-20 shadow-[0_1px_0_var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_92%,transparent)] backdrop-blur-xl min-h-[var(--header-height,56px)]">
+      <div className="flex h-[var(--header-height,56px)] items-center px-3 sm:px-6 lg:px-10">
+        <div className="mx-auto flex w-full max-w-[680px] items-center gap-2">
           <Button
             type="button"
             variant="secondary"

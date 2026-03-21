@@ -39,6 +39,7 @@
   --success: #148f5d;
   --warning: #b67616;
 
+  --header-height: 56px;
   --radius-container: 18px;
   --radius-input: 12px;
   --radius-pill: 999px;
@@ -528,6 +529,29 @@ button:disabled {
   100% {
     transform: scale(1);
     box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent-cyan) 0%, transparent);
+  }
+}
+
+@keyframes auto-pill-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--accent-cyan) 50%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--accent-cyan) 90%, transparent),
+                0 0 6px color-mix(in oklab, var(--accent-cyan) 20%, transparent);
+  }
+}
+
+.auto-pill-active {
+  animation: auto-pill-glow 2.4s ease-in-out infinite;
+}
+
+@keyframes soul-core-pulse {
+  0%, 100% {
+    box-shadow: 0 0 60px var(--brand-primary), inset 0 0 30px white;
+  }
+  50% {
+    box-shadow: 0 0 80px var(--brand-primary), 0 0 120px color-mix(in oklab, var(--brand-primary) 30%, transparent), inset 0 0 40px white;
   }
 }
 

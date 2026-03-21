@@ -50,7 +50,13 @@ import {
   rewriteCitationMarkers,
   stripOrphanCitations,
 } from "@/lib/orchestrator/post-process";
-import { buildResearchEvidenceBlock, maybeSearchWeb, runRagRetrieval } from "@/lib/orchestrator/retrieval";
+import {
+  buildResearchEvidenceBlock,
+  maybeSearchWeb,
+  runRagRetrieval,
+  type RetrievalResult,
+  type WebSearchResult,
+} from "@/lib/orchestrator/retrieval";
 import { buildRoutePlan } from "@/lib/orchestrator/route-plan";
 import { PipelineController } from "@/lib/orchestrator/pipeline-controller";
 import { formatRuntimeSkillBlock, selectRuntimeSkills } from "@/lib/orchestrator/skills";
@@ -66,6 +72,14 @@ import {
   serializeLearningContext,
   type LearningContext,
 } from "@/lib/orchestrator/learning-context";
+import {
+  buildRecentContextSnapshot,
+  formatClarificationAsText,
+  needsClarification,
+  parseRecentContext,
+  serializeRecentContext,
+  type ClarificationBlock,
+} from "@/lib/orchestrator/clarification";
 import { formatSchoolNow } from "@/lib/timezone";
 import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 import type { StudyMode } from "@/types";
@@ -880,6 +894,23 @@ export async function runChatPipeline(request: NextRequest) {
 
   const history = toChatMessageShape(chatData.messages);
   const storedLearningContext = parseLearningContext((chatData.chat as { learningContext?: unknown }).learningContext);
+  const recentContextCache = parseRecentContext({
+    raw: (chatData.chat as { recentContext?: unknown }).recentContext,
+    savedAt: (chatData.chat as { recentContextAt?: unknown }).recentContextAt,
+  });
+  const lastAssistantMessage = [...history].reverse().find((message) => message.role === "assistant");
+  const lastAssistantWasClarification = Boolean(
+    (lastAssistantMessage?.routeTrace as { clarificationBlock?: unknown } | undefined)?.clarificationBlock,
+  );
+  const shouldReuseRecentContext = Boolean(recentContextCache && lastAssistantWasClarification);
+  if (shouldReuseRecentContext) {
+    void convexMutation("chats:setRecentContext", {
+      actorClerkId: actor.clerkId,
+      chatId,
+      recentContext: undefined,
+      recentContextAt: undefined,
+    }).catch(() => {});
+  }
   const isFirstAssistantTurn = history.every((message) => message.role !== "assistant");
   const attemptStats = extractAttemptStats(history);
   const directiveMemorySummary = {
@@ -1011,9 +1042,6 @@ export async function runChatPipeline(request: NextRequest) {
     pipelineController.markStageSkipped("autoSettings", "Skipped for T0 request class.");
   } else {
     pipelineController.markStageCompleted("autoSettings");
-  }
-  if (pipelineController.shouldRun("clarificationCheck")) {
-    pipelineController.markStageCompleted("clarificationCheck");
   }
 
   let agentSuggestion:
@@ -1187,48 +1215,83 @@ export async function runChatPipeline(request: NextRequest) {
       }).catch(() => null)
     : Promise.resolve(null);
 
-  const retrievalPromise = routePlan.allowedToolBundles.includes("retrieval") && routePlan.retrievalScopes.length > 0
-    ? runRagRetrieval({
-        actorClerkId: actor.clerkId,
-        chatId,
-        packId: routePlan.retrievalScopes.includes("pack") ? activePackId : undefined,
-        usePersonalResources: routePlan.retrievalScopes.includes("personal") && body.usePersonalResources,
-        selectedAgentId: routePlan.retrievalScopes.includes("agent") ? selectedAgent?._id : undefined,
-        message: auto.message,
-        logger,
-      })
-    : Promise.resolve({
-        citations: [],
-        sourceBlock: "No retrieved sources.",
+  const defaultRetrievalResult: RetrievalResult = {
+    citations: [],
+    sourceBlock: "No retrieved sources.",
+    queryEmbedding: undefined,
+    diagnostics: {
+      scopesAttempted: [],
+      status: "not_requested" as const,
+      reason: "Retrieval not enabled by the route plan.",
+      embeddingModel: undefined,
+    },
+  };
+  const defaultSearchResult: WebSearchResult = {
+    text: "",
+    urls: [],
+    sources: [],
+    provider: "disabled" as const,
+    modelUsed: undefined,
+    usage: undefined,
+    durationMs: undefined,
+  };
+  const hasReusableRecentContext =
+    shouldReuseRecentContext
+    && Boolean(recentContextCache?.retrieval || recentContextCache?.search);
+
+  const retrievalPromise = hasReusableRecentContext
+    ? Promise.resolve({
+        citations: recentContextCache?.retrieval.citations ?? [],
+        sourceBlock: recentContextCache?.retrieval.sourceBlock ?? "Reused cached retrieval context.",
         queryEmbedding: undefined,
         diagnostics: {
-          scopesAttempted: [],
-          status: "not_requested" as const,
-          reason: "Retrieval not enabled by the route plan.",
+          scopesAttempted: recentContextCache?.retrieval.diagnostics?.scopesAttempted ?? [],
+          status: recentContextCache?.retrieval.diagnostics?.status ?? ("retrieved" as const),
+          reason: recentContextCache?.retrieval.diagnostics?.reason ?? "Loaded from recent clarification context cache.",
+          embeddingModel: recentContextCache?.retrieval.diagnostics?.embeddingModel,
         },
-      });
+      })
+    : routePlan.allowedToolBundles.includes("retrieval") && routePlan.retrievalScopes.length > 0
+      ? runRagRetrieval({
+          actorClerkId: actor.clerkId,
+          chatId,
+          packId: routePlan.retrievalScopes.includes("pack") ? activePackId : undefined,
+          usePersonalResources: routePlan.retrievalScopes.includes("personal") && body.usePersonalResources,
+          selectedAgentId: routePlan.retrievalScopes.includes("agent") ? selectedAgent?._id : undefined,
+          message: auto.message,
+          logger,
+        })
+      : Promise.resolve(defaultRetrievalResult);
 
-  const searchPromise = routePlan.shouldUseWebSearch
-    ? maybeSearchWeb(auto.message, auto.thinkingLevel, {
-        actorClerkId: actor.clerkId,
-        chatId,
-        modelCatalog: catalog,
-        spendingTier: budget.tier,
-        modelRuntimeStats: runtimeStatMap,
-        searxngEnabled,
-      }).catch(() => ({
-        text: "",
-        urls: [] as string[],
-        sources: [] as Array<{ url: string; title: string; domain: string }>,
-        provider: "error" as const,
-      }))
-    : Promise.resolve({
-      text: "",
-      urls: [] as string[],
-      sources: [] as Array<{ url: string; title: string; domain: string }>,
-      provider: "disabled" as const,
-    });
-  if (routePlan.shouldUseWebSearch) {
+  const searchPromise = hasReusableRecentContext
+    ? Promise.resolve({
+        text: recentContextCache?.search.text ?? "",
+        urls: recentContextCache?.search.urls ?? [],
+        sources: recentContextCache?.search.sources ?? [],
+        provider: recentContextCache?.search.provider ?? ("disabled" as const),
+        modelUsed: undefined,
+        usage: undefined,
+        durationMs: undefined,
+      })
+    : routePlan.shouldUseWebSearch
+      ? maybeSearchWeb(auto.message, auto.thinkingLevel, {
+          actorClerkId: actor.clerkId,
+          chatId,
+          modelCatalog: catalog,
+          spendingTier: budget.tier,
+          modelRuntimeStats: runtimeStatMap,
+          searxngEnabled,
+        }).catch(() => ({
+          text: "",
+          urls: [] as string[],
+          sources: [] as Array<{ url: string; title: string; domain: string }>,
+          provider: "error" as const,
+          modelUsed: undefined,
+          usage: undefined,
+          durationMs: undefined,
+        }))
+      : Promise.resolve(defaultSearchResult);
+  if (routePlan.shouldUseWebSearch || hasReusableRecentContext) {
     earlyEventBuffer.push({ type: "phase", phase: "searching" });
   }
 
@@ -1310,20 +1373,23 @@ export async function runChatPipeline(request: NextRequest) {
   const searchUrls = webResult.urls ?? [];
   let searchSources = webResult.sources ?? [];
   const searchProvider = webResult.provider;
+  const usedRecentContextCache = hasReusableRecentContext;
   const routeTraceSearchStatus =
-    !routePlan.shouldUseWebSearch
+    !routePlan.shouldUseWebSearch && !usedRecentContextCache
       ? "skipped"
       : searchProvider === "searxng"
         ? "real_search"
         : searchProvider === "model_fallback"
           ? "model_knowledge"
+          : searchProvider === "disabled"
+            ? "skipped"
           : "error";
-  if (routePlan.retrievalScopes.length > 0) {
+  if (usedRecentContextCache || routePlan.retrievalScopes.length > 0) {
     pipelineController.markStageCompleted("ragRetrieval");
   } else {
     pipelineController.markStageSkipped("ragRetrieval", "No retrieval scope enabled after cost and route gating.");
   }
-  if (routePlan.shouldUseWebSearch) {
+  if (usedRecentContextCache || routePlan.shouldUseWebSearch) {
     pipelineController.markStageCompleted("webSearch");
   } else {
     pipelineController.markStageSkipped("webSearch", "Web search disabled after request-class and route gating.");
@@ -1355,7 +1421,7 @@ export async function runChatPipeline(request: NextRequest) {
       durationMs: webResult.durationMs,
     });
   }
-  if (routePlan.shouldUseWebSearch) {
+  if (routePlan.shouldUseWebSearch || usedRecentContextCache) {
     logger.info("web search complete", { urlCount: searchUrls.length });
     if (searchProvider === "model_fallback") {
       earlyEventBuffer.push({ type: "search_status", status: "model_fallback" });
@@ -1424,7 +1490,7 @@ export async function runChatPipeline(request: NextRequest) {
     thinkingLevel: phaseThinkingLevel,
     stakes: phaseStake,
     messageLength: auto.message.length,
-    needsSearch: routePlan.shouldUseWebSearch,
+    needsSearch: routePlan.shouldUseWebSearch || usedRecentContextCache,
     hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
     requiredCapabilities: routePlan.candidateModelRequirements.required,
     preferredCapabilities: routePlan.candidateModelRequirements.preferred,
@@ -1448,7 +1514,7 @@ export async function runChatPipeline(request: NextRequest) {
     verificationModel: undefined as string | undefined,
     reason: routeDecision.reason,
     autoEnhanced: routingMode !== "manual",
-    searchEnabled: routePlan.shouldUseWebSearch,
+    searchEnabled: routePlan.shouldUseWebSearch || usedRecentContextCache,
     trace: {
       inputs: {
         routerMode: routingMode,
@@ -1459,7 +1525,7 @@ export async function runChatPipeline(request: NextRequest) {
         promptCategory: auto.promptCategory,
         questionType: auto.questionType,
         isMultipart: auto.isMultipart,
-        needsSearch: routePlan.shouldUseWebSearch,
+        needsSearch: routePlan.shouldUseWebSearch || usedRecentContextCache,
         needsRag: retrieval.citations.length > 0,
         needsVision: (body.attachmentTypes?.length ?? 0) > 0,
         needsTabular: false,
@@ -1643,8 +1709,11 @@ export async function runChatPipeline(request: NextRequest) {
   if (retrieval.diagnostics?.status) {
     route.trace.toolchain.push(`retrieval_${retrieval.diagnostics.status}`);
   }
-  if (routePlan.shouldUseWebSearch) route.trace.toolchain.push("web_search");
-  if (routePlan.shouldUseWebSearch) {
+  if (usedRecentContextCache) {
+    route.trace.toolchain.push("recent_context_reused");
+  }
+  if (routePlan.shouldUseWebSearch || usedRecentContextCache) route.trace.toolchain.push("web_search");
+  if (routePlan.shouldUseWebSearch || usedRecentContextCache) {
     if (searchProvider === "searxng") {
       route.trace.toolchain.push("search_provider_searxng");
     } else if (searchProvider === "model_fallback") {
@@ -1794,7 +1863,7 @@ export async function runChatPipeline(request: NextRequest) {
     retrieval.citations.length > 0
       ? `scoped retrieval available (${retrieval.citations.length} source${retrieval.citations.length === 1 ? "" : "s"})`
       : retrieval.diagnostics?.reason ?? "not used";
-  const searchStatus = routePlan.shouldUseWebSearch
+  const searchStatus = routePlan.shouldUseWebSearch || usedRecentContextCache
     ? (searchBlock.trim()
         ? "web search already run; use the provided web context and do not claim browsing is unavailable"
         : "web search allowed for this route but returned no usable results")
@@ -1860,6 +1929,63 @@ export async function runChatPipeline(request: NextRequest) {
   const learningContextStatus = storedLearningContext
     ? `topics=${storedLearningContext.topics.length}, facts=${storedLearningContext.keyFacts.length}, cards=${storedLearningContext.flashcardCandidates.length}`
     : "none";
+  const clarificationDecision = pipelineController.shouldRun("clarificationCheck")
+    ? needsClarification({
+        requestClass: auto.requestClass,
+        mode: effectiveMode,
+        message: normalizedMessage,
+        userDirectives,
+        lastAssistantWasClarification,
+      })
+    : null;
+  if (pipelineController.shouldRun("clarificationCheck")) {
+    pipelineController.markStageCompleted("clarificationCheck");
+  }
+  const clarificationBlock = clarificationDecision?.block ?? null;
+  const clarificationText = clarificationBlock ? formatClarificationAsText(clarificationBlock) : null;
+  if (clarificationBlock) {
+    route.trace.toolchain.push("clarification_interrupt");
+    (route.trace as { clarificationBlock?: ClarificationBlock }).clarificationBlock = clarificationBlock;
+  } else if (pipelineController.shouldRun("clarificationCheck")) {
+    route.trace.toolchain.push("clarification_not_needed");
+  }
+  if (
+    clarificationBlock
+    && (auto.requestClass === "T2" || auto.requestClass === "T3")
+    && (retrieval.citations.length > 0 || searchSources.length > 0 || searchBlock.trim().length > 0)
+  ) {
+    const recentContextSnapshot = buildRecentContextSnapshot({
+      requestClass: auto.requestClass,
+      mode: effectiveMode,
+      retrieval: {
+        citations: retrieval.citations,
+        sourceBlock: retrieval.sourceBlock,
+        diagnostics: retrieval.diagnostics
+          ? {
+              scopesAttempted: retrieval.diagnostics.scopesAttempted,
+              status: retrieval.diagnostics.status,
+              reason: retrieval.diagnostics.reason,
+              embeddingModel: retrieval.diagnostics.embeddingModel,
+            }
+          : undefined,
+      },
+      search: {
+        text: searchBlock,
+        urls: searchUrls,
+        sources: searchSources,
+        provider: searchProvider,
+      },
+      clarification: clarificationBlock,
+    });
+    await convexMutation("chats:setRecentContext", {
+      actorClerkId: actor.clerkId,
+      chatId,
+      recentContext: serializeRecentContext(recentContextSnapshot),
+      recentContextAt: recentContextSnapshot.createdAt,
+    }).catch(() => {});
+    route.trace.toolchain.push("recent_context_cached");
+  }
+
   const runtimeContextBlock = [
     `School: ${orgSettings.org?.name ?? "Spectra"}`,
     `School type: ${orgSettings.org?.schoolType ?? "unspecified"}`,
@@ -1946,7 +2072,7 @@ Validator: ${routePlan.modeContract.validator}
   );
   systemPromptParts.push(
     `=== ROUTE PRIMITIVES ===
-Web search bundle: ${routePlan.shouldUseWebSearch ? "enabled" : "disabled"}.
+Web search bundle: ${routePlan.shouldUseWebSearch || usedRecentContextCache ? "enabled" : "disabled"}.
 Retrieved school resources: ${retrieval.citations.length > 0 ? `${retrieval.citations.length} source(s) available` : routePlan.retrievalScopes.length > 0 ? "enabled but no high-confidence sources found" : "disabled"}.
 Memory bundle: ${useMemoryProfile ? "layered memory injected (global + topic-aware)" : memoryEnabled ? "enabled but no relevant memory injected" : "disabled"}.
 Multi-agent collaboration: ${routePlan.allowSubAgents ? "allowed only if the route earns it" : "disabled"}.
@@ -1974,7 +2100,7 @@ Allowed bundles: ${routePlan.agentContract.toolBundles.join(", ") || "none"}
   systemPromptParts.push(
     `=== TOOL EXECUTION CONTEXT ===
 Route-approved bundles: ${routePlan.allowedToolBundles.join(", ") || "none"}
-Search route enabled: ${routePlan.shouldUseWebSearch ? "yes" : "no"}
+Search route enabled: ${routePlan.shouldUseWebSearch || usedRecentContextCache ? "yes" : "no"}
 Retrieval scopes enabled: ${routePlan.retrievalScopes.join(", ") || "none"}
 Memory route enabled: ${memoryEnabled ? "yes" : "no"}
 Web results provided below: ${searchSources.length > 0 ? "yes" : "no"}
@@ -2203,7 +2329,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
   }
   route.trace.phasePlan = buildPhasePlan({
     routeNeedsRetrieval: retrieval.citations.length > 0 || routePlan.retrievalScopes.length > 0,
-    routeNeedsSearch: routePlan.shouldUseWebSearch,
+    routeNeedsSearch: routePlan.shouldUseWebSearch || usedRecentContextCache,
     multiAgentEnabled,
     shouldVerify,
     shouldRepair: effectiveMode === "quiz" || effectiveMode === "flashcard",
@@ -2282,7 +2408,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     }
   }
   if (route.trace.phasePlan?.some((phase) => phase.id === "search")) {
-    if (!routePlan.shouldUseWebSearch) {
+    if (!routePlan.shouldUseWebSearch && !usedRecentContextCache) {
       queuePhaseUpdate("search", "skipped", "Web search not required.");
     } else {
       const sourceCount = searchSources.length || searchUrls.length;
@@ -2389,6 +2515,86 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           chatId,
         });
       });
+
+      if (clarificationBlock && clarificationText) {
+        await send({
+          type: "phase_update",
+          phaseId: "clarificationCheck",
+          status: "in_progress",
+          detail: "Checking whether additional scope details are needed.",
+        });
+        await send({
+          type: "phase_update",
+          phaseId: "clarificationCheck",
+          status: "completed",
+          detail: clarificationDecision?.reason ?? "Clarification required before generation.",
+        });
+
+        pipelineController.markStageSkipped("generation", "Clarification required before response generation.");
+        pipelineController.markStageSkipped("postProcess", "Waiting for user clarification before post-processing.");
+        route.trace.phasePlan = (route.trace.phasePlan ?? []).map((phase) => {
+          if (phase.status === "completed" || phase.status === "skipped" || phase.status === "failed") {
+            return phase;
+          }
+          return {
+            ...phase,
+            status: "skipped",
+            detail: phase.detail ?? "Deferred until clarification answers are provided.",
+          };
+        });
+        const clarificationSnapshot = pipelineController.getState();
+        route.trace.stepsExecuted = clarificationSnapshot.completedStages;
+        route.trace.stepsSkipped = clarificationSnapshot.skippedStages.map((row) => ({
+          step: row.step,
+          reason: row.reason,
+        }));
+        (route.trace as any).totalDurationMs = Date.now() - requestStartedAt;
+
+        const appended = (await convexMutation("chats:appendMessage", {
+          actorClerkId: actor.clerkId,
+          chatId,
+          role: "assistant",
+          content: clarificationText,
+          enhancedContent: undefined,
+          mode: effectiveMode,
+          packId: body.packId,
+          citations: [],
+          modelRequested: undefined,
+          modelUsed: undefined,
+          whyThisResponse: "Additional clarification required before executing the full workflow.",
+          usageIn: undefined,
+          usageOut: undefined,
+          verificationPassed: undefined,
+          thinkingContent: undefined,
+          routeTrace: route.trace,
+        })) as { messageId: string };
+        assistantPersisted = true;
+
+        await send({
+          type: "done",
+          content: clarificationText,
+          chatId,
+          userMessageId: persistedUserMessageId,
+          messageId: appended.messageId,
+          modelUsed: undefined,
+          modelRequested: route.primaryModel,
+          whyThisResponse: "Clarification requested before executing the expensive stages.",
+          citations: [],
+          routeTrace: route.trace,
+          autoResult: {
+            modelUsed: undefined,
+            searchEnabled: route.searchEnabled || routePlan.shouldUseWebSearch || usedRecentContextCache,
+            thinkingLevel: effectiveThinkingLevel,
+            promptEnhanced: auto.promptEnhanced,
+          },
+          enhancedPrompt: auto.promptEnhanced ? auto.message : undefined,
+          effectiveMode,
+          suggestedMode: effectiveMode !== safeMode ? effectiveMode : undefined,
+          userSelectedMode: safeMode,
+          agentSuggestion,
+        });
+        return;
+      }
 
       if (effectiveMode === "image") {
         if (route.trace.phasePlan?.some((phase) => phase.id === "analysis")) {

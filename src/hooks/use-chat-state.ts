@@ -65,6 +65,9 @@ export type Message = {
   usageOut?: number;
   createdAt?: number;
   mode?: StudyMode;
+  parentMessageId?: string;
+  siblingIndex?: number;
+  siblingCount?: number;
 };
 
 export type FileStatus = "pending" | "uploading" | "processing" | "ready" | "error";
@@ -132,6 +135,27 @@ export type UserSpending = {
 export type AutoPreference = "auto" | "on" | "off";
 type StreamPhase = "idle" | "compacting" | "routing" | "searching" | "thinking" | "generating" | "synthesizing";
 type SearchStatusBanner = "model_knowledge" | "real_search" | "error" | null;
+type ProactiveBanner = {
+  id: string;
+  kind: "reminder_flashcards_due" | "reminder_streak_risk" | "reminder_study_plan" | "continuation_chat";
+  title: string;
+  body: string;
+  actionLabel: string;
+  chatId?: string;
+  mode?: StudyMode;
+  followUpMessage?: string;
+  actionUrl?: string;
+};
+
+type ApiNotification = {
+  _id: string;
+  type: string;
+  title: string;
+  body: string;
+  actionUrl?: string;
+  read: boolean;
+  createdAt: number;
+};
 
 function normalizePhaseStatus(value?: string): "planned" | "running" | "completed" | "skipped" | "failed" {
   if (value === "in_progress" || value === "running") return "running";
@@ -159,6 +183,7 @@ const LAST_ACTIVE_CHAT_ID_KEY = "ai-school:lastActiveChatId";
 const CHAT_SESSION_WINDOW_MS = 12 * 60 * 60 * 1000;
 const MEMORY_ENABLED_KEY = "ai-school:memory-enabled";
 const SEARXNG_ENABLED_KEY = "ai-school:searxng-enabled";
+const PROACTIVE_BANNER_DISMISSED_KEY = "ai-school:proactive-banner-dismissed-v1";
 
 type LiveModel = {
   id: string;
@@ -544,6 +569,7 @@ export function useChatState() {
   const [streamPhase, setStreamPhase] = useState<StreamPhase>("idle");
   const [livePhasePlan, setLivePhasePlan] = useState<NonNullable<RouteTrace["phasePlan"]>>([]);
   const [searchStatusBanner, setSearchStatusBanner] = useState<SearchStatusBanner>(null);
+  const [proactiveBanner, setProactiveBanner] = useState<ProactiveBanner | null>(null);
   const [collaboratorPhase, setCollaboratorPhase] = useState<"idle" | "running" | "synthesizing">("idle");
   const [fileList, setFileList] = useState<File[]>([]);
   const [fileUploadState, setFileUploadState] = useState<
@@ -580,6 +606,7 @@ export function useChatState() {
   const sendingRef = useRef(false);
   const shownAchievementToastsRef = useRef<Set<string>>(new Set());
   const lastPersonalRetryFailureRef = useRef("");
+  const dismissedProactiveIdsRef = useRef<Set<string>>(new Set());
 
   const refreshBookmarks = useCallback(async (chatId = selectedChatIdRef.current) => {
     if (!chatId) {
@@ -726,6 +753,18 @@ export function useChatState() {
       `${chat.latestUserPrompt ?? ""} ${chat.title}`.toLowerCase().includes(clean),
     );
   }, [chats, search, searchHits]);
+
+  useEffect(() => {
+    try {
+      const raw = window.sessionStorage.getItem(PROACTIVE_BANNER_DISMISSED_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as string[];
+      if (!Array.isArray(parsed)) return;
+      dismissedProactiveIdsRef.current = new Set(parsed.filter((id) => typeof id === "string" && id.trim().length > 0));
+    } catch {
+      dismissedProactiveIdsRef.current = new Set();
+    }
+  }, []);
 
   useEffect(() => {
     if (sidebar.loading || initializedRef.current) return;
@@ -1058,6 +1097,7 @@ export function useChatState() {
       setLastFailedMessage(null);
       setLastAutoResult(null);
       setAgentSuggestion(null);
+      setProactiveBanner(null);
       setMobileSidebarOpen(false);
       setStreamPhase("idle");
       pendingLocalUserMessageIdsRef.current.clear();
@@ -1079,6 +1119,29 @@ export function useChatState() {
     },
     [clearRecentChatActivity],
   );
+
+  const persistDismissedProactiveIds = useCallback(() => {
+    try {
+      window.sessionStorage.setItem(
+        PROACTIVE_BANNER_DISMISSED_KEY,
+        JSON.stringify([...dismissedProactiveIdsRef.current]),
+      );
+    } catch {
+      // Ignore storage failures.
+    }
+  }, []);
+
+  const markProactiveDismissed = useCallback((id: string) => {
+    if (!id.trim()) return;
+    dismissedProactiveIdsRef.current.add(id);
+    persistDismissedProactiveIds();
+  }, [persistDismissedProactiveIds]);
+
+  const dismissProactiveBanner = useCallback(() => {
+    if (!proactiveBanner) return;
+    markProactiveDismissed(proactiveBanner.id);
+    setProactiveBanner(null);
+  }, [markProactiveDismissed, proactiveBanner]);
 
   useEffect(() => {
     const clean = search.trim();
@@ -1102,6 +1165,92 @@ export function useChatState() {
 
     return () => window.clearTimeout(timeout);
   }, [search]);
+
+  useEffect(() => {
+    if (sending || messages.length > 0) {
+      setProactiveBanner(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const collectBannerCandidates = async () => {
+      const candidates: ProactiveBanner[] = [];
+      try {
+        const response = await fetch("/api/notifications?read=false&limit=20");
+        if (response.ok) {
+          const payload = (await response.json()) as { notifications?: ApiNotification[] };
+          const unread = (payload.notifications ?? [])
+            .filter((row) => !row.read)
+            .sort((a, b) => b.createdAt - a.createdAt);
+
+          for (const notification of unread) {
+            if (notification.type === "reminder_flashcards_due") {
+              candidates.push({
+                id: `notif:${notification._id}`,
+                kind: "reminder_flashcards_due",
+                title: notification.title,
+                body: notification.body,
+                actionLabel: "Open flashcards",
+                actionUrl: notification.actionUrl ?? "/flashcards",
+              });
+              continue;
+            }
+            if (notification.type === "reminder_streak_risk") {
+              candidates.push({
+                id: `notif:${notification._id}`,
+                kind: "reminder_streak_risk",
+                title: notification.title,
+                body: notification.body,
+                actionLabel: "Protect streak",
+                mode: "tutor",
+                followUpMessage: "Give me a focused 10-minute study drill I can do right now to keep my streak alive today.",
+              });
+              continue;
+            }
+            if (notification.type === "reminder_study_plan") {
+              candidates.push({
+                id: `notif:${notification._id}`,
+                kind: "reminder_study_plan",
+                title: notification.title,
+                body: notification.body,
+                actionLabel: "Build plan",
+                mode: "tutor",
+                followUpMessage: "Build an actionable study plan for today based on my recent performance.",
+              });
+            }
+          }
+        }
+      } catch {
+        // Keep proactive banner non-blocking.
+      }
+
+      if (!selectedChatId) {
+        const recencyWindowMs = 14 * 24 * 60 * 60 * 1000;
+        const recentChat = chats.find((chat) => Date.now() - chat.updatedAt <= recencyWindowMs);
+        if (recentChat) {
+          candidates.push({
+            id: `continue:${recentChat._id}`,
+            kind: "continuation_chat",
+            title: "Continue previous thread",
+            body: `Jump back into \"${recentChat.title}\" to keep momentum.`,
+            actionLabel: "Resume",
+            chatId: recentChat._id,
+          });
+        }
+      }
+
+      const next = candidates.find((candidate) => !dismissedProactiveIdsRef.current.has(candidate.id)) ?? null;
+      if (!cancelled) {
+        setProactiveBanner(next);
+      }
+    };
+
+    void collectBannerCandidates();
+    return () => {
+      cancelled = true;
+    };
+  }, [chats, messages.length, selectedChatId, sending]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1184,6 +1333,37 @@ export function useChatState() {
     },
     [],
   );
+
+  const applyProactiveBanner = useCallback(async () => {
+    const banner = proactiveBanner;
+    if (!banner) return;
+
+    markProactiveDismissed(banner.id);
+    setProactiveBanner(null);
+
+    if (banner.kind === "continuation_chat" && banner.chatId) {
+      setSelectedChatId(banner.chatId);
+      markChatActive(banner.chatId);
+      return;
+    }
+
+    if (banner.actionUrl && banner.actionUrl.startsWith("/")) {
+      window.location.href = banner.actionUrl;
+      return;
+    }
+
+    if (banner.mode && banner.mode !== mode) {
+      setMode(banner.mode);
+      const activeChatId = selectedChatIdRef.current;
+      if (activeChatId) {
+        await updateChatSettingsById(activeChatId, { mode: banner.mode }).catch(() => {});
+      }
+    }
+
+    if (banner.followUpMessage && banner.followUpMessage.trim().length > 0) {
+      setMessage(banner.followUpMessage.trim());
+    }
+  }, [markProactiveDismissed, markChatActive, mode, proactiveBanner, updateChatSettingsById]);
 
   useEffect(() => {
     const handleNewChat = () => startNewChat(selectedAgentId);
@@ -2748,6 +2928,7 @@ export function useChatState() {
     streamPhase,
     livePhasePlan,
     searchStatusBanner,
+    proactiveBanner,
     activeCollaborators,
     collaboratorPhase,
     activeStreamIds,
@@ -2806,6 +2987,8 @@ export function useChatState() {
     uploadPersonalResources,
     compactConversation,
     updateExistingChatSettings,
+    applyProactiveBanner,
+    dismissProactiveBanner,
     stopGeneration,
     pinChat,
     hasDraft,

@@ -496,14 +496,16 @@ export async function routeMemoryWrite(params: {
   if (routedEntries.length === 0) {
     return { written: 0, promoted: 0 };
   }
-  if (params.spendingTier === "free_only") {
+  const freeOnlyMode = params.spendingTier === "free_only";
+  const allowZeroCostMemoryWrite = sourceType === "user_explicit" || sourceType === "correction";
+  if (freeOnlyMode && !allowZeroCostMemoryWrite) {
     return { written: 0, promoted: 0 };
   }
 
   const payloadEntries: Array<{
     key: string;
     text: string;
-    embedding: number[];
+    embedding?: number[];
     confidence: number;
     category: MemoryEntryCategory;
     sourceType: MemoryEntrySourceType;
@@ -513,6 +515,20 @@ export async function routeMemoryWrite(params: {
   }> = [];
 
   for (const entry of routedEntries.slice(0, 12)) {
+    if (freeOnlyMode) {
+      payloadEntries.push({
+        key: entry.key,
+        text: entry.text,
+        confidence: entry.confidence,
+        category: entry.category,
+        sourceType: entry.sourceType,
+        status: entry.status,
+        relatedArtifacts: entry.relatedArtifacts,
+        negativeTopicLinks: entry.negativeTopicLinks,
+      });
+      continue;
+    }
+
     try {
       const startedAt = Date.now();
       const embeddingResult = await openRouterEmbeddingRequest(

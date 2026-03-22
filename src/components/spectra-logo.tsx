@@ -79,6 +79,9 @@ function loadAllImages(): Promise<Images> {
   ]).then(([mask, shadow, highlight]) => {
     _cache = { mask, shadow, highlight };
     return _cache;
+  }).catch((error) => {
+    _promise = null;
+    throw error;
   });
   return _promise;
 }
@@ -298,6 +301,8 @@ export function SpectraLogo({
           styles.getPropertyValue("--brand-accent").trim() || DEFAULT_ACCENT;
 
         renderIcon(ctx, S, primary, accent, images, showTile);
+      }).catch(() => {
+        // Leave canvas empty; next paint attempt can retry image loading.
       });
     }
 
@@ -347,7 +352,12 @@ export function DynamicFavicon() {
     let cancelled = false;
 
     async function update() {
-      const images = await loadAllImages();
+      let images: Images;
+      try {
+        images = await loadAllImages();
+      } catch {
+        return;
+      }
       if (cancelled) return;
 
       const styles = getComputedStyle(document.documentElement);

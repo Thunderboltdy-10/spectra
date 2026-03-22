@@ -91,8 +91,8 @@ export function PrismAnimation() {
     return Ax + tR * (Cx - Ax);
   };
 
-  // Fan endpoints at right edge
-  const fanEndX = W - 70;
+  // Fan endpoints at right edge (allow room for mode labels)
+  const fanEndX = W - 130;
   const fanTopY = 35;
   const fanBotY = 385;
   const getFanY = (t: number) => fanTopY + t * (fanBotY - fanTopY);
@@ -273,9 +273,9 @@ export function PrismAnimation() {
           return (
             <g key={mode.label}>
               <circle
-                cx={fanEndX + 8}
+                cx={fanEndX + 10}
                 cy={y}
-                r={3.5}
+                r={4}
                 fill={color}
                 style={{
                   opacity: triggered ? 1 : 0,
@@ -283,10 +283,10 @@ export function PrismAnimation() {
                 }}
               />
               <text
-                x={fanEndX + 18}
-                y={y + 4.5}
+                x={fanEndX + 22}
+                y={y + 5}
                 fill="var(--text-secondary, #6b5f52)"
-                fontSize={13}
+                fontSize={15}
                 fontWeight={500}
                 style={{
                   fontFamily: "var(--font-manrope, sans-serif)",

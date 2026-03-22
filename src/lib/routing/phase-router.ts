@@ -285,6 +285,17 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
       },
     ];
     const fallbackModels: string[] = [];
+    const routingDurationMs = Math.max(0, Math.round(nowMs() - startedAt));
+    console.info(JSON.stringify({
+      event: "route_decision",
+      mode: input.mode,
+      selectedModel: input.manualModel,
+      score: 1,
+      candidateCount: 1,
+      fallback: false,
+      latencyMs: routingDurationMs,
+      tier: input.spendingTier,
+    }));
     return {
       selectedModel: input.manualModel,
       fallbackModels,
@@ -298,7 +309,7 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
         thinkingLevel: input.thinkingLevel,
         model: input.manualModel,
       },
-      routingDurationMs: Math.max(0, Math.round(nowMs() - startedAt)),
+      routingDurationMs,
     };
   }
 
@@ -307,6 +318,17 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
       .filter((model) => isModelAllowedInTier(model, input.spendingTier))
       .slice(0, 5)
       .map((model) => model.modelId);
+    const routingDurationMs = Math.max(0, Math.round(nowMs() - startedAt));
+    console.info(JSON.stringify({
+      event: "route_decision",
+      mode: input.mode,
+      selectedModel: "openrouter/auto",
+      score: 1,
+      candidateCount: 1,
+      fallback: false,
+      latencyMs: routingDurationMs,
+      tier: input.spendingTier,
+    }));
     return {
       selectedModel: "openrouter/auto",
       fallbackModels: rankedFallbacks,
@@ -328,7 +350,7 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
         thinkingLevel: input.thinkingLevel,
         model: "openrouter/auto",
       },
-      routingDurationMs: Math.max(0, Math.round(nowMs() - startedAt)),
+      routingDurationMs,
     };
   }
 
@@ -416,6 +438,17 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
 
   if (!selected) {
     const fallbackModel = input.manualModel || "openrouter/auto";
+    const routingDurationMs = Math.max(0, Math.round(nowMs() - startedAt));
+    console.info(JSON.stringify({
+      event: "route_decision",
+      mode: input.mode,
+      selectedModel: fallbackModel,
+      score: 0.01,
+      candidateCount: scored.length,
+      fallback: true,
+      latencyMs: routingDurationMs,
+      tier: input.spendingTier,
+    }));
     return {
       selectedModel: fallbackModel,
       fallbackModels: [],
@@ -429,7 +462,7 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
         thinkingLevel: input.thinkingLevel,
         model: fallbackModel,
       },
-      routingDurationMs: Math.max(0, Math.round(nowMs() - startedAt)),
+      routingDurationMs,
     };
   }
 
@@ -455,6 +488,17 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
   const reason = shouldExplore
     ? `Phase router selected ${selected.modelId} via exploration from top candidates for ${input.phaseLabel.toLowerCase()}`
     : `Phase router selected ${selected.modelId} in ${preferredLane} lane for ${input.phaseLabel.toLowerCase()}`;
+  const routingDurationMs = Math.max(0, Math.round(nowMs() - startedAt));
+  console.info(JSON.stringify({
+    event: "route_decision",
+    mode: input.mode,
+    selectedModel: selected.modelId,
+    score: Number(Math.max(0, Math.min(1, selected.score)).toFixed(3)),
+    candidateCount: scored.length,
+    fallback: false,
+    latencyMs: routingDurationMs,
+    tier: input.spendingTier,
+  }));
   return {
     selectedModel: selected.modelId,
     fallbackModels,
@@ -468,6 +512,6 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
       thinkingLevel: input.thinkingLevel,
       model: selected.modelId,
     },
-    routingDurationMs: Math.max(0, Math.round(nowMs() - startedAt)),
+    routingDurationMs,
   };
 }

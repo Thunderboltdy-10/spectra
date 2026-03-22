@@ -25,6 +25,7 @@ import { parseSlashCommand, normalizeModeArg, SLASH_COMMANDS } from "@/lib/slash
 import { useCanvasState } from "@/hooks/use-canvas-state";
 import { FILE_LIMITS } from "@/lib/file-limits";
 import { isModeAvailable } from "@/lib/modes";
+import { GlobalUtilityDock } from "@/components/global-utility-dock";
 
 const GuidedTour = dynamic(
   () => import("@/components/ui/guided-tour").then((module) => module.GuidedTour),
@@ -431,6 +432,7 @@ export function ChatLayout() {
     onSelectChat: (chatId: string) => {
       chat.setSelectedChatId(chatId);
       chat.setMobileSidebarOpen(false);
+      closePanel();
     },
     onNewChat: () => chat.startNewChat(chat.selectedAgentId),
     onDeleteChat: (chatId: string) => void chat.handleDeleteChat(chatId),
@@ -490,7 +492,7 @@ export function ChatLayout() {
       )}
 
       <main
-        className="flex min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto"
+        className="flex min-w-0 flex-1 flex-col overflow-hidden"
         data-chat-scroll-root
       >
         <ChatHeader
@@ -546,6 +548,7 @@ export function ChatLayout() {
           }}
         />
 
+        <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
         <ChatMessages
           messages={chat.messages}
           draftResponse={chat.draftResponse}
@@ -681,6 +684,7 @@ export function ChatLayout() {
         />
 
         <ChatComposer
+          sidebarExpanded={chat.sidebarOpen}
           message={chat.message}
           onMessageChange={chat.setMessage}
           fileList={chat.fileList}
@@ -759,6 +763,7 @@ export function ChatLayout() {
           lastAutoResult={chat.lastAutoResult}
           messageCount={chat.messages.length}
         />
+        </div>
       </main>
 
       <CodeCanvas
@@ -855,6 +860,8 @@ export function ChatLayout() {
         }}
       />
 
+
+      <GlobalUtilityDock placement="floating" />
 
       <GuidedTour
         open={tourOpen}

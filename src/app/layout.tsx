@@ -4,6 +4,11 @@ import { Manrope, IBM_Plex_Mono, Fraunces } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { getClerkPublishableKey } from "@/lib/clerk-config";
+import { checkDeploymentConsistency } from "@/lib/boot-diagnostics";
+
+// Run at module load time (server only). Logs a warning if the Convex
+// deployment and public URL variables disagree on environment.
+checkDeploymentConsistency();
 
 const manrope = Manrope({
   variable: "--font-manrope",

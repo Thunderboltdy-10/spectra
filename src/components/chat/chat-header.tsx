@@ -65,9 +65,9 @@ export function ChatHeader({
   const showCompactTip = messageCount > 8;
 
   return (
-    <header className="sticky top-0 z-20 shadow-[0_1px_0_var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_92%,transparent)] backdrop-blur-xl min-h-[var(--header-height,56px)]">
+    <header className="sticky top-0 z-20 relative after:content-[''] after:absolute after:top-[56px] after:left-0 after:right-0 after:h-px after:bg-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_92%,transparent)] backdrop-blur-xl min-h-[var(--header-height,56px)]">
       <div className="flex h-[var(--header-height,56px)] items-center px-3 sm:px-6 lg:px-10">
-        <div className="mx-auto flex w-full max-w-[680px] items-center gap-2">
+        <div className="mx-auto flex w-full max-w-[680px] xl:max-w-[780px] 2xl:max-w-[860px] items-center gap-2">
           <Button
             type="button"
             variant="secondary"
@@ -131,7 +131,7 @@ export function ChatHeader({
                 aria-label="Open orchestration panel"
                 title="Open orchestration panel"
               >
-                <Bot className={`h-3.5 w-3.5 ${orchestrationActive ? "text-[var(--accent-cyan)]" : ""}`} />
+                <Bot className={`h-3.5 w-3.5 ${orchestrationActive ? "text-[var(--brand-primary)]" : ""}`} />
               </Button>
             ) : null}
             {sending ? (
@@ -151,7 +151,7 @@ export function ChatHeader({
                   aria-label="Open settings"
                   title="Open settings"
                 >
-                  <Settings2 className={`h-3.5 w-3.5 ${settingsActive ? "text-[var(--accent-cyan)]" : ""}`} />
+                  <Settings2 className={`h-3.5 w-3.5 ${settingsActive ? "text-[var(--brand-primary)]" : ""}`} />
                 </Button>
               </>
             )}

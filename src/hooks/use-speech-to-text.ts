@@ -52,7 +52,7 @@ export function useSpeechToText() {
   const ctor = useMemo<SpeechCtor | null>(() => hasSpeechRecognition(), []);
   const useMediaRecorderFallback = useMemo(
     () => !hasSpeechRecognition() && hasMediaRecorder(),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     [],
   );
 

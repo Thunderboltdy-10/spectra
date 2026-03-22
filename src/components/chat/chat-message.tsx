@@ -247,7 +247,7 @@ export function ChatMessage({
       className={cn("flex", animateIn && "chat-fade-in", isUser ? "justify-end" : "justify-start")}
       aria-label={isUser ? "Your message" : "Assistant response"}
     >
-      <div className={cn("w-full", isUser ? "max-w-3xl" : "max-w-5xl xl:max-w-6xl")}>
+      <div className={cn("w-full", isUser ? "w-fit max-w-[60%]" : "max-w-5xl xl:max-w-6xl")}>
         {isUser ? (
           <div className="ml-auto rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3 shadow-[var(--shadow-soft)]">
             {editing ? (

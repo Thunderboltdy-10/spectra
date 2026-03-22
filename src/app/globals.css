@@ -22,7 +22,7 @@
   --bg-elevated: #ffffff;
   --bg-hover: #e8e3db;
   --bg-overlay: rgba(12, 18, 28, 0.35);
-  --bg-code: #f8f6f2;
+  --bg-code: #eae7e0;
 
   --text-primary: #1a1510;
   --text-secondary: #6b5f52;
@@ -39,7 +39,7 @@
   --success: #148f5d;
   --warning: #b67616;
 
-  --header-height: 56px;
+  --header-height: 64px;
   --radius-container: 18px;
   --radius-input: 12px;
   --radius-pill: 999px;
@@ -483,16 +483,14 @@ button:disabled {
 }
 
 .right-panel-shell--docked {
-  animation: right-panel-enter-docked 520ms cubic-bezier(0.2, 0.95, 0.22, 1) both;
+  animation: right-panel-enter-docked 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .right-panel-shell--sheet {
-  animation: right-panel-enter-sheet 540ms cubic-bezier(0.2, 0.95, 0.22, 1) both;
+  animation: right-panel-enter-sheet 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .right-panel-content {
-  animation: right-panel-content-in 340ms var(--ease-standard) both;
-  animation-delay: 120ms;
 }
 
 @keyframes chat-fade-in {
@@ -543,7 +541,9 @@ button:disabled {
 }
 
 .auto-pill-active {
-  animation: auto-pill-glow 2.4s ease-in-out infinite;
+  background: linear-gradient(135deg,
+    color-mix(in oklab, var(--accent-cyan) 14%, var(--bg-secondary)),
+    color-mix(in oklab, var(--accent-mint) 10%, var(--bg-secondary)));
 }
 
 @keyframes soul-core-pulse {
@@ -557,24 +557,46 @@ button:disabled {
 
 @keyframes right-panel-enter-docked {
   0% {
-    opacity: 0;
-    transform: translateX(24px) scale(0.992);
+    transform: translateX(100%);
   }
   100% {
-    opacity: 1;
-    transform: translateX(0) scale(1);
+    transform: translateX(0);
   }
 }
 
 @keyframes right-panel-enter-sheet {
   0% {
-    opacity: 0;
-    transform: translateX(28px) scale(0.992);
+    transform: translateX(100%);
   }
   100% {
-    opacity: 1;
-    transform: translateX(0) scale(1);
+    transform: translateX(0);
   }
+}
+
+@keyframes right-panel-exit-docked {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes right-panel-exit-sheet {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.right-panel-shell--docked.is-exiting {
+  animation: right-panel-exit-docked 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.right-panel-shell--sheet.is-exiting {
+  animation: right-panel-exit-sheet 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @keyframes right-panel-content-in {
@@ -891,12 +913,12 @@ button:disabled {
 
 .hljs {
   background: transparent;
-  color: #d9e3f3;
+  color: var(--text-primary);
 }
 
 .hljs-comment,
 .hljs-quote {
-  color: color-mix(in oklab, var(--text-secondary) 90%, transparent);
+  color: var(--text-secondary);
 }
 
 .hljs-keyword,
@@ -904,7 +926,7 @@ button:disabled {
 .hljs-literal,
 .hljs-section,
 .hljs-link {
-  color: #ff7a59;
+  color: #c44127;
 }
 
 .hljs-string,
@@ -918,11 +940,51 @@ button:disabled {
 .hljs-variable,
 .hljs-template-tag,
 .hljs-template-variable {
+  color: #0a7abf;
+}
+
+.hljs-number {
+  color: #8b6914;
+}
+
+.hljs-built_in,
+.hljs-builtin-name {
+  color: #1a7a5a;
+}
+
+.dark .hljs {
+  color: #e8f0fb;
+}
+
+.dark .hljs-keyword,
+.dark .hljs-selector-tag,
+.dark .hljs-literal,
+.dark .hljs-section,
+.dark .hljs-link {
+  color: #ff7a59;
+}
+
+.dark .hljs-string,
+.dark .hljs-title,
+.dark .hljs-name,
+.dark .hljs-type,
+.dark .hljs-attribute,
+.dark .hljs-symbol,
+.dark .hljs-bullet,
+.dark .hljs-addition,
+.dark .hljs-variable,
+.dark .hljs-template-tag,
+.dark .hljs-template-variable {
   color: #2cb5ff;
 }
 
-.dark .chat-markdown code {
-  color: #e8f0fb;
+.dark .hljs-number {
+  color: #e5b567;
+}
+
+.dark .hljs-built_in,
+.dark .hljs-builtin-name {
+  color: #38d6a0;
 }
 
 .dark .chat-markdown th {
@@ -1090,4 +1152,25 @@ button:disabled {
 }
 .trace-pulse {
   animation: trace-pulse 4s ease-in-out infinite;
+}
+
+/* ── Landing page animations ────────────────────────────────────────────── */
+
+@keyframes shimmer-move {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.animate-spin-slow {
+  animation: spin-slow 20s linear infinite;
+}
+
+@keyframes energy-arrive {
+  0% { box-shadow: 0 0 0 0 transparent; }
+  30% { box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand-primary) 45%, transparent), 0 0 18px 0 color-mix(in oklab, var(--brand-primary) 25%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
 }

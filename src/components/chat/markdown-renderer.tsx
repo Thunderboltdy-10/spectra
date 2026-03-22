@@ -40,13 +40,24 @@ function normalizeCode(children: React.ReactNode) {
   return String(children ?? "");
 }
 
+const CODE_PREVIEW_PREF_KEY = "ai-school:code-preview-pref";
+
+function getDefaultPreviewPref(): boolean {
+  try {
+    const stored = window.localStorage.getItem(CODE_PREVIEW_PREF_KEY);
+    if (stored === "code") return false;
+    if (stored === "preview") return true;
+  } catch { /* ignore */ }
+  return true; // default to preview
+}
+
 function CodeBlock({ children, className, onOpenCanvas, ...props }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
-  const [showPreview, setShowPreview] = useState(false);
   const language = className?.match(/language-(\S+)/)?.[1] || "";
   const codeText = useMemo(() => normalizeCode(children).trim(), [children]);
   const canOpenCanvas = Boolean(onOpenCanvas) && codeText.split("\n").length > 10;
   const previewable = canPreview(language);
+  const [showPreview, setShowPreview] = useState(() => previewable && getDefaultPreviewPref());
 
   function handleCopy() {
     void navigator.clipboard.writeText(codeText);
@@ -55,16 +66,22 @@ function CodeBlock({ children, className, onOpenCanvas, ...props }: CodeBlockPro
   }
 
   return (
-    <div className="group relative my-4 flex flex-col rounded-xl border border-[var(--border-default)] bg-[var(--bg-code)] shadow-sm dark:bg-[#0a0910]">
+    <div className="group relative my-4 flex flex-col rounded-xl border border-[var(--border-default)] bg-[var(--bg-code)] shadow-sm">
       <div className="flex items-center justify-between rounded-t-xl border-b border-[var(--border-default)] bg-[var(--bg-tertiary)] px-3 py-1.5">
         <span className="font-mono text-[11px] font-medium uppercase tracking-wider text-[var(--text-secondary)]">
-          {language || "code"}
+          {language ? language.charAt(0).toUpperCase() + language.slice(1) : "Code"}
         </span>
         <div className="flex items-center gap-1">
           {previewable ? (
             <button
               type="button"
-              onClick={() => setShowPreview((prev) => !prev)}
+              onClick={() => {
+                setShowPreview((prev) => {
+                  const next = !prev;
+                  try { window.localStorage.setItem(CODE_PREVIEW_PREF_KEY, next ? "preview" : "code"); } catch { /* ignore */ }
+                  return next;
+                });
+              }}
               className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition hover:bg-[var(--bg-hover)] ${
                 showPreview ? "text-[var(--accent-cyan)]" : "text-[var(--text-secondary)]"
               }`}

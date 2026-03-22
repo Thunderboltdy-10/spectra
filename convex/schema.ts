@@ -108,7 +108,8 @@ export default defineSchema({
     .index("by_pack", ["packId"])
     .index("by_agent", ["agentId"])
     .index("by_owner_scope", ["ownerUserId", "scope"])
-    .index("by_org_scope", ["orgId", "scope"]),
+    .index("by_org_scope", ["orgId", "scope"])
+    .index("by_status_updated", ["status", "updatedAt"]),
 
   chunks: defineTable({
     orgId: v.id("orgs"),

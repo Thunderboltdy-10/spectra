@@ -43,9 +43,21 @@ async function transcribeAudioBlob(blob: Blob): Promise<string> {
   const form = new FormData();
   form.append("audio", blob, "recording.webm");
   const response = await fetch("/api/transcribe", { method: "POST", body: form });
-  if (!response.ok) throw new Error("Transcription failed");
-  const json = (await response.json()) as { transcript?: string };
-  return json.transcript ?? "";
+  const json = (await response.json().catch(() => null)) as
+    | { transcript?: string; error?: string | { code?: string; message?: string } }
+    | null;
+  if (!response.ok) {
+    const message = typeof json?.error === "string"
+      ? json.error
+      : typeof json?.error?.message === "string"
+        ? json.error.message
+        : "Transcription failed";
+    const code = typeof json?.error === "object" && typeof json.error?.code === "string"
+      ? json.error.code
+      : undefined;
+    throw new Error(code ? `${code}: ${message}` : message);
+  }
+  return json?.transcript ?? "";
 }
 
 export function useSpeechToText() {
@@ -62,9 +74,11 @@ export function useSpeechToText() {
   const [isListening, setIsListening] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcript, setTranscript] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   const startNativeSpeech = useCallback(() => {
     if (!ctor || isListening) return;
+    setError(null);
     const recognition = new ctor();
     recognition.lang = detectPreferredSpeechLanguage();
     recognition.continuous = true;
@@ -91,6 +105,7 @@ export function useSpeechToText() {
 
   const startMediaRecorder = useCallback(async () => {
     if (isListening) return;
+    setError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       // Pick a MIME type supported by the browser (Firefox prefers ogg/opus)
@@ -116,8 +131,9 @@ export function useSpeechToText() {
         try {
           const text = await transcribeAudioBlob(blob);
           if (text) setTranscript(text);
-        } catch {
-          // transcription failed — leave transcript unchanged
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Transcription failed";
+          setError(message);
         } finally {
           setIsTranscribing(false);
         }
@@ -158,12 +174,14 @@ export function useSpeechToText() {
 
   function reset() {
     setTranscript("");
+    setError(null);
   }
 
   return {
     isSupported: Boolean(ctor) || useMediaRecorderFallback,
     isListening: isListening || isTranscribing,
     isTranscribing,
+    error,
     transcript,
     start,
     stop,

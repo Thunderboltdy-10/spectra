@@ -920,10 +920,10 @@ export function LandingClient() {
         }}
       >
         <div className="max-w-7xl mx-auto px-6 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <SpectraLogo size={30} />
-            <span className="font-display text-xl tracking-tight" style={{ color: "var(--text-primary)" }}>
-              Spectra
+          <div className="flex items-center">
+            <SpectraLogo size={36} style={{ marginRight: -2 }} />
+            <span className="font-display text-[22px] tracking-tight" style={{ color: "var(--text-primary)" }}>
+              pectra
             </span>
           </div>
           <div className="flex items-center gap-4">
@@ -1783,9 +1783,9 @@ export function LandingClient() {
         style={{ background: "var(--bg-primary)" }}
       >
         <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-8">
-          <div className="flex items-center gap-2.5">
-            <SpectraLogo size={24} />
-            <span className="font-display text-base tracking-tight">Spectra</span>
+          <div className="flex items-center">
+            <SpectraLogo size={28} style={{ marginRight: -1 }} />
+            <span className="font-display text-[17px] tracking-tight">pectra</span>
           </div>
           <div
             className="flex gap-7 text-[10px] font-bold uppercase tracking-widest"

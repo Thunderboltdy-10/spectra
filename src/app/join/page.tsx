@@ -5,8 +5,9 @@ import { useSearchParams } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 import Image from "next/image";
 import Link from "next/link";
-import { AlertTriangle, CheckCircle2, Clock, Sparkles } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { SpectraLogo } from "@/components/spectra-logo";
 
 type InvitationData = {
   email: string;
@@ -104,9 +105,7 @@ function JoinPageContent() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)]">
         <div className="flex flex-col items-center gap-4">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--gradient-brand)] text-white shadow-[var(--shadow-soft)]">
-            <Sparkles className="h-6 w-6 animate-pulse" />
-          </div>
+          <SpectraLogo size={56} showTile className="animate-pulse" />
           <p className="text-sm text-[var(--text-secondary)]">Verifying invitation...</p>
         </div>
       </div>
@@ -194,9 +193,7 @@ function JoinPageContent() {
                 className="mb-3 h-16 w-16 rounded-2xl border border-[var(--border-default)] object-cover shadow-[var(--shadow-card)]"
               />
             ) : (
-              <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-[var(--gradient-brand)] text-white shadow-[var(--shadow-card)]">
-                <Sparkles className="h-7 w-7" />
-              </div>
+              <SpectraLogo size={64} showTile className="mb-3" />
             )}
             <h1 className="font-display text-2xl text-[var(--text-primary)]">
               {data.orgName ?? "Spectra"}
@@ -261,7 +258,7 @@ export default function JoinPage() {
   return (
     <Suspense fallback={
       <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)]">
-        <Sparkles className="h-8 w-8 animate-pulse text-[var(--accent-cyan)]" />
+        <SpectraLogo size={32} className="animate-pulse" />
       </div>
     }>
       <JoinPageContent />

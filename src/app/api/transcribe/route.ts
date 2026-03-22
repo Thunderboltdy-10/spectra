@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireActor } from "@/lib/auth-server";
 import { getEnv } from "@/lib/env";
+import { recordOpenRouterUsage } from "@/lib/usage-tracking";
+import { withRouteErrorHandling } from "@/lib/route-handler";
 
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
-  try {
+  return withRouteErrorHandling(async () => {
+    const actor = await requireActor();
     const env = getEnv();
     if (!env.OPENROUTER_API_KEY) {
       return NextResponse.json({ error: "Transcription service not configured" }, { status: 503 });
@@ -29,17 +33,36 @@ export async function POST(request: NextRequest) {
     openAiForm.append("model", "openai/whisper-large-v3-turbo");
     openAiForm.append("language", "en");
 
-    const transcribeResponse = await fetch("https://openrouter.ai/api/v1/audio/transcriptions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
-        ...(process.env.OPENROUTER_APP_NAME ? { "X-Title": process.env.OPENROUTER_APP_NAME } : {}),
-      },
-      body: openAiForm,
-    });
+    let transcribeResponse: Response;
+    try {
+      transcribeResponse = await fetch("https://openrouter.ai/api/v1/audio/transcriptions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+          ...(process.env.OPENROUTER_APP_NAME ? { "X-Title": process.env.OPENROUTER_APP_NAME } : {}),
+        },
+        body: openAiForm,
+      });
+    } catch {
+      return NextResponse.json({ error: "Transcription unavailable" }, { status: 502 });
+    }
 
     if (transcribeResponse.ok) {
-      const result = (await transcribeResponse.json()) as { text?: string };
+      const result = (await transcribeResponse.json()) as {
+        text?: string;
+        model?: string;
+        usage?: {
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          cost?: number;
+        };
+      };
+      await recordOpenRouterUsage({
+        actorClerkId: actor.clerkId,
+        model: result.model ?? "openai/whisper-large-v3-turbo",
+        usage: result.usage,
+        skipIfZeroTokens: false,
+      }).catch(() => {});
       return NextResponse.json({ transcript: result.text ?? "" });
     }
 
@@ -53,23 +76,39 @@ export async function POST(request: NextRequest) {
     fallbackForm.append("model", "openai/whisper-large-v3");
     fallbackForm.append("language", "en");
 
-    const fallbackResponse = await fetch("https://openrouter.ai/api/v1/audio/transcriptions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
-        ...(process.env.OPENROUTER_APP_NAME ? { "X-Title": process.env.OPENROUTER_APP_NAME } : {}),
-      },
-      body: fallbackForm,
-    });
+    let fallbackResponse: Response;
+    try {
+      fallbackResponse = await fetch("https://openrouter.ai/api/v1/audio/transcriptions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+          ...(process.env.OPENROUTER_APP_NAME ? { "X-Title": process.env.OPENROUTER_APP_NAME } : {}),
+        },
+        body: fallbackForm,
+      });
+    } catch {
+      return NextResponse.json({ error: "Transcription unavailable" }, { status: 502 });
+    }
 
     if (fallbackResponse.ok) {
-      const fallbackResult = (await fallbackResponse.json()) as { text?: string };
+      const fallbackResult = (await fallbackResponse.json()) as {
+        text?: string;
+        model?: string;
+        usage?: {
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          cost?: number;
+        };
+      };
+      await recordOpenRouterUsage({
+        actorClerkId: actor.clerkId,
+        model: fallbackResult.model ?? "openai/whisper-large-v3",
+        usage: fallbackResult.usage,
+        skipIfZeroTokens: false,
+      }).catch(() => {});
       return NextResponse.json({ transcript: fallbackResult.text ?? "" });
     }
 
     return NextResponse.json({ error: "Transcription unavailable" }, { status: 502 });
-  } catch (error) {
-    console.error("Transcription error:", error);
-    return NextResponse.json({ error: "Transcription failed" }, { status: 500 });
-  }
+  }, request);
 }

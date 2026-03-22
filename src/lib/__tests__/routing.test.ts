@@ -398,6 +398,46 @@ describe("chooseModelRoute", () => {
     expect(route.trace.inputs.needsVision).toBe(true);
   });
 
+  it("retains manual model lock on multimodal turns while queuing a vision fallback", () => {
+    const manualModel = "openai/gpt-4.1-mini";
+    const visionModel = "google/gemini-2.5-flash-image";
+    const route = chooseModelRoute({
+      mode: "tutor",
+      thinkingLevel: "medium",
+      hasAttachments: true,
+      attachmentTypes: ["image/png"],
+      messageLength: 220,
+      teacherStrictness: "medium",
+      routerMode: "manual",
+      manualModel,
+      studentSeemsStuck: false,
+      spendingTier: "normal",
+      needsSearch: false,
+      modelCatalog: [
+        {
+          modelId: manualModel,
+          name: "GPT-4.1 Mini",
+          provider: "openai",
+          tags: ["chat"],
+          multimodalRating: "none",
+          inputCostPerM: 1,
+          outputCostPerM: 2,
+        },
+        {
+          modelId: visionModel,
+          name: "Gemini Image",
+          provider: "google",
+          tags: ["vision", "image_generation"],
+          multimodalRating: "strong",
+        },
+      ],
+    });
+
+    expect(route.primaryModel).toBe(manualModel);
+    expect(route.fallbackModels).toContain(visionModel);
+    expect(route.reason).toContain("manual lock retained");
+  });
+
   it("marks tabular analysis when spreadsheet attachments are present", () => {
     const route = chooseModelRoute({
       mode: "tutor",

@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { getUserByClerkId } from "./helpers";
+import { EMBEDDING_DIMENSIONS } from "./constants";
 
 const vMemoryEntry = v.object({
   key: v.string(),
@@ -128,8 +129,19 @@ function normalizeConfidence(rawValue: number | undefined, fallback = 0.6) {
   return Math.max(0, Math.min(1, rawValue));
 }
 
-function normalizeEmbedding(rawEmbedding: number[]) {
-  return rawEmbedding.map((value) => (Number.isFinite(value) ? value : 0));
+function normalizeEmbedding(rawEmbedding?: number[]) {
+  const source = Array.isArray(rawEmbedding) ? rawEmbedding : [];
+  if (source.length === EMBEDDING_DIMENSIONS) {
+    return source.map((value) => (Number.isFinite(value) ? value : 0));
+  }
+
+  const normalized = new Array<number>(EMBEDDING_DIMENSIONS).fill(0);
+  const length = Math.min(source.length, EMBEDDING_DIMENSIONS);
+  for (let i = 0; i < length; i += 1) {
+    const value = source[i];
+    normalized[i] = Number.isFinite(value) ? value : 0;
+  }
+  return normalized;
 }
 
 function memoryFingerprint(params: {
@@ -372,7 +384,7 @@ export const routeMemoryWrite = mutation({
     entries: v.array(v.object({
       key: v.string(),
       text: v.string(),
-      embedding: v.array(v.float64()),
+      embedding: v.optional(v.array(v.float64())),
       confidence: v.optional(v.number()),
       category: v.optional(vMemoryCategory),
       sourceType: v.optional(vMemorySourceType),

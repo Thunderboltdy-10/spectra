@@ -8,6 +8,13 @@ type ParsedPage = { page?: number; text: string };
 
 const CHUNK_SIZE = 900;
 const CHUNK_OVERLAP = 160;
+const EMBEDDING_TIMEOUT_MS = (() => {
+  const raw = Number.parseInt(process.env.OPENROUTER_EMBEDDING_TIMEOUT_MS ?? "", 10);
+  if (Number.isFinite(raw) && raw >= 5_000 && raw <= 180_000) {
+    return raw;
+  }
+  return 45_000;
+})();
 
 function extension(filename: string) {
   return fileExtension(filename);
@@ -212,36 +219,74 @@ async function parseFileBytes(
   throw new Error(`Unsupported file type: ${ext || "unknown"}`);
 }
 
+function toFiniteNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
 async function openRouterEmbedding(input: string) {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     throw new Error("OPENROUTER_API_KEY missing for ingestion");
   }
 
-  const response = await fetch("https://openrouter.ai/api/v1/embeddings", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: MODEL_DEFAULTS.embedding,
-      input,
-    }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("Embedding request timed out"), EMBEDDING_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch("https://openrouter.ai/api/v1/embeddings", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: MODEL_DEFAULTS.embedding,
+        input,
+      }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`Embedding request timed out after ${Math.round(EMBEDDING_TIMEOUT_MS / 1000)}s`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     throw new Error(`Embedding request failed: ${await response.text()}`);
   }
 
   const json = (await response.json()) as {
+    model?: string;
+    usage?: {
+      prompt_tokens?: number | string;
+      completion_tokens?: number | string;
+      cost?: number | string;
+    };
     data?: Array<{ embedding?: number[] }>;
   };
   const vector = json.data?.[0]?.embedding;
   if (!vector) {
     throw new Error("Embedding response missing vector");
   }
-  return vector;
+  return {
+    embedding: vector,
+    model: json.model ?? MODEL_DEFAULTS.embedding,
+    usage: json.usage
+      ? {
+          prompt_tokens: toFiniteNumber(json.usage.prompt_tokens),
+          completion_tokens: toFiniteNumber(json.usage.completion_tokens),
+          cost: toFiniteNumber(json.usage.cost),
+        }
+      : undefined,
+  };
 }
 
 export const getResourceForIngestion = internalQuery({
@@ -253,6 +298,8 @@ export const getResourceForIngestion = internalQuery({
     if (!resource) return null;
     return {
       _id: resource._id,
+      ownerUserId: resource.ownerUserId,
+      orgId: resource.orgId,
       filename: resource.filename,
       mimeType: resource.mimeType,
       storageId: resource.storageId,
@@ -312,6 +359,14 @@ export const processResource = internalAction({
       return { ok: false, reason: "blob_missing" };
     }
 
+    const usageTotals = {
+      promptTokens: 0,
+      completionTokens: 0,
+      cost: 0,
+      hasUsage: false,
+    };
+    let embeddingModelUsed = MODEL_DEFAULTS.embedding;
+
     try {
       const bytes = await blob.arrayBuffer();
       await heartbeat(true);
@@ -335,15 +390,21 @@ export const processResource = internalAction({
       const embedded: Array<{ text: string; page?: number; embedding: number[] }> = [];
       for (let index = 0; index < chunks.length; index += 1) {
         const chunk = chunks[index]!;
-        const embedding = await openRouterEmbedding(chunk.text);
+        const embeddingResult = await openRouterEmbedding(chunk.text);
+        embeddingModelUsed = embeddingResult.model ?? embeddingModelUsed;
         embedded.push({
           text: chunk.text,
           page: chunk.page,
-          embedding,
+          embedding: embeddingResult.embedding,
         });
-        if (index === 0 || index === chunks.length - 1 || (index + 1) % 3 === 0) {
-          await heartbeat();
+        const usage = embeddingResult.usage;
+        if (usage) {
+          usageTotals.promptTokens += usage.prompt_tokens ?? 0;
+          usageTotals.completionTokens += usage.completion_tokens ?? 0;
+          usageTotals.cost += usage.cost ?? 0;
+          usageTotals.hasUsage = true;
         }
+        await heartbeat();
       }
 
       await heartbeat(true);
@@ -369,6 +430,17 @@ export const processResource = internalAction({
         ok: false,
         reason: error instanceof Error ? error.message : "Background ingestion failed",
       };
+    } finally {
+      if (usageTotals.hasUsage) {
+        await ctx.runMutation(internal.usage.recordUsageWithCostInternal, {
+          userId: resource.ownerUserId,
+          orgId: resource.orgId,
+          model: embeddingModelUsed,
+          inputTokens: Math.max(0, Math.round(usageTotals.promptTokens)),
+          outputTokens: Math.max(0, Math.round(usageTotals.completionTokens)),
+          openRouterCost: Math.max(0, Number(usageTotals.cost.toFixed(8))),
+        }).catch(() => {});
+      }
     }
   },
 });

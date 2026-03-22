@@ -3,8 +3,9 @@ import { requireActor } from "@/lib/auth-server";
 import { convexQuery } from "@/lib/convex-server";
 import { ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
-import { openRouterEmbedding } from "@/lib/openrouter";
+import { openRouterEmbeddingRequest } from "@/lib/openrouter";
 import { MODEL_CONFIG } from "@/lib/model-config";
+import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 
 function cosineSimilarity(a: number[], b: number[]) {
   if (a.length === 0 || b.length === 0 || a.length !== b.length) return 0;
@@ -34,7 +35,14 @@ export async function POST(request: NextRequest) {
       return ok({ results: [] });
     }
 
-    const queryEmbedding = await openRouterEmbedding(query, MODEL_CONFIG.embedding);
+    const queryEmbeddingResult = await openRouterEmbeddingRequest(query, MODEL_CONFIG.embedding);
+    await recordOpenRouterUsage({
+      actorClerkId: actor.clerkId,
+      model: queryEmbeddingResult.model ?? MODEL_CONFIG.embedding,
+      usage: queryEmbeddingResult.usage,
+      skipIfZeroTokens: false,
+    }).catch(() => {});
+    const queryEmbedding = queryEmbeddingResult.embedding;
 
     const models = await convexQuery("models:listWithEmbeddings", {
       actorClerkId: actor.clerkId,

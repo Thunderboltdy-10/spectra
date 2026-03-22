@@ -769,6 +769,7 @@ export async function runAutoSettingsPipeline(input: AutoSettingsInput): Promise
   let promptEnhanced = false;
   let promptEnhancementCall: AutoSettingsResult["promptEnhancementCall"];
   const allowAutoEnhancement = !isLowSignalChitChat(input.message);
+  const allowModelPromptEnhancement = input.spendingTier !== "free_only";
 
   const forceLocalEnhancement = (raw: string) => {
     const clean = raw.trim();
@@ -783,7 +784,13 @@ export async function runAutoSettingsPipeline(input: AutoSettingsInput): Promise
     ].join("\n");
   };
 
-  if (input.autoEnhancePrompt && enhanceMode !== "off" && !input.skipModelCalls && (enhanceMode === "on" || allowAutoEnhancement)) {
+  if (
+    input.autoEnhancePrompt &&
+    enhanceMode !== "off" &&
+    !input.skipModelCalls &&
+    allowModelPromptEnhancement &&
+    (enhanceMode === "on" || allowAutoEnhancement)
+  ) {
     const enhanced = await maybeEnhancePrompt(input.message, input.actorClerkId);
     if (enhanced.model || enhanced.usage) {
       promptEnhancementCall = {

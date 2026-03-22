@@ -1279,6 +1279,9 @@ export function ChatComposer(props: ChatComposerProps) {
               {sendDisabledReason ? (
                 <p className="pb-1 text-xs text-[var(--warning)]" aria-live="polite">{sendDisabledReason}</p>
               ) : null}
+              {speech.error ? (
+                <p className="pb-1 text-xs text-[var(--warning)]" aria-live="polite">{speech.error}</p>
+              ) : null}
             </div>
 
             <div className={sidebarExpanded ? "flex shrink-0 items-center gap-1.5 mb-1" : "flex items-center justify-end gap-2 px-3 pb-2.5 pt-0.5"}>

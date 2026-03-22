@@ -202,6 +202,11 @@ export class PipelineController {
       }
     }
 
+    if (params.spendingTier === "free_only" && ragEnabled) {
+      ragEnabled = false;
+      this.markStageSkipped("ragRetrieval", "free_only tier disables embedding-based retrieval.");
+    }
+
     const tierAllowsForcedMultiAgent =
       params.spendingTier !== "cheap_only" && params.spendingTier !== "free_only";
     const forceDeniedReasons: string[] = [];

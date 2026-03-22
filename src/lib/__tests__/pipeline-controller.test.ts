@@ -65,4 +65,24 @@ describe("PipelineController", () => {
     expect(gated.forceMultiAgentAllowed).toBe(true);
     expect(gated.forceDeniedReasons).toHaveLength(0);
   });
+
+  it("disables RAG retrieval in free_only tier to avoid embedding spend", () => {
+    const controller = new PipelineController({
+      requestClass: "T2",
+      classificationReason: "resource-grounded request",
+    });
+
+    const gated = controller.applyCostGates({
+      allowSearch: true,
+      allowRag: true,
+      allowMultiAgent: false,
+      spendingTier: "free_only",
+      forceMultiAgentRequested: false,
+      orchestratorEnabled: true,
+      budgetSoftLimited: false,
+    });
+
+    expect(gated.ragEnabled).toBe(false);
+    expect(gated.skippedStages.some((row) => row.step === "ragRetrieval")).toBe(true);
+  });
 });

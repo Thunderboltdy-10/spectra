@@ -16,6 +16,7 @@ import {
 import {
   canReuseResourceUpload,
   MAX_RESOURCE_PROCESSING_ATTEMPTS,
+  RESOURCE_QUEUE_STALE_MS,
   RESOURCE_PROCESSING_STALE_MS,
 } from "../shared/resource-processing";
 
@@ -566,6 +567,94 @@ export const enqueueResourceProcessing = mutation({
       });
       return { ok: false, scheduled: false };
     }
+  },
+});
+
+export const retryStaleResourcesInternal = internalMutation({
+  args: {
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const limit = Math.max(1, Math.min(Math.round(args.limit ?? 24), 100));
+    const maxUploadedUpdatedAt = now - RESOURCE_QUEUE_STALE_MS;
+    const maxProcessingUpdatedAt = now - RESOURCE_PROCESSING_STALE_MS;
+
+    const staleUploaded = await ctx.db
+      .query("resources")
+      .withIndex("by_status_updated", (q) => q.eq("status", "uploaded").lt("updatedAt", maxUploadedUpdatedAt))
+      .take(limit);
+
+    const remaining = Math.max(0, limit - staleUploaded.length);
+    const staleProcessing =
+      remaining > 0
+        ? await ctx.db
+            .query("resources")
+            .withIndex("by_status_updated", (q) => q.eq("status", "processing").lt("updatedAt", maxProcessingUpdatedAt))
+            .take(remaining)
+        : [];
+
+    const candidates = [...staleUploaded, ...staleProcessing];
+    let requeued = 0;
+    let exhausted = 0;
+    let failed = 0;
+
+    for (const resource of candidates) {
+      if (resource.status !== "uploaded" && resource.status !== "processing") {
+        continue;
+      }
+
+      const attempts = resource.processingAttempts ?? 0;
+      const nextAttempts = attempts + 1;
+      if (nextAttempts > MAX_RESOURCE_PROCESSING_ATTEMPTS) {
+        await ctx.db.patch(resource._id, {
+          status: "failed",
+          error: "Processing failed repeatedly. Remove the file and upload it again.",
+          updatedAt: now,
+        });
+        exhausted += 1;
+        continue;
+      }
+
+      if (!resource.storageId) {
+        await ctx.db.patch(resource._id, {
+          status: "failed",
+          error: "Resource file unavailable in storage.",
+          updatedAt: now,
+        });
+        failed += 1;
+        continue;
+      }
+
+      await ctx.db.patch(resource._id, {
+        status: "processing",
+        error: undefined,
+        processingAttempts: nextAttempts,
+        updatedAt: now,
+      });
+
+      try {
+        await ctx.scheduler.runAfter(0, internal.ingestQueue.processResource, {
+          resourceId: resource._id,
+        });
+        requeued += 1;
+      } catch (error) {
+        await ctx.db.patch(resource._id, {
+          status: "failed",
+          error: error instanceof Error ? error.message.slice(0, 400) : "Unable to schedule file processing.",
+          updatedAt: Date.now(),
+        });
+        failed += 1;
+      }
+    }
+
+    return {
+      ok: true,
+      scanned: candidates.length,
+      requeued,
+      exhausted,
+      failed,
+    };
   },
 });
 

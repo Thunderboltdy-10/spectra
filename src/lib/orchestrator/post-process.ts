@@ -143,25 +143,48 @@ async function selectUtilityModel(params: {
           speed?: number;
         };
       }>);
+  const spendingTier = (budget as { tier?: "normal" | "expensive_blocked" | "cheap_only" | "free_only" })?.tier ?? "normal";
+  const catalogWithoutAuto = catalog.filter((model) => model.modelId !== "openrouter/auto");
+  const runtimeStatMap = buildRuntimeStatMap(
+    runtimeStats as Array<{ modelId: string; successCount: number; failureCount: number; avgLatencyMs?: number }>,
+  );
 
   const picked = pickModelAndFallbacks({
-    catalog: catalog.filter((model) => model.modelId !== "openrouter/auto"),
-    tier: (budget as { tier?: "normal" | "expensive_blocked" | "cheap_only" | "free_only" })?.tier ?? "normal",
+    catalog: catalogWithoutAuto,
+    tier: spendingTier,
     requiredCapabilities: params.requiredCapabilities,
     preferredCapabilities: params.preferredCapabilities,
     preferFast: params.preferFast ?? true,
     preferCheap: params.preferCheap ?? true,
     preferFree: params.preferFree ?? false,
-    runtimeStats: buildRuntimeStatMap(
-      runtimeStats as Array<{ modelId: string; successCount: number; failureCount: number; avgLatencyMs?: number }>,
-    ),
+    runtimeStats: runtimeStatMap,
     maxFallbacks: 3,
   });
 
-  const model = picked.selected?.modelId ?? "openrouter/auto";
+  let model = picked.selected?.modelId;
+  let fallbackModels = picked.fallbacks.filter((candidate) => candidate !== model);
+
+  if (!model) {
+    const relaxed = pickModelAndFallbacks({
+      catalog: catalogWithoutAuto,
+      tier: spendingTier,
+      preferFast: params.preferFast ?? true,
+      preferCheap: params.preferCheap ?? true,
+      preferFree: spendingTier === "free_only" || Boolean(params.preferFree),
+      runtimeStats: runtimeStatMap,
+      maxFallbacks: 3,
+    });
+    model = relaxed.selected?.modelId;
+    fallbackModels = relaxed.fallbacks.filter((candidate) => candidate !== model);
+  }
+
+  if (!model) {
+    model = spendingTier === "free_only" ? MODEL_CONFIG.tutorFast : MODEL_CONFIG.smartCheap;
+  }
+
   return {
     model,
-    fallbackModels: picked.fallbacks.filter((candidate) => candidate !== model),
+    fallbackModels: [...new Set(fallbackModels)].filter((candidate) => candidate !== model),
   };
 }
 
@@ -451,6 +474,7 @@ function coerceRoutedMemoryEntries(params: {
 export async function routeMemoryWrite(params: {
   actorClerkId: string;
   chatId?: string;
+  spendingTier?: "normal" | "expensive_blocked" | "cheap_only" | "free_only";
   entries: Array<MemoryEntry | MemoryDirectiveEntry>;
   sourceType?: MemoryEntrySourceType;
   onModelCall?: (call: {
@@ -472,11 +496,16 @@ export async function routeMemoryWrite(params: {
   if (routedEntries.length === 0) {
     return { written: 0, promoted: 0 };
   }
+  const freeOnlyMode = params.spendingTier === "free_only";
+  const allowZeroCostMemoryWrite = sourceType === "user_explicit" || sourceType === "correction";
+  if (freeOnlyMode && !allowZeroCostMemoryWrite) {
+    return { written: 0, promoted: 0 };
+  }
 
   const payloadEntries: Array<{
     key: string;
     text: string;
-    embedding: number[];
+    embedding?: number[];
     confidence: number;
     category: MemoryEntryCategory;
     sourceType: MemoryEntrySourceType;
@@ -486,6 +515,20 @@ export async function routeMemoryWrite(params: {
   }> = [];
 
   for (const entry of routedEntries.slice(0, 12)) {
+    if (freeOnlyMode) {
+      payloadEntries.push({
+        key: entry.key,
+        text: entry.text,
+        confidence: entry.confidence,
+        category: entry.category,
+        sourceType: entry.sourceType,
+        status: entry.status,
+        relatedArtifacts: entry.relatedArtifacts,
+        negativeTopicLinks: entry.negativeTopicLinks,
+      });
+      continue;
+    }
+
     try {
       const startedAt = Date.now();
       const embeddingResult = await openRouterEmbeddingRequest(
@@ -546,6 +589,7 @@ export async function routeMemoryWrite(params: {
 export async function planMemoryRead(params: {
   actorClerkId: string;
   chatId?: string;
+  spendingTier?: "normal" | "expensive_blocked" | "cheap_only" | "free_only";
   message: string;
   includeTopicMemory: boolean;
   personalSoulPreferences?: {
@@ -623,7 +667,8 @@ export async function planMemoryRead(params: {
 
   let embeddingCall: PlannedMemoryProfile["embeddingCall"];
   let queryEmbedding = params.existingEmbedding?.embedding;
-  if (!queryEmbedding && params.includeTopicMemory && params.message.trim()) {
+  const allowEmbeddingCall = params.spendingTier !== "free_only";
+  if (!queryEmbedding && params.includeTopicMemory && params.message.trim() && allowEmbeddingCall) {
     try {
       const startedAt = Date.now();
       const embeddingResult = await openRouterEmbeddingRequest(

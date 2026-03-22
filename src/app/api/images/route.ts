@@ -5,6 +5,7 @@ import { openRouterGenerateImage } from "@/lib/openrouter";
 import { IMAGE_GEN_FALLBACKS, MODEL_CONFIG } from "@/lib/model-config";
 import { badRequest, ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
+import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 
 export async function GET() {
   return withRouteErrorHandling(async () => {
@@ -38,6 +39,13 @@ export async function POST(request: NextRequest) {
         prompt: body.prompt.trim(),
         size: "1024x1024",
       });
+      await recordOpenRouterUsage({
+        actorClerkId: actor.clerkId,
+        chatId: body.chatId,
+        model: generated.modelUsed,
+        usage: generated.usage,
+        skipIfZeroTokens: false,
+      }).catch(() => {});
       const imageUrl = generated.imageUrl;
       const modelUsed = generated.modelUsed;
 

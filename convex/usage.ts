@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { dayKey, getUserByClerkId } from "./helpers";
 import { estimateUsageCostCents, summarizeEffectiveUsageCost, type UsagePricing } from "../shared/spending";
@@ -321,6 +321,149 @@ export const recordUsageWithCost = mutation({
       await ctx.db.insert("userSpending", {
         userId: actor._id,
         orgId: actor.orgId,
+        monthKey: key,
+        totalCostCents: costCents,
+        lastUpdatedAt: now,
+      });
+    }
+
+    return { ok: true, costCents };
+  },
+});
+
+export const recordUsageWithCostInternal = internalMutation({
+  args: {
+    userId: v.id("users"),
+    orgId: v.id("orgs"),
+    chatId: v.optional(v.id("chats")),
+    messageId: v.optional(v.id("messages")),
+    model: v.string(),
+    inputTokens: v.number(),
+    outputTokens: v.number(),
+    openRouterCost: v.optional(v.number()),
+    inputCostPerM: v.optional(v.number()),
+    outputCostPerM: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId);
+    if (!user || user.orgId !== args.orgId) {
+      throw new Error("User not found");
+    }
+
+    const day = dayKey();
+    const now = Date.now();
+    const totalTokens = Math.max(0, args.inputTokens + args.outputTokens);
+
+    let inPrice = args.inputCostPerM;
+    let outPrice = args.outputCostPerM;
+    if (typeof inPrice !== "number" || typeof outPrice !== "number") {
+      const directModelRow = await ctx.db
+        .query("modelCatalog")
+        .withIndex("by_org_model", (q) => q.eq("orgId", args.orgId).eq("modelId", args.model))
+        .unique();
+      if (typeof inPrice !== "number") inPrice = directModelRow?.inputCostPerM;
+      if (typeof outPrice !== "number") outPrice = directModelRow?.outputCostPerM;
+
+      if (typeof inPrice !== "number" || typeof outPrice !== "number") {
+        const normalized = normalizeModelId(args.model);
+        const normalizedLeaf = modelLeaf(args.model);
+        const modelRows = await ctx.db
+          .query("modelCatalog")
+          .withIndex("by_org", (q) => q.eq("orgId", args.orgId))
+          .collect();
+        const leafMatches = modelRows.filter((row) => modelLeaf(row.modelId) === normalizedLeaf);
+        const fuzzyMatch = modelRows.find((row) => {
+          const candidate = normalizeModelId(row.modelId);
+          return candidate === normalized;
+        }) ?? (leafMatches.length === 1 ? leafMatches[0] : undefined);
+        if (typeof inPrice !== "number") inPrice = fuzzyMatch?.inputCostPerM;
+        if (typeof outPrice !== "number") outPrice = fuzzyMatch?.outputCostPerM;
+      }
+    }
+
+    const hasKnownPricing =
+      (typeof inPrice === "number" && Number.isFinite(inPrice)) ||
+      (typeof outPrice === "number" && Number.isFinite(outPrice));
+
+    const openRouterCost =
+      typeof args.openRouterCost === "number" && Number.isFinite(args.openRouterCost)
+        ? Math.max(0, args.openRouterCost)
+        : undefined;
+
+    const inputPricePerM = typeof inPrice === "number" && Number.isFinite(inPrice) ? inPrice : 0;
+    const outputPricePerM = typeof outPrice === "number" && Number.isFinite(outPrice) ? outPrice : 0;
+    const estimatedRawCostCents =
+      (
+        ((args.inputTokens / 1_000_000) * inputPricePerM) +
+        ((args.outputTokens / 1_000_000) * outputPricePerM)
+      ) * 100;
+    const directCostCents =
+      openRouterCost !== undefined
+        ? Number((openRouterCost * 100).toFixed(6))
+        : undefined;
+    const costCents = Math.max(
+      0,
+      Number((directCostCents ?? estimatedRawCostCents).toFixed(6)),
+    );
+
+    const existingDaily = await ctx.db
+      .query("usageDaily")
+      .withIndex("by_org_day", (q) => q.eq("orgId", args.orgId).eq("day", day))
+      .unique();
+
+    if (existingDaily) {
+      await ctx.db.patch(existingDaily._id, {
+        inputTokens: existingDaily.inputTokens + args.inputTokens,
+        outputTokens: existingDaily.outputTokens + args.outputTokens,
+        totalTokens: existingDaily.totalTokens + totalTokens,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.insert("usageDaily", {
+        orgId: args.orgId,
+        day,
+        inputTokens: args.inputTokens,
+        outputTokens: args.outputTokens,
+        totalTokens,
+        updatedAt: now,
+      });
+    }
+
+    await ctx.db.insert("usageEvents", {
+      orgId: args.orgId,
+      userId: args.userId,
+      chatId: args.chatId,
+      messageId: args.messageId,
+      model: args.model,
+      inputTokens: args.inputTokens,
+      outputTokens: args.outputTokens,
+      totalTokens,
+      costCents,
+      pricingNote:
+        openRouterCost !== undefined
+          ? "Cost sourced directly from OpenRouter usage."
+          : hasKnownPricing
+            ? undefined
+            : "Pricing unknown at record time; cost defaulted to zero.",
+      day,
+      createdAt: now,
+    });
+
+    const key = monthKey(now);
+    const existingMonth = await ctx.db
+      .query("userSpending")
+      .withIndex("by_user_month", (q) => q.eq("userId", args.userId).eq("monthKey", key))
+      .unique();
+
+    if (existingMonth) {
+      await ctx.db.patch(existingMonth._id, {
+        totalCostCents: Math.max(0, existingMonth.totalCostCents + costCents),
+        lastUpdatedAt: now,
+      });
+    } else {
+      await ctx.db.insert("userSpending", {
+        userId: args.userId,
+        orgId: args.orgId,
         monthKey: key,
         totalCostCents: costCents,
         lastUpdatedAt: now,

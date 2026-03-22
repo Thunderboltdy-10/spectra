@@ -3,10 +3,11 @@ import { requireActor } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
-import { fetchOpenRouterModels, openRouterEmbedding } from "@/lib/openrouter";
+import { fetchOpenRouterModels, openRouterEmbeddingRequest } from "@/lib/openrouter";
 import { MODEL_CONFIG } from "@/lib/model-config";
 import { featuredMeta } from "@/lib/featured-models";
 import { MAX_MODEL_COST_PER_MILLION } from "@/lib/model-policy";
+import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 
 type MappedModel = {
   modelId: string;
@@ -164,13 +165,24 @@ export async function POST(request: NextRequest) {
 
     const openRouterModels = await fetchOpenRouterModels();
     const mapped = mapOpenRouterModels(limit, openRouterModels);
+    const usageTotals = {
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      cost: 0,
+    };
+    let usageModel: string | undefined;
 
     for (const batch of chunkArray(mapped, 20)) {
       const embeddings = await Promise.all(
         batch.map(async (model) => {
           if (!model.strengthText) return undefined;
           try {
-            return await openRouterEmbedding(model.strengthText, MODEL_CONFIG.embedding);
+            const result = await openRouterEmbeddingRequest(model.strengthText, MODEL_CONFIG.embedding);
+            usageModel = usageModel ?? result.model ?? MODEL_CONFIG.embedding;
+            usageTotals.prompt_tokens += Math.max(0, Number(result.usage?.prompt_tokens ?? 0));
+            usageTotals.completion_tokens += Math.max(0, Number(result.usage?.completion_tokens ?? 0));
+            usageTotals.cost += Math.max(0, Number(result.usage?.cost ?? 0));
+            return result.embedding;
           } catch {
             return undefined;
           }
@@ -180,6 +192,19 @@ export async function POST(request: NextRequest) {
       batch.forEach((model, index) => {
         model.strengthEmbedding = embeddings[index];
       });
+    }
+
+    if (usageModel || usageTotals.prompt_tokens > 0 || usageTotals.completion_tokens > 0 || usageTotals.cost > 0) {
+      await recordOpenRouterUsage({
+        actorClerkId: actor.clerkId,
+        model: usageModel ?? MODEL_CONFIG.embedding,
+        usage: {
+          prompt_tokens: usageTotals.prompt_tokens,
+          completion_tokens: usageTotals.completion_tokens,
+          cost: usageTotals.cost,
+        },
+        skipIfZeroTokens: false,
+      }).catch(() => {});
     }
 
     await convexMutation("models:upsertModelCatalog", {

@@ -72,7 +72,7 @@ export type ParsedGeneratedDocument = {
   rawJson: string;
 };
 
-const DOCUMENT_BLOCK_RE = /<<DOCUMENT_START>>\s*([\s\S]*?)\s*<<DOCUMENT_END>>/i;
+const DOCUMENT_BLOCK_RE = /<<\s*DOCUMENT[_\s]?START\s*>>\s*([\s\S]*?)\s*<<\s*DOCUMENT[_\s]?END\s*>>/i;
 
 function asString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";

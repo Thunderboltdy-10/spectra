@@ -38,6 +38,7 @@ import { useSpeechToText } from "@/hooks/use-speech-to-text";
 import { CHEAP_MODEL_COST_PER_MILLION, MAX_MODEL_COST_PER_MILLION } from "@/lib/model-policy";
 
 type ChatComposerProps = {
+  sidebarExpanded?: boolean;
   message: string;
   onMessageChange: (value: string) => void;
   fileList: File[];
@@ -257,25 +258,30 @@ function SettingPill({
     value === "on"
       ? "border-[color-mix(in_oklab,var(--accent-cyan)_50%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_16%,transparent)] text-[var(--accent-cyan)]"
       : value === "auto"
-        ? "auto-pill-active border-[color-mix(in_oklab,var(--accent-cyan)_30%,var(--border-default))] bg-[var(--bg-secondary)] text-[var(--text-primary)]"
-        : "border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-tertiary)] opacity-60 hover:opacity-100 hover:bg-[var(--bg-hover)]";
+        ? "auto-pill-active border-[color-mix(in_oklab,var(--accent-cyan)_35%,var(--border-default))] text-[var(--text-primary)]"
+        : "border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]";
   return (
-    <button
-      type="button"
-      onClick={() => onChange(nextPreference(value))}
-      title={`${label}: ${preferenceLabel(value)} — ${title}`}
-      className={`group/pill inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border transition-all hover:w-auto hover:px-3 ${pillClass}`}
-    >
-      <span className="shrink-0">{icon}</span>
-      <span className="max-w-0 overflow-hidden whitespace-nowrap text-[11px] font-medium opacity-0 transition-all duration-300 ease-[var(--ease-standard)] group-hover/pill:ml-2 group-hover/pill:max-w-[100px] group-hover/pill:opacity-100">
-        {preferenceLabel(value)}
+    <div className="group/pill relative py-0.5">
+      <button
+        type="button"
+        onClick={() => onChange(nextPreference(value))}
+        className={`inline-flex h-[34px] cursor-pointer items-center justify-center rounded-full border px-[9px] transition-all duration-200 group-hover/pill:px-3 ${pillClass}`}
+      >
+        <span className="shrink-0">{icon}</span>
+        <span className="ml-0 max-w-0 overflow-hidden whitespace-nowrap text-[11px] font-medium opacity-0 transition-all duration-200 group-hover/pill:ml-1.5 group-hover/pill:max-w-[80px] group-hover/pill:opacity-100">
+          {preferenceLabel(value)}
+        </span>
+      </button>
+      <span className="pointer-events-none absolute -top-7 left-1/2 z-[95] -translate-x-1/2 whitespace-nowrap rounded-md border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)] opacity-0 shadow-sm transition-opacity duration-200 group-hover/pill:opacity-100">
+        {label}: {preferenceLabel(value)}
       </span>
-    </button>
+    </div>
   );
 }
 
 export function ChatComposer(props: ChatComposerProps) {
   const {
+    sidebarExpanded = true,
     message,
     onMessageChange,
     fileList,
@@ -316,7 +322,6 @@ export function ChatComposer(props: ChatComposerProps) {
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
   const modelMenuRef = useRef<HTMLDivElement | null>(null);
   const agentMenuRef = useRef<HTMLDivElement | null>(null);
-  const mobileFileInputRef = useRef<HTMLInputElement | null>(null);
   const attachInputRef = useRef<HTMLInputElement | null>(null);
   const previousFileCountRef = useRef(0);
   const listeningBaseMessageRef = useRef<string | null>(null);
@@ -731,13 +736,14 @@ export function ChatComposer(props: ChatComposerProps) {
         "sticky bottom-0 z-20 px-3 pb-[calc(0.9rem+env(safe-area-inset-bottom))] pt-4 sm:px-6 lg:px-10",
         draggingFiles && "bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-primary))]",
       )}
+      style={draggingFiles ? undefined : { background: "linear-gradient(to bottom, transparent 0%, var(--bg-primary) 42%)" }}
       aria-label="Message composer"
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div className="mx-auto w-full max-w-[680px]">
+      <div className="mx-auto w-full max-w-[680px] xl:max-w-[780px] 2xl:max-w-[860px]">
         {slashActive ? (
           <SlashCommandMenu
             query={message.trim()}
@@ -835,8 +841,8 @@ export function ChatComposer(props: ChatComposerProps) {
         )}
 
         <div className="relative overflow-visible rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-soft)]">
-          <div className="flex items-center justify-between gap-2 px-3 py-2">
-            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 pb-1">
+          <div className="flex items-center gap-2 px-3 pt-2.5 pb-1">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
               <div ref={modeMenuRef} className="relative">
                 <button
                   type="button"
@@ -973,13 +979,13 @@ export function ChatComposer(props: ChatComposerProps) {
 
                     <div className="mb-2">
                       <div className="relative">
-                        <Search className="pointer-events-none absolute left-2.5 top-2 h-3.5 w-3.5 text-[var(--text-secondary)]" />
+                        <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-[var(--text-secondary)]" />
                         <input
                           ref={modelSearchRef}
                           value={modelSearch}
                           onChange={(event) => setModelSearch(event.target.value)}
                           placeholder="Search models..."
-                          className="h-9 w-full appearance-none rounded-md border-0 bg-transparent pl-8 pr-2 text-sm outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none"
+                          className="h-9 w-full appearance-none rounded-md border-0 bg-[var(--bg-secondary)] pl-10 pr-2 text-sm outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none"
                         />
                       </div>
                     </div>
@@ -1177,92 +1183,67 @@ export function ChatComposer(props: ChatComposerProps) {
               </div>
             </div>
 
-            <div className="flex shrink-0 items-center gap-1.5">
-              <div
-                data-tour="auto-controls"
-                className="hidden flex-wrap items-center gap-1.5 transition-all duration-200 xl:flex"
-              >
-                <SettingPill
-                  label="Enhance"
-                  value={autoEnhancePrompt}
-                  onChange={onAutoEnhancePromptChange}
-                  title="Auto chooses when to refine prompts. On forces refinement. Off disables."
-                  icon={<Sparkles className="h-3.5 w-3.5" />}
-                />
-                <SettingPill
-                  label="Thinking"
-                  value={autoThinking}
-                  onChange={onAutoThinkingChange}
-                  title="Auto adapts reasoning depth. On forces deeper reasoning. Off keeps it lightweight."
-                  icon={<Brain className="h-3.5 w-3.5" />}
-                />
-                <SettingPill
-                  label="Search"
-                  value={autoSearch}
-                  onChange={onAutoSearchChange}
-                  title="Auto enables web research for time-sensitive prompts. On always enables. Off disables."
-                  icon={<Search className="h-3.5 w-3.5" />}
-                />
-                <SettingPill
-                  label="Compact"
-                  value={autoCompaction}
-                  onChange={onAutoCompactionChange}
-                  title="Auto compacts when chats grow long. On compacts once before the next response, then returns to Auto."
-                  icon={<Layers className="h-3.5 w-3.5" />}
-                />
+            <div
+              data-tour="auto-controls"
+              className="hidden shrink-0 items-center gap-1.5 sm:flex"
+            >
+              <SettingPill
+                label="Enhance"
+                value={autoEnhancePrompt}
+                onChange={onAutoEnhancePromptChange}
+                title="Enhance"
+                icon={<Sparkles className="h-3.5 w-3.5" />}
+              />
+              <SettingPill
+                label="Think"
+                value={autoThinking}
+                onChange={onAutoThinkingChange}
+                title="Think"
+                icon={<Brain className="h-3.5 w-3.5" />}
+              />
+              <SettingPill
+                label="Search"
+                value={autoSearch}
+                onChange={onAutoSearchChange}
+                title="Search"
+                icon={<Search className="h-3.5 w-3.5" />}
+              />
+              <SettingPill
+                label="Compact"
+                value={autoCompaction}
+                onChange={onAutoCompactionChange}
+                title="Compact"
+                icon={<Layers className="h-3.5 w-3.5" />}
+              />
+            </div>
 
-                {lastAutoResult?.promptEnhanced && (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_14%,transparent)] px-2 py-1 text-[11px] text-[var(--accent-cyan)]">
-                    <Sparkles className="h-3 w-3" />
-                    Enhanced
-                  </span>
-                )}
-              </div>
-
-              <div className="transition-all duration-200 xl:hidden">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button type="button" variant="secondary" size="icon" className="h-8 w-8 rounded-full" aria-label="More controls">
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onSelect={() => onAutoEnhancePromptChange(nextPreference(autoEnhancePrompt))}>
-                      Enhance: {preferenceLabel(autoEnhancePrompt)}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => onAutoThinkingChange(nextPreference(autoThinking))}>
-                      Thinking: {preferenceLabel(autoThinking)}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => onAutoSearchChange(nextPreference(autoSearch))}>
-                      Search: {preferenceLabel(autoSearch)}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => onAutoCompactionChange(nextPreference(autoCompaction))}>
-                      Compact: {preferenceLabel(autoCompaction)}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => mobileFileInputRef.current?.click()}>
-                      Attach files
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <input
-                  ref={mobileFileInputRef}
-                  type="file"
-                  className="hidden"
-                  multiple
-                  onChange={(event) => {
-                    const files = Array.from(event.target.files ?? []);
-                    if (files.length > 0) {
-                      onFilesAdd(files);
-                    }
-                    event.currentTarget.value = "";
-                  }}
-                />
-              </div>
+            <div className="sm:hidden">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-full" aria-label="More controls">
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => onAutoEnhancePromptChange(nextPreference(autoEnhancePrompt))}>
+                    Enhance: {preferenceLabel(autoEnhancePrompt)}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => onAutoThinkingChange(nextPreference(autoThinking))}>
+                    Think: {preferenceLabel(autoThinking)}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => onAutoSearchChange(nextPreference(autoSearch))}>
+                    Search: {preferenceLabel(autoSearch)}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => onAutoCompactionChange(nextPreference(autoCompaction))}>
+                    Compact: {preferenceLabel(autoCompaction)}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
 
           {!selectedAgentId && agentSuggestion ? (
-            <div className="border-b border-[var(--border-default)] px-3 py-2">
+            <div className="border-b border-[var(--border-default)] px-3 py-1.5">
               <button
                 type="button"
                 onClick={onApplyAgentSuggestion}
@@ -1275,8 +1256,8 @@ export function ChatComposer(props: ChatComposerProps) {
             </div>
           ) : null}
 
-          <div className="flex items-end gap-2 px-3 py-2.5">
-            <div className="flex-1">
+          <div className={sidebarExpanded ? "flex items-end gap-2 px-3 pb-3 pt-2" : "flex flex-col"}>
+            <div className={sidebarExpanded ? "flex-1 min-w-0" : "px-4 py-1.5"}>
               <textarea
                 ref={textareaRef}
                 value={message}
@@ -1286,78 +1267,78 @@ export function ChatComposer(props: ChatComposerProps) {
                 data-tour="composer"
                 aria-label="Message input"
                 rows={1}
-                className="max-h-[220px] min-h-[24px] w-full resize-none appearance-none border-0 bg-transparent px-2 py-0 text-[15px] leading-6 text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] shadow-none outline-none ring-0 focus:border-transparent focus:outline-none focus:ring-0 focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none"
+                className="max-h-[220px] min-h-[24px] w-full resize-none appearance-none border-0 bg-transparent pl-3 pr-0 py-1 text-[15px] leading-6 text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] shadow-none outline-none ring-0 focus:border-transparent focus:outline-none focus:ring-0 focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none"
                 onKeyDown={handleKeyDown}
               />
               {speech.isListening ? (
-                <p className="inline-flex items-center gap-1 px-2 pb-1 text-xs text-[var(--danger)]" aria-live="polite">
+                <p className="inline-flex items-center gap-1 pb-1 text-xs text-[var(--danger)]" aria-live="polite">
                   <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-[var(--danger)]" />
                   Recording... dictating into composer
                 </p>
               ) : null}
               {sendDisabledReason ? (
-                <p className="px-2 pb-1 text-xs text-[var(--warning)]" aria-live="polite">{sendDisabledReason}</p>
+                <p className="pb-1 text-xs text-[var(--warning)]" aria-live="polite">{sendDisabledReason}</p>
               ) : null}
             </div>
 
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-10 w-10 rounded-full border-0 bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-              onClick={() => attachInputRef.current?.click()}
-              aria-label="Attach files"
-              title="Attach files"
-            >
-              <Paperclip className="h-4 w-4" />
-            </Button>
-            <input
-              ref={attachInputRef}
-              type="file"
-              className="hidden"
-              multiple
-              onChange={(event) => {
-                const files = Array.from(event.target.files ?? []);
-                if (files.length > 0) {
-                  onFilesAdd(files);
-                }
-                event.currentTarget.value = "";
-              }}
-            />
-
-            <Button
-              onClick={handleToggleMic}
-              variant={speech.isListening ? "destructive" : "secondary"}
-              size="icon"
-              className={cn("h-10 w-10 rounded-full", speech.isListening && "animate-pulse")}
-              aria-label={speech.isListening ? "Stop voice input" : "Start voice input"}
-              title={speech.isSupported ? undefined : "Voice input support is coming soon for this browser."}
-            >
-              <Mic className="h-4 w-4" />
-            </Button>
-
-            {sending && onStop ? (
+            <div className={sidebarExpanded ? "flex shrink-0 items-center gap-1.5 mb-1" : "flex items-center justify-end gap-2 px-3 pb-2.5 pt-0.5"}>
+              <input
+                ref={attachInputRef}
+                type="file"
+                className="hidden"
+                multiple
+                onChange={(event) => {
+                  const files = Array.from(event.target.files ?? []);
+                  if (files.length > 0) {
+                    onFilesAdd(files);
+                  }
+                  event.currentTarget.value = "";
+                }}
+              />
               <Button
-                onClick={onStop}
-                variant="secondary"
+                type="button"
+                variant="ghost"
                 size="icon"
-                className="h-10 w-10 rounded-full"
-                aria-label="Stop generation"
+                className="h-9 w-9 rounded-full text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                onClick={() => attachInputRef.current?.click()}
+                aria-label="Attach files"
+                title="Attach files"
               >
-                <Square className="h-4 w-4" />
+                <Paperclip className="h-4.5 w-4.5" />
               </Button>
-            ) : (
               <Button
-                onClick={onSend}
-                disabled={sending || !message.trim() || Boolean(sendDisabledReason)}
+                onClick={handleToggleMic}
+                variant={speech.isListening ? "destructive" : "ghost"}
                 size="icon"
-                className="h-10 w-10 rounded-full"
-                aria-label="Send message"
-                title={sendDisabledReason ?? "Send message"}
+                className={cn("h-9 w-9 rounded-full text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]", speech.isListening && "animate-pulse text-[var(--danger)]")}
+                aria-label={speech.isListening ? "Stop voice input" : "Start voice input"}
+                title={speech.isSupported ? "Voice input" : "Voice input support is coming soon for this browser."}
               >
-                <ArrowUp className="h-4 w-4" />
+                <Mic className="h-4.5 w-4.5" />
               </Button>
-            )}
+              {sending && onStop ? (
+                <Button
+                  onClick={onStop}
+                  variant="secondary"
+                  size="icon"
+                  className="h-9 w-9 rounded-full"
+                  aria-label="Stop generation"
+                >
+                  <Square className="h-4.5 w-4.5" />
+                </Button>
+              ) : (
+                <Button
+                  onClick={onSend}
+                  disabled={sending || !message.trim() || Boolean(sendDisabledReason)}
+                  size="icon"
+                  className="h-9 w-9 rounded-full"
+                  aria-label="Send message"
+                  title={sendDisabledReason ?? "Send message"}
+                >
+                  <ArrowUp className="h-4.5 w-4.5" />
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </div>

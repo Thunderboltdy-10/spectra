@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const STORAGE_KEY = "ai-school-study-timer-v2";
+const SESSIONS_STORAGE_KEY = "ai-school:timer-sessions";
+const MAX_STORED_SESSIONS = 100;
 const DEFAULT_WORK_MINUTES = 25;
 const DEFAULT_BREAK_MINUTES = 5;
 const MIN_WORK_MINUTES = 5;
@@ -55,6 +57,27 @@ function formatRemaining(seconds: number) {
 
 function nextPhase(phase: TimerPhase): TimerPhase {
   return phase === "work" ? "break" : "work";
+}
+
+type CompletedTimerSession = {
+  completedAt: string;
+  durationMinutes: number;
+};
+
+function persistCompletedSession(durationMinutes: number): void {
+  try {
+    const raw = window.localStorage.getItem(SESSIONS_STORAGE_KEY);
+    const existing: CompletedTimerSession[] = raw ? (JSON.parse(raw) as CompletedTimerSession[]) : [];
+    const entry: CompletedTimerSession = {
+      completedAt: new Date().toISOString(),
+      durationMinutes,
+    };
+    // Append new session and keep only the most recent MAX_STORED_SESSIONS entries.
+    const updated = [...existing, entry].slice(-MAX_STORED_SESSIONS);
+    window.localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(updated));
+  } catch {
+    // Storage can fail in private browsing contexts — silently skip.
+  }
 }
 
 function readPersistedState(): PersistedTimerState | null {
@@ -288,6 +311,7 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
           endedAt: now,
           totalSeconds: measuredElapsedSeconds,
         });
+        persistCompletedSession(workMinutes);
         setCompletedSessions((prev) => prev + 1);
         toast.success("Focus block complete. Starting a short break.");
         const nextDuration = phaseDurationMs("break", workMinutes, breakMinutes);

@@ -725,6 +725,9 @@ function ContactForm() {
 
 export function LandingClient() {
   const [scrolled, setScrolled] = useState(false);
+  const [aiCoreHovered, setAiCoreHovered] = useState(false);
+  const [pulseKey, setPulseKey] = useState(0);
+  const handlePulseTrigger = () => setPulseKey(k => k + 1);
 
   useEffect(() => {
     const h = () => setScrolled(window.scrollY > 24);
@@ -1433,19 +1436,86 @@ export function LandingClient() {
             </p>
           </div>
 
-          <div className="relative max-w-5xl mx-auto mt-16 flex flex-col md:flex-row items-center md:items-stretch gap-12 md:gap-8 justify-between">
-            {/* Desktop horizontal connection line */}
-            <div className="hidden md:block absolute top-1/2 left-[15%] right-[15%] h-[2px] -translate-y-1/2 z-0 pointer-events-none">
-              <div className="absolute inset-0 bg-[var(--border-default)] opacity-40" />
-              {/* Animated pulses */}
-              <div className="absolute inset-y-0 left-0 w-1/4 bg-gradient-to-r from-transparent via-[var(--brand-primary)] to-transparent opacity-60" style={{ animation: "shimmer-move 3s infinite linear" }} />
-              <div className="absolute inset-y-0 left-1/2 w-1/4 bg-gradient-to-r from-transparent via-[var(--brand-accent)] to-transparent opacity-60" style={{ animation: "shimmer-move 3s infinite linear 1.5s" }} />
+          <style>{`
+            @keyframes pulse-circle-anim {
+              0% { r: 0; stroke-width: 0px; opacity: 1; }
+              15% { stroke-width: 150px; opacity: 1; }
+              80% { stroke-width: 250px; opacity: 1; }
+              100% { r: 150%; stroke-width: 400px; opacity: 0; }
+            }
+            .pulse-circle-active {
+              animation: pulse-circle-anim 1.2s cubic-bezier(0.2, 0, 0.2, 1) 0.3s forwards;
+              opacity: 0;
+            }
+            @keyframes ray-left {
+              0% { transform: scaleX(0); transform-origin: right; opacity: 1; }
+              50% { transform: scaleX(1); transform-origin: right; opacity: 1; }
+              50.1% { transform: scaleX(1); transform-origin: left; opacity: 1; }
+              100% { transform: scaleX(0); transform-origin: left; opacity: 0; }
+            }
+            @keyframes ray-right {
+              0% { transform: scaleX(0); transform-origin: left; opacity: 1; }
+              50% { transform: scaleX(1); transform-origin: left; opacity: 1; }
+              50.1% { transform: scaleX(1); transform-origin: right; opacity: 1; }
+              100% { transform: scaleX(0); transform-origin: right; opacity: 0; }
+            }
+            @keyframes ray-up {
+              0% { transform: scaleY(0); transform-origin: bottom; opacity: 1; }
+              50% { transform: scaleY(1); transform-origin: bottom; opacity: 1; }
+              50.1% { transform: scaleY(1); transform-origin: top; opacity: 1; }
+              100% { transform: scaleY(0); transform-origin: top; opacity: 0; }
+            }
+            @keyframes ray-down {
+              0% { transform: scaleY(0); transform-origin: top; opacity: 1; }
+              50% { transform: scaleY(1); transform-origin: top; opacity: 1; }
+              50.1% { transform: scaleY(1); transform-origin: bottom; opacity: 1; }
+              100% { transform: scaleY(0); transform-origin: bottom; opacity: 0; }
+            }
+          `}</style>
+
+          <div className="relative max-w-5xl mx-auto mt-16 flex flex-col md:flex-row items-center md:items-stretch gap-12 md:gap-8 justify-between" data-ai-core-active={aiCoreHovered ? "true" : undefined}>
+            {/* Desktop horizontal connection lines */}
+            <div className="hidden md:block absolute top-1/2 right-[50%] left-[15%] mr-[4rem] -translate-y-1/2 z-0 pointer-events-none h-[2px]">
+              <div className="absolute inset-0 bg-[var(--border-default)] opacity-40 rounded-full" />
+              {pulseKey > 0 && (
+                <div 
+                  key={`ray-left-${pulseKey}`}
+                  className="absolute inset-y-0 right-0 rounded-full bg-gradient-to-l from-transparent via-[var(--brand-primary)] to-transparent" 
+                  style={{ width: "40%", animation: "ray-left 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards" }} 
+                />
+              )}
+            </div>
+            <div className="hidden md:block absolute top-1/2 left-[50%] right-[15%] ml-[4rem] -translate-y-1/2 z-0 pointer-events-none h-[2px]">
+              <div className="absolute inset-0 bg-[var(--border-default)] opacity-40 rounded-full" />
+              {pulseKey > 0 && (
+                <div 
+                  key={`ray-right-${pulseKey}`}
+                  className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-transparent via-[var(--brand-primary)] to-transparent" 
+                  style={{ width: "40%", animation: "ray-right 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards" }} 
+                />
+              )}
             </div>
             
-            {/* Mobile vertical connection line */}
-            <div className="md:hidden absolute left-1/2 top-[10%] bottom-[10%] w-[2px] -translate-x-1/2 z-0 pointer-events-none">
-              <div className="absolute inset-0 bg-[var(--border-default)] opacity-40" />
-              <div className="absolute inset-x-0 top-0 h-1/4 bg-gradient-to-b from-transparent via-[var(--brand-primary)] to-transparent opacity-60" style={{ animation: "shimmer-move 3s infinite linear" }} />
+            {/* Mobile vertical connection lines */}
+            <div className="md:hidden absolute left-1/2 bottom-[50%] top-[10%] mb-[4rem] w-[2px] -translate-x-1/2 z-0 pointer-events-none">
+              <div className="absolute inset-0 bg-[var(--border-default)] opacity-40 rounded-full" />
+              {pulseKey > 0 && (
+                <div 
+                  key={`ray-up-${pulseKey}`} 
+                  className="absolute inset-x-0 bottom-0 rounded-full bg-gradient-to-t from-transparent via-[var(--brand-primary)] to-transparent" 
+                  style={{ height: "40%", animation: "ray-up 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards" }} 
+                />
+              )}
+            </div>
+            <div className="md:hidden absolute left-1/2 top-[50%] bottom-[10%] mt-[4rem] w-[2px] -translate-x-1/2 z-0 pointer-events-none">
+              <div className="absolute inset-0 bg-[var(--border-default)] opacity-40 rounded-full" />
+              {pulseKey > 0 && (
+                <div 
+                  key={`ray-down-${pulseKey}`} 
+                  className="absolute inset-x-0 top-0 rounded-full bg-gradient-to-b from-transparent via-[var(--brand-primary)] to-transparent" 
+                  style={{ height: "40%", animation: "ray-down 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards" }} 
+                />
+              )}
             </div>
 
             {/* Student Card */}
@@ -1474,6 +1544,26 @@ export function LandingClient() {
                   }}
                 >
                   <div className="absolute inset-0 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500" style={{ background: `radial-gradient(circle at top right, ${color}15, transparent 70%)` }} />
+                  {pulseKey > 0 && (
+                    <svg key={`pulse-student-${pulseKey}`} className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" style={{ borderRadius: "1.5rem" }}>
+                      <defs>
+                        <filter id="electric-glow-student" x="-20%" y="-20%" width="140%" height="140%">
+                          <feGaussianBlur stdDeviation="6" result="blur"/>
+                          <feMerge>
+                            <feMergeNode in="blur"/>
+                            <feMergeNode in="blur"/>
+                            <feMergeNode in="SourceGraphic"/>
+                          </feMerge>
+                        </filter>
+                        <mask id="pulse-mask-student">
+                          <circle cx="50%" cy="100%" r="0" fill="none" stroke="white" className="pulse-circle-active md:hidden" />
+                          <circle cx="100%" cy="50%" r="0" fill="none" stroke="white" className="pulse-circle-active hidden md:block" />
+                        </mask>
+                      </defs>
+                      <rect x="0" y="0" width="100%" height="100%" rx="24" fill="none" stroke="var(--brand-primary)" strokeWidth="6" mask="url(#pulse-mask-student)" filter="url(#electric-glow-student)" />
+                      <rect x="0" y="0" width="100%" height="100%" rx="24" fill="none" stroke="white" strokeWidth="2" mask="url(#pulse-mask-student)" />
+                    </svg>
+                  )}
                   <div className="relative z-10">
                     <div className="stk-icon w-12 h-12 rounded-2xl flex items-center justify-center mb-5 transition-transform duration-300 ease-out" style={{ background: color + "14", border: "1px solid " + color + "28", color }}>
                       <Icon size={22} strokeWidth={1.5} />
@@ -1494,11 +1584,14 @@ export function LandingClient() {
             })()}
 
             {/* Central Node */}
-            <div className="relative z-20 w-24 h-24 md:w-32 md:h-32 rounded-full flex flex-col items-center justify-center shrink-0 border-4 transition-transform duration-500 hover:scale-110 self-center"
-                 style={{ background: "var(--bg-primary)", borderColor: "var(--brand-primary)", boxShadow: "0 0 40px color-mix(in oklab, var(--brand-primary) 30%, transparent)" }}
+            <div className="relative z-20 w-24 h-24 md:w-32 md:h-32 rounded-full flex flex-col items-center justify-center shrink-0 border-4 transition-all duration-500 hover:scale-110 self-center cursor-pointer"
+                 style={{ background: "var(--bg-primary)", borderColor: "var(--brand-primary)", boxShadow: aiCoreHovered ? "0 0 60px color-mix(in oklab, var(--brand-primary) 50%, transparent), 0 0 100px color-mix(in oklab, var(--brand-primary) 20%, transparent)" : "0 0 40px color-mix(in oklab, var(--brand-primary) 30%, transparent)" }}
+                 onMouseEnter={() => { setAiCoreHovered(true); handlePulseTrigger(); }}
+                 onMouseLeave={() => setAiCoreHovered(false)}
+                 onClick={handlePulseTrigger}
                  data-reveal data-delay="100">
-              <div className="absolute inset-0 rounded-full animate-spin-slow" style={{ border: "2px dashed var(--brand-primary)", opacity: 0.3 }} />
-              <div className="absolute inset-2 rounded-full animate-pulse" style={{ background: "var(--brand-primary)", opacity: 0.1 }} />
+              <div className="absolute inset-0 rounded-full animate-spin-slow" style={{ border: "2px dashed var(--brand-primary)", opacity: aiCoreHovered ? 0.6 : 0.3, transition: "opacity 0.3s" }} />
+              <div className="absolute inset-2 rounded-full" style={{ background: "var(--brand-primary)", opacity: aiCoreHovered ? 0.2 : 0.1, transition: "opacity 0.3s", animation: aiCoreHovered ? "subtle-pulse 1s ease-in-out" : "none" }} />
               <Sparkles size={24} className="text-[var(--brand-primary)] mb-1" />
               <span className="text-[9px] font-bold tracking-widest" style={{ color: "var(--text-primary)" }}>AI CORE</span>
             </div>
@@ -1529,6 +1622,26 @@ export function LandingClient() {
                   }}
                 >
                   <div className="absolute inset-0 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500" style={{ background: `radial-gradient(circle at top right, ${color}15, transparent 70%)` }} />
+                  {pulseKey > 0 && (
+                    <svg key={`pulse-teacher-${pulseKey}`} className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" style={{ borderRadius: "1.5rem" }}>
+                      <defs>
+                        <filter id="electric-glow-teacher" x="-20%" y="-20%" width="140%" height="140%">
+                          <feGaussianBlur stdDeviation="6" result="blur"/>
+                          <feMerge>
+                            <feMergeNode in="blur"/>
+                            <feMergeNode in="blur"/>
+                            <feMergeNode in="SourceGraphic"/>
+                          </feMerge>
+                        </filter>
+                        <mask id="pulse-mask-teacher">
+                          <circle cx="50%" cy="0%" r="0" fill="none" stroke="white" className="pulse-circle-active md:hidden" />
+                          <circle cx="0%" cy="50%" r="0" fill="none" stroke="white" className="pulse-circle-active hidden md:block" />
+                        </mask>
+                      </defs>
+                      <rect x="0" y="0" width="100%" height="100%" rx="24" fill="none" stroke="var(--brand-primary)" strokeWidth="6" mask="url(#pulse-mask-teacher)" filter="url(#electric-glow-teacher)" />
+                      <rect x="0" y="0" width="100%" height="100%" rx="24" fill="none" stroke="white" strokeWidth="2" mask="url(#pulse-mask-teacher)" />
+                    </svg>
+                  )}
                   <div className="relative z-10">
                     <div className="stk-icon w-12 h-12 rounded-2xl flex items-center justify-center mb-5 transition-transform duration-300 ease-out" style={{ background: color + "14", border: "1px solid " + color + "28", color }}>
                       <Icon size={22} strokeWidth={1.5} />

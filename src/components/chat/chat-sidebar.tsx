@@ -455,7 +455,7 @@ export function ChatSidebar({
             <p className="text-lg leading-none">
               <span className="font-display">{orgName ?? "School"}</span>
             </p>
-            <p className="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Spectra</p>
+            <p className="mt-0.5 text-[11px] uppercase tracking-[0.12em] text-[var(--brand-primary)]">Spectra</p>
           </div>
         </div>
         <Button type="button" variant="ghost" size="icon" onClick={onToggleCollapse} aria-label="Collapse sidebar">
@@ -503,7 +503,7 @@ export function ChatSidebar({
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search chats"
             data-search-input
-            className="h-8 w-full rounded-lg border border-transparent bg-[var(--bg-primary)] pl-8 pr-2.5 text-xs text-[var(--text-primary)] transition placeholder:text-[var(--text-secondary)] focus:outline-none focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none"
+            className="h-8 w-full rounded-lg border border-transparent bg-[var(--bg-primary)] pl-9 pr-2.5 text-xs text-[var(--text-primary)] transition placeholder:text-[var(--text-secondary)] focus:outline-none focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none"
           />
         </div>
 

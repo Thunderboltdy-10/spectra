@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Bot, Brain, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Loader2, Settings2, Trash2, X, XCircle, FileText, Milestone } from "lucide-react";
+import { Bot, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Loader2, X, XCircle, FileText, Milestone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ProviderLogo } from "@/components/provider-logo";
 import { Switch } from "@/components/ui/switch";
@@ -27,27 +27,29 @@ function AutoChoice({
   value: AutoPreference;
   onChange: (value: AutoPreference) => void;
 }) {
+  const options = ["auto", "on", "off"] as const;
+  const activeIndex = options.indexOf(value);
+
   return (
     <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2">
       <p className="mb-2 text-xs uppercase tracking-[0.1em] text-[var(--text-secondary)]">{label}</p>
-      <div className="grid grid-cols-3 gap-1">
-        {(["auto", "on", "off"] as const).map((item) => {
+      <div className="relative flex w-full rounded-lg bg-[var(--bg-primary)] p-1">
+        <div
+          className="absolute bottom-1 top-1 rounded-md bg-[var(--bg-elevated)] shadow-sm border border-[var(--border-default)] transition-transform duration-300 ease-out"
+          style={{ left: "4px", width: "calc((100% - 8px) / 3)", transform: `translateX(${activeIndex * 100}%)` }}
+        />
+        {options.map((item) => {
           const isActive = value === item;
-          const pillClass = isActive
-            ? item === "auto"
-              ? "auto-pill-active bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[0_0_0_1.5px_var(--accent-cyan)]"
-              : item === "on"
-                ? "bg-[color-mix(in_oklab,var(--accent-cyan)_18%,var(--bg-primary))] text-[var(--accent-cyan)] shadow-[0_0_0_1.5px_var(--accent-cyan)]"
-                : "bg-[var(--bg-primary)] text-[var(--text-tertiary)]"
-            : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]";
           return (
             <button
               key={item}
               type="button"
               onClick={() => onChange(item)}
-              className={`rounded-md px-2 py-1 text-xs font-medium transition-all duration-150 ${pillClass}`}
+              className={`relative z-10 flex-1 rounded-md py-1 text-[11px] font-semibold tracking-wide uppercase transition-colors duration-200 ${
+                isActive ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+              }`}
             >
-              {item === "auto" ? "Auto" : item === "on" ? "On" : "Off"}
+              {item}
             </button>
           );
         })}
@@ -87,19 +89,6 @@ function providerFromModelId(value: string) {
     .join(" ");
 }
 
-function confidenceBucket(value: number) {
-  if (value >= 0.75) return "high";
-  if (value >= 0.5) return "medium";
-  return "low";
-}
-
-function confidenceBadgeTone(value: number) {
-  const bucket = confidenceBucket(value);
-  if (bucket === "high") return "text-[var(--success)]";
-  if (bucket === "medium") return "text-[var(--accent-cyan)]";
-  return "text-[var(--text-secondary)]";
-}
-
 function resourceStatusMeta(status: PersonalResource["status"], updatedAt?: number, attempts?: number) {
   if (status === "uploaded") {
     return {
@@ -135,20 +124,7 @@ function resourceStatusMeta(status: PersonalResource["status"], updatedAt?: numb
   };
 }
 
-type MemoryPanelEntry = {
-  _id: string;
-  key: string;
-  text: string;
-  category: "identity" | "academic" | "preference" | "topic" | "artifact" | "correction";
-  confidence: number;
-  status: "pending" | "confirmed";
-  sourceType: "extraction" | "user_explicit" | "correction";
-  sourceChatId?: string;
-  relatedArtifacts: string[];
-  negativeTopicLinks: string[];
-  createdAt: number;
-  updatedAt: number;
-};
+
 
 export type SettingsViewProps = {
   models: ModelOption[];
@@ -329,21 +305,13 @@ export function SettingsView({
   onDeleteResource,
   onUploadPersonalFiles,
 }: SettingsViewProps) {
-  const [memoryEnabled, setMemoryEnabled] = useState(true);
   const [searxngEnabled, setSearxngEnabled] = useState(true);
   const [documentModeEnabled, setDocumentModeEnabled] = useState(true);
   const [multiAgentVerbose, setMultiAgentVerbose] = useState(false);
   const [showSpecialists, setShowSpecialists] = useState(true);
-  const [memoryEntries, setMemoryEntries] = useState<MemoryPanelEntry[]>([]);
-  const [memoryLoading, setMemoryLoading] = useState(false);
-  const [memoryError, setMemoryError] = useState<string | null>(null);
-  const [memoryActionBusyId, setMemoryActionBusyId] = useState<string | null>(null);
-  const [forgetTopicInput, setForgetTopicInput] = useState("");
-  const [forgetTopicBusy, setForgetTopicBusy] = useState(false);
 
   useEffect(() => {
     try {
-      setMemoryEnabled(window.localStorage.getItem("ai-school:memory-enabled") !== "0");
       setSearxngEnabled(window.localStorage.getItem("ai-school:searxng-enabled") !== "0");
       setDocumentModeEnabled(window.localStorage.getItem("ai-school:document-mode-enabled") !== "0");
       setMultiAgentVerbose(window.localStorage.getItem("ai-school:multi-agent-verbose") === "1");
@@ -359,78 +327,6 @@ export function SettingsView({
       window.localStorage.setItem(key, value ? "1" : "0");
     } catch {
       // Ignore storage failures.
-    }
-  };
-
-  const refreshMemoryEntries = async () => {
-    setMemoryLoading(true);
-    setMemoryError(null);
-    try {
-      const response = await fetch("/api/memory", { method: "GET" });
-      if (!response.ok) {
-        throw new Error(`Failed to load memory (${response.status})`);
-      }
-      const payload = (await response.json()) as { entries?: MemoryPanelEntry[] };
-      setMemoryEntries(Array.isArray(payload.entries) ? payload.entries : []);
-    } catch (error) {
-      setMemoryError(error instanceof Error ? error.message : "Could not load memory");
-      setMemoryEntries([]);
-    } finally {
-      setMemoryLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void refreshMemoryEntries();
-  }, []);
-
-  const runMemoryAction = async (params: {
-    action: "confirm" | "dismiss" | "delete";
-    entryId: string;
-  }) => {
-    setMemoryActionBusyId(params.entryId);
-    try {
-      const response = await fetch("/api/memory", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: params.action,
-          entryId: params.entryId,
-        }),
-      });
-      if (!response.ok) {
-        throw new Error(`Memory action failed (${response.status})`);
-      }
-      await refreshMemoryEntries();
-    } catch (error) {
-      setMemoryError(error instanceof Error ? error.message : "Memory action failed");
-    } finally {
-      setMemoryActionBusyId(null);
-    }
-  };
-
-  const forgetTopic = async () => {
-    const topic = forgetTopicInput.trim();
-    if (!topic) return;
-    setForgetTopicBusy(true);
-    try {
-      const response = await fetch("/api/memory", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "forget_topic",
-          topic,
-        }),
-      });
-      if (!response.ok) {
-        throw new Error(`Forget topic failed (${response.status})`);
-      }
-      setForgetTopicInput("");
-      await refreshMemoryEntries();
-    } catch (error) {
-      setMemoryError(error instanceof Error ? error.message : "Forget topic failed");
-    } finally {
-      setForgetTopicBusy(false);
     }
   };
 
@@ -473,31 +369,23 @@ export function SettingsView({
     routerMode === "manual"
       ? (selectedManualModel?.tags ?? [])
       : (routedRecentModel?.tags ?? []);
-  const pendingEntries = memoryEntries.filter((entry) => entry.status === "pending");
-  const confirmedEntries = memoryEntries.filter((entry) => entry.status === "confirmed");
-  const groupedConfirmedEntries = {
-    high: confirmedEntries.filter((entry) => confidenceBucket(entry.confidence) === "high"),
-    medium: confirmedEntries.filter((entry) => confidenceBucket(entry.confidence) === "medium"),
-    low: confirmedEntries.filter((entry) => confidenceBucket(entry.confidence) === "low"),
-  };
 
   return (
     <div className="space-y-4">
       <Tabs defaultValue="assistant" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="assistant">Assistant</TabsTrigger>
-          <TabsTrigger value="memory">Memory</TabsTrigger>
           <TabsTrigger value="app">App &amp; Account</TabsTrigger>
         </TabsList>
 
         <TabsContent value="assistant" className="space-y-4">
           <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-            <h3 className="mb-2 text-xs font-medium text-[var(--text-secondary)]">Automation profile</h3>
+            <h3 className="mb-2 text-xs font-medium text-[var(--text-secondary)]">Chat options</h3>
             <div className="grid gap-2">
-              <AutoChoice label="Auto-enhance prompt" value={autoEnhancePrompt} onChange={onAutoEnhancePromptChange} />
-              <AutoChoice label="Auto-thinking" value={autoThinking} onChange={onAutoThinkingChange} />
-              <AutoChoice label="Auto-search" value={autoSearch} onChange={onAutoSearchChange} />
-              <AutoChoice label="Auto-compaction" value={autoCompaction} onChange={onAutoCompactionChange} />
+              <AutoChoice label="Enhance prompt" value={autoEnhancePrompt} onChange={onAutoEnhancePromptChange} />
+              <AutoChoice label="Thinking" value={autoThinking} onChange={onAutoThinkingChange} />
+              <AutoChoice label="Search" value={autoSearch} onChange={onAutoSearchChange} />
+              <AutoChoice label="Compaction" value={autoCompaction} onChange={onAutoCompactionChange} />
             </div>
           </section>
 
@@ -537,13 +425,7 @@ export function SettingsView({
               </div>
               <Switch checked={searxngEnabled} onCheckedChange={(value) => persistToggle("ai-school:searxng-enabled", value, setSearxngEnabled)} />
             </div>
-            <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
-              <div>
-                <p className="text-sm">Memory updates</p>
-                <p className="text-xs text-[var(--text-secondary)]">Allow the tutor to update your personal SOUL profile</p>
-              </div>
-              <Switch checked={memoryEnabled} onCheckedChange={(value) => persistToggle("ai-school:memory-enabled", value, setMemoryEnabled)} />
-            </div>
+
             <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
               <div>
                 <p className="text-sm">Auto-open live progress</p>
@@ -656,170 +538,7 @@ export function SettingsView({
           </section>
         </TabsContent>
 
-        <TabsContent value="memory" className="space-y-4">
-          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <h3 className="text-xs font-medium text-[var(--text-secondary)]">Memory manager</h3>
-                <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
-                  Layered memory with pending review and topic-specific recall.
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-[11px]"
-                onClick={() => {
-                  void refreshMemoryEntries();
-                }}
-              >
-                <Brain className="mr-1 h-3.5 w-3.5" />
-                Refresh
-              </Button>
-            </div>
-            <div className="mt-3 flex items-center gap-2">
-              <input
-                type="text"
-                value={forgetTopicInput}
-                onChange={(event) => setForgetTopicInput(event.target.value)}
-                placeholder="Forget all about topic (e.g. WWII)"
-                className="h-9 flex-1 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)] focus:border-[var(--accent-cyan)]"
-              />
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-9 px-3 text-xs"
-                disabled={forgetTopicBusy || !forgetTopicInput.trim()}
-                onClick={() => {
-                  void forgetTopic();
-                }}
-              >
-                {forgetTopicBusy ? "Forgetting..." : "Forget topic"}
-              </Button>
-            </div>
-            {memoryLoading ? (
-              <p className="mt-2 text-xs text-[var(--text-secondary)]">Loading memory...</p>
-            ) : null}
-            {memoryError ? (
-              <p className="mt-2 text-xs text-[var(--danger)]">{memoryError}</p>
-            ) : null}
-          </section>
 
-          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-            <h3 className="mb-2 text-xs font-medium text-[var(--text-secondary)]">Pending confirmation</h3>
-            {pendingEntries.length === 0 ? (
-              <p className="text-xs text-[var(--text-secondary)]">No pending entries.</p>
-            ) : (
-              <div className="space-y-2">
-                {pendingEntries.map((entry) => (
-                  <article key={entry._id} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-xs font-medium text-[var(--text-primary)]">{entry.key.replace(/_/g, " ")}</p>
-                      <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">{entry.category}</span>
-                    </div>
-                    <p className="mt-1 text-xs text-[var(--text-secondary)]">{entry.text}</p>
-                    <div className="mt-2 flex items-center justify-between gap-2">
-                      {entry.sourceChatId ? (
-                        <a href={`/chat?chatId=${entry.sourceChatId}`} className="text-[11px] text-[var(--accent-cyan)] hover:underline">
-                          Open source chat
-                        </a>
-                      ) : (
-                        <span className="text-[11px] text-[var(--text-secondary)]">No source chat</span>
-                      )}
-                      <div className="flex items-center gap-1.5">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="h-7 px-2 text-[11px]"
-                          disabled={memoryActionBusyId === entry._id}
-                          onClick={() => {
-                            void runMemoryAction({ action: "confirm", entryId: entry._id });
-                          }}
-                        >
-                          Confirm
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 px-2 text-[11px] text-[var(--danger)]"
-                          disabled={memoryActionBusyId === entry._id}
-                          onClick={() => {
-                            void runMemoryAction({ action: "dismiss", entryId: entry._id });
-                          }}
-                        >
-                          Dismiss
-                        </Button>
-                      </div>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-            <h3 className="mb-2 text-xs font-medium text-[var(--text-secondary)]">Confirmed memory</h3>
-            {memoryEntries.length === 0 ? (
-              <p className="text-xs text-[var(--text-secondary)]">No memory entries yet.</p>
-            ) : (
-              <div className="space-y-3">
-                {(["high", "medium", "low"] as const).map((bucket) => {
-                  const rows = groupedConfirmedEntries[bucket];
-                  if (rows.length === 0) return null;
-                  return (
-                    <div key={bucket}>
-                      <p className="mb-1 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
-                        {bucket} confidence
-                      </p>
-                      <div className="space-y-2">
-                        {rows.map((entry) => (
-                          <article key={entry._id} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2">
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="text-xs font-medium text-[var(--text-primary)]">{entry.key.replace(/_/g, " ")}</p>
-                              <div className="flex items-center gap-2">
-                                <span className={`text-[10px] uppercase tracking-[0.08em] ${confidenceBadgeTone(entry.confidence)}`}>
-                                  {(entry.confidence * 100).toFixed(0)}%
-                                </span>
-                                <Button
-                                  type="button"
-                                  size="icon"
-                                  variant="ghost"
-                                  className="h-6 w-6 text-[var(--danger)]"
-                                  disabled={memoryActionBusyId === entry._id}
-                                  onClick={() => {
-                                    void runMemoryAction({ action: "delete", entryId: entry._id });
-                                  }}
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </Button>
-                              </div>
-                            </div>
-                            <p className="mt-1 text-xs text-[var(--text-secondary)]">{entry.text}</p>
-                            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-[var(--text-secondary)]">
-                              <span>{entry.category}</span>
-                              {entry.sourceChatId ? (
-                                <a href={`/chat?chatId=${entry.sourceChatId}`} className="text-[var(--accent-cyan)] hover:underline">
-                                  source chat
-                                </a>
-                              ) : null}
-                              {entry.negativeTopicLinks.length > 0 ? (
-                                <span>blocked for: {entry.negativeTopicLinks.join(", ")}</span>
-                              ) : null}
-                            </div>
-                          </article>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-        </TabsContent>
 
         <TabsContent value="app" className="space-y-4">
           <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
@@ -1455,22 +1174,50 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
   });
   const [collapsed, setCollapsed] = useState(false);
   const [animateIn, setAnimateIn] = useState(false);
+  const [internalView, setInternalView] = useState<string | null>(activeView);
+  const shellRef = useRef<HTMLElement>(null);
   const prevViewRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (activeView) {
+      setInternalView(activeView);
       setCollapsed(false);
       // Trigger slide-in animation when panel opens
       if (!prevViewRef.current) {
         requestAnimationFrame(() => setAnimateIn(true));
       }
-    } else {
+    } else if (internalView) {
+      const w = panelWidth;
       setAnimateIn(false);
+      const shell = shellRef.current;
+      if (shell) {
+        shell.style.width = `${w}px`; // fix width so aside doesn't shrink with wrapper
+        void shell.offsetWidth; // force layout so CSS transition and WAAPI start same frame
+        const closeAnim = shell.animate(
+          [
+            { transform: "translateX(0)" },
+            { transform: `translateX(${w}px)` },
+          ],
+          { duration: 600, easing: "cubic-bezier(0.16, 1, 0.3, 1)", fill: "none" },
+        );
+        closeAnim.onfinish = () => {
+          shell.style.transform = `translateX(${w}px)`;
+        };
+      }
+      const timer = setTimeout(() => {
+        setInternalView(null);
+      }, 600);
+      return () => {
+        clearTimeout(timer);
+        if (shell) {
+          shell.getAnimations().forEach((a) => a.cancel());
+        }
+      };
     }
     prevViewRef.current = activeView;
-  }, [activeView]);
+  }, [activeView, internalView]);
 
-  if (!activeView) return null;
+  if (!internalView) return null;
 
   const titles: Record<string, { subtitle: string; title: string }> = {
     settings: { subtitle: "Configuration", title: "Chat Settings" },
@@ -1480,12 +1227,12 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
     quiz: { subtitle: "Quiz", title: "Quiz Review" },
   };
 
-  const current = titles[activeView] ?? { subtitle: "Panel", title: "Details" };
+  const current = titles[internalView] ?? { subtitle: "Panel", title: "Details" };
 
   return (
     <div
       className={docked ? "relative z-40 h-full shrink-0" : "fixed inset-0 z-50"}
-      style={docked ? { width: `${panelWidth}px`, transition: "width 0.32s cubic-bezier(0.16, 1, 0.3, 1)" } : undefined}
+      style={docked ? { width: animateIn ? `${panelWidth}px` : "0px", transition: "width 0.6s cubic-bezier(0.16, 1, 0.3, 1)", overflow: "hidden" } : undefined}
     >
       {!docked ? (
         <button
@@ -1497,6 +1244,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
       ) : null}
 
       <aside
+        ref={shellRef as React.RefObject<HTMLElement>}
         className={`right-panel-shell ${rightPanelSurfaceClassName()} pointer-events-auto flex flex-col ${
           docked ? "right-panel-shell--docked" : "right-panel-shell--sheet"
         } ${
@@ -1508,19 +1256,19 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
         }`}
         style={{
           ...(docked
-            ? { width: "100%", height: "100%" }
+            ? { width: animateIn ? `${panelWidth}px` : "0px", height: "100%", opacity: 1, transition: "width 0.6s cubic-bezier(0.16, 1, 0.3, 1)" }
             : compact
               ? {}
               : { maxWidth: `${maxWidthPx}px` }),
           ...(!docked ? {
-            transition: "transform 280ms cubic-bezier(0.16, 1, 0.3, 1), opacity 200ms ease",
-            transform: animateIn ? "translateX(0)" : compact ? "translateY(16px)" : "translateX(24px)",
+            transition: "transform 0.5s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.5s ease",
+            transform: animateIn ? "translateX(0)" : compact ? "translateY(16px)" : "translateX(32px)",
             opacity: animateIn ? 1 : 0,
           } : {}),
         }}
       >
         <div
-          className={`flex items-center justify-between ${docked ? "min-h-[56px] shadow-[0_1px_0_var(--border-default)] px-5 pb-3 pt-2.5" : "min-h-[56px] mb-4"}`}
+          className={`flex items-center justify-between shrink-0 relative after:content-[''] after:absolute after:top-[56px] after:left-0 after:right-0 after:h-px after:bg-[var(--border-default)] ${docked ? "min-h-[56px] px-5 pb-3 pt-2.5" : "min-h-[56px] mb-4"}`}
         >
           <div className="min-w-0">
             <p className="text-[9px] uppercase tracking-[0.14em] text-[var(--text-secondary)] truncate">{current.subtitle}</p>
@@ -1538,23 +1286,6 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
                 <ChevronDown className={`h-4 w-4 transition ${collapsed ? "-rotate-90" : "rotate-0"}`} />
               </Button>
             ) : null}
-            {activeView === "route-trace" && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={() => {
-                  closePanel();
-                  if (settingsProps) {
-                    window.dispatchEvent(new CustomEvent("ai-school:toggle-settings"));
-                  }
-                }}
-                aria-label="Open settings"
-                title="Open settings"
-              >
-                <Settings2 className="h-4 w-4" />
-              </Button>
-            )}
             <Button type="button" variant="ghost" size="icon" onClick={closePanel} aria-label="Close panel">
               <X className="h-4 w-4" />
             </Button>
@@ -1562,7 +1293,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
         </div>
 
         {!collapsed ? (
-          <div className={`right-panel-content min-h-0 flex-1 overflow-x-hidden overflow-y-auto ${docked ? "px-5 py-4 pr-4" : "pr-1"}`}>
+          <div className={`right-panel-content min-h-0 flex-1 overflow-x-hidden overflow-y-auto ${docked ? "px-4 py-4" : "pr-1"}`}>
             {activeView === "settings" && settingsProps && <SettingsView {...settingsProps} />}
             {activeView === "route-trace" && <RouteTraceView trace={panelData.routeTrace ?? orchestrationProps?.routeTrace} />}
             {activeView === "sources" && <SourcesView citations={panelData.sources ?? []} />}

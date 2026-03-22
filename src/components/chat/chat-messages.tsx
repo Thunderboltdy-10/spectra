@@ -479,7 +479,7 @@ export function ChatMessages({
         aria-live="polite"
         aria-relevant="additions text"
       >
-        <div className="mx-auto w-full max-w-[680px] space-y-8">
+        <div className="mx-auto w-full max-w-[680px] xl:max-w-[780px] 2xl:max-w-[860px] space-y-8">
           {!hasContent && emptyState}
           {searchStatusBanner === "model_knowledge" ? (
             <div className="rounded-xl border border-[color-mix(in_oklab,var(--warning)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_10%,transparent)] px-3 py-2 text-xs text-[var(--warning)]">
@@ -1014,7 +1014,7 @@ export function ChatMessages({
             );
           })}
 
-          {visibleDraftResponse && (mode === "quiz" || mode === "exam" || mode === "flashcard") ? (
+          {visibleDraftResponse && (mode === "quiz" || mode === "exam" || mode === "flashcard" || mode === "document") ? (
             <article className="chat-fade-in flex justify-start">
               <div className="w-full max-w-5xl rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3">
                 <div className="mb-3 inline-flex items-center gap-2 text-xs text-[var(--text-secondary)]">
@@ -1025,7 +1025,9 @@ export function ChatMessages({
                   <p className="text-sm text-[var(--text-secondary)]">
                     {mode === "flashcard"
                       ? "Preparing flashcard view. Cards will appear only after the full structured result is ready."
-                      : "Preparing quiz interface. Questions and answers will appear only after the final structured result is ready."}
+                      : mode === "document"
+                        ? "Generating document. It will render once the structured content is complete."
+                        : "Preparing quiz interface. Questions and answers will appear only after the final structured result is ready."}
                   </p>
                   <div className="space-y-2">
                     {(showQuizSkeletonOnly ? [0, 1, 2] : [0, 1, 2, 3]).map((index) => (

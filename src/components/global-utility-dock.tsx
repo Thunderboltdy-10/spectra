@@ -654,7 +654,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
           className={cn(
             inProfileBar
               ? "flex w-full items-center justify-between gap-2"
-              : "inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-1.5 py-1 shadow-[var(--shadow-soft)]",
+              : "inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-1.5 py-1 shadow-[var(--shadow-soft)] md:hidden",
           )}
           aria-label="Global utility actions"
         >

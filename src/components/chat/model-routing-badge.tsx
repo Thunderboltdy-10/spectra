@@ -37,13 +37,14 @@ function formatModelName(modelId: string) {
 }
 
 export function ModelRoutingBadge({ modelUsed, whyThisResponse, routeTrace }: ModelRoutingBadgeProps) {
-  const { openPanel } = usePanel();
+  const { activeView, openPanel, closePanel } = usePanel();
 
   const activeModelId = modelUsed ?? routeTrace?.selected.modelId;
   const formattedName = useMemo(() => formatModelName(activeModelId ?? ""), [activeModelId]);
   const hasTrace = Boolean(routeTrace);
   const manualLock = routeTrace?.inputs.routerMode === "manual";
   const hintText = whyThisResponse ? "Why this model" : "Routing details";
+  const isActive = activeView === "route-trace";
 
   if (!activeModelId) return null;
 
@@ -52,12 +53,12 @@ export function ModelRoutingBadge({ modelUsed, whyThisResponse, routeTrace }: Mo
       {hasTrace && !manualLock ? (
         <button
           type="button"
-          onClick={() => openPanel("route-trace", { routeTrace })}
+          onClick={() => isActive ? closePanel() : openPanel("route-trace", { routeTrace })}
           title={whyThisResponse ?? "Model route details"}
           className="group inline-flex min-w-0 cursor-pointer items-baseline gap-2 text-left transition"
         >
-          <span className="truncate text-[15px] font-semibold text-[var(--text-primary)]">{formattedName}</span>
-          <span className="text-[11px] text-[var(--text-secondary)] underline decoration-dotted underline-offset-4 transition group-hover:text-[var(--text-primary)]">
+          <span className={`truncate text-[15px] font-semibold transition ${isActive ? "text-[var(--brand-primary)]" : "text-[var(--text-primary)]"}`}>{formattedName}</span>
+          <span className={`text-[11px] underline decoration-dotted underline-offset-4 transition ${isActive ? "text-[var(--brand-primary)] decoration-[var(--brand-primary)]/50" : "text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]"}`}>
             {hintText}
           </span>
         </button>

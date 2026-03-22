@@ -231,7 +231,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
       <KBarPortal>
         <KBarPositioner className="z-[100] bg-[var(--bg-overlay)]">
           <KBarAnimator className="w-full max-w-xl rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-soft)]">
-            <KBarSearch className="h-11 w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)] focus-visible:border-[var(--border-default)] focus-visible:ring-0" />
+            <KBarSearch className="h-11 w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] pl-5 pr-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)] focus-visible:border-[var(--border-default)] focus-visible:ring-0" />
             <div className="mt-2 max-h-[60vh] overflow-y-auto overscroll-contain pb-3">
               <CommandResults />
             </div>

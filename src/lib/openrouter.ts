@@ -95,7 +95,7 @@ function buildChatCompletionBody(params: {
   return {
     model: params.model,
     messages: params.messages,
-    ...(params.stream ? { stream: true, stream_options: { include_usage: true } } : {}),
+    ...(params.stream ? { stream: true } : {}),
     ...(supportsTemperatureControl(params.model) ? { temperature: params.temperature ?? 0.2 } : {}),
     max_tokens: params.maxTokens,
   };

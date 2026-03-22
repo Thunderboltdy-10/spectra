@@ -34,7 +34,10 @@ export const metadata: Metadata = {
   description: "Spectra routes every question to the right AI — the right model, the right mode, the right context. Purpose-built for schools.",
   icons: {
     icon: [
-      { url: "/favicon.svg", type: "image/svg+xml" },
+      { url: "/favicon.png", type: "image/png", sizes: "64x64" },
+    ],
+    apple: [
+      { url: "/icon-192.png", sizes: "192x192" },
     ],
   },
   openGraph: {

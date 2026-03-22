@@ -93,6 +93,15 @@ function buildSoulCapsule(docs: SoulDocRow[]) {
   };
 }
 
+function toFiniteNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
 async function embeddingFor(text: string) {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error("OPENROUTER_API_KEY missing");
@@ -112,10 +121,28 @@ async function embeddingFor(text: string) {
     throw new Error(`Embedding failed: ${await response.text()}`);
   }
 
-  const json = (await response.json()) as { data?: Array<{ embedding?: number[] }> };
+  const json = (await response.json()) as {
+    model?: string;
+    usage?: {
+      prompt_tokens?: number | string;
+      completion_tokens?: number | string;
+      cost?: number | string;
+    };
+    data?: Array<{ embedding?: number[] }>;
+  };
   const vector = json.data?.[0]?.embedding;
   if (!vector) throw new Error("Embedding missing");
-  return vector;
+  return {
+    embedding: vector,
+    model: json.model ?? MODEL_DEFAULTS.embedding,
+    usage: json.usage
+      ? {
+          prompt_tokens: toFiniteNumber(json.usage.prompt_tokens),
+          completion_tokens: toFiniteNumber(json.usage.completion_tokens),
+          cost: toFiniteNumber(json.usage.cost),
+        }
+      : undefined,
+  };
 }
 
 export const resolveActor = internalQuery({
@@ -332,6 +359,13 @@ export const publishSoul: ReturnType<typeof action> = action({
     }
 
     let chunkCount = 0;
+    const usageTotals = {
+      promptTokens: 0,
+      completionTokens: 0,
+      cost: 0,
+      hasUsage: false,
+    };
+    let embeddingModelUsed = MODEL_DEFAULTS.embedding;
     for (const doc of docs) {
       if (doc.orgId !== actor.orgId) {
         throw new Error("Unauthorized org scope");
@@ -340,8 +374,16 @@ export const publishSoul: ReturnType<typeof action> = action({
       const embedded: Array<{ text: string; embedding: number[] }> = [];
       for (const piece of pieces) {
         try {
-          const embedding = await embeddingFor(piece);
-          embedded.push({ text: piece, embedding });
+          const embeddingResult = await embeddingFor(piece);
+          embedded.push({ text: piece, embedding: embeddingResult.embedding });
+          embeddingModelUsed = embeddingResult.model ?? embeddingModelUsed;
+          const usage = embeddingResult.usage;
+          if (usage) {
+            usageTotals.promptTokens += usage.prompt_tokens ?? 0;
+            usageTotals.completionTokens += usage.completion_tokens ?? 0;
+            usageTotals.cost += usage.cost ?? 0;
+            usageTotals.hasUsage = true;
+          }
         } catch {
           // Skip failed chunk embeddings and keep publishing the rest.
         }
@@ -354,6 +396,17 @@ export const publishSoul: ReturnType<typeof action> = action({
         publishedAt: now,
       });
       chunkCount += embedded.length;
+    }
+
+    if (usageTotals.hasUsage) {
+      await ctx.runMutation(internal.usage.recordUsageWithCostInternal, {
+        userId: actor._id,
+        orgId: actor.orgId,
+        model: embeddingModelUsed,
+        inputTokens: Math.max(0, Math.round(usageTotals.promptTokens)),
+        outputTokens: Math.max(0, Math.round(usageTotals.completionTokens)),
+        openRouterCost: Math.max(0, Number(usageTotals.cost.toFixed(8))),
+      }).catch(() => {});
     }
 
     return { ok: true, chunkCount };
@@ -409,7 +462,19 @@ export const retrieveSoulGuidance: ReturnType<typeof action> = action({
     }
 
     try {
-      const vector = await embeddingFor(args.query);
+      const embeddingResult = await embeddingFor(args.query);
+      await ctx.runMutation(internal.usage.recordUsageWithCostInternal, {
+        userId: actor._id,
+        orgId: actor.orgId,
+        model: embeddingResult.model ?? MODEL_DEFAULTS.embedding,
+        inputTokens: Math.max(0, Math.round(embeddingResult.usage?.prompt_tokens ?? 0)),
+        outputTokens: Math.max(0, Math.round(embeddingResult.usage?.completion_tokens ?? 0)),
+        openRouterCost:
+          typeof embeddingResult.usage?.cost === "number" && Number.isFinite(embeddingResult.usage.cost)
+            ? Math.max(0, Number(embeddingResult.usage.cost.toFixed(8)))
+            : undefined,
+      }).catch(() => {});
+      const vector = embeddingResult.embedding;
       const hits = await ctx.vectorSearch("orgSoulChunks", "by_embedding", {
         vector,
         limit: Math.min(16, Math.max(4, args.limit ?? 8)),

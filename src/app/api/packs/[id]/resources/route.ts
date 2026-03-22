@@ -3,9 +3,10 @@ import { requireActor } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
-import { chunkTextWithPages, embedChunks, parseUploadedFile } from "@/lib/ingest";
-import { openRouterChatCompletion } from "@/lib/openrouter";
+import { chunkTextWithPages, parseUploadedFile } from "@/lib/ingest";
+import { openRouterChatCompletion, openRouterEmbeddingRequest } from "@/lib/openrouter";
 import { MODEL_CONFIG } from "@/lib/model-config";
+import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 import {
   formatMegabytes,
   normalizedResourceMimeType,
@@ -64,6 +65,11 @@ async function regenerateGuidelines(actorClerkId: string, packId: string) {
     ],
     temperature: 0.1,
   });
+  await recordOpenRouterUsage({
+    actorClerkId,
+    model: response.model ?? MODEL_CONFIG.tutorFast,
+    usage: response.usage,
+  }).catch(() => {});
 
   const content = response.choices?.[0]?.message?.content ?? "{}";
   const parsed = JSON.parse(content.match(/\{[\s\S]*\}/)?.[0] ?? "{}");
@@ -151,9 +157,44 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         const chunks = chunkTextWithPages(parsed.pages);
 
         let embedded: Array<{ text: string; page?: number; embedding: number[] }> = [];
+        const embeddingUsageTotals = {
+          promptTokens: 0,
+          completionTokens: 0,
+          cost: 0,
+          hasUsage: false,
+        };
+        let embeddingModelUsed: string = MODEL_CONFIG.embedding;
+        const recordEmbeddingUsage = async () => {
+          if (!embeddingUsageTotals.hasUsage) return;
+          await recordOpenRouterUsage({
+            actorClerkId: actor.clerkId,
+            model: embeddingModelUsed,
+            usage: {
+              prompt_tokens: Math.max(0, Math.round(embeddingUsageTotals.promptTokens)),
+              completion_tokens: Math.max(0, Math.round(embeddingUsageTotals.completionTokens)),
+              cost: Math.max(0, Number(embeddingUsageTotals.cost.toFixed(8))),
+            },
+            skipIfZeroTokens: false,
+          }).catch(() => {});
+        };
 
         try {
-          embedded = await embedChunks(chunks);
+          for (const chunk of chunks) {
+            const embeddingResult = await openRouterEmbeddingRequest(chunk.text, MODEL_CONFIG.embedding);
+            embedded.push({
+              text: chunk.text,
+              page: chunk.page,
+              embedding: embeddingResult.embedding,
+            });
+            embeddingModelUsed = embeddingResult.model ?? embeddingModelUsed;
+            const usage = embeddingResult.usage;
+            if (usage) {
+              embeddingUsageTotals.promptTokens += usage.prompt_tokens ?? 0;
+              embeddingUsageTotals.completionTokens += usage.completion_tokens ?? 0;
+              embeddingUsageTotals.cost += usage.cost ?? 0;
+              embeddingUsageTotals.hasUsage = true;
+            }
+          }
         } catch {
           await convexMutation("resources:completeResourceIngestion", {
             actorClerkId: actor.clerkId,
@@ -162,6 +203,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             chunks: [],
             failedReason: "Embedding failed. Verify OpenRouter embedding model availability.",
           });
+          await recordEmbeddingUsage();
 
           results.push({
             file: file.name,
@@ -171,6 +213,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           });
           continue;
         }
+
+        await recordEmbeddingUsage();
 
         await convexMutation("resources:completeResourceIngestion", {
           actorClerkId: actor.clerkId,

@@ -11,5 +11,11 @@ crons.daily(
   internal.notifications.generateDailyStudyReminders,
   {},
 );
+crons.interval(
+  "retry-stale-resource-ingestion",
+  { minutes: 3 },
+  internal.resources.retryStaleResourcesInternal,
+  { limit: 30 },
+);
 
 export default crons;

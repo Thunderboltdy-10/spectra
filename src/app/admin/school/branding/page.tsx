@@ -4,9 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { toast } from "sonner";
-import { ChevronLeft, ImagePlus, Sparkles } from "lucide-react";
+import { ChevronLeft, ImagePlus } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
+import { SpectraLogo } from "@/components/spectra-logo";
 
 type BrandingData = {
   org?: {
@@ -298,14 +299,7 @@ export default function SchoolBrandingPage() {
                     className="h-8 w-8 rounded-xl border border-[var(--border-default)] object-cover"
                   />
                 ) : (
-                  <div
-                    className="flex h-8 w-8 items-center justify-center rounded-xl text-white shadow-sm"
-                    style={{
-                      background: `linear-gradient(132deg, ${primaryColor}, ${accentColor})`,
-                    }}
-                  >
-                    <Sparkles className="h-4 w-4" />
-                  </div>
+                  <SpectraLogo size={32} showTile />
                 )}
                 <div>
                   <p className="text-sm font-semibold text-[var(--text-primary)]">{orgName}</p>

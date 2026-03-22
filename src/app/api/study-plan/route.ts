@@ -4,6 +4,7 @@ import { convexQuery } from "@/lib/convex-server";
 import { MODEL_CONFIG } from "@/lib/model-config";
 import { openRouterChatCompletion } from "@/lib/openrouter";
 import { withRouteErrorHandling } from "@/lib/route-handler";
+import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 
 type StudyPlanTimelineItem = {
   day: string;
@@ -385,6 +386,11 @@ ${JSON.stringify(snapshot, null, 2)}`,
           },
         ],
       });
+      await recordOpenRouterUsage({
+        actorClerkId: actor.clerkId,
+        model: completion.model ?? MODEL_CONFIG.glmAir,
+        usage: completion.usage,
+      }).catch(() => {});
 
       const raw = completion.choices?.[0]?.message?.content?.trim() ?? "";
       const jsonMatch = raw.match(/\{[\s\S]*\}/);

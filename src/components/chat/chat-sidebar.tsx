@@ -37,6 +37,7 @@ import {
 import { ThemeToggle } from "@/components/theme-toggle";
 import { GlobalUtilityDock } from "@/components/global-utility-dock";
 import { NotificationBell } from "@/components/notification-bell";
+import { SpectraLogo } from "@/components/spectra-logo";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -327,9 +328,7 @@ export function ChatSidebar({
               onError={() => setLogoLoadFailed(true)}
             />
           ) : (
-            <div className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--gradient-brand)] text-white">
-              <Sparkles className="h-6 w-6" />
-            </div>
+            <SpectraLogo size={48} showTile />
           )}
           <Button type="button" variant="ghost" size="icon" className="h-8.5 w-8.5" onClick={onToggleCollapse} aria-label="Expand sidebar">
             <PanelLeftOpen className="h-4 w-4" />
@@ -447,9 +446,7 @@ export function ChatSidebar({
               onError={() => setLogoLoadFailed(true)}
             />
           ) : (
-            <div className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--gradient-brand)] text-white shadow-[var(--shadow-soft)]">
-              <Sparkles className="h-6 w-6" />
-            </div>
+            <SpectraLogo size={48} showTile />
           )}
           <div className="min-w-0 flex-1">
             <p className="text-lg leading-none">

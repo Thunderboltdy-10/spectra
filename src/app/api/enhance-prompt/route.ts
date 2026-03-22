@@ -4,6 +4,7 @@ import { withRouteErrorHandling } from "@/lib/route-handler";
 import { MODEL_CONFIG } from "@/lib/model-config";
 import { openRouterChatCompletion } from "@/lib/openrouter";
 import { safeStudyMode } from "@/lib/contracts/studyModes";
+import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 
 function localEnhance(message: string, mode: string) {
   return {
@@ -47,7 +48,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | nul
 
 export async function POST(request: NextRequest) {
   return withRouteErrorHandling(async () => {
-    await requireActor();
+    const actor = await requireActor();
 
     const body = (await request.json().catch(() => null)) as {
       message?: string;
@@ -86,6 +87,12 @@ Return ONLY JSON: {"original":"...","enhanced":"...","improvements":["..."]}`,
     if (!completion) {
       return NextResponse.json(localEnhance(body.message, mode));
     }
+
+    await recordOpenRouterUsage({
+      actorClerkId: actor.clerkId,
+      model: completion.model ?? MODEL_CONFIG.promptEnhance,
+      usage: completion.usage,
+    }).catch(() => {});
 
     const raw = completion.choices?.[0]?.message?.content ?? "";
     const jsonMatch = raw.match(/\{[\s\S]*\}/);

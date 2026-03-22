@@ -191,10 +191,21 @@ export async function POST(request: NextRequest) {
           storageId,
           saveToLibrary,
         })) as { resourceId: string };
-        await convexMutation("resources:enqueueResourceProcessing", {
+        const enqueueResult = (await convexMutation("resources:enqueueResourceProcessing", {
           actorClerkId: actor.clerkId,
           resourceId: registered.resourceId,
-        });
+        })) as { ok?: boolean; reason?: string };
+
+        if (enqueueResult?.ok === false) {
+          results.push({
+            file: file.name,
+            resourceId: registered.resourceId,
+            status: "failed",
+            error: enqueueResult.reason ?? "Unable to queue file processing.",
+            savedToLibrary: saveToLibrary,
+          });
+          continue;
+        }
 
         results.push({
           file: file.name,

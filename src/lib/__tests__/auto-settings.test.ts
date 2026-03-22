@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as openRouter from "@/lib/openrouter";
 import {
   classifyRequest,
   classifyComplexity,
@@ -158,6 +159,31 @@ describe("auto-settings prompt analysis", () => {
       spendingTier: "cheap_only",
     });
     expect(capped.requestClass).toBe("T2");
+  });
+
+  it("skips paid prompt-enhancement model calls in free_only tier", async () => {
+    const completionSpy = vi.spyOn(openRouter, "openRouterChatCompletion").mockResolvedValue({
+      id: "mock",
+      model: "openai/gpt-5.4-nano",
+      choices: [{ message: { content: "{\"prompt\":\"enhanced\"}" } }],
+      usage: undefined,
+    } as any);
+
+    const result = await runAutoSettingsPipeline({
+      message: "Help me summarize this chapter.",
+      currentThinkingLevel: "low",
+      spendingTier: "free_only",
+      autoEnhancePrompt: true,
+      autoThinking: true,
+      autoSearch: false,
+      enhanceMode: "on",
+      skipModelCalls: false,
+    });
+
+    expect(result.promptEnhanced).toBe(true);
+    expect(result.message).toContain("Clarified objective:");
+    expect(completionSpy).not.toHaveBeenCalled();
+    completionSpy.mockRestore();
   });
 
   it("parses memory correction directives", () => {

@@ -3,6 +3,7 @@ import { requireActor } from "@/lib/auth-server";
 import { ok } from "@/lib/http";
 import { MODEL_CONFIG } from "@/lib/model-config";
 import { openRouterChatCompletion } from "@/lib/openrouter";
+import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 
 function fallbackPrompt(params: { name?: string; description?: string; category?: string }) {
@@ -27,7 +28,7 @@ ${params.description || "No extra description provided."}`;
 
 export async function POST(request: NextRequest) {
   return withRouteErrorHandling(async () => {
-    await requireActor();
+    const actor = await requireActor();
 
     const body = (await request.json().catch(() => ({}))) as {
       name?: string;
@@ -59,6 +60,11 @@ export async function POST(request: NextRequest) {
         },
       ],
     });
+    await recordOpenRouterUsage({
+      actorClerkId: actor.clerkId,
+      model: completion.model ?? MODEL_CONFIG.tutorFast,
+      usage: completion.usage,
+    }).catch(() => {});
 
     const prompt = completion.choices?.[0]?.message?.content?.trim();
     return ok({ prompt: prompt || fallbackPrompt(body) });

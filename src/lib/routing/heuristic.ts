@@ -664,13 +664,18 @@ function dynamicRouteFromCatalog(params: {
         maxFallbacks: 3,
       });
       if (visionPick.selected) {
-        fallbackModels = [
-          primaryModel,
+        const visionFallbacks = [
+          visionPick.selected.modelId,
           ...fallbackModels.filter((candidate) => candidate !== visionPick.selected?.modelId),
           ...visionPick.fallbacks,
-        ];
-        primaryModel = visionPick.selected.modelId;
-        reason = `${reason}; vision-capable model selected`;
+        ].filter((candidate) => candidate !== primaryModel);
+        fallbackModels = [...new Set(visionFallbacks)];
+        if (params.input.routerMode === "manual") {
+          reason = `${reason}; manual lock retained with vision-capable prepass candidate`;
+        } else {
+          primaryModel = visionPick.selected.modelId;
+          reason = `${reason}; vision-capable model selected`;
+        }
       }
     }
   }

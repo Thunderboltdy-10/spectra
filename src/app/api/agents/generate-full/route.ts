@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { requireActor } from "@/lib/auth-server";
 import { MODEL_CONFIG } from "@/lib/model-config";
 import { openRouterChatCompletion } from "@/lib/openrouter";
+import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 import { badRequest, ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 
@@ -98,7 +99,7 @@ export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
   return withRouteErrorHandling(async () => {
-    await requireActor();
+    const actor = await requireActor();
 
     const body = (await request.json().catch(() => null)) as {
       audience?: string;
@@ -170,6 +171,11 @@ Do not include markdown fences, prose, or any text outside the JSON object.`;
           { role: "user", content: userMessage },
         ],
       });
+      await recordOpenRouterUsage({
+        actorClerkId: actor.clerkId,
+        model: completion.model ?? MODEL_CONFIG.smartCheap,
+        usage: completion.usage,
+      }).catch(() => {});
 
       const raw = completion.choices?.[0]?.message?.content ?? "{}";
       const jsonMatch = raw.match(/\{[\s\S]*\}/);

@@ -37,7 +37,7 @@ function formatModelName(modelId: string) {
 }
 
 export function ModelRoutingBadge({ modelUsed, whyThisResponse, routeTrace }: ModelRoutingBadgeProps) {
-  const { activeView, openPanel, closePanel } = usePanel();
+  const { activeView, openPanel } = usePanel();
 
   const activeModelId = modelUsed ?? routeTrace?.selected.modelId;
   const formattedName = useMemo(() => formatModelName(activeModelId ?? ""), [activeModelId]);
@@ -53,7 +53,7 @@ export function ModelRoutingBadge({ modelUsed, whyThisResponse, routeTrace }: Mo
       {hasTrace && !manualLock ? (
         <button
           type="button"
-          onClick={() => isActive ? closePanel() : openPanel("route-trace", { routeTrace })}
+          onClick={() => openPanel("route-trace", { routeTrace })}
           title={whyThisResponse ?? "Model route details"}
           className="group inline-flex min-w-0 cursor-pointer items-baseline gap-2 text-left transition"
         >

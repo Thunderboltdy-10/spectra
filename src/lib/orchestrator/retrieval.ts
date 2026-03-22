@@ -3,7 +3,7 @@ import { MODEL_CONFIG } from "@/lib/model-config";
 import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
 import { openRouterChatCompletion, openRouterEmbeddingRequest } from "@/lib/openrouter";
 import { withTimeout } from "@/lib/orchestrator/history";
-import { pickModelAndFallbacks, type CatalogModelEntry, type ModelRuntimeStat } from "@/lib/model-selection";
+import { isModelAllowedInTier, pickModelAndFallbacks, type CatalogModelEntry, type ModelRuntimeStat } from "@/lib/model-selection";
 import { searxngSearch } from "@/lib/search/searxng";
 import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 
@@ -371,9 +371,10 @@ export async function maybeSearchWeb(
   const liveCatalog = options?.modelCatalog?.length
     ? options.modelCatalog
     : (await getLiveCatalogSnapshot()).models;
+  const spendingTier = options?.spendingTier ?? "normal";
   const searchModelSelection = pickModelAndFallbacks({
     catalog: liveCatalog.filter((model) => model.modelId !== "openrouter/auto"),
-    tier: options?.spendingTier ?? "normal",
+    tier: spendingTier,
     requiredCapabilities: ["search"],
     preferredCapabilities: thinkingLevel === "high" ? ["reasoning", "search"] : ["search"],
     preferFast: thinkingLevel !== "high",
@@ -382,12 +383,21 @@ export async function maybeSearchWeb(
     maxFallbacks: 3,
   });
   const searchModel = searchModelSelection.selected?.modelId
-    ?? liveCatalog.find((model) => model.modelId !== "openrouter/auto")?.modelId
-    ?? "openrouter/auto";
+    ?? searchModelSelection.fallbacks.find((candidate) =>
+      liveCatalog.some((model) => model.modelId === candidate && isModelAllowedInTier(model, spendingTier)))
+    ?? liveCatalog.find((model) => model.modelId !== "openrouter/auto" && isModelAllowedInTier(model, spendingTier))?.modelId;
+  if (!searchModel) {
+    return {
+      text: "",
+      urls: [],
+      sources: [],
+      provider: "disabled",
+    };
+  }
   const startedAt = Date.now();
   const completionPromise = openRouterChatCompletion({
     model: searchModel,
-    fallbackModels: searchModelSelection.fallbacks,
+    fallbackModels: searchModelSelection.fallbacks.filter((candidate) => candidate !== searchModel),
     messages: [
       {
         role: "system",

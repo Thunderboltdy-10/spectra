@@ -62,15 +62,18 @@ function nextPhase(phase: TimerPhase): TimerPhase {
 type CompletedTimerSession = {
   completedAt: string;
   durationMinutes: number;
+  durationSeconds?: number;
 };
 
-function persistCompletedSession(durationMinutes: number): void {
+function persistCompletedSession(totalSeconds: number): void {
   try {
     const raw = window.localStorage.getItem(SESSIONS_STORAGE_KEY);
     const existing: CompletedTimerSession[] = raw ? (JSON.parse(raw) as CompletedTimerSession[]) : [];
+    const safeSeconds = Math.max(60, Math.round(totalSeconds));
     const entry: CompletedTimerSession = {
       completedAt: new Date().toISOString(),
-      durationMinutes,
+      durationMinutes: Number((safeSeconds / 60).toFixed(2)),
+      durationSeconds: safeSeconds,
     };
     // Append new session and keep only the most recent MAX_STORED_SESSIONS entries.
     const updated = [...existing, entry].slice(-MAX_STORED_SESSIONS);
@@ -311,7 +314,7 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
           endedAt: now,
           totalSeconds: measuredElapsedSeconds,
         });
-        persistCompletedSession(workMinutes);
+        persistCompletedSession(measuredElapsedSeconds);
         setCompletedSessions((prev) => prev + 1);
         toast.success("Focus block complete. Starting a short break.");
         const nextDuration = phaseDurationMs("break", workMinutes, breakMinutes);

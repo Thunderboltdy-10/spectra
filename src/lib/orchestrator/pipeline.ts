@@ -650,7 +650,7 @@ export async function runChatPipeline(request: NextRequest) {
   });
 
   if (budget.tier === "free_only") {
-    const hasFreeModel = catalog.some((model) => model.isFree || model.modelId.includes(":free"));
+    const hasFreeModel = catalog.some((model) => canUseInTier(model.modelId, "free_only", catalog));
     if (!hasFreeModel) {
       return jsonError(402, {
         code: "NO_FREE_MODEL_AVAILABLE",
@@ -1034,6 +1034,7 @@ export async function runChatPipeline(request: NextRequest) {
         const routed = await routeMemoryWrite({
           actorClerkId: actor.clerkId,
           chatId,
+          spendingTier: budget.tier,
           entries: explicitEntries,
           sourceType: "user_explicit",
           onModelCall: (call) => {
@@ -1959,8 +1960,9 @@ export async function runChatPipeline(request: NextRequest) {
     ? await planMemoryRead({
         actorClerkId: actor.clerkId,
         chatId,
+        spendingTier: budget.tier,
         message: auto.message,
-        includeTopicMemory: routePlan.shouldConsultMemory,
+        includeTopicMemory: routePlan.shouldConsultMemory && budget.tier !== "free_only",
         personalSoulPreferences: personalSoulPrefs,
         rawMemoryText: userMemory.rawMemoryText,
         existingEmbedding: retrieval.queryEmbedding
@@ -2735,10 +2737,18 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           runtimeStats: runtimeStatMap,
           maxFallbacks: 3,
         });
-        const selectedImageModel =
-          body.imageModel
-          || imageModelSelection.selected?.modelId
-          || primaryModel;
+        const requestedImageModel = body.imageModel
+          && canUseInTier(body.imageModel, budget.tier, catalog)
+          && modelSupportsCapability(
+            catalog.find((model) => model.modelId === body.imageModel) ?? { modelId: body.imageModel },
+            "image_generation",
+          )
+          ? body.imageModel
+          : undefined;
+        const selectedImageModel = requestedImageModel || imageModelSelection.selected?.modelId;
+        if (!selectedImageModel) {
+          throw new Error("No image-generation model is available in the current budget tier.");
+        }
         const imageFallbackModels = Array.from(
           new Set([
             ...imageModelSelection.fallbacks,
@@ -3748,6 +3758,7 @@ BACK: [answer or definition]`,
         ? await routeMemoryWrite({
             actorClerkId: actor.clerkId,
             chatId,
+            spendingTier: budget.tier,
             entries: extractedMemory,
             sourceType: "extraction",
             onModelCall: (call) => {

@@ -28,22 +28,22 @@ describe("memory consolidation", () => {
     expect(merged[0]?.value).toBe("prefers worked examples");
   });
 
-  it("removes stale low-confidence entries older than 30 days", () => {
+  it("expires topic memories after 45 days", () => {
     const now = Date.now();
     const stale: MemoryEntry = {
-      key: "goal",
-      value: "improve essays",
-      confidence: 0.2,
-      extractedAt: now - 31 * 24 * 60 * 60 * 1000,
+      key: "topic_revision_note",
+      value: "cell respiration trick",
+      confidence: 0.6,
+      extractedAt: now - 46 * 24 * 60 * 60 * 1000,
     };
 
     const merged = mergeMemoryEntries([stale], []);
     expect(merged).toHaveLength(0);
   });
 
-  it("caps merged memory entries at 40", () => {
+  it("caps merged memory entries at 80", () => {
     const now = Date.now();
-    const incoming: MemoryEntry[] = Array.from({ length: 30 }).map((_, index) => ({
+    const incoming: MemoryEntry[] = Array.from({ length: 120 }).map((_, index) => ({
       key: `key_${index}`,
       value: `value_${index}`,
       confidence: 0.9 - index * 0.01,
@@ -51,7 +51,7 @@ describe("memory consolidation", () => {
     }));
 
     const merged = mergeMemoryEntries([], incoming);
-    expect(merged.length).toBeLessThanOrEqual(40);
+    expect(merged.length).toBeLessThanOrEqual(80);
   });
 
   it("keeps raw memory text under 1500 characters", () => {

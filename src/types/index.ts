@@ -318,6 +318,11 @@ export type RouteTrace = {
   }>;
   clarificationBlock?: ClarificationBlock;
   collaborators?: Array<{ role: string; model: string; tokensUsed: number; durationMs: number }>;
+  usedMemory?: Array<{
+    key: string;
+    text: string;
+    category: "identity" | "academic" | "preference" | "topic" | "artifact" | "correction";
+  }>;
 };
 
 export type ModelRouteOutput = {

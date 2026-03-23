@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Bot, Download, Layers, LoaderCircle, Menu, MoreHorizontal, Search, Settings2, Square } from "lucide-react";
 import { useKBar } from "kbar";
 import { ContextualTip } from "@/components/ui/contextual-tip";
@@ -25,6 +26,7 @@ type ChatHeaderProps = {
   showOrchestrationButton?: boolean;
   orchestrationActive?: boolean;
   settingsActive?: boolean;
+  mobileUtilitySlot?: ReactNode;
 };
 
 function formatRelativeTime(timestamp: number) {
@@ -57,6 +59,7 @@ export function ChatHeader({
   showOrchestrationButton = false,
   orchestrationActive = false,
   settingsActive = false,
+  mobileUtilitySlot,
 }: ChatHeaderProps) {
   const { query } = useKBar();
   const responseAgo = lastResponseAt
@@ -167,6 +170,11 @@ export function ChatHeader({
                 {compacting ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Layers className="h-3.5 w-3.5" />}
                 {compacting ? "Compacting..." : "Compact"}
               </Button>
+            ) : null}
+            {mobileUtilitySlot ? (
+              <div className="md:hidden">
+                {mobileUtilitySlot}
+              </div>
             ) : null}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

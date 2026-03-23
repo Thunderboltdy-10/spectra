@@ -7,7 +7,6 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
-import { RichText } from "@/components/chat/rich-text";
 import { ModelRoutingBadge } from "@/components/chat/model-routing-badge";
 import { ProviderLogo } from "@/components/provider-logo";
 import { ThinkingBlock } from "@/components/chat/thinking-block";
@@ -25,6 +24,7 @@ type ChatMessageProps = {
   messageId?: string;
   role: "user" | "assistant" | "system";
   content: string;
+  cancelled?: boolean;
   thinkingContent?: string;
   enhancedContent?: string;
   attachments?: string[];
@@ -58,6 +58,7 @@ type ChatMessageProps = {
   siblingIndex?: number;
   siblingCount?: number;
   onNavigateSibling?: (direction: "prev" | "next") => void;
+  preferRouteTraceModel?: boolean;
   animateIn?: boolean;
   children?: React.ReactNode;
 };
@@ -149,6 +150,7 @@ export function ChatMessage({
   messageId,
   role,
   content,
+  cancelled = false,
   thinkingContent,
   enhancedContent,
   attachments,
@@ -177,6 +179,7 @@ export function ChatMessage({
   siblingIndex,
   siblingCount,
   onNavigateSibling,
+  preferRouteTraceModel = false,
   animateIn = true,
   children,
 }: ChatMessageProps) {
@@ -191,7 +194,9 @@ export function ChatMessage({
   const tts = useTextToSpeech();
   const validCitations = citations.filter((c) => c.url || c.resourceId || c.filename);
   const searchCitations = validCitations.filter((citation) => citation.sourceType === "search");
-  const activeModelId = modelUsed ?? routeTrace?.selected.modelId;
+  const activeModelId = preferRouteTraceModel
+    ? routeTrace?.selected?.modelId ?? modelUsed
+    : modelUsed ?? routeTrace?.selected?.modelId;
   const activeProvider = activeModelId?.split("/")[0] ?? "openrouter";
   const renderedContent = content;
   const parsedDocument = useMemo(() => parseGeneratedDocument(renderedContent), [renderedContent]);
@@ -213,6 +218,10 @@ export function ChatMessage({
   const timeLabel = useMemo(() => formatRelativeTime(createdAt), [createdAt]);
   const hasEnhanced = Boolean(enhancedContent && enhancedContent.trim());
   const displayUserContent = isUser && showEnhanced && hasEnhanced ? enhancedContent ?? content : content;
+  const hasSiblingVersions =
+    typeof siblingCount === "number" && siblingCount > 1 && typeof siblingIndex === "number";
+  const siblingIndexValue = typeof siblingIndex === "number" ? siblingIndex : 0;
+  const siblingCountValue = typeof siblingCount === "number" ? siblingCount : 1;
   const assistantAttachmentLinks = !isUser && attachments?.length
     ? attachments.map((name, index) => ({
         name,
@@ -267,7 +276,7 @@ export function ChatMessage({
                 </div>
               </div>
             ) : (
-              <RichText content={displayUserContent} className="text-[15px] leading-7 text-[var(--text-primary)]" />
+              <MarkdownRenderer content={displayUserContent} userMessage />
             )}
             {attachmentPreviews && attachmentPreviews.length > 0 ? (
               <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
@@ -346,7 +355,32 @@ export function ChatMessage({
                   </button>
                 ) : null}
                 </div>
-                {timeLabel ? <span className="text-[11px] text-[var(--text-secondary)]">{timeLabel}</span> : null}
+                <div className="flex flex-wrap items-center gap-2">
+                  {hasSiblingVersions ? (
+                    <span className="inline-flex items-center gap-0.5 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1 text-[10px] text-[var(--text-secondary)]">
+                      <button
+                        type="button"
+                        disabled={siblingIndexValue <= 0}
+                        onClick={() => onNavigateSibling?.("prev")}
+                        className="inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded transition hover:bg-[var(--bg-hover)] disabled:cursor-default disabled:opacity-30"
+                        aria-label="Previous version"
+                      >
+                        <ChevronLeft className="h-3 w-3" />
+                      </button>
+                      <span className="tabular-nums">{siblingIndexValue + 1}/{siblingCountValue}</span>
+                      <button
+                        type="button"
+                        disabled={siblingIndexValue >= siblingCountValue - 1}
+                        onClick={() => onNavigateSibling?.("next")}
+                        className="inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded transition hover:bg-[var(--bg-hover)] disabled:cursor-default disabled:opacity-30"
+                        aria-label="Next version"
+                      >
+                        <ChevronRight className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ) : null}
+                  {timeLabel ? <span className="text-[11px] text-[var(--text-secondary)]">{timeLabel}</span> : null}
+                </div>
               </div>
             ) : null}
           </div>
@@ -370,21 +404,26 @@ export function ChatMessage({
                   whyThisResponse={whyThisResponse}
                   routeTrace={routeTrace}
                 />
-                {typeof siblingCount === "number" && siblingCount > 1 && typeof siblingIndex === "number" ? (
+                {cancelled ? (
+                  <span className="inline-flex items-center rounded-full border border-[color-mix(in_oklab,var(--warning)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_12%,var(--bg-secondary))] px-2 py-0.5 text-[10px] text-[var(--warning)]">
+                    Cancelled
+                  </span>
+                ) : null}
+                {hasSiblingVersions ? (
                   <span className="inline-flex items-center gap-0.5 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1 text-[10px] text-[var(--text-secondary)]">
                     <button
-                      type="button"
-                      disabled={siblingIndex <= 0}
+                        type="button"
+                      disabled={siblingIndexValue <= 0}
                       onClick={() => onNavigateSibling?.("prev")}
                       className="inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded transition hover:bg-[var(--bg-hover)] disabled:cursor-default disabled:opacity-30"
                       aria-label="Previous version"
                     >
                       <ChevronLeft className="h-3 w-3" />
                     </button>
-                    <span className="tabular-nums">{siblingIndex + 1}/{siblingCount}</span>
+                    <span className="tabular-nums">{siblingIndexValue + 1}/{siblingCountValue}</span>
                     <button
                       type="button"
-                      disabled={siblingIndex >= siblingCount - 1}
+                      disabled={siblingIndexValue >= siblingCountValue - 1}
                       onClick={() => onNavigateSibling?.("next")}
                       className="inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded transition hover:bg-[var(--bg-hover)] disabled:cursor-default disabled:opacity-30"
                       aria-label="Next version"

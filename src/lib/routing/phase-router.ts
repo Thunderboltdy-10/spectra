@@ -6,6 +6,7 @@ import {
   type ModelCapability,
   type ModelRuntimeStat,
 } from "@/lib/model-selection";
+import { modelFamily } from "@/lib/model-roles";
 import type { RouteTraceCandidate, RouteTracePhase, SpendingTier, StudyMode } from "@/types";
 
 export type RoutingLane = "stable" | "fresh" | "challenger";
@@ -27,6 +28,7 @@ export type PhaseRoutingInput = {
   preferredCapabilities?: ModelCapability[];
   preferredModelIds?: string[];
   previousModelUsed?: string;
+  conversationTurnCount?: number;
   recentModels?: string[];
   modelCatalog: CatalogModelEntry[];
   modelRuntimeStats?: Record<string, ModelRuntimeStat>;
@@ -47,8 +49,12 @@ type ScoredCandidate = {
   model: CatalogModelEntry;
   modelId: string;
   provider: string;
+  family: string;
   lane: RoutingLane;
   score: number;
+  reliability: number;
+  context: number;
+  stickinessBonus: number;
   reasons: string[];
   breakdown: string[];
 };
@@ -219,14 +225,21 @@ function selectLane(weights: ReturnType<typeof laneWeights>, seed: number): Rout
 function repetitionPenalty(modelId: string, recentModels: string[]) {
   const hits = recentModels.filter((item) => item === modelId).length;
   if (hits <= 0) return 0;
-  return Math.min(0.35, hits * 0.12);
+  return Math.min(0.3, hits * 0.09);
 }
 
 function providerDiversityPenalty(provider: string, recentProviders: string[]) {
   if (recentProviders.length < 3) return 0;
   const providerHits = recentProviders.filter((item) => item === provider).length;
   const share = providerHits / recentProviders.length;
-  return share > 0.35 ? 0.1 : 0;
+  return share > 0.25 ? Math.min(0.16, (share - 0.25) * 0.5) : 0;
+}
+
+function familyDiversityPenalty(family: string, recentFamilies: string[]) {
+  if (recentFamilies.length < 6) return 0;
+  const familyHits = recentFamilies.filter((item) => item === family).length;
+  const share = familyHits / recentFamilies.length;
+  return share > 0.4 ? Math.min(0.18, (share - 0.4) * 0.5) : 0;
 }
 
 export function buildPhasePlan(params: {
@@ -258,10 +271,32 @@ export function buildPhasePlan(params: {
   return phases;
 }
 
+function applyTopProviderDiversityBoost(scored: ScoredCandidate[]) {
+  if (scored.length <= 10) return;
+  const topWindowSize = Math.min(10, scored.length);
+  const topProviders = new Set(scored.slice(0, topWindowSize).map((row) => row.provider));
+  const allProviders = new Set(scored.map((row) => row.provider));
+  const targetProviderCount = Math.min(4, allProviders.size);
+
+  if (topProviders.size >= targetProviderCount || targetProviderCount <= 1) return;
+
+  const missingProviders = [...allProviders].filter((provider) => !topProviders.has(provider));
+  for (const provider of missingProviders) {
+    if (topProviders.size >= targetProviderCount) break;
+    const candidate = scored.find((row) => row.provider === provider);
+    if (!candidate) continue;
+    candidate.score += 0.06;
+    candidate.reasons.push("provider-balance");
+    candidate.breakdown.push("providerDiversityBoost +0.06");
+    topProviders.add(provider);
+  }
+}
+
 export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecision {
   const startedAt = nowMs();
-  const recentModels = (input.recentModels ?? []).slice(-10);
+  const recentModels = (input.recentModels ?? []).slice(-20);
   const recentProviders = recentModels.map(providerFromModelId);
+  const recentFamilies = recentModels.map((modelId) => modelFamily(modelId));
   const required = input.requiredCapabilities ?? [];
   const preferred = input.preferredCapabilities ?? [];
   const catalog = input.modelCatalog.filter((model) => model.modelId && model.modelId !== "openrouter/auto");
@@ -375,13 +410,24 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
     const totalRuns = Math.max(0, (stat?.successCount ?? 0) + (stat?.failureCount ?? 0));
     const lane = laneForCandidate({ reliability, freshness, totalRuns });
     const provider = providerFromModelId(model.modelId);
+    const family = modelFamily(model.modelId);
 
     const repeatPenalty = repetitionPenalty(model.modelId, recentModels);
     const providerPenalty = providerDiversityPenalty(provider, recentProviders);
+    const familyPenalty = familyDiversityPenalty(family, recentFamilies);
     const agePenalty = stalenessPenalty(model);
     const researchPenalty = deepResearchPenalty(model.modelId, input.mode, input.stakes);
-    const previousPenalty = input.previousModelUsed && input.previousModelUsed === model.modelId ? 0.08 : 0;
-    const antiLockIn = Math.max(0, 1 - repeatPenalty - providerPenalty - previousPenalty);
+    const conversationTurnCount = Math.max(0, input.conversationTurnCount ?? 0);
+    const isPreviousModel = input.previousModelUsed && input.previousModelUsed === model.modelId;
+    let stickinessBonus = 0;
+    if (isPreviousModel && conversationTurnCount > 2 && reliability > 0.6) {
+      stickinessBonus = 0.15;
+      if (model.promptCachingSupported) stickinessBonus += 0.05;
+      if (input.hasAttachments) stickinessBonus = Math.max(stickinessBonus, 0.25);
+    }
+    const attachmentSwitchPenalty =
+      input.hasAttachments && input.previousModelUsed && input.previousModelUsed !== model.modelId ? 0.35 : 0;
+    const diversityBalance = Math.max(0, 1 - repeatPenalty - providerPenalty - familyPenalty);
     const laneBoost = lane === selectLane(weights, seed) ? 0.08 : lane === "fresh" ? 0.03 : 0;
     const preferredBoost = preferredIds.has(model.modelId) ? 0.05 : 0;
 
@@ -392,20 +438,27 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
       cost * 0.15 +
       latency * 0.1 +
       context * 0.1 +
-      antiLockIn * 0.16 +
+      diversityBalance * 0.13 +
+      stickinessBonus +
       laneBoost +
       preferredBoost -
       agePenalty -
-      researchPenalty;
+      researchPenalty -
+      attachmentSwitchPenalty;
 
     scored.push({
       model,
       modelId: model.modelId,
       provider,
+      family,
       lane,
       score,
+      reliability,
+      context,
+      stickinessBonus,
       reasons: [
         lane === "stable" ? "stable lane" : lane === "fresh" ? "fresh lane" : "challenger lane",
+        stickinessBonus >= 0.2 ? "cache-aware stickiness" : stickinessBonus > 0 ? "conversation stickiness" : "",
         preferredIds.has(model.modelId) ? "preferred" : "",
       ].filter(Boolean),
       breakdown: [
@@ -415,8 +468,11 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
         `costFit ${cost.toFixed(2)}`,
         `latencyFit ${latency.toFixed(2)}`,
         `contextFit ${context.toFixed(2)}`,
-        `antiLockIn ${antiLockIn.toFixed(2)}`,
+        `diversityBalance ${diversityBalance.toFixed(2)}`,
+        stickinessBonus > 0 ? `stickinessBonus +${stickinessBonus.toFixed(2)}` : "stickinessBonus +0.00",
         providerPenalty > 0 ? `providerDiversityPenalty ${providerPenalty.toFixed(2)}` : "providerDiversityPenalty 0.00",
+        familyPenalty > 0 ? `familyDiversityPenalty ${familyPenalty.toFixed(2)}` : "familyDiversityPenalty 0.00",
+        attachmentSwitchPenalty > 0 ? `attachmentSwitchPenalty -${attachmentSwitchPenalty.toFixed(2)}` : "attachmentSwitchPenalty 0.00",
         agePenalty > 0 ? `stalenessPenalty -${agePenalty.toFixed(2)}` : "stalenessPenalty 0.00",
         researchPenalty > 0 ? `deepResearchPenalty -${researchPenalty.toFixed(2)}` : "deepResearchPenalty 0.00",
       ],
@@ -424,16 +480,46 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
   }
 
   scored.sort((a, b) => b.score - a.score || a.modelId.localeCompare(b.modelId));
+  applyTopProviderDiversityBoost(scored);
+  scored.sort((a, b) => b.score - a.score || a.modelId.localeCompare(b.modelId));
   const preferredLane = selectLane(weights, seed);
   const laneRows = scored.filter((row) => row.lane === preferredLane);
   const primaryPool = (laneRows.length > 0 ? laneRows : scored).slice(0, 5);
   const explorationSeed = hashToUnit(`${input.seedKey}:${input.phaseId}:epsilon`);
-  const shouldExplore = primaryPool.length > 1 && explorationSeed < 0.1;
+  const shouldExplore = primaryPool.length > 1 && explorationSeed < (input.stakes === "low" ? 0.15 : 0.1);
   let selected = laneRows[0] ?? scored[0];
+  let switchReason: string | undefined;
   if (shouldExplore) {
     const pickSeed = hashToUnit(`${input.seedKey}:${input.phaseId}:epsilon-pick`);
     const randomIndex = Math.min(primaryPool.length - 1, Math.floor(pickSeed * primaryPool.length));
     selected = primaryPool[randomIndex];
+  }
+
+  const previousRow = input.previousModelUsed ? scored.find((row) => row.modelId === input.previousModelUsed) : undefined;
+  const conversationTurnCount = Math.max(0, input.conversationTurnCount ?? 0);
+  const stickyEligible = Boolean(previousRow && conversationTurnCount > 2 && previousRow.reliability > 0.6);
+  const stickyMinImprovement = 0.12;
+  const previousContextOverflow = Boolean(previousRow && previousRow.context < 0.16);
+
+  if (selected && previousRow && input.hasAttachments) {
+    if (selected.modelId !== previousRow.modelId) {
+      selected = previousRow;
+      switchReason = `Staying on ${previousRow.modelId} to preserve attachment context.`;
+    }
+  } else if (selected && previousRow && stickyEligible && selected.modelId !== previousRow.modelId) {
+    const improvement = selected.score - previousRow.score;
+    if (improvement < stickyMinImprovement) {
+      selected = previousRow;
+      switchReason = `Kept ${previousRow.modelId} (conversation stickiness; switch requires +${stickyMinImprovement.toFixed(2)} score).`;
+    } else {
+      switchReason = `Switched from ${previousRow.modelId} to ${selected.modelId} (+${improvement.toFixed(2)} score gain).`;
+    }
+  } else if (selected && previousRow && selected.modelId !== previousRow.modelId) {
+    if (previousContextOverflow) {
+      switchReason = `Switched from ${previousRow.modelId} due to context-window pressure.`;
+    } else if (previousRow.reliability <= 0.6) {
+      switchReason = `Switched from ${previousRow.modelId} due to reliability drop (${previousRow.reliability.toFixed(2)}).`;
+    }
   }
 
   if (!selected) {
@@ -485,9 +571,11 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
     scoreBreakdown: row.breakdown,
   }));
 
-  const reason = shouldExplore
-    ? `Phase router selected ${selected.modelId} via exploration from top candidates for ${input.phaseLabel.toLowerCase()}`
-    : `Phase router selected ${selected.modelId} in ${preferredLane} lane for ${input.phaseLabel.toLowerCase()}`;
+  const reason = switchReason
+    ? switchReason
+    : shouldExplore
+      ? `Phase router selected ${selected.modelId} via exploration from top candidates for ${input.phaseLabel.toLowerCase()}`
+      : `Phase router selected ${selected.modelId} in ${preferredLane} lane for ${input.phaseLabel.toLowerCase()}`;
   const routingDurationMs = Math.max(0, Math.round(nowMs() - startedAt));
   console.info(JSON.stringify({
     event: "route_decision",

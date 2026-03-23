@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireActor } from "@/lib/auth-server";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 import { MODEL_CONFIG } from "@/lib/model-config";
+import { resolveRoleModelBundle } from "@/lib/model-role-resolver";
 import { openRouterChatCompletion } from "@/lib/openrouter";
+import { classifyComplexity, classifyRequest } from "@/lib/auto-settings";
 import { safeStudyMode } from "@/lib/contracts/studyModes";
 import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 
@@ -15,6 +17,14 @@ function localEnhance(message: string, mode: string) {
       "Requested a clear structure",
       "Preserved original intent",
     ],
+  };
+}
+
+function passthroughEnhance(message: string) {
+  return {
+    original: message,
+    enhanced: message,
+    improvements: ["Enhancement skipped for short/simple prompt."],
   };
 }
 
@@ -60,11 +70,36 @@ export async function POST(request: NextRequest) {
     }
 
     const mode = safeStudyMode(body.mode, "POST /api/enhance-prompt");
+    const normalizedMessage = body.message.trim();
+    const wordCount = normalizedMessage.split(/\s+/).filter(Boolean).length;
+    const complexity = classifyComplexity(normalizedMessage);
+    const requestClass = classifyRequest({
+      message: normalizedMessage,
+      complexity,
+      mode,
+      hasAttachments: false,
+      isFirstMessage: false,
+      spendingTier: "normal",
+    }).requestClass;
+    const isShortQuestion = normalizedMessage.includes("?") && wordCount < 10;
+    if (normalizedMessage.length < 25 || isShortQuestion || requestClass === "T0" || requestClass === "T1") {
+      return NextResponse.json(passthroughEnhance(body.message));
+    }
+
+    const utility = await resolveRoleModelBundle({
+      actorClerkId: actor.clerkId,
+      role: "utilityFree",
+      fallbackModel: MODEL_CONFIG.utilityFree,
+      maxFallbacks: 2,
+    }).catch(() => ({
+      model: MODEL_CONFIG.utilityFree,
+      fallbackModels: [MODEL_CONFIG.marker],
+    }));
 
     const completion = await withTimeout(
       openRouterChatCompletion({
-        model: MODEL_CONFIG.promptEnhance,
-        fallbackModels: [MODEL_CONFIG.tutorFast],
+        model: utility.model,
+        fallbackModels: utility.fallbackModels,
         messages: [
           {
             role: "system",
@@ -90,7 +125,7 @@ Return ONLY JSON: {"original":"...","enhanced":"...","improvements":["..."]}`,
 
     await recordOpenRouterUsage({
       actorClerkId: actor.clerkId,
-      model: completion.model ?? MODEL_CONFIG.promptEnhance,
+      model: completion.model ?? utility.model,
       usage: completion.usage,
     }).catch(() => {});
 

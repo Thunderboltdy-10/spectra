@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
       return badRequest("messageId and newContent are required");
     }
 
-    const result = await convexMutation("chats:editMessageAndPrune", {
+    const result = await convexMutation("chats:editMessageAsSibling", {
       actorClerkId: actor.clerkId,
       messageId,
       newContent,

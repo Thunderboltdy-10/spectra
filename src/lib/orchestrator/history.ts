@@ -1,9 +1,15 @@
 import { convexMutation } from "@/lib/convex-server";
 import { MODEL_CONFIG } from "@/lib/model-config";
+import { resolveRoleModelBundle } from "@/lib/model-role-resolver";
 import { openRouterChatCompletion } from "@/lib/openrouter";
 import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 import type { ChatMessage, Citation, StudyMode } from "@/types";
 import { inferAttempt, inferReflection } from "@/lib/prompts/policy";
+
+const COMPACTION_TRIGGER_RATIO = 0.9;
+const DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000;
+const MIN_MESSAGES_FOR_COMPACTION = 14;
+const MASK_OLDER_THAN_RECENT_TURNS = 8;
 
 export type MemoryEntry = {
   key: string;
@@ -20,29 +26,19 @@ export function shouldScheduleCompaction(params: {
 }) {
   if (params.hasExistingSummary) return false;
   const turns = params.history.length;
-  if (turns <= 10) return false;
+  if (turns < MIN_MESSAGES_FOR_COMPACTION) return false;
 
-  const totalChars = params.history.reduce((sum, message) => {
-    const content = typeof message.content === "string" ? message.content.length : 0;
-    const thinking = typeof message.thinkingContent === "string" ? message.thinkingContent.length : 0;
-    return sum + content + Math.min(800, thinking);
-  }, 0);
+  const contextWindowTokens =
+    typeof params.contextWindowTokens === "number" && params.contextWindowTokens > 0
+      ? params.contextWindowTokens
+      : DEFAULT_CONTEXT_WINDOW_TOKENS;
+  const thresholdTokens = Math.floor(contextWindowTokens * COMPACTION_TRIGGER_RATIO);
+  const rawEstimate = estimateHistoryTokens(params.history, false);
+  if (rawEstimate < thresholdTokens) return false;
 
-  // Context-aware compaction: if we know the model's context window, compact at ~75%
-  if (params.contextWindowTokens && params.contextWindowTokens > 0) {
-    const estimatedTokens = Math.ceil(totalChars / 4);
-    const threshold = Math.floor(params.contextWindowTokens * 0.75);
-    if (estimatedTokens >= threshold && turns > 10) return true;
-  }
-
-  // Fallback to turn-count heuristics
-  const mode = params.mode ?? "general";
-  const denseModes = mode === "research" || mode === "document" || mode === "exam";
-  if (turns >= 24) return true;
-  if (denseModes && turns >= 16) return true;
-  if (turns >= 14 && totalChars >= 9_000) return true;
-  if (turns >= 12 && totalChars >= 14_000) return true;
-  return false;
+  // Primary strategy: mask search/RAG-heavy observations in older turns before summarizing.
+  const maskedEstimate = estimateHistoryTokens(params.history, true);
+  return maskedEstimate >= thresholdTokens;
 }
 
 export function toChatMessageShape(messages: Array<Record<string, unknown>>): ChatMessage[] {
@@ -117,6 +113,48 @@ function compactText(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function countUrls(value: string) {
+  return (value.match(/https?:\/\/[^\s)\]]+/g) ?? []).length;
+}
+
+function maskObservationContent(message: ChatMessage) {
+  if (message.role !== "assistant") return message.content;
+  const citations = Array.isArray(message.citations) ? message.citations : [];
+  const searchCitationCount = citations.filter((citation) => citation.sourceType === "search").length;
+  if (searchCitationCount > 0) {
+    return `[Search: "web query" — ${searchCitationCount} result${searchCitationCount === 1 ? "" : "s"}]`;
+  }
+  const ragCitationCount = citations.filter(
+    (citation) => citation.sourceType === "pack" || citation.sourceType === "personal",
+  ).length;
+  if (ragCitationCount > 0) {
+    return `[RAG: cited ${ragCitationCount} classroom source${ragCitationCount === 1 ? "" : "s"}]`;
+  }
+
+  const content = message.content ?? "";
+  const urlCount = countUrls(content);
+  if (urlCount >= 2) {
+    return `[Search: linked web references — ${urlCount} result${urlCount === 1 ? "" : "s"}]`;
+  }
+  if (/source reliability scan|research evidence matrix|web search results/i.test(content)) {
+    return "[Search: summarized evidence block]";
+  }
+  return content;
+}
+
+function estimateHistoryTokens(history: ChatMessage[], maskOlderObservations: boolean) {
+  const cutoffIndex = Math.max(0, history.length - MASK_OLDER_THAN_RECENT_TURNS);
+  const totalChars = history.reduce((sum, message, index) => {
+    const contentValue = maskOlderObservations && index < cutoffIndex
+      ? maskObservationContent(message)
+      : message.content;
+    const contentChars = typeof contentValue === "string" ? contentValue.length : 0;
+    const thinkingChars = typeof message.thinkingContent === "string" ? Math.min(400, message.thinkingContent.length) : 0;
+    return sum + contentChars + thinkingChars;
+  }, 0);
+  return Math.ceil(totalChars / 4);
+}
+
 function fallbackCompactSummary(history: ChatMessage[]) {
   const compacted = history.slice(-14);
   const userLines = compacted
@@ -161,16 +199,33 @@ export async function maybeCompactHistory(params: {
 }) {
   if (!shouldScheduleCompaction({ history: params.history, hasExistingSummary: false })) return;
 
-  const olderHistory = params.history.slice(0, Math.max(0, params.history.length - 6));
+  const olderHistory = params.history.slice(0, Math.max(0, params.history.length - MASK_OLDER_THAN_RECENT_TURNS));
+  const maskedOlderHistory = olderHistory.map((message) => ({
+    ...message,
+    content: maskObservationContent(message),
+  }));
   const source = olderHistory
-    .map((message) => `${message.role.toUpperCase()} [${message.mode}]: ${compactText(message.content).slice(0, 300)}`)
+    .map((message, index) => {
+      const masked = maskedOlderHistory[index];
+      return `${message.role.toUpperCase()} [${message.mode}]: ${compactText(masked?.content ?? message.content).slice(0, 300)}`;
+    })
     .join("\n\n")
     .slice(0, 12000);
 
+  const utility = await resolveRoleModelBundle({
+    actorClerkId: params.actorClerkId,
+    role: "utilityFree",
+    fallbackModel: MODEL_CONFIG.utilityFree,
+    maxFallbacks: 2,
+  }).catch(() => ({
+    model: MODEL_CONFIG.utilityFree,
+    fallbackModels: [MODEL_CONFIG.marker],
+  }));
+
   const startedAt = Date.now();
   const completionPromise = openRouterChatCompletion({
-    model: MODEL_CONFIG.tutorFast,
-    fallbackModels: [MODEL_CONFIG.marker],
+    model: utility.model,
+    fallbackModels: utility.fallbackModels,
     messages: [
       {
         role: "system",
@@ -188,7 +243,7 @@ export async function maybeCompactHistory(params: {
   const recordUsage = async (completion: Awaited<typeof completionPromise>) => {
     if (usageRecorded) return;
     usageRecorded = true;
-    const model = completion.model ?? MODEL_CONFIG.tutorFast;
+    const model = completion.model ?? utility.model;
     const usage = completion.usage;
     const durationMs = Date.now() - startedAt;
     await recordOpenRouterUsage({

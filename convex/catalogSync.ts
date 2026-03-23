@@ -5,6 +5,8 @@ import { MODEL_DEFAULTS } from "./constants";
 import { lookupCuratedModelMeta } from "./curatedModelRegistry";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+const ENDPOINT_SAMPLE_LIMIT = 60;
+const ENDPOINT_FETCH_CONCURRENCY = 6;
 
 const FEATURED: Record<string, number> = {
   "stepfun/step-3.5-flash:free": 1,
@@ -13,6 +15,27 @@ const FEATURED: Record<string, number> = {
   "openai/gpt-5.4-mini": 4,
   "openai/gpt-5.4-nano": 5,
   "google/gemma-3-27b-vision:free": 6,
+};
+
+type OpenRouterModel = {
+  id: string;
+  name?: string;
+  description?: string;
+  context_length?: number;
+  created?: number;
+  pricing?: Record<string, string | number | undefined>;
+  architecture?: {
+    modality?: string;
+    input_modalities?: string[];
+    output_modalities?: string[];
+  };
+  top_provider?: { name?: string };
+  supported_parameters?: unknown;
+};
+
+type EndpointAggregate = {
+  latencyP50Ms?: number;
+  uptimePercent?: number;
 };
 
 function rating(value: number, thresholds: [number, number]) {
@@ -54,6 +77,124 @@ function chunkArray<T>(items: T[], size: number) {
   return out;
 }
 
+function toFiniteNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function parsePricePerM(value: unknown) {
+  const parsed = toFiniteNumber(value);
+  if (!Number.isFinite(parsed)) return undefined;
+  return Math.max(0, parsed as number) * 1_000_000;
+}
+
+function normalizeParamName(value: unknown) {
+  if (typeof value !== "string") return "";
+  return value.trim().toLowerCase().replace(/\s+/g, "_");
+}
+
+function parseSupportedParameters(raw: unknown) {
+  const names = new Set<string>();
+
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      if (typeof item === "string") {
+        const normalized = normalizeParamName(item);
+        if (normalized) names.add(normalized);
+        continue;
+      }
+      if (item && typeof item === "object") {
+        const maybeName = normalizeParamName((item as { name?: string; key?: string }).name ?? (item as { key?: string }).key);
+        if (maybeName) names.add(maybeName);
+      }
+    }
+  } else if (raw && typeof raw === "object") {
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (value === false || value === null || value === undefined) continue;
+      const normalized = normalizeParamName(key);
+      if (normalized) names.add(normalized);
+    }
+  }
+
+  return Array.from(names.values()).sort();
+}
+
+function parseModalities(model: OpenRouterModel) {
+  const arch = model.architecture ?? {};
+  const input = new Set<string>();
+  const output = new Set<string>();
+
+  for (const value of arch.input_modalities ?? []) {
+    const normalized = normalizeParamName(value);
+    if (normalized) input.add(normalized);
+  }
+  for (const value of arch.output_modalities ?? []) {
+    const normalized = normalizeParamName(value);
+    if (normalized) output.add(normalized);
+  }
+
+  const modality = String(arch.modality ?? "").toLowerCase();
+  if (modality) {
+    const [left, right] = modality.split("->");
+    for (const part of String(left ?? "").split(/[+,/]/)) {
+      const normalized = normalizeParamName(part);
+      if (normalized) input.add(normalized);
+    }
+    for (const part of String(right ?? modality).split(/[+,/]/)) {
+      const normalized = normalizeParamName(part);
+      if (normalized) output.add(normalized);
+    }
+  }
+
+  return {
+    inputModalities: Array.from(input.values()),
+    outputModalities: Array.from(output.values()),
+  };
+}
+
+function parseCachePricing(pricing: Record<string, string | number | undefined> | undefined) {
+  const readPerM =
+    parsePricePerM(pricing?.cache_read)
+    ?? parsePricePerM(pricing?.prompt_cache_read)
+    ?? parsePricePerM(pricing?.input_cache_read)
+    ?? parsePricePerM(pricing?.cached_input);
+
+  const writePerM =
+    parsePricePerM(pricing?.cache_write)
+    ?? parsePricePerM(pricing?.prompt_cache_write)
+    ?? parsePricePerM(pricing?.input_cache_write)
+    ?? parsePricePerM(pricing?.cache_creation_input);
+
+  return {
+    cachePricingReadPerM: readPerM,
+    cachePricingWritePerM: writePerM,
+  };
+}
+
+function hasPromptCachingSupport(params: {
+  modelId: string;
+  supportedParameters: string[];
+  cachePricingReadPerM?: number;
+  cachePricingWritePerM?: number;
+}) {
+  if (typeof params.cachePricingReadPerM === "number" || typeof params.cachePricingWritePerM === "number") {
+    return true;
+  }
+
+  if (params.modelId.toLowerCase().startsWith("anthropic/")) return true;
+
+  return params.supportedParameters.some((name) =>
+    name.includes("cache")
+    || name === "cache_control"
+    || name === "prompt_cache"
+    || name === "prompt_caching",
+  );
+}
+
 async function openRouterFetch(path: string, apiKey: string, body?: unknown) {
   const response = await fetch(`${OPENROUTER_BASE_URL}${path}`, {
     method: body ? "POST" : "GET",
@@ -71,6 +212,194 @@ async function openRouterFetch(path: string, apiKey: string, body?: unknown) {
   return response.json();
 }
 
+function collectNumericByKey(root: unknown, keyMatcher: (key: string) => boolean, out: number[] = []) {
+  if (Array.isArray(root)) {
+    for (const item of root) collectNumericByKey(item, keyMatcher, out);
+    return out;
+  }
+
+  if (!root || typeof root !== "object") return out;
+
+  for (const [key, value] of Object.entries(root as Record<string, unknown>)) {
+    if (keyMatcher(key)) {
+      const numeric = toFiniteNumber(value);
+      if (typeof numeric === "number") out.push(numeric);
+    }
+
+    if (value && typeof value === "object") {
+      collectNumericByKey(value, keyMatcher, out);
+    }
+  }
+
+  return out;
+}
+
+function mean(values: number[]) {
+  if (values.length === 0) return undefined;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function parseEndpointAggregate(payload: unknown): EndpointAggregate {
+  const envelope = payload as { data?: unknown[]; endpoints?: unknown[] };
+  const rows = Array.isArray(envelope?.data)
+    ? envelope.data
+    : Array.isArray(envelope?.endpoints)
+      ? envelope.endpoints
+      : Array.isArray(payload)
+        ? payload
+        : [payload];
+
+  const latencyCandidates = collectNumericByKey(rows, (key) => {
+    const normalized = key.toLowerCase();
+    return (
+      normalized === "latencyp50"
+      || normalized === "latency_p50"
+      || normalized === "latencyp50ms"
+      || normalized === "latency_p50_ms"
+      || (normalized.includes("latency") && normalized.includes("p50"))
+    );
+  });
+
+  const uptimeCandidatesRaw = collectNumericByKey(rows, (key) => key.toLowerCase().includes("uptime"));
+  const uptimeCandidates = uptimeCandidatesRaw
+    .map((value) => (value <= 1 ? value * 100 : value))
+    .filter((value) => Number.isFinite(value) && value >= 0 && value <= 100);
+
+  return {
+    latencyP50Ms: mean(latencyCandidates),
+    uptimePercent: mean(uptimeCandidates),
+  };
+}
+
+function modelIdToEndpointPath(modelId: string) {
+  const slash = modelId.indexOf("/");
+  if (slash <= 0 || slash === modelId.length - 1) return undefined;
+  const author = modelId.slice(0, slash);
+  const slug = modelId.slice(slash + 1);
+  return `/models/${encodeURIComponent(author)}/${encodeURIComponent(slug)}/endpoints`;
+}
+
+async function fetchEndpointStatsForModels(params: {
+  modelIds: string[];
+  apiKey: string;
+}) {
+  const uniqueIds = Array.from(new Set(params.modelIds.filter(Boolean)));
+  const statsByModelId = new Map<string, EndpointAggregate>();
+
+  for (const batch of chunkArray(uniqueIds, ENDPOINT_FETCH_CONCURRENCY)) {
+    const rows = await Promise.all(
+      batch.map(async (modelId) => {
+        const path = modelIdToEndpointPath(modelId);
+        if (!path) return { modelId, stats: undefined as EndpointAggregate | undefined };
+        try {
+          const payload = await openRouterFetch(path, params.apiKey);
+          return { modelId, stats: parseEndpointAggregate(payload) };
+        } catch {
+          return { modelId, stats: undefined as EndpointAggregate | undefined };
+        }
+      }),
+    );
+
+    for (const row of rows) {
+      if (!row.stats) continue;
+      statsByModelId.set(row.modelId, row.stats);
+    }
+  }
+
+  return statsByModelId;
+}
+
+function mapOpenRouterModels(params: {
+  models: OpenRouterModel[];
+  limit: number;
+  endpointStatsByModelId: Map<string, EndpointAggregate>;
+}) {
+  const mapped = params.models.slice(0, params.limit).map((model) => {
+    const promptCost = toFiniteNumber(model.pricing?.prompt);
+    const completionCost = toFiniteNumber(model.pricing?.completion);
+    const inputCostPerM = Number.isFinite(promptCost) ? (promptCost as number) * 1_000_000 : undefined;
+    const outputCostPerM = Number.isFinite(completionCost) ? (completionCost as number) * 1_000_000 : undefined;
+    const avg = Number.isFinite((inputCostPerM ?? NaN) + (outputCostPerM ?? NaN))
+      ? (inputCostPerM ?? 0) + (outputCostPerM ?? 0)
+      : 10;
+
+    const supportedParameters = parseSupportedParameters(model.supported_parameters);
+    const { inputModalities, outputModalities } = parseModalities(model);
+    const modalityBlob = `${inputModalities.join(" ")} ${outputModalities.join(" ")}`;
+    const isVision = /image|vision|multimodal/.test(modalityBlob);
+    const isFree = model.id.includes(":free") || (promptCost === 0 && completionCost === 0);
+    const reasoningBoost = /(o3|o4|reason|deepseek|gpt-5|gemini-2\.5-pro)/i.test(model.id) ? 2 : 1;
+    const fast = /(flash|mini|haiku|lite)/i.test(model.id);
+    const supportsSearch =
+      supportedParameters.some((name) => name.includes("search") || name === "web_search_options")
+      || /(search|sonar|perplexity|web)/i.test(model.id);
+
+    const { cachePricingReadPerM, cachePricingWritePerM } = parseCachePricing(model.pricing);
+    const promptCachingSupported = hasPromptCachingSupport({
+      modelId: model.id,
+      supportedParameters,
+      cachePricingReadPerM,
+      cachePricingWritePerM,
+    });
+
+    const endpointStats = params.endpointStatsByModelId.get(model.id);
+
+    const item = {
+      modelId: model.id,
+      name: model.name || model.id,
+      provider: model.top_provider?.name || model.id.split("/")[0] || "Unknown",
+      description: model.description || "Model metadata from OpenRouter.",
+      contextLength: model.context_length,
+      inputCostPerM,
+      outputCostPerM,
+      supportedParameters,
+      promptCachingSupported,
+      cachePricingReadPerM,
+      cachePricingWritePerM,
+      endpointLatencyP50Ms: endpointStats?.latencyP50Ms,
+      endpointUptimePercent: endpointStats?.uptimePercent,
+      inputModalities,
+      outputModalities,
+      tags: [
+        isVision ? "vision" : "text",
+        reasoningBoost > 1 ? "reasoning" : "general",
+        ...(isFree ? ["free"] : []),
+        ...(supportsSearch ? ["search"] : []),
+      ],
+      costRating: rating(avg, [0.2, 3]),
+      speedRating: fast ? "high" : "medium",
+      reasoningRating: rating(reasoningBoost, [0.5, 1.5]),
+      multimodalRating: isVision ? "strong" : "none",
+      recommendedForPhysics: /(physics|math|science|reason|deepseek|gemini-2\.5-pro)/i.test(model.id),
+      isFree,
+      isFeatured: typeof FEATURED[model.id] === "number",
+      featuredOrder: FEATURED[model.id],
+      capabilities: {
+        reasoning: reasoningBoost > 1 ? 8 : 4,
+        creative: /(claude|gpt|gemini)/i.test(model.id) ? 7 : 5,
+        code: /(code|coder|starcoder|deepseek)/i.test(model.id) ? 8 : 5,
+        vision: isVision ? 7 : 0,
+        speed: fast ? 9 : 5,
+      },
+    };
+    const curated = lookupCuratedModelMeta(model.id);
+
+    return {
+      ...item,
+      strengthText: strengthText(item),
+      strengthEmbedding: undefined as number[] | undefined,
+      releaseDate: curated?.releaseDate,
+      knowledgeCutoff: curated?.knowledgeCutoff,
+      curatedNotes: curated?.curatedNotes,
+      benchmarkMMLU: curated?.benchmarkMMLU,
+      benchmarkHumanEval: curated?.benchmarkHumanEval,
+      arenaElo: curated?.arenaElo,
+    };
+  });
+
+  return mapped;
+}
+
 export const listOrgIds = internalQuery({
   args: {},
   handler: async (ctx) => {
@@ -79,88 +408,64 @@ export const listOrgIds = internalQuery({
   },
 });
 
-export const refreshCatalog: ReturnType<typeof internalAction> = internalAction({
-  args: {
-    limit: v.optional(v.number()),
-  },
-  handler: async (ctx, args) => {
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) {
-      throw new Error("OPENROUTER_API_KEY missing for catalog sync");
+export const listModelUsageCounts = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const usage = await ctx.db.query("usageEvents").collect();
+    const counts = new Map<string, number>();
+    for (const row of usage) {
+      const key = row.model?.trim();
+      if (!key) continue;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
     }
+    return Array.from(counts.entries()).map(([modelId, count]) => ({ modelId, count }));
+  },
+});
 
-    const limit = Math.min(Math.max(args.limit ?? 120, 10), 200);
-    const modelsResponse = (await openRouterFetch("/models", apiKey)) as {
-      data?: Array<{
-        id: string;
-        name?: string;
-        description?: string;
-        context_length?: number;
-        pricing?: { prompt?: string; completion?: string };
-        architecture?: { modality?: string };
-        top_provider?: { name?: string };
-      }>;
-    };
+async function refreshCatalogBase(params: {
+  ctx: any;
+  limit?: number;
+  includeEmbeddings: boolean;
+}) {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENROUTER_API_KEY missing for catalog sync");
+  }
 
-    const mapped = (modelsResponse.data ?? []).slice(0, limit).map((model) => {
-      const promptCost = parseFloat(model.pricing?.prompt ?? "");
-      const completionCost = parseFloat(model.pricing?.completion ?? "");
-      const inputCostPerM = Number.isFinite(promptCost) ? promptCost * 1_000_000 : undefined;
-      const outputCostPerM = Number.isFinite(completionCost) ? completionCost * 1_000_000 : undefined;
-      const avg = Number.isFinite((inputCostPerM ?? NaN) + (outputCostPerM ?? NaN))
-        ? (inputCostPerM ?? 0) + (outputCostPerM ?? 0)
-        : 10;
+  const limit = Math.min(Math.max(params.limit ?? 400, 50), 400);
+  const modelsResponse = (await openRouterFetch("/models", apiKey)) as { data?: OpenRouterModel[] };
+  const allModels = modelsResponse.data ?? [];
 
-      const modality = model.architecture?.modality ?? "";
-      const isVision = /image|multimodal/i.test(modality);
-      const isFree = model.id.includes(":free") || (promptCost === 0 && completionCost === 0);
-      const reasoningBoost = /(o3|o4|reason|deepseek|gpt-5|gemini-2\.5-pro)/i.test(model.id) ? 2 : 1;
-      const fast = /(flash|mini|haiku|lite)/i.test(model.id);
+  const usageCounts = (await params.ctx.runQuery(internal.catalogSync.listModelUsageCounts, {})) as Array<{
+    modelId: string;
+    count: number;
+  }>;
+  const usageByModelId = new Map<string, number>(usageCounts.map((row) => [row.modelId, row.count]));
+  const endpointTargetIds = [...allModels]
+    .sort((a, b) => {
+      const aUsage = usageByModelId.get(a.id) ?? 0;
+      const bUsage = usageByModelId.get(b.id) ?? 0;
+      if (aUsage !== bUsage) return bUsage - aUsage;
+      const aCreated = a.created ?? 0;
+      const bCreated = b.created ?? 0;
+      if (aCreated !== bCreated) return bCreated - aCreated;
+      return a.id.localeCompare(b.id);
+    })
+    .slice(0, ENDPOINT_SAMPLE_LIMIT)
+    .map((model) => model.id);
 
-      const item = {
-        modelId: model.id,
-        name: model.name || model.id,
-        provider: model.top_provider?.name || model.id.split("/")[0] || "Unknown",
-        description: model.description || "Model metadata from OpenRouter.",
-        contextLength: model.context_length,
-        inputCostPerM,
-        outputCostPerM,
-        tags: [
-          isVision ? "vision" : "text",
-          reasoningBoost > 1 ? "reasoning" : "general",
-          ...(isFree ? ["free"] : []),
-        ],
-        costRating: rating(avg, [0.2, 3]),
-        speedRating: fast ? "high" : "medium",
-        reasoningRating: rating(reasoningBoost, [0.5, 1.5]),
-        multimodalRating: isVision ? "strong" : "none",
-        recommendedForPhysics: /(physics|math|science|reason|deepseek|gemini-2\.5-pro)/i.test(model.id),
-        isFree,
-        isFeatured: typeof FEATURED[model.id] === "number",
-        featuredOrder: FEATURED[model.id],
-        capabilities: {
-          reasoning: reasoningBoost > 1 ? 8 : 4,
-          creative: /(claude|gpt|gemini)/i.test(model.id) ? 7 : 5,
-          code: /(code|coder|starcoder|deepseek)/i.test(model.id) ? 8 : 5,
-          vision: isVision ? 7 : 0,
-          speed: fast ? 9 : 5,
-        },
-      };
-      const curated = lookupCuratedModelMeta(model.id);
+  const endpointStatsByModelId = await fetchEndpointStatsForModels({
+    modelIds: endpointTargetIds,
+    apiKey,
+  });
 
-      return {
-        ...item,
-        strengthText: strengthText(item),
-        strengthEmbedding: undefined as number[] | undefined,
-        releaseDate: curated?.releaseDate,
-        knowledgeCutoff: curated?.knowledgeCutoff,
-        curatedNotes: curated?.curatedNotes,
-        benchmarkMMLU: curated?.benchmarkMMLU,
-        benchmarkHumanEval: curated?.benchmarkHumanEval,
-        arenaElo: curated?.arenaElo,
-      };
-    });
+  const mapped = mapOpenRouterModels({
+    models: allModels,
+    limit,
+    endpointStatsByModelId,
+  });
 
+  if (params.includeEmbeddings) {
     for (const batch of chunkArray(mapped, 20)) {
       const embedded = await Promise.all(
         batch.map(async (model) => {
@@ -181,19 +486,42 @@ export const refreshCatalog: ReturnType<typeof internalAction> = internalAction(
         model.strengthEmbedding = embedded[index];
       });
     }
+  }
 
-    const orgIds = await ctx.runQuery(internal.catalogSync.listOrgIds, {});
-    for (const orgId of orgIds) {
-      await ctx.runMutation(internal.models.upsertModelCatalogForOrg, {
-        orgId,
-        models: mapped,
-      });
-    }
+  const orgIds = (await params.ctx.runQuery(internal.catalogSync.listOrgIds, {})) as string[];
+  for (const orgId of orgIds) {
+    await params.ctx.runMutation(internal.models.upsertModelCatalogForOrg, {
+      orgId,
+      models: mapped,
+    });
+  }
 
-    return {
-      ok: true,
-      orgCount: orgIds.length,
-      modelCount: mapped.length,
-    };
+  return {
+    ok: true,
+    orgCount: orgIds.length,
+    modelCount: mapped.length,
+    endpointStatsCount: endpointStatsByModelId.size,
+  };
+}
+
+export const refreshCatalog: ReturnType<typeof internalAction> = internalAction({
+  args: {
+    limit: v.optional(v.number()),
   },
+  handler: async (ctx, args) => refreshCatalogBase({
+    ctx,
+    limit: args.limit,
+    includeEmbeddings: true,
+  }),
+});
+
+export const refreshCatalogRuntime: ReturnType<typeof internalAction> = internalAction({
+  args: {
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => refreshCatalogBase({
+    ctx,
+    limit: args.limit,
+    includeEmbeddings: false,
+  }),
 });

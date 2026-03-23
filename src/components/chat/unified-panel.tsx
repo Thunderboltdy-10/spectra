@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Bot, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Loader2, X, XCircle, FileText, Milestone } from "lucide-react";
+import { Bot, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Loader2, RotateCcw, X, XCircle, FileText, Milestone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ProviderLogo } from "@/components/provider-logo";
 import { Switch } from "@/components/ui/switch";
@@ -17,6 +17,7 @@ import type { Citation, RouteTrace, RouterMode } from "@/types";
 import { FILE_LIMITS } from "@/lib/file-limits";
 import { formatToolchainLabel } from "@/lib/orchestrator/trace-labels";
 import { RESOURCE_PROCESSING_STALE_MS } from "../../../shared/resource-processing";
+import { CodeCanvas } from "@/components/chat/code-canvas";
 
 function AutoChoice({
   label,
@@ -150,6 +151,7 @@ export type SettingsViewProps = {
   onAutoSearchChange: (value: AutoPreference) => void;
   onAutoCompactionChange: (value: AutoPreference) => void;
   onDeleteResource: (resourceId: string) => void;
+  onRetryResource?: (resourceId: string) => void;
   onUploadPersonalFiles: (files: File[]) => void;
 };
 
@@ -294,15 +296,14 @@ export function SettingsView({
   autoEnhancePrompt,
   autoThinking,
   autoSearch,
-  autoCompaction,
   onTogglePersonalResources,
   onAutoSaveConversationFilesToLibraryChange,
   onLiveProgressAutoOpenChange,
   onAutoEnhancePromptChange,
   onAutoThinkingChange,
   onAutoSearchChange,
-  onAutoCompactionChange,
   onDeleteResource,
+  onRetryResource,
   onUploadPersonalFiles,
 }: SettingsViewProps) {
   const [searxngEnabled, setSearxngEnabled] = useState(true);
@@ -385,7 +386,6 @@ export function SettingsView({
               <AutoChoice label="Enhance prompt" value={autoEnhancePrompt} onChange={onAutoEnhancePromptChange} />
               <AutoChoice label="Thinking" value={autoThinking} onChange={onAutoThinkingChange} />
               <AutoChoice label="Search" value={autoSearch} onChange={onAutoSearchChange} />
-              <AutoChoice label="Compaction" value={autoCompaction} onChange={onAutoCompactionChange} />
             </div>
           </section>
 
@@ -497,15 +497,39 @@ export function SettingsView({
                         </p>
                       ) : null}
                     </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-[var(--danger)]"
-                      onClick={() => onDeleteResource(resource._id)}
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      {(() => {
+                        const isStaleProcessing =
+                          resource.status === "processing"
+                          && typeof resource.updatedAt === "number"
+                          && Date.now() - resource.updatedAt > RESOURCE_PROCESSING_STALE_MS;
+                        const canRetry =
+                          Boolean(onRetryResource)
+                          && (resource.status === "failed" || isStaleProcessing);
+                        if (!canRetry) return null;
+                        return (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-[var(--text-secondary)]"
+                            title="Retry processing"
+                            onClick={() => onRetryResource?.(resource._id)}
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                          </Button>
+                        );
+                      })()}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-[var(--danger)]"
+                        onClick={() => onDeleteResource(resource._id)}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
                 ))
               )}
@@ -642,6 +666,26 @@ function RouteTraceView({ trace }: { trace?: RouteTrace }) {
           ))}
         </div>
       </section>
+
+      {trace.usedMemory && trace.usedMemory.length > 0 ? (
+        <section>
+          <h4 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Used Memory</h4>
+          <div className="space-y-2">
+            {trace.usedMemory.map((entry, index) => (
+              <div
+                key={`${entry.category}:${entry.key}:${index}`}
+                className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2"
+              >
+                <p className="text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                  {entry.category}
+                </p>
+                <p className="text-xs font-medium text-[var(--text-primary)]">{entry.key}</p>
+                <p className="mt-0.5 text-xs text-[var(--text-secondary)]">{entry.text}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
         <h4 className="mb-1 text-sm font-semibold text-[var(--text-primary)]">Selected</h4>
@@ -1151,14 +1195,38 @@ function QuizPanelView({ quiz }: { quiz?: PanelQuizData }) {
 type UnifiedPanelProps = {
   settingsProps?: SettingsViewProps;
   orchestrationProps?: OrchestrationViewProps;
+  canvasProps?: {
+    open: boolean;
+    code: string;
+    language: string;
+    previewDoc: string;
+    versions: Array<{
+      id: string;
+      label: string;
+      code: string;
+      language: string;
+      createdAt: number;
+    }>;
+    activeVersionId?: string;
+    onClose: () => void;
+    onCodeChange: (value: string) => void;
+    onLanguageChange: (value: string) => void;
+    onRun: () => void;
+    onSaveVersion: () => void;
+    onRestoreVersion: (id: string) => void;
+    onAskAiModify: (instruction: string) => void;
+  };
 };
 
-export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanelProps) {
-  const { activeView, panelData, closePanel } = usePanel();
+export function UnifiedPanel({ settingsProps, orchestrationProps, canvasProps }: UnifiedPanelProps) {
+  const { activeView, panelData, closePanel, backPanel, canGoBack } = usePanel();
   const compact = useCompactSheet(980);
+  const mobileOverlay = useCompactSheet(767);
   const maxWidthPx =
     activeView === "quiz"
       ? 460
+      : activeView === "canvas"
+        ? 1100
       : activeView === "route-trace"
         ? 620
         : activeView === "settings"
@@ -1169,7 +1237,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
     open: !!activeView,
     compact,
     maxWidthPx,
-    minMainWidthPx: activeView === "settings" ? 620 : 720,
+    minMainWidthPx: activeView === "settings" ? 620 : activeView === "canvas" ? 520 : 720,
     reserveLeftPx: 160,
   });
   const [collapsed, setCollapsed] = useState(false);
@@ -1225,6 +1293,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
     sources: { subtitle: "Sources", title: "Citation Details" },
     orchestration: { subtitle: "Orchestrator", title: "Live Progress" },
     quiz: { subtitle: "Quiz", title: "Quiz Review" },
+    canvas: { subtitle: "Canvas", title: "Artifact Workspace" },
   };
 
   const current = titles[internalView] ?? { subtitle: "Panel", title: "Details" };
@@ -1237,7 +1306,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
       {!docked ? (
         <button
           type="button"
-          className={`absolute inset-0 cursor-pointer transition bg-transparent`}
+          className={`absolute inset-0 cursor-pointer transition ${mobileOverlay ? "bg-black/45 backdrop-blur-[2px]" : "bg-transparent"}`}
           onClick={closePanel}
           aria-label="Close panel"
         />
@@ -1250,19 +1319,23 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
         } ${
           docked
             ? "relative h-full w-full border-l border-[var(--border-default)] p-0"
-            : compact
+            : mobileOverlay
+              ? "absolute inset-0 rounded-none border-0 p-0"
+              : compact
               ? "absolute bottom-3 left-3 right-3 max-h-[78vh] rounded-2xl border p-4"
               : "absolute inset-y-0 right-0 w-[92vw] border-l p-4"
         }`}
         style={{
           ...(docked
             ? { width: animateIn ? `${panelWidth}px` : "0px", height: "100%", opacity: 1, transition: "width 0.6s cubic-bezier(0.16, 1, 0.3, 1)" }
-            : compact
+            : mobileOverlay
+              ? { width: "100%", height: "100%" }
+              : compact
               ? {}
               : { maxWidth: `${maxWidthPx}px` }),
           ...(!docked ? {
             transition: "transform 0.5s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.5s ease",
-            transform: animateIn ? "translateX(0)" : compact ? "translateY(16px)" : "translateX(32px)",
+            transform: animateIn ? "translateX(0)" : compact && !mobileOverlay ? "translateY(16px)" : "translateX(32px)",
             opacity: animateIn ? 1 : 0,
           } : {}),
         }}
@@ -1275,7 +1348,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
             <h3 className={`truncate font-display text-[var(--text-primary)] ${docked ? "text-xl" : "text-2xl"}`}>{current.title}</h3>
           </div>
           <div className="flex items-center gap-1.5">
-            {compact ? (
+            {compact && !mobileOverlay ? (
               <Button
                 type="button"
                 variant="secondary"
@@ -1293,7 +1366,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
         </div>
 
         {!collapsed ? (
-          <div className={`right-panel-content min-h-0 flex-1 overflow-x-hidden overflow-y-auto ${docked ? "px-4 py-4" : "pr-1"}`}>
+          <div className={`right-panel-content min-h-0 flex-1 overflow-x-hidden overflow-y-auto ${activeView === "canvas" ? "p-0" : docked ? "pl-4 pr-2 py-4" : "pr-1"}`}>
             {activeView === "settings" && settingsProps && <SettingsView {...settingsProps} />}
             {activeView === "route-trace" && <RouteTraceView trace={panelData.routeTrace ?? orchestrationProps?.routeTrace} />}
             {activeView === "sources" && <SourcesView citations={panelData.sources ?? []} />}
@@ -1303,6 +1376,15 @@ export function UnifiedPanel({ settingsProps, orchestrationProps }: UnifiedPanel
                 : <p className="text-sm text-[var(--text-secondary)]">No live orchestration data available.</p>
             )}
             {activeView === "quiz" && <QuizPanelView quiz={panelData.quiz} />}
+            {activeView === "canvas" && canvasProps ? (
+              <CodeCanvas
+                {...canvasProps}
+                open
+                embedded
+                showBackButton={canGoBack}
+                onBack={backPanel}
+              />
+            ) : null}
           </div>
         ) : null}
       </aside>

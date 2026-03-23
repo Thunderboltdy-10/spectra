@@ -3,6 +3,8 @@ import { convexMutation, convexQuery } from "@/lib/convex-server";
 type UsagePricing = {
   inputCostPerM?: number;
   outputCostPerM?: number;
+  cachePricingReadPerM?: number;
+  cachePricingWritePerM?: number;
   isFree?: boolean;
 };
 
@@ -12,8 +14,43 @@ type CompletionLike = {
     prompt_tokens?: number;
     completion_tokens?: number;
     cost?: number;
+    cached_tokens?: number;
+    cache_creation_input_tokens?: number;
   };
 };
+
+function estimateCacheSavingsCents(params: {
+  usage?: {
+    cached_tokens?: number;
+    cache_creation_input_tokens?: number;
+  } | null;
+  pricing?: UsagePricing;
+}) {
+  const cachedTokens = Math.max(0, Math.round(params.usage?.cached_tokens ?? 0));
+  const cacheCreationTokens = Math.max(0, Math.round(params.usage?.cache_creation_input_tokens ?? 0));
+  if (cachedTokens <= 0 && cacheCreationTokens <= 0) return undefined;
+
+  const inputCostPerM =
+    typeof params.pricing?.inputCostPerM === "number" && Number.isFinite(params.pricing.inputCostPerM)
+      ? Math.max(0, params.pricing.inputCostPerM)
+      : undefined;
+  if (!inputCostPerM || inputCostPerM <= 0) return undefined;
+
+  const cacheReadPerM =
+    typeof params.pricing?.cachePricingReadPerM === "number" && Number.isFinite(params.pricing.cachePricingReadPerM)
+      ? Math.max(0, params.pricing.cachePricingReadPerM)
+      : inputCostPerM * 0.1;
+  const cacheWritePerM =
+    typeof params.pricing?.cachePricingWritePerM === "number" && Number.isFinite(params.pricing.cachePricingWritePerM)
+      ? Math.max(0, params.pricing.cachePricingWritePerM)
+      : inputCostPerM * 1.25;
+
+  const readSavingsCents = ((cachedTokens / 1_000_000) * (inputCostPerM - cacheReadPerM)) * 100;
+  const writePremiumCents = ((cacheCreationTokens / 1_000_000) * (cacheWritePerM - inputCostPerM)) * 100;
+  const savings = Math.max(0, readSavingsCents - Math.max(0, writePremiumCents));
+  if (savings <= 0) return undefined;
+  return Number(savings.toFixed(6));
+}
 
 async function resolveUsagePricing(params: {
   actorClerkId: string;
@@ -42,6 +79,7 @@ export async function recordModelUsage(params: {
   inputTokens?: number;
   outputTokens?: number;
   openRouterCost?: number;
+  cacheSavingsCents?: number;
   pricing?: UsagePricing;
   skipIfZeroTokens?: boolean;
 }) {
@@ -72,6 +110,7 @@ export async function recordModelUsage(params: {
       inputTokens,
       outputTokens,
       openRouterCost,
+      cacheSavingsCents: params.cacheSavingsCents,
       inputCostPerM: pricing.inputCostPerM,
       outputCostPerM: pricing.outputCostPerM,
     });
@@ -90,6 +129,7 @@ export async function recordModelUsage(params: {
           model,
           inputTokens,
           outputTokens,
+          cacheSavingsCents: params.cacheSavingsCents,
           inputCostPerM: pricing.inputCostPerM,
           outputCostPerM: pricing.outputCostPerM,
         });
@@ -139,16 +179,30 @@ export async function recordOpenRouterUsage(params: {
     prompt_tokens?: number;
     completion_tokens?: number;
     cost?: number;
+    cached_tokens?: number;
+    cache_creation_input_tokens?: number;
   } | null;
   openRouterCost?: number;
   pricing?: UsagePricing;
   skipIfZeroTokens?: boolean;
 }) {
+  const actorClerkId = params.actorClerkId?.trim();
+  const model = params.model?.trim();
+  const effectivePricing =
+    params.pricing
+    ?? (actorClerkId && model
+      ? await resolveUsagePricing({
+        actorClerkId,
+        model,
+        pricing: params.pricing,
+      })
+      : undefined);
+
   return recordModelUsage({
-    actorClerkId: params.actorClerkId,
+    actorClerkId,
     chatId: params.chatId,
     messageId: params.messageId,
-    model: params.model,
+    model,
     inputTokens: params.inputTokens ?? params.usage?.prompt_tokens,
     outputTokens: params.outputTokens ?? params.usage?.completion_tokens,
     openRouterCost:
@@ -156,7 +210,11 @@ export async function recordOpenRouterUsage(params: {
       ?? (typeof params.usage?.cost === "number" && Number.isFinite(params.usage.cost)
         ? params.usage.cost
         : undefined),
-    pricing: params.pricing,
+    cacheSavingsCents: estimateCacheSavingsCents({
+      usage: params.usage,
+      pricing: effectivePricing,
+    }),
+    pricing: effectivePricing,
     skipIfZeroTokens: params.skipIfZeroTokens,
   });
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import {
   Bar,
   CartesianGrid,
@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import { ModeBreakdown } from "@/components/analytics/mode-breakdown";
 import { TimeOfDayChart } from "@/components/analytics/time-of-day-chart";
+import { CostChart } from "@/components/analytics/cost-chart";
 import { Button } from "@/components/ui/button";
 
 type AnalyticsRow = {
@@ -61,7 +62,36 @@ type AnalyticsDashboardProps = {
     preferredModelCount: number;
   };
   enhanced: EnhancedAnalytics;
+  cost: {
+    daily: Array<{
+      day: string;
+      free: number;
+      cheap: number;
+      mid: number;
+      premium: number;
+      total: number;
+    }>;
+    byModel: Array<{
+      modelId: string;
+      requestCount: number;
+      totalTokens: number;
+      totalCostCents: number;
+    }>;
+    estimatedMonthCostCents: number;
+    monthKey: string;
+  };
   classData: AnalyticsRow[];
+  range: {
+    preset: "current_month" | "last_7_days" | "last_30_days" | "custom";
+    startDate: string;
+    endDate: string;
+  };
+  onRangeChange: (value: {
+    preset: "current_month" | "last_7_days" | "last_30_days" | "custom";
+    startDate: string;
+    endDate: string;
+  }) => void;
+  refreshing?: boolean;
 };
 
 const TOOLTIP_STYLE = {
@@ -209,6 +239,19 @@ function listDaysInMonth(monthKey: string) {
   });
 }
 
+function listDaysInRange(startDay: string, endDay: string) {
+  if (!startDay || !endDay || startDay > endDay) return [];
+  const startTs = Date.parse(`${startDay}T00:00:00Z`);
+  const endTs = Date.parse(`${endDay}T00:00:00Z`);
+  if (!Number.isFinite(startTs) || !Number.isFinite(endTs) || startTs > endTs) return [];
+
+  const days: string[] = [];
+  for (let cursor = startTs; cursor <= endTs; cursor += 24 * 60 * 60 * 1000) {
+    days.push(new Date(cursor).toISOString().slice(0, 10));
+  }
+  return days;
+}
+
 function buildMonthOptions(items: Array<{ day: string }>) {
   return Array.from(new Set(items.map((item) => monthKeyFromDay(item.day)).filter(Boolean))).sort();
 }
@@ -220,6 +263,18 @@ function buildDailyActivity(rows: AnalyticsRow[], monthKey: string) {
   }
 
   return listDaysInMonth(monthKey).map((day) => ({
+    day,
+    count: map.get(day) ?? 0,
+  }));
+}
+
+function buildDailyActivityRange(rows: AnalyticsRow[], startDay: string, endDay: string) {
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    map.set(row.day, (map.get(row.day) ?? 0) + row.messagesCount);
+  }
+
+  return listDaysInRange(startDay, endDay).map((day) => ({
     day,
     count: map.get(day) ?? 0,
   }));
@@ -241,8 +296,29 @@ function buildDailyStudyTime(
   });
 }
 
+function buildDailyStudyTimeRange(
+  daily: EnhancedAnalytics["timeSpentDaily"],
+  startDay: string,
+  endDay: string,
+) {
+  const byDay = new Map(daily.map((item) => [item.day, item]));
+  return listDaysInRange(startDay, endDay).map((day) => {
+    const row = byDay.get(day);
+    return {
+      day,
+      totalSeconds: row?.totalSeconds ?? 0,
+      totalMinutes: Math.round((row?.totalSeconds ?? 0) / 60),
+      messages: row?.messages ?? 0,
+    };
+  });
+}
+
 function filterByMonth<T extends { day: string }>(rows: T[], monthKey: string) {
   return rows.filter((row) => monthKeyFromDay(row.day) === monthKey);
+}
+
+function filterByDayRange<T extends { day: string }>(rows: T[], startDay: string, endDay: string) {
+  return rows.filter((row) => row.day >= startDay && row.day <= endDay);
 }
 
 function aggregateMonthlyModeCounts(rows: AnalyticsRow[]) {
@@ -291,44 +367,126 @@ function buildHourlyCountsForMonth(
   return hourly;
 }
 
-function MonthPager({
-  monthLabel,
-  onPrevious,
-  onNext,
-  previousDisabled,
-  nextDisabled,
-}: {
-  monthLabel: string;
-  onPrevious: () => void;
-  onNext: () => void;
-  previousDisabled: boolean;
-  nextDisabled: boolean;
-}) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <Button type="button" variant="secondary" size="icon" className="h-8 w-8" onClick={onPrevious} disabled={previousDisabled}>
-        <ChevronLeft className="h-3.5 w-3.5" />
-      </Button>
-      <div className="min-w-[9rem] rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1 text-center text-[11px] font-medium text-[var(--text-primary)]">
-        {monthLabel}
+function toIsoDay(value: Date) {
+  return value.toISOString().slice(0, 10);
+}
+
+function formatUsdCents(value: number) {
+  return `$${(Math.max(0, value) / 100).toFixed(2)}`;
+}
+
+function computePresetRange(preset: "current_month" | "last_7_days" | "last_30_days") {
+  const now = new Date();
+  if (preset === "current_month") {
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    return {
+      startDate: toIsoDay(start),
+      endDate: toIsoDay(now),
+    };
+  }
+  const days = preset === "last_7_days" ? 7 : 30;
+  const start = new Date(now.getTime() - (days - 1) * 24 * 60 * 60 * 1000);
+  return {
+    startDate: toIsoDay(start),
+    endDate: toIsoDay(now),
+  };
+}
+
+function TimeOfDayHeatmap({ dailyPeaks }: { dailyPeaks: Array<{ day: string; hour: number; count: number }> }) {
+  if (!dailyPeaks.length) {
+    return (
+      <div className="flex h-[120px] items-center justify-center text-xs text-[var(--text-secondary)]">
+        No activity heatmap data in this range.
       </div>
-      <Button type="button" variant="secondary" size="icon" className="h-8 w-8" onClick={onNext} disabled={nextDisabled}>
-        <ChevronRight className="h-3.5 w-3.5" />
-      </Button>
+    );
+  }
+
+  const maxCount = Math.max(1, ...dailyPeaks.map((item) => item.count));
+  return (
+    <div className="grid grid-cols-[repeat(auto-fit,minmax(10px,1fr))] gap-1 px-5 pb-5">
+      {dailyPeaks.map((item) => {
+        const intensity = Math.max(0.12, item.count / maxCount);
+        return (
+          <div
+            key={`${item.day}:${item.hour}`}
+            className="h-6 rounded-[6px] border border-[var(--border-default)]"
+            style={{
+              backgroundColor: `color-mix(in oklab, var(--accent-cyan) ${Math.round(intensity * 100)}%, transparent)`,
+            }}
+            title={`${shortDayLabel(item.day)} • ${formatHour(item.hour)} • ${item.count} prompts`}
+          />
+        );
+      })}
     </div>
   );
 }
 
-function ChartToolbar(props: {
-  monthLabel: string;
-  onPrevious: () => void;
-  onNext: () => void;
-  previousDisabled: boolean;
-  nextDisabled: boolean;
+function RangeControls(props: {
+  range: {
+    preset: "current_month" | "last_7_days" | "last_30_days" | "custom";
+    startDate: string;
+    endDate: string;
+  };
+  onRangeChange: (value: {
+    preset: "current_month" | "last_7_days" | "last_30_days" | "custom";
+    startDate: string;
+    endDate: string;
+  }) => void;
+  refreshing?: boolean;
 }) {
   return (
-    <div className="flex justify-end px-4 pt-4 sm:px-5">
-      <MonthPager {...props} />
+    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+      <span className="text-xs text-[var(--text-secondary)]">Range</span>
+      <select
+        value={props.range.preset}
+        onChange={(event) => {
+          const nextPreset = event.target.value as "current_month" | "last_7_days" | "last_30_days" | "custom";
+          if (nextPreset === "custom") {
+            props.onRangeChange({
+              preset: "custom",
+              startDate: props.range.startDate,
+              endDate: props.range.endDate,
+            });
+            return;
+          }
+          const windowRange = computePresetRange(nextPreset);
+          props.onRangeChange({
+            preset: nextPreset,
+            startDate: windowRange.startDate,
+            endDate: windowRange.endDate,
+          });
+        }}
+        className="h-8 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 text-xs text-[var(--text-primary)] outline-none"
+      >
+        <option value="current_month">Current month</option>
+        <option value="last_7_days">Last 7 days</option>
+        <option value="last_30_days">Last 30 days</option>
+        <option value="custom">Custom range</option>
+      </select>
+      <input
+        type="date"
+        value={props.range.startDate}
+        onChange={(event) =>
+          props.onRangeChange({
+            preset: "custom",
+            startDate: event.target.value,
+            endDate: props.range.endDate,
+          })}
+        className="h-8 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 text-xs text-[var(--text-primary)] outline-none"
+      />
+      <span className="text-xs text-[var(--text-secondary)]">to</span>
+      <input
+        type="date"
+        value={props.range.endDate}
+        onChange={(event) =>
+          props.onRangeChange({
+            preset: "custom",
+            startDate: props.range.startDate,
+            endDate: event.target.value,
+          })}
+        className="h-8 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 text-xs text-[var(--text-primary)] outline-none"
+      />
+      {props.refreshing ? <Loader2 className="h-4 w-4 animate-spin text-[var(--text-secondary)]" /> : null}
     </div>
   );
 }
@@ -336,9 +494,13 @@ function ChartToolbar(props: {
 function ActivityAndTimeChart({
   activity,
   studyTime,
+  selectedDay,
+  onSelectDay,
 }: {
   activity: Array<{ day: string; count: number }>;
   studyTime: Array<{ day: string; totalMinutes: number }>;
+  selectedDay?: string;
+  onSelectDay?: (day: string) => void;
 }) {
   const chartData = activity.map((item, index) => ({
     day: shortDayLabel(item.day),
@@ -358,7 +520,7 @@ function ActivityAndTimeChart({
         <p className="text-xs text-[var(--text-secondary)]">{totalMessages} msgs • {totalMinutes} minutes</p>
       </div>
 
-      <ResponsiveContainer width="100%" height={240}>
+      <ResponsiveContainer width="100%" height={280}>
         <ComposedChart data={chartData} margin={{ top: 4, right: 4, left: -18, bottom: 0 }}>
           <CartesianGrid vertical={false} stroke="var(--border-default)" strokeOpacity={0.45} />
           <XAxis dataKey="day" tick={{ fontSize: 10, fill: "var(--text-secondary)" }} tickLine={false} axisLine={false} />
@@ -369,11 +531,38 @@ function ActivityAndTimeChart({
           <Line yAxisId="minutes" type="monotone" dataKey="minutes" stroke="var(--accent-coral)" strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 4 }} />
         </ComposedChart>
       </ResponsiveContainer>
+      {selectedDay ? (
+        <p className="mt-3 text-xs text-[var(--text-secondary)]">
+          Selected day: <span className="font-medium text-[var(--text-primary)]">{shortDayLabel(selectedDay)}</span>
+        </p>
+      ) : null}
+      <div className="mt-2 flex flex-wrap gap-1">
+        {activity.slice(-14).map((row) => (
+          <Button
+            key={row.day}
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="h-7 px-2 text-[10px]"
+            onClick={() => onSelectDay?.(row.day)}
+          >
+            {shortDayLabel(row.day)}
+          </Button>
+        ))}
+      </div>
     </div>
   );
 }
 
-function QuizTrendChart({ trend }: { trend: EnhancedAnalytics["quizTrend"] }) {
+function QuizTrendChart({
+  trend,
+  selectedDay,
+  onSelectDay,
+}: {
+  trend: EnhancedAnalytics["quizTrend"];
+  selectedDay?: string;
+  onSelectDay?: (day: string) => void;
+}) {
   if (trend.length === 0) {
     return <div className="p-4 text-center text-sm text-[var(--text-secondary)]">No quiz trend data yet</div>;
   }
@@ -384,7 +573,7 @@ function QuizTrendChart({ trend }: { trend: EnhancedAnalytics["quizTrend"] }) {
         <p className="text-xs text-[var(--text-secondary)]">Quiz performance</p>
         <p className="text-xs text-[var(--text-secondary)]">{trend[trend.length - 1]?.averageScore ?? 0}% latest</p>
       </div>
-      <ResponsiveContainer width="100%" height={128}>
+      <ResponsiveContainer width="100%" height={220}>
         <ComposedChart data={trend.map((item) => ({ day: shortDayLabel(item.day), score: item.averageScore, attempts: item.attempts }))}>
           <CartesianGrid vertical={false} stroke="var(--border-default)" strokeOpacity={0.45} />
           <XAxis dataKey="day" tick={{ fontSize: 10, fill: "var(--text-secondary)" }} tickLine={false} axisLine={false} />
@@ -393,27 +582,60 @@ function QuizTrendChart({ trend }: { trend: EnhancedAnalytics["quizTrend"] }) {
           <Line type="monotone" dataKey="score" stroke="var(--mode-quiz)" strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 4 }} />
         </ComposedChart>
       </ResponsiveContainer>
+      {selectedDay ? (
+        <p className="mt-3 text-xs text-[var(--text-secondary)]">
+          Drill-down day: <span className="font-medium text-[var(--text-primary)]">{shortDayLabel(selectedDay)}</span>
+        </p>
+      ) : null}
+      <div className="mt-2 flex flex-wrap gap-1">
+        {trend.slice(-10).map((row) => (
+          <Button
+            key={row.day}
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="h-7 px-2 text-[10px]"
+            onClick={() => onSelectDay?.(row.day)}
+          >
+            {shortDayLabel(row.day)}
+          </Button>
+        ))}
+      </div>
     </div>
   );
 }
 
-function ModelLeaderboard({ rows }: { rows: AnalyticsRow[] }) {
+function ModelLeaderboard({
+  rows,
+  costRows,
+}: {
+  rows: AnalyticsRow[];
+  costRows: Array<{ modelId: string; requestCount: number; totalTokens: number; totalCostCents: number }>;
+}) {
   const entries = useMemo(() => {
-    const byModel = new Map<string, number>();
+    const countByModel = new Map<string, number>();
     for (const row of rows) {
       for (const model of row.modelsUsed) {
         if (!model) continue;
-        byModel.set(model, (byModel.get(model) ?? 0) + 1);
+        countByModel.set(model, (countByModel.get(model) ?? 0) + 1);
       }
     }
-    return Array.from(byModel.entries())
-      .map(([modelId, usageCount]) => ({
-        modelId,
-        usageCount,
-      }))
-      .sort((a, b) => b.usageCount - a.usageCount)
-      .slice(0, 6);
-  }, [rows]);
+    const costLookup = new Map(costRows.map((row) => [row.modelId, row]));
+    return Array.from(new Set([...countByModel.keys(), ...costLookup.keys()]))
+      .map((modelId) => {
+        const usageCount = countByModel.get(modelId) ?? costLookup.get(modelId)?.requestCount ?? 0;
+        const tokens = costLookup.get(modelId)?.totalTokens ?? 0;
+        const costCents = costLookup.get(modelId)?.totalCostCents ?? 0;
+        return {
+          modelId,
+          usageCount,
+          tokens,
+          costCents,
+        };
+      })
+      .sort((a, b) => b.costCents - a.costCents || b.usageCount - a.usageCount)
+      .slice(0, 8);
+  }, [costRows, rows]);
 
   return (
     <div className="p-4">
@@ -432,9 +654,13 @@ function ModelLeaderboard({ rows }: { rows: AnalyticsRow[] }) {
               <span className="text-[11px] font-medium text-[var(--text-secondary)]">{index + 1}</span>
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-[var(--text-primary)]">{formatModelName(entry.modelId)}</p>
-                <p className="truncate text-[11px] text-[var(--text-secondary)]">{entry.usageCount} routed responses</p>
+                <p className="truncate text-[11px] text-[var(--text-secondary)]">
+                  {entry.usageCount} requests • {entry.tokens.toLocaleString()} tokens
+                </p>
               </div>
-              <span className="text-[11px] text-[var(--text-secondary)]">{scoreLabel(entry.usageCount)}</span>
+              <span className="text-[11px] text-[var(--text-secondary)]">
+                {entry.costCents > 0 ? formatUsdCents(entry.costCents) : scoreLabel(entry.usageCount)}
+              </span>
             </div>
           ))
         )}
@@ -481,77 +707,62 @@ function ProductivityInsights({
   );
 }
 
-export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced, classData }: AnalyticsDashboardProps) {
-  const student = useMemo(() => aggregateRows(studentData), [studentData]);
-  const classAgg = useMemo(() => aggregateRows(classData), [classData]);
-  const streak = useMemo(() => calculateStreak(studentData), [studentData]);
+export function AnalyticsDashboard({
+  role,
+  studentData,
+  studentSignals,
+  enhanced,
+  cost,
+  classData,
+  range,
+  onRangeChange,
+  refreshing,
+}: AnalyticsDashboardProps) {
+  const [selectedActivityDay, setSelectedActivityDay] = useState<string | undefined>(undefined);
+  const [selectedQuizDay, setSelectedQuizDay] = useState<string | undefined>(undefined);
   const isTeacher = role === "admin" || role === "teacher";
 
-  const availableMonths = useMemo(
-    () =>
-      buildMonthOptions([
-        ...studentData,
-        ...classData,
-        ...enhanced.timeSpentDaily,
-        ...enhanced.quizTrend,
-        ...studentSignals.dailyPeakHours,
-      ]),
-    [classData, enhanced.quizTrend, enhanced.timeSpentDaily, studentData, studentSignals.dailyPeakHours],
-  );
-
-  const [selectedMonthIndex, setSelectedMonthIndex] = useState(0);
-
-  useEffect(() => {
-    setSelectedMonthIndex((prev) => {
-      if (availableMonths.length === 0) return 0;
-      if (prev >= 0 && prev < availableMonths.length) return prev;
-      return availableMonths.length - 1;
-    });
-  }, [availableMonths]);
-
-  const selectedMonthKey =
-    availableMonths[selectedMonthIndex] ??
-    availableMonths[availableMonths.length - 1] ??
-    monthKeyFromDay(new Date().toISOString().slice(0, 10));
-
   const filteredStudentData = useMemo(
-    () => filterByMonth(studentData, selectedMonthKey),
-    [selectedMonthKey, studentData],
+    () => filterByDayRange(studentData, range.startDate, range.endDate),
+    [range.endDate, range.startDate, studentData],
   );
   const filteredStudyTime = useMemo(
-    () => filterByMonth(enhanced.timeSpentDaily, selectedMonthKey),
-    [enhanced.timeSpentDaily, selectedMonthKey],
+    () => filterByDayRange(enhanced.timeSpentDaily, range.startDate, range.endDate),
+    [enhanced.timeSpentDaily, range.endDate, range.startDate],
   );
   const filteredQuizTrend = useMemo(
-    () => filterByMonth(enhanced.quizTrend, selectedMonthKey),
-    [enhanced.quizTrend, selectedMonthKey],
+    () => filterByDayRange(enhanced.quizTrend, range.startDate, range.endDate),
+    [enhanced.quizTrend, range.endDate, range.startDate],
   );
   const filteredDailyPeaks = useMemo(
-    () => filterByMonth(studentSignals.dailyPeakHours, selectedMonthKey),
-    [selectedMonthKey, studentSignals.dailyPeakHours],
+    () => filterByDayRange(studentSignals.dailyPeakHours, range.startDate, range.endDate),
+    [range.endDate, range.startDate, studentSignals.dailyPeakHours],
   );
   const filteredClassData = useMemo(
-    () => filterByMonth(classData, selectedMonthKey),
-    [classData, selectedMonthKey],
+    () => filterByDayRange(classData, range.startDate, range.endDate),
+    [classData, range.endDate, range.startDate],
   );
 
-  const dailyActivity = useMemo(() => buildDailyActivity(filteredStudentData, selectedMonthKey), [filteredStudentData, selectedMonthKey]);
-  const dailyStudyTime = useMemo(
-    () => buildDailyStudyTime(filteredStudyTime, selectedMonthKey),
-    [filteredStudyTime, selectedMonthKey],
-  );
+  const student = useMemo(() => aggregateRows(filteredStudentData), [filteredStudentData]);
+  const classAgg = useMemo(() => aggregateRows(filteredClassData), [filteredClassData]);
+  const streak = useMemo(() => calculateStreak(filteredStudentData), [filteredStudentData]);
   const filteredModeCounts = useMemo(() => aggregateMonthlyModeCounts(filteredStudentData), [filteredStudentData]);
   const filteredProductivity = useMemo(
     () => deriveMonthlyProductivity(filteredStudentData, filteredStudyTime),
     [filteredStudentData, filteredStudyTime],
   );
-  const filteredHourlyCounts = useMemo(
-    () => buildHourlyCountsForMonth(studentSignals.dailyPeakHours, studentSignals.hourlyPromptCounts, selectedMonthKey),
-    [selectedMonthKey, studentSignals.dailyPeakHours, studentSignals.hourlyPromptCounts],
+  const dailyActivity = useMemo(
+    () => buildDailyActivityRange(filteredStudentData, range.startDate, range.endDate),
+    [filteredStudentData, range.endDate, range.startDate],
   );
-  const monthLabel = formatMonthLabel(selectedMonthKey);
-  const previousDisabled = selectedMonthIndex <= 0;
-  const nextDisabled = selectedMonthIndex >= availableMonths.length - 1;
+  const dailyStudyTime = useMemo(
+    () => buildDailyStudyTimeRange(filteredStudyTime, range.startDate, range.endDate),
+    [filteredStudyTime, range.endDate, range.startDate],
+  );
+  const filteredHourlyCounts = useMemo(
+    () => buildHourlyCountsForMonth(filteredDailyPeaks, studentSignals.hourlyPromptCounts, monthKeyFromDay(range.endDate)),
+    [filteredDailyPeaks, range.endDate, studentSignals.hourlyPromptCounts],
+  );
 
   const topHour = useMemo(() => {
     const counts = filteredHourlyCounts ?? [];
@@ -569,11 +780,11 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
 
   const uniqueStudents = useMemo(() => {
     const ids = new Set<string>();
-    for (const row of classData) {
+    for (const row of filteredClassData) {
       if ("userId" in row) ids.add(String((row as AnalyticsRow & { userId?: string }).userId));
     }
     return ids.size;
-  }, [classData]);
+  }, [filteredClassData]);
 
   const averageDailyStudyMinutes =
     filteredProductivity.activeDays > 0
@@ -582,6 +793,8 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
 
   return (
     <div className="space-y-6">
+      <RangeControls range={range} onRangeChange={onRangeChange} refreshing={refreshing} />
+
       <div data-tour="analytics-stats">
         <h2 className="mb-3 font-display text-xl">Your Study Stats</h2>
         <div className="flex flex-wrap divide-x divide-[var(--border-default)] border-t border-b border-[var(--border-default)]">
@@ -589,80 +802,49 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
           <StatItem label="Total messages" value={student.totalMessages} subtitle={`${student.totalSessions} sessions`} />
           <StatItem label="Topics explored" value={student.uniqueTopicCount} />
           <StatItem label="Avg quiz score" value={student.avgScore !== null ? `${student.avgScore}%` : "-"} subtitle={student.avgScore !== null ? "across all quizzes" : "No quizzes yet"} />
-          <StatItem label="Avg study/day" value={`${averageDailyStudyMinutes}m`} subtitle={monthLabel} />
+          <StatItem label="Avg study/day" value={`${averageDailyStudyMinutes}m`} subtitle={`${shortDayLabel(range.startDate)} to ${shortDayLabel(range.endDate)}`} />
           <StatItem label="Preferred model" value={formatModelName(studentSignals.preferredModel)} subtitle={studentSignals.preferredModelCount > 0 ? `${studentSignals.preferredModelCount} routed responses` : "No routed responses yet"} />
+          <StatItem label="Est. cost this month" value={formatUsdCents(cost.estimatedMonthCostCents)} subtitle={cost.monthKey} />
         </div>
       </div>
 
       <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] xl:col-span-2">
-        <ChartToolbar
-          monthLabel={monthLabel}
-          onPrevious={() => setSelectedMonthIndex((value) => Math.max(0, value - 1))}
-          onNext={() => setSelectedMonthIndex((value) => Math.min(availableMonths.length - 1, value + 1))}
-          previousDisabled={previousDisabled}
-          nextDisabled={nextDisabled}
+        <ActivityAndTimeChart
+          activity={dailyActivity}
+          studyTime={dailyStudyTime}
+          selectedDay={selectedActivityDay}
+          onSelectDay={setSelectedActivityDay}
         />
-        <ActivityAndTimeChart activity={dailyActivity} studyTime={dailyStudyTime} />
       </section>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
-          <ChartToolbar
-            monthLabel={monthLabel}
-            onPrevious={() => setSelectedMonthIndex((value) => Math.max(0, value - 1))}
-            onNext={() => setSelectedMonthIndex((value) => Math.min(availableMonths.length - 1, value + 1))}
-            previousDisabled={previousDisabled}
-            nextDisabled={nextDisabled}
-          />
-          <QuizTrendChart trend={filteredQuizTrend} />
+          <QuizTrendChart trend={filteredQuizTrend} selectedDay={selectedQuizDay} onSelectDay={setSelectedQuizDay} />
         </section>
         <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
-          <ChartToolbar
-            monthLabel={monthLabel}
-            onPrevious={() => setSelectedMonthIndex((value) => Math.max(0, value - 1))}
-            onNext={() => setSelectedMonthIndex((value) => Math.min(availableMonths.length - 1, value + 1))}
-            previousDisabled={previousDisabled}
-            nextDisabled={nextDisabled}
-          />
-          <ModelLeaderboard rows={filteredStudentData} />
+          <ModelLeaderboard rows={filteredStudentData} costRows={cost.byModel} />
         </section>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.9fr)]">
         <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
-          <ChartToolbar
-            monthLabel={monthLabel}
-            onPrevious={() => setSelectedMonthIndex((value) => Math.max(0, value - 1))}
-            onNext={() => setSelectedMonthIndex((value) => Math.min(availableMonths.length - 1, value + 1))}
-            previousDisabled={previousDisabled}
-            nextDisabled={nextDisabled}
-          />
           <TimeOfDayChart hourlyCounts={filteredHourlyCounts} dailyPeaks={filteredDailyPeaks} />
+          <TimeOfDayHeatmap dailyPeaks={filteredDailyPeaks} />
         </section>
         <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
-          <ChartToolbar
-            monthLabel={monthLabel}
-            onPrevious={() => setSelectedMonthIndex((value) => Math.max(0, value - 1))}
-            onNext={() => setSelectedMonthIndex((value) => Math.min(availableMonths.length - 1, value + 1))}
-            previousDisabled={previousDisabled}
-            nextDisabled={nextDisabled}
-          />
           <ModeBreakdown modeCounts={filteredModeCounts} />
         </section>
       </div>
 
       <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
-        <ChartToolbar
-          monthLabel={monthLabel}
-          onPrevious={() => setSelectedMonthIndex((value) => Math.max(0, value - 1))}
-          onNext={() => setSelectedMonthIndex((value) => Math.min(availableMonths.length - 1, value + 1))}
-          previousDisabled={previousDisabled}
-          nextDisabled={nextDisabled}
-        />
+        <CostChart data={cost.daily} />
+      </section>
+
+      <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
         <ProductivityInsights productivity={filteredProductivity} />
       </section>
 
-      {isTeacher && classData.length > 0 ? (
+      {isTeacher && filteredClassData.length > 0 ? (
         <div className="border-t border-[var(--border-default)] pt-6">
           <h2 className="mb-3 font-display text-xl">Class Overview</h2>
           <div className="grid divide-y divide-[var(--border-default)] border-t border-b border-[var(--border-default)] text-sm sm:grid-cols-2 sm:divide-y-0 sm:divide-x">
@@ -686,14 +868,14 @@ export function AnalyticsDashboard({ role, studentData, studentSignals, enhanced
           </div>
           <div className="mt-4 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 text-sm text-[var(--text-secondary)]">
             {filteredClassData.length > 0
-              ? `Month focus for ${monthLabel}: ${filteredClassData.length} active class day${filteredClassData.length === 1 ? "" : "s"} recorded.`
-              : `No class activity recorded in ${monthLabel}.`}
+              ? `Range focus: ${filteredClassData.length} active class day${filteredClassData.length === 1 ? "" : "s"} recorded.`
+              : "No class activity recorded in this range."}
           </div>
         </div>
       ) : null}
 
       <div className="p-2 text-xs text-[var(--text-secondary)]">
-        Most active study window in {monthLabel}: <span className="font-medium text-[var(--text-primary)]">{formatHour(topHour)} UTC</span>
+        Most active study window: <span className="font-medium text-[var(--text-primary)]">{formatHour(topHour)} UTC</span>
       </div>
     </div>
   );

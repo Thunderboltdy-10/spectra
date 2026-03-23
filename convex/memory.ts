@@ -12,11 +12,10 @@ const vMemoryEntry = v.object({
   extractedAt: v.number(),
 });
 
-const MEMORY_MAX_ENTRIES = 50;
+const MEMORY_MAX_ENTRIES = 80;
 const MEMORY_MAX_RAW_CHARS = 1500;
-const MEMORY_DECAY_CONFIDENCE = 0.3;
-const MEMORY_DECAY_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const MEMORY_TOPIC_SIMILARITY_MIN = 0.52;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const vMemoryCategory = v.union(
   v.literal("identity"),
@@ -31,6 +30,18 @@ const vMemorySourceType = v.union(v.literal("extraction"), v.literal("user_expli
 
 const GLOBAL_MEMORY_CATEGORIES = new Set(["identity", "academic", "preference"]);
 const TOPIC_MEMORY_CATEGORIES = new Set(["topic", "artifact", "correction"]);
+
+const RETENTION_WINDOWS_MS: Record<
+  "identity" | "academic" | "preference" | "topic" | "artifact" | "correction",
+  number | null
+> = {
+  identity: null,
+  academic: 180 * DAY_MS,
+  preference: 90 * DAY_MS,
+  topic: 45 * DAY_MS,
+  artifact: 45 * DAY_MS,
+  correction: 180 * DAY_MS,
+};
 
 function canonicalKey(rawKey: string) {
   const normalized = rawKey
@@ -57,8 +68,8 @@ function normalizeEntries(
     if (!value) continue;
     const confidence = Math.max(0, Math.min(1, Number(raw.confidence ?? 0.6)));
     const extractedAt = Number.isFinite(raw.extractedAt) ? Number(raw.extractedAt) : now;
-    const isStaleLowConfidence = confidence < MEMORY_DECAY_CONFIDENCE && now - extractedAt > MEMORY_DECAY_AGE_MS;
-    if (isStaleLowConfidence) continue;
+    const category = inferLegacyMemoryCategory({ key, value });
+    if (isMemoryEntryExpired({ category, updatedAt: extractedAt, now })) continue;
 
     const existing = map.get(key);
     if (!existing) {
@@ -185,6 +196,26 @@ function inferMemoryCategory(params: {
     return "correction" as const;
   }
   return "topic" as const;
+}
+
+function inferLegacyMemoryCategory(params: {
+  key: string;
+  value: string;
+}): "identity" | "academic" | "preference" | "topic" | "artifact" | "correction" {
+  return inferMemoryCategory({
+    key: params.key,
+    text: params.value,
+  });
+}
+
+function isMemoryEntryExpired(params: {
+  category: "identity" | "academic" | "preference" | "topic" | "artifact" | "correction";
+  updatedAt: number;
+  now: number;
+}) {
+  const windowMs = RETENTION_WINDOWS_MS[params.category];
+  if (windowMs === null) return false;
+  return params.now - params.updatedAt > windowMs;
 }
 
 function matchesTarget(target: string, entry: { key: string; text: string }) {
@@ -531,6 +562,12 @@ export const listMemoryEntries = query({
       .collect();
 
     return rows
+      .filter((row) =>
+        !isMemoryEntryExpired({
+          category: row.category,
+          updatedAt: row.updatedAt,
+          now: Date.now(),
+        }))
       .slice()
       .sort((a, b) => b.updatedAt - a.updatedAt || b.confidence - a.confidence)
       .map((row) => ({
@@ -566,7 +603,15 @@ export const getGlobalProfileEntries = query({
       .collect();
 
     return rows
-      .filter((row) => row.status === "confirmed" && GLOBAL_MEMORY_CATEGORIES.has(row.category))
+      .filter((row) => {
+        if (row.status !== "confirmed") return false;
+        if (!GLOBAL_MEMORY_CATEGORIES.has(row.category)) return false;
+        return !isMemoryEntryExpired({
+          category: row.category,
+          updatedAt: row.updatedAt,
+          now: Date.now(),
+        });
+      })
       .sort((a, b) => b.confidence - a.confidence || b.updatedAt - a.updatedAt)
       .slice(0, 18)
       .map((row) => ({
@@ -807,6 +852,15 @@ export const retrieveRelevantEntries: ReturnType<typeof action> = action({
       const rowCategory = String(row.category ?? "");
       if (rowStatus !== "confirmed") continue;
       if (!TOPIC_MEMORY_CATEGORIES.has(rowCategory)) continue;
+      if (
+        isMemoryEntryExpired({
+          category: rowCategory as "topic" | "artifact" | "correction",
+          updatedAt: typeof row.updatedAt === "number" ? row.updatedAt : 0,
+          now: Date.now(),
+        })
+      ) {
+        continue;
+      }
       const score = typeof hit._score === "number" ? hit._score : 0;
       if (score < minScore) continue;
       const negativeTopicLinks = Array.isArray(row.negativeTopicLinks)

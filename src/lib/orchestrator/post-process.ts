@@ -1,5 +1,6 @@
 import { convexAction, convexMutation, convexQuery } from "@/lib/convex-server";
 import { MODEL_CONFIG } from "@/lib/model-config";
+import { resolveRoleModelBundle } from "@/lib/model-role-resolver";
 import { buildRuntimeStatMap, pickModelAndFallbacks } from "@/lib/model-selection";
 import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
 import { openRouterChatCompletion, openRouterEmbeddingRequest } from "@/lib/openrouter";
@@ -16,14 +17,13 @@ import type { Citation } from "@/types";
 
 const TITLE_MIN_WORDS = 2;
 const TITLE_MAX_WORDS = 6;
-const MEMORY_MAX_ENTRIES = 40;
+const MEMORY_MAX_ENTRIES = 80;
 const MEMORY_MAX_RAW_CHARS = 1500;
-const MEMORY_DECAY_CONFIDENCE = 0.3;
-const MEMORY_DECAY_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const MEMORY_PROFILE_MAX_ENTRIES = 8;
 const MEMORY_PROFILE_MIN_SCORE = 0.08;
 const MEMORY_TOPIC_SIMILARITY_MIN = 0.52;
 const MEMORY_TOPIC_MAX_ENTRIES = 5;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 type UtilityModelSelection = {
   model: string;
@@ -48,6 +48,15 @@ type MemoryDirectiveEntry = {
   key: string;
   text: string;
   category: "identity" | "academic" | "preference";
+};
+
+const MEMORY_RETENTION_WINDOWS_MS: Record<MemoryEntryCategory, number | null> = {
+  identity: null,
+  academic: 180 * DAY_MS,
+  preference: 90 * DAY_MS,
+  topic: 45 * DAY_MS,
+  artifact: 45 * DAY_MS,
+  correction: 180 * DAY_MS,
 };
 
 export type PlannedMemoryProfile = {
@@ -223,6 +232,16 @@ function inferMemoryCategory(params: {
   return "topic";
 }
 
+function isMemoryExpired(params: {
+  category: MemoryEntryCategory;
+  extractedAt: number;
+  now: number;
+}) {
+  const retentionWindow = MEMORY_RETENTION_WINDOWS_MS[params.category];
+  if (retentionWindow === null) return false;
+  return params.now - params.extractedAt > retentionWindow;
+}
+
 function isOneOffMemoryCandidate(value: string) {
   return /\b(today|tomorrow|tonight|this week|next week|submit|deadline|due by|assignment due|homework due)\b/i.test(
     value,
@@ -280,7 +299,18 @@ export function mergeMemoryEntries(existing: MemoryEntry[], incoming: MemoryEntr
       extractedAt: Number.isFinite(entry.extractedAt) ? Number(entry.extractedAt) : now,
     }))
     .filter((entry) => entry.value.length > 0)
-    .filter((entry) => !(entry.confidence < MEMORY_DECAY_CONFIDENCE && now - entry.extractedAt > MEMORY_DECAY_AGE_MS));
+    .filter((entry) => {
+      const category = inferMemoryCategory({
+        key: entry.key,
+        value: entry.value,
+        sourceType: "extraction",
+      });
+      return !isMemoryExpired({
+        category,
+        extractedAt: entry.extractedAt,
+        now,
+      });
+    });
 
   for (const entry of normalizedExisting) {
     map.set(entry.key, entry);
@@ -290,12 +320,20 @@ export function mergeMemoryEntries(existing: MemoryEntry[], incoming: MemoryEntr
     const key = canonicalMemoryKey(rawEntry.key);
     const value = rawEntry.value.replace(/\s+/g, " ").trim();
     if (!value) continue;
+    const category = inferMemoryCategory({
+      key,
+      value,
+      sourceType: "extraction",
+    });
     const entry: MemoryEntry = {
       key,
       value,
       confidence: Math.max(0, Math.min(1, Number(rawEntry.confidence ?? 0.6))),
       extractedAt: Number.isFinite(rawEntry.extractedAt) ? Number(rawEntry.extractedAt) : now,
     };
+    if (isMemoryExpired({ category, extractedAt: entry.extractedAt, now })) {
+      continue;
+    }
     const previous = map.get(key);
     if (!previous) {
       map.set(key, entry);
@@ -955,13 +993,15 @@ async function generateTitleFromSnippet(
     }) => void;
   },
 ) {
-  const utility = await selectUtilityModel({
+  const utility = await resolveRoleModelBundle({
     actorClerkId,
-    preferredCapabilities: ["reasoning"],
-    preferFast: true,
-    preferCheap: true,
-    preferFree: false,
-  });
+    role: "utilityFree",
+    fallbackModel: MODEL_CONFIG.utilityFree,
+    maxFallbacks: 3,
+  }).catch(() => ({
+    model: MODEL_CONFIG.utilityFree,
+    fallbackModels: [MODEL_CONFIG.marker, MODEL_CONFIG.gptOss],
+  }));
   const buildRequest = (model: string, fallbackModels: string[]) =>
     openRouterChatCompletion({
       model,

@@ -13,6 +13,7 @@ type ThinkingBlockProps = {
 
 export function ThinkingBlock({ content, streaming = false }: ThinkingBlockProps) {
   const [open, setOpen] = useState(true);
+  const [showAll, setShowAll] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
   const startTimeRef = useRef<number>(0);
@@ -34,12 +35,47 @@ export function ThinkingBlock({ content, streaming = false }: ThinkingBlockProps
       .replace(/\[[^\]\n]*§[^\]\n]*\]/g, "")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
-    return sanitized
-      .split(/\n{2,}/)
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .slice(0, 20);
+    if (!sanitized) return [];
+
+    const lines = sanitized.split(/\r?\n/);
+    const output: string[] = [];
+    const flush = (buffer: string[]) => {
+      const joined = buffer.join("\n").trim();
+      if (joined) output.push(joined);
+      buffer.length = 0;
+    };
+    const segmentBuffer: string[] = [];
+    const startsStructuredLine = (line: string) =>
+      /^(\s*[-*+•]\s+|\s*\d+[.)]\s+|\s*#{1,6}\s+)/.test(line);
+
+    for (let index = 0; index < lines.length; index += 1) {
+      const rawLine = lines[index] ?? "";
+      const line = rawLine.trim();
+      if (!line) {
+        flush(segmentBuffer);
+        continue;
+      }
+      if (segmentBuffer.length === 0) {
+        segmentBuffer.push(line);
+        continue;
+      }
+
+      const previousLine = segmentBuffer[segmentBuffer.length - 1] ?? "";
+      const previousEndsSentence = /[.!?:]["')\]]?$/.test(previousLine.trim());
+      const shouldSplit = previousEndsSentence || startsStructuredLine(line);
+      if (shouldSplit) {
+        flush(segmentBuffer);
+        segmentBuffer.push(line);
+      } else {
+        segmentBuffer.push(line);
+      }
+    }
+
+    flush(segmentBuffer);
+    return output;
   }, [clean]);
+  const visibleSegments = showAll ? segments : segments.slice(0, 12);
+  const hasHiddenSegments = segments.length > 12;
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -64,6 +100,12 @@ export function ThinkingBlock({ content, streaming = false }: ThinkingBlockProps
       setOpen(true);
     }
   }, [clean, streaming]);
+
+  useEffect(() => {
+    if (!hasHiddenSegments) {
+      setShowAll(false);
+    }
+  }, [hasHiddenSegments]);
 
   if (!clean) return null;
 
@@ -91,7 +133,7 @@ export function ThinkingBlock({ content, streaming = false }: ThinkingBlockProps
           <div ref={scrollRef} className="max-h-56 overflow-y-auto pr-1">
             <div className="relative pl-6">
               <div className="absolute left-[5px] top-0 bottom-0 w-0.5 bg-[var(--border-default)]" />
-              {segments.map((segment, index) => (
+              {visibleSegments.map((segment, index) => (
                 <div key={`${index}-${segment.slice(0, 24)}`} className="relative mb-3 text-xs leading-relaxed text-[var(--text-secondary)]">
                   <div className="absolute -left-6 top-1 h-3 w-3 rounded-full border-2 border-[var(--accent-cyan)] bg-[var(--bg-elevated)]" />
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{segment}</ReactMarkdown>
@@ -99,6 +141,17 @@ export function ThinkingBlock({ content, streaming = false }: ThinkingBlockProps
               ))}
             </div>
           </div>
+          {hasHiddenSegments ? (
+            <div className="mt-1 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowAll((prev) => !prev)}
+                className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1 text-[10px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+              >
+                {showAll ? "Show less" : `Show ${segments.length - 12} more`}
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

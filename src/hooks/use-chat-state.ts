@@ -7,6 +7,7 @@ import type { Agent, Citation, RouteTrace, RouterMode, StudyMode, ThinkingLevel 
 import { appendToBuffer, createBufferState } from "@/lib/structured-stream-buffer";
 import { useSidebar } from "@/context/sidebar-context";
 import { isModeAvailable } from "@/lib/modes";
+import { parseRecentContext } from "@/lib/orchestrator/clarification";
 import { shouldRetryResourceProcessing, toClientFileStatus } from "../../shared/resource-processing";
 
 export type Chat = {
@@ -46,6 +47,7 @@ export type Message = {
   _id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  cancelled?: boolean;
   enhancedContent?: string;
   thinkingContent?: string;
   attachments?: string[];
@@ -135,6 +137,11 @@ export type UserSpending = {
 export type AutoPreference = "auto" | "on" | "off";
 type StreamPhase = "idle" | "compacting" | "routing" | "searching" | "thinking" | "generating" | "synthesizing";
 type SearchStatusBanner = "model_knowledge" | "real_search" | "error" | null;
+type SearchStatusInfo = {
+  status: "completed" | "failed";
+  sourceCount: number;
+};
+type AbortReason = "user_stop" | "mode_switch" | "chat_switch" | "new_send" | "unknown";
 type ProactiveBanner = {
   id: string;
   kind: "reminder_flashcards_due" | "reminder_streak_risk" | "reminder_study_plan" | "continuation_chat";
@@ -175,7 +182,7 @@ function streamPhaseFromPhaseId(phaseId?: string): StreamPhase | undefined {
   return undefined;
 }
 
-const AUTO_COMPACTION_MIN_MESSAGES = 10;
+const AUTO_COMPACTION_MIN_MESSAGES = 14;
 const AUTO_COMPACTION_KEEP_LATEST = 6;
 const SAVE_CONVERSATION_FILES_KEY = "ai-school:save-conversation-files-to-library";
 const LAST_ACTIVE_CHAT_TS_KEY = "ai-school:lastActiveChatTimestamp";
@@ -223,6 +230,8 @@ type ChatDetailResponse = {
     usePersonalResources: boolean;
     packId?: string;
     agentId?: string;
+    recentContext?: string;
+    recentContextAt?: number;
   };
   messages: Message[];
 };
@@ -237,6 +246,7 @@ type SendMessageOptions = {
   routerModeOverride?: RouterMode;
   manualModelOverride?: string;
   forcedModelOverride?: string;
+  parentMessageIdOverride?: string;
   attemptedModels?: string[];
   preservedText?: string;
   preservedFiles?: File[];
@@ -573,6 +583,9 @@ export function useChatState() {
   const [streamPhase, setStreamPhase] = useState<StreamPhase>("idle");
   const [livePhasePlan, setLivePhasePlan] = useState<NonNullable<RouteTrace["phasePlan"]>>([]);
   const [searchStatusBanner, setSearchStatusBanner] = useState<SearchStatusBanner>(null);
+  const [searchStatusInfo, setSearchStatusInfo] = useState<SearchStatusInfo | null>(null);
+  const [streamModelUsed, setStreamModelUsed] = useState<string | null>(null);
+  const [liveRouteTrace, setLiveRouteTrace] = useState<RouteTrace | null>(null);
   const [proactiveBanner, setProactiveBanner] = useState<ProactiveBanner | null>(null);
   const [collaboratorPhase, setCollaboratorPhase] = useState<"idle" | "running" | "synthesizing">("idle");
   const [fileList, setFileList] = useState<File[]>([]);
@@ -602,8 +615,15 @@ export function useChatState() {
   const lastAttachmentPreviewsRef = useRef<Map<string, Message["attachmentPreviews"]>>(new Map());
   const pendingCompletionsRef = useRef<Map<string, Message[]>>(new Map());
   const streamChatIdRef = useRef<string | null>(null);
+  const streamModelUsedRef = useRef<string | null>(null);
+  const activeStreamModeRef = useRef<StudyMode>("tutor");
+  const cancelledDraftPersistedRef = useRef(false);
+  const cancelledDraftPersistPromiseRef = useRef<Promise<void> | null>(null);
+  const abortReasonRef = useRef<AbortReason | null>(null);
   const activeStreamsRef = useRef<Set<string>>(new Set());
   const activeStreamIdsRef = useRef<Set<string>>(new Set());
+  const draftResponsesRef = useRef<Map<string, string>>(new Map());
+  const draftThinkingsRef = useRef<Map<string, string>>(new Map());
   const pendingLocalUserMessageIdsRef = useRef<Set<string>>(new Set());
   const pendingLocalUserMessagesRef = useRef<Map<string, Message>>(new Map());
   const pendingLocalUserMessageChatIdsRef = useRef<Map<string, string>>(new Map());
@@ -617,6 +637,21 @@ export function useChatState() {
   } | null>(null);
   const personalResourcesPollMsRef = useRef(PERSONAL_RESOURCES_POLL_MIN_MS);
   const personalResourcesRefreshInFlightRef = useRef<Promise<void> | null>(null);
+
+  function confirmModeSwitch(nextMode: StudyMode) {
+    if (mode === nextMode) return true;
+    const nonSystemCount = messages.filter((item) => item.role !== "system").length;
+    if (nonSystemCount <= 2) return true;
+    return window.confirm(`Switch to ${nextMode}? This may change how the AI responds.`);
+  }
+
+  useEffect(() => {
+    draftResponsesRef.current = draftResponses;
+  }, [draftResponses]);
+
+  useEffect(() => {
+    draftThinkingsRef.current = draftThinkings;
+  }, [draftThinkings]);
 
   const refreshBookmarks = useCallback(async (chatId = selectedChatIdRef.current) => {
     if (!chatId) {
@@ -912,6 +947,9 @@ export function useChatState() {
     }
     setLivePhasePlan([]);
     setSearchStatusBanner(null);
+    setSearchStatusInfo(null);
+    setStreamModelUsed(null);
+    setLiveRouteTrace(null);
   }, [selectedChatId, markChatActive, syncChatIdToUrl]);
 
   useEffect(() => {
@@ -955,6 +993,9 @@ export function useChatState() {
       setActiveCollaborators([]);
       setCollaboratorPhase("idle");
       setStreamPhase("idle");
+      setSearchStatusInfo(null);
+      setStreamModelUsed(null);
+      setLiveRouteTrace(null);
       setStreamError(null);
       setLastAutoResult(null);
       setAgentSuggestion(null);
@@ -1020,6 +1061,50 @@ export function useChatState() {
           }
           return msg;
         });
+        const recentContextCache = parseRecentContext({
+          raw: data.chat.recentContext,
+          savedAt: data.chat.recentContextAt,
+        });
+        const hasClarificationMessage = messagesWithPreviews.some((msg) => {
+          if (msg.role !== "assistant") return false;
+          const block = (msg.routeTrace as { clarificationBlock?: unknown } | undefined)?.clarificationBlock;
+          return Boolean(block && typeof block === "object");
+        });
+        if (recentContextCache?.clarification && !hasClarificationMessage) {
+          messagesWithPreviews.push({
+            _id: `clarification-${selectedChatId}-${recentContextCache.createdAt}`,
+            role: "assistant",
+            content: "",
+            mode: data.chat.mode,
+            createdAt: recentContextCache.createdAt,
+            routeTrace: {
+              inputs: {
+                routerMode: data.chat.routerMode,
+                mode: data.chat.mode,
+                thinkingLevel: data.chat.thinkingLevel,
+                complexPrompt: true,
+                promptCategory: "clarification",
+                needsSearch: true,
+                needsRag: false,
+                needsVision: false,
+                spendingTier: "normal",
+                hasAttachments: false,
+                attachmentTypes: [],
+                promptEnhanced: false,
+                messageLength: 0,
+              },
+              candidates: [],
+              selected: {
+                modelId: "openrouter/auto",
+                reason: "Rehydrated clarification prompt from recent context cache.",
+              },
+              toolchain: ["clarification_context_rehydrated"],
+              fallbacks: [],
+              routingDurationMs: 0,
+              clarificationBlock: recentContextCache.clarification,
+            },
+          });
+        }
         for (const [pendingId, localMessage] of pendingLocalUserMessagesRef.current.entries()) {
           if (pendingLocalUserMessageChatIdsRef.current.get(pendingId) !== selectedChatId) {
             continue;
@@ -1126,6 +1211,9 @@ export function useChatState() {
       setProactiveBanner(null);
       setMobileSidebarOpen(false);
       setStreamPhase("idle");
+      setSearchStatusInfo(null);
+      setStreamModelUsed(null);
+      setLiveRouteTrace(null);
       pendingLocalUserMessageIdsRef.current.clear();
       pendingLocalUserMessagesRef.current.clear();
       pendingLocalUserMessageChatIdsRef.current.clear();
@@ -1414,7 +1502,9 @@ export function useChatState() {
       const nextMode = custom.detail;
       if (!nextMode) return;
       if (!isModeAvailable(nextMode)) return;
+      if (!confirmModeSwitch(nextMode)) return;
       if (sendingRef.current) {
+        abortReasonRef.current = "mode_switch";
         stopGeneration();
       }
       setMode(nextMode);
@@ -1429,7 +1519,7 @@ export function useChatState() {
       window.removeEventListener("ai-school:toggle-settings", handleSettings);
       window.removeEventListener("ai-school:set-mode", handleSetMode);
     };
-  }, [selectedAgentId, startNewChat, updateExistingChatSettings]);
+  }, [messages, mode, selectedAgentId, startNewChat, updateExistingChatSettings]);
 
   useEffect(() => {
     const handleContextRequest = () => {
@@ -1547,8 +1637,91 @@ export function useChatState() {
     }
   }
 
+  async function persistCancelledDraft(options?: { reason?: AbortReason }) {
+    const streamChatId = streamChatIdRef.current;
+    if (!streamChatId || cancelledDraftPersistedRef.current) return;
+    if (cancelledDraftPersistPromiseRef.current) {
+      await cancelledDraftPersistPromiseRef.current;
+      return;
+    }
+    const responseText = (draftResponsesRef.current.get(streamChatId) ?? "").trim();
+    if (!responseText) return;
+
+    const selectedRouteModel = liveRouteTrace?.selected?.modelId;
+    const modelUsed = streamModelUsedRef.current ?? selectedRouteModel ?? undefined;
+    const thinkingContent = (draftThinkingsRef.current.get(streamChatId) ?? "").trim() || undefined;
+
+    const persistTask = (async () => {
+      try {
+        const response = await fetch("/api/chats/messages/cancelled", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chatId: streamChatId,
+            content: responseText,
+            mode: activeStreamModeRef.current,
+            modelUsed,
+            modelRequested: modelUsed,
+            thinkingContent,
+            routeTrace: liveRouteTrace ?? undefined,
+            reason: options?.reason ?? abortReasonRef.current ?? "unknown",
+          }),
+        });
+        if (!response.ok) {
+          throw new Error(await response.text());
+        }
+        const persisted = (await response.json()) as { messageId?: string };
+        cancelledDraftPersistedRef.current = true;
+        const cancelledMessage: Message = {
+          _id: persisted.messageId ?? `cancelled-${Date.now()}`,
+          role: "assistant",
+          content: responseText,
+          cancelled: true,
+          mode: activeStreamModeRef.current,
+          modelUsed,
+          modelRequested: modelUsed,
+          thinkingContent,
+          routeTrace: liveRouteTrace ?? undefined,
+          createdAt: Date.now(),
+        };
+        if (selectedChatIdRef.current === streamChatId) {
+          setMessages((prev) => [...prev, cancelledMessage]);
+        } else {
+          const existing = pendingCompletionsRef.current.get(streamChatId) ?? [];
+          existing.push(cancelledMessage);
+          pendingCompletionsRef.current.set(streamChatId, existing);
+        }
+        setDraftResponses((prev) => {
+          const next = new Map(prev);
+          next.delete(streamChatId);
+          return next;
+        });
+        setDraftThinkings((prev) => {
+          const next = new Map(prev);
+          next.delete(streamChatId);
+          return next;
+        });
+      } catch (error) {
+        console.warn("Failed to persist cancelled draft response", {
+          chatId: streamChatId,
+          reason: options?.reason ?? abortReasonRef.current ?? "unknown",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    })();
+
+    cancelledDraftPersistPromiseRef.current = persistTask;
+    try {
+      await persistTask;
+    } finally {
+      cancelledDraftPersistPromiseRef.current = null;
+    }
+  }
+
   function stopGeneration() {
     if (abortControllerRef.current) {
+      abortReasonRef.current = abortReasonRef.current ?? "user_stop";
+      void persistCancelledDraft({ reason: abortReasonRef.current });
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
       // Clear active stream for current chat
@@ -1590,6 +1763,11 @@ export function useChatState() {
     // Capture which chat this stream belongs to
     const streamChatId = selectedChatIdRef.current || options?.chatIdOverride || "";
     streamChatIdRef.current = streamChatId;
+    activeStreamModeRef.current = requestedMode;
+    cancelledDraftPersistedRef.current = false;
+    cancelledDraftPersistPromiseRef.current = null;
+    abortReasonRef.current = null;
+    streamModelUsedRef.current = null;
     // Per-chat streaming state is managed via activeStreamIds
     setDraftResponses(prev => { const next = new Map(prev); next.delete(streamChatId || ""); return next; });
     setDraftThinkings(prev => { const next = new Map(prev); next.delete(streamChatId || ""); return next; });
@@ -1599,6 +1777,9 @@ export function useChatState() {
     setStreamPhase("idle");
     setLivePhasePlan([]);
     setSearchStatusBanner(null);
+    setSearchStatusInfo(null);
+    setStreamModelUsed(null);
+    setLiveRouteTrace(null);
     setStreamError(null);
     setSearch("");
     if (retryAttempt === 0) {
@@ -1653,8 +1834,7 @@ export function useChatState() {
       const shouldAutoCompact =
         retryAttempt === 0 &&
         !isRegenerate &&
-        ((autoCompaction === "on") ||
-          (autoCompaction === "auto" && messageCountBeforeSend >= AUTO_COMPACTION_MIN_MESSAGES));
+        messageCountBeforeSend >= AUTO_COMPACTION_MIN_MESSAGES;
       if (shouldAutoCompact) {
         setStreamPhase("compacting");
         await runCompaction({
@@ -1663,9 +1843,6 @@ export function useChatState() {
           silent: true,
           showSuccessToast: false,
         });
-        if (autoCompaction === "on") {
-          setAutoCompaction("auto");
-        }
       }
       let uploadedResourceIds: string[] = [];
 
@@ -1773,6 +1950,7 @@ export function useChatState() {
           regenerate: isRegenerate,
           retryAttempt,
           skipUserMessagePersist: !isRegenerate && skipServerUserPersist,
+          parentMessageId: options?.parentMessageIdOverride,
           forcedModel: options?.forcedModelOverride,
           attachmentTypes: outgoingFiles.map((file) => ext(file.name)).filter(Boolean),
           attachmentResourceIds: uploadedResourceIds,
@@ -1940,6 +2118,7 @@ export function useChatState() {
             }>;
             status?: "pending" | "running" | "done" | "failed" | "skipped" | "planned" | "in_progress" | "completed";
             searchStatus?: "model_fallback" | "real_search" | "error";
+            sourceCount?: number;
             agentSuggestion?: AgentSuggestion;
             unlockedAchievements?: AchievementToastData[];
             sources?: Array<{ filename: string; page?: number; sourceType: string }>;
@@ -2090,6 +2269,43 @@ export function useChatState() {
           }
 
           if (payload.type === "route_model" && payload.modelUsed) {
+            streamModelUsedRef.current = payload.modelUsed;
+            setStreamModelUsed(payload.modelUsed);
+            if (payload.routeTrace) {
+              setLiveRouteTrace(payload.routeTrace);
+            } else {
+              setLiveRouteTrace((prev) => ({
+                ...(prev ?? {
+                  inputs: {
+                    routerMode: requestedRouterMode,
+                    mode: requestedMode,
+                    thinkingLevel,
+                    complexPrompt: false,
+                    promptCategory: "unknown",
+                    needsSearch: false,
+                    needsRag: false,
+                    needsVision: false,
+                    spendingTier: "normal",
+                    hasAttachments: false,
+                    attachmentTypes: [],
+                    promptEnhanced: false,
+                    messageLength: text.length,
+                  },
+                  candidates: [],
+                  selected: {
+                    modelId: payload.modelUsed!,
+                    reason: "Live model selection event.",
+                  },
+                  toolchain: [],
+                  fallbacks: [],
+                  routingDurationMs: 0,
+                }),
+                selected: {
+                  modelId: payload.modelUsed!,
+                  reason: prev?.selected.reason ?? "Live model selection event.",
+                },
+              }));
+            }
             setLastAutoResult((prev) => ({
               modelUsed: payload.modelUsed,
               searchEnabled: prev?.searchEnabled ?? false,
@@ -2099,14 +2315,38 @@ export function useChatState() {
           }
 
           if (payload.type === "search_status") {
+            if (payload.status === "completed" || payload.status === "failed") {
+              setSearchStatusInfo({
+                status: payload.status,
+                sourceCount: Math.max(0, payload.sourceCount ?? 0),
+              });
+              setSearchStatusBanner(payload.status === "completed" ? "real_search" : "error");
+              if (payload.status === "failed") {
+                pushThinkingNote("Web search unavailable. Response used fallback context.");
+              }
+              continue;
+            }
+
             const status = payload.searchStatus ?? payload.status;
             if (status === "model_fallback") {
               setSearchStatusBanner("model_knowledge");
+              setSearchStatusInfo({
+                status: "failed",
+                sourceCount: 0,
+              });
               pushThinkingNote("Web search was unavailable. Response used model knowledge fallback.");
             } else if (status === "real_search") {
               setSearchStatusBanner("real_search");
+              setSearchStatusInfo({
+                status: "completed",
+                sourceCount: Math.max(0, payload.sourceCount ?? 0),
+              });
             } else if (status === "error") {
               setSearchStatusBanner("error");
+              setSearchStatusInfo({
+                status: "failed",
+                sourceCount: 0,
+              });
             }
           }
 
@@ -2188,6 +2428,14 @@ export function useChatState() {
                     },
                   }
                 : payload.routeTrace;
+            const resolvedStreamModel = actualModel ?? payload.modelRequested ?? payload.modelUsed;
+            if (resolvedStreamModel) {
+              streamModelUsedRef.current = resolvedStreamModel;
+              setStreamModelUsed(resolvedStreamModel);
+            }
+            if (normalizedTrace) {
+              setLiveRouteTrace(normalizedTrace);
+            }
             if (normalizedTrace?.phasePlan?.length) {
               setLivePhasePlan(normalizedTrace.phasePlan);
             }
@@ -2381,6 +2629,13 @@ export function useChatState() {
       );
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
+        if (!cancelledDraftPersistedRef.current) {
+          void persistCancelledDraft({ reason: abortReasonRef.current ?? "unknown" });
+        }
+        console.warn("Chat stream aborted", {
+          chatId: activeChatId ?? streamChatIdRef.current,
+          reason: abortReasonRef.current ?? "unknown",
+        });
         return;
       }
       if (outgoingFiles.length > 0) {
@@ -2460,6 +2715,8 @@ export function useChatState() {
       setStreamPhase("idle");
       setHasRealThinking(false);
       abortControllerRef.current = null;
+      abortReasonRef.current = null;
+      streamChatIdRef.current = null;
     }
   }
 
@@ -2693,6 +2950,12 @@ export function useChatState() {
     lastPersonalRetryFailureRef.current = "";
   }
 
+  async function retryPersonalResource(resourceId: string) {
+    if (!resourceId) return;
+    await retryPendingPersonalResources([resourceId]);
+    await refreshPersonalResources();
+  }
+
   async function deletePersonalResource(resourceId: string) {
     const response = await fetch("/api/resources", {
       method: "DELETE",
@@ -2824,8 +3087,11 @@ export function useChatState() {
     if (!response.ok) {
       throw new Error(await response.text());
     }
+    const payload = (await response.json()) as { chatId?: string; messageId?: string };
+    const targetChatId = payload.chatId ?? selectedChatId;
+    const editedMessageId = payload.messageId;
 
-    const reload = await fetch(`/api/chats/${selectedChatId}`);
+    const reload = await fetch(`/api/chats/${targetChatId}`);
     if (reload.ok) {
       const data = (await reload.json()) as ChatDetailResponse;
       setMessages(data.messages);
@@ -2834,7 +3100,8 @@ export function useChatState() {
     await sendMessage(clean, {
       skipLocalUser: true,
       skipServerUserPersist: true,
-      chatIdOverride: selectedChatId,
+      chatIdOverride: targetChatId,
+      parentMessageIdOverride: editedMessageId,
       retryAttempt: 0,
     });
   }
@@ -2962,6 +3229,9 @@ export function useChatState() {
     streamPhase,
     livePhasePlan,
     searchStatusBanner,
+    searchStatusInfo,
+    streamModelUsed,
+    liveRouteTrace,
     proactiveBanner,
     activeCollaborators,
     collaboratorPhase,
@@ -3003,6 +3273,7 @@ export function useChatState() {
     startNewChat,
     handleDeleteChat,
     renameChat,
+    confirmModeSwitch,
     sendMessage,
     retryLastMessage,
     regenerateLastResponse,
@@ -3017,6 +3288,7 @@ export function useChatState() {
     recordAssistantFeedback,
     refreshBookmarks,
     refreshPersonalResources,
+    retryPersonalResource,
     deletePersonalResource,
     uploadPersonalResources,
     compactConversation,

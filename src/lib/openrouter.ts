@@ -26,7 +26,7 @@ export type OpenRouterStreamEvent =
   | { type: "error"; error: string };
 
 export type OpenRouterMessageContentPart =
-  | { type: "text"; text: string }
+  | { type: "text"; text: string; cache_control?: { type: "ephemeral" } }
   | { type: "image_url"; image_url: { url: string; detail?: "low" | "auto" } };
 
 export type OpenRouterMessage = {
@@ -39,6 +39,8 @@ export type OpenRouterUsage = {
   completion_tokens?: number;
   total_tokens?: number;
   cost?: number;
+  cached_tokens?: number;
+  cache_creation_input_tokens?: number;
 };
 
 export type OpenRouterChatCompletionResult = {
@@ -92,9 +94,49 @@ function buildChatCompletionBody(params: {
   maxTokens?: number;
   stream?: boolean;
 }) {
+  const supportsAnthropicCaching = params.model.toLowerCase().startsWith("anthropic/");
+  const preparedMessages = supportsAnthropicCaching
+    ? params.messages.map((message) => {
+      if (message.role !== "system") return message;
+      if (typeof message.content === "string") {
+        return {
+          ...message,
+          content: [{
+            type: "text" as const,
+            text: message.content,
+            cache_control: { type: "ephemeral" as const },
+          }],
+        };
+      }
+      if (!Array.isArray(message.content)) return message;
+      let attached = false;
+      const nextContent = message.content.map((part) => {
+        if (!attached && part.type === "text") {
+          attached = true;
+          return {
+            ...part,
+            cache_control: { type: "ephemeral" as const },
+          };
+        }
+        return part;
+      });
+      if (!attached) {
+        nextContent.unshift({
+          type: "text",
+          text: "",
+          cache_control: { type: "ephemeral" as const },
+        });
+      }
+      return {
+        ...message,
+        content: nextContent,
+      };
+    })
+    : params.messages;
+
   return {
     model: params.model,
-    messages: params.messages,
+    messages: preparedMessages,
     ...(params.stream ? { stream: true } : {}),
     ...(supportsTemperatureControl(params.model) ? { temperature: params.temperature ?? 0.2 } : {}),
     max_tokens: params.maxTokens,
@@ -189,17 +231,28 @@ function toFiniteNumber(value: unknown) {
 function parseUsage(payload: unknown): OpenRouterUsage | undefined {
   const raw = (payload as { usage?: Record<string, unknown> } | null)?.usage;
   if (!raw || typeof raw !== "object") return undefined;
+  const promptDetails = raw.prompt_tokens_details as Record<string, unknown> | undefined;
   const usage: OpenRouterUsage = {
     prompt_tokens: toFiniteNumber(raw.prompt_tokens),
     completion_tokens: toFiniteNumber(raw.completion_tokens),
     total_tokens: toFiniteNumber(raw.total_tokens),
     cost: toFiniteNumber(raw.cost),
+    cached_tokens:
+      toFiniteNumber(raw.cached_tokens)
+      ?? toFiniteNumber(raw.prompt_cache_hit_tokens)
+      ?? toFiniteNumber(promptDetails?.cached_tokens),
+    cache_creation_input_tokens:
+      toFiniteNumber(raw.cache_creation_input_tokens)
+      ?? toFiniteNumber(raw.prompt_cache_miss_tokens)
+      ?? toFiniteNumber(promptDetails?.cache_creation_input_tokens),
   };
   if (
     usage.prompt_tokens === undefined &&
     usage.completion_tokens === undefined &&
     usage.total_tokens === undefined &&
-    usage.cost === undefined
+    usage.cost === undefined &&
+    usage.cached_tokens === undefined &&
+    usage.cache_creation_input_tokens === undefined
   ) {
     return undefined;
   }
@@ -581,12 +634,16 @@ export type OpenRouterModel = {
   description?: string;
   created?: number;
   context_length?: number;
+  supported_parameters?: unknown;
   pricing?: {
     prompt?: string;
     completion?: string;
+    [key: string]: string | number | undefined;
   };
   architecture?: {
     modality?: string;
+    input_modalities?: string[];
+    output_modalities?: string[];
   };
   top_provider?: {
     name?: string;
@@ -604,4 +661,25 @@ export async function fetchOpenRouterModels() {
 
   const json = (await response.json()) as { data?: OpenRouterModel[] };
   return json.data ?? [];
+}
+
+export async function fetchModelEndpoints(author: string, slug: string) {
+  const normalizedAuthor = author.trim();
+  const normalizedSlug = slug.trim();
+  if (!normalizedAuthor || !normalizedSlug) {
+    throw new Error("Model endpoints require author and slug.");
+  }
+
+  const response = await fetchWithTimeout(
+    `${OPENROUTER_BASE_URL}/models/${encodeURIComponent(normalizedAuthor)}/${encodeURIComponent(normalizedSlug)}/endpoints`,
+    {
+      headers: openRouterHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`Model endpoint listing failed: ${await response.text()}`);
+  }
+
+  return response.json();
 }

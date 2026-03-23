@@ -394,15 +394,19 @@ export async function maybeSearchWeb(
       provider: "disabled",
     };
   }
+  const onlineModel = searchModel.endsWith(":online") ? searchModel : `${searchModel}:online`;
+  const onlineFallbackModels = searchModelSelection.fallbacks
+    .filter((candidate) => candidate !== searchModel)
+    .map((candidate) => (candidate.endsWith(":online") ? candidate : `${candidate}:online`));
   const startedAt = Date.now();
   const completionPromise = openRouterChatCompletion({
-    model: searchModel,
-    fallbackModels: searchModelSelection.fallbacks.filter((candidate) => candidate !== searchModel),
+    model: onlineModel,
+    fallbackModels: onlineFallbackModels,
     messages: [
       {
         role: "system",
         content:
-          "Provide a concise briefing from your training knowledge ONLY. DO NOT fabricate, invent, or guess any URLs. Begin with: 'Note: Web search was unavailable.' Keep under 180 words.",
+          "Use integrated web search to answer. Return concise bullets and include direct source URLs. Do not invent URLs.",
       },
       {
         role: "user",
@@ -418,7 +422,7 @@ export async function maybeSearchWeb(
     await recordOpenRouterUsage({
       actorClerkId: options.actorClerkId,
       chatId: options.chatId,
-      model: completion.model ?? searchModel,
+      model: completion.model ?? onlineModel,
       usage: completion.usage,
     }).catch(() => {});
   };
@@ -432,19 +436,27 @@ export async function maybeSearchWeb(
   );
 
   const text = completion?.choices?.[0]?.message?.content?.trim() ?? "";
-  const modelUsed = completion?.model ?? searchModel;
+  const modelUsed = completion?.model ?? onlineModel;
   const usage = completion?.usage;
   const durationMs = Date.now() - startedAt;
   if (completion) {
     await recordUsage(completion);
   }
-  const prefixedText = text.startsWith("Note: Web search was unavailable.")
-    ? text
-    : `Note: Web search was unavailable. ${text}`.trim();
-  const extractedUrls = extractUrls(prefixedText);
+  const extractedUrls = extractUrls(text);
+  if (extractedUrls.length === 0) {
+    return {
+      text,
+      urls: [],
+      sources: [],
+      provider: "error",
+      modelUsed,
+      usage,
+      durationMs,
+    };
+  }
   const sources = await resolveWebSearchSources(extractedUrls);
   const validUrlSet = new Set(sources.map((source) => source.url));
-  const sanitizedText = prefixedText
+  const sanitizedText = text
     .replace(/https?:\/\/[^\s)\]>"']+/g, (rawUrl) => {
       const parsed = parseHttpUrl(rawUrl);
       if (!parsed) return "";
@@ -454,7 +466,7 @@ export async function maybeSearchWeb(
     .replace(/\s{2,}/g, " ")
     .trim();
   return {
-    text: sanitizedText || prefixedText,
+    text: sanitizedText || text,
     urls: sources.map((source) => source.url),
     sources,
     provider: "model_fallback" as const,

@@ -17,7 +17,7 @@ import { stripQuizMarkers } from "@/lib/quiz-parser";
 import { autoCloseMarkdown } from "@/lib/stream-markdown";
 import { getModeConfig } from "@/lib/modes";
 import type { Message } from "@/hooks/use-chat-state";
-import type { ClarificationBlock, StudyMode } from "@/types";
+import type { ClarificationBlock, RouteTrace, StudyMode } from "@/types";
 
 type ChatMessagesProps = {
   messages: Message[];
@@ -28,6 +28,10 @@ type ChatMessagesProps = {
   streamPhase?: "idle" | "compacting" | "routing" | "searching" | "thinking" | "generating" | "synthesizing";
   streamError: string | null;
   searchStatusBanner?: "model_knowledge" | "real_search" | "error" | null;
+  searchStatusInfo?: {
+    status: "completed" | "failed";
+    sourceCount: number;
+  } | null;
   proactiveBanner?: {
     title: string;
     body: string;
@@ -58,6 +62,7 @@ type ChatMessagesProps = {
   mode: StudyMode;
   thinkingLevel?: "low" | "medium" | "high";
   lastModelUsed?: string;
+  streamRouteTrace?: RouteTrace | null;
   lastAutoResult?: {
     modelUsed?: string;
     searchEnabled: boolean;
@@ -87,6 +92,7 @@ export function ChatMessages({
   streamPhase = "idle",
   streamError,
   searchStatusBanner = null,
+  searchStatusInfo = null,
   proactiveBanner = null,
   chatId,
   onRetry,
@@ -111,6 +117,7 @@ export function ChatMessages({
   mode,
   thinkingLevel = "medium",
   lastModelUsed,
+  streamRouteTrace = null,
   lastAutoResult,
   activeCollaborators = [],
   collaboratorPhase = "idle",
@@ -273,18 +280,22 @@ export function ChatMessages({
       rafId = requestAnimationFrame(() => {
         const scrollTop = element.scrollTop;
         const deltaFromBottom = element.scrollHeight - scrollTop - element.clientHeight;
-        const scrolledUp = scrollTop < lastScrollTopRef.current;
+        const deltaUp = lastScrollTopRef.current - scrollTop;
+        const scrolledUp = deltaUp > 0;
         const nearBottom = deltaFromBottom < 72;
 
         if (nearBottom) {
           shouldAutoScrollRef.current = true;
           stickyBottomRef.current = true;
-        } else if (shouldAutoScrollRef.current && stickyBottomRef.current && scrolledUp && deltaFromBottom > 140) {
+        } else if (deltaUp > 30) {
+          shouldAutoScrollRef.current = false;
+          stickyBottomRef.current = false;
+        } else if (shouldAutoScrollRef.current && stickyBottomRef.current && scrolledUp && deltaFromBottom > 80) {
           shouldAutoScrollRef.current = false;
           stickyBottomRef.current = false;
         }
 
-        setShowJumpButton(deltaFromBottom > 180);
+        setShowJumpButton(deltaFromBottom > 120);
         lastScrollTopRef.current = scrollTop;
       });
     };
@@ -452,7 +463,8 @@ export function ChatMessages({
         return "Generating response";
     }
   })();
-  const activeProvider = lastModelUsed?.split("/")[0] ?? "openrouter";
+  const streamingModelId = streamRouteTrace?.selected?.modelId ?? lastModelUsed;
+  const activeProvider = streamingModelId?.split("/")[0] ?? "openrouter";
   const visibleDraftResponse = (() => {
     const cleanDraft = draftResponse.trim();
     if (!cleanDraft) return "";
@@ -481,9 +493,27 @@ export function ChatMessages({
       >
         <div className="mx-auto w-full max-w-[680px] xl:max-w-[780px] 2xl:max-w-[860px] space-y-8">
           {!hasContent && emptyState}
-          {searchStatusBanner === "model_knowledge" ? (
+          {searchStatusInfo ? (
+            <div className={`rounded-xl border px-3 py-2 text-xs ${
+              searchStatusInfo.status === "completed"
+                ? "border-[color-mix(in_oklab,var(--success)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_10%,transparent)] text-[var(--success)]"
+                : "border-[color-mix(in_oklab,var(--warning)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_10%,transparent)] text-[var(--warning)]"
+            }`}>
+              {searchStatusInfo.status === "completed"
+                ? `Checked ${searchStatusInfo.sourceCount} web source${searchStatusInfo.sourceCount === 1 ? "" : "s"}.`
+                : "Web search unavailable for this response."}
+            </div>
+          ) : searchStatusBanner === "model_knowledge" ? (
             <div className="rounded-xl border border-[color-mix(in_oklab,var(--warning)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_10%,transparent)] px-3 py-2 text-xs text-[var(--warning)]">
               Web search was unavailable for this response. The assistant used model knowledge instead.
+            </div>
+          ) : searchStatusBanner === "real_search" ? (
+            <div className="rounded-xl border border-[color-mix(in_oklab,var(--success)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_10%,transparent)] px-3 py-2 text-xs text-[var(--success)]">
+              Web search completed.
+            </div>
+          ) : searchStatusBanner === "error" ? (
+            <div className="rounded-xl border border-[color-mix(in_oklab,var(--danger)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_10%,transparent)] px-3 py-2 text-xs text-[var(--danger)]">
+              Web search failed.
             </div>
           ) : null}
           {proactiveBanner ? (
@@ -574,6 +604,7 @@ export function ChatMessages({
                     {...siblingNavigationProps}
                     messageId={msg._id}
                     role={msg.role}
+                    cancelled={msg.cancelled}
                     content=""
                     thinkingContent={msg.thinkingContent}
                     enhancedContent={msg.enhancedContent}
@@ -631,6 +662,7 @@ export function ChatMessages({
                       {...siblingNavigationProps}
                       messageId={msg._id}
                       role={msg.role}
+                      cancelled={msg.cancelled}
                       content=""
                       thinkingContent={msg.thinkingContent}
                       enhancedContent={msg.enhancedContent}
@@ -695,6 +727,7 @@ export function ChatMessages({
                       {...siblingNavigationProps}
                       messageId={msg._id}
                       role={msg.role}
+                      cancelled={msg.cancelled}
                       content={msg.content}
                       thinkingContent={msg.thinkingContent}
                       enhancedContent={msg.enhancedContent}
@@ -743,6 +776,7 @@ export function ChatMessages({
                     {...siblingNavigationProps}
                     messageId={msg._id}
                     role={msg.role}
+                    cancelled={msg.cancelled}
                     content={msg.content}
                     thinkingContent={msg.thinkingContent}
                     enhancedContent={msg.enhancedContent}
@@ -795,6 +829,7 @@ export function ChatMessages({
                       {...siblingNavigationProps}
                       messageId={msg._id}
                       role={msg.role}
+                      cancelled={msg.cancelled}
                       content=""
                       thinkingContent={msg.thinkingContent}
                       enhancedContent={msg.enhancedContent}
@@ -868,6 +903,7 @@ export function ChatMessages({
                     {...siblingNavigationProps}
                     messageId={msg._id}
                     role={msg.role}
+                    cancelled={msg.cancelled}
                     content={msg.content}
                     thinkingContent={msg.thinkingContent}
                     enhancedContent={msg.enhancedContent}
@@ -916,6 +952,7 @@ export function ChatMessages({
                     {...siblingNavigationProps}
                     messageId={msg._id}
                     role={msg.role}
+                    cancelled={msg.cancelled}
                     content=""
                     thinkingContent={msg.thinkingContent}
                     enhancedContent={msg.enhancedContent}
@@ -963,6 +1000,7 @@ export function ChatMessages({
                   {...siblingNavigationProps}
                   messageId={msg._id}
                   role={msg.role}
+                  cancelled={msg.cancelled}
                   content={msg.content}
                   thinkingContent={msg.thinkingContent}
                   enhancedContent={msg.enhancedContent}
@@ -971,12 +1009,12 @@ export function ChatMessages({
                   attachmentPreviews={msg.attachmentPreviews}
                   modelUsed={msg.modelUsed}
                   whyThisResponse={msg.whyThisResponse}
-                    routeTrace={msg.routeTrace}
-                    citations={msg.citations}
-                    mode={msg.role === "assistant" ? msgMode : undefined}
-                    isLastAssistant={isLastAssistant}
-                    animateIn={msg.role === "assistant" ? !isLastAssistant : true}
-                    onRegenerate={isLastAssistant ? onRegenerate : undefined}
+                  routeTrace={msg.routeTrace}
+                  citations={msg.citations}
+                  mode={msg.role === "assistant" ? msgMode : undefined}
+                  isLastAssistant={isLastAssistant}
+                  animateIn={msg.role === "assistant" ? !isLastAssistant : true}
+                  onRegenerate={isLastAssistant ? onRegenerate : undefined}
                   onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
                   regenModels={regenModels}
                   onEdit={msg.role === "user" && onEditMessage ? (value) => void onEditMessage(msg._id, value) : undefined}
@@ -1018,8 +1056,8 @@ export function ChatMessages({
             <article className="chat-fade-in flex justify-start">
               <div className="w-full max-w-5xl rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3">
                 <div className="mb-3 inline-flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-                  <ProviderLogo provider={activeProvider} modelId={lastModelUsed} size={12} className="h-5 w-5 rounded-md" />
-                  <span>{modelLabel(lastModelUsed)} · {streamingStatus}</span>
+                  <ProviderLogo provider={activeProvider} modelId={streamingModelId} size={12} className="h-5 w-5 rounded-md" />
+                  <span>{modelLabel(streamingModelId)} · {streamingStatus}</span>
                 </div>
                 <div className="space-y-2">
                   <p className="text-sm text-[var(--text-secondary)]">
@@ -1050,12 +1088,12 @@ export function ChatMessages({
                 <div className="message-journal flex min-w-0 items-start gap-3 px-1 py-4">
                   <ProviderLogo
                     provider={activeProvider}
-                    modelId={lastModelUsed}
+                    modelId={streamingModelId}
                     className="mt-0.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]"
                   />
                   <div className="min-w-0 flex-1">
                     <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-[var(--text-secondary)]">
-                      <span>{modelLabel(lastModelUsed)}</span>
+                      <span>{modelLabel(streamingModelId)}</span>
                       <span className="h-1 w-1 rounded-full bg-[var(--border-default)]" />
                       <span className="thinking-wave">{streamingStatus}</span>
                     </div>
@@ -1084,12 +1122,12 @@ export function ChatMessages({
                 <div className="message-journal flex min-w-0 items-start gap-3 px-1 py-4">
                   <ProviderLogo
                     provider={activeProvider}
-                    modelId={lastModelUsed}
+                    modelId={streamingModelId}
                     className="mt-0.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]"
                   />
                   <div className="min-w-0 flex-1">
                     <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-[var(--text-secondary)]">
-                      <span>{modelLabel(lastModelUsed)}</span>
+                      <span>{modelLabel(streamingModelId)}</span>
                       <span className="h-1 w-1 rounded-full bg-[var(--border-default)]" />
                       <span className="thinking-wave">{streamingStatus}</span>
                     </div>

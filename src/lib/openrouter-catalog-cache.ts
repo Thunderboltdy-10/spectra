@@ -1,7 +1,7 @@
 import { fetchOpenRouterModels } from "@/lib/openrouter";
 import type { CatalogModelEntry } from "@/lib/model-selection";
 
-const CACHE_TTL_MS = 2 * 60 * 60 * 1000;
+const CACHE_TTL_MS = 30 * 60 * 1000;
 
 declare global {
   var __openRouterCatalogCache:
@@ -12,8 +12,8 @@ declare global {
     | undefined;
 }
 
-function parsePrice(value?: string) {
-  const parsed = Number.parseFloat(value ?? "");
+function parsePrice(value?: string | number) {
+  const parsed = typeof value === "number" ? value : Number.parseFloat(value ?? "");
   if (!Number.isFinite(parsed) || parsed < 0) return undefined;
   return parsed * 1_000_000;
 }
@@ -30,21 +30,52 @@ function mapLiveModel(model: {
   description?: string;
   created?: number;
   context_length?: number;
-  pricing?: { prompt?: string; completion?: string };
-  architecture?: { modality?: string };
+  supported_parameters?: unknown;
+  pricing?: Record<string, string | number | undefined>;
+  architecture?: { modality?: string; input_modalities?: string[]; output_modalities?: string[] };
   top_provider?: { name?: string };
 }): CatalogModelEntry {
   const promptCost = parsePrice(model.pricing?.prompt);
   const completionCost = parsePrice(model.pricing?.completion);
+  const cacheReadCost =
+    parsePrice(model.pricing?.cache_read)
+    ?? parsePrice(model.pricing?.prompt_cache_read)
+    ?? parsePrice(model.pricing?.input_cache_read);
+  const cacheWriteCost =
+    parsePrice(model.pricing?.cache_write)
+    ?? parsePrice(model.pricing?.prompt_cache_write)
+    ?? parsePrice(model.pricing?.input_cache_write);
+  const inputModalities = Array.isArray(model.architecture?.input_modalities)
+    ? model.architecture?.input_modalities.map((item) => item.toLowerCase())
+    : [];
+  const outputModalities = Array.isArray(model.architecture?.output_modalities)
+    ? model.architecture?.output_modalities.map((item) => item.toLowerCase())
+    : [];
   const modality = (model.architecture?.modality ?? "").toLowerCase();
-  const isVision = modality.includes("image") || modality.includes("multimodal");
+  const modalityBlob = `${modality} ${inputModalities.join(" ")} ${outputModalities.join(" ")}`;
+  const isVision = modalityBlob.includes("image") || modalityBlob.includes("multimodal") || modalityBlob.includes("vision");
   const isImageGeneration = /image[-_ ]?gen|text[-_ ]to[-_ ]image|image generation|diffusion/.test(
     `${model.id} ${model.name ?? ""}`.toLowerCase(),
   );
   const isFast = /flash|mini|haiku|lite|turbo/i.test(model.id);
   const isReasoning = /reason|o3|o4|r1|deepseek|gemini-2\.5|claude/i.test(model.id);
   const isCode = /code|coder|codestral|program/i.test(model.id);
-  const isSearch = /search|sonar|perplexity|web/i.test(model.id);
+  const supportedParameters = Array.isArray(model.supported_parameters)
+    ? model.supported_parameters
+        .map((item) => {
+          if (typeof item === "string") return item.trim().toLowerCase().replace(/\s+/g, "_");
+          if (item && typeof item === "object") {
+            const row = item as { name?: string; key?: string };
+            return (row.name ?? row.key ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+          }
+          return "";
+        })
+        .filter(Boolean)
+    : [];
+  const isSearch =
+    supportedParameters.includes("web_search_options")
+    || supportedParameters.some((item) => item.includes("search"))
+    || /search|sonar|perplexity|web/i.test(model.id);
 
   const inCost = promptCost ?? 5;
   const outCost = completionCost ?? 5;
@@ -60,6 +91,16 @@ function mapLiveModel(model: {
     createdAt: typeof model.created === "number" ? model.created * 1000 : undefined,
     inputCostPerM: promptCost,
     outputCostPerM: completionCost,
+    supportedParameters,
+    promptCachingSupported:
+      model.id.toLowerCase().startsWith("anthropic/")
+      || supportedParameters.some((item) => item.includes("cache"))
+      || typeof cacheReadCost === "number"
+      || typeof cacheWriteCost === "number",
+    cachePricingReadPerM: cacheReadCost,
+    cachePricingWritePerM: cacheWriteCost,
+    inputModalities,
+    outputModalities,
     isFree: model.id.includes(":free") || (inCost === 0 && outCost === 0),
     costRating: toRating(blendedCost, [0.2, 6]),
     speedRating: isFast ? "high" : "medium",

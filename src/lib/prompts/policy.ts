@@ -50,7 +50,10 @@ export function buildSystemPrompt(params: {
   const tutorRules =
     params.mode === "tutor"
       ? `Tutor mode policy:
-- Use Socratic questioning first.
+- Adapt your response style to the student's engagement level.
+- When the student is actively working through a problem, ask guiding questions.
+- When the student needs a clear explanation, give it directly.
+- Do not append a formulaic question to every response.
 - Strictness: ${params.strictness}.
 - Attempts so far: ${params.gate.attemptCount}.
 - Reflection provided: ${params.gate.hasReflection}.
@@ -187,7 +190,9 @@ BACK: [answer or definition]
 - Provide comprehensive analysis with clear headings and structure.
 - Include evidence, examples, and reasoning for claims.
 - Present multiple perspectives where relevant.
-- Include a short evidence matrix table with: claim | source | confidence.
+- Prefer prose and bullet lists for presenting information.
+- Use tables only when directly comparing 3+ items across multiple dimensions.
+- Never use a table when a simple list would suffice.
 - Include a "Source reliability scan" section with confidence notes.
 - End with a clear conclusion or summary of findings.`
       : "";
@@ -313,6 +318,8 @@ Response style:
 Visualization capability:
 - When explaining concepts that benefit from visual representation (processes, relationships, data comparisons, timelines, architectures), include a Mermaid diagram in a \`\`\`mermaid code block.
 - For interactive demonstrations (math visualizations, physics simulations, data charts), include JavaScript/HTML code in appropriate code blocks — these can be previewed live in the app.
+- For executable analysis or simulations, you can provide \`\`\`python code blocks (Pyodide-backed preview supports Python and matplotlib SVG output).
+- Prefer interactive React/JSX artifacts when they improve learning (for example sliders for function parameters, manipulable charts, simple simulations).
 - Use SVG code blocks for simple graphics and icons.
 - Only include visualizations when they genuinely aid understanding — not for every response.
 

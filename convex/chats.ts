@@ -239,6 +239,7 @@ export const appendMessage = mutation({
     verificationPassed: v.optional(v.boolean()),
     thinkingContent: v.optional(v.string()),
     routeTrace: vRouteTrace,
+    cancelled: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
@@ -320,6 +321,7 @@ export const appendMessage = mutation({
       verificationPassed: args.verificationPassed,
       thinkingContent: args.thinkingContent,
       routeTrace: args.routeTrace,
+      cancelled: args.cancelled,
       createdAt: now,
     });
 
@@ -352,7 +354,7 @@ export const appendMessage = mutation({
   },
 });
 
-export const editMessageAndPrune = mutation({
+export const editMessageAsSibling = mutation({
   args: {
     actorClerkId: v.string(),
     messageId: v.id("messages"),
@@ -379,35 +381,65 @@ export const editMessageAndPrune = mutation({
       throw new Error("Message cannot be empty");
     }
 
-    const all = await ctx.db
+    const allMessages = await ctx.db
       .query("messages")
       .withIndex("by_chat", (q) => q.eq("chatId", target.chatId))
       .collect();
-    const sorted = all.sort((a, b) => a.createdAt - b.createdAt);
-    const idx = sorted.findIndex((row) => row._id === args.messageId);
-    if (idx === -1) {
-      throw new Error("Message not found");
-    }
+    const groupParent = target.parentMessageId ?? target._id;
+    const siblingCandidates = allMessages
+      .filter((row) => row.role === "user")
+      .filter((row) => (row.parentMessageId ?? row._id) === groupParent)
+      .sort((a, b) => a.createdAt - b.createdAt);
 
-    await ctx.db.patch(target._id, {
+    const now = Date.now();
+    const messageId = await ctx.db.insert("messages", {
+      orgId: target.orgId,
+      packId: target.packId,
+      chatId: target.chatId,
+      userId: target.userId,
+      role: "user",
+      mode: target.mode,
       content: clean,
-      enhancedContent: undefined,
+      attachments: target.attachments,
+      attachmentResourceIds: target.attachmentResourceIds,
+      citations: [],
+      modelRequested: undefined,
+      modelUsed: undefined,
+      whyThisResponse: undefined,
+      usageIn: undefined,
+      usageOut: undefined,
+      verificationPassed: undefined,
+      thinkingContent: undefined,
+      routeTrace: undefined,
+      cancelled: undefined,
+      parentMessageId: groupParent,
+      siblingIndex: siblingCandidates.length,
+      siblingCount: siblingCandidates.length + 1,
+      createdAt: now,
     });
 
-    for (let i = idx + 1; i < sorted.length; i += 1) {
-      const row = sorted[i]!;
-      await ctx.db.delete(row._id);
+    const orderedSiblings = [
+      ...siblingCandidates.map((row) => ({ _id: row._id, createdAt: row.createdAt })),
+      { _id: messageId, createdAt: now },
+    ]
+      .sort((a, b) => a.createdAt - b.createdAt);
+    for (let i = 0; i < orderedSiblings.length; i += 1) {
+      const row = orderedSiblings[i]!;
+      await ctx.db.patch(row._id, {
+        siblingIndex: i,
+        siblingCount: orderedSiblings.length,
+      });
     }
 
     await ctx.db.patch(chat._id, {
-      updatedAt: Date.now(),
+      updatedAt: now,
       title: summarizeChatTitle(clean) || chat.title,
       latestUserPrompt: compactMessageText(clean).slice(0, 120),
     });
 
     return {
       chatId: target.chatId,
-      prunedCount: Math.max(0, sorted.length - idx - 1),
+      messageId,
     };
   },
 });
@@ -493,6 +525,7 @@ export const branchFromMessage = mutation({
         verificationPassed: row.verificationPassed,
         thinkingContent: row.thinkingContent,
         routeTrace: row.routeTrace,
+        cancelled: row.cancelled,
         createdAt: now + i,
       });
     }

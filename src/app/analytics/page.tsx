@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/layout/app-shell";
 import { AnalyticsDashboard } from "@/components/analytics/analytics-dashboard";
@@ -49,8 +49,47 @@ type AnalyticsResponse = {
       activeDays: number;
     };
   };
+  cost: {
+    daily: Array<{
+      day: string;
+      free: number;
+      cheap: number;
+      mid: number;
+      premium: number;
+      total: number;
+    }>;
+    byModel: Array<{
+      modelId: string;
+      requestCount: number;
+      totalTokens: number;
+      totalCostCents: number;
+    }>;
+    estimatedMonthCostCents: number;
+    monthKey: string;
+  };
   class: AnalyticsRow[];
 };
+
+export type AnalyticsRangePreset = "current_month" | "last_7_days" | "last_30_days" | "custom";
+export type AnalyticsRange = {
+  preset: AnalyticsRangePreset;
+  startDate: string;
+  endDate: string;
+};
+
+function toIsoDay(value: Date) {
+  return value.toISOString().slice(0, 10);
+}
+
+function defaultCurrentMonthRange(): AnalyticsRange {
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  return {
+    preset: "current_month",
+    startDate: toIsoDay(monthStart),
+    endDate: toIsoDay(now),
+  };
+}
 
 function AnalyticsSkeleton() {
   return (
@@ -72,11 +111,20 @@ function AnalyticsSkeleton() {
 export default function AnalyticsPage() {
   const [data, setData] = useState<AnalyticsResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [range, setRange] = useState<AnalyticsRange>(defaultCurrentMonthRange());
+  const hasLoadedRef = useRef(false);
 
   useEffect(() => {
     async function load() {
+      const initialLoad = !hasLoadedRef.current;
       try {
-        const response = await fetch("/api/analytics");
+        if (!initialLoad) setRefreshing(true);
+        const params = new URLSearchParams({
+          startDate: range.startDate,
+          endDate: range.endDate,
+        });
+        const response = await fetch(`/api/analytics?${params.toString()}`);
         if (!response.ok) throw new Error(await response.text());
         const json = (await response.json()) as AnalyticsResponse;
         setData(json);
@@ -84,10 +132,12 @@ export default function AnalyticsPage() {
         toast.error(error instanceof Error ? error.message : "Failed to load analytics");
       } finally {
         setLoading(false);
+        setRefreshing(false);
+        hasLoadedRef.current = true;
       }
     }
     void load();
-  }, []);
+  }, [range.endDate, range.startDate]);
 
   return (
     <AppShell fullBleed contentClassName="2xl:px-14">
@@ -104,7 +154,11 @@ export default function AnalyticsPage() {
           studentData={data.student}
           studentSignals={data.studentSignals}
           enhanced={data.enhanced}
+          cost={data.cost}
           classData={data.class}
+          range={range}
+          onRangeChange={setRange}
+          refreshing={refreshing}
         />
       ) : (
         <div className="rounded-[var(--radius-container)] border border-dashed border-[var(--border-default)] p-8 text-center text-[var(--text-secondary)]">

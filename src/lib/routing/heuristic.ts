@@ -1,4 +1,4 @@
-import { CHEAP_MODEL_DEFAULTS, MODEL_CONFIG, ROUTER_FALLBACKS } from "@/lib/model-config";
+import { CHEAP_MODEL_DEFAULTS, MODEL_CONFIG, ROUTER_FALLBACKS, getRouterFallbacks } from "@/lib/model-config";
 import {
   isModelAllowedInTier,
   modelSupportsCapability,
@@ -109,7 +109,8 @@ function fallbackForCatalog(
   if (!catalog || catalog.length === 0) {
     return fallbackFor(model, tier);
   }
-  const defaults = ROUTER_FALLBACKS[model] ?? [MODEL_CONFIG.tutorFast, MODEL_CONFIG.marker];
+  const catalogFallbacks = getRouterFallbacks(catalog);
+  const defaults = catalogFallbacks[model] ?? ROUTER_FALLBACKS[model] ?? [MODEL_CONFIG.tutorFast, MODEL_CONFIG.marker];
   return defaults.filter((candidate) => canUseInTier(candidate, tier, catalog));
 }
 

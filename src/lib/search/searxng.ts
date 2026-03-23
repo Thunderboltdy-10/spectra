@@ -12,19 +12,24 @@ type SearxngOptions = {
 };
 
 const DEFAULT_SEARXNG_INSTANCES = [
-  "https://searx.be",
-  "https://search.bus-hit.me",
-  "https://searxng.world",
-  "https://paulgo.io",
+  "https://search.inetol.net",
   "https://searx.tiekoetter.com",
-  "https://search.sapti.me",
-  "https://searx.nixnet.services",
   "https://search.ononoki.org",
+  "https://search.mdosch.de",
+  "https://search.rhscz.eu",
+  "https://searx.rhscz.eu",
+  "https://searxng.site",
+  "https://priv.au",
+  "https://searx.ro",
+  "https://search.bladerunn.in",
+  "https://etsi.me",
 ];
 
-const DEFAULT_TIMEOUT_MS = 4000;
+const DEFAULT_TIMEOUT_MS = 6000;
 const MAX_TIMEOUT_MS = 15000;
 const MIN_TIMEOUT_MS = 2500;
+const RETRY_TIMEOUT_MS = 8000;
+const BATCH_SIZE = 2;
 
 // Instance health tracking — skip recently-failed instances for 5 minutes
 const instanceFailures = new Map<string, number>();
@@ -204,18 +209,34 @@ export async function searxngSearch(query: string, options: SearxngOptions = {})
   const healthy = instances.filter(isInstanceHealthy);
   const unhealthy = instances.filter((i) => !isInstanceHealthy(i));
   const ordered = [...healthy, ...unhealthy];
-  for (let i = 0; i < ordered.length; i += 3) {
-    const batch = ordered.slice(i, i + 3);
-    const { winner } = await runParallelBatch({
-      instances: batch,
-      query,
-      language,
-      limit,
-      timeoutMs,
-    });
-    if (winner?.results?.length) {
-      return winner.results;
+
+  const runBatches = async (attemptTimeoutMs: number) => {
+    for (let i = 0; i < ordered.length; i += BATCH_SIZE) {
+      const batch = ordered.slice(i, i + BATCH_SIZE);
+      const { winner } = await runParallelBatch({
+        instances: batch,
+        query,
+        language,
+        limit,
+        timeoutMs: attemptTimeoutMs,
+      });
+      if (winner?.results?.length) {
+        return winner.results;
+      }
     }
+    return [];
+  };
+
+  const firstPass = await runBatches(timeoutMs);
+  if (firstPass.length > 0) {
+    return firstPass;
+  }
+
+  // Retry once with a longer timeout before giving up.
+  const retryTimeoutMs = Math.max(timeoutMs, RETRY_TIMEOUT_MS);
+  const retryPass = await runBatches(retryTimeoutMs);
+  if (retryPass.length > 0) {
+    return retryPass;
   }
 
   console.warn(`[searxng] all ${ordered.length} instances failed for "${query.slice(0, 80)}"`);

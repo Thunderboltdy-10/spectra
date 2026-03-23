@@ -1,7 +1,7 @@
 export type ResourceProcessingStatus = "uploaded" | "processing" | "processed" | "failed";
 
 export const RESOURCE_QUEUE_STALE_MS = 12_000;
-export const RESOURCE_PROCESSING_STALE_MS = 90_000;
+export const RESOURCE_PROCESSING_STALE_MS = 300_000;
 export const MAX_RESOURCE_PROCESSING_ATTEMPTS = 3;
 
 export function isResourceProcessingStale(params: {

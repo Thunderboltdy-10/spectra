@@ -198,6 +198,7 @@ export const recordUsageWithCost = mutation({
     inputTokens: v.number(),
     outputTokens: v.number(),
     openRouterCost: v.optional(v.number()),
+    cacheSavingsCents: v.optional(v.number()),
     inputCostPerM: v.optional(v.number()),
     outputCostPerM: v.optional(v.number()),
   },
@@ -262,6 +263,10 @@ export const recordUsageWithCost = mutation({
       0,
       Number((directCostCents ?? estimatedRawCostCents).toFixed(6)),
     );
+    const cacheSavingsCents =
+      typeof args.cacheSavingsCents === "number" && Number.isFinite(args.cacheSavingsCents)
+        ? Math.max(0, Number(args.cacheSavingsCents.toFixed(6)))
+        : undefined;
 
     const existingDaily = await ctx.db
       .query("usageDaily")
@@ -296,6 +301,7 @@ export const recordUsageWithCost = mutation({
       outputTokens: args.outputTokens,
       totalTokens,
       costCents,
+      cacheSavingsCents,
       pricingNote:
         openRouterCost !== undefined
           ? "Cost sourced directly from OpenRouter usage."
@@ -341,6 +347,7 @@ export const recordUsageWithCostInternal = internalMutation({
     inputTokens: v.number(),
     outputTokens: v.number(),
     openRouterCost: v.optional(v.number()),
+    cacheSavingsCents: v.optional(v.number()),
     inputCostPerM: v.optional(v.number()),
     outputCostPerM: v.optional(v.number()),
   },
@@ -405,6 +412,10 @@ export const recordUsageWithCostInternal = internalMutation({
       0,
       Number((directCostCents ?? estimatedRawCostCents).toFixed(6)),
     );
+    const cacheSavingsCents =
+      typeof args.cacheSavingsCents === "number" && Number.isFinite(args.cacheSavingsCents)
+        ? Math.max(0, Number(args.cacheSavingsCents.toFixed(6)))
+        : undefined;
 
     const existingDaily = await ctx.db
       .query("usageDaily")
@@ -439,6 +450,7 @@ export const recordUsageWithCostInternal = internalMutation({
       outputTokens: args.outputTokens,
       totalTokens,
       costCents,
+      cacheSavingsCents,
       pricingNote:
         openRouterCost !== undefined
           ? "Cost sourced directly from OpenRouter usage."

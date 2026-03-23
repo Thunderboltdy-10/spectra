@@ -1,12 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
-import { Check, Copy, ExternalLink, Eye, EyeOff } from "lucide-react";
+import { Check, Copy, ExternalLink } from "lucide-react";
 
 import { QuizReveal, isQuizContent, type QuizSubmitResult } from "@/components/chat/quiz-reveal";
 import { FlashcardReveal, isFlashcardContent } from "@/components/chat/flashcard-reveal";
@@ -22,6 +22,7 @@ type MarkdownRendererProps = {
   content: string;
   citations?: Citation[];
   mode?: StudyMode;
+  userMessage?: boolean;
   chatId?: string;
   onOpenCanvas?: (params: { code: string; language: string }) => void;
   onCitationClick?: (index: number) => void;
@@ -32,6 +33,8 @@ type CodeBlockProps = {
   children?: React.ReactNode;
   className?: string;
   onOpenCanvas?: (params: { code: string; language: string }) => void;
+  disablePreview?: boolean;
+  disableCanvas?: boolean;
 } & React.HTMLAttributes<HTMLElement>;
 
 function normalizeCode(children: React.ReactNode) {
@@ -40,30 +43,49 @@ function normalizeCode(children: React.ReactNode) {
   return String(children ?? "");
 }
 
-const CODE_PREVIEW_PREF_KEY = "ai-school:code-preview-pref";
-
-function getDefaultPreviewPref(): boolean {
-  try {
-    const stored = window.localStorage.getItem(CODE_PREVIEW_PREF_KEY);
-    if (stored === "code") return false;
-    if (stored === "preview") return true;
-  } catch { /* ignore */ }
-  return true; // default to preview
-}
-
-function CodeBlock({ children, className, onOpenCanvas, ...props }: CodeBlockProps) {
+function CodeBlock({
+  children,
+  className,
+  onOpenCanvas,
+  disablePreview = false,
+  disableCanvas = false,
+  ...props
+}: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
   const language = className?.match(/language-(\S+)/)?.[1] || "";
   const codeText = useMemo(() => normalizeCode(children).trim(), [children]);
-  const canOpenCanvas = Boolean(onOpenCanvas) && codeText.split("\n").length > 10;
-  const previewable = canPreview(language);
-  const [showPreview, setShowPreview] = useState(() => previewable && getDefaultPreviewPref());
+  const canOpenCanvas = !disableCanvas && Boolean(onOpenCanvas) && codeText.split("\n").length > 10;
+  const previewable = !disablePreview && canPreview(language);
+  const splitContainerRef = useRef<HTMLDivElement | null>(null);
+  const draggingRef = useRef(false);
+  const [splitRatio, setSplitRatio] = useState(0.5);
 
   function handleCopy() {
     void navigator.clipboard.writeText(codeText);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }
+
+  useEffect(() => {
+    const onPointerMove = (event: PointerEvent) => {
+      if (!draggingRef.current || !splitContainerRef.current) return;
+      const rect = splitContainerRef.current.getBoundingClientRect();
+      if (!rect.width) return;
+      const relative = (event.clientX - rect.left) / rect.width;
+      setSplitRatio(Math.min(0.8, Math.max(0.2, relative)));
+    };
+    const onPointerUp = () => {
+      draggingRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, []);
 
   return (
     <div className="group relative my-4 flex flex-col rounded-xl border border-[var(--border-default)] bg-[var(--bg-code)] shadow-sm">
@@ -72,24 +94,7 @@ function CodeBlock({ children, className, onOpenCanvas, ...props }: CodeBlockPro
           {language ? language.charAt(0).toUpperCase() + language.slice(1) : "Code"}
         </span>
         <div className="flex items-center gap-1">
-          {previewable ? (
-            <button
-              type="button"
-              onClick={() => {
-                setShowPreview((prev) => {
-                  const next = !prev;
-                  try { window.localStorage.setItem(CODE_PREVIEW_PREF_KEY, next ? "preview" : "code"); } catch { /* ignore */ }
-                  return next;
-                });
-              }}
-              className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition hover:bg-[var(--bg-hover)] ${
-                showPreview ? "text-[var(--accent-cyan)]" : "text-[var(--text-secondary)]"
-              }`}
-            >
-              {showPreview ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-              <span>{showPreview ? "Code" : "Preview"}</span>
-            </button>
-          ) : null}
+          {previewable ? <span className="px-2 py-1 text-[10px] text-[var(--text-secondary)]">Split preview</span> : null}
           <button
             type="button"
             onClick={handleCopy}
@@ -118,9 +123,33 @@ function CodeBlock({ children, className, onOpenCanvas, ...props }: CodeBlockPro
           ) : null}
         </div>
       </div>
-      {showPreview && previewable ? (
-        <div className="rounded-b-xl overflow-hidden">
-          <CodePreview code={codeText} language={language as PreviewLanguage} />
+      {previewable ? (
+        <div
+          ref={splitContainerRef}
+          className="relative flex min-h-[260px] rounded-b-xl overflow-hidden"
+        >
+          <div
+            className="h-full min-h-0 bg-[var(--bg-code)]"
+            style={{ width: `calc(${Math.round(splitRatio * 100)}% - 1px)` }}
+          >
+            <pre className="h-full !m-0 overflow-x-auto !p-4" {...props}>
+              <code className={className}>{children}</code>
+            </pre>
+          </div>
+          <button
+            type="button"
+            className="absolute inset-y-0 z-10 w-2 cursor-col-resize bg-[color-mix(in_oklab,var(--accent-cyan)_28%,transparent)] hover:bg-[color-mix(in_oklab,var(--accent-cyan)_45%,transparent)] max-md:hidden"
+            style={{ left: `calc(${Math.round(splitRatio * 100)}% - 4px)` }}
+            aria-label="Resize code and preview panes"
+            onPointerDown={() => {
+              draggingRef.current = true;
+              document.body.style.cursor = "col-resize";
+              document.body.style.userSelect = "none";
+            }}
+          />
+          <div className="min-w-0 flex-1">
+            <CodePreview code={codeText} language={language as PreviewLanguage} />
+          </div>
         </div>
       ) : (
         <pre className="!m-0 overflow-x-auto rounded-b-xl !p-4" {...props}>
@@ -206,7 +235,16 @@ function normalizeMathDelimiters(content: string) {
   return result;
 }
 
-export function MarkdownRenderer({ content, citations = [], mode, chatId, onOpenCanvas, onCitationClick, onSubmitQuizAnswers }: MarkdownRendererProps) {
+export function MarkdownRenderer({
+  content,
+  citations = [],
+  mode,
+  userMessage = false,
+  chatId,
+  onOpenCanvas,
+  onCitationClick,
+  onSubmitQuizAnswers,
+}: MarkdownRendererProps) {
   const cleanContent = useMemo(() => {
     let baseContent = normalizeMathDelimiters(content);
     if (mode === "quiz" || mode === "exam" || mode === "flashcard" || isQuizContent(content) || isFlashcardContent(content)) {
@@ -390,7 +428,13 @@ export function MarkdownRenderer({ content, citations = [], mode, chatId, onOpen
               );
             }
             return (
-              <CodeBlock className={className} onOpenCanvas={onOpenCanvas} {...props}>
+              <CodeBlock
+                className={className}
+                onOpenCanvas={onOpenCanvas}
+                disablePreview={userMessage}
+                disableCanvas={userMessage}
+                {...props}
+              >
                 {children}
               </CodeBlock>
             );

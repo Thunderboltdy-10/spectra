@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { buildSrcdoc, canPreview, type PreviewLanguage } from "@/lib/code-sandbox";
 
 export type CanvasVersion = {
   id: string;
@@ -31,13 +32,19 @@ function sanitizeVersionLabel(value: unknown, fallback: string) {
 }
 
 function buildPreviewDocument(code: string, language: string) {
-  if (language === "html") return code;
-  if (language === "css") {
-    return `<!doctype html><html><head><style>${code}</style></head><body><main class="preview-root"><h1>CSS Preview</h1><p>Edit styles and click Run to refresh.</p></main></body></html>`;
+  const normalized = normalizeLanguage(language);
+  const previewLanguage = (
+    normalized === "typescript"
+      ? "tsx"
+      : normalized === "text"
+        ? "html"
+        : normalized
+  ) as PreviewLanguage;
+
+  if (canPreview(previewLanguage)) {
+    return buildSrcdoc(code, previewLanguage);
   }
-  if (language === "javascript" || language === "typescript") {
-    return `<!doctype html><html><body><main id="app"><h1>JS Preview</h1><p>Open console for runtime output.</p></main><script type="module">${code}\n<\/script></body></html>`;
-  }
+
   return `<!doctype html><html><body><pre>${code
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")

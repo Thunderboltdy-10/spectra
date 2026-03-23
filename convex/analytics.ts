@@ -2,6 +2,70 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { getUserByClerkId, dayKey } from "./helpers";
 
+function isIsoDay(value: string | undefined) {
+  return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
+}
+
+function startOfDayUtcTs(day: string) {
+  return Date.parse(`${day}T00:00:00.000Z`);
+}
+
+function addUtcDays(day: string, days: number) {
+  const base = startOfDayUtcTs(day);
+  if (!Number.isFinite(base)) return day;
+  const next = new Date(base + days * 24 * 60 * 60 * 1000);
+  return next.toISOString().slice(0, 10);
+}
+
+function resolveAnalyticsRange(args: {
+  days?: number;
+  startDay?: string;
+  endDay?: string;
+  maxDays?: number;
+  minDays?: number;
+}) {
+  const maxDays = Math.max(1, Math.round(args.maxDays ?? 180));
+  const minDays = Math.max(1, Math.round(args.minDays ?? 1));
+  if (isIsoDay(args.startDay) && isIsoDay(args.endDay) && (args.startDay as string) <= (args.endDay as string)) {
+    const startDay = args.startDay as string;
+    const endDay = args.endDay as string;
+    const spanDays = Math.max(1, Math.round((startOfDayUtcTs(addUtcDays(endDay, 1)) - startOfDayUtcTs(startDay)) / (24 * 60 * 60 * 1000)));
+    if (spanDays <= maxDays) {
+      const startTs = startOfDayUtcTs(startDay);
+      const endTsExclusive = startOfDayUtcTs(addUtcDays(endDay, 1));
+      return { startDay, endDay, startTs, endTsExclusive };
+    }
+  }
+
+  const daysBack = Math.min(maxDays, Math.max(minDays, Math.round(args.days ?? 30)));
+  const end = new Date();
+  const endDay = end.toISOString().slice(0, 10);
+  const start = new Date(end.getTime() - (daysBack - 1) * 24 * 60 * 60 * 1000);
+  const startDay = start.toISOString().slice(0, 10);
+  return {
+    startDay,
+    endDay,
+    startTs: startOfDayUtcTs(startDay),
+    endTsExclusive: startOfDayUtcTs(addUtcDays(endDay, 1)),
+  };
+}
+
+function modelTierFromCatalogEntry(entry: {
+  isFree?: boolean;
+  inputCostPerM?: number;
+  outputCostPerM?: number;
+} | undefined): "free" | "cheap" | "mid" | "premium" {
+  if (!entry) return "cheap";
+  if (entry.isFree) return "free";
+  const input = typeof entry.inputCostPerM === "number" && Number.isFinite(entry.inputCostPerM) ? Math.max(0, entry.inputCostPerM) : 3;
+  const output = typeof entry.outputCostPerM === "number" && Number.isFinite(entry.outputCostPerM) ? Math.max(0, entry.outputCostPerM) : 3;
+  const blended = (input + output) / 2;
+  if (blended <= 0.01) return "free";
+  if (blended <= 2) return "cheap";
+  if (blended <= 10) return "mid";
+  return "premium";
+}
+
 export const recordSession = mutation({
   args: {
     actorClerkId: v.string(),
@@ -68,22 +132,27 @@ export const getStudentAnalytics = query({
   args: {
     actorClerkId: v.string(),
     days: v.optional(v.number()),
+    startDay: v.optional(v.string()),
+    endDay: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
     if (!actor) throw new Error("Actor not found");
 
-    const daysBack = args.days ?? 30;
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - daysBack);
-    const cutoffDay = cutoff.toISOString().slice(0, 10);
+    const range = resolveAnalyticsRange({
+      days: args.days,
+      startDay: args.startDay,
+      endDay: args.endDay,
+      maxDays: 180,
+      minDays: 1,
+    });
 
     const rows = await ctx.db
       .query("studentAnalytics")
       .withIndex("by_user_day", (q) => q.eq("userId", actor._id))
       .collect();
 
-    return rows.filter((r) => r.day >= cutoffDay);
+    return rows.filter((r) => r.day >= range.startDay && r.day <= range.endDay);
   },
 });
 
@@ -207,6 +276,8 @@ export const getClassAnalytics = query({
   args: {
     actorClerkId: v.string(),
     days: v.optional(v.number()),
+    startDay: v.optional(v.string()),
+    endDay: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
@@ -215,17 +286,20 @@ export const getClassAnalytics = query({
       throw new Error("Only teachers and admins can view class analytics");
     }
 
-    const daysBack = args.days ?? 30;
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - daysBack);
-    const cutoffDay = cutoff.toISOString().slice(0, 10);
+    const range = resolveAnalyticsRange({
+      days: args.days,
+      startDay: args.startDay,
+      endDay: args.endDay,
+      maxDays: 180,
+      minDays: 1,
+    });
 
     const rows = await ctx.db
       .query("studentAnalytics")
       .withIndex("by_org_day", (q) => q.eq("orgId", actor.orgId))
       .collect();
 
-    return rows.filter((r) => r.day >= cutoffDay);
+    return rows.filter((r) => r.day >= range.startDay && r.day <= range.endDay);
   },
 });
 
@@ -233,13 +307,22 @@ export const getStudentPromptSignals = query({
   args: {
     actorClerkId: v.string(),
     days: v.optional(v.number()),
+    startDay: v.optional(v.string()),
+    endDay: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
     if (!actor) throw new Error("Actor not found");
 
-    const daysBack = args.days ?? 30;
-    const cutoffTs = Date.now() - daysBack * 24 * 60 * 60 * 1000;
+    const range = resolveAnalyticsRange({
+      days: args.days,
+      startDay: args.startDay,
+      endDay: args.endDay,
+      maxDays: 180,
+      minDays: 1,
+    });
+    const cutoffTs = range.startTs;
+    const upperTs = range.endTsExclusive;
 
     const messages = await ctx.db
       .query("messages")
@@ -252,7 +335,7 @@ export const getStudentPromptSignals = query({
     const modelCounts = new Map<string, number>();
 
     for (const message of messages) {
-      if (message.createdAt < cutoffTs) continue;
+      if (message.createdAt < cutoffTs || message.createdAt >= upperTs) continue;
 
       const date = new Date(message.createdAt);
       const day = date.toISOString().slice(0, 10);
@@ -313,14 +396,22 @@ export const getStudentEnhancedAnalytics = query({
   args: {
     actorClerkId: v.string(),
     days: v.optional(v.number()),
+    startDay: v.optional(v.string()),
+    endDay: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
     if (!actor) throw new Error("Actor not found");
 
-    const daysBack = Math.min(Math.max(args.days ?? 30, 7), 120);
-    const cutoffTs = Date.now() - daysBack * 24 * 60 * 60 * 1000;
-    const cutoffDay = new Date(cutoffTs).toISOString().slice(0, 10);
+    const range = resolveAnalyticsRange({
+      days: args.days,
+      startDay: args.startDay,
+      endDay: args.endDay,
+      maxDays: 180,
+      minDays: 7,
+    });
+    const cutoffTs = range.startTs;
+    const upperTs = range.endTsExclusive;
 
     const [messages, timers, quizzes, studentRows] = await Promise.all([
       ctx.db
@@ -345,7 +436,7 @@ export const getStudentEnhancedAnalytics = query({
     const messageCountsByDay = new Map<string, number>();
 
     for (const message of messages) {
-      if (message.createdAt < cutoffTs) continue;
+      if (message.createdAt < cutoffTs || message.createdAt >= upperTs) continue;
       modeMessageCounts[message.mode] = (modeMessageCounts[message.mode] ?? 0) + 1;
       const day = new Date(message.createdAt).toISOString().slice(0, 10);
       messageCountsByDay.set(day, (messageCountsByDay.get(day) ?? 0) + 1);
@@ -354,7 +445,7 @@ export const getStudentEnhancedAnalytics = query({
     const timerSecondsByDay = new Map<string, number>();
     for (const timer of timers) {
       const anchorTs = timer.endedAt ?? timer.startedAt;
-      if (anchorTs < cutoffTs) continue;
+      if (anchorTs < cutoffTs || anchorTs >= upperTs) continue;
       const day = new Date(anchorTs).toISOString().slice(0, 10);
       timerSecondsByDay.set(day, (timerSecondsByDay.get(day) ?? 0) + Math.max(0, timer.totalSeconds));
     }
@@ -379,7 +470,7 @@ export const getStudentEnhancedAnalytics = query({
 
     const quizTrendMap = new Map<string, { totalPercent: number; attempts: number }>();
     for (const quiz of quizzes) {
-      if (quiz.submittedAt < cutoffTs) continue;
+      if (quiz.submittedAt < cutoffTs || quiz.submittedAt >= upperTs) continue;
       const day = new Date(quiz.submittedAt).toISOString().slice(0, 10);
       const total = Math.max(1, quiz.total);
       const scorePercent = (quiz.score / total) * 100;
@@ -396,7 +487,7 @@ export const getStudentEnhancedAnalytics = query({
         averageScore: Math.round(stats.totalPercent / Math.max(1, stats.attempts)),
       }));
 
-    const filteredRows = studentRows.filter((row) => row.day >= cutoffDay);
+    const filteredRows = studentRows.filter((row) => row.day >= range.startDay && row.day <= range.endDay);
     const activeDays = new Set(timeSpentDaily.map((item) => item.day)).size || 1;
     const totalMessages = Object.values(modeMessageCounts).reduce((sum, value) => sum + value, 0);
     const totalStudySeconds = timeSpentDaily.reduce((sum, item) => sum + item.totalSeconds, 0);
@@ -419,6 +510,107 @@ export const getStudentEnhancedAnalytics = query({
         topicDepth: Number((uniqueTopics / activeDays).toFixed(1)),
         activeDays,
       },
+    };
+  },
+});
+
+export const getStudentCostAnalytics = query({
+  args: {
+    actorClerkId: v.string(),
+    days: v.optional(v.number()),
+    startDay: v.optional(v.string()),
+    endDay: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) throw new Error("Actor not found");
+
+    const range = resolveAnalyticsRange({
+      days: args.days,
+      startDay: args.startDay,
+      endDay: args.endDay,
+      maxDays: 180,
+      minDays: 1,
+    });
+
+    const [events, catalogRows] = await Promise.all([
+      ctx.db
+        .query("usageEvents")
+        .withIndex("by_user_day", (q) => q.eq("userId", actor._id))
+        .collect(),
+      ctx.db
+        .query("modelCatalog")
+        .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
+        .collect(),
+    ]);
+
+    const byModel = new Map(catalogRows.map((row) => [row.modelId, row]));
+    const dailyMap = new Map<string, {
+      free: number;
+      cheap: number;
+      mid: number;
+      premium: number;
+      total: number;
+    }>();
+    const leaderboard = new Map<string, {
+      requestCount: number;
+      totalTokens: number;
+      totalCostCents: number;
+    }>();
+
+    for (const event of events) {
+      if (event.day < range.startDay || event.day > range.endDay) continue;
+      const modelId = event.model;
+      const catalog = byModel.get(modelId);
+      const tier = modelTierFromCatalogEntry(catalog);
+      const cost = Math.max(0, event.costCents ?? 0);
+
+      const daily = dailyMap.get(event.day) ?? { free: 0, cheap: 0, mid: 0, premium: 0, total: 0 };
+      daily[tier] += cost;
+      daily.total += cost;
+      dailyMap.set(event.day, daily);
+
+      const modelStats = leaderboard.get(modelId) ?? { requestCount: 0, totalTokens: 0, totalCostCents: 0 };
+      modelStats.requestCount += 1;
+      modelStats.totalTokens += Math.max(0, event.totalTokens ?? 0);
+      modelStats.totalCostCents += cost;
+      leaderboard.set(modelId, modelStats);
+    }
+
+    const daily = [...dailyMap.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([day, values]) => ({
+        day,
+        free: Number(values.free.toFixed(6)),
+        cheap: Number(values.cheap.toFixed(6)),
+        mid: Number(values.mid.toFixed(6)),
+        premium: Number(values.premium.toFixed(6)),
+        total: Number(values.total.toFixed(6)),
+      }));
+
+    const byModelRows = [...leaderboard.entries()]
+      .map(([modelId, stats]) => ({
+        modelId,
+        requestCount: stats.requestCount,
+        totalTokens: stats.totalTokens,
+        totalCostCents: Number(stats.totalCostCents.toFixed(6)),
+      }))
+      .sort((a, b) => b.totalCostCents - a.totalCostCents || b.requestCount - a.requestCount)
+      .slice(0, 25);
+
+    const currentMonthKey = dayKey().slice(0, 7);
+    const estimatedMonthCostCents = Number(
+      events
+        .filter((event) => event.day.startsWith(`${currentMonthKey}-`))
+        .reduce((sum, event) => sum + Math.max(0, event.costCents ?? 0), 0)
+        .toFixed(6),
+    );
+
+    return {
+      daily,
+      byModel: byModelRows,
+      estimatedMonthCostCents,
+      monthKey: currentMonthKey,
     };
   },
 });

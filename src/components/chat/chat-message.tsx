@@ -7,7 +7,6 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
-import { RichText } from "@/components/chat/rich-text";
 import { ModelRoutingBadge } from "@/components/chat/model-routing-badge";
 import { ProviderLogo } from "@/components/provider-logo";
 import { ThinkingBlock } from "@/components/chat/thinking-block";
@@ -25,6 +24,7 @@ type ChatMessageProps = {
   messageId?: string;
   role: "user" | "assistant" | "system";
   content: string;
+  cancelled?: boolean;
   thinkingContent?: string;
   enhancedContent?: string;
   attachments?: string[];
@@ -58,6 +58,7 @@ type ChatMessageProps = {
   siblingIndex?: number;
   siblingCount?: number;
   onNavigateSibling?: (direction: "prev" | "next") => void;
+  preferRouteTraceModel?: boolean;
   animateIn?: boolean;
   children?: React.ReactNode;
 };
@@ -149,6 +150,7 @@ export function ChatMessage({
   messageId,
   role,
   content,
+  cancelled = false,
   thinkingContent,
   enhancedContent,
   attachments,
@@ -177,6 +179,7 @@ export function ChatMessage({
   siblingIndex,
   siblingCount,
   onNavigateSibling,
+  preferRouteTraceModel = true,
   animateIn = true,
   children,
 }: ChatMessageProps) {
@@ -191,7 +194,9 @@ export function ChatMessage({
   const tts = useTextToSpeech();
   const validCitations = citations.filter((c) => c.url || c.resourceId || c.filename);
   const searchCitations = validCitations.filter((citation) => citation.sourceType === "search");
-  const activeModelId = modelUsed ?? routeTrace?.selected.modelId;
+  const activeModelId = preferRouteTraceModel
+    ? routeTrace?.selected?.modelId ?? modelUsed
+    : modelUsed ?? routeTrace?.selected?.modelId;
   const activeProvider = activeModelId?.split("/")[0] ?? "openrouter";
   const renderedContent = content;
   const parsedDocument = useMemo(() => parseGeneratedDocument(renderedContent), [renderedContent]);
@@ -267,7 +272,7 @@ export function ChatMessage({
                 </div>
               </div>
             ) : (
-              <RichText content={displayUserContent} className="text-[15px] leading-7 text-[var(--text-primary)]" />
+              <MarkdownRenderer content={displayUserContent} userMessage />
             )}
             {attachmentPreviews && attachmentPreviews.length > 0 ? (
               <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
@@ -370,6 +375,11 @@ export function ChatMessage({
                   whyThisResponse={whyThisResponse}
                   routeTrace={routeTrace}
                 />
+                {cancelled ? (
+                  <span className="inline-flex items-center rounded-full border border-[color-mix(in_oklab,var(--warning)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_12%,var(--bg-secondary))] px-2 py-0.5 text-[10px] text-[var(--warning)]">
+                    Cancelled
+                  </span>
+                ) : null}
                 {typeof siblingCount === "number" && siblingCount > 1 && typeof siblingIndex === "number" ? (
                   <span className="inline-flex items-center gap-0.5 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1 text-[10px] text-[var(--text-secondary)]">
                     <button

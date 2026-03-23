@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import type { Citation, RouteTrace } from "@/types";
 import type { ParsedQuizQuestion } from "@/lib/quiz-parser";
 
-export type PanelView = "settings" | "route-trace" | "sources" | "orchestration" | "quiz" | null;
+export type PanelView = "settings" | "route-trace" | "sources" | "orchestration" | "quiz" | "canvas" | null;
 
 export type PanelQuizData = {
   panelId: string;
@@ -31,13 +31,17 @@ type PanelContextValue = {
   openPanel: (view: PanelView, data?: PanelData) => void;
   closePanel: () => void;
   togglePanel: (view: PanelView, data?: PanelData) => void;
+  backPanel: () => void;
+  canGoBack: boolean;
 };
 
 const PanelContext = createContext<PanelContextValue | null>(null);
+type PanelHistoryEntry = { view: Exclude<PanelView, null>; data: PanelData };
 
 export function PanelProvider({ children }: { children: React.ReactNode }) {
   const [activeView, setActiveView] = useState<PanelView>(null);
   const [panelData, setPanelData] = useState<PanelData>({});
+  const [history, setHistory] = useState<PanelHistoryEntry[]>([]);
   const activeViewRef = useRef<PanelView>(null);
   const panelDataRef = useRef<PanelData>({});
 
@@ -85,6 +89,15 @@ export function PanelProvider({ children }: { children: React.ReactNode }) {
     if (sameView && samePanelData(panelDataRef.current, { ...panelDataRef.current, ...data })) {
       return;
     }
+    if (view && activeViewRef.current && activeViewRef.current !== view) {
+      setHistory((prev) => [
+        ...prev,
+        {
+          view: activeViewRef.current as Exclude<PanelView, null>,
+          data: panelDataRef.current,
+        },
+      ].slice(-10));
+    }
     if (typeof window !== "undefined" && view) {
       window.dispatchEvent(new CustomEvent("ai-school:panel-opened", { detail: { view } }));
     }
@@ -101,6 +114,7 @@ export function PanelProvider({ children }: { children: React.ReactNode }) {
     }
     setActiveView(null);
     setPanelData({});
+    setHistory([]);
   }, []);
 
   const hasData = useCallback((data: PanelData) => {
@@ -120,14 +134,44 @@ export function PanelProvider({ children }: { children: React.ReactNode }) {
       } else {
         setActiveView(null);
         setPanelData({});
+        setHistory([]);
       }
     } else {
+      if (view && activeViewRef.current && activeViewRef.current !== view) {
+        setHistory((prev) => [
+          ...prev,
+          {
+            view: activeViewRef.current as Exclude<PanelView, null>,
+            data: panelDataRef.current,
+          },
+        ].slice(-10));
+      }
       if (activeViewRef.current !== view) {
         setActiveView(view);
       }
       setPanelData((prev) => (samePanelData(prev, data) ? prev : data));
     }
   }, [activeView, hasData, samePanelData]);
+
+  const backPanel = useCallback(() => {
+    setHistory((prev) => {
+      if (prev.length === 0) {
+        setActiveView(null);
+        setPanelData({});
+        return [];
+      }
+      const next = [...prev];
+      const previousEntry = next.pop();
+      if (!previousEntry) {
+        setActiveView(null);
+        setPanelData({});
+        return [];
+      }
+      setActiveView(previousEntry.view);
+      setPanelData(previousEntry.data);
+      return next;
+    });
+  }, []);
 
   return (
     <PanelContext.Provider
@@ -137,6 +181,8 @@ export function PanelProvider({ children }: { children: React.ReactNode }) {
         openPanel,
         closePanel,
         togglePanel,
+        backPanel,
+        canGoBack: history.length > 0,
       }}
     >
       {children}

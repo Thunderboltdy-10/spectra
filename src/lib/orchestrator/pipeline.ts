@@ -101,6 +101,7 @@ type ChatRequestBody = {
   regenerate?: boolean;
   retryAttempt?: number;
   skipUserMessagePersist?: boolean;
+  parentMessageId?: string;
   attachmentTypes?: string[];
   attachmentResourceIds?: string[];
   autoSettings?: {
@@ -974,7 +975,17 @@ export async function runChatPipeline(request: NextRequest) {
     }).catch(() => {});
   }
   const latestUserMessageInHistory = [...history].reverse().find((message) => message.role === "user");
-  const currentTurnParentMessageId = persistedUserMessageId ?? latestUserMessageInHistory?._id;
+  const requestedParentMessageId =
+    typeof body.parentMessageId === "string" && body.parentMessageId.trim().length > 0
+      ? body.parentMessageId.trim()
+      : undefined;
+  const requestedParentExists = requestedParentMessageId
+    ? history.some((message) => message._id === requestedParentMessageId && message.role === "user")
+    : false;
+  const currentTurnParentMessageId =
+    (requestedParentExists ? requestedParentMessageId : undefined)
+    ?? persistedUserMessageId
+    ?? latestUserMessageInHistory?._id;
   const resolvedUserMessageId = persistedUserMessageId ?? currentTurnParentMessageId;
   const historyForTurn = (() => {
     if (!isRegenerate) return history;
@@ -1274,6 +1285,7 @@ export async function runChatPipeline(request: NextRequest) {
     ? selectRuntimeSkills({
         message: auto.message,
         mode: effectiveMode,
+        allowedToolBundles: routePlan.allowedToolBundles,
         maxSkills: routePlan.responseBudget === "deep" ? 6 : 4,
       })
     : [];
@@ -1503,11 +1515,22 @@ export async function runChatPipeline(request: NextRequest) {
   if (routePlan.shouldUseWebSearch || usedRecentContextCache) {
     logger.info("web search complete", { urlCount: searchUrls.length });
     if (searchProvider === "model_fallback") {
-      earlyEventBuffer.push({ type: "search_status", status: "model_fallback" });
+      const fallbackSourceCount = Math.max(0, searchUrls.length);
+      earlyEventBuffer.push({
+        type: "search_status",
+        status: fallbackSourceCount > 0 ? "completed" : "failed",
+        searchStatus: "model_fallback",
+        sourceCount: fallbackSourceCount,
+      });
     } else if (searchProvider === "searxng") {
-      earlyEventBuffer.push({ type: "search_status", status: "real_search" });
+      earlyEventBuffer.push({
+        type: "search_status",
+        status: "completed",
+        searchStatus: "real_search",
+        sourceCount: Math.max(0, searchUrls.length),
+      });
     } else if (searchProvider === "error") {
-      earlyEventBuffer.push({ type: "search_status", status: "error" });
+      earlyEventBuffer.push({ type: "search_status", status: "failed", searchStatus: "error", sourceCount: 0 });
     }
   }
 
@@ -1588,6 +1611,7 @@ export async function runChatPipeline(request: NextRequest) {
       selectedAgent?.preferredModel,
     ].filter((value): value is string => Boolean(value)),
     previousModelUsed: previousAssistantModel,
+    conversationTurnCount: history.length,
     recentModels: combinedRecentAssistantModels,
     modelCatalog: catalog,
     modelRuntimeStats: runtimeStatMap,
@@ -2002,6 +2026,35 @@ export async function runChatPipeline(request: NextRequest) {
   const memoryStatus = memoryPlan.profileText
     ? `global ${memoryPlan.layer2Count} fact(s), topic ${memoryPlan.layer3Count} match(es)`
     : "no relevant memory entries";
+  const surfacedGlobalMemory = memoryPlan.layer2Text
+    .split("\n")
+    .map((line) => line.replace(/^-+\s*/, "").trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [labelPart, remainder = ""] = line.split(" - ", 2);
+      const [keyPart, textPart = ""] = remainder.split(":", 2);
+      const normalizedLabel = labelPart.toLowerCase();
+      const category = normalizedLabel.includes("identity")
+        ? "identity"
+        : normalizedLabel.includes("academic")
+          ? "academic"
+          : "preference";
+      return {
+        key: keyPart.trim() || labelPart.trim(),
+        text: textPart.trim(),
+        category: category as "identity" | "academic" | "preference",
+      };
+    })
+    .filter((entry) => entry.text.length > 0);
+  const surfacedTopicMemory = memoryPlan.retrievedTopicEntries.map((entry) => ({
+    key: entry.key,
+    text: entry.text,
+    category: entry.category,
+  }));
+  const usedMemory = [...surfacedGlobalMemory, ...surfacedTopicMemory].slice(0, 8);
+  if (usedMemory.length > 0) {
+    (route.trace as { usedMemory?: typeof usedMemory }).usedMemory = usedMemory;
+  }
   const directiveStatus = directiveMemorySummary.forgotten > 0
     || directiveMemorySummary.negativeLinks > 0
     || directiveMemorySummary.written > 0
@@ -2324,6 +2377,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     preferredCapabilities: ["reasoning"],
     preferredModelIds: [route.primaryModel],
     previousModelUsed: route.primaryModel,
+    conversationTurnCount: history.length,
     recentModels: combinedRecentAssistantModels,
     modelCatalog: catalog,
     modelRuntimeStats: runtimeStatMap,
@@ -2354,6 +2408,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         : ["reasoning"],
     preferredModelIds: [selectedAgent?.preferredModel, route.primaryModel].filter((value): value is string => Boolean(value)),
     previousModelUsed: route.primaryModel,
+    conversationTurnCount: history.length,
     recentModels: combinedRecentAssistantModels,
     modelCatalog: catalog,
     modelRuntimeStats: runtimeStatMap,
@@ -2399,6 +2454,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
       preferredCapabilities: ["reasoning"],
       preferredModelIds: [supportModel, route.primaryModel],
       previousModelUsed: route.primaryModel,
+      conversationTurnCount: history.length,
       recentModels: combinedRecentAssistantModels,
       modelCatalog: catalog,
       modelRuntimeStats: runtimeStatMap,

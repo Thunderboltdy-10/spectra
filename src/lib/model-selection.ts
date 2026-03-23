@@ -11,6 +11,14 @@ export type CatalogModelEntry = {
   createdAt?: number;
   inputCostPerM?: number;
   outputCostPerM?: number;
+  supportedParameters?: string[];
+  promptCachingSupported?: boolean;
+  cachePricingReadPerM?: number;
+  cachePricingWritePerM?: number;
+  endpointLatencyP50Ms?: number;
+  endpointUptimePercent?: number;
+  inputModalities?: string[];
+  outputModalities?: string[];
   tags?: string[];
   isFree?: boolean;
   costRating?: "low" | "medium" | "high";

@@ -19,7 +19,7 @@ export const MODEL_DEFAULTS = {
   verify: "openai/gpt-5.4-mini",
   openrouterAuto: "openrouter/auto",
   embedding: "openai/text-embedding-3-large",
-  promptEnhance: "openai/gpt-5.4-nano",
+  promptEnhance: "stepfun/step-3.5-flash:free",
   glmAir: "z-ai/glm-4.5-air:free",
   gptOss: "openai/gpt-oss-120b:free",
 };

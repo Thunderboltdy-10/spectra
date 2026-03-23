@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { toast } from "sonner";
 import { ChatComposer } from "@/components/chat/chat-composer";
-import { CodeCanvas } from "@/components/chat/code-canvas";
 import { ChatHeader } from "@/components/chat/chat-header";
 import { ChatMessages } from "@/components/chat/chat-messages";
 import { UnifiedPanel } from "@/components/chat/unified-panel";
@@ -116,13 +115,13 @@ const TOUR_STEPS: GuidedTourStep[] = [
 export function ChatLayout() {
   const chat = useChatState();
   const canvas = useCanvasState();
-  const { activeView: panelActiveView, openPanel, closePanel, togglePanel } = usePanel();
+  const { activeView: panelActiveView, openPanel, closePanel, togglePanel, backPanel, canGoBack } = usePanel();
   const [tourOpen, setTourOpen] = useState(false);
   const [activityCutoffTs, setActivityCutoffTs] = useState<number | null>(null);
   const [liveProgressAutoOpen, setLiveProgressAutoOpen] = useState(true);
-  const openedOrchestrationForStreamRef = useRef(false);
-  const orchestrationDismissedForStreamRef = useRef(false);
-  const previousPanelViewRef = useRef<string | null>(null);
+  const autoOpenedRouteTraceForSendRef = useRef(false);
+  const routeTraceDismissedForSendRef = useRef(false);
+  const previousStreamPhaseRef = useRef(chat.streamPhase);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -173,6 +172,9 @@ export function ChatLayout() {
       toast.info("This mode is coming soon.");
       return;
     }
+    if (!chat.confirmModeSwitch(nextMode)) {
+      return;
+    }
     chat.setMode(nextMode);
     void chat.updateExistingChatSettings({ mode: nextMode }).catch((error: unknown) =>
       toast.error(error instanceof Error ? error.message : "Failed to update mode"),
@@ -216,9 +218,10 @@ export function ChatLayout() {
 
   const lastModelUsed = useMemo(() => {
     if (modelTransitioning) return undefined;
+    if (chat.sending && chat.streamModelUsed) return chat.streamModelUsed;
     const lastAssistant = [...chat.messages].reverse().find((item) => item.role === "assistant");
     return lastAssistant?.modelUsed ?? chat.lastAutoResult?.modelUsed;
-  }, [chat.lastAutoResult?.modelUsed, chat.messages, modelTransitioning]);
+  }, [chat.lastAutoResult?.modelUsed, chat.messages, chat.sending, chat.streamModelUsed, modelTransitioning]);
   const lastResponseAt = useMemo(() => {
     const lastAssistant = [...chat.messages].reverse().find((item) => item.role === "assistant");
     return lastAssistant?.createdAt;
@@ -252,25 +255,10 @@ export function ChatLayout() {
   }, [chat, isFirstSession]);
 
   useEffect(() => {
-    const previous = previousPanelViewRef.current;
-    if (
-      previous === "orchestration" &&
-      panelActiveView !== "orchestration" &&
-      chat.sending
-    ) {
-      orchestrationDismissedForStreamRef.current = true;
-    }
-    if (panelActiveView === "orchestration") {
-      orchestrationDismissedForStreamRef.current = false;
-    }
-    previousPanelViewRef.current = panelActiveView;
-  }, [chat.sending, panelActiveView]);
-
-  useEffect(() => {
     const onPanelClosed = (event: Event) => {
       const detail = (event as CustomEvent<{ view?: string }>).detail;
-      if (detail?.view === "orchestration" && chat.sending) {
-        orchestrationDismissedForStreamRef.current = true;
+      if (detail?.view === "route-trace" && chat.sending) {
+        routeTraceDismissedForSendRef.current = true;
       }
     };
     window.addEventListener("ai-school:panel-closed", onPanelClosed);
@@ -286,37 +274,37 @@ export function ChatLayout() {
   );
 
   useEffect(() => {
-    const meaningfulOrchestration =
-      chat.activeCollaborators.length > 0
-      || chat.collaboratorPhase !== "idle"
-      || chat.streamPhase === "searching"
-      || chat.streamPhase === "compacting"
-      || chat.streamPhase === "synthesizing";
-    const shouldAutoOpen = chat.sending && liveProgressAutoOpen && meaningfulOrchestration;
-
-    if (
-      shouldAutoOpen &&
-      panelActiveView !== "orchestration" &&
-      !orchestrationDismissedForStreamRef.current
-    ) {
-      openPanel("orchestration");
-      openedOrchestrationForStreamRef.current = true;
+    if (!chat.sending) {
+      autoOpenedRouteTraceForSendRef.current = false;
+      routeTraceDismissedForSendRef.current = false;
+      previousStreamPhaseRef.current = "idle";
       return;
     }
 
-    if (!chat.sending) {
-      openedOrchestrationForStreamRef.current = false;
-      orchestrationDismissedForStreamRef.current = false;
+    const previousPhase = previousStreamPhaseRef.current;
+    const currentPhase = chat.streamPhase;
+    const enteredOrchestration =
+      previousPhase === "idle"
+      && (currentPhase === "routing" || currentPhase === "searching" || currentPhase === "thinking");
+
+    if (
+      liveProgressAutoOpen
+      && enteredOrchestration
+      && !autoOpenedRouteTraceForSendRef.current
+      && !routeTraceDismissedForSendRef.current
+    ) {
+      openPanel("route-trace");
+      autoOpenedRouteTraceForSendRef.current = true;
     }
-  }, [
-    chat.activeCollaborators.length,
-    chat.collaboratorPhase,
-    chat.streamPhase,
-    chat.sending,
-    liveProgressAutoOpen,
-    openPanel,
-    panelActiveView,
-  ]);
+
+    previousStreamPhaseRef.current = currentPhase;
+  }, [chat.sending, chat.streamPhase, liveProgressAutoOpen, openPanel]);
+
+  useEffect(() => {
+    if (panelActiveView !== "canvas" && canvas.isOpen) {
+      canvas.closeCanvas();
+    }
+  }, [canvas, panelActiveView]);
 
   function handleRegenerateLastResponse() {
     void chat.regenerateLastResponse();
@@ -458,6 +446,13 @@ export function ChatLayout() {
         onEscape={() => {
           if (chat.mobileSidebarOpen) {
             chat.setMobileSidebarOpen(false);
+          } else if (panelActiveView === "canvas" && canvas.isOpen) {
+            canvas.closeCanvas();
+            if (canGoBack) {
+              backPanel();
+            } else {
+              closePanel();
+            }
           } else {
             closePanel();
           }
@@ -477,11 +472,11 @@ export function ChatLayout() {
         <div className="fixed inset-0 z-40 md:hidden">
           <button
             type="button"
-            className="absolute inset-0 bg-black/45"
+            className="absolute inset-0 bg-black/45 backdrop-blur-[2px]"
             onClick={() => chat.setMobileSidebarOpen(false)}
             aria-label="Close sidebar"
           />
-          <aside className="absolute inset-y-0 left-0 w-[88vw] max-w-[340px] border-r border-[var(--border-default)] bg-[var(--bg-sidebar)] shadow-[var(--shadow-soft)]">
+          <aside className="absolute inset-y-0 left-0 w-[85vw] max-w-[85vw] border-r border-[var(--border-default)] bg-[var(--bg-sidebar)] shadow-[var(--shadow-soft)]">
             <ChatSidebar
               {...sidebarProps}
               collapsed={false}
@@ -524,6 +519,7 @@ export function ChatLayout() {
           showOrchestrationButton={canOpenOrchestration}
           orchestrationActive={panelActiveView === "orchestration"}
           settingsActive={panelActiveView === "settings"}
+          mobileUtilitySlot={<GlobalUtilityDock placement="profile-bar" className="w-full" />}
           onExport={(format) => {
             if (format === "pdf") {
               const node = document.querySelector("[data-conversation-export]") ?? document.querySelector("main");
@@ -558,6 +554,7 @@ export function ChatLayout() {
           streamPhase={chat.streamPhase}
           streamError={chat.streamError}
           searchStatusBanner={chat.searchStatusBanner}
+          searchStatusInfo={chat.searchStatusInfo}
           proactiveBanner={chat.proactiveBanner}
           chatId={chat.selectedChatId}
           onRetry={() => void chat.retryLastMessage()}
@@ -631,6 +628,7 @@ export function ChatLayout() {
           mode={chat.mode}
           thinkingLevel={chat.thinkingLevel}
           lastModelUsed={lastModelUsed}
+          streamRouteTrace={chat.liveRouteTrace}
           lastAutoResult={chat.lastAutoResult}
           activeCollaborators={chat.activeCollaborators}
           collaboratorPhase={chat.collaboratorPhase}
@@ -640,6 +638,7 @@ export function ChatLayout() {
               language: payload.language,
               label: "From chat response",
             });
+            openPanel("canvas");
           }}
           emptyState={
             isFirstSession
@@ -766,39 +765,6 @@ export function ChatLayout() {
         </div>
       </main>
 
-      <CodeCanvas
-        open={canvas.isOpen}
-        code={canvas.code}
-        language={canvas.language}
-        previewDoc={canvas.previewDoc}
-        versions={canvas.versions}
-        activeVersionId={canvas.currentVersion?.id}
-        onClose={canvas.closeCanvas}
-        onCodeChange={canvas.setCode}
-        onLanguageChange={canvas.setLanguage}
-        onRun={canvas.runPreview}
-        onSaveVersion={canvas.saveVersion}
-        onRestoreVersion={canvas.restoreVersion}
-        onAskAiModify={(instruction) => {
-          const artifactPrompt = [
-            "Modify this artifact according to the instruction.",
-            `Instruction: ${instruction}`,
-            `Language: ${canvas.language}`,
-            "Return the complete updated code in one fenced block.",
-            "",
-            "Current code:",
-            "```",
-            canvas.code,
-            "```",
-          ].join("\n");
-          void chat.sendMessage(artifactPrompt, {
-            chatIdOverride: chat.selectedChatId || undefined,
-            skipLocalUser: false,
-            retryAttempt: 0,
-          });
-        }}
-      />
-
       <UnifiedPanel
           settingsProps={{
             models: chat.models,
@@ -842,6 +808,11 @@ export function ChatLayout() {
               toast.error(error instanceof Error ? error.message : "Failed to delete file"),
             );
           },
+          onRetryResource: (resourceId) => {
+            void chat.retryPersonalResource(resourceId).catch((error: unknown) =>
+              toast.error(error instanceof Error ? error.message : "Failed to retry processing"),
+            );
+          },
           onUploadPersonalFiles: (files) => {
             void chat.uploadPersonalResources(files).catch((error: unknown) =>
               toast.error(error instanceof Error ? error.message : "Failed to upload file"),
@@ -854,14 +825,52 @@ export function ChatLayout() {
           activeCollaborators: chat.activeCollaborators,
           streamPhase: chat.streamPhase,
           livePhasePlan: chat.livePhasePlan,
-          routeTrace: latestRouteTrace,
+          routeTrace: chat.liveRouteTrace ?? latestRouteTrace,
           lastModelUsed,
           searchEnabled: chat.lastAutoResult?.searchEnabled,
         }}
+        canvasProps={{
+          open: canvas.isOpen,
+          code: canvas.code,
+          language: canvas.language,
+          previewDoc: canvas.previewDoc,
+          versions: canvas.versions,
+          activeVersionId: canvas.currentVersion?.id,
+          onClose: () => {
+            canvas.closeCanvas();
+            if (panelActiveView === "canvas") {
+              if (canGoBack) {
+                backPanel();
+              } else {
+                closePanel();
+              }
+            }
+          },
+          onCodeChange: canvas.setCode,
+          onLanguageChange: canvas.setLanguage,
+          onRun: canvas.runPreview,
+          onSaveVersion: canvas.saveVersion,
+          onRestoreVersion: canvas.restoreVersion,
+          onAskAiModify: (instruction) => {
+            const artifactPrompt = [
+              "Modify this artifact according to the instruction.",
+              `Instruction: ${instruction}`,
+              `Language: ${canvas.language}`,
+              "Return the complete updated code in one fenced block.",
+              "",
+              "Current code:",
+              "```",
+              canvas.code,
+              "```",
+            ].join("\n");
+            void chat.sendMessage(artifactPrompt, {
+              chatIdOverride: chat.selectedChatId || undefined,
+              skipLocalUser: false,
+              retryAttempt: 0,
+            });
+          },
+        }}
       />
-
-
-      <GlobalUtilityDock placement="floating" />
 
       <GuidedTour
         open={tourOpen}

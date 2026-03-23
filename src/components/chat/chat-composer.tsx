@@ -12,7 +12,6 @@ import {
   ChevronDown,
   ChevronUp,
   FileText,
-  Layers,
   Loader2,
   Mic,
   MoreHorizontal,
@@ -307,11 +306,9 @@ export function ChatComposer(props: ChatComposerProps) {
     autoEnhancePrompt,
     autoThinking,
     autoSearch,
-    autoCompaction,
     onAutoEnhancePromptChange,
     onAutoThinkingChange,
     onAutoSearchChange,
-    onAutoCompactionChange,
     onSlashCommand,
     lastAutoResult,
     messageCount = 0,
@@ -489,7 +486,7 @@ export function ChatComposer(props: ChatComposerProps) {
     if (!textarea) return;
 
     textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 220)}px`;
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
   }, [message]);
 
   useEffect(() => {
@@ -1208,13 +1205,6 @@ export function ChatComposer(props: ChatComposerProps) {
                 title="Search"
                 icon={<Search className="h-3.5 w-3.5" />}
               />
-              <SettingPill
-                label="Compact"
-                value={autoCompaction}
-                onChange={onAutoCompactionChange}
-                title="Compact"
-                icon={<Layers className="h-3.5 w-3.5" />}
-              />
             </div>
 
             <div className="sm:hidden">
@@ -1233,9 +1223,6 @@ export function ChatComposer(props: ChatComposerProps) {
                   </DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => onAutoSearchChange(nextPreference(autoSearch))}>
                     Search: {preferenceLabel(autoSearch)}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => onAutoCompactionChange(nextPreference(autoCompaction))}>
-                    Compact: {preferenceLabel(autoCompaction)}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -1257,7 +1244,7 @@ export function ChatComposer(props: ChatComposerProps) {
           ) : null}
 
           <div className={sidebarExpanded ? "flex items-end gap-2 px-3 pb-3 pt-2" : "flex flex-col"}>
-            <div className={sidebarExpanded ? "flex-1 min-w-0" : "px-4 py-1.5"}>
+            <div className={sidebarExpanded ? "flex-1 min-w-0 max-h-[200px] overflow-y-auto" : "max-h-[200px] overflow-y-auto px-4 py-1.5"}>
               <textarea
                 ref={textareaRef}
                 value={message}
@@ -1267,7 +1254,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 data-tour="composer"
                 aria-label="Message input"
                 rows={1}
-                className="max-h-[220px] min-h-[24px] w-full resize-none appearance-none border-0 bg-transparent pl-3 pr-0 py-1 text-[15px] leading-6 text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] shadow-none outline-none ring-0 focus:border-transparent focus:outline-none focus:ring-0 focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none"
+                className="min-h-[24px] w-full resize-none appearance-none border-0 bg-transparent pl-3 pr-0 py-1 text-[15px] leading-6 text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] shadow-none outline-none ring-0 focus:border-transparent focus:outline-none focus:ring-0 focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none"
                 onKeyDown={handleKeyDown}
               />
               {speech.isListening ? (

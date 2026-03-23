@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Copy, Download, Play, Save, Sparkles, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronLeft, Copy, Download, Play, Save, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import type { CanvasVersion } from "@/hooks/use-canvas-state";
 import { Button } from "@/components/ui/button";
+import { buildSrcdoc, canPreview as canPreviewLanguage, type PreviewLanguage } from "@/lib/code-sandbox";
 
-type CanvasTab = "editor" | "preview" | "versions";
+type CanvasTab = "workspace" | "versions";
 
 type CodeCanvasProps = {
   open: boolean;
@@ -22,6 +23,9 @@ type CodeCanvasProps = {
   onSaveVersion: () => void;
   onRestoreVersion: (id: string) => void;
   onAskAiModify: (instruction: string) => void;
+  embedded?: boolean;
+  showBackButton?: boolean;
+  onBack?: () => void;
 };
 
 function downloadCode(code: string, language: string) {
@@ -62,24 +66,80 @@ export function CodeCanvas({
   onSaveVersion,
   onRestoreVersion,
   onAskAiModify,
+  embedded = false,
+  showBackButton = false,
+  onBack,
 }: CodeCanvasProps) {
-  const [tab, setTab] = useState<CanvasTab>("editor");
+  const [tab, setTab] = useState<CanvasTab>("workspace");
   const [instruction, setInstruction] = useState("");
+  const [splitRatio, setSplitRatio] = useState(0.5);
+  const splitRef = useRef<HTMLDivElement | null>(null);
+  const draggingRef = useRef(false);
+
+  const previewLanguage = useMemo(() => {
+    const normalized = language.toLowerCase().trim();
+    if (normalized === "ts") return "tsx";
+    if (normalized === "js") return "javascript";
+    if (normalized === "py") return "python";
+    if (normalized === "typescript") return "tsx";
+    if (normalized === "text") return "html";
+    return normalized;
+  }, [language]) as PreviewLanguage;
+
   const canPreview = useMemo(
-    () => ["html", "css", "javascript", "typescript", "text"].includes(language),
-    [language],
+    () => canPreviewLanguage(previewLanguage),
+    [previewLanguage],
   );
+  const previewSrcdoc = useMemo(() => {
+    if (canPreview) return buildSrcdoc(code, previewLanguage);
+    return previewDoc;
+  }, [canPreview, code, previewDoc, previewLanguage]);
+
+  useEffect(() => {
+    const onPointerMove = (event: PointerEvent) => {
+      if (!draggingRef.current || !splitRef.current) return;
+      const rect = splitRef.current.getBoundingClientRect();
+      if (!rect.width) return;
+      const relative = (event.clientX - rect.left) / rect.width;
+      setSplitRatio(Math.min(0.78, Math.max(0.22, relative)));
+    };
+    const onPointerUp = () => {
+      draggingRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, []);
 
   if (!open) return null;
 
+  const shellClasses = embedded
+    ? "flex h-full min-h-0 flex-col"
+    : "fixed md:static inset-y-0 right-0 z-[70] w-full md:w-[60vw] lg:w-[50vw] xl:w-[50vw] shrink-0 border-l border-[var(--border-default)] bg-[var(--bg-primary)] shadow-[var(--shadow-soft)]";
+
   return (
     <>
-      <div className="md:hidden fixed inset-0 z-[60] bg-black/50" aria-label="Close canvas" onClick={onClose} />
-      <aside className="fixed md:static inset-y-0 right-0 z-[70] w-full md:w-[60vw] lg:w-[50vw] xl:w-[50vw] shrink-0 border-l border-[var(--border-default)] bg-[var(--bg-primary)] shadow-[var(--shadow-soft)]">
+      {!embedded ? (
+        <div className="md:hidden fixed inset-0 z-[60] bg-black/50" aria-label="Close canvas" onClick={onClose} />
+      ) : null}
+      <aside className={shellClasses}>
         <header className="flex items-center justify-between border-b border-[var(--border-default)] px-4 py-3">
-          <div>
+          <div className="flex items-center gap-1.5">
+            {showBackButton ? (
+              <Button type="button" variant="ghost" size="icon" onClick={onBack} aria-label="Back to previous panel">
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+            ) : null}
+            <div>
             <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Canvas</p>
             <h3 className="font-display text-xl text-[var(--text-primary)]">Code Artifact</h3>
+            </div>
           </div>
           <div className="flex items-center gap-1.5">
             <Button
@@ -117,7 +177,7 @@ export function CodeCanvas({
         <div className="flex h-[calc(100%-73px)] min-h-0 flex-col">
           <div className="flex items-center justify-between border-b border-[var(--border-default)] px-3 py-2">
             <div className="flex items-center gap-1.5">
-              {(["editor", "preview", "versions"] as CanvasTab[]).map((item) => (
+              {(["workspace", "versions"] as CanvasTab[]).map((item) => (
                 <button
                   key={item}
                   type="button"
@@ -158,27 +218,50 @@ export function CodeCanvas({
           </div>
 
           <div className="min-h-0 flex-1 overflow-hidden p-3">
-            {tab === "editor" ? (
-              <textarea
-                value={code}
-                onChange={(event) => onCodeChange(event.target.value)}
-                className="h-full w-full resize-none rounded-xl border border-[var(--border-default)] bg-[var(--bg-code)] p-3 font-mono text-[13px] leading-6 text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-[var(--accent-cyan)]/35"
-                spellCheck={false}
-              />
-            ) : null}
-
-            {tab === "preview" ? (
+            {tab === "workspace" ? (
               canPreview ? (
-                <iframe
-                  title="Artifact preview"
-                  sandbox="allow-scripts"
-                  srcDoc={previewDoc}
-                  className="h-full w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)]"
-                />
-              ) : (
-                <div className="flex h-full items-center justify-center rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] text-sm text-[var(--text-secondary)]">
-                  Preview not available for this language.
+                <div
+                  ref={splitRef}
+                  className="relative flex h-full min-h-0 overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)]"
+                >
+                  <div
+                    className="h-full min-h-0"
+                    style={{ width: `${Math.round(splitRatio * 100)}%` }}
+                  >
+                    <textarea
+                      value={code}
+                      onChange={(event) => onCodeChange(event.target.value)}
+                      className="h-full w-full resize-none border-0 bg-[var(--bg-code)] p-3 font-mono text-[13px] leading-6 text-[var(--text-primary)] outline-none"
+                      spellCheck={false}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    className="absolute inset-y-0 z-10 w-2 cursor-col-resize bg-[color-mix(in_oklab,var(--accent-cyan)_28%,transparent)] hover:bg-[color-mix(in_oklab,var(--accent-cyan)_45%,transparent)]"
+                    style={{ left: `calc(${Math.round(splitRatio * 100)}% - 4px)` }}
+                    aria-label="Resize code and preview panes"
+                    onPointerDown={() => {
+                      draggingRef.current = true;
+                      document.body.style.cursor = "col-resize";
+                      document.body.style.userSelect = "none";
+                    }}
+                  />
+                  <div className="h-full min-h-0 flex-1 border-l border-[var(--border-default)] bg-white">
+                    <iframe
+                      title="Artifact preview"
+                      sandbox="allow-scripts"
+                      srcDoc={previewSrcdoc}
+                      className="h-full w-full border-0"
+                    />
+                  </div>
                 </div>
+              ) : (
+                <textarea
+                  value={code}
+                  onChange={(event) => onCodeChange(event.target.value)}
+                  className="h-full w-full resize-none rounded-xl border border-[var(--border-default)] bg-[var(--bg-code)] p-3 font-mono text-[13px] leading-6 text-[var(--text-primary)] outline-none focus:ring-2 focus:ring-[var(--accent-cyan)]/35"
+                  spellCheck={false}
+                />
               )
             ) : null}
 

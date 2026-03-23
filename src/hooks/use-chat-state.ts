@@ -618,6 +618,7 @@ export function useChatState() {
   const streamModelUsedRef = useRef<string | null>(null);
   const activeStreamModeRef = useRef<StudyMode>("tutor");
   const cancelledDraftPersistedRef = useRef(false);
+  const cancelledDraftPersistPromiseRef = useRef<Promise<void> | null>(null);
   const abortReasonRef = useRef<AbortReason | null>(null);
   const activeStreamsRef = useRef<Set<string>>(new Set());
   const activeStreamIdsRef = useRef<Set<string>>(new Set());
@@ -1639,6 +1640,10 @@ export function useChatState() {
   async function persistCancelledDraft(options?: { reason?: AbortReason }) {
     const streamChatId = streamChatIdRef.current;
     if (!streamChatId || cancelledDraftPersistedRef.current) return;
+    if (cancelledDraftPersistPromiseRef.current) {
+      await cancelledDraftPersistPromiseRef.current;
+      return;
+    }
     const responseText = (draftResponsesRef.current.get(streamChatId) ?? "").trim();
     if (!responseText) return;
 
@@ -1646,61 +1651,70 @@ export function useChatState() {
     const modelUsed = streamModelUsedRef.current ?? selectedRouteModel ?? undefined;
     const thinkingContent = (draftThinkingsRef.current.get(streamChatId) ?? "").trim() || undefined;
 
-    try {
-      const response = await fetch("/api/chats/messages/cancelled", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chatId: streamChatId,
+    const persistTask = (async () => {
+      try {
+        const response = await fetch("/api/chats/messages/cancelled", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chatId: streamChatId,
+            content: responseText,
+            mode: activeStreamModeRef.current,
+            modelUsed,
+            modelRequested: modelUsed,
+            thinkingContent,
+            routeTrace: liveRouteTrace ?? undefined,
+            reason: options?.reason ?? abortReasonRef.current ?? "unknown",
+          }),
+        });
+        if (!response.ok) {
+          throw new Error(await response.text());
+        }
+        const persisted = (await response.json()) as { messageId?: string };
+        cancelledDraftPersistedRef.current = true;
+        const cancelledMessage: Message = {
+          _id: persisted.messageId ?? `cancelled-${Date.now()}`,
+          role: "assistant",
           content: responseText,
+          cancelled: true,
           mode: activeStreamModeRef.current,
           modelUsed,
           modelRequested: modelUsed,
           thinkingContent,
           routeTrace: liveRouteTrace ?? undefined,
+          createdAt: Date.now(),
+        };
+        if (selectedChatIdRef.current === streamChatId) {
+          setMessages((prev) => [...prev, cancelledMessage]);
+        } else {
+          const existing = pendingCompletionsRef.current.get(streamChatId) ?? [];
+          existing.push(cancelledMessage);
+          pendingCompletionsRef.current.set(streamChatId, existing);
+        }
+        setDraftResponses((prev) => {
+          const next = new Map(prev);
+          next.delete(streamChatId);
+          return next;
+        });
+        setDraftThinkings((prev) => {
+          const next = new Map(prev);
+          next.delete(streamChatId);
+          return next;
+        });
+      } catch (error) {
+        console.warn("Failed to persist cancelled draft response", {
+          chatId: streamChatId,
           reason: options?.reason ?? abortReasonRef.current ?? "unknown",
-        }),
-      });
-      if (!response.ok) {
-        throw new Error(await response.text());
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
-      const persisted = (await response.json()) as { messageId?: string };
-      cancelledDraftPersistedRef.current = true;
-      const cancelledMessage: Message = {
-        _id: persisted.messageId ?? `cancelled-${Date.now()}`,
-        role: "assistant",
-        content: responseText,
-        cancelled: true,
-        mode: activeStreamModeRef.current,
-        modelUsed,
-        modelRequested: modelUsed,
-        thinkingContent,
-        routeTrace: liveRouteTrace ?? undefined,
-        createdAt: Date.now(),
-      };
-      if (selectedChatIdRef.current === streamChatId) {
-        setMessages((prev) => [...prev, cancelledMessage]);
-      } else {
-        const existing = pendingCompletionsRef.current.get(streamChatId) ?? [];
-        existing.push(cancelledMessage);
-        pendingCompletionsRef.current.set(streamChatId, existing);
-      }
-      setDraftResponses((prev) => {
-        const next = new Map(prev);
-        next.delete(streamChatId);
-        return next;
-      });
-      setDraftThinkings((prev) => {
-        const next = new Map(prev);
-        next.delete(streamChatId);
-        return next;
-      });
-    } catch (error) {
-      console.warn("Failed to persist cancelled draft response", {
-        chatId: streamChatId,
-        reason: options?.reason ?? abortReasonRef.current ?? "unknown",
-        error: error instanceof Error ? error.message : String(error),
-      });
+    })();
+
+    cancelledDraftPersistPromiseRef.current = persistTask;
+    try {
+      await persistTask;
+    } finally {
+      cancelledDraftPersistPromiseRef.current = null;
     }
   }
 
@@ -1751,6 +1765,7 @@ export function useChatState() {
     streamChatIdRef.current = streamChatId;
     activeStreamModeRef.current = requestedMode;
     cancelledDraftPersistedRef.current = false;
+    cancelledDraftPersistPromiseRef.current = null;
     abortReasonRef.current = null;
     streamModelUsedRef.current = null;
     // Per-chat streaming state is managed via activeStreamIds

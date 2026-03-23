@@ -140,21 +140,33 @@ export function ChatMessages({
     () => messages.slice(visibleStartIndex),
     [messages, visibleStartIndex],
   );
-  const { siblingGroups, siblingGroupKeyByMessage } = useMemo(() => {
+  const { siblingGroups, siblingGroupKeyByMessage, userSiblingGroupKeyByMessage } = useMemo(() => {
     const groups = new Map<string, Message[]>();
     const keyByMessage = new Map<string, string>();
+    const userKeyByMessage = new Map<string, string>();
     let lastUserMessageId: string | undefined;
 
     for (const message of messages) {
       if (message.role === "user") {
+        const userGroupRootId =
+          message.parentMessageId
+          ?? (typeof message.siblingCount === "number" && message.siblingCount > 1 ? message._id : undefined);
+        if (userGroupRootId) {
+          const groupKey = `user:${userGroupRootId}`;
+          const list = groups.get(groupKey) ?? [];
+          list.push(message);
+          groups.set(groupKey, list);
+          keyByMessage.set(message._id, groupKey);
+          userKeyByMessage.set(message._id, groupKey);
+        }
         lastUserMessageId = message._id;
         continue;
       }
       if (message.role !== "assistant") continue;
 
       const groupKey = message.parentMessageId
-        ? `parent:${message.parentMessageId}`
-        : (lastUserMessageId ? `implicit:${lastUserMessageId}` : undefined);
+        ? `assistant-parent:${message.parentMessageId}`
+        : (lastUserMessageId ? `assistant-implicit:${lastUserMessageId}` : undefined);
       if (!groupKey) continue;
 
       const list = groups.get(groupKey) ?? [];
@@ -176,20 +188,38 @@ export function ChatMessages({
     return {
       siblingGroups: groups,
       siblingGroupKeyByMessage: keyByMessage,
+      userSiblingGroupKeyByMessage: userKeyByMessage,
     };
   }, [messages]);
   const filteredVisibleMessages = useMemo(() => {
     return visibleMessages.filter((message) => {
-      if (message.role !== "assistant") return true;
       const groupKey = siblingGroupKeyByMessage.get(message._id);
-      if (!groupKey) return true;
-      const siblings = siblingGroups.get(groupKey);
-      if (!siblings || siblings.length <= 1) return true;
-      const fallback = siblings[siblings.length - 1]?._id;
-      const activeId = activeSiblingByParent[groupKey] ?? fallback;
-      return message._id === activeId;
+      if (groupKey) {
+        const siblings = siblingGroups.get(groupKey);
+        if (siblings && siblings.length > 1) {
+          const fallback = siblings[siblings.length - 1]?._id;
+          const activeId = activeSiblingByParent[groupKey] ?? fallback;
+          if (message._id !== activeId) return false;
+        }
+      }
+
+      if (message.role === "assistant" && message.parentMessageId) {
+        const parentUserGroupKey = userSiblingGroupKeyByMessage.get(message.parentMessageId);
+        if (parentUserGroupKey) {
+          const userSiblings = siblingGroups.get(parentUserGroupKey);
+          if (userSiblings && userSiblings.length > 1) {
+            const fallbackUserId = userSiblings[userSiblings.length - 1]?._id;
+            const activeUserId = activeSiblingByParent[parentUserGroupKey] ?? fallbackUserId;
+            if (activeUserId && message.parentMessageId !== activeUserId) {
+              return false;
+            }
+          }
+        }
+      }
+
+      return true;
     });
-  }, [visibleMessages, siblingGroups, siblingGroupKeyByMessage, activeSiblingByParent]);
+  }, [visibleMessages, siblingGroups, siblingGroupKeyByMessage, userSiblingGroupKeyByMessage, activeSiblingByParent]);
 
   useEffect(() => {
     setActiveSiblingByParent((prev) => {
@@ -567,21 +597,20 @@ export function ChatMessages({
               siblingGroup && siblingGroup.length > 1
                 ? siblingGroup.findIndex((row) => row._id === msg._id)
                 : -1;
-            const siblingNavigationProps = msg.role === "assistant"
-              ? {
-                  siblingIndex:
-                    typeof msg.siblingIndex === "number"
-                      ? msg.siblingIndex
-                      : (fallbackSiblingIndex >= 0 ? fallbackSiblingIndex : undefined),
-                  siblingCount:
-                    typeof msg.siblingCount === "number"
-                      ? msg.siblingCount
-                      : (siblingGroup && siblingGroup.length > 1 ? siblingGroup.length : undefined),
-                  onNavigateSibling: siblingGroup && siblingGroup.length > 1
-                    ? (direction: "prev" | "next") => navigateSibling(msg, direction)
-                    : undefined,
-                }
-              : {};
+            const siblingNavigationProps =
+              siblingGroup && siblingGroup.length > 1
+                ? {
+                    siblingIndex:
+                      typeof msg.siblingIndex === "number"
+                        ? msg.siblingIndex
+                        : (fallbackSiblingIndex >= 0 ? fallbackSiblingIndex : undefined),
+                    siblingCount:
+                      typeof msg.siblingCount === "number"
+                        ? msg.siblingCount
+                        : siblingGroup.length,
+                    onNavigateSibling: (direction: "prev" | "next") => navigateSibling(msg, direction),
+                  }
+                : {};
             const assistantIsBookmarked = bookmarkedMessageIds.has(msg._id);
             const assistantBookmarking = bookmarkingMessageId === msg._id;
             const modeSuggestions = msg.role === "assistant" ? getModeSuggestions(msg) : [];

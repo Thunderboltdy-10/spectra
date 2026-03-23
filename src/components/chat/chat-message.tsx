@@ -179,7 +179,7 @@ export function ChatMessage({
   siblingIndex,
   siblingCount,
   onNavigateSibling,
-  preferRouteTraceModel = true,
+  preferRouteTraceModel = false,
   animateIn = true,
   children,
 }: ChatMessageProps) {
@@ -218,6 +218,10 @@ export function ChatMessage({
   const timeLabel = useMemo(() => formatRelativeTime(createdAt), [createdAt]);
   const hasEnhanced = Boolean(enhancedContent && enhancedContent.trim());
   const displayUserContent = isUser && showEnhanced && hasEnhanced ? enhancedContent ?? content : content;
+  const hasSiblingVersions =
+    typeof siblingCount === "number" && siblingCount > 1 && typeof siblingIndex === "number";
+  const siblingIndexValue = typeof siblingIndex === "number" ? siblingIndex : 0;
+  const siblingCountValue = typeof siblingCount === "number" ? siblingCount : 1;
   const assistantAttachmentLinks = !isUser && attachments?.length
     ? attachments.map((name, index) => ({
         name,
@@ -351,7 +355,32 @@ export function ChatMessage({
                   </button>
                 ) : null}
                 </div>
-                {timeLabel ? <span className="text-[11px] text-[var(--text-secondary)]">{timeLabel}</span> : null}
+                <div className="flex flex-wrap items-center gap-2">
+                  {hasSiblingVersions ? (
+                    <span className="inline-flex items-center gap-0.5 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1 text-[10px] text-[var(--text-secondary)]">
+                      <button
+                        type="button"
+                        disabled={siblingIndexValue <= 0}
+                        onClick={() => onNavigateSibling?.("prev")}
+                        className="inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded transition hover:bg-[var(--bg-hover)] disabled:cursor-default disabled:opacity-30"
+                        aria-label="Previous version"
+                      >
+                        <ChevronLeft className="h-3 w-3" />
+                      </button>
+                      <span className="tabular-nums">{siblingIndexValue + 1}/{siblingCountValue}</span>
+                      <button
+                        type="button"
+                        disabled={siblingIndexValue >= siblingCountValue - 1}
+                        onClick={() => onNavigateSibling?.("next")}
+                        className="inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded transition hover:bg-[var(--bg-hover)] disabled:cursor-default disabled:opacity-30"
+                        aria-label="Next version"
+                      >
+                        <ChevronRight className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ) : null}
+                  {timeLabel ? <span className="text-[11px] text-[var(--text-secondary)]">{timeLabel}</span> : null}
+                </div>
               </div>
             ) : null}
           </div>
@@ -380,21 +409,21 @@ export function ChatMessage({
                     Cancelled
                   </span>
                 ) : null}
-                {typeof siblingCount === "number" && siblingCount > 1 && typeof siblingIndex === "number" ? (
+                {hasSiblingVersions ? (
                   <span className="inline-flex items-center gap-0.5 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1 text-[10px] text-[var(--text-secondary)]">
                     <button
-                      type="button"
-                      disabled={siblingIndex <= 0}
+                        type="button"
+                      disabled={siblingIndexValue <= 0}
                       onClick={() => onNavigateSibling?.("prev")}
                       className="inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded transition hover:bg-[var(--bg-hover)] disabled:cursor-default disabled:opacity-30"
                       aria-label="Previous version"
                     >
                       <ChevronLeft className="h-3 w-3" />
                     </button>
-                    <span className="tabular-nums">{siblingIndex + 1}/{siblingCount}</span>
+                    <span className="tabular-nums">{siblingIndexValue + 1}/{siblingCountValue}</span>
                     <button
                       type="button"
-                      disabled={siblingIndex >= siblingCount - 1}
+                      disabled={siblingIndexValue >= siblingCountValue - 1}
                       onClick={() => onNavigateSibling?.("next")}
                       className="inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded transition hover:bg-[var(--bg-hover)] disabled:cursor-default disabled:opacity-30"
                       aria-label="Next version"

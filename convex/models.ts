@@ -598,7 +598,6 @@ export const upsertModelCatalog = mutation({
         featuredOrder: model.featuredOrder,
         capabilities: model.capabilities,
         strengthText: model.strengthText,
-        strengthEmbedding: model.strengthEmbedding,
         releaseDate: model.releaseDate,
         knowledgeCutoff: model.knowledgeCutoff,
         curatedNotes: model.curatedNotes,
@@ -606,6 +605,7 @@ export const upsertModelCatalog = mutation({
         benchmarkHumanEval: model.benchmarkHumanEval,
         arenaElo: model.arenaElo,
         updatedAt: now,
+        ...(model.strengthEmbedding !== undefined ? { strengthEmbedding: model.strengthEmbedding } : {}),
       };
 
       if (existing) {
@@ -665,7 +665,6 @@ export const syncModelCatalog = mutation({
         featuredOrder: model.featuredOrder,
         capabilities: model.capabilities,
         strengthText: model.strengthText,
-        strengthEmbedding: model.strengthEmbedding,
         releaseDate: model.releaseDate,
         knowledgeCutoff: model.knowledgeCutoff,
         curatedNotes: model.curatedNotes,
@@ -673,6 +672,7 @@ export const syncModelCatalog = mutation({
         benchmarkHumanEval: model.benchmarkHumanEval,
         arenaElo: model.arenaElo,
         updatedAt: now,
+        ...(model.strengthEmbedding !== undefined ? { strengthEmbedding: model.strengthEmbedding } : {}),
       };
 
       if (existing) {
@@ -730,7 +730,6 @@ export const upsertModelCatalogForOrg = internalMutation({
         featuredOrder: model.featuredOrder,
         capabilities: model.capabilities,
         strengthText: model.strengthText,
-        strengthEmbedding: model.strengthEmbedding,
         releaseDate: model.releaseDate,
         knowledgeCutoff: model.knowledgeCutoff,
         curatedNotes: model.curatedNotes,
@@ -738,6 +737,7 @@ export const upsertModelCatalogForOrg = internalMutation({
         benchmarkHumanEval: model.benchmarkHumanEval,
         arenaElo: model.arenaElo,
         updatedAt: now,
+        ...(model.strengthEmbedding !== undefined ? { strengthEmbedding: model.strengthEmbedding } : {}),
       };
 
       if (existing) {

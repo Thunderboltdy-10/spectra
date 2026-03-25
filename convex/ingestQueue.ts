@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { LIMITS, MODEL_DEFAULTS } from "./constants";
 import { TEXT_RESOURCE_EXTENSIONS, fileExtension } from "../shared/resource-upload-policy";
+import { getOpenRouterApiKey, warnOpenRouterMissing } from "./env";
 
 type ParsedPage = { page?: number; text: string };
 
@@ -15,6 +16,7 @@ const EMBEDDING_TIMEOUT_MS = (() => {
   }
   return 45_000;
 })();
+const INGESTION_RETRY_DELAY_MS = 15 * 60 * 1000;
 
 function extension(filename: string) {
   return fileExtension(filename);
@@ -229,7 +231,7 @@ function toFiniteNumber(value: unknown) {
 }
 
 async function openRouterEmbedding(input: string) {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiKey = getOpenRouterApiKey();
   if (!apiKey) {
     throw new Error("OPENROUTER_API_KEY missing for ingestion");
   }
@@ -304,6 +306,7 @@ export const getResourceForIngestion = internalQuery({
       mimeType: resource.mimeType,
       storageId: resource.storageId,
       status: resource.status,
+      processingAttempts: resource.processingAttempts,
     };
   },
 });
@@ -386,6 +389,17 @@ export const processResource = internalAction({
       }
 
       const chunks = chunkTextWithPages(parsed.pages);
+      if (chunks.length > 0 && !getOpenRouterApiKey()) {
+        warnOpenRouterMissing("resource_ingestion");
+        await ctx.runMutation(internal.resources.deferResourceForMissingApiKeyInternal, {
+          resourceId: args.resourceId,
+          nextAttemptAt: Date.now() + INGESTION_RETRY_DELAY_MS,
+        });
+        await ctx.scheduler.runAfter(INGESTION_RETRY_DELAY_MS, internal.ingestQueue.processResource, {
+          resourceId: args.resourceId,
+        });
+        return { ok: false, reason: "openrouter_key_missing_retrying" };
+      }
 
       const embedded: Array<{ text: string; page?: number; embedding: number[] }> = [];
       for (let index = 0; index < chunks.length; index += 1) {

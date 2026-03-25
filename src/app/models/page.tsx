@@ -157,8 +157,13 @@ function blockedByTier(model: ExplorerModel, tier: SpendingTier) {
   return !isBudgetSafe(model) || model.modelId === "openrouter/auto";
 }
 
-function blockedReason(model: ExplorerModel, tier: SpendingTier) {
+function blockedReasonWithVisibility(model: ExplorerModel, tier: SpendingTier, showPricingDetails: boolean) {
   if (!blockedByTier(model, tier)) return null;
+  if (!showPricingDetails) {
+    if (tier === "expensive_blocked") return "Temporarily unavailable due to current usage limits";
+    if (tier === "cheap_only") return "Temporarily limited while current usage limits are active";
+    return "Only currently allowed models are available right now";
+  }
   if (
     !isBudgetSafe(model)
     && ((typeof model.inputCostPerM === "number" && model.inputCostPerM > 30)
@@ -221,14 +226,16 @@ function scoreModel(model: ExplorerModel, tier: SpendingTier) {
 function ModelCard({
   model,
   tier,
+  showPricingDetails,
   onTry,
 }: {
   model: ExplorerModel;
   tier: SpendingTier;
+  showPricingDetails: boolean;
   onTry: (modelId: string) => void;
 }) {
   const restricted = blockedByTier(model, tier);
-  const restrictionReason = blockedReason(model, tier);
+  const restrictionReason = blockedReasonWithVisibility(model, tier, showPricingDetails);
 
   return (
     <article
@@ -291,7 +298,7 @@ function ModelCard({
 
 export default function ModelsPage() {
   const router = useRouter();
-  const { userSpending } = useSidebar();
+  const { userSpending, isSuperAdmin } = useSidebar();
   const [catalogModels, setCatalogModels] = useState<CatalogModel[]>([]);
   const [featuredModels, setFeaturedModels] = useState<CatalogModel[]>([]);
   const [mostUsed, setMostUsed] = useState<MostUsedModel[]>([]);
@@ -514,7 +521,7 @@ export default function ModelsPage() {
   }, [availableModels.length, visibleCount]);
 
   function tryModel(modelId: string) {
-    router.push(`/chat?model=${encodeURIComponent(modelId)}`);
+    router.push(`/chat?model=${encodeURIComponent(modelId)}&router=manual`);
   }
 
   function toggleProvider(name: string) {
@@ -624,7 +631,7 @@ export default function ModelsPage() {
               <h2 className="mb-3 text-lg font-semibold text-[var(--text-primary)]">Featured Models</h2>
               <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
                 {featured.slice(0, 6).map((model) => (
-                  <ModelCard key={`featured-${model.modelId}`} model={model} tier={tier} onTry={tryModel} />
+                  <ModelCard key={`featured-${model.modelId}`} model={model} tier={tier} showPricingDetails={isSuperAdmin} onTry={tryModel} />
                 ))}
               </div>
             </section>
@@ -647,7 +654,7 @@ export default function ModelsPage() {
               <>
                 <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
                   {availableModels.slice(0, visibleCount).map((model) => (
-                    <ModelCard key={`available-${model.modelId}`} model={model} tier={tier} onTry={tryModel} />
+                    <ModelCard key={`available-${model.modelId}`} model={model} tier={tier} showPricingDetails={isSuperAdmin} onTry={tryModel} />
                   ))}
                 </div>
                 {visibleCount < availableModels.length ? <div ref={autoLoadSentinelRef} className="h-10" aria-hidden /> : null}
@@ -668,7 +675,7 @@ export default function ModelsPage() {
                 {showRestricted ? (
                   <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
                     {restrictedModels.map((model) => (
-                      <ModelCard key={`restricted-${model.modelId}`} model={model} tier={tier} onTry={tryModel} />
+                      <ModelCard key={`restricted-${model.modelId}`} model={model} tier={tier} showPricingDetails={isSuperAdmin} onTry={tryModel} />
                     ))}
                   </div>
                 ) : null}

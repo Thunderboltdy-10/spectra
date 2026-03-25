@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { AppShell } from "@/components/layout/app-shell";
 import { AnalyticsDashboard } from "@/components/analytics/analytics-dashboard";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useSidebar } from "@/context/sidebar-context";
 
 type AnalyticsRow = {
   day: string;
@@ -109,6 +110,7 @@ function AnalyticsSkeleton() {
 }
 
 export default function AnalyticsPage() {
+  const { isSuperAdmin } = useSidebar();
   const [data, setData] = useState<AnalyticsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -155,6 +157,7 @@ export default function AnalyticsPage() {
           studentSignals={data.studentSignals}
           enhanced={data.enhanced}
           cost={data.cost}
+          showCostDetails={isSuperAdmin}
           classData={data.class}
           range={range}
           onRangeChange={setRange}

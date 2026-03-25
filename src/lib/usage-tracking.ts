@@ -80,6 +80,8 @@ export async function recordModelUsage(params: {
   outputTokens?: number;
   openRouterCost?: number;
   cacheSavingsCents?: number;
+  finishReason?: string;
+  truncatedByLength?: boolean;
   pricing?: UsagePricing;
   skipIfZeroTokens?: boolean;
 }) {
@@ -111,6 +113,8 @@ export async function recordModelUsage(params: {
       outputTokens,
       openRouterCost,
       cacheSavingsCents: params.cacheSavingsCents,
+      finishReason: params.finishReason,
+      truncatedByLength: params.truncatedByLength,
       inputCostPerM: pricing.inputCostPerM,
       outputCostPerM: pricing.outputCostPerM,
     });
@@ -130,6 +134,8 @@ export async function recordModelUsage(params: {
           inputTokens,
           outputTokens,
           cacheSavingsCents: params.cacheSavingsCents,
+          finishReason: params.finishReason,
+          truncatedByLength: params.truncatedByLength,
           inputCostPerM: pricing.inputCostPerM,
           outputCostPerM: pricing.outputCostPerM,
         });
@@ -183,6 +189,8 @@ export async function recordOpenRouterUsage(params: {
     cache_creation_input_tokens?: number;
   } | null;
   openRouterCost?: number;
+  finishReason?: string;
+  truncatedByLength?: boolean;
   pricing?: UsagePricing;
   skipIfZeroTokens?: boolean;
 }) {
@@ -210,6 +218,8 @@ export async function recordOpenRouterUsage(params: {
       ?? (typeof params.usage?.cost === "number" && Number.isFinite(params.usage.cost)
         ? params.usage.cost
         : undefined),
+    finishReason: params.finishReason,
+    truncatedByLength: params.truncatedByLength,
     cacheSavingsCents: estimateCacheSavingsCents({
       usage: params.usage,
       pricing: effectivePricing,

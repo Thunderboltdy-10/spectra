@@ -33,14 +33,14 @@ export function computeCompactionWindow<TId extends string>(
   input: CompactionWindowInput<TId>,
 ): CompactionWindow<TId> {
   const sorted = [...input.messages].sort((a, b) => a.createdAt - b.createdAt);
-  if (sorted.length < 20) {
+  if (sorted.length < 12) {
     return { ok: false, reason: "not_enough_messages" };
   }
 
-  const keepLatest = Math.min(12, Math.max(4, Math.round(input.keepLatestMessages)));
-  if (!Number.isFinite(keepLatest)) {
+  if (!Number.isFinite(input.keepLatestMessages)) {
     return { ok: false, reason: "invalid_keep_latest" };
   }
+  const keepLatest = Math.min(12, Math.max(4, Math.round(input.keepLatestMessages)));
 
   const boundaryIndex = sorted.length - keepLatest - 1;
   if (boundaryIndex < 0) {

@@ -56,6 +56,7 @@ type ChatComposerProps = {
   onApplyAgentSuggestion?: () => void;
   models: ModelOption[];
   userSpending: UserSpending | null;
+  isSuperAdmin?: boolean;
   routerMode: RouterMode;
   manualModel: string;
   imageModel?: string;
@@ -151,19 +152,47 @@ function isExpensiveModel(model: ModelOption) {
   return inputCost > MAX_MODEL_COST_PER_MILLION || outputCost > MAX_MODEL_COST_PER_MILLION;
 }
 
-function restrictionReasonForTier(model: ModelOption, tier?: UserSpending["tier"]) {
+function restrictionReasonForTier(
+  model: ModelOption,
+  tier?: UserSpending["tier"],
+  showPricingDetails = false,
+) {
   if (!tier || tier === "normal") return null;
   if (tier === "expensive_blocked") {
-    if (model.modelId === "openrouter/auto") return "Auto routing is disabled while guardrails are active.";
-    if (isExpensiveModel(model)) return "Blocked while budget guard is active.";
+    if (model.modelId === "openrouter/auto") {
+      return showPricingDetails
+        ? "Auto routing is disabled while guardrails are active."
+        : "Auto routing is temporarily unavailable.";
+    }
+    if (isExpensiveModel(model)) {
+      return showPricingDetails
+        ? "Blocked while budget guard is active."
+        : "Temporarily unavailable due to current usage limits.";
+    }
     return null;
   }
   if (tier === "cheap_only") {
-    if (model.modelId === "openrouter/auto") return "Auto routing is disabled while in cheap-only mode.";
-    return isCheapModel(model) ? null : "Unavailable until spending drops below the cheap-only threshold.";
+    if (model.modelId === "openrouter/auto") {
+      return showPricingDetails
+        ? "Auto routing is disabled while in cheap-only mode."
+        : "Auto routing is temporarily unavailable.";
+    }
+    return isCheapModel(model)
+      ? null
+      : showPricingDetails
+        ? "Unavailable until spending drops below the cheap-only threshold."
+        : "Temporarily unavailable due to current usage limits.";
   }
-  if (model.modelId === "openrouter/auto") return "Auto routing is disabled at hard budget limit.";
-  return isBudgetSafeModel(model) ? null : "Only budget-safe models are available at hard limit.";
+  if (model.modelId === "openrouter/auto") {
+    return showPricingDetails
+      ? "Auto routing is disabled at hard budget limit."
+      : "Auto routing is temporarily unavailable.";
+  }
+  return isBudgetSafeModel(model)
+    ? null
+    : showPricingDetails
+      ? "Only budget-safe models are available at hard limit."
+      : "Only currently available models can be selected right now.";
 }
 
 function dataTransferHasFiles(dataTransfer: DataTransfer | null) {
@@ -299,6 +328,7 @@ export function ChatComposer(props: ChatComposerProps) {
     onApplyAgentSuggestion,
     models,
     userSpending,
+    isSuperAdmin = false,
     routerMode,
     manualModel,
     onSelectAuto,
@@ -405,16 +435,18 @@ export function ChatComposer(props: ChatComposerProps) {
           cautions.push("Context too small");
         }
         const hasKnownCost = typeof model.inputCostPerM === "number" || typeof model.outputCostPerM === "number";
-        const expensiveBlock = hasKnownCost && isExpensiveModel(model) ? "Model exceeds the maximum cost limit." : null;
-        const restrictionReason = expensiveBlock ?? restrictionReasonForTier(model, userSpending?.tier);
+        const expensiveWarning = isSuperAdmin && hasKnownCost && isExpensiveModel(model)
+          ? "Exceeds 30/M cap (manual confirmation required)."
+          : null;
+        const restrictionReason = restrictionReasonForTier(model, userSpending?.tier, isSuperAdmin);
         return {
           model,
           recommended: recommendedModelIds.has(model.modelId),
-          cautionReason: cautions.join(" · "),
+          cautionReason: [...cautions, expensiveWarning].filter(Boolean).join(" · "),
           restrictionReason,
         };
       });
-  }, [estimatedTokens, hasImages, modelSearch, models, recommendedModelIds, userSpending?.tier]);
+  }, [estimatedTokens, hasImages, isSuperAdmin, modelSearch, models, recommendedModelIds, userSpending?.tier]);
 
   const providerOptions = useMemo(
     () =>
@@ -429,18 +461,20 @@ export function ChatComposer(props: ChatComposerProps) {
   }, [modelRows, providerFilter]);
 
   const hasBudgetSafeModel = useMemo(
-    () => models.some((model) => restrictionReasonForTier(model, "free_only") === null),
-    [models],
+    () => models.some((model) => restrictionReasonForTier(model, "free_only", isSuperAdmin) === null),
+    [isSuperAdmin, models],
   );
   const selectedManualRestriction = useMemo(() => {
     if (routerMode !== "manual") return null;
     const selected = models.find((model) => model.modelId === manualModel);
     if (!selected) return null;
-    return restrictionReasonForTier(selected, userSpending?.tier);
-  }, [manualModel, models, routerMode, userSpending?.tier]);
+    return restrictionReasonForTier(selected, userSpending?.tier, isSuperAdmin);
+  }, [isSuperAdmin, manualModel, models, routerMode, userSpending?.tier]);
   const hardLimitNoModel = userSpending?.tier === "free_only" && !hasBudgetSafeModel;
   const sendDisabledReason = hardLimitNoModel
-    ? "No budget-safe model is currently available. Sending is paused."
+    ? (isSuperAdmin
+      ? "No budget-safe model is currently available. Sending is paused."
+      : "No available model can be selected right now. Sending is paused.")
     : selectedManualRestriction;
   const autoRoutingRestriction = useMemo(
     () =>
@@ -453,8 +487,9 @@ export function ChatComposer(props: ChatComposerProps) {
           tags: [],
         },
         userSpending?.tier,
+        isSuperAdmin,
       ),
-    [userSpending?.tier],
+    [isSuperAdmin, userSpending?.tier],
   );
   
   const selectorTriggerClass =
@@ -480,6 +515,15 @@ export function ChatComposer(props: ChatComposerProps) {
     }
     lastAgentIdRef.current = selectedAgentId;
   }, [selectedAgentId]);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const msg = (e as CustomEvent<{ message: string }>).detail?.message;
+      if (msg) onMessageChange(msg);
+    };
+    window.addEventListener("ai-school:set-message", handler);
+    return () => window.removeEventListener("ai-school:set-message", handler);
+  }, [onMessageChange]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -549,6 +593,14 @@ export function ChatComposer(props: ChatComposerProps) {
   }, []);
 
   useEffect(() => {
+    const handleFocusComposer = () => {
+      textareaRef.current?.focus();
+    };
+    window.addEventListener("ai-school:focus-composer", handleFocusComposer);
+    return () => window.removeEventListener("ai-school:focus-composer", handleFocusComposer);
+  }, []);
+
+  useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
       const target = event.target as Node;
       if (showModeSelector && modeMenuRef.current && !modeMenuRef.current.contains(target)) {
@@ -565,6 +617,24 @@ export function ChatComposer(props: ChatComposerProps) {
     document.addEventListener("mousedown", onPointerDown);
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, [showAgentSelector, showModeSelector, showModelSelector]);
+
+  // Issue #14: Lift composer above the virtual keyboard on mobile using the Visual Viewport API
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+
+    const handleResize = () => {
+      const offset = window.innerHeight - viewport.height;
+      const composerEl = document.querySelector("[data-composer]");
+      if (composerEl instanceof HTMLElement) {
+        composerEl.style.paddingBottom = offset > 50 ? `${offset}px` : "";
+      }
+    };
+
+    viewport.addEventListener("resize", handleResize);
+    return () => viewport.removeEventListener("resize", handleResize);
+  }, []);
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (sendDisabledReason) return;
@@ -729,6 +799,7 @@ export function ChatComposer(props: ChatComposerProps) {
 
   return (
     <footer
+      data-composer
       className={cn(
         "sticky bottom-0 z-20 px-3 pb-[calc(0.9rem+env(safe-area-inset-bottom))] pt-4 sm:px-6 lg:px-10",
         draggingFiles && "bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-primary))]",

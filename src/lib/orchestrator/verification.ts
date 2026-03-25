@@ -32,6 +32,7 @@ export async function runMarkerVerificationPipeline(params: {
   primaryModel: string;
   fallbackModels: string[];
   messages: OpenRouterMessage[];
+  thinkingLevel?: "low" | "medium" | "high";
   maxTokens?: number;
   verificationModel?: string;
   onFallback?: (event: RouteTraceFallback) => void;
@@ -39,6 +40,12 @@ export async function runMarkerVerificationPipeline(params: {
     info: (message: string, context?: Record<string, unknown>) => void;
   };
 }) {
+  const reasoningEffort =
+    params.thinkingLevel === "high"
+      ? "high"
+      : params.thinkingLevel === "medium"
+        ? "medium"
+        : "low";
   let responseText = "";
   let modelUsed = params.primaryModel;
   let usageIn = 0;
@@ -51,6 +58,7 @@ export async function runMarkerVerificationPipeline(params: {
     model: params.primaryModel,
     fallbackModels: params.fallbackModels,
     messages: params.messages,
+    reasoningEffort,
     maxTokens: params.maxTokens,
     onFallback: params.onFallback,
   });
@@ -83,6 +91,7 @@ export async function runMarkerVerificationPipeline(params: {
         { role: "user", content: markerVerificationPrompt(responseText) },
       ],
       temperature: 0,
+      reasoningEffort: "low",
       onFallback: params.onFallback,
     });
 
@@ -121,6 +130,7 @@ export async function runMarkerVerificationPipeline(params: {
           },
         ],
         temperature: 0.1,
+        reasoningEffort,
         maxTokens: params.maxTokens,
         onFallback: params.onFallback,
       });

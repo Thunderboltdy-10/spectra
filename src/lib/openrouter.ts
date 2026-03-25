@@ -52,6 +52,8 @@ export type OpenRouterChatCompletionResult = {
   [key: string]: unknown;
 };
 
+export type OpenRouterReasoningEffort = "low" | "medium" | "high";
+
 export type OpenRouterImageResult = {
   imageUrl: string;
   modelUsed: string;
@@ -87,12 +89,25 @@ function supportsTemperatureControl(model: string) {
   return true;
 }
 
+function supportsReasoningEffortControl(model: string) {
+  const leaf = model.split("/").pop()?.toLowerCase() ?? model.toLowerCase();
+  return (
+    /^o\d/.test(leaf)
+    || leaf.includes("gpt-5")
+    || leaf.includes("reasoning")
+    || leaf.includes("thinking")
+    || leaf.includes("claude-3.7")
+    || leaf.includes("claude-sonnet-4")
+  );
+}
+
 function buildChatCompletionBody(params: {
   model: string;
   messages: OpenRouterMessage[];
   temperature?: number;
   maxTokens?: number;
   stream?: boolean;
+  reasoningEffort?: OpenRouterReasoningEffort;
 }) {
   const supportsAnthropicCaching = params.model.toLowerCase().startsWith("anthropic/");
   const preparedMessages = supportsAnthropicCaching
@@ -139,6 +154,12 @@ function buildChatCompletionBody(params: {
     messages: preparedMessages,
     ...(params.stream ? { stream: true } : {}),
     ...(supportsTemperatureControl(params.model) ? { temperature: params.temperature ?? 0.2 } : {}),
+    ...(params.reasoningEffort && supportsReasoningEffortControl(params.model)
+      ? {
+          reasoning: { effort: params.reasoningEffort },
+          reasoning_effort: params.reasoningEffort,
+        }
+      : {}),
     max_tokens: params.maxTokens,
   };
 }
@@ -305,6 +326,7 @@ export async function openRouterChatCompletion(params: {
   messages: OpenRouterMessage[];
   temperature?: number;
   maxTokens?: number;
+  reasoningEffort?: OpenRouterReasoningEffort;
   onFallback?: (event: RouteTraceFallback) => void;
 }): Promise<OpenRouterChatCompletionResult> {
   const candidates = uniqueModelList(params.model, params.fallbackModels);
@@ -319,12 +341,13 @@ export async function openRouterChatCompletion(params: {
         headers: openRouterHeaders(),
         body: JSON.stringify(
           buildChatCompletionBody({
-            model,
-            messages: params.messages,
-            temperature: params.temperature,
-            maxTokens: params.maxTokens,
-          }),
-        ),
+              model,
+              messages: params.messages,
+              temperature: params.temperature,
+              maxTokens: params.maxTokens,
+              reasoningEffort: params.reasoningEffort,
+            }),
+          ),
       });
 
       if (!response.ok) {
@@ -454,6 +477,7 @@ export async function* openRouterStreamChat(params: {
   messages: OpenRouterMessage[];
   temperature?: number;
   maxTokens?: number;
+  reasoningEffort?: OpenRouterReasoningEffort;
   onFallback?: (event: RouteTraceFallback) => void;
 }): AsyncGenerator<OpenRouterStreamEvent> {
   const candidates = uniqueModelList(params.model, params.fallbackModels);
@@ -468,13 +492,14 @@ export async function* openRouterStreamChat(params: {
         headers: openRouterHeaders(),
         body: JSON.stringify(
           buildChatCompletionBody({
-            model,
-            messages: params.messages,
-            temperature: params.temperature,
-            maxTokens: params.maxTokens,
-            stream: true,
-          }),
-        ),
+              model,
+              messages: params.messages,
+              temperature: params.temperature,
+              maxTokens: params.maxTokens,
+              stream: true,
+              reasoningEffort: params.reasoningEffort,
+            }),
+          ),
       });
 
       if (!response.ok || !response.body) {

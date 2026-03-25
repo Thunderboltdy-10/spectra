@@ -13,6 +13,7 @@ type RouteTraceDrawerProps = {
   open: boolean;
   onClose: () => void;
   trace?: RouteTrace;
+  showCostDetails?: boolean;
 };
 
 function Label({ children }: { children: React.ReactNode }) {
@@ -59,7 +60,7 @@ function CandidateBar({ score }: { score?: number }) {
   );
 }
 
-export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps) {
+export function RouteTraceDrawer({ open, onClose, trace, showCostDetails = false }: RouteTraceDrawerProps) {
   const compact = useCompactSheet(1024);
   const { docked, panelWidth } = useRightPanelDock({ id: "route-trace-drawer", open, compact, maxWidthPx: 640 });
   const [collapsed, setCollapsed] = useState(false);
@@ -134,12 +135,12 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
         </div>
 
         {!collapsed ? (
-          <div className="right-panel-content min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-1">
+          <div className="right-panel-content w-full min-w-0 min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-1">
             <section className="mb-5">
           <h4 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Inputs</h4>
           <div className="grid gap-2 sm:grid-cols-2">
             <InputRow label="Mode" value={trace.inputs.mode} />
-            <InputRow label="Tier" value={trace.inputs.spendingTier} />
+            {showCostDetails ? <InputRow label="Tier" value={trace.inputs.spendingTier} /> : null}
             <InputRow label="Thinking" value={trace.inputs.thinkingLevel} />
             <InputRow label="Complex" value={trace.inputs.complexPrompt ? "Yes" : "No"} />
             <InputRow label="Prompt Category" value={trace.inputs.promptCategory} />
@@ -148,6 +149,7 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
             <InputRow label="Enhanced" value={trace.inputs.promptEnhanced ? "Yes" : "No"} />
             <InputRow label="Attachments" value={`${trace.inputs.attachmentTypes.join(", ") || "none"}`} />
             <InputRow label="Message Length" value={trace.inputs.messageLength} />
+            <InputRow label="Detected Intents" value={(trace.inputs.detectedIntents ?? []).join(", ") || "none"} />
           </div>
             </section>
 
@@ -223,7 +225,7 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
 
             {trace.subcalls && trace.subcalls.length > 0 ? (
               <section className="mb-5">
-                <h4 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Billable Subcalls</h4>
+                <h4 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">{showCostDetails ? "Billable Subcalls" : "Subcalls"}</h4>
                 <div className="space-y-2">
                   {trace.subcalls.slice(0, 14).map((call) => (
                     <div key={call.id} className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2.5">
@@ -238,6 +240,15 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
                     </div>
                   ))}
                 </div>
+              </section>
+            ) : null}
+
+            {trace.inputTokenBreakdown ? (
+              <section className="mb-5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+                <h4 className="mb-1 text-sm font-semibold text-[var(--text-primary)]">Input Token Breakdown</h4>
+                <p className="text-xs text-[var(--text-secondary)]">
+                  System: {trace.inputTokenBreakdown.systemPrompt.toLocaleString()} | History: {trace.inputTokenBreakdown.history.toLocaleString()} | Memory: {trace.inputTokenBreakdown.memory.toLocaleString()} | Sources: {trace.inputTokenBreakdown.sources.toLocaleString()}
+                </p>
               </section>
             ) : null}
 
@@ -313,7 +324,10 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
                   Routing: {formatMs(trace.routingDurationMs)}
                 </p>
                 <p>Total: {formatMs(trace.totalDurationMs)}</p>
-                <p>Budget guard: {trace.inputs.spendingTier}</p>
+                {showCostDetails ? <p>Budget guard: {trace.inputs.spendingTier}</p> : null}
+                {showCostDetails && typeof trace.usageBudgetRemaining === "number" ? (
+                  <p>Usage budget remaining: {trace.usageBudgetRemaining.toLocaleString()} tokens</p>
+                ) : null}
               </div>
             </section>
           </div>

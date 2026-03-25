@@ -102,6 +102,7 @@ export default defineSchema({
     processingAttempts: v.optional(v.number()),
     pinned: v.optional(v.boolean()),
     saveToLibrary: v.optional(v.boolean()),
+    expiresAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -109,7 +110,9 @@ export default defineSchema({
     .index("by_agent", ["agentId"])
     .index("by_owner_scope", ["ownerUserId", "scope"])
     .index("by_org_scope", ["orgId", "scope"])
-    .index("by_status_updated", ["status", "updatedAt"]),
+    .index("by_status_updated", ["status", "updatedAt"])
+    .index("by_expires", ["expiresAt"])
+    .index("by_org_updated", ["orgId", "updatedAt"]),
 
   chunks: defineTable({
     orgId: v.id("orgs"),
@@ -197,6 +200,7 @@ export default defineSchema({
     recentContextAt: v.optional(v.number()),
     compactedUntilMessageId: v.optional(v.id("messages")),
     compactedAt: v.optional(v.number()),
+    compactionQuality: v.optional(v.union(v.literal("manual"), v.literal("llm"), v.literal("hybrid"))),
     contextSummaryVersion: v.optional(v.number()),
     deletedAt: v.optional(v.number()),
     createdAt: v.number(),
@@ -204,6 +208,7 @@ export default defineSchema({
   })
     .index("by_owner", ["ownerUserId"])
     .index("by_owner_updated", ["ownerUserId", "updatedAt"])
+    .index("by_owner_pack_updated", ["ownerUserId", "packId", "updatedAt"])
     .index("by_org", ["orgId"]),
 
   messages: defineTable({
@@ -234,6 +239,7 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_chat", ["chatId"])
+    .index("by_chat_created", ["chatId", "createdAt"])
     .index("by_chat_client_message", ["chatId", "clientMessageId"])
     .index("by_user_created", ["userId", "createdAt"])
     .index("by_org", ["orgId"])
@@ -265,11 +271,43 @@ export default defineSchema({
     costCents: v.optional(v.number()),
     cacheSavingsCents: v.optional(v.number()),
     pricingNote: v.optional(v.string()),
+    finishReason: v.optional(v.string()),
+    truncatedByLength: v.optional(v.boolean()),
     day: v.string(),
     createdAt: v.number(),
   })
     .index("by_org_day", ["orgId", "day"])
-    .index("by_user_day", ["userId", "day"]),
+    .index("by_user_day", ["userId", "day"])
+    .index("by_org_model_day", ["orgId", "model", "day"]),
+
+  artifacts: defineTable({
+    ownerUserId: v.id("users"),
+    orgId: v.id("orgs"),
+    type: v.string(),
+    title: v.string(),
+    content: v.any(),
+    layout: v.optional(v.any()),
+    status: v.union(v.literal("active"), v.literal("archived")),
+    pinnedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_owner_updated", ["ownerUserId", "updatedAt"])
+    .index("by_org", ["orgId"])
+    .index("by_type", ["type"])
+    .index("by_owner_type", ["ownerUserId", "type"]),
+
+  artifactVersions: defineTable({
+    artifactId: v.id("artifacts"),
+    diff: v.any(),
+    authorType: v.union(v.literal("user"), v.literal("agent")),
+    authorAgentId: v.optional(v.id("agents")),
+    sourceChatId: v.optional(v.id("chats")),
+    sourceMessageId: v.optional(v.id("messages")),
+    createdAt: v.number(),
+  })
+    .index("by_artifact", ["artifactId"])
+    .index("by_chat", ["sourceChatId"]),
 
   userSpending: defineTable({
     userId: v.id("users"),
@@ -652,6 +690,15 @@ export default defineSchema({
     failureCount: v.number(),
     totalLatencyMs: v.number(),
     avgLatencyMs: v.number(),
+    consecutiveFailureCount: v.optional(v.number()),
+    lastFailureAt: v.optional(v.number()),
+    lengthFinishCount: v.optional(v.number()),
+    totalResponseChars: v.optional(v.number()),
+    positiveFeedbackCount: v.optional(v.number()),
+    negativeFeedbackCount: v.optional(v.number()),
+    qualityScore: v.optional(v.number()),
+    challengerState: v.optional(v.union(v.literal("challenger"), v.literal("normal"), v.literal("deprioritized"))),
+    lastEvaluatedAt: v.optional(v.number()),
     lastUsedAt: v.number(),
     createdAt: v.number(),
     updatedAt: v.number(),

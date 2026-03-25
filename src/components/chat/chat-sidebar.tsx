@@ -168,6 +168,7 @@ export function ChatSidebar({
   const { signOut, openUserProfile } = useClerk();
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
+  const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
   const [logoLoadFailed, setLogoLoadFailed] = useState(false);
   const [activityCutoffTs, setActivityCutoffTs] = useState<number | null>(null);
   const [gamification, setGamification] = useState<{
@@ -181,7 +182,9 @@ export function ChatSidebar({
     longestStreak: 0,
     lastActiveDate: null,
   });
+  const [visibleChatCount, setVisibleChatCount] = useState(20);
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  const chatListEndRef = useRef<HTMLDivElement>(null);
   const pageNavScrollRef = useRef<HTMLDivElement>(null);
   const pinnedSet = pinnedChatIds ?? EMPTY_PINNED_IDS;
 
@@ -288,10 +291,42 @@ export function ChatSidebar({
     active.scrollIntoView({ block: "nearest" });
   }, [pathname]);
 
+  // Reset visible count when search changes or the chat list grows/shrinks significantly.
+  useEffect(() => {
+    if (search) {
+      setVisibleChatCount(chats.length); // Show all results when filtering
+    } else {
+      setVisibleChatCount(20);
+    }
+  }, [search, chats.length]);
+
+  // IntersectionObserver: load the next batch of chats when the sentinel is visible.
+  useEffect(() => {
+    const target = chatListEndRef.current;
+    const root = chatScrollRef.current;
+    if (!target || !root) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && visibleChatCount < chats.length) {
+          setVisibleChatCount((prev) => Math.min(prev + 20, chats.length));
+        }
+      },
+      { root, rootMargin: "100px" },
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [visibleChatCount, chats.length]);
+
   const pinned = useMemo(() => chats.filter((chat) => pinnedSet.has(chat._id)), [chats, pinnedSet]);
   const nonPinnedChats = useMemo(() => chats.filter((chat) => !pinnedSet.has(chat._id)), [chats, pinnedSet]);
+  const visibleNonPinnedChats = useMemo(
+    () => nonPinnedChats.slice(0, visibleChatCount),
+    [nonPinnedChats, visibleChatCount],
+  );
   const grouped = useMemo(() => groupChats(nonPinnedChats), [nonPinnedChats]);
-  const visibleGrouped = grouped;
+  const visibleGrouped = useMemo(() => groupChats(visibleNonPinnedChats), [visibleNonPinnedChats]);
   const collapsedUtilityActions = [
     {
       id: "timer",
@@ -462,7 +497,7 @@ export function ChatSidebar({
 
       <div className="mb-3" data-tour="sidebar-pages">
         <p className="mb-1 px-3 text-[9px] uppercase tracking-[0.2em] text-[var(--text-tertiary)]">Navigation</p>
-        <div ref={pageNavScrollRef} className="overflow-y-auto max-h-[192px] [mask-image:linear-gradient(to_bottom,black_85%,transparent)]">
+        <div ref={pageNavScrollRef} className="overflow-y-auto max-h-[192px] pb-4 [mask-image:linear-gradient(to_bottom,black_85%,transparent)]">
           {allNavItems.map((item) => {
             const Icon = item.icon;
             const active = isNavActive(pathname, item.href);
@@ -582,8 +617,13 @@ export function ChatSidebar({
                           <form
                             onSubmit={(e) => {
                               e.preventDefault();
-                              onRenameChat(chat._id, editingValue);
+                              const chatId = chat._id;
+                              const newTitle = editingValue;
                               setEditingChatId(null);
+                              setRenamingChatId(chatId);
+                              Promise.resolve(onRenameChat(chatId, newTitle)).finally(() => {
+                                setRenamingChatId((prev) => (prev === chatId ? null : prev));
+                              });
                             }}
                           >
                             <input
@@ -597,8 +637,8 @@ export function ChatSidebar({
                         ) : (
                           <>
                             <div className="flex items-center gap-1.5">
-                              {isStreaming ? (
-                                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--accent-cyan)]" />
+                              {isStreaming || renamingChatId === chat._id ? (
+                                <Loader2 className={`h-3.5 w-3.5 shrink-0 animate-spin ${renamingChatId === chat._id ? "text-[var(--text-tertiary)]" : "text-[var(--accent-cyan)]"}`} />
                               ) : (
                                 <span
                                   className="h-2 w-2 shrink-0 rounded-full"
@@ -609,12 +649,14 @@ export function ChatSidebar({
                               {hasDraftIndicator && !isStreaming && <FileText className="h-3 w-3 shrink-0 text-[var(--text-tertiary)]" />}
                             </div>
                             <p className="truncate pl-3.5 text-[11px] text-[var(--text-secondary)]">
-                              {isStreaming ? (
+                              {renamingChatId === chat._id ? (
+                                <span className="text-[var(--text-tertiary)]">Renaming...</span>
+                              ) : isStreaming ? (
                                 <span className="text-[var(--accent-cyan)]">Generating...</span>
                               ) : (
                                 secondaryLine
                               )}
-                              {hasDraftIndicator && !isStreaming && <span className="ml-1.5 text-[var(--text-tertiary)]">Draft</span>}
+                              {hasDraftIndicator && !isStreaming && !renamingChatId && <span className="ml-1.5 text-[var(--text-tertiary)]">Draft</span>}
                             </p>
                           </>
                         )}
@@ -659,6 +701,12 @@ export function ChatSidebar({
             </div>
           ))}
         </div>
+
+        {visibleChatCount < nonPinnedChats.length && (
+          <div ref={chatListEndRef} className="py-2 text-center text-[10px] text-[var(--text-tertiary)]">
+            Loading more...
+          </div>
+        )}
       </div>
 
       <div className="mt-auto border-t border-[var(--border-default)] pt-2">

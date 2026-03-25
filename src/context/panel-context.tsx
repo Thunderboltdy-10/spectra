@@ -96,7 +96,7 @@ export function PanelProvider({ children }: { children: React.ReactNode }) {
           view: activeViewRef.current as Exclude<PanelView, null>,
           data: panelDataRef.current,
         },
-      ].slice(-10));
+      ].slice(-20));
     }
     if (typeof window !== "undefined" && view) {
       window.dispatchEvent(new CustomEvent("ai-school:panel-opened", { detail: { view } }));
@@ -144,7 +144,7 @@ export function PanelProvider({ children }: { children: React.ReactNode }) {
             view: activeViewRef.current as Exclude<PanelView, null>,
             data: panelDataRef.current,
           },
-        ].slice(-10));
+        ].slice(-20));
       }
       if (activeViewRef.current !== view) {
         setActiveView(view);

@@ -1,8 +1,11 @@
-import { mutation, query } from "./_generated/server";
+import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { getUserByClerkId } from "./helpers";
 import { vStudyMode, vThinkingLevel, vRouterMode, vCitation, vRouteTrace } from "./shared";
 import { computeCompactionWindow } from "./compaction";
+import { MODEL_DEFAULTS } from "./constants";
+import { internal } from "./_generated/api";
+import { getOpenRouterApiKey, warnOpenRouterMissing } from "./env";
 
 function compactMessageText(value: string) {
   return value.replace(/\s+/g, " ").trim();
@@ -13,6 +16,26 @@ function summarizeChatTitle(value: string) {
   if (words.length === 0) return "New chat";
   if (words.length === 1) return `${words[0]} session`.slice(0, 80);
   return words.slice(0, 5).join(" ").slice(0, 80);
+}
+
+function collectArtifactReferences(messages: Array<{ role: "user" | "assistant" | "system"; content: string }>) {
+  const artifactRegex = /\b(artifact|flashcard|deck|document|canvas|diagram|image|timeline|table|bookmark)\b/i;
+  return messages
+    .map((message) => compactMessageText(message.content))
+    .filter((line) => artifactRegex.test(line))
+    .slice(0, 6)
+    .map((line) => `- ${line.slice(0, 180)}`);
+}
+
+function collectUnresolvedGoals(messages: Array<{ role: "user" | "assistant" | "system"; content: string }>) {
+  const userPrompts = messages
+    .filter((message) => message.role === "user")
+    .map((message) => compactMessageText(message.content))
+    .filter(Boolean);
+  if (userPrompts.length === 0) {
+    return ["- No unresolved goal captured."];
+  }
+  return userPrompts.slice(-3).map((line) => `- ${line.slice(0, 180)}`);
 }
 
 function buildManualCompactionSummary(messages: Array<{ role: "user" | "assistant" | "system"; content: string; mode: string }>) {
@@ -35,11 +58,89 @@ function buildManualCompactionSummary(messages: Array<{ role: "user" | "assistan
     ...assistantGuidance.slice(0, 4).map((line) => `- ${line}`),
     "Outstanding Questions",
     userGoals.length > 0 ? `- ${userGoals[userGoals.length - 1]}` : "- No unresolved question captured.",
+    "Unresolved Goals",
+    ...collectUnresolvedGoals(messages),
+    "Artifact References",
+    ...collectArtifactReferences(messages),
     "Next Steps",
     "- Continue from recent messages and verify against cited sources/rubric.",
   ];
 
   return lines.join("\n").slice(0, 2000);
+}
+
+function toFiniteNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function compactionTranscript(messages: Array<{ role: "user" | "assistant" | "system"; content: string; mode: string }>) {
+  return messages
+    .map((message) => `${message.role.toUpperCase()} [${message.mode}]: ${compactMessageText(message.content).slice(0, 320)}`)
+    .join("\n\n")
+    .slice(0, 16_000);
+}
+
+async function generateLlmCompactionSummary(params: {
+  messages: Array<{ role: "user" | "assistant" | "system"; content: string; mode: string }>;
+}) {
+  const apiKey = getOpenRouterApiKey();
+  if (!apiKey) {
+    warnOpenRouterMissing("chat_compaction");
+    return null;
+  }
+
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: MODEL_DEFAULTS.tutorFast,
+      temperature: 0.1,
+      max_tokens: 420,
+      messages: [
+        {
+          role: "system",
+          content:
+            "Summarize this study chat for context compaction. Output plain text only with these headings exactly: Goals, Attempts, Key Guidance, Outstanding Questions, Unresolved Goals, Artifact References, Next Steps. Keep it concise (120-220 words) and preserve unresolved goals and artifact mentions.",
+        },
+        {
+          role: "user",
+          content: compactionTranscript(params.messages),
+        },
+      ],
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Compaction summary request failed: ${await response.text()}`);
+  }
+
+  const json = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+    usage?: {
+      prompt_tokens?: number | string;
+      completion_tokens?: number | string;
+      cost?: number | string;
+    };
+  };
+  const content = json.choices?.[0]?.message?.content?.trim();
+  if (!content) return null;
+  return {
+    summary: content.slice(0, 2000),
+    usage: json.usage
+      ? {
+          prompt_tokens: toFiniteNumber(json.usage.prompt_tokens),
+          completion_tokens: toFiniteNumber(json.usage.completion_tokens),
+          cost: toFiniteNumber(json.usage.cost),
+        }
+      : undefined,
+  };
 }
 
 function mergeContextSummary(existingSummary: string | undefined, generatedSummary: string) {
@@ -64,25 +165,17 @@ export const listChats = query({
     }
 
     const max = Math.max(1, Math.min(args.limit ?? 120, 300));
-    const indexedChats = await ctx.db
-      .query("chats")
-      .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id))
-      .order("desc")
-      .take(args.packId ? Math.max(max * 6, max) : max);
-
-    const orderedChats = (() => {
-      if (!args.packId) return indexedChats;
-      const filteredFromIndexed = indexedChats.filter((chat) => chat.packId === args.packId && !chat.deletedAt);
-      if (filteredFromIndexed.length >= max) return indexedChats;
-      // Fallback only for pack-scoped views when the initial indexed window is insufficient.
-      return null;
-    })();
-
-    const chats = orderedChats ?? (await ctx.db
-      .query("chats")
-      .withIndex("by_owner", (q) => q.eq("ownerUserId", actor._id))
-      .collect())
-      .sort((a, b) => b.updatedAt - a.updatedAt);
+    const chats = args.packId
+      ? await ctx.db
+          .query("chats")
+          .withIndex("by_owner_pack_updated", (q) => q.eq("ownerUserId", actor._id).eq("packId", args.packId))
+          .order("desc")
+          .take(max)
+      : await ctx.db
+          .query("chats")
+          .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id))
+          .order("desc")
+          .take(max);
 
     return chats
       .filter((chat) => !chat.deletedAt)
@@ -207,7 +300,7 @@ export const getChat = query({
 
     const messages = await ctx.db
       .query("messages")
-      .withIndex("by_chat", (q) => q.eq("chatId", args.chatId))
+      .withIndex("by_chat_created", (q) => q.eq("chatId", args.chatId))
       .collect();
 
     return {
@@ -701,11 +794,10 @@ export const setRecentContext = mutation({
   },
 });
 
-export const manualCompact = mutation({
+export const loadCompactionContextInternal = internalQuery({
   args: {
     actorClerkId: v.string(),
     chatId: v.id("chats"),
-    keepLatestMessages: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
@@ -720,10 +812,19 @@ export const manualCompact = mutation({
 
     const allMessages = await ctx.db
       .query("messages")
-      .withIndex("by_chat", (q) => q.eq("chatId", args.chatId))
+      .withIndex("by_chat_created", (q) => q.eq("chatId", args.chatId))
       .collect();
     const sorted = allMessages.sort((a, b) => a.createdAt - b.createdAt);
-    const window = computeCompactionWindow({
+
+    return {
+      actorId: actor._id,
+      actorOrgId: actor.orgId,
+      chat: {
+        _id: chat._id,
+        contextSummary: chat.contextSummary,
+        compactedUntilMessageId: chat.compactedUntilMessageId,
+        contextSummaryVersion: chat.contextSummaryVersion,
+      },
       messages: sorted.map((message) => ({
         _id: message._id,
         createdAt: message.createdAt,
@@ -731,8 +832,48 @@ export const manualCompact = mutation({
         content: message.content,
         mode: message.mode,
       })),
+    };
+  },
+});
+
+export const applyCompactionInternal = internalMutation({
+  args: {
+    chatId: v.id("chats"),
+    contextSummary: v.string(),
+    compactedUntilMessageId: v.id("messages"),
+    compactedAt: v.number(),
+    contextSummaryVersion: v.number(),
+    compactionQuality: v.union(v.literal("manual"), v.literal("llm"), v.literal("hybrid")),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.chatId, {
+      contextSummary: args.contextSummary,
+      compactedUntilMessageId: args.compactedUntilMessageId,
+      compactedAt: args.compactedAt,
+      compactionQuality: args.compactionQuality,
+      contextSummaryVersion: args.contextSummaryVersion,
+      updatedAt: args.compactedAt,
+    });
+    return { ok: true };
+  },
+});
+
+export const manualCompact: ReturnType<typeof action> = action({
+  args: {
+    actorClerkId: v.string(),
+    chatId: v.id("chats"),
+    keepLatestMessages: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const data = await ctx.runQuery(internal.chats.loadCompactionContextInternal, {
+      actorClerkId: args.actorClerkId,
+      chatId: args.chatId,
+    });
+
+    const window = computeCompactionWindow({
+      messages: data.messages,
       keepLatestMessages: args.keepLatestMessages ?? 6,
-      compactedUntilMessageId: chat.compactedUntilMessageId,
+      compactedUntilMessageId: data.chat.compactedUntilMessageId,
     });
 
     if (!window.ok) {
@@ -740,27 +881,74 @@ export const manualCompact = mutation({
         ok: false,
         reason: window.reason,
         compactedMessages: 0,
-        currentMessages: sorted.length,
-        minimumMessages: 20,
+        currentMessages: data.messages.length,
+        minimumMessages: 12,
       };
     }
 
-    const generatedSummary = buildManualCompactionSummary(
+    const manualSummary = buildManualCompactionSummary(
       window.toCompact.map((message) => ({
         role: message.role,
         content: message.content,
         mode: message.mode,
       })),
     );
-    const contextSummary = mergeContextSummary(chat.contextSummary, generatedSummary);
+
+    let generatedSummary = manualSummary;
+    let compactionQuality: "manual" | "llm" | "hybrid" = "manual";
+    try {
+      const llmSummary = await generateLlmCompactionSummary({
+        messages: window.toCompact.map((message) => ({
+          role: message.role,
+          content: message.content,
+          mode: message.mode,
+        })),
+      });
+      if (llmSummary?.summary?.trim()) {
+        const mustKeep = [
+          ...collectUnresolvedGoals(window.toCompact),
+          ...collectArtifactReferences(window.toCompact),
+        ];
+        const missingLines = mustKeep.filter((line) => {
+          const needle = line.replace(/^- /, "").toLowerCase();
+          return needle && !llmSummary.summary.toLowerCase().includes(needle.slice(0, 48));
+        });
+        generatedSummary =
+          missingLines.length > 0
+            ? `${llmSummary.summary.trim()}\n\nUnresolved Goals & Artifact References\n${missingLines.join("\n")}`.slice(0, 2000)
+            : llmSummary.summary.trim().slice(0, 2000);
+        compactionQuality = missingLines.length > 0 ? "hybrid" : "llm";
+
+        if (llmSummary.usage) {
+          await ctx.runMutation(internal.usage.recordUsageWithCostInternal, {
+            userId: data.actorId,
+            orgId: data.actorOrgId,
+            chatId: args.chatId,
+            model: MODEL_DEFAULTS.tutorFast,
+            inputTokens: Math.max(0, Math.round(llmSummary.usage.prompt_tokens ?? 0)),
+            outputTokens: Math.max(0, Math.round(llmSummary.usage.completion_tokens ?? 0)),
+            openRouterCost:
+              typeof llmSummary.usage.cost === "number" && Number.isFinite(llmSummary.usage.cost)
+                ? Math.max(0, Number(llmSummary.usage.cost.toFixed(8)))
+                : undefined,
+          }).catch(() => {});
+        }
+      }
+    } catch {
+      compactionQuality = "manual";
+      generatedSummary = manualSummary;
+    }
+
+    const contextSummary = mergeContextSummary(data.chat.contextSummary, generatedSummary);
     const compactedAt = Date.now();
 
-    await ctx.db.patch(chat._id, {
+    await ctx.runMutation(internal.chats.applyCompactionInternal, {
+      chatId: data.chat._id,
       contextSummary,
       compactedUntilMessageId: window.compactedUntilMessageId,
       compactedAt,
-      contextSummaryVersion: (chat.contextSummaryVersion ?? 0) + 1,
-      updatedAt: compactedAt,
+      compactionQuality,
+      contextSummaryVersion: (data.chat.contextSummaryVersion ?? 0) + 1,
     });
 
     return {
@@ -769,6 +957,7 @@ export const manualCompact = mutation({
       retainedMessages: window.retainedMessages,
       compactedUntilMessageId: window.compactedUntilMessageId,
       contextSummary,
+      compactionQuality,
     };
   },
 });

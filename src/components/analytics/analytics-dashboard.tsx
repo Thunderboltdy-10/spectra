@@ -80,6 +80,7 @@ type AnalyticsDashboardProps = {
     estimatedMonthCostCents: number;
     monthKey: string;
   };
+  showCostDetails?: boolean;
   classData: AnalyticsRow[];
   range: {
     preset: "current_month" | "last_7_days" | "last_30_days" | "custom";
@@ -608,9 +609,11 @@ function QuizTrendChart({
 function ModelLeaderboard({
   rows,
   costRows,
+  showCostDetails = false,
 }: {
   rows: AnalyticsRow[];
-  costRows: Array<{ modelId: string; requestCount: number; totalTokens: number; totalCostCents: number }>;
+  costRows?: Array<{ modelId: string; requestCount: number; totalTokens: number; totalCostCents: number }>;
+  showCostDetails?: boolean;
 }) {
   const entries = useMemo(() => {
     const countByModel = new Map<string, number>();
@@ -620,7 +623,7 @@ function ModelLeaderboard({
         countByModel.set(model, (countByModel.get(model) ?? 0) + 1);
       }
     }
-    const costLookup = new Map(costRows.map((row) => [row.modelId, row]));
+    const costLookup = new Map((costRows ?? []).map((row) => [row.modelId, row]));
     return Array.from(new Set([...countByModel.keys(), ...costLookup.keys()]))
       .map((modelId) => {
         const usageCount = countByModel.get(modelId) ?? costLookup.get(modelId)?.requestCount ?? 0;
@@ -633,9 +636,12 @@ function ModelLeaderboard({
           costCents,
         };
       })
-      .sort((a, b) => b.costCents - a.costCents || b.usageCount - a.usageCount)
+      .sort((a, b) => {
+        if (showCostDetails) return b.costCents - a.costCents || b.usageCount - a.usageCount;
+        return b.usageCount - a.usageCount || b.tokens - a.tokens;
+      })
       .slice(0, 8);
-  }, [costRows, rows]);
+  }, [costRows, rows, showCostDetails]);
 
   return (
     <div className="p-4">
@@ -659,7 +665,7 @@ function ModelLeaderboard({
                 </p>
               </div>
               <span className="text-[11px] text-[var(--text-secondary)]">
-                {entry.costCents > 0 ? formatUsdCents(entry.costCents) : scoreLabel(entry.usageCount)}
+                {showCostDetails && entry.costCents > 0 ? formatUsdCents(entry.costCents) : scoreLabel(entry.usageCount)}
               </span>
             </div>
           ))
@@ -713,6 +719,7 @@ export function AnalyticsDashboard({
   studentSignals,
   enhanced,
   cost,
+  showCostDetails = false,
   classData,
   range,
   onRangeChange,
@@ -804,7 +811,9 @@ export function AnalyticsDashboard({
           <StatItem label="Avg quiz score" value={student.avgScore !== null ? `${student.avgScore}%` : "-"} subtitle={student.avgScore !== null ? "across all quizzes" : "No quizzes yet"} />
           <StatItem label="Avg study/day" value={`${averageDailyStudyMinutes}m`} subtitle={`${shortDayLabel(range.startDate)} to ${shortDayLabel(range.endDate)}`} />
           <StatItem label="Preferred model" value={formatModelName(studentSignals.preferredModel)} subtitle={studentSignals.preferredModelCount > 0 ? `${studentSignals.preferredModelCount} routed responses` : "No routed responses yet"} />
-          <StatItem label="Est. cost this month" value={formatUsdCents(cost.estimatedMonthCostCents)} subtitle={cost.monthKey} />
+          {showCostDetails ? (
+            <StatItem label="Est. cost this month" value={formatUsdCents(cost.estimatedMonthCostCents)} subtitle={cost.monthKey} />
+          ) : null}
         </div>
       </div>
 
@@ -822,7 +831,7 @@ export function AnalyticsDashboard({
           <QuizTrendChart trend={filteredQuizTrend} selectedDay={selectedQuizDay} onSelectDay={setSelectedQuizDay} />
         </section>
         <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
-          <ModelLeaderboard rows={filteredStudentData} costRows={cost.byModel} />
+          <ModelLeaderboard rows={filteredStudentData} costRows={cost.byModel} showCostDetails={showCostDetails} />
         </section>
       </div>
 
@@ -836,9 +845,11 @@ export function AnalyticsDashboard({
         </section>
       </div>
 
-      <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
-        <CostChart data={cost.daily} />
-      </section>
+      {showCostDetails ? (
+        <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+          <CostChart data={cost.daily} />
+        </section>
+      ) : null}
 
       <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
         <ProductivityInsights productivity={filteredProductivity} />

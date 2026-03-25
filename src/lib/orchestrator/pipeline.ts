@@ -26,7 +26,7 @@ import { countFlashcardPairs, isFlashcardDeckStructured, normalizeFlashcardDeck 
 import { safeStudyMode } from "@/lib/contracts/studyModes";
 import { createRequestLogger } from "@/lib/logging";
 import { isModeAvailable } from "@/lib/modes";
-import { modelSupportsCapability, pickModelAndFallbacks } from "@/lib/model-selection";
+import { isModelTooExpensivePerMillion, modelSupportsCapability, pickModelAndFallbacks } from "@/lib/model-selection";
 import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
 import { normalizeAttachments } from "@/lib/attachments/normalizer";
 import { gateCapabilities } from "@/lib/attachments/capability-gate";
@@ -95,6 +95,7 @@ type ChatRequestBody = {
   thinkingLevel: "low" | "medium" | "high";
   routerMode: "auto" | "manual" | "openrouter_auto";
   manualModel?: string;
+  confirmExpensiveModel?: boolean;
   forcedModel?: string;
   imageModel?: string;
   usePersonalResources: boolean;
@@ -498,6 +499,33 @@ export async function runChatPipeline(request: NextRequest) {
     typeof usage?.cost === "number" && Number.isFinite(usage.cost)
       ? Number((Math.max(0, usage.cost) * 100).toFixed(4))
       : undefined;
+  const allocateInputTokenBreakdown = (params: {
+    inputTokens: number;
+    systemChars: number;
+    historyChars: number;
+    memoryChars: number;
+    sourceChars: number;
+  }) => {
+    const totalChars = Math.max(
+      1,
+      params.systemChars + params.historyChars + params.memoryChars + params.sourceChars,
+    );
+    const provisional = {
+      systemPrompt: Math.floor((params.inputTokens * params.systemChars) / totalChars),
+      history: Math.floor((params.inputTokens * params.historyChars) / totalChars),
+      memory: Math.floor((params.inputTokens * params.memoryChars) / totalChars),
+      sources: Math.floor((params.inputTokens * params.sourceChars) / totalChars),
+    };
+    const used =
+      provisional.systemPrompt
+      + provisional.history
+      + provisional.memory
+      + provisional.sources;
+    if (used < params.inputTokens) {
+      provisional.history += params.inputTokens - used;
+    }
+    return provisional;
+  };
   const deferSubcall = (entry: Omit<PendingSubcall, "id" | "provider">) => {
     deferredSubcalls.push({
       ...entry,
@@ -712,9 +740,14 @@ export async function runChatPipeline(request: NextRequest) {
         thinkingMode: autoSettings.thinkingMode,
         searchMode: autoSettings.searchMode,
       });
-  const userDirectives = parseUserDirectives(normalizedMessage);
+  const userDirectives = parseUserDirectives(normalizedMessage, { modelCatalog: catalog });
   if (userDirectives.forcedModel) {
-    logger.info("user directive: forced model", { model: userDirectives.forcedModel });
+    logger.info("user directive: forced model", {
+      model: userDirectives.forcedModel,
+      phrase: userDirectives.detectedModelPhrase,
+      score: userDirectives.detectedModelScore,
+      source: userDirectives.detectedModelSource,
+    });
   }
   if (userDirectives.forceMultiAgent) {
     logger.info("user directive: force multi-agent");
@@ -725,10 +758,6 @@ export async function runChatPipeline(request: NextRequest) {
       actions: userDirectives.memoryActions.map((action) => action.type),
     });
   }
-  if (userDirectives.forcedModel && !body.forcedModel) {
-    (body as Record<string, unknown>).forcedModel = userDirectives.forcedModel;
-  }
-
   logger.info("auto-settings complete", {
     skippedForT0: skipAutoSettingsForT0,
     promptEnhanced: auto.promptEnhanced,
@@ -1465,6 +1494,15 @@ export async function runChatPipeline(request: NextRequest) {
   let searchSources = webResult.sources ?? [];
   const searchProvider = webResult.provider;
   const usedRecentContextCache = hasReusableRecentContext;
+  const retrievalExpectedByUser = routePlan.shouldUseSchoolResources && routePlan.retrievalScopes.length > 0;
+  const retrievalMissedExpectedSources =
+    retrievalExpectedByUser
+    && retrieval.citations.length === 0
+    && (
+      retrieval.diagnostics?.status === "no_high_confidence_matches"
+      || retrieval.diagnostics?.status === "no_sources_available"
+      || retrieval.diagnostics?.status === "failed"
+    );
   const routeTraceSearchStatus =
     !routePlan.shouldUseWebSearch && !usedRecentContextCache
       ? "skipped"
@@ -1533,6 +1571,13 @@ export async function runChatPipeline(request: NextRequest) {
       earlyEventBuffer.push({ type: "search_status", status: "failed", searchStatus: "error", sourceCount: 0 });
     }
   }
+  if (retrievalMissedExpectedSources) {
+    earlyEventBuffer.push({
+      type: "notice",
+      message:
+        "I could not find usable evidence in your uploaded resources for this request, so I will respond with general guidance unless you point me to a specific file or section.",
+    });
+  }
 
   const contextQuizDifficulty =
     storedLearningContext && Number.isFinite(storedLearningContext.difficultyLevel)
@@ -1563,24 +1608,47 @@ export async function runChatPipeline(request: NextRequest) {
   const previousAssistantModel = [...history]
     .reverse()
     .find((message) => message.role === "assistant" && message.modelUsed)?.modelUsed;
+  const previousAssistantTurn = [...history]
+    .reverse()
+    .find((message) => message.role === "assistant" && message.modelUsed);
+  const cacheWindow = {
+    lastModel: previousAssistantTurn?.modelUsed,
+    lastUsedAt: previousAssistantTurn?.createdAt,
+    compactedAt: typeof chatData.chat.compactedAt === "number" ? chatData.chat.compactedAt : undefined,
+    ttlMs: 5 * 60 * 1000,
+  };
   const chatRecentAssistantModels = history
     .filter((message) => message.role === "assistant")
     .map((message) => message.modelUsed)
     .filter((model): model is string => Boolean(model))
     .slice(-20);
   const combinedRecentAssistantModels = Array.from(
-    new Set([
+    [
       ...chatRecentAssistantModels,
       ...globalRecentAssistantModels.filter((model): model is string => Boolean(model && model.trim())),
-    ]),
-  ).slice(-30);
+    ],
+  ).slice(-20);
 
   const fallbackManualModel =
     body.manualModel
     ?? catalog.find((model) => model.modelId !== "openrouter/auto")?.modelId
     ?? "openrouter/auto";
-  const routingMode = autoSettings.autoModel ? body.routerMode : "manual";
-  const routingManualModel = autoSettings.autoModel ? body.manualModel : fallbackManualModel;
+  const intentForcesManualModel = userDirectives.forcedModel
+    && body.routerMode !== "manual"
+    && autoSettings.autoModel;
+  const routingMode = autoSettings.autoModel
+    ? (intentForcesManualModel ? "manual" : body.routerMode)
+    : "manual";
+  const routingManualModel = autoSettings.autoModel
+    ? (intentForcesManualModel ? userDirectives.forcedModel : body.manualModel)
+    : fallbackManualModel;
+  const detectedIntents = [
+    userDirectives.detectedModelPhrase && userDirectives.forcedModel
+      ? `model_request:${userDirectives.detectedModelPhrase}->${userDirectives.forcedModel}`
+      : undefined,
+    userDirectives.orchestrationPhraseDetected ? "orchestration_request:multi_model" : undefined,
+    routePlan.intentSignals?.requestedOrchestration ? "route_plan_orchestration_signal" : undefined,
+  ].filter((value): value is string => Boolean(value));
   const phaseThinkingLevel =
     routePlan.responseBudget === "simple"
       ? "low"
@@ -1613,6 +1681,9 @@ export async function runChatPipeline(request: NextRequest) {
     previousModelUsed: previousAssistantModel,
     conversationTurnCount: history.length,
     recentModels: combinedRecentAssistantModels,
+    requestClass: auto.requestClass,
+    cacheWindow,
+    manualModelConfirmedExpensive: Boolean(body.confirmExpensiveModel),
     modelCatalog: catalog,
     modelRuntimeStats: runtimeStatMap,
     seedKey: `${chatId}:${normalizedMessage}`,
@@ -1650,6 +1721,7 @@ export async function runChatPipeline(request: NextRequest) {
         classificationReason: auto.classificationReason,
         previousModelUsed: previousAssistantModel,
         agentPreferredModel: selectedAgent?.preferredModel,
+        detectedIntents,
       },
       candidates: routeDecision.candidates,
       selected: {
@@ -1671,6 +1743,15 @@ export async function runChatPipeline(request: NextRequest) {
       })),
       searchStatus: routeTraceSearchStatus,
       costBudgetUsd: pipelineSnapshot.costBudgetUsd,
+      usageBudgetRemaining: pipelineSnapshot.usageBudgetRemaining,
+      inputTokenBreakdown: undefined as
+        | {
+          systemPrompt: number;
+          history: number;
+          memory: number;
+          sources: number;
+        }
+        | undefined,
     },
   };
   const appendSubcall = (entry: {
@@ -1763,8 +1844,25 @@ export async function runChatPipeline(request: NextRequest) {
       return { ...phase, status: "completed" };
     });
   };
-  const manualLockRequested = body.routerMode === "manual" && Boolean(body.manualModel) && !body.forcedModel;
-  if (manualLockRequested && body.manualModel && route.primaryModel !== body.manualModel) {
+  const manualLockRequested = routingMode === "manual" && Boolean(routingManualModel) && !body.forcedModel;
+  const manualModelMeta = routingManualModel
+    ? catalog.find((model) => model.modelId === routingManualModel)
+    : undefined;
+  const manualModelExceedsCap = Boolean(manualModelMeta && isModelTooExpensivePerMillion(manualModelMeta));
+  if (manualLockRequested && routingManualModel && manualModelExceedsCap && !body.confirmExpensiveModel) {
+    await rollbackPersistedUserMessage();
+    return jsonError(409, {
+      code: "MANUAL_MODEL_CONFIRM_REQUIRED",
+      message: `The selected model (${routingManualModel}) exceeds the automatic 30/M cap. Confirm once to run it manually for this request.`,
+      retryable: false,
+    }, {
+      requiredConfirmation: true,
+      modelId: routingManualModel,
+      inputCostPerM: manualModelMeta?.inputCostPerM,
+      outputCostPerM: manualModelMeta?.outputCostPerM,
+    });
+  }
+  if (manualLockRequested && routingManualModel && route.primaryModel !== routingManualModel) {
     const allowedAlternatives = route.trace.candidates
       .filter((candidate) => candidate.allowed)
       .map((candidate) => candidate.modelId)
@@ -1820,6 +1918,9 @@ export async function runChatPipeline(request: NextRequest) {
   if (retrieval.diagnostics?.status) {
     route.trace.toolchain.push(`retrieval_${retrieval.diagnostics.status}`);
   }
+  if (retrievalMissedExpectedSources) {
+    route.trace.toolchain.push("retrieval_expected_no_sources");
+  }
   if (usedRecentContextCache) {
     route.trace.toolchain.push("recent_context_reused");
   }
@@ -1834,6 +1935,12 @@ export async function runChatPipeline(request: NextRequest) {
     }
   }
   if (agentSuggestion) route.trace.toolchain.push("agent_suggestion");
+  if (userDirectives.detectedModelPhrase && userDirectives.forcedModel) {
+    route.trace.toolchain.push("intent_model_request");
+  }
+  if (userDirectives.orchestrationPhraseDetected) {
+    route.trace.toolchain.push("intent_orchestration_request");
+  }
   if (explainDepth) route.trace.toolchain.push("explain_depth_detection");
   if (effectiveMode === "quiz" && featureEnabled(orgSettings.org?.adaptiveQuizEnabled)) {
     route.trace.toolchain.push("adaptive_quiz");
@@ -2164,9 +2271,21 @@ export async function runChatPipeline(request: NextRequest) {
     route.trace.toolchain.push("mode_transform_guidance");
   }
 
+  const systemPromptTier = auto.requestClass === "T3"
+    ? "T3"
+    : auto.requestClass === "T2"
+      ? "T2"
+      : auto.requestClass === "T1"
+        ? "T1"
+        : "T0";
+  const includeRuntimeContextBlocks = systemPromptTier !== "T0";
+  const includeRichContextBlocks = systemPromptTier === "T2" || systemPromptTier === "T3";
+  const includeFullContextBlocks = systemPromptTier === "T3";
+
   const systemPromptParts = [buildSystemPrompt({
     mode: effectiveMode,
     strictness: "medium",
+    promptTier: systemPromptTier,
     guidelines: {
       summary:
         selectedAgent?.guidelinesSummary ??
@@ -2194,15 +2313,18 @@ export async function runChatPipeline(request: NextRequest) {
     quizDifficultyLabel,
   })];
 
-  systemPromptParts.push(`=== RUNTIME CONTEXT ===\n${runtimeContextBlock}\n=== END RUNTIME CONTEXT ===`);
-  if (learningContextPrompt) {
+  if (includeRuntimeContextBlocks) {
+    systemPromptParts.push(`=== RUNTIME CONTEXT ===\n${runtimeContextBlock}\n=== END RUNTIME CONTEXT ===`);
+  }
+  if (includeRuntimeContextBlocks && learningContextPrompt) {
     systemPromptParts.push(`=== LEARNING CONTEXT ===\n${learningContextPrompt}\n=== END LEARNING CONTEXT ===`);
   }
-  if (modeTransformGuidance) {
+  if (includeRuntimeContextBlocks && modeTransformGuidance) {
     systemPromptParts.push(`=== MODE TRANSFORM GUIDANCE ===\n${modeTransformGuidance}\n=== END MODE TRANSFORM GUIDANCE ===`);
   }
-  systemPromptParts.push(
-    `=== MODE CONTRACT ===
+  if (includeRichContextBlocks) {
+    systemPromptParts.push(
+      `=== MODE CONTRACT ===
 Pedagogy: ${routePlan.modeContract.pedagogy}
 Output format: ${routePlan.modeContract.outputFormat}
 Response depth: ${routePlan.modeContract.responseDepth}
@@ -2210,9 +2332,9 @@ Escalation: ${routePlan.modeContract.escalationPolicy}
 Allowed bundles: ${routePlan.modeContract.toolBundles.join(", ") || "none"}
 Validator: ${routePlan.modeContract.validator}
 === END MODE CONTRACT ===`,
-  );
-  systemPromptParts.push(
-    `=== ROUTE PRIMITIVES ===
+    );
+    systemPromptParts.push(
+      `=== ROUTE PRIMITIVES ===
 Web search bundle: ${routePlan.shouldUseWebSearch || usedRecentContextCache ? "enabled" : "disabled"}.
 Retrieved school resources: ${retrieval.citations.length > 0 ? `${retrieval.citations.length} source(s) available` : routePlan.retrievalScopes.length > 0 ? "enabled but no high-confidence sources found" : "disabled"}.
 Memory bundle: ${useMemoryProfile ? "layered memory injected (global + topic-aware)" : memoryEnabled ? "enabled but no relevant memory injected" : "disabled"}.
@@ -2222,24 +2344,26 @@ If retrieval is enabled, ground claims in the provided classroom sources instead
 If sources exist, cite them inline where useful and finish with a compact sources section.
 Do not invent tool calls that were not actually run.
 === END ROUTE PRIMITIVES ===`,
-  );
-  const runtimeSkillBlock = formatRuntimeSkillBlock(runtimeSkills);
-  if (runtimeSkillBlock) {
-    systemPromptParts.push(runtimeSkillBlock);
-    route.trace.toolchain.push("skill_guidance_applied");
+    );
   }
-  if (routePlan.agentContract) {
-    systemPromptParts.push(
-      `=== AGENT CONTRACT ===
+  if (includeFullContextBlocks) {
+    const runtimeSkillBlock = formatRuntimeSkillBlock(runtimeSkills);
+    if (runtimeSkillBlock) {
+      systemPromptParts.push(runtimeSkillBlock);
+      route.trace.toolchain.push("skill_guidance_applied");
+    }
+    if (routePlan.agentContract) {
+      systemPromptParts.push(
+        `=== AGENT CONTRACT ===
 Agent: ${routePlan.agentContract.name ?? "Focused agent"}
 Scope: ${routePlan.agentContract.scope}
 Resource scopes: ${routePlan.agentContract.resourceScopes.join(", ") || "none"}
 Allowed bundles: ${routePlan.agentContract.toolBundles.join(", ") || "none"}
 === END AGENT CONTRACT ===`,
-    );
-  }
-  systemPromptParts.push(
-    `=== TOOL EXECUTION CONTEXT ===
+      );
+    }
+    systemPromptParts.push(
+      `=== TOOL EXECUTION CONTEXT ===
 Route-approved bundles: ${routePlan.allowedToolBundles.join(", ") || "none"}
 Search route enabled: ${routePlan.shouldUseWebSearch || usedRecentContextCache ? "yes" : "no"}
 Retrieval scopes enabled: ${routePlan.retrievalScopes.join(", ") || "none"}
@@ -2249,20 +2373,21 @@ Retrieved classroom/personal sources provided below: ${retrieval.citations.lengt
 If a route-approved capability returned no results, say that no usable results were found.
 Do not claim you lack a supported tool when search, retrieval, or memory context is already provided in this prompt.
 === END TOOL EXECUTION CONTEXT ===`,
-  );
-  if (featureEnabled(orgSettings.org?.soulEnabled) && schoolSoulCapsule.capsule.trim()) {
+    );
+  }
+  if (includeRichContextBlocks && featureEnabled(orgSettings.org?.soulEnabled) && schoolSoulCapsule.capsule.trim()) {
     systemPromptParts.push(
       `=== SCHOOL SOUL ${schoolSoulCapsule.version} ===\n${schoolSoulCapsule.capsule}\n=== END SCHOOL SOUL ===`,
     );
   }
 
-  if (attachments.quickExtractBlock) {
+  if (includeRichContextBlocks && attachments.quickExtractBlock) {
     systemPromptParts.push(attachments.quickExtractBlock);
   }
-  if (researchEvidenceBlock) {
+  if (includeRichContextBlocks && researchEvidenceBlock) {
     systemPromptParts.push(researchEvidenceBlock);
   }
-  if (imageDescriptionBlock) {
+  if (includeRichContextBlocks && imageDescriptionBlock) {
     systemPromptParts.push(`IMAGE DESCRIPTION:\n${imageDescriptionBlock}`);
   }
 
@@ -2317,6 +2442,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     step: row.step,
     reason: row.reason,
   }));
+  route.trace.usageBudgetRemaining = gatedPipelineSnapshot.usageBudgetRemaining;
 
   const collabWallTimeMs =
     routePlan.responseBudget === "deep"
@@ -2379,6 +2505,9 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     previousModelUsed: route.primaryModel,
     conversationTurnCount: history.length,
     recentModels: combinedRecentAssistantModels,
+    requestClass: auto.requestClass,
+    cacheWindow,
+    manualModelConfirmedExpensive: Boolean(body.confirmExpensiveModel),
     modelCatalog: catalog,
     modelRuntimeStats: runtimeStatMap,
     seedKey: `${chatId}:${normalizedMessage}:support`,
@@ -2410,6 +2539,9 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     previousModelUsed: route.primaryModel,
     conversationTurnCount: history.length,
     recentModels: combinedRecentAssistantModels,
+    requestClass: auto.requestClass,
+    cacheWindow,
+    manualModelConfirmedExpensive: Boolean(body.confirmExpensiveModel),
     modelCatalog: catalog,
     modelRuntimeStats: runtimeStatMap,
     seedKey: `${chatId}:${normalizedMessage}:synthesis`,
@@ -2436,6 +2568,19 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
       capability.requiresPrepass ? undefined : allImageBlocks,
     ),
   ];
+  const inputContextChars = {
+    systemChars: systemPromptParts.join("\n\n").length,
+    historyChars: historyForModel.reduce((sum, item) => sum + (item.content?.length ?? 0), 0),
+    memoryChars:
+      (memoryPlan.profileText?.length ?? 0)
+      + (memoryPlan.layer2Text?.length ?? 0)
+      + (memoryPlan.layer3Text?.length ?? 0)
+      + (personalSoulExcerpt?.length ?? 0),
+    sourceChars:
+      (retrieval.sourceBlock?.length ?? 0)
+      + (searchBlock?.length ?? 0)
+      + (researchEvidenceBlock?.length ?? 0),
+  };
   const specialistConversationContext = buildSpecialistConversationContext(historyForModel);
 
   const shouldVerify = effectiveMode === "marker" && Boolean(orgSettings.org?.verifyMarkerPassEnabled);
@@ -2456,6 +2601,9 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
       previousModelUsed: route.primaryModel,
       conversationTurnCount: history.length,
       recentModels: combinedRecentAssistantModels,
+      requestClass: auto.requestClass,
+      cacheWindow,
+      manualModelConfirmedExpensive: Boolean(body.confirmExpensiveModel),
       modelCatalog: catalog,
       modelRuntimeStats: runtimeStatMap,
       seedKey: `${chatId}:${normalizedMessage}:verification`,
@@ -2579,9 +2727,31 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
       : routePlan.responseBudget === "normal"
         ? Math.min(modeMaxTokens, effectiveMode === "research" || effectiveMode === "document" ? 2400 : 1800)
         : modeMaxTokens;
+  const primaryCatalogEntry =
+    catalog.find((model) => model.modelId === route.primaryModel)
+    ?? catalog.find((model) => model.modelId.replace(/:free$/i, "") === route.primaryModel.replace(/:free$/i, ""));
+  const estimatedInputTokens = Math.ceil(
+    (
+      inputContextChars.systemChars
+      + inputContextChars.historyChars
+      + inputContextChars.memoryChars
+      + inputContextChars.sourceChars
+    ) / 4,
+  );
+  const modelContextAwareCap =
+    typeof primaryCatalogEntry?.contextLength === "number" && Number.isFinite(primaryCatalogEntry.contextLength) && primaryCatalogEntry.contextLength > 0
+      ? Math.max(256, Math.floor(primaryCatalogEntry.contextLength - estimatedInputTokens - 1024))
+      : undefined;
+  const contextAwareMaxTokens =
+    typeof modelContextAwareCap === "number"
+      ? Math.max(256, Math.min(budgetAwareMaxTokens, modelContextAwareCap))
+      : budgetAwareMaxTokens;
+  if (typeof modelContextAwareCap === "number" && modelContextAwareCap < budgetAwareMaxTokens) {
+    route.trace.toolchain.push("context_window_token_cap");
+  }
   const maxTokens = isVagueRequest
-    ? Math.min(512, budgetAwareMaxTokens)
-    : budgetAwareMaxTokens;
+    ? Math.min(512, contextAwareMaxTokens)
+    : contextAwareMaxTokens;
   const earlyTitlePromise = isFirstAssistantTurn
     ? maybeGenerateTitleFromUserPrompt({
         chatId,
@@ -2714,6 +2884,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           whyThisResponse: "Clarification requested before executing the expensive stages.",
           citations: [],
           routeTrace: route.trace,
+          finishReason: undefined,
           autoResult: {
             modelUsed: undefined,
             searchEnabled: route.searchEnabled || routePlan.shouldUseWebSearch || usedRecentContextCache,
@@ -3059,6 +3230,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           citations,
           verificationPassed: undefined,
           thinkingContent: undefined,
+          finishReason: undefined,
           routeTrace: route.trace,
           spendingUpdate,
           autoResult: {
@@ -3107,6 +3279,11 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
       if (route.trace.phasePlan?.some((phase) => phase.id === "verification") && shouldVerify) {
         await emitPhaseUpdate("verification", "in_progress");
       }
+      const consumeUsageTokens = (tokens: number) => {
+        const remaining = pipelineController.consumeUsageTokens(tokens);
+        route.trace.usageBudgetRemaining = remaining;
+      };
+      const usageBudgetState = pipelineController.getState();
 
       const streamed = multiAgentEnabled
         ? await runCollaborativeStreaming({
@@ -3123,11 +3300,15 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
             catalog,
             modelRuntimeStats: runtimeStatMap,
             spendingTier: budget.tier,
+            thinkingLevel: effectiveThinkingLevel,
             maxTokens,
             maxSubcalls: collabLimits.maxSubcalls,
             maxTokensPerSpecialist: collabLimits.maxTokensPerSpecialist,
             maxWallTimeMs: collabLimits.maxWallTimeMs,
+            usageBudgetTokens: usageBudgetState.usageBudgetRemaining,
+            budgetOverrunFactor: 1.5,
             send,
+            onUsageTokens: consumeUsageTokens,
             onFallback,
             logger,
           })
@@ -3135,12 +3316,14 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
             actorClerkId: actor.clerkId,
             chatId,
             shouldVerify,
+            thinkingLevel: effectiveThinkingLevel,
             primaryModel,
             fallbackModels,
             verificationModel: route.verificationModel,
             messages,
             maxTokens,
             send,
+            onUsageTokens: consumeUsageTokens,
             onFallback,
             logger,
           });
@@ -3186,9 +3369,18 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
       const usageIn = streamed.usageIn;
       const usageOut = streamed.usageOut;
       const usage = streamed.usage;
+      const finishReason = streamed.finishReason;
+      const truncatedByLength = streamed.truncatedByLength;
+      const continuationCount = streamed.continuationCount;
       const verificationPassed = streamed.verificationPassed;
       const thinkingContent = streamed.thinkingContent;
       const modelRequested = primaryModel;
+      if (continuationCount > 0) {
+        route.trace.toolchain.push("length_auto_continue");
+      }
+      if (truncatedByLength && continuationCount >= 2 && finishReason === "length") {
+        route.trace.toolchain.push("length_cap_reached");
+      }
       if (streamed.verificationSubcalls && streamed.verificationSubcalls.length > 0) {
         for (const verificationSubcall of streamed.verificationSubcalls) {
           appendSubcall({
@@ -3633,6 +3825,14 @@ BACK: [answer or definition]`,
       const finalSubcallTotals = subcallTokenTotals();
       const finalUsageIn = finalSubcallTotals.input > 0 ? finalSubcallTotals.input : usageIn;
       const finalUsageOut = finalSubcallTotals.output > 0 ? finalSubcallTotals.output : usageOut;
+      route.trace.inputTokenBreakdown = allocateInputTokenBreakdown({
+        inputTokens: Math.max(0, finalUsageIn),
+        systemChars: inputContextChars.systemChars,
+        historyChars: inputContextChars.historyChars,
+        memoryChars: inputContextChars.memoryChars,
+        sourceChars: inputContextChars.sourceChars,
+      });
+      route.trace.usageBudgetRemaining = pipelineController.getState().usageBudgetRemaining;
       (route.trace as any).totalCostCents = Number(
         ((route.trace.subcalls ?? []).reduce((sum, call) => sum + (call.costCents ?? 0), 0)).toFixed(4),
       );
@@ -3686,10 +3886,18 @@ BACK: [answer or definition]`,
           usage,
           inputTokens: finalUsageIn,
           outputTokens: finalUsageOut,
+          finishReason,
+          truncatedByLength,
           pricing,
         });
       }
       await recordModelRuntime(modelUsed, true, Date.now() - requestStartedAt);
+      await convexMutation("models:recordModelQualitySignals", {
+        actorClerkId: actor.clerkId,
+        modelId: modelUsed,
+        finishReason,
+        responseLength: finalizedResponse.length,
+      }).catch(() => {});
       if ((route.trace as any).collaborators?.length) {
         for (const collaborator of (route.trace as any).collaborators) {
           await recordModelRuntime(
@@ -3941,6 +4149,7 @@ BACK: [answer or definition]`,
         attachmentResourceIds: generatedArtifactResourceIds,
         verificationPassed,
         thinkingContent: thinkingContent || undefined,
+        finishReason,
         routeTrace: route.trace,
         spendingUpdate,
         autoResult: {

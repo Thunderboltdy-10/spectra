@@ -82,6 +82,8 @@ export function getSpecialist(
         preferredModelIds: explicitModel ? [explicitModel] : undefined,
         previousModelUsed: options?.avoidModels?.at(-1),
         recentModels: options?.avoidModels ?? [],
+        requestClass: "T2",
+        manualModelConfirmedExpensive: false,
         modelCatalog: catalog.filter((model) => model.modelId !== "openrouter/auto"),
         modelRuntimeStats: options?.runtimeStats,
         seedKey: `${role}:${options?.avoidModels?.join(",") ?? ""}`,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { createElement, useCallback, useEffect, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { Bell, CheckCheck, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { NotificationToast } from "@/components/notification-toast";
 
 type NotificationItem = {
   _id: string;
@@ -85,13 +86,27 @@ export function NotificationBell({
       } catch { return; }
       const unread = (initialPayload?.notifications ?? []).filter((n) => !n.read);
       if (unread.length === 0) return;
-      if (unread.length === 1) {
-        toast(unread[0].title, { description: unread[0].body });
-      } else {
-        const unreadCountLabel = initialPayload?.unreadCount ?? unread.length;
-        toast(`${unreadCountLabel} unread notification${unreadCountLabel > 1 ? "s" : ""}`, {
-          description: unread[0].title,
-        });
+      // Show up to 3 individual toasts (Toaster visibleToasts cap handles overflow)
+      const toShow = unread.slice(0, 3);
+      for (const notif of toShow) {
+        toast.custom(
+          (toastId) =>
+            createElement(NotificationToast, {
+              notification: {
+                title: notif.title,
+                body: notif.body,
+                type: notif.type,
+                actionUrl: notif.actionUrl,
+              },
+              onDismiss: () => toast.dismiss(toastId),
+              onNavigate: () => {
+                if (notif.actionUrl) {
+                  window.location.href = notif.actionUrl;
+                }
+              },
+            }),
+          { duration: 6000 },
+        );
       }
     })();
     const interval = window.setInterval(() => {

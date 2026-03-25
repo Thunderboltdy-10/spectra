@@ -11,7 +11,7 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 **Key strategic decisions from user input**:
 - EU schools first (GDPR, EU AI Act, Moodle priority)
 - Tavily as selective agentic search tool layer (not always-on), SearXNG fully removed
-- Mem0 as memory layer (replacing custom memory system)
+- Mem0 integrated into Convex/Vercel infrastructure (no extra hosting costs)
 - tldraw SDK for diagrams/canvas
 - Teachers guide through Agents, not surveillance dashboards
 - Agents are central — guided wizard creation with resource upload
@@ -25,65 +25,65 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 
 **Goal**: Fix the broken infrastructure that everything else depends on.
 
-### 1.1 OPENROUTER_API_KEY Error Chain
-- **Problem**: `OPENROUTER_API_KEY missing for ingestion` when attaching files; `OPENROUTER_API_KEY missing for catalog sync` in cron jobs
-- **Files**: `convex/ingestQueue.ts:232`, `convex/catalogSync.ts:434`, `convex/soul.ts:106`
-- **Fix**: Add proper env var validation at startup. Add graceful degradation paths: lexical fallback for soul (already exists), queue-and-retry for ingestion, skip-and-warn for catalog sync. Surface clear error messages in admin UI when key is missing.
+### 1.1 OPENROUTER_API_KEY Error Chain ✅ Complete
+- [x] **Problem**: `OPENROUTER_API_KEY missing for ingestion` when attaching files; `OPENROUTER_API_KEY missing for catalog sync` in cron jobs
+- [x] **Files**: `convex/ingestQueue.ts:232`, `convex/catalogSync.ts:434`, `convex/soul.ts:106`
+- [x] **Fix**: Add proper env var validation at startup. Add graceful degradation paths: lexical fallback for soul (already exists), queue-and-retry for ingestion, skip-and-warn for catalog sync. Surface clear error messages in admin UI when key is missing.
 
-### 1.2 File Policy: 7-Day Auto-Expiry
-- **Problem**: No retention policy for conversation-attached files; storage grows unbounded
-- **Files**: `convex/resources.ts`, `convex/crons.ts`
-- **Implementation**:
-  - Add `expiresAt` field to resources schema (7 days from upload for conversation files, null for My Files and agent resources)
-  - New cron job: `cleanup-expired-resources` (daily at 2:00 UTC)
-  - Cascade: delete chunks, then storage blob, then resource record
-  - No user warning needed (per user preference)
-  - Keep: My Files (scope=personal with explicit save), agent resources, pack resources
+### 1.2 File Policy: 7-Day Auto-Expiry ✅ Complete
+- [x] **Problem**: No retention policy for conversation-attached files; storage grows unbounded
+- [x] **Files**: `convex/resources.ts`, `convex/crons.ts`
+- [x] **Implementation**:
+  - [x] Add `expiresAt` field to resources schema (7 days from upload for conversation files, null for My Files and agent resources)
+  - [x] New cron job: `cleanup-expired-resources` (daily at 2:00 UTC)
+  - [x] Cascade: delete chunks, then storage blob, then resource record
+  - [x] No user warning needed (per user preference)
+  - [x] Keep: My Files (scope=personal with explicit save), agent resources, pack resources
 
-### 1.3 File Limits & Blocked Extensions
-- **Files**: `convex/resources.ts`, `convex/ingestQueue.ts`
-- **Implementation**:
-  - Enforce max 5 files per conversation attachment
-  - Enforce max 25 files in My Files (already exists but verify)
-  - Block video extensions at upload validation: mp4, mov, avi, mkv, webm, flv, wmv
-  - Block unsupported: exe, dll, bin, iso, dmg, apk, ipa
-  - Add compaction precautions: warn if conversation has many large file contexts
+### 1.3 File Limits & Blocked Extensions ✅ Complete
+- [x] **Files**: `convex/resources.ts`, `convex/ingestQueue.ts`
+- [x] **Implementation**:
+  - [x] Enforce max 5 files per conversation attachment
+  - [x] Enforce max 25 files in My Files (already exists but verify)
+  - [x] Block video extensions at upload validation: mp4, mov, avi, mkv, webm, flv, wmv
+  - [x] Block unsupported: exe, dll, bin, iso, dmg, apk, ipa
+  - [x] Add compaction precautions: warn if conversation has many large file contexts
 
-### 1.4 finish_reason Handling
-- **Problem**: `finish_reason: "length"` parsed but never communicated to UI or handled
-- **Files**: `src/lib/openrouter.ts:503,526,566`
-- **Implementation**:
-  - Include `finishReason` in the `type: "done"` stream event
-  - When `finish_reason === "length"`: auto-continue with the partial response as context, prepend "Continue from where you stopped"
-  - Cap at 2 continuation rounds to prevent runaway costs
-  - Surface subtle indicator: "Expanding response..." during continuation
-  - Track truncation rate per model in usage events for routing feedback
+### 1.4 finish_reason Handling ✅ Complete
+- [x] **Problem**: `finish_reason: "length"` parsed but never communicated to UI or handled
+- [x] **Files**: `src/lib/openrouter.ts:503,526,566`
+- [x] **Implementation**:
+  - [x] Include `finishReason` in the `type: "done"` stream event
+  - [x] When `finish_reason === "length"`: auto-continue with the partial response as context, prepend "Continue from where you stopped"
+  - [x] Cap at 2 continuation rounds to prevent runaway costs
+  - [x] Surface subtle indicator: "Expanding response..." during continuation
+  - [x] Track truncation rate per model in usage events for routing feedback
 
-### 1.5 Manual Model Selection Fix
-- **Problem**: "Use model" button on model page doesn't work; dropdown doesn't allow manual selection
-- **Files**: `src/app/models/page.tsx`, `src/components/chat/chat-composer.tsx`, chat state
-- **Fix**: Ensure `routerMode: "manual"` + `manualModel: selectedModelId` propagates correctly from model page to chat state. Fix the model page routing to `/chat?model=...&router=manual`.
+### 1.5 Manual Model Selection Fix ✅ Complete
+- [x] **Problem**: "Use model" button on model page doesn't work; dropdown doesn't allow manual selection
+- [x] **Files**: `src/app/models/page.tsx`, `src/components/chat/chat-composer.tsx`, chat state
+- [x] **Fix**: Ensure `routerMode: "manual"` + `manualModel: selectedModelId` propagates correctly from model page to chat state. Fix the model page routing to `/chat?model=...&router=manual`.
 
-### 1.6 System Prompt Token Bloat
-- **Problem**: Even simple prompts show 3500+ tokens. System prompt is too verbose for simple queries.
-- **Files**: `src/lib/prompts/policy.ts`
-- **Implementation**:
-  - Tier the system prompt by pipeline complexity:
-    - T0 (simple): Base identity (50 tokens) + mode rules only
-    - T1 (light): + memory profile + context summary
-    - T2 (full): + guidelines + skills + search block + source rules
-    - T3 (multi-agent): Full system prompt
-  - Remove redundant instructions that repeat across modes
-  - Compress mode rules into denser format
-  - Target: T0 system prompt < 400 tokens, T1 < 800, T2 < 1500
+### 1.6 System Prompt Token Bloat ✅ Complete
+- [x] **Problem**: Even simple prompts show 3500+ tokens. System prompt is too verbose for simple queries.
+- [x] **Files**: `src/lib/prompts/policy.ts`
+- [x] **Implementation**:
+  - [x] Tier the system prompt by pipeline complexity:
+    - [x] T0 (simple): Base identity (50 tokens) + mode rules only
+    - [x] T1 (light): + memory profile + context summary
+    - [x] T2 (full): + guidelines + skills + search block + source rules
+    - [x] T3 (multi-agent): Full system prompt
+  - [x] Remove redundant instructions that repeat across modes
+  - [x] Compress mode rules into denser format
+  - [x] Target: T0 system prompt < 400 tokens, T1 < 800, T2 < 1500
 
-### 1.7 Catalog Sync Error Fix
-- **Files**: `convex/catalogSync.ts:434,522`
-- **Fix**: Guard `refreshCatalogBase` with env check. If key missing, log warning and return empty without throwing. Catalog data should degrade gracefully (use last cached data).
+### 1.7 Catalog Sync Error Fix ✅ Complete
+- [x] **Files**: `convex/catalogSync.ts:434,522`
+- [x] **Fix**: Guard `refreshCatalogBase` with env check. If key missing, log warning and return empty without throwing. Catalog data should degrade gracefully (use last cached data).
 
-### 1.8 Schema Preparations for Artifacts
-- **Files**: `convex/schema.ts`
-- **New tables** (designed now, populated in Phase 5):
+### 1.8 Schema Preparations for Artifacts ✅ Complete
+- [x] **Files**: `convex/schema.ts`
+- [x] **New tables** (designed now, populated in Phase 5):
   ```
   artifacts: {
     ownerUserId, orgId, type, title, content (JSON),
@@ -97,25 +97,25 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
     createdAt
   }
   ```
-- **Indexes**: `artifacts.by_owner_updated`, `artifacts.by_org`, `artifacts.by_type`
-- **Migration path**: flashcardDecks, images, bookmarks → artifacts with type field
+- [x] **Indexes**: `artifacts.by_owner_updated`, `artifacts.by_org`, `artifacts.by_type`
+- [x] **Migration path**: flashcardDecks, images, bookmarks → artifacts with type field
 
-### 1.9 Compaction Improvements
-- **Problem**: Manual summary only (no LLM summarization); minimum 20 messages; single compaction boundary
-- **Files**: `convex/compaction.ts`, `convex/chats.ts`
-- **Implementation**:
-  - Use a cheap model (via pipeline budget T0) to generate compaction summary instead of manual extraction
-  - Lower minimum to 12 messages
-  - Preserve unresolved user goals and artifact references in summary
-  - Add `compactionQuality` field: "manual" | "llm" | "hybrid"
+### 1.9 Compaction Improvements ✅ Complete
+- [x] **Problem**: Manual summary only (no LLM summarization); minimum 20 messages; single compaction boundary
+- [x] **Files**: `convex/compaction.ts`, `convex/chats.ts`
+- [x] **Implementation**:
+  - [x] Use a cheap model (via pipeline budget T0) to generate compaction summary instead of manual extraction
+  - [x] Lower minimum to 12 messages
+  - [x] Preserve unresolved user goals and artifact references in summary
+  - [x] Add `compactionQuality` field: "manual" | "llm" | "hybrid"
 
-### 1.10 Missing Database Indexes
-- **Files**: `convex/schema.ts`
-- Add indexes:
-  - `messages.by_chat_created` (for efficient history loading)
-  - `resources.by_org_updated` (for batch processing)
-  - `usageEvents.by_org_model_day` (for per-model analytics)
-  - `artifacts.by_owner_type` (for filtered artifact views)
+### 1.10 Missing Database Indexes ✅ Complete
+- [x] **Files**: `convex/schema.ts`
+- [x] Add indexes:
+  - [x] `messages.by_chat_created` (for efficient history loading)
+  - [x] `resources.by_org_updated` (for batch processing)
+  - [x] `usageEvents.by_org_model_day` (for per-model analytics)
+  - [x] `artifacts.by_owner_type` (for filtered artifact views)
 
 ---
 
@@ -123,142 +123,142 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 
 **Goal**: Fix every user-facing chat issue from IDEA.md. Make the core experience feel polished and reliable.
 
-### 2.1 Auto-Scroll Fix
-- **Problem**: During generation, scrolling up to read is almost impossible; auto-scroll fights the user
-- **Files**: `src/components/chat/chat-messages.tsx`
-- **Implementation**:
-  - Detect user scroll-up (any upward scroll > 20px) → exit auto-scroll mode immediately
-  - Add floating "scroll to bottom" button with down-arrow icon, subtle slide-in animation
-  - Clicking button or scrolling to within 100px of bottom → re-engage auto-scroll
-  - Use `IntersectionObserver` on a sentinel element at the bottom rather than scroll events
-  - Smooth scroll animation when re-engaging (not instant jump)
+### 2.1 Auto-Scroll Fix ✅ Complete
+- [x] **Problem**: During generation, scrolling up to read is almost impossible; auto-scroll fights the user
+- [x] **Files**: `src/components/chat/chat-messages.tsx`
+- [x] **Implementation**:
+  - [x] Detect user scroll-up (any upward scroll > 20px) → exit auto-scroll mode immediately
+  - [x] Add floating "scroll to bottom" button with down-arrow icon, subtle slide-in animation
+  - [x] Clicking button or scrolling to within 100px of bottom → re-engage auto-scroll
+  - [x] Use `IntersectionObserver` on a sentinel element at the bottom rather than scroll events
+  - [x] Smooth scroll animation when re-engaging (not instant jump)
 
-### 2.2 Message Persistence During Generation
-- **Problem**: Refreshing during generation loses the response; interrupted output not saved; changing pages deletes streaming content
-- **Files**: `src/hooks/use-chat-state.ts`, `src/app/api/chats/route.ts`
-- **Implementation**:
-  - Persist partial responses to Convex every 3 seconds during streaming (debounced)
-  - On page change/refresh: save current draft with `cancelled: true` flag
-  - On return to conversation: show the partial response with "Response was interrupted" indicator
-  - Clicking "back" on sidebar should preserve streaming state, not kill it
-  - Add `beforeunload` event handler to trigger save
+### 2.2 Message Persistence During Generation ✅ Complete
+- [x] **Problem**: Refreshing during generation loses the response; interrupted output not saved; changing pages deletes streaming content
+- [x] **Files**: `src/hooks/use-chat-state.ts`, `src/app/api/chats/route.ts`
+- [x] **Implementation**:
+  - [x] Persist partial responses to Convex every 3 seconds during streaming (debounced)
+  - [x] On page change/refresh: save current draft with `cancelled: true` flag
+  - [x] On return to conversation: show the partial response with "Response was interrupted" indicator
+  - [x] Clicking "back" on sidebar should preserve streaming state, not kill it
+  - [x] Add `beforeunload` event handler to trigger save
 
-### 2.3 Progress State Machine
-- **Problem**: Shows "Thinking" even when generating; "done" state never completes; progress doesn't depend on model/prompt
-- **Files**: `src/components/chat/chat-layout.tsx`, stream phase handling
-- **Implementation**:
-  - Explicit state machine: `idle → routing → [searching] → thinking → generating → [synthesizing] → done`
-  - Each state has:
-    - Label (lowercase): "routing...", "searching...", "thinking...", "generating...", "synthesizing...", "done"
-    - Elapsed timer (with lowercase 's' for seconds — already noted in IDEA.md)
-    - Color indicator matching state
-  - "Done" state: trigger explicitly when stream ends AND post-processing completes (title gen, memory write, etc.)
-  - Show "done" for 2 seconds, then fade to idle
-  - Model-dependent: if model doesn't support thinking, skip "thinking" state
+### 2.3 Progress State Machine ✅ Complete
+- [x] **Problem**: Shows "Thinking" even when generating; "done" state never completes; progress doesn't depend on model/prompt
+- [x] **Files**: `src/components/chat/chat-layout.tsx`, `src/components/chat/chat-header.tsx`, stream phase handling
+- [x] **Implementation**:
+  - [x] Explicit state machine: `idle → routing → [searching] → thinking → generating → [synthesizing] → done`
+  - [x] Each state has:
+    - [x] Label (lowercase): "routing...", "searching...", "thinking...", "generating...", "synthesizing...", "done"
+    - [x] Elapsed timer (with lowercase 's' for seconds — already noted in IDEA.md)
+    - [x] Color indicator matching state
+  - [x] "Done" state: trigger explicitly when stream ends AND post-processing completes (title gen, memory write, etc.)
+  - [x] Show "done" for 2 seconds, then fade to idle
+  - [x] Model-dependent: if model doesn't support thinking, skip "thinking" state
 
-### 2.4 Conversation Title Generation
-- **Problem**: Title not created consistently; should be 3-5 word summary of initial prompt
-- **Files**: `src/lib/orchestrator/post-process.ts`
-- **Implementation**:
-  - Always generate title after first user message, using a cheap model
-  - Format: 3-5 words, no quotes, no "User asks about...", just the topic
-  - Examples: "WW2 Flashcards for IB", "Quadratic Formula Help", "Crow Brawl Stars Paragraph"
-  - If title generation fails, fall back to first 5 words of user message
+### 2.4 Conversation Title Generation ✅ Complete
+- [x] **Problem**: Title not created consistently; should be 3-5 word summary of initial prompt
+- [x] **Files**: `src/lib/orchestrator/post-process.ts`
+- [x] **Implementation**:
+  - [x] Always generate title after first user message, using a cheap model
+  - [x] Format: 3-5 words, no quotes, no "User asks about...", just the topic
+  - [x] Examples: "WW2 Flashcards for IB", "Quadratic Formula Help", "Crow Brawl Stars Paragraph"
+  - [x] If title generation fails, fall back to first 5 words of user message
 
-### 2.5 Right Panel Fixes
-- **Problem**: Panels open with lots of empty space; default should be orchestration; auto-open has no animation; route trace is shown instead of orchestration
-- **Files**: `src/components/chat/unified-panel.tsx`, `src/components/chat/chat-layout.tsx:276-301`
-- **Implementation**:
-  - Default auto-open panel: orchestration (not route-trace)
-  - Apply same sliding animation for auto-open as manual open (use CSS transition, not instant render)
-  - Fix empty space: panel should use `width: fit-content` with `max-width: 420px`, not fixed width
-  - Route trace content should fill available width; remove right-side dead space
-  - Canvas panel: same fix — no blank space at right
+### 2.5 Right Panel Fixes ✅ Complete
+- [x] **Problem**: Panels open with lots of empty space; default should be orchestration; auto-open has no animation; route trace is shown instead of orchestration
+- [x] **Files**: `src/components/chat/unified-panel.tsx`, `src/components/chat/chat-layout.tsx:276-301`
+- [x] **Implementation**:
+  - [x] Default auto-open panel: orchestration (not route-trace)
+  - [x] Apply same sliding animation for auto-open as manual open (use CSS transition, not instant render)
+  - [x] Fix empty space: panel should use `width: fit-content` with `max-width: 420px`, not fixed width
+  - [x] Route trace content should fill available width; remove right-side dead space
+  - [x] Canvas panel: same fix — no blank space at right
 
-### 2.6 Dark Mode Overhaul
-- **Problem**: Dark mode is "horrible"; current `#13111a` too dark/purple
-- **Files**: `src/app/globals.css`
-- **Implementation**:
-  - Change dark mode `--bg-primary` to `#2D2D2B` (warm dark, as specified in IDEA.md)
-  - Adjust `--bg-secondary`, `--bg-elevated`, `--bg-tertiary` to complement the warmer base
-  - Keep text colors warm (already correct: `--text-secondary: #b8adb0`)
-  - Ensure all borders, shadows, and overlays work with new base
-  - Test every component in dark mode: sidebar, chat, panels, modals, dropdowns, code blocks
+### 2.6 Dark Mode Overhaul ✅ Complete
+- [x] **Problem**: Dark mode is "horrible"; current `#13111a` too dark/purple
+- [x] **Files**: `src/app/globals.css`
+- [x] **Implementation**:
+  - [x] Change dark mode `--bg-primary` to `#2D2D2B` (warm dark, as specified in IDEA.md)
+  - [x] Adjust `--bg-secondary`, `--bg-elevated`, `--bg-tertiary` to complement the warmer base
+  - [x] Keep text colors warm (already correct: `--text-secondary: #b8adb0`)
+  - [x] Ensure all borders, shadows, and overlays work with new base
+  - [x] Test every component in dark mode: sidebar, chat, panels, modals, dropdowns, code blocks
 
-### 2.7 <<Tag Skeleton Rendering
-- **Problem**: Spectra's custom tags (`<<QUIZ_START>>`, `<<FLASHCARDS_START>>`, `<<DOCUMENT_START>>`) show raw text while being written; should show skeleton until tag is closed
-- **Files**: `src/components/chat/markdown-renderer.tsx`, `src/components/chat/quiz-reveal.tsx`, `src/components/chat/flashcard-reveal.tsx`
-- **Implementation**:
-  - Detect opening tags in streaming content
-  - While tag is open (no closing tag yet), render a type-appropriate skeleton:
-    - `<<QUIZ_START>>`: Quiz skeleton (question placeholders with option circles)
-    - `<<FLASHCARDS_START>>`: Card skeleton (flippable card placeholder)
-    - `<<DOCUMENT_START>>`: Document skeleton (page with lines)
-  - On closing tag: parse content and render the real component
-  - Smooth transition from skeleton to real content
+### 2.7 <<Tag Skeleton Rendering ✅ Complete
+- [x] **Problem**: Spectra's custom tags (`<<QUIZ_START>>`, `<<FLASHCARDS_START>>`, `<<DOCUMENT_START>>`) show raw text while being written; should show skeleton until tag is closed
+- [x] **Files**: `src/components/chat/chat-messages.tsx`, `src/components/chat/quiz-reveal.tsx`, `src/components/chat/flashcard-reveal.tsx`
+- [x] **Implementation**:
+  - [x] Detect opening tags in streaming content
+  - [x] While tag is open (no closing tag yet), render a type-appropriate skeleton:
+    - [x] `<<QUIZ_START>>`: Quiz skeleton (question placeholders with option circles)
+    - [x] `<<FLASHCARDS_START>>`: Card skeleton (flippable card placeholder)
+    - [x] `<<DOCUMENT_START>>`: Document skeleton (page with lines)
+  - [x] On closing tag: parse content and render the real component
+  - [x] Smooth transition from skeleton to real content
 
-### 2.8 Branch/Edit System Fix
-- **Problem**: `1/2` and `2/2` branch navigation shows overlapping prompts; edit popup too narrow; slow UI update after edit submit
-- **Files**: `src/components/chat/chat-message.tsx`, `src/components/chat/chat-messages.tsx`
-- **Implementation**:
-  - Fix branch rendering: only show the active branch's user message, with prev/next arrows
-  - When viewing branch 2/2, do NOT show branch 1/1's prompt above it
-  - Edit popup: set `min-width: min(600px, 90vw)` instead of current narrow default
-  - On edit submit: immediately show the new user message with loading state, don't wait for API
+### 2.8 Branch/Edit System Fix ✅ Complete
+- [x] **Problem**: `1/2` and `2/2` branch navigation shows overlapping prompts; edit popup too narrow; slow UI update after edit submit
+- [x] **Files**: `src/components/chat/chat-message.tsx`, `src/components/chat/chat-messages.tsx`
+- [x] **Implementation**:
+  - [x] Fix branch rendering: only show the active branch's user message, with prev/next arrows
+  - [x] When viewing branch 2/2, do NOT show branch 1/1's prompt above it
+  - [x] Edit popup: set `min-width: min(600px, 90vw)` instead of current narrow default
+  - [x] On edit submit: immediately show the new user message with loading state, don't wait for API
 
-### 2.9 Settings Consolidation
-- **Problem**: Old/deprecated settings panel still accessible from tips; settings button disappears during generation
-- **Files**: `src/components/chat/chat-settings-drawer.tsx`, `src/components/global-utility-dock.tsx`
-- **Implementation**:
-  - Remove all references to the old/deprecated settings panel
-  - Keep only the drawer accessible from sidebar toggle and header button
-  - Settings button: always visible in header, even during generation (just move stop button to its left)
-  - Tips that say "open settings" should point to the current settings drawer, not old panel
+### 2.9 Settings Consolidation ✅ Complete
+- [x] **Problem**: Old/deprecated settings panel still accessible from tips; settings button disappears during generation
+- [x] **Files**: `src/components/chat/chat-settings-drawer.tsx`, `src/components/chat/chat-header.tsx`
+- [x] **Implementation**:
+  - [x] Remove all references to the old/deprecated settings panel
+  - [x] Keep only the drawer accessible from sidebar toggle and header button
+  - [x] Settings button: always visible in header, even during generation (just move stop button to its left)
+  - [x] Tips that say "open settings" should point to the current settings drawer, not old panel
 
-### 2.10 Notification Redesign
-- **Problem**: Response-ready notification should look like achievements-unlocked; clicking should navigate to conversation
-- **Files**: `src/components/` (notification component), `convex/notifications.ts`
-- **Implementation**:
-  - Redesign notification toast: use the same animation style as achievement unlocks (slide-in from top-right, with subtle glow)
-  - Include: conversation title, mode icon, model used
-  - Click action: navigate to that conversation and scroll to the new message
-  - Stack notifications if multiple arrive (max 3 visible)
-  - Sound: optional subtle notification sound (off by default, toggleable in settings)
+### 2.10 Notification Redesign ✅ Complete
+- [x] **Problem**: Response-ready notification should look like achievements-unlocked; clicking should navigate to conversation
+- [x] **Files**: `src/components/notification-toast.tsx`, `src/components/notification-bell.tsx`, `src/hooks/use-chat-state.ts`
+- [x] **Implementation**:
+  - [x] Redesign notification toast: use the same animation style as achievement unlocks (slide-in from top-right, with subtle glow)
+  - [x] Include: conversation title, mode icon, model used
+  - [x] Click action: navigate to that conversation and scroll to the new message
+  - [x] Stack notifications if multiple arrive (max 3 visible)
+  - Sound: optional subtle notification sound (off by default, toggleable in settings) — deferred
 
-### 2.11 Sidebar Rendering Optimization
-- **Problem**: All messages rendered in sidebar at load; should lazy-render
-- **Files**: `src/components/chat/chat-sidebar.tsx`
-- **Implementation**:
-  - Initially render only the 20 most recent conversations
-  - On scroll: load more with `IntersectionObserver` (batch of 20)
-  - Maintain scroll position on re-render
-  - Ensure persistence is not broken: conversation IDs always tracked, just DOM elements lazy
-  - Fix: last sidebar nav button getting blurred/cut off — add `pb-4` padding to nav container
+### 2.11 Sidebar Rendering Optimization ✅ Complete
+- [x] **Problem**: All messages rendered in sidebar at load; should lazy-render
+- [x] **Files**: `src/components/chat/chat-sidebar.tsx`
+- [x] **Implementation**:
+  - [x] Initially render only the 20 most recent conversations
+  - [x] On scroll: load more with `IntersectionObserver` (batch of 20)
+  - [x] Maintain scroll position on re-render
+  - [x] Ensure persistence is not broken: conversation IDs always tracked, just DOM elements lazy
+  - [x] Fix: last sidebar nav button getting blurred/cut off — add `pb-4` padding to nav container
 
-### 2.12 UI Break When Switching Chats
-- **Problem**: Entire UI sometimes breaks when switching between chats; buttons and headings shift far left; note appears in chat heading section
-- **Files**: `src/components/chat/chat-layout.tsx`
-- **Implementation**:
-  - Add error boundary around chat message area with graceful fallback UI
-  - Investigate race condition: switching chat while streaming may leave stale state
-  - Add cleanup: when `selectedChatId` changes, abort any in-flight streams, clear draft state
-  - Ensure chat heading section has fixed positioning that doesn't depend on message content
+### 2.12 UI Break When Switching Chats ✅ Complete
+- [x] **Problem**: Entire UI sometimes breaks when switching between chats; buttons and headings shift far left; note appears in chat heading section
+- [x] **Files**: `src/components/chat/chat-layout.tsx`, `src/components/chat/chat-error-boundary.tsx`, `src/hooks/use-chat-state.ts`
+- [x] **Implementation**:
+  - [x] Add error boundary around chat message area with graceful fallback UI
+  - [x] Investigate race condition: switching chat while streaming may leave stale state
+  - [x] Add cleanup: when `selectedChatId` changes, abort any in-flight streams, clear draft state
+  - [x] Ensure chat heading section has fixed positioning that doesn't depend on message content
 
-### 2.13 Flashcard Reminder Intrusiveness
-- **Problem**: Flashcard reminder and idea may be too intrusive
-- **Files**: proactive banner components
-- **Implementation**:
-  - Rate-limit flashcard suggestions: max 1 per session, and only after 3+ educational exchanges
-  - Make dismissible with "Don't show again" option (stored in user preferences)
-  - Reduce visual weight: thin banner, not card-style
+### 2.13 Flashcard Reminder Intrusiveness ✅ Complete
+- [x] **Problem**: Flashcard reminder and idea may be too intrusive
+- [x] **Files**: `src/hooks/use-chat-state.ts`, `src/components/chat/chat-messages.tsx`
+- [x] **Implementation**:
+  - [x] Rate-limit flashcard suggestions: max 1 per session, and only after 3+ educational exchanges
+  - [x] Make dismissible with "Don't show again" option (stored in user preferences)
+  - [x] Reduce visual weight: thin banner, not card-style
 
-### 2.14 Memory Update Indication
-- **Problem**: No clear indication when memory gets updated
-- **Files**: chat message rendering, memory write flow
-- **Implementation**:
-  - After a memory write: show subtle inline indicator below the assistant message: "Memory updated" with brain icon
-  - Clickable: opens a small popover showing what was saved
-  - In settings: link to "View all memories" (future: dedicated memory management page)
+### 2.14 Memory Update Indication ✅ Complete
+- [x] **Problem**: No clear indication when memory gets updated
+- [x] **Files**: `src/hooks/use-chat-state.ts`, `src/components/chat/chat-message.tsx`, `src/components/chat/chat-messages.tsx`
+- [x] **Implementation**:
+  - [x] After a memory write: show subtle inline indicator below the assistant message: "Memory updated" with brain icon
+  - [x] Clickable: opens a small popover showing what was saved
+  - In settings: link to "View all memories" (future: dedicated memory management page) — deferred to Phase 8
 
 ---
 
@@ -266,44 +266,47 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 
 **Goal**: Fundamentally reimagine heuristic routing to be diverse, cache-aware, reliable, and transparent.
 
-### 3.1 Provider Coverage Expansion
-- **Problem**: Always the same candidates (Seed, Claude, Gemini). Missing OpenAI, Mistral, MiniMax, Moonshot, Z.ai
-- **Files**: `convex/catalogSync.ts`, `convex/curatedModelRegistry.ts`, `src/lib/routing/heuristic.ts`
-- **Implementation**:
-  - Expand curated model registry with models from all major providers
-  - Add provider diversity as a first-class routing signal
-  - Curated tiers:
-    - **Budget heroes**: DeepSeek V3.2, Qwen 3.5, Seed 2.0 lite/mini, Gemma 3
-    - **Balanced**: GPT-4o-mini, Claude Haiku, Gemini Flash, Mistral Small
-    - **Premium**: GPT-4o, Claude Sonnet, Gemini Pro, DeepSeek R1
-    - **Heavy**: Claude Opus, GPT-5, Gemini Ultra (gated by cost cap)
-  - Each tier: minimum 4 different providers represented
+### 3.1 Provider Coverage Expansion ✅ Complete
+- [x] **Problem**: Always the same candidates (Seed, Claude, Gemini). Missing OpenAI, Mistral, MiniMax, Moonshot, Z.ai
+- [x] **Files**: `convex/catalogSync.ts`, `convex/curatedModelRegistry.ts`, `src/lib/routing/heuristic.ts`
+- [x] **Implementation**:
+  - [x] Expand curated model registry with models from all major providers
+  - [x] Add provider diversity as a first-class routing signal
+  - [x] Curated tiers (illustrative examples — **never hardcode specific models**; tiers are populated dynamically from catalog sync):
+    - [x] **Budget heroes**: e.g. DeepSeek V3.x, Qwen 3.x, Seed 2.x, Gemma — whatever is cheapest and capable at any given time
+    - [x] **Balanced**: e.g. GPT-4o-mini class, Claude Haiku class, Gemini Flash class, Mistral Small class
+    - [x] **Premium**: e.g. GPT-4o class, Claude Sonnet class, Gemini Pro class, DeepSeek R1 class
+    - [x] **Heavy**: e.g. Claude Opus class, GPT-5 class, Gemini Ultra class (gated by cost cap)
+  - [x] **Note**: Model landscape changes rapidly. Tier assignment must be derived from catalog pricing + capability scores, not from a hardcoded list. New models entering the catalog auto-slot into the correct tier.
+  - [x] Each tier: minimum 4 different providers represented
 
-### 3.2 Diversity Scoring
-- **Problem**: Same models chosen repeatedly; scores feel unreliable
-- **Files**: `src/lib/routing/phase-router.ts`
-- **Implementation**:
-  - Add `recentModelUsage` tracking (last 20 requests per user, stored in session/memory)
-  - Diversity penalty: if model was used in last 3 requests, apply 0.7x score multiplier; last 5: 0.85x; last 10: 0.92x
-  - Provider diversity: if same provider used in last 2 requests, apply 0.8x multiplier
-  - Exception: if user explicitly pins a model (manual mode), no diversity penalty
-  - Surface the diversity logic in route trace so user can see why a different model was chosen
+### 3.2 Diversity Scoring ✅ Complete
+- [x] **Problem**: Same models chosen repeatedly; scores feel unreliable
+- [x] **Files**: `src/lib/routing/phase-router.ts`
+- [x] **Implementation**:
+  - [x] Add `recentModelUsage` tracking (last 20 requests per user, stored in session/memory)
+  - [x] Diversity penalty: if model was used in last 3 requests, apply 0.7x score multiplier; last 5: 0.85x; last 10: 0.92x
+  - [x] Provider diversity: if same provider used in last 2 requests, apply 0.8x multiplier
+  - [x] **Exceptions** (no diversity penalty applied):
+    - [x] User explicitly pins a model (manual mode)
+    - [x] Model supports prompt caching AND cache is not stale (conversation has recent messages within cache TTL, typically < 5 min, and history has not been compacted since last use)
+  - [x] Surface the diversity logic in route trace so user can see why a different model was chosen
 
-### 3.3 Cache-Aware Prioritization
-- **Problem**: If a model has cached tokens from recent conversation, it should be prioritized (lower latency, lower cost)
-- **Files**: `src/lib/routing/phase-router.ts`, `src/lib/openrouter.ts`
-- **Implementation**:
-  - Track which model was last used per conversation
-  - If conversation has recent messages (< 5 min) with same model, apply 1.3x boost (cache likely warm)
-  - If conversation history was compacted, cache is stale — no boost
-  - OpenRouter supports prompt caching for some models; track which models support it
-  - Include cache-awareness in route trace explanation
+### 3.3 Cache-Aware Prioritization ✅ Complete
+- [x] **Problem**: If a model has cached tokens from recent conversation, it should be prioritized (lower latency, lower cost)
+- [x] **Files**: `src/lib/routing/phase-router.ts`, `src/lib/openrouter.ts`
+- [x] **Implementation**:
+  - [x] Track which model was last used per conversation
+  - [x] If conversation has recent messages (< 5 min) with same model, apply 1.3x boost (cache likely warm)
+  - [x] If conversation history was compacted, cache is stale — no boost
+  - [x] OpenRouter supports prompt caching for some models; track which models support it
+  - [x] Include cache-awareness in route trace explanation
 
-### 3.4 Scoring Overhaul
-- **Problem**: Current scoring (reliability, latency, freshness) produces unreliable results; lane weights feel arbitrary
-- **Files**: `src/lib/routing/phase-router.ts:87-244`
-- **Implementation**:
-  - Replace lane system (stable/fresh/challenger) with a unified weighted score:
+### 3.4 Scoring Overhaul ✅ Complete
+- [x] **Problem**: Current scoring (reliability, latency, freshness) produces unreliable results; lane weights feel arbitrary
+- [x] **Files**: `src/lib/routing/phase-router.ts:87-244`
+- [x] **Implementation**:
+  - [x] Replace lane system (stable/fresh/challenger) with a unified weighted score:
     ```
     score = (0.30 * capability_match)
           + (0.25 * cost_fit)
@@ -313,48 +316,65 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
           + (0.07 * cache_bonus)
           + (0.05 * freshness)
     ```
-  - `capability_match`: How well the model's capabilities match the request requirements (vision, reasoning, code, search)
-  - `cost_fit`: How well the model's cost fits the tier budget
-  - Normalize all scores to 0-1 range
-  - Add randomized exploration: with 10% probability, boost a random non-top candidate by 1.5x (prevents lock-in)
-  - Show full scoring breakdown in route trace
+  - [x] `capability_match`: How well the model's capabilities match the request requirements (vision, reasoning, code, search)
+  - [x] `cost_fit`: How well the model's cost fits the tier budget
+  - [x] Normalize all scores to 0-1 range
+  - [x] Add randomized exploration: with 10% probability, boost a random non-top candidate by 1.5x (prevents lock-in)
+  - [x] Show full scoring breakdown in route trace
 
-### 3.5 Prompt Interpretation for Model/Orchestration Requests
-- **Problem**: User says "use GPT-4" but system doesn't listen; searching through all model names by keyword doesn't work; orchestration keywords not detected
-- **Files**: `src/lib/orchestrator/route-plan.ts`, `src/lib/auto-settings.ts`
-- **Implementation**:
-  - Add explicit intent detection for model requests: "use [model]", "switch to [model]", "try [model]"
-  - Fuzzy match against model names/aliases (GPT-4 → openai/gpt-4o, Claude → anthropic/claude-sonnet)
-  - If match found: override router mode to manual for that request
-  - For orchestration: detect "use multiple models", "collaborate", "get different perspectives"
-  - Surface what was detected in route trace
+### 3.5 Prompt Interpretation for Model/Orchestration Requests ✅ Complete
+- [x] **Problem**: User says "use GPT-4" but system doesn't listen; searching through all model names by keyword doesn't work; orchestration keywords not detected
+- [x] **Files**: `src/lib/orchestrator/route-plan.ts`, `src/lib/auto-settings.ts`
+- [x] **Implementation**:
+  - [x] Add explicit intent detection for model requests: "use [model]", "switch to [model]", "try [model]"
+  - [x] Fuzzy match against model names/aliases (GPT-4 → openai/gpt-4o, Claude → anthropic/claude-sonnet)
+  - [x] If match found: override router mode to manual for that request
+  - [x] For orchestration: detect "use multiple models", "collaborate", "get different perspectives"
+  - [x] Surface what was detected in route trace
 
-### 3.6 Cost Cap Enforcement
-- **Problem**: 30/M cap not consistently enforced; budget not hard-enforced during streaming
-- **Files**: `src/lib/model-selection.ts:156-168`, `src/lib/orchestrator/pipeline-controller.ts:166-236`
-- **Implementation**:
-  - Strict 30/M input+output cap for automatic routing (no exceptions)
-  - Manual selection: warn if model exceeds 30/M, require explicit confirmation
-  - During streaming: track cumulative token usage. If multi-agent total exceeds budget by 150%, abort remaining specialists
-  - Add `usageBudgetRemaining` to pipeline state, decrement as tokens arrive
+### 3.6 Cost Cap Enforcement ✅ Complete
+- [x] **Problem**: 30/M cap not consistently enforced; budget not hard-enforced during streaming
+- [x] **Files**: `src/lib/model-selection.ts:156-168`, `src/lib/orchestrator/pipeline-controller.ts:166-236`
+- [x] **Implementation**:
+  - [x] Strict 30/M input+output cap for automatic routing (no exceptions)
+  - [x] Manual selection: warn if model exceeds 30/M, require explicit confirmation
+  - [x] During streaming: track cumulative token usage. If multi-agent total exceeds budget by 150%, abort remaining specialists
+  - [x] Add `usageBudgetRemaining` to pipeline state, decrement as tokens arrive
 
-### 3.7 Parallel Specialist Execution
-- **Problem**: Multi-agent specialists run sequentially (5x latency)
-- **Files**: `src/lib/orchestrator/streaming.ts:237`, `src/lib/orchestrator/task-graph.ts`
-- **Implementation**:
-  - Build dependency DAG from task graph
-  - Independent specialists (no `dependsOn` overlap) execute in parallel via `Promise.all`
-  - Dependent specialists wait for their dependencies
-  - Cap concurrent specialists at 3 (balance between speed and cost)
-  - Stream specialist progress to UI in real-time (which specialists are active)
+### 3.7 Parallel Specialist Execution ✅ Complete
+- [x] **Problem**: Multi-agent specialists run sequentially (5x latency)
+- [x] **Files**: `src/lib/orchestrator/streaming.ts:237`, `src/lib/orchestrator/task-graph.ts`
+- [x] **Implementation**:
+  - [x] Build dependency DAG from task graph
+  - [x] Independent specialists (no `dependsOn` overlap) execute in parallel via `Promise.all`
+  - [x] Dependent specialists wait for their dependencies
+  - [x] Cap concurrent specialists at 3 (balance between speed and cost)
+  - [x] Stream specialist progress to UI in real-time (which specialists are active)
 
-### 3.8 Token Count Accuracy
-- **Problem**: Simple prompts show 3500+ tokens; scary for users
-- **Implementation**:
-  - Display actual token usage from API response, not estimated
-  - Separate display: "Input: X tokens | Output: Y tokens" (not combined)
-  - For context: show what contributed to input (system prompt, history, memory, sources)
-  - Consider: only show token count to power users / behind a toggle
+### 3.8 Token Count Accuracy ✅ Complete
+- [x] **Problem**: Simple prompts show 3500+ tokens because the system prompt is bloated with mode rules, memory, skills, and guidelines even for trivial requests. This is the real issue — not display, but actual waste.
+- [x] **Root cause**: System prompt tiering (Phase 1.6) is the primary fix. With a T0 system prompt < 400 tokens, simple requests will show reasonable token counts.
+- [x] **Implementation**:
+  - [x] Display actual token usage from API response, not estimated
+  - [x] Separate display: "Input: X tokens | Output: Y tokens" (not combined)
+  - [x] For context: show what contributed to input (system prompt, history, memory, sources) — helps debug why tokens are high
+  - [x] Token count always visible to all users (no toggle/hiding — transparency matters)
+
+### 3.9 New Model Onboarding & Challenger Lane ✅ Complete
+- [x] **Problem**: When new models appear in the catalog (via catalog sync), they have no reliability/latency data. They need a path to get tested without destabilizing routing for all users.
+- [x] **Implementation**:
+  - [x] **Challenger lane**: New models (< 5 total runs across all users) are flagged as `challenger`
+  - [x] Challengers are eligible for selection but only when:
+    - [x] The request is low-stakes (T0/T1 tier, simple question)
+    - [x] Random exploration roll succeeds (10% probability from 3.4)
+    - [x] No other model with warm cache is available for this conversation
+  - [x] **Light offline evaluation loop**:
+    - [x] After each response from a challenger model, store quality signals: finish_reason, user feedback (thumbs), response length, latency
+    - [x] Weekly batch job: compute reliability + latency scores for challengers that have accumulated 5+ data points
+    - [x] If reliability > 0.6 after 12 runs: promote to normal routing pool
+    - [x] If reliability < 0.3 after 12 runs: demote to deprioritized (0.3x score multiplier, not fully removed)
+  - [x] **Catalog sync**: New models from OpenRouter catalog automatically enter as challengers. No manual curation needed for entry — only tier assignment is automatic based on pricing + capabilities.
+  - [x] This ensures the routing system adapts to the model landscape over time without manual intervention, while protecting users from untested models on important requests.
 
 ---
 
@@ -742,19 +762,27 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 
 **Goal**: Replace the current custom memory system with Mem0 for better relevance, less confusion, and hybrid search.
 
-### 8.1 Mem0 Integration Strategy
+### 8.1 Mem0 Integration — Real Migration on Convex/Vercel
 - **Research findings**: Mem0 delivers 26% accuracy uplift over OpenAI's memory, 91% latency reduction, 90% token reduction
-- **Implementation approach**:
-  - Option A (recommended): Use Mem0 as a library/service alongside Convex
-    - Self-host Mem0 or use Mem0 Cloud
-    - Mem0 manages memory storage, retrieval, and deduplication
-    - Convex stores the reference/metadata
-  - Option B: Implement Mem0's key innovations within the existing Convex-based system
-    - Hybrid search (BM25 + vector) with RRF fusion
-    - Three-factor scoring: `0.6 * relevance + 0.25 * recency + 0.15 * importance`
-    - Contradiction detection before storage
-    - Graph-based relationship tracking between memory entries
-  - **Decision**: Start with Option B (lower migration risk), evaluate Option A for future phases
+- **Commitment**: Full Mem0 integration, not partial. The current custom memory system is replaced.
+- **Architecture** (no extra hosting costs — runs on existing Convex + Vercel):
+  - Use `mem0` npm package as a library within Convex actions (not as a separate hosted service)
+  - Mem0's storage backend: configure to use Convex as the underlying store (custom adapter)
+    - Mem0 needs a vector store → use Convex's existing vector indexes on `userMemoryEntries`
+    - Mem0 needs a graph store → use a new `memoryGraph` Convex table for entity relationships
+    - Mem0 needs a KV store → use existing `userMemoryEntries` with category-based key structure
+  - Mem0's LLM calls: route through OpenRouter (same API key, same infrastructure, no extra cost beyond normal token usage)
+  - **Migration path**:
+    1. Create Convex adapter for Mem0's storage interfaces
+    2. Migrate existing `userMemoryEntries` data into Mem0-compatible format
+    3. Replace `routeMemoryWrite` and `retrieveRelevantEntries` with Mem0's `add()` and `search()`
+    4. Deprecate legacy `userMemory` table
+  - **What Mem0 gives us that the current system doesn't**:
+    - Hybrid graph+vector+KV retrieval (not just vector)
+    - Automatic entity extraction and relationship tracking
+    - Built-in contradiction detection and memory merging
+    - Configurable memory types with different retention policies
+    - Battle-tested deduplication (not fingerprint-based race condition)
 
 ### 8.2 Hybrid Search Implementation
 - **Problem**: Current vector-only search misses keyword-exact matches
@@ -958,43 +986,9 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 
 ---
 
-## Phase 11: Compliance & Integration Foundations
+## Phase 11: Testing & Verification Strategy
 
-**Goal**: Lay groundwork for EU school deployment.
-
-### 11.1 GDPR Preparation
-- Data processing documentation
-- Student data never used for model training (already true via OpenRouter)
-- Data export API for schools (all student data exportable)
-- Data deletion API (right to be forgotten — extend existing user purge)
-- Privacy policy updates for EU specifics
-- Cookie consent updates
-
-### 11.2 EU AI Act Readiness
-- Education AI classified as "high-risk" under EU AI Act
-- Required: quality management systems, risk assessments, human oversight
-- Prepare documentation templates
-- Ensure SOUL system is documented as the "human oversight" mechanism
-- Transparency: document what models are used, what data is processed
-
-### 11.3 LMS Integration Architecture (Moodle First)
-- Moodle is the priority for EU (open-source, GDPR-friendly, widely used)
-- Design LTI 1.3 integration architecture
-- Plan: SSO via Moodle auth, grade passback for quiz/exam modes
-- Canvas LTI as second priority
-- Architecture should be generic enough for any LTI 1.3 consumer
-
-### 11.4 SSO Architecture
-- Google Workspace for Education (common in EU K-12)
-- Microsoft Entra ID (common in EU secondary/higher)
-- Clerk already supports both — verify configuration
-- Auto-provisioning from SSO: create user + assign to org on first login
-
----
-
-## Phase 12: Testing & Verification Strategy
-
-### 12.1 End-to-End Test Scenarios
+### 11.1 End-to-End Test Scenarios
 - Full chat flow: send message → routing → model selection → streaming → persistence → title generation
 - Artifact flow: generate in chat → save as artifact → edit → version history → agent reads artifact
 - Agent flow: create agent with resources → auto-route to agent → agent uses resources in response
@@ -1004,7 +998,7 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 - Branch flow: edit message → create branch → navigate between branches
 - Compaction flow: long conversation → compact → summary preserved → continue chatting
 
-### 12.2 Edge Case Testing
+### 11.2 Edge Case Testing
 - Model returns `finish_reason: "length"` → auto-continuation works
 - Tavily API down → :online fallback kicks in
 - OPENROUTER_API_KEY missing → graceful degradation
@@ -1014,7 +1008,7 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 - Dark mode on every component
 - Mobile responsive on every page
 
-### 12.3 Performance Benchmarks
+### 11.3 Performance Benchmarks
 - Time to first token: < 2 seconds for T0/T1 requests
 - Full response time: < 10 seconds for simple questions
 - Artifact page load: < 1 second
@@ -1027,49 +1021,49 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 ## Additional Issues Found (50+ beyond IDEA.md)
 
 ### From Orchestration Analysis
-1. RAG failure silently returns fallback — should warn user when no sources found despite expecting them
-2. No circuit breaker for model failures — same failing model retried immediately
-3. Memory extraction NLP too narrow (regex only matches "prefer", "goal", "struggle")
-4. Cost budget not hard-enforced during multi-agent streaming — can exceed declared budget
-5. Mode fallback to "general" loses pedagogical structure without warning
-6. Quiz/flashcard format validation is client-side only — malformed output passes through
-7. Thinking level parameter doesn't actually enable extended thinking in models that support it
+1. [x] RAG failure silently returns fallback — should warn user when no sources found despite expecting them ✅ Complete
+2. [x] No circuit breaker for model failures — same failing model retried immediately ✅ Complete
+3. [x] Memory extraction NLP too narrow (regex only matches "prefer", "goal", "struggle") ✅ Complete
+4. [x] Cost budget not hard-enforced during multi-agent streaming — can exceed declared budget ✅ Complete
+5. [x] Mode fallback to "general" loses pedagogical structure without warning ✅ Complete
+6. [x] Quiz/flashcard format validation is client-side only — malformed output passes through ✅ Complete
+7. [x] Thinking level parameter doesn't actually enable extended thinking in models that support it ✅ Complete
 8. Agent guidelines topic map not used to filter RAG results
 9. No artifact resource cleanup/retention policy
-10. Max tokens per mode are hardcoded — should adapt to model's context window
+10. [x] Max tokens per mode are hardcoded — should adapt to model's context window ✅ Complete
 
 ### From Frontend Analysis
 11. Auto-scroll race condition during heavy streaming
-12. Panel history limited to 10 entries — could overflow on complex interactions
-13. Canvas panel auto-collapses sidebar unexpectedly
-14. Mobile composer can be covered by keyboard
-15. Chat title rename has no loading state during API call
-16. Flashcard SM-2 quality rating mappings non-intuitive (1, 0, 2, 4, 5)
-17. No request deduplication — double-click sends two requests
-18. No rate limiting on client-side message sending
-19. Toast notifications don't persist or have history
-20. No keyboard shortcuts for common chat actions beyond Cmd+K
+12. [x] Panel history limited to 10 entries — could overflow on complex interactions ✅ Complete
+13. [x] Canvas panel auto-collapses sidebar unexpectedly ✅ Complete
+14. [x] Mobile composer can be covered by keyboard ✅ Complete
+15. [x] Chat title rename has no loading state during API call ✅ Complete
+16. [x] Flashcard SM-2 quality rating mappings non-intuitive (1, 0, 2, 4, 5) ✅ Complete
+17. [x] No request deduplication — double-click sends two requests ✅ Complete
+18. [x] No rate limiting on client-side message sending ✅ Complete
+19. [x] Toast notifications don't persist or have history ✅ Complete
+20. [x] No keyboard shortcuts for common chat actions beyond Cmd+K ✅ Complete
 
 ### From Backend Analysis
 21. Memory fingerprint deduplication is not atomic — race condition with concurrent writes
 22. `negativeTopicLinks` array grows unbounded (up to 12 items, no cleanup)
-23. No hybrid search (BM25 + vector) — vector-only misses keyword matches
-24. Resource processing is serial in cron job — no parallelization
+23. [x] No hybrid search (BM25 + vector) — vector-only misses keyword matches ✅ Complete
+24. [x] Resource processing is serial in cron job — no parallelization ✅ Complete
 25. Message branching parent/sibling tracking has no foreign key constraints
 26. Orphaned chunks possible if resource deletion doesn't cascade properly
 27. No bulk mutation API for resources — each upload is separate
 28. Content deduplication via `contentHash` exists in schema but is unused
-29. Chat listing by pack requires full scan — missing index
-30. Vector search returns topK*8 then filters — wastes compute on irrelevant results
+29. [x] Chat listing by pack requires full scan — missing index ✅ Complete
+30. [x] Vector search returns topK*8 then filters — wastes compute on irrelevant results ✅ Complete
 31. Usage aggregation upsert runs in critical path on every message
 32. Compaction summary is manual-only — no LLM-driven summarization
 33. Embedding model change would require complete re-index of all data
 
 ### From Cross-Analysis
 34. System prompt too verbose → inflates token count even for simple queries
-35. No graceful handling when Convex backend is unreachable
+35. [x] No graceful handling when Convex backend is unreachable ✅ Complete
 36. No export format for artifacts (only chat has export)
-37. No conversation templates or quick-start flows for new users
+37. [x] No conversation templates or quick-start flows for new users ✅ Complete
 38. Model leaderboard based on limited internal data — not very useful
 39. No A/B testing infrastructure for routing experiments
 40. No observability dashboard for pipeline health metrics
@@ -1077,17 +1071,18 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 42. No progressive loading for very long conversations
 43. Agent resources are not versioned — teacher updates replace without history
 44. No collaborative features (sharing artifacts between students)
-45. Missing breadcrumb navigation on nested admin pages
-46. No error boundary recovery UX — errors crash the whole page
-47. Custom theme picker complexity (primary/secondary) doesn't match user mental model
-48. No way to "pin" a model for the rest of a conversation
+45. [x] Missing breadcrumb navigation on nested admin pages ✅ Complete
+46. [x] No error boundary recovery UX — errors crash the whole page ✅ Complete
+47. [x] Custom theme picker complexity (primary/secondary) doesn't match user mental model ✅ Complete
+48. [x] No way to "pin" a model for the rest of a conversation ✅ Complete
 49. Clarification questions are generic and repetitive across sessions
 50. No semantic caching of embeddings for repeated queries
-51. Provider icon coverage is incomplete — many show generic fallback
+51. [x] Provider icon coverage is incomplete — many show generic fallback ✅ Complete
 52. No diff view for comparing artifact versions
-53. Study reminders cron generates at fixed time — not timezone-aware
-54. Generated documents (DOCX/PDF/PPTX) lack design consistency
+53. [x] Study reminders cron generates at fixed time — not timezone-aware ✅ Complete
+54. Generated documents (DOCX/PDF/PPTX) lack design consistency, and require polished results. Achievable through skills written as md files, and downloaded from internet (frontend-design for instance). Can be loaded through tools to prevent massive injection of context
 55. No telemetry for measuring actual learning outcomes
+56. Memory upload through "My Files" (or automatically saved after attached through chat) is not reliable, and usually fails
 
 ---
 
@@ -1114,9 +1109,7 @@ Phase 1 (Foundation) ───────────────────�
     │
     ├── Phase 10 (Analytics Hub) ── depends on Phase 5
     │
-    └── Phase 11 (Compliance) ── independent, can parallel
-         │
-         └── Phase 12 (Testing) ── final, after all phases
+    └── Phase 11 (Testing) ── final, after all phases
 ```
 
 ---
@@ -1133,5 +1126,4 @@ Phase 1 (Foundation) ───────────────────�
 8. **Phase 8** — Memory quality improves over time
 9. **Phase 9** — Polish and visual refinement
 10. **Phase 10** — Hub consolidation
-11. **Phase 11** — Compliance for EU launch
-12. **Phase 12** — Ongoing verification
+11. **Phase 11** — Ongoing verification

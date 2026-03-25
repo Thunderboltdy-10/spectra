@@ -139,6 +139,8 @@ export const recordUsage = mutation({
     model: v.string(),
     inputTokens: v.number(),
     outputTokens: v.number(),
+    finishReason: v.optional(v.string()),
+    truncatedByLength: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
@@ -181,6 +183,8 @@ export const recordUsage = mutation({
       inputTokens: args.inputTokens,
       outputTokens: args.outputTokens,
       totalTokens,
+      finishReason: args.finishReason,
+      truncatedByLength: args.truncatedByLength,
       day,
       createdAt: Date.now(),
     });
@@ -199,6 +203,8 @@ export const recordUsageWithCost = mutation({
     outputTokens: v.number(),
     openRouterCost: v.optional(v.number()),
     cacheSavingsCents: v.optional(v.number()),
+    finishReason: v.optional(v.string()),
+    truncatedByLength: v.optional(v.boolean()),
     inputCostPerM: v.optional(v.number()),
     outputCostPerM: v.optional(v.number()),
   },
@@ -302,6 +308,8 @@ export const recordUsageWithCost = mutation({
       totalTokens,
       costCents,
       cacheSavingsCents,
+      finishReason: args.finishReason,
+      truncatedByLength: args.truncatedByLength,
       pricingNote:
         openRouterCost !== undefined
           ? "Cost sourced directly from OpenRouter usage."
@@ -348,6 +356,8 @@ export const recordUsageWithCostInternal = internalMutation({
     outputTokens: v.number(),
     openRouterCost: v.optional(v.number()),
     cacheSavingsCents: v.optional(v.number()),
+    finishReason: v.optional(v.string()),
+    truncatedByLength: v.optional(v.boolean()),
     inputCostPerM: v.optional(v.number()),
     outputCostPerM: v.optional(v.number()),
   },
@@ -451,6 +461,8 @@ export const recordUsageWithCostInternal = internalMutation({
       totalTokens,
       costCents,
       cacheSavingsCents,
+      finishReason: args.finishReason,
+      truncatedByLength: args.truncatedByLength,
       pricingNote:
         openRouterCost !== undefined
           ? "Cost sourced directly from OpenRouter usage."

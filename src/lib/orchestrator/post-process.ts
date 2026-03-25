@@ -15,8 +15,8 @@ import {
 } from "@/lib/orchestrator/learning-context";
 import type { Citation } from "@/types";
 
-const TITLE_MIN_WORDS = 2;
-const TITLE_MAX_WORDS = 6;
+const TITLE_MIN_WORDS = 3;
+const TITLE_MAX_WORDS = 5;
 const MEMORY_MAX_ENTRIES = 80;
 const MEMORY_MAX_RAW_CHARS = 1500;
 const MEMORY_PROFILE_MAX_ENTRIES = 8;
@@ -952,14 +952,33 @@ function heuristicTitle(source: string) {
   return "General Study";
 }
 
+const STRIP_PREFIXES = [
+  /^(user\s+asks?\s+(about|for|to)\s+)/i,
+  /^(help(ing)?\s+with\s+)/i,
+  /^(question\s+(about|on)\s+)/i,
+  /^(discussion\s+(about|on)\s+)/i,
+  /^(request\s+for\s+)/i,
+  /^(conversation\s+about\s+)/i,
+];
+
 function normalizeTitle(candidate: string, fallbackSource: string) {
-  const cleaned = compactText(
+  let stripped = compactText(
     candidate
       .replace(/^title\s*:\s*/i, "")
       .replace(/[\n\r]+/g, " ")
       .replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, "")
       .replace(/["'`*#_]/g, ""),
   );
+
+  // Strip surrounding quotes
+  stripped = stripped.replace(/^["'"]+|["'"]+$/g, "");
+
+  // Strip common AI title prefixes
+  for (const prefix of STRIP_PREFIXES) {
+    stripped = stripped.replace(prefix, "");
+  }
+
+  const cleaned = compactText(stripped);
 
   const words = tokenizeWords(cleaned).slice(0, TITLE_MAX_WORDS);
   const fallbackWords = tokenizeWords(fallbackSource);
@@ -1010,7 +1029,7 @@ async function generateTitleFromSnippet(
         {
           role: "system",
           content:
-            "Generate a conversation title in 2 to 6 words. Keep the same language as the user when possible. Return plain title text only with no quotes.",
+            "Generate a conversation title in 3 to 5 words. Rules:\n- Just the topic, no quotes, no prefixes like \"User asks about\" or \"Help with\"\n- Be specific: \"WW2 Flashcards for IB\" not \"History Help\"\n- Include subject/context clues when present\n- Never start with articles (a, an, the)\n- Keep the same language as the user\n- Return plain title text only",
         },
         {
           role: "user",
@@ -1238,28 +1257,49 @@ export async function maybeExtractMemory(params: {
     if (!text) return [] as MemoryEntry[];
 
     const inferred: MemoryEntry[] = [];
-    const patterns: Array<{ key: string; regex: RegExp; confidence: number }> = [
-      { key: "goals", regex: /\b(my goal is|i want to|i need to|help me)\b/i, confidence: 0.72 },
-      { key: "subject_preferences", regex: /\b(i (love|like|enjoy)|favorite subject|interested in)\b/i, confidence: 0.64 },
-      { key: "struggles", regex: /\b(i struggle with|i find .* hard|i'm stuck on|confused about)\b/i, confidence: 0.74 },
-      { key: "learning_style", regex: /\b(i prefer|please explain|step by step|simple terms|visual)\b/i, confidence: 0.58 },
-      { key: "timezone", regex: /\b(my timezone is|i am in|i'm in|based in|utc[+-]?\d{1,2})\b/i, confidence: 0.66 },
-      { key: "language", regex: /\b(i speak|my language is|please answer in|respond in)\b/i, confidence: 0.65 },
-      { key: "identity", regex: /\b(i am|i'm)\b.{0,48}\b(student|teacher|grade|year|college|university)\b/i, confidence: 0.67 },
-      { key: "communication_style", regex: /\b(be concise|short answers|detailed answers|more detail|less detail)\b/i, confidence: 0.62 },
-      { key: "memory_updates", regex: /\b(update my memory|remember this|save this|from now on)\b/i, confidence: 0.78 },
-    ];
-
-    for (const pattern of patterns) {
-      if (!pattern.regex.test(text)) continue;
+    const seen = new Set<string>();
+    const pushInference = (key: string, value: string, confidence: number) => {
+      const normalized = normalizeMemoryLine(value).slice(0, 220);
+      if (!normalized) return;
+      const fingerprint = `${canonicalMemoryKey(key)}:${normalized.toLowerCase()}`;
+      if (seen.has(fingerprint)) return;
+      seen.add(fingerprint);
       inferred.push({
-        key: pattern.key,
-        value: text.slice(0, 200),
-        confidence: pattern.confidence,
+        key,
+        value: normalized,
+        confidence,
         extractedAt: now,
       });
+    };
+
+    const capture = (
+      key: string,
+      regex: RegExp,
+      confidence: number,
+      format?: (captured: string) => string,
+    ) => {
+      const match = text.match(regex);
+      const captured = match?.[1]?.trim();
+      if (!captured) return;
+      pushInference(key, format ? format(captured) : captured, confidence);
+    };
+
+    capture("goals", /\b(?:my goal is|i want to|i need to|i am trying to|i'm trying to)\s+([^.!?\n]{4,140})/i, 0.78, (value) => `Goal: ${value}`);
+    capture("subject_preferences", /\b(?:favorite subject is|i (?:love|like|enjoy)|interested in)\s+([^.!?\n]{2,100})/i, 0.67);
+    capture("struggles", /\b(?:i struggle with|i find|i'm stuck on|i am stuck on|confused about|i get confused by)\s+([^.!?\n]{2,140})/i, 0.76);
+    capture("learning_style", /\b(?:i prefer|please|can you)\s+(step by step|simple terms|visual examples?|concise answers?|detailed answers?|short answers?)\b/i, 0.66);
+    capture("communication_style", /\b(?:be|keep|use)\s+(concise|brief|detailed|step[- ]by[- ]step|simple)\b/i, 0.64, (value) => `Prefer ${value} explanations`);
+    capture("timezone", /\b(?:my timezone is|i am in|i'm in|based in)\s+([a-z0-9_\/:+\- ]{2,40})/i, 0.7, (value) => value.toUpperCase().replace(/\s+/g, " ").trim());
+    capture("language", /\b(?:i speak|my language is|please answer in|respond in)\s+([a-z][a-z\s-]{1,30})/i, 0.69, (value) => value.toLowerCase());
+    capture("identity", /\b(?:i am|i'm)\s+(a\s+)?(student|teacher|tutor|parent|in grade\s+\d+|in year\s+\d+)\b/i, 0.68, (value) => value.toLowerCase());
+    capture("exam_context", /\b(?:preparing for|studying for|taking)\s+([^.!?\n]{3,120}\b(?:exam|gcse|a-level|ib|sat|act|ap)\b[^.!?\n]*)/i, 0.74);
+    capture("study_habit", /\b(?:i can study|i usually study|i study)\s+([^.!?\n]{3,120})/i, 0.63);
+
+    if (/\b(update my memory|remember this|remember that|save this|from now on|always|never)\b/i.test(text)) {
+      pushInference("memory_updates", text, 0.8);
     }
-    return inferred.slice(0, 4);
+
+    return inferred.slice(0, 8);
   })();
   extracted.push(...heuristics);
   let extractedLearningContext: LearningContext | null = null;

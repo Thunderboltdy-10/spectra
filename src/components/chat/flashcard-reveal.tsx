@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RichText } from "@/components/chat/rich-text";
+import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { extractFlashcardPairs } from "@/lib/flashcard-format";
 
 export type FlashcardCard = {
@@ -469,35 +470,43 @@ function CardsView({ cards, onRateCard, onEditCard, onUpdateCard, onLearningCoun
               variant="secondary"
               onClick={() => void handleRate(0, false)}
               disabled={busyRating}
+              title="Forgot — repeat tomorrow (SM-2 quality 0)"
               className="cursor-pointer border-[var(--danger)] text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_10%,var(--bg-primary))]"
             >
-              Again (~1 day)
+              Again
+              <span className="ml-1 text-[10px] opacity-70">~1 day</span>
             </Button>
             <Button
               size="sm"
               variant="secondary"
-              onClick={() => void handleRate(2, false)}
+              onClick={() => void handleRate(1, false)}
               disabled={busyRating}
+              title="Remembered with difficulty (SM-2 quality 1)"
               className="cursor-pointer border-[var(--warning)] text-[var(--warning)] hover:bg-[color-mix(in_oklab,var(--warning)_10%,var(--bg-primary))]"
             >
-              Hard (~2 days)
+              Hard
+              <span className="ml-1 text-[10px] opacity-70">~2 days</span>
             </Button>
             <Button
               size="sm"
-              onClick={() => void handleRate(4, true)}
+              onClick={() => void handleRate(3, true)}
               disabled={busyRating}
+              title="Recalled correctly with some effort (SM-2 quality 3)"
               className="cursor-pointer bg-[var(--success)] hover:bg-[color-mix(in_oklab,var(--success)_85%,black)]"
             >
-              Good (~5 days)
+              Good
+              <span className="ml-1 text-[10px] opacity-70">~5 days</span>
             </Button>
             <Button
               size="sm"
               variant="secondary"
               onClick={() => void handleRate(5, true)}
               disabled={busyRating}
+              title="Perfect recall with no hesitation (SM-2 quality 5)"
               className="cursor-pointer border-[var(--accent-cyan)] text-[var(--accent-cyan)] hover:bg-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--bg-primary))]"
             >
-              Easy (~9 days)
+              Easy
+              <span className="ml-1 text-[10px] opacity-70">~9 days</span>
             </Button>
           </div>
         ) : (
@@ -919,17 +928,19 @@ export function FlashcardReveal({ content, onSaveDeck, onRateCard, onEditCard, o
   >({});
   const cards = useMemo(
     () =>
-      parsedCards.map((card) => {
-        const override = cardOverrides[card.cardHash];
-        return override
-          ? {
-              ...card,
-              front: override.front,
-              back: override.back,
-              cardHash: override.cardHash ?? card.cardHash,
-            }
-          : card;
-      }),
+      parsedCards
+        .filter((card) => card.front.trim() && card.back.trim())
+        .map((card) => {
+          const override = cardOverrides[card.cardHash];
+          return override
+            ? {
+                ...card,
+                front: override.front,
+                back: override.back,
+                cardHash: override.cardHash ?? card.cardHash,
+              }
+            : card;
+        }),
     [parsedCards, cardOverrides],
   );
   const [viewMode, setViewMode] = useState<StudyViewMode>("cards");
@@ -971,7 +982,9 @@ export function FlashcardReveal({ content, onSaveDeck, onRateCard, onEditCard, o
     void onSaveDeck({ title: inferDeckTitle(cards), cards });
   }, [cards, onSaveDeck]);
 
-  if (cards.length === 0) return null;
+  if (cards.length === 0) {
+    return <MarkdownRenderer content={content} citations={[]} />;
+  }
 
   const title = inferDeckTitle(cards);
 

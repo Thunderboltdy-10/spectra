@@ -310,7 +310,7 @@ export function AdminOnboarding({
               <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 text-left">
                 <Sparkles className="mb-2 h-5 w-5 text-[var(--success)]" />
                 <p className="text-sm font-semibold text-[var(--text-primary)]">Set governance</p>
-                <p className="mt-1 text-xs text-[var(--text-secondary)]">Control quality, behavior, and spend.</p>
+                <p className="mt-1 text-xs text-[var(--text-secondary)]">Control quality, behavior, and safety.</p>
               </div>
             </div>
           </StepContainer>

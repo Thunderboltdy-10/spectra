@@ -13,6 +13,16 @@ export const VIDEO_RESOURCE_EXTENSIONS = new Set([
   "flv",
 ]);
 
+export const BLOCKED_RESOURCE_EXTENSIONS = new Set([
+  "exe",
+  "dll",
+  "bin",
+  "iso",
+  "dmg",
+  "apk",
+  "ipa",
+]);
+
 export const SUPPORTED_RESOURCE_EXTENSIONS = new Set([
   "pdf",
   "docx",
@@ -107,4 +117,3 @@ export const SUPPORTED_MIME_BY_EXTENSION: Record<string, string[]> = {
 export function fileExtension(filename: string) {
   return filename.split(".").pop()?.trim().toLowerCase() ?? "";
 }
-

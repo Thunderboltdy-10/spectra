@@ -70,6 +70,7 @@ export async function POST(request: NextRequest) {
     const packId = (formData.get("packId") as string | null) ?? undefined;
     const agentId = (formData.get("agentId") as string | null) ?? undefined;
     const saveToLibraryRequested = (formData.get("saveToLibrary") as string | null) !== "0";
+    const conversationAttachment = (formData.get("conversationAttachment") as string | null) === "1";
 
     if (files.length === 0) {
       return badRequest("No files uploaded");
@@ -77,6 +78,12 @@ export async function POST(request: NextRequest) {
 
     if (scope === "agent" && !agentId) {
       return badRequest("agentId is required for agent uploads");
+    }
+
+    if (conversationAttachment && files.length > FILE_LIMITS.maxConversationAttachments) {
+      return badRequest(
+        `Attachment limit reached (${FILE_LIMITS.maxConversationAttachments} files per conversation).`,
+      );
     }
 
     const orgSettings = (await convexQuery("admin:getOrgSettings", {
@@ -236,12 +243,18 @@ export async function POST(request: NextRequest) {
     const chatOnlyResourceIds = results
       .filter((item) => item.resourceId && item.savedToLibrary === false)
       .map((item) => item.resourceId as string);
+    const uploadedBytes = acceptedFiles.reduce((sum, file) => sum + Math.max(0, file.size), 0);
+    const compactionWarning =
+      conversationAttachment && acceptedFiles.length >= 4 && uploadedBytes >= 18 * 1024 * 1024
+        ? "Large attachment context detected. Long chats may compact earlier to preserve response quality."
+        : undefined;
 
     return ok({
       results,
       resourceIds: results.map((item) => item.resourceId).filter((id): id is string => Boolean(id)),
       chatOnlyResourceIds,
       count: results.length,
+      warning: compactionWarning,
     });
   });
 }

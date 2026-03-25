@@ -14,7 +14,7 @@ function createMessages(count: number, start = 0): CompactableMessage[] {
 describe("computeCompactionWindow", () => {
   it("rejects compaction when there is not enough history", () => {
     const result = computeCompactionWindow({
-      messages: createMessages(19),
+      messages: createMessages(11),
       keepLatestMessages: 6,
     });
 

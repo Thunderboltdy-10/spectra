@@ -821,17 +821,33 @@ export const retrieveRelevantEntries: ReturnType<typeof action> = action({
 
     const topK = Math.max(1, Math.min(args.topK ?? 5, 12));
     const minScore = Math.max(0, Math.min(1, args.minScore ?? MEMORY_TOPIC_SIMILARITY_MIN));
-
-    const hits = await ctx.vectorSearch("userMemoryEntries", "by_embedding", {
-      vector: normalizeEmbedding(args.embedding),
-      limit: topK * 8,
-      filter: (q) => q.eq("userId", actor._id),
-    });
-
-    const rows = await ctx.runQuery(internal.memory.getMemoryEntriesByIds, {
-      ids: hits.map((hit) => hit._id),
-    });
-    const rowById = new Map(rows.map((row) => [String(row._id), row]));
+    const reciprocalRankK = 60;
+    const queryTokens = args.message
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((token) => token.length >= 3);
+    const lexicalOverlapScore = (value: string) => {
+      if (queryTokens.length === 0) return 0;
+      const haystack = new Set(
+        value
+          .toLowerCase()
+          .replace(/[^a-z0-9\s]/g, " ")
+          .split(/\s+/)
+          .filter((token) => token.length >= 3),
+      );
+      if (haystack.size === 0) return 0;
+      let overlap = 0;
+      for (const token of queryTokens) {
+        if (haystack.has(token)) overlap += 1;
+      }
+      return overlap / queryTokens.length;
+    };
+    const fingerprintOf = (row: {
+      category: "topic" | "artifact" | "correction";
+      key: string;
+      text: string;
+    }) => `${row.category}:${row.key}:${row.text.toLowerCase()}`;
     const results: Array<{
       _id: Id<"userMemoryEntries">;
       key: string;
@@ -839,62 +855,132 @@ export const retrieveRelevantEntries: ReturnType<typeof action> = action({
       category: "topic" | "artifact" | "correction";
       confidence: number;
       score: number;
+      vectorRank: number;
+      lexicalScore: number;
       sourceChatId?: Id<"chats">;
       negativeTopicLinks: string[];
       updatedAt: number;
     }> = [];
+    const now = Date.now();
+    const seenHitIds = new Set<string>();
+    const vector = normalizeEmbedding(args.embedding);
 
-    for (let index = 0; index < hits.length; index += 1) {
-      const hit = hits[index];
-      const row = rowById.get(String(hit._id));
-      if (!hit || !row) continue;
-      const rowStatus = String(row.status ?? "");
-      const rowCategory = String(row.category ?? "");
-      if (rowStatus !== "confirmed") continue;
-      if (!TOPIC_MEMORY_CATEGORIES.has(rowCategory)) continue;
-      if (
-        isMemoryEntryExpired({
-          category: rowCategory as "topic" | "artifact" | "correction",
-          updatedAt: typeof row.updatedAt === "number" ? row.updatedAt : 0,
-          now: Date.now(),
-        })
-      ) {
-        continue;
+    const collectFromHits = async (hits: Array<{ _id: Id<"userMemoryEntries">; _score?: number }>) => {
+      const unseen: Array<{ hit: { _id: Id<"userMemoryEntries">; _score?: number }; vectorRank: number }> = [];
+      for (const hit of hits) {
+        const id = String(hit._id);
+        if (seenHitIds.has(id)) continue;
+        seenHitIds.add(id);
+        unseen.push({
+          hit,
+          vectorRank: seenHitIds.size,
+        });
       }
-      const score = typeof hit._score === "number" ? hit._score : 0;
-      if (score < minScore) continue;
-      const negativeTopicLinks = Array.isArray(row.negativeTopicLinks)
-        ? row.negativeTopicLinks.map((value) => String(value))
-        : [];
-      if (hasNegativeTopicMatch(args.message, negativeTopicLinks)) continue;
+      if (unseen.length === 0) return;
 
-      results.push({
-        _id: hit._id,
-        key: String(row.key ?? ""),
-        text: String(row.text ?? ""),
-        category: rowCategory as "topic" | "artifact" | "correction",
-        confidence: normalizeConfidence(
-          typeof row.confidence === "number" ? row.confidence : Number(row.confidence ?? 0.6),
-          0.6,
-        ),
-        score,
-        sourceChatId: row.sourceChatId as Id<"chats"> | undefined,
-        negativeTopicLinks,
-        updatedAt: typeof row.updatedAt === "number" ? row.updatedAt : 0,
+      const rows = await ctx.runQuery(internal.memory.getMemoryEntriesByIds, {
+        ids: unseen.map((item) => item.hit._id),
       });
+      const rowById = new Map(rows.map((row) => [String(row._id), row]));
+
+      for (let index = 0; index < unseen.length; index += 1) {
+        const hit = unseen[index]?.hit;
+        const vectorRank = unseen[index]?.vectorRank ?? index + 1;
+        const row = rowById.get(String(hit._id));
+        if (!hit || !row) continue;
+        const rowStatus = String(row.status ?? "");
+        const rowCategory = String(row.category ?? "");
+        if (rowStatus !== "confirmed") continue;
+        if (!TOPIC_MEMORY_CATEGORIES.has(rowCategory)) continue;
+        if (
+          isMemoryEntryExpired({
+            category: rowCategory as "topic" | "artifact" | "correction",
+            updatedAt: typeof row.updatedAt === "number" ? row.updatedAt : 0,
+            now,
+          })
+        ) {
+          continue;
+        }
+        const score = typeof hit._score === "number" ? hit._score : 0;
+        if (score < minScore) continue;
+        const negativeTopicLinks = Array.isArray(row.negativeTopicLinks)
+          ? row.negativeTopicLinks.map((value) => String(value))
+          : [];
+        if (hasNegativeTopicMatch(args.message, negativeTopicLinks)) continue;
+
+        results.push({
+          _id: hit._id,
+          key: String(row.key ?? ""),
+          text: String(row.text ?? ""),
+          category: rowCategory as "topic" | "artifact" | "correction",
+          confidence: normalizeConfidence(
+            typeof row.confidence === "number" ? row.confidence : Number(row.confidence ?? 0.6),
+            0.6,
+          ),
+          score,
+          vectorRank,
+          lexicalScore: lexicalOverlapScore(`${String(row.key ?? "")} ${String(row.text ?? "")}`),
+          sourceChatId: row.sourceChatId as Id<"chats"> | undefined,
+          negativeTopicLinks,
+          updatedAt: typeof row.updatedAt === "number" ? row.updatedAt : 0,
+        });
+      }
+    };
+
+    const primaryLimit = Math.min(36, Math.max(topK + 4, topK * 3));
+    const primaryHits = await ctx.vectorSearch("userMemoryEntries", "by_embedding", {
+      vector,
+      limit: primaryLimit,
+      filter: (q) => q.eq("userId", actor._id),
+    });
+    await collectFromHits(primaryHits);
+
+    if (results.length < topK && primaryHits.length === primaryLimit) {
+      const fallbackLimit = Math.min(60, Math.max(primaryLimit + topK * 2, topK * 5));
+      if (fallbackLimit > primaryLimit) {
+        const fallbackHits = await ctx.vectorSearch("userMemoryEntries", "by_embedding", {
+          vector,
+          limit: fallbackLimit,
+          filter: (q) => q.eq("userId", actor._id),
+        });
+        await collectFromHits(fallbackHits);
+      }
     }
 
     const deduped = new Map<string, (typeof results)[number]>();
     for (const row of results) {
-      const key = `${row.category}:${row.key}:${row.text.toLowerCase()}`;
+      const key = fingerprintOf(row);
       const existing = deduped.get(key);
-      if (!existing || row.score > existing.score) {
+      if (
+        !existing
+        || row.score > existing.score
+        || (row.score === existing.score && row.lexicalScore > existing.lexicalScore)
+      ) {
         deduped.set(key, row);
       }
     }
 
-    return [...deduped.values()]
-      .sort((a, b) => b.score - a.score || b.confidence - a.confidence || b.updatedAt - a.updatedAt)
+    const dedupedRows = [...deduped.values()];
+    const lexicalRanks = new Map<string, number>();
+    dedupedRows
+      .slice()
+      .sort((a, b) => b.lexicalScore - a.lexicalScore || a.vectorRank - b.vectorRank)
+      .forEach((row, index) => {
+        lexicalRanks.set(fingerprintOf(row), index + 1);
+      });
+
+    return dedupedRows
+      .map((row) => {
+        const lexicalRank = lexicalRanks.get(fingerprintOf(row)) ?? dedupedRows.length + 1;
+        const fusedScore =
+          (1 / (reciprocalRankK + Math.max(1, row.vectorRank)))
+          + (1 / (reciprocalRankK + Math.max(1, lexicalRank)));
+        return {
+          ...row,
+          fusedScore,
+        };
+      })
+      .sort((a, b) => b.fusedScore - a.fusedScore || b.score - a.score || b.confidence - a.confidence || b.updatedAt - a.updatedAt)
       .slice(0, topK);
   },
 });

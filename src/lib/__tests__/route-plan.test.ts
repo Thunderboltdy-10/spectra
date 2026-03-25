@@ -138,4 +138,25 @@ describe("buildRoutePlan", () => {
     expect(plan.requestedArtifactFormats).toEqual(["docx", "pdf"]);
     expect(plan.allowedToolBundles).toContain("artifact");
   });
+
+  it("captures model and orchestration intent signals", () => {
+    const plan = buildRoutePlan({
+      message: "Use Claude and get different perspectives with multiple models.",
+      mode: "general",
+      selectedMode: "general",
+      hasAttachments: false,
+      hasAgent: false,
+      hasPack: false,
+      hasPersonalResources: false,
+      hasAgentResources: false,
+      autoSearchEnabled: false,
+      thinkingLevel: "medium",
+      complexity: "medium",
+      schoolSoulVersion: "school-soul-v7",
+    });
+
+    expect(plan.intentSignals?.requestedModelPhrase?.toLowerCase()).toContain("claude");
+    expect(plan.intentSignals?.requestedOrchestration).toBe(true);
+    expect(plan.shouldUseMultiStep).toBe(true);
+  });
 });

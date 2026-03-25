@@ -5,6 +5,7 @@ import { getUserByClerkId } from "./helpers";
 import { vScope } from "./shared";
 import { internal } from "./_generated/api";
 import {
+  BLOCKED_RESOURCE_EXTENSIONS,
   DEFAULT_MAX_RESOURCE_FILE_SIZE_BYTES,
   MAX_RESOURCE_FILE_SIZE_BYTES,
   MIN_RESOURCE_FILE_SIZE_BYTES,
@@ -19,6 +20,8 @@ import {
   RESOURCE_QUEUE_STALE_MS,
   RESOURCE_PROCESSING_STALE_MS,
 } from "../shared/resource-processing";
+
+const CONVERSATION_RESOURCE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 function resolveMaxResourceFileSizeBytes(value: number | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -38,6 +41,10 @@ function maxFileSizeError(maxBytes: number) {
 function invalidResourceTypeError(filename: string, mimeType: string) {
   const ext = fileExtension(filename);
   const normalizedMime = mimeType.trim().toLowerCase();
+
+  if (BLOCKED_RESOURCE_EXTENSIONS.has(ext)) {
+    return `Blocked file type: .${ext}. Upload documents, code, images, or audio only.`;
+  }
 
   if (VIDEO_RESOURCE_EXTENSIONS.has(ext) || normalizedMime.startsWith("video/")) {
     return "Video uploads are not supported. Upload documents, code, images, or audio instead.";
@@ -154,7 +161,8 @@ export const createUploadUrl = mutation({
         .query("resources")
         .withIndex("by_owner_scope", (q) => q.eq("ownerUserId", actor._id).eq("scope", "personal"))
         .collect();
-      if (!args.ignorePersonalLimit && mine.length >= LIMITS.maxStudentPersonalFiles) {
+      const personalLibraryCount = mine.filter((resource) => resource.saveToLibrary !== false).length;
+      if (!args.ignorePersonalLimit && personalLibraryCount >= LIMITS.maxStudentPersonalFiles) {
         throw new Error(`Personal file limit reached (${LIMITS.maxStudentPersonalFiles})`);
       }
     }
@@ -231,6 +239,11 @@ export const registerResource = mutation({
     }
 
     const now = Date.now();
+    const saveToLibrary = args.saveToLibrary ?? true;
+    const expiresAt =
+      args.scope === "personal" && !saveToLibrary
+        ? now + CONVERSATION_RESOURCE_TTL_MS
+        : undefined;
     const resourceId = await ctx.db.insert("resources", {
       orgId: actor.orgId,
       ownerUserId: actor._id,
@@ -245,7 +258,8 @@ export const registerResource = mutation({
       parsedCharCount: 0,
       status: "uploaded",
       processingAttempts: 0,
-      saveToLibrary: args.saveToLibrary ?? true,
+      saveToLibrary,
+      expiresAt,
       createdAt: now,
       updatedAt: now,
     });
@@ -493,6 +507,35 @@ export const markResourceProcessingHeartbeatInternal = internalMutation({
   },
 });
 
+export const deferResourceForMissingApiKeyInternal = internalMutation({
+  args: {
+    resourceId: v.id("resources"),
+    nextAttemptAt: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const resource = await ctx.db.get(args.resourceId);
+    if (!resource) {
+      return { ok: false };
+    }
+
+    const currentAttempts = resource.processingAttempts ?? 0;
+    const nextAttempts = Math.max(0, currentAttempts - 1);
+    const now = Date.now();
+    const baseUpdatedAt = typeof args.nextAttemptAt === "number" && Number.isFinite(args.nextAttemptAt)
+      ? args.nextAttemptAt
+      : now;
+
+    await ctx.db.patch(args.resourceId, {
+      status: "uploaded",
+      processingAttempts: nextAttempts,
+      error: "OPENROUTER_API_KEY is missing. Processing is queued and will retry automatically.",
+      updatedAt: baseUpdatedAt,
+    });
+
+    return { ok: true };
+  },
+});
+
 export const enqueueResourceProcessing = mutation({
   args: {
     actorClerkId: v.string(),
@@ -598,6 +641,7 @@ export const retryStaleResourcesInternal = internalMutation({
     let requeued = 0;
     let exhausted = 0;
     let failed = 0;
+    const pendingScheduleResources: typeof candidates = [];
 
     for (const resource of candidates) {
       if (resource.status !== "uploaded" && resource.status !== "processing") {
@@ -632,20 +676,35 @@ export const retryStaleResourcesInternal = internalMutation({
         processingAttempts: nextAttempts,
         updatedAt: now,
       });
+      pendingScheduleResources.push(resource);
+    }
 
-      try {
-        await ctx.scheduler.runAfter(0, internal.ingestQueue.processResource, {
+    const scheduleResults = await Promise.allSettled(
+      pendingScheduleResources.map((resource) =>
+        ctx.scheduler.runAfter(0, internal.ingestQueue.processResource, {
           resourceId: resource._id,
-        });
+        })
+      ),
+    );
+
+    for (let index = 0; index < scheduleResults.length; index += 1) {
+      const scheduleResult = scheduleResults[index];
+      const resource = pendingScheduleResources[index];
+      if (!resource) continue;
+      if (scheduleResult?.status === "fulfilled") {
         requeued += 1;
-      } catch (error) {
-        await ctx.db.patch(resource._id, {
-          status: "failed",
-          error: error instanceof Error ? error.message.slice(0, 400) : "Unable to schedule file processing.",
-          updatedAt: Date.now(),
-        });
-        failed += 1;
+        continue;
       }
+
+      await ctx.db.patch(resource._id, {
+        status: "failed",
+        error:
+          scheduleResult?.reason instanceof Error
+            ? scheduleResult.reason.message.slice(0, 400)
+            : "Unable to schedule file processing.",
+        updatedAt: Date.now(),
+      });
+      failed += 1;
     }
 
     return {
@@ -1134,8 +1193,50 @@ export const listAgentTexts = query({
 });
 
 export const cleanupExpired = internalMutation({
-  args: {},
-  handler: async () => {
-    return { ok: true, deletedCount: 0 };
+  args: {
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const limit = Math.max(1, Math.min(Math.round(args.limit ?? 200), 500));
+    const expired = await ctx.db
+      .query("resources")
+      .withIndex("by_expires", (q) => q.gte("expiresAt", 0).lt("expiresAt", now))
+      .take(limit);
+
+    let deletedCount = 0;
+    let deletedChunkCount = 0;
+    let deletedStorageCount = 0;
+
+    for (const resource of expired) {
+      if (typeof resource.expiresAt !== "number" || resource.expiresAt > now) continue;
+      if (resource.scope !== "personal") continue;
+      if (resource.saveToLibrary !== false) continue;
+
+      const chunks = await ctx.db
+        .query("chunks")
+        .withIndex("by_resource", (q) => q.eq("resourceId", resource._id))
+        .collect();
+      for (const chunk of chunks) {
+        await ctx.db.delete(chunk._id);
+        deletedChunkCount += 1;
+      }
+
+      if (resource.storageId) {
+        await ctx.storage.delete(resource.storageId).catch(() => {});
+        deletedStorageCount += 1;
+      }
+
+      await ctx.db.delete(resource._id);
+      deletedCount += 1;
+    }
+
+    return {
+      ok: true,
+      scanned: expired.length,
+      deletedCount,
+      deletedChunkCount,
+      deletedStorageCount,
+    };
   },
 });

@@ -121,7 +121,7 @@ const PAGE_TOUR_STEPS: Record<string, GuidedTourStep[]> = {
     {
       selector: '[data-tour="models-header"]',
       title: "Model atlas",
-      description: "Use this page to compare models by capability, context size, and budget fit.",
+      description: "Use this page to compare models by capability, context size, and task fit.",
       position: "bottom",
     },
     {

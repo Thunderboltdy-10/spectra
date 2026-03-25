@@ -19,6 +19,15 @@ import {
 import { ALL_MODES, COMING_SOON_MODES, getModeConfig, isModeAvailable } from "@/lib/modes";
 import type { Agent, StudyMode } from "@/types";
 
+const STARTER_TEMPLATES = [
+  { label: "Study Plan", prompt: "Create a 2-week study plan for my upcoming exams", mode: "tutor" as const, icon: "📋" },
+  { label: "Quick Quiz", prompt: "Quiz me on the topic I'm currently studying", mode: "quiz" as const, icon: "❓" },
+  { label: "Flashcard Set", prompt: "Generate flashcards for the key concepts I need to review", mode: "flashcard" as const, icon: "🃏" },
+  { label: "Essay Help", prompt: "Help me outline and structure my essay", mode: "draft_coach" as const, icon: "✍️" },
+  { label: "Explain Topic", prompt: "Explain this topic to me in simple terms with examples", mode: "explain" as const, icon: "💡" },
+  { label: "Research", prompt: "Help me research and find reliable sources on this topic", mode: "research" as const, icon: "🔍" },
+];
+
 const MODE_ICONS: Record<string, React.ReactNode> = {
   GraduationCap: <GraduationCap className="h-5 w-5" />,
   CircleHelp: <CircleHelp className="h-5 w-5" />,
@@ -326,6 +335,30 @@ export function ChatWelcome({
             </div>
           </section>
         ) : null}
+
+        <section className="space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="font-display text-xl">Quick Start</h2>
+            <p className="text-xs text-[var(--text-secondary)]">Pick a template to get going fast</p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {STARTER_TEMPLATES.map((tmpl) => (
+              <button
+                key={tmpl.label}
+                type="button"
+                onClick={() => {
+                  onSelectMode(tmpl.mode);
+                  window.dispatchEvent(new CustomEvent("ai-school:set-message", { detail: { message: tmpl.prompt } }));
+                }}
+                className="flex flex-col items-start gap-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 text-left transition hover:border-[color-mix(in_oklab,var(--accent-cyan)_30%,var(--border-default))] hover:bg-[var(--bg-hover)]"
+              >
+                <span className="text-lg">{tmpl.icon}</span>
+                <span className="text-xs font-medium text-[var(--text-primary)]">{tmpl.label}</span>
+                <span className="text-[10px] leading-tight text-[var(--text-tertiary)]">{tmpl.prompt}</span>
+              </button>
+            ))}
+          </div>
+        </section>
 
         <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-xs text-[var(--text-secondary)]">
           <p className="inline-flex items-center gap-1">

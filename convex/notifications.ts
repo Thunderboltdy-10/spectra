@@ -32,6 +32,39 @@ function dayKey(ts = Date.now()) {
   return new Date(ts).toISOString().slice(0, 10);
 }
 
+function resolveSafeTimeZone(value: string | undefined) {
+  if (!value || !value.trim()) return "UTC";
+  try {
+    Intl.DateTimeFormat("en-US", { timeZone: value }).format(new Date());
+    return value;
+  } catch {
+    return "UTC";
+  }
+}
+
+function dayKeyInTimeZone(ts: number, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(ts));
+  const year = parts.find((part) => part.type === "year")?.value ?? "1970";
+  const month = parts.find((part) => part.type === "month")?.value ?? "01";
+  const day = parts.find((part) => part.type === "day")?.value ?? "01";
+  return `${year}-${month}-${day}`;
+}
+
+function hourInTimeZone(ts: number, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(ts));
+  const hour = Number.parseInt(parts.find((part) => part.type === "hour")?.value ?? "0", 10);
+  return Number.isFinite(hour) ? hour : 0;
+}
+
 export const createNotification = mutation({
   args: {
     actorClerkId: v.string(),
@@ -343,14 +376,26 @@ export const generateDailyStudyReminders = internalMutation({
   args: {},
   handler: async (ctx) => {
     const now = Date.now();
-    const today = dayKey(now);
-    const yesterday = dayKey(now - 86_400_000);
     const oneWeekAgo = now - (7 * 86_400_000);
+    const reminderLocalHour = 7;
 
     const users = await ctx.db.query("users").collect();
+    const orgIds = Array.from(new Set(users.map((user) => user.orgId)));
+    const orgById = new Map<Doc<"users">["orgId"], Doc<"orgs">>();
+    for (const orgId of orgIds) {
+      const org = await ctx.db.get(orgId);
+      if (org) orgById.set(orgId, org);
+    }
     let notificationsCreated = 0;
 
     for (const user of users) {
+      const org = orgById.get(user.orgId);
+      const orgTimeZone = resolveSafeTimeZone(org?.timezone);
+      if (hourInTimeZone(now, orgTimeZone) !== reminderLocalHour) {
+        continue;
+      }
+      const today = dayKeyInTimeZone(now, orgTimeZone);
+      const yesterday = dayKeyInTimeZone(now - 86_400_000, orgTimeZone);
       const existingNotifications = await ctx.db
         .query("notifications")
         .withIndex("by_user", (q) => q.eq("userId", user._id))
@@ -358,7 +403,7 @@ export const generateDailyStudyReminders = internalMutation({
 
       const todaysTypes = new Set(
         existingNotifications
-          .filter((row) => dayKey(row.createdAt) === today)
+          .filter((row) => dayKeyInTimeZone(row.createdAt, orgTimeZone) === today)
           .map((row) => row.type),
       );
 

@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { getUserByClerkId } from "./helpers";
+import { getOpenRouterAdminWarnings, isOpenRouterConfigured } from "./env";
 
 const MIN_RESOURCE_FILE_SIZE_BYTES = 1 * 1024 * 1024;
 const MAX_RESOURCE_FILE_SIZE_BYTES = 100 * 1024 * 1024;
@@ -41,6 +42,8 @@ export const getOrgSettings = query({
           }
         : org,
       actorRole: actor.role,
+      openRouterConfigured: isOpenRouterConfigured(),
+      openRouterWarnings: getOpenRouterAdminWarnings(),
     };
   },
 });

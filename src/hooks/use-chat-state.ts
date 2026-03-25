@@ -3,6 +3,7 @@
 import { createElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AchievementToast, type AchievementToastData } from "@/components/achievement-toast";
+import { NotificationToast } from "@/components/notification-toast";
 import type { Agent, Citation, RouteTrace, RouterMode, StudyMode, ThinkingLevel } from "@/types";
 import { appendToBuffer, createBufferState } from "@/lib/structured-stream-buffer";
 import { useSidebar } from "@/context/sidebar-context";
@@ -70,6 +71,8 @@ export type Message = {
   parentMessageId?: string;
   siblingIndex?: number;
   siblingCount?: number;
+  memoryUpdated?: boolean;
+  memoryUpdateSummary?: string;
 };
 
 export type FileStatus = "pending" | "uploading" | "processing" | "ready" | "error";
@@ -191,6 +194,7 @@ const CHAT_SESSION_WINDOW_MS = 12 * 60 * 60 * 1000;
 const MEMORY_ENABLED_KEY = "ai-school:memory-enabled";
 const SEARXNG_ENABLED_KEY = "ai-school:searxng-enabled";
 const PROACTIVE_BANNER_DISMISSED_KEY = "ai-school:proactive-banner-dismissed-v1";
+const FLASHCARD_REMINDER_DISABLED_KEY = "ai-school:flashcard-reminder-disabled";
 const PERSONAL_RESOURCES_POLL_MIN_MS = 4_000;
 const PERSONAL_RESOURCES_POLL_MAX_MS = 30_000;
 const PERSONAL_RESOURCES_POLL_BACKOFF = 1.7;
@@ -610,6 +614,7 @@ export function useChatState() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const pinnedChatIds = sidebar.pinnedChatIds;
   const [imageModel, setImageModel] = useState<string>("");
+  const [isOffline, setIsOffline] = useState(false);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const selectedChatIdRef = useRef("");
@@ -631,9 +636,13 @@ export function useChatState() {
   const pendingLocalUserMessagesRef = useRef<Map<string, Message>>(new Map());
   const pendingLocalUserMessageChatIdsRef = useRef<Map<string, string>>(new Map());
   const sendingRef = useRef(false);
+  const lastSendTimestampRef = useRef(0);
+  const lastSendContentRef = useRef("");
   const shownAchievementToastsRef = useRef<Set<string>>(new Set());
   const lastPersonalRetryFailureRef = useRef("");
   const dismissedProactiveIdsRef = useRef<Set<string>>(new Set());
+  const educationalExchangeCountRef = useRef(0);
+  const flashcardReminderShownRef = useRef(false);
   const proactiveNotificationsCacheRef = useRef<{
     fetchedAt: number;
     notifications: ApiNotification[];
@@ -647,6 +656,18 @@ export function useChatState() {
     if (nonSystemCount <= 2) return true;
     return window.confirm(`Switch to ${nextMode}? This may change how the AI responds.`);
   }
+
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    setIsOffline(!navigator.onLine);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
 
   useEffect(() => {
     draftResponsesRef.current = draftResponses;
@@ -926,7 +947,7 @@ export function useChatState() {
           const key = staleResourceIds.slice().sort().join(",");
           if (lastPersonalRetryFailureRef.current !== key) {
             lastPersonalRetryFailureRef.current = key;
-            toast.error(error instanceof Error ? error.message : "Failed to retry My Files processing");
+            toast.error(error instanceof Error ? error.message : "Failed to retry My Files processing", { duration: 8000 });
           }
           void refreshPersonalResources().catch(() => {});
         });
@@ -967,6 +988,33 @@ export function useChatState() {
   useEffect(() => {
     activeStreamIdsRef.current = activeStreamIds;
   }, [activeStreamIds]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (_e: BeforeUnloadEvent) => {
+      // Check if any stream is active
+      if (activeStreamIdsRef.current.size === 0) return;
+
+      // Try to persist any in-flight drafts
+      for (const streamChatId of activeStreamIdsRef.current) {
+        const draft = draftResponsesRef.current.get(streamChatId);
+        if (draft && draft.length > 10) {
+          // Use sendBeacon for reliable delivery during unload
+          const payload = JSON.stringify({
+            chatId: streamChatId,
+            content: draft,
+            thinkingContent: draftThinkingsRef.current.get(streamChatId) || undefined,
+            modelUsed: streamModelUsedRef.current || undefined,
+            cancelled: true,
+            reason: "page_unload",
+          });
+          navigator.sendBeacon("/api/chats/messages/partial", payload);
+        }
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
 
   useEffect(() => {
     sendingRef.current = sending;
@@ -1017,6 +1065,30 @@ export function useChatState() {
     }
 
     if (previousSelectedChatIdRef.current !== selectedChatId) {
+      // Abort any in-flight stream that belongs to the chat we are leaving, so stale
+      // stream state (draft response, stream phase, errors) does not bleed into the
+      // newly selected chat's view. Background streams for other chats are tracked
+      // separately via activeStreamIds and are NOT affected.
+      const leavingChatId = previousSelectedChatIdRef.current;
+      if (
+        leavingChatId &&
+        abortControllerRef.current &&
+        streamChatIdRef.current === leavingChatId
+      ) {
+        abortReasonRef.current = abortReasonRef.current ?? "user_stop";
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+
+      // Reset transient stream UI state so the new chat starts clean.
+      setStreamPhase("idle");
+      setStreamError(null);
+      setLiveRouteTrace(null);
+      setSearchStatusInfo(null);
+      setStreamModelUsed(null);
+      setActiveCollaborators([]);
+      setCollaboratorPhase("idle");
+
       // Clear stale messages from the previously viewed chat before merging pending/fetched state.
       setMessages(() => {
         if (pendingLocalUserMessageIdsRef.current.size === 0) {
@@ -1151,7 +1223,7 @@ export function useChatState() {
           ),
         );
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Failed to load chat");
+        toast.error(error instanceof Error ? error.message : "Failed to load chat", { duration: 8000 });
       }
     })();
   }, [selectedChatId, loadDraft, refreshBookmarks]);
@@ -1331,6 +1403,14 @@ export function useChatState() {
 
       for (const notification of unread) {
         if (notification.type === "reminder_flashcards_due") {
+          try {
+            if (localStorage.getItem(FLASHCARD_REMINDER_DISABLED_KEY) === "1") continue;
+          } catch {
+            // ignore storage errors
+          }
+          if (flashcardReminderShownRef.current) continue;
+          if (educationalExchangeCountRef.current < 3) continue;
+          flashcardReminderShownRef.current = true;
           candidates.push({
             id: `notif:${notification._id}`,
             kind: "reminder_flashcards_due",
@@ -1631,7 +1711,7 @@ export function useChatState() {
     try {
       await sidebar.deleteChat(chatId);
     } catch {
-      toast.error("Failed to delete chat");
+      toast.error("Failed to delete chat", { duration: 8000 });
       return;
     }
     if (selectedChatId === chatId) {
@@ -1645,7 +1725,7 @@ export function useChatState() {
     try {
       await sidebar.renameChat(chatId, clean);
     } catch {
-      toast.error("Failed to rename chat");
+      toast.error("Failed to rename chat", { duration: 8000 });
     }
   }
 
@@ -1755,6 +1835,20 @@ export function useChatState() {
     const text = (override ?? message).trim();
     const retryAttempt = options?.retryAttempt ?? 0;
     if (!text) return;
+    // Dedup / rate-limit guard (only for fresh sends, not retries or regenerations)
+    if (retryAttempt === 0 && !options?.regenerate && !options?.skipLocalUser) {
+      const now = Date.now();
+      // Reject identical content submitted within 1 second (double-click protection)
+      if (text === lastSendContentRef.current && now - lastSendTimestampRef.current < 1000) {
+        return;
+      }
+      // Enforce a minimum 500 ms gap between any two sends
+      if (now - lastSendTimestampRef.current < 500) {
+        return;
+      }
+      lastSendTimestampRef.current = now;
+      lastSendContentRef.current = text;
+    }
     const targetChatId = options?.chatIdOverride || selectedChatIdRef.current || "";
     if (activeStreamIds.has(targetChatId) && retryAttempt === 0) return;
     const preservedText = options?.preservedText ?? text;
@@ -2064,6 +2158,7 @@ export function useChatState() {
       let thinkingBuffer = "";
       let hasModelThinking = false;
       let orchestrationNotes: string[] = [];
+      let memoryUpdateAccum: { updated: boolean; summary: string } | null = null;
 
       const buildThinkingContent = () => {
         const sections: string[] = [];
@@ -2098,6 +2193,10 @@ export function useChatState() {
         setHasRealThinking(true);
         syncDraftThinking();
       };
+
+      // Periodic draft persistence during streaming
+      let lastPersistedAt = 0;
+      const PERSIST_INTERVAL_MS = 3000;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -2189,6 +2288,22 @@ export function useChatState() {
           if (payload.type === "delta" && payload.content) {
             setStreamPhase("generating");
             assistantBuffer += payload.content;
+            const now = Date.now();
+            if (now - lastPersistedAt > PERSIST_INTERVAL_MS && assistantBuffer.length > 50) {
+              lastPersistedAt = now;
+              // Fire-and-forget persistence of partial response
+              fetch("/api/chats/messages/partial", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  chatId,
+                  content: assistantBuffer,
+                  thinkingContent: thinkingBuffer || undefined,
+                  modelUsed: streamModelUsedRef.current || undefined,
+                  isPartial: true,
+                }),
+              }).catch(() => {}); // Silent failure - this is best-effort
+            }
             const targetChatId = chatId;
             if (bufferState.mode !== "none") {
               bufferState = appendToBuffer(bufferState, assistantBuffer);
@@ -2321,6 +2436,9 @@ export function useChatState() {
           if (payload.type === "mode_update" && payload.suggestedMode) {
             const nextMode = payload.suggestedMode as StudyMode;
             if (isModeAvailable(nextMode)) {
+              if (requestedMode !== "general" && nextMode === "general") {
+                toast.info(`Mode "${requestedMode}" was unavailable — using general mode instead.`);
+              }
               setMode(nextMode);
               void updateChatSettingsById(chatId, { mode: nextMode }).catch(() => {});
             }
@@ -2532,6 +2650,22 @@ export function useChatState() {
               setChats((prev) =>
                 prev.map((chat) => (chat._id === chatId ? { ...chat, title: nextTitle } : chat)),
               );
+            } else if (messageCountBeforeSend === 0) {
+              // Fallback: no title from stream on first message — derive from user text
+              const fallbackTitle = text
+                .split(/\s+/)
+                .slice(0, 5)
+                .join(" ")
+                .replace(/[.,!?;:]+$/, "");
+              if (fallbackTitle.length > 2) {
+                setChats((prev) =>
+                  prev.map((chat) =>
+                    chat._id === chatId && (!chat.title || chat.title === "New Chat")
+                      ? { ...chat, title: fallbackTitle }
+                      : chat,
+                  ),
+                );
+              }
             }
             if (payload.agentSuggestion && !selectedAgentId) {
               setAgentSuggestion(payload.agentSuggestion);
@@ -2539,6 +2673,9 @@ export function useChatState() {
               setAgentSuggestion(null);
             }
             if (payload.suggestedMode && payload.suggestedMode !== requestedMode) {
+              if (requestedMode !== "general" && payload.suggestedMode === "general") {
+                toast.info(`Mode "${requestedMode}" was unavailable — using general mode instead.`);
+              }
               setMode(payload.suggestedMode as StudyMode);
               // Use the stream's chatId, not selectedChatId, to avoid updating wrong chat
               void updateChatSettingsById(chatId, { mode: payload.suggestedMode as StudyMode }).catch(() => {});
@@ -2586,6 +2723,11 @@ export function useChatState() {
 
           if (payload.type === "soul_update" && payload.entries?.length) {
             pushThinkingNote(`Updated personal memory: ${payload.entries[0]?.key ?? "profile"}.`);
+            const entryLabels = payload.entries.slice(0, 3).map((entry) => entry.key).join(", ");
+            memoryUpdateAccum = {
+              updated: true,
+              summary: payload.content || payload.message || `Saved: ${entryLabels}`,
+            };
           }
 
           if (payload.type === "agent_summoned" && payload.agent && payload.model) {
@@ -2635,7 +2777,12 @@ export function useChatState() {
           content: assistantBuffer,
           createdAt: Date.now(),
           ...assistantMeta,
+          ...(memoryUpdateAccum?.updated ? {
+            memoryUpdated: true,
+            memoryUpdateSummary: memoryUpdateAccum.summary,
+          } : {}),
         };
+        memoryUpdateAccum = null;
 
         const stillViewingStreamChat = selectedChatIdRef.current === chatId;
 
@@ -2663,9 +2810,26 @@ export function useChatState() {
           existing.push(assistantMessage);
           pendingCompletionsRef.current.set(chatId, existing);
 
-          // Find the chat title for the toast
+          // Find the chat title and metadata for the toast
           const chatTitle = chats.find((c) => c._id === chatId)?.title ?? "a chat";
-          toast.info(`Response ready in "${chatTitle}"`);
+          const responseReadyModel = finalMeta.modelUsed;
+          const responseReadyMode = requestedMode;
+          toast.custom(
+            (toastId) =>
+              createElement(NotificationToast, {
+                notification: {
+                  title: `Response ready in "${chatTitle}"`,
+                  body: "Click to jump to the conversation.",
+                  mode: responseReadyMode,
+                  model: responseReadyModel,
+                },
+                onDismiss: () => toast.dismiss(toastId),
+                onNavigate: () => {
+                  setSelectedChatId(chatId);
+                },
+              }),
+            { duration: 6000 },
+          );
         }
       }
 
@@ -2673,6 +2837,10 @@ export function useChatState() {
       setDraftThinkings(prev => { const next = new Map(prev); next.delete(chatId); return next; });
       setHasRealThinking(false);
       setLastFailedMessage(null);
+      const educationalModes: StudyMode[] = ["tutor", "quiz", "flashcard", "exam", "explain", "research", "marker", "draft_coach"];
+      if (educationalModes.includes(requestedMode)) {
+        educationalExchangeCountRef.current += 1;
+      }
       setChats((prev) =>
         prev.map((chat) =>
           chat._id === chatId
@@ -2869,9 +3037,9 @@ export function useChatState() {
         void updateExistingChatSettings({ mode: nextMode }).catch(() => {});
       }
       setMessage(followUpPrompt);
-      toast.success(`Quiz saved. ${recommendationLabel}`);
+      toast.success(`Quiz saved. ${recommendationLabel}`, { duration: 4000 });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to submit quiz");
+      toast.error(error instanceof Error ? error.message : "Failed to submit quiz", { duration: 8000 });
     }
   }
 
@@ -2899,15 +3067,15 @@ export function useChatState() {
       const result = (await response.json()) as { updated?: boolean; created?: boolean; appended?: number };
       if (result.updated) {
         if (typeof result.appended === "number" && result.appended > 0) {
-          toast.success(`Added ${result.appended} new flashcard${result.appended === 1 ? "" : "s"}`);
+          toast.success(`Added ${result.appended} new flashcard${result.appended === 1 ? "" : "s"}`, { duration: 4000 });
         } else {
           toast.message("Flashcard deck updated");
         }
       } else {
-        toast.success("Flashcard deck saved");
+        toast.success("Flashcard deck saved", { duration: 4000 });
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save deck");
+      toast.error(error instanceof Error ? error.message : "Failed to save deck", { duration: 8000 });
     }
   }
 
@@ -2926,7 +3094,7 @@ export function useChatState() {
         throw new Error(await response.text());
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to rate card");
+      toast.error(error instanceof Error ? error.message : "Failed to rate card", { duration: 8000 });
     }
   }
 
@@ -2952,10 +3120,10 @@ export function useChatState() {
         previousCardHash?: string;
         hashChanged?: boolean;
       };
-      toast.success("Flashcard updated");
+      toast.success("Flashcard updated", { duration: 4000 });
       return result;
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to update flashcard");
+      toast.error(error instanceof Error ? error.message : "Failed to update flashcard", { duration: 8000 });
       throw error;
     }
   }
@@ -3093,12 +3261,12 @@ export function useChatState() {
       }
 
       if (showSuccessToast) {
-        toast.success(`Conversation compacted (${result.compactedMessages ?? 0} messages summarized).`);
+        toast.success(`Conversation compacted (${result.compactedMessages ?? 0} messages summarized).`, { duration: 4000 });
       }
       return "compacted";
     } catch (error) {
       if (!silent) {
-        toast.error(error instanceof Error ? error.message : "Failed to compact conversation");
+        toast.error(error instanceof Error ? error.message : "Failed to compact conversation", { duration: 8000 });
       }
       return "failed";
     } finally {
@@ -3217,7 +3385,7 @@ export function useChatState() {
         else next.delete(messageId);
         return next;
       });
-      toast.success(isBookmarked ? "Message bookmarked" : "Bookmark removed");
+      toast.success(isBookmarked ? "Message bookmarked" : "Bookmark removed", { duration: 4000 });
     } catch (error) {
       setBookmarkedMessageIds((prev) => {
         const next = new Set(prev);
@@ -3225,7 +3393,7 @@ export function useChatState() {
         else next.delete(messageId);
         return next;
       });
-      toast.error(error instanceof Error ? error.message : "Failed to update bookmark");
+      toast.error(error instanceof Error ? error.message : "Failed to update bookmark", { duration: 8000 });
     } finally {
       setBookmarkingMessageId(null);
     }
@@ -3359,5 +3527,6 @@ export function useChatState() {
     stopGeneration,
     pinChat,
     hasDraft,
+    isOffline,
   };
 }

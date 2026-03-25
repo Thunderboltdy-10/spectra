@@ -72,6 +72,8 @@ type ChatMessagesProps = {
   activeCollaborators?: ActiveCollaborator[];
   collaboratorPhase?: "idle" | "running" | "synthesizing";
   onOpenCanvas?: (params: { code: string; language: string }) => void;
+  onPinModel?: (modelId: string) => void;
+  pinnedModelId?: string;
 };
 
 function hashContent(value: string) {
@@ -81,6 +83,82 @@ function hashContent(value: string) {
     hash |= 0;
   }
   return Math.abs(hash).toString(36);
+}
+
+function TagSkeleton({ type }: { type: "quiz" | "flashcard" | "document" }) {
+  if (type === "quiz") {
+    return (
+      <div className="animate-pulse space-y-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+        <div className="flex items-center gap-2">
+          <div className="h-5 w-5 rounded bg-[var(--mode-quiz)]/20" />
+          <div className="h-4 w-32 rounded bg-[var(--bg-secondary)]" />
+        </div>
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="space-y-2 pl-2">
+            <div className="h-3.5 w-3/4 rounded bg-[var(--bg-secondary)]" />
+            <div className="flex flex-wrap gap-2">
+              {["A", "B", "C", "D"].map((opt) => (
+                <div key={opt} className="flex items-center gap-1.5">
+                  <div className="h-3.5 w-3.5 rounded-full border border-[var(--border-default)]" />
+                  <div className="h-3 w-16 rounded bg-[var(--bg-secondary)]" />
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (type === "flashcard") {
+    return (
+      <div className="animate-pulse space-y-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+        <div className="flex items-center gap-2">
+          <div className="h-5 w-5 rounded bg-[var(--mode-flashcard)]/20" />
+          <div className="h-4 w-36 rounded bg-[var(--bg-secondary)]" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="flex h-24 flex-col items-center justify-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)]/50">
+              <div className="h-3 w-20 rounded bg-[var(--bg-tertiary)]" />
+              <div className="mt-2 h-2.5 w-14 rounded bg-[var(--bg-tertiary)]" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Document skeleton
+  return (
+    <div className="animate-pulse space-y-2.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+      <div className="flex items-center gap-2">
+        <div className="h-5 w-5 rounded bg-[var(--mode-document)]/20" />
+        <div className="h-4 w-40 rounded bg-[var(--bg-secondary)]" />
+      </div>
+      {[1, 2, 3, 4, 5].map((i) => (
+        <div key={i} className="h-3 rounded bg-[var(--bg-secondary)]" style={{ width: `${85 - i * 8}%` }} />
+      ))}
+    </div>
+  );
+}
+
+function detectOpenTag(content: string): "quiz" | "flashcard" | "document" | null {
+  const lower = content.toLowerCase();
+
+  const quizOpen = lower.includes("<<quiz_start>>") || lower.includes("<<quiz start>>");
+  const quizClose = lower.includes("<<quiz_end>>") || lower.includes("<<quiz end>>");
+  if (quizOpen && !quizClose) return "quiz";
+
+  const fcOpen = lower.includes("<<flashcards_start>>") || lower.includes("<<flashcard_start>>");
+  const fcClose = lower.includes("<<flashcards_end>>") || lower.includes("<<flashcard_end>>");
+  if (fcOpen && !fcClose) return "flashcard";
+
+  const docOpen = lower.includes("<<document_start>>") || lower.includes("<<doc_start>>");
+  const docClose = lower.includes("<<document_end>>") || lower.includes("<<doc_end>>");
+  if (docOpen && !docClose) return "document";
+
+  return null;
 }
 
 export function ChatMessages({
@@ -122,6 +200,8 @@ export function ChatMessages({
   activeCollaborators = [],
   collaboratorPhase = "idle",
   onOpenCanvas,
+  onPinModel,
+  pinnedModelId,
 }: ChatMessagesProps) {
   const scrollContainerRef = useRef<HTMLElement | null>(null);
   const topLoadSentinelRef = useRef<HTMLDivElement | null>(null);
@@ -132,8 +212,12 @@ export function ChatMessages({
   const [visibleStartIndex, setVisibleStartIndex] = useState(() => Math.max(0, messages.length - 36));
   const [activeSiblingByParent, setActiveSiblingByParent] = useState<Record<string, string>>({});
   const shouldAutoScrollRef = useRef(true);
-  const stickyBottomRef = useRef(true);
   const lastScrollTopRef = useRef(0);
+
+  const scrollToBottom = useCallback(() => {
+    shouldAutoScrollRef.current = true;
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, []);
 
   const hasContent = messages.length > 0 || Boolean(draftResponse);
   const visibleMessages = useMemo(
@@ -293,12 +377,11 @@ export function ChatMessages({
   }, [chatId, messages.length]);
 
   useEffect(() => {
-    if (shouldAutoScrollRef.current) {
-      endRef.current?.scrollIntoView({
-        behavior: sending ? "auto" : scrollContainerRef.current ? "smooth" : "auto",
-      });
-    }
-  }, [draftResponse, messages, sending]);
+    if (!shouldAutoScrollRef.current) return;
+    requestAnimationFrame(() => {
+      endRef.current?.scrollIntoView({ behavior: "auto" });
+    });
+  }, [draftResponse, messages.length]);
 
   useEffect(() => {
     const element = document.querySelector<HTMLElement>("[data-chat-scroll-root]");
@@ -311,18 +394,12 @@ export function ChatMessages({
         const scrollTop = element.scrollTop;
         const deltaFromBottom = element.scrollHeight - scrollTop - element.clientHeight;
         const deltaUp = lastScrollTopRef.current - scrollTop;
-        const scrolledUp = deltaUp > 0;
-        const nearBottom = deltaFromBottom < 72;
+        const nearBottom = deltaFromBottom < 100;
 
         if (nearBottom) {
           shouldAutoScrollRef.current = true;
-          stickyBottomRef.current = true;
-        } else if (deltaUp > 30) {
+        } else if (deltaUp > 20) {
           shouldAutoScrollRef.current = false;
-          stickyBottomRef.current = false;
-        } else if (shouldAutoScrollRef.current && stickyBottomRef.current && scrolledUp && deltaFromBottom > 80) {
-          shouldAutoScrollRef.current = false;
-          stickyBottomRef.current = false;
         }
 
         setShowJumpButton(deltaFromBottom > 120);
@@ -340,9 +417,7 @@ export function ChatMessages({
 
   useEffect(() => {
     if (!sending) return;
-    if (stickyBottomRef.current) {
-      shouldAutoScrollRef.current = true;
-    }
+    shouldAutoScrollRef.current = true;
   }, [sending]);
 
   useEffect(() => {
@@ -373,6 +448,23 @@ export function ChatMessages({
     return () => observer.disconnect();
   }, [visibleStartIndex]);
 
+  useEffect(() => {
+    const target = endRef.current;
+    const root = scrollContainerRef.current;
+    if (!target || !root) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          shouldAutoScrollRef.current = true;
+          setShowJumpButton(false);
+        }
+      },
+      { root, rootMargin: "0px 0px 100px 0px" },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, []);
+
   function modelLabel(modelId?: string) {
     if (!modelId) return "Routing model";
     return modelId.split("/").pop() ?? "Model";
@@ -391,7 +483,7 @@ export function ChatMessages({
     const lower = error.toLowerCase();
 
     if (lower.includes("monthly limit") || lower.includes("no_free_model_available")) {
-      return "Current usage guardrails are active. Guardrail-safe models are still available.";
+      return "Some models are temporarily unavailable right now.";
     }
     if (lower.includes("429") || lower.includes("rate")) {
       return "The model is busy. Backup models were attempted automatically.";
@@ -401,6 +493,9 @@ export function ChatMessages({
     }
     if (lower.includes("auth") || lower.includes("401") || lower.includes("unauthorized")) {
       return "Session expired. Redirecting to sign-in...";
+    }
+    if (/(budget|cost|pricing|spend|cheap-only|free_only)/.test(lower)) {
+      return "Some models are temporarily unavailable right now.";
     }
 
     return error;
@@ -513,6 +608,8 @@ export function ChatMessages({
     (mode === "quiz" || mode === "exam") &&
     visibleDraftResponse.trim().length < 100;
 
+  const streamingOpenTag = sending ? detectOpenTag(visibleDraftResponse) : null;
+
   return (
     <section className="relative flex flex-1" aria-label="Conversation" data-conversation-export>
       <div
@@ -547,28 +644,42 @@ export function ChatMessages({
             </div>
           ) : null}
           {proactiveBanner ? (
-            <div className="rounded-xl border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-elevated))] px-3 py-2.5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-[var(--text-primary)]">{proactiveBanner.title}</p>
-                  <p className="text-xs text-[var(--text-secondary)]">{proactiveBanner.body}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={onDismissProactiveBanner}
-                    className="rounded-full border border-[var(--border-default)] px-2.5 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
-                  >
-                    Dismiss
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onApplyProactiveBanner}
-                    className="rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_18%,var(--bg-primary))] px-2.5 py-1 text-[11px] font-medium text-[var(--text-primary)] transition hover:bg-[color-mix(in_oklab,var(--accent-cyan)_24%,var(--bg-primary))]"
-                  >
-                    {proactiveBanner.actionLabel}
-                  </button>
-                </div>
+            <div className="flex items-center gap-3 rounded-lg border border-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary))] px-3 py-2">
+              <div className="min-w-0 flex-1">
+                <p className="text-xs text-[var(--text-primary)]">
+                  <span className="font-medium">{proactiveBanner.title}</span>
+                  {" — "}
+                  <span className="text-[var(--text-secondary)]">{proactiveBanner.body}</span>
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={onDismissProactiveBanner}
+                  className="text-[10px] text-[var(--text-tertiary)] transition hover:text-[var(--text-secondary)]"
+                >
+                  Dismiss
+                </button>
+                <span className="text-[var(--border-default)]">·</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      localStorage.setItem("ai-school:flashcard-reminder-disabled", "1");
+                    } catch {}
+                    onDismissProactiveBanner?.();
+                  }}
+                  className="text-[10px] text-[var(--text-tertiary)] transition hover:text-[var(--text-secondary)]"
+                >
+                  Don't show again
+                </button>
+                <button
+                  type="button"
+                  onClick={onApplyProactiveBanner}
+                  className="ml-1 rounded-md border border-[color-mix(in_oklab,var(--accent-cyan)_30%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,var(--bg-primary))] px-2 py-0.5 text-[10px] font-medium text-[var(--text-primary)] transition hover:bg-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--bg-primary))]"
+                >
+                  {proactiveBanner.actionLabel}
+                </button>
               </div>
             </div>
           ) : null}
@@ -576,10 +687,10 @@ export function ChatMessages({
           {visibleStartIndex > 0 ? (
             <div
               ref={topLoadSentinelRef}
-              className="mb-4 text-center text-[11px] uppercase tracking-[0.12em] text-[var(--text-secondary)]"
+              className="mb-4 text-center text-[11px] text-[var(--text-tertiary)]"
               aria-label="Load older messages"
             >
-              Loading earlier messages...
+              {visibleStartIndex} older messages · scroll up to load
             </div>
           ) : null}
 
@@ -660,6 +771,10 @@ export function ChatMessages({
                     createdAt={msg.createdAt}
                     onFeedback={onAssistantFeedback}
                     onOpenCanvas={onOpenCanvas}
+                    memoryUpdated={msg.memoryUpdated}
+                    memoryUpdateSummary={msg.memoryUpdateSummary}
+                    onPinModel={onPinModel}
+                    isPinned={Boolean(pinnedModelId && msg.modelUsed === pinnedModelId)}
                   >
                     <ClarificationCard
                       block={clarificationBlock}
@@ -721,6 +836,10 @@ export function ChatMessages({
                       onSubmitQuizAnswers={(result) => {
                         onSubmitQuizAnswers?.({ messageId: msg._id, result });
                       }}
+                      memoryUpdated={msg.memoryUpdated}
+                      memoryUpdateSummary={msg.memoryUpdateSummary}
+                      onPinModel={onPinModel}
+                      isPinned={Boolean(pinnedModelId && msg.modelUsed === pinnedModelId)}
                     >
                       {preamble && <MarkdownRenderer content={preamble} citations={[]} />}
                       <QuizReveal
@@ -786,6 +905,10 @@ export function ChatMessages({
                       onSubmitQuizAnswers={(result) => {
                         onSubmitQuizAnswers?.({ messageId: msg._id, result });
                       }}
+                      memoryUpdated={msg.memoryUpdated}
+                      memoryUpdateSummary={msg.memoryUpdateSummary}
+                      onPinModel={onPinModel}
+                      isPinned={Boolean(pinnedModelId && msg.modelUsed === pinnedModelId)}
                     />
                   </div>
                 );
@@ -835,6 +958,10 @@ export function ChatMessages({
                     onSubmitQuizAnswers={(result) => {
                       onSubmitQuizAnswers?.({ messageId: msg._id, result });
                     }}
+                    memoryUpdated={msg.memoryUpdated}
+                    memoryUpdateSummary={msg.memoryUpdateSummary}
+                    onPinModel={onPinModel}
+                    isPinned={Boolean(pinnedModelId && msg.modelUsed === pinnedModelId)}
                   />
                 </div>
               );
@@ -885,6 +1012,10 @@ export function ChatMessages({
                       createdAt={msg.createdAt}
                       onFeedback={onAssistantFeedback}
                       onOpenCanvas={onOpenCanvas}
+                      memoryUpdated={msg.memoryUpdated}
+                      memoryUpdateSummary={msg.memoryUpdateSummary}
+                      onPinModel={onPinModel}
+                      isPinned={Boolean(pinnedModelId && msg.modelUsed === pinnedModelId)}
                     >
                       {preamble && <MarkdownRenderer content={preamble} citations={[]} />}
                       <FlashcardReveal
@@ -959,6 +1090,10 @@ export function ChatMessages({
                     createdAt={msg.createdAt}
                     onFeedback={onAssistantFeedback}
                     onOpenCanvas={onOpenCanvas}
+                    memoryUpdated={msg.memoryUpdated}
+                    memoryUpdateSummary={msg.memoryUpdateSummary}
+                    onPinModel={onPinModel}
+                    isPinned={Boolean(pinnedModelId && msg.modelUsed === pinnedModelId)}
                   />
                 </div>
               );
@@ -1006,6 +1141,10 @@ export function ChatMessages({
                     createdAt={msg.createdAt}
                     onFeedback={onAssistantFeedback}
                     onOpenCanvas={onOpenCanvas}
+                    memoryUpdated={msg.memoryUpdated}
+                    memoryUpdateSummary={msg.memoryUpdateSummary}
+                    onPinModel={onPinModel}
+                    isPinned={Boolean(pinnedModelId && msg.modelUsed === pinnedModelId)}
                   >
                     {parsed.preamble ? <MarkdownRenderer content={parsed.preamble} citations={[]} /> : null}
                     <DocumentPanel content={msg.content} />
@@ -1046,7 +1185,7 @@ export function ChatMessages({
                   onRegenerate={isLastAssistant ? onRegenerate : undefined}
                   onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
                   regenModels={regenModels}
-                  onEdit={msg.role === "user" && onEditMessage ? (value) => void onEditMessage(msg._id, value) : undefined}
+                  onEdit={msg.role === "user" && onEditMessage ? (value) => onEditMessage(msg._id, value) : undefined}
                   onBranch={msg.role === "assistant" && onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
                   onToggleBookmark={msg.role === "assistant" && onToggleBookmarkMessage ? () => void onToggleBookmarkMessage(msg._id) : undefined}
                   isBookmarked={msg.role === "assistant" ? assistantIsBookmarked : undefined}
@@ -1059,6 +1198,10 @@ export function ChatMessages({
                   onSubmitQuizAnswers={(result) => {
                     onSubmitQuizAnswers?.({ messageId: msg._id, result });
                   }}
+                  memoryUpdated={msg.role === "assistant" ? msg.memoryUpdated : undefined}
+                  memoryUpdateSummary={msg.role === "assistant" ? msg.memoryUpdateSummary : undefined}
+                  onPinModel={msg.role === "assistant" ? onPinModel : undefined}
+                  isPinned={msg.role === "assistant" ? Boolean(pinnedModelId && msg.modelUsed === pinnedModelId) : undefined}
                 />
                 {msg.role === "assistant" && modeSuggestions.length > 0 ? (
                   <div className="mt-2 ml-14 flex flex-wrap gap-2">
@@ -1129,7 +1272,17 @@ export function ChatMessages({
                     {hasRealThinking && draftThinking ? (
                       <ThinkingBlock content={draftThinking} streaming={streamPhase === "thinking"} />
                     ) : null}
-                    {renderDraftMarkdown(visibleDraftResponse)}
+                    {streamingOpenTag ? (() => {
+                      const tagPattern = /<<(?:quiz|flashcard|flashcards|document|doc)_?start>>/i;
+                      const match = visibleDraftResponse.match(tagPattern);
+                      const preamble = match?.index ? visibleDraftResponse.slice(0, match.index).trim() : "";
+                      return (
+                        <>
+                          {preamble ? renderDraftMarkdown(preamble) : null}
+                          <TagSkeleton type={streamingOpenTag} />
+                        </>
+                      );
+                    })() : renderDraftMarkdown(visibleDraftResponse)}
                     {showStreamCursor ? (
                       <span className={`stream-cursor ${sending ? "" : "stream-cursor--fade"}`} aria-hidden>
                         |
@@ -1204,23 +1357,15 @@ export function ChatMessages({
         </div>
       </div>
 
-      {showJumpButton && (
-        <Button
-          type="button"
-          size="icon"
-          className="fixed bottom-28 right-5 z-30 rounded-full shadow-[var(--shadow-soft)]"
-          onClick={() => {
-            shouldAutoScrollRef.current = true;
-            stickyBottomRef.current = true;
-            endRef.current?.scrollIntoView({
-              behavior: scrollContainerRef.current ? "smooth" : "auto",
-            });
-          }}
-          aria-label="Scroll to bottom"
-        >
-          <ArrowDown className="h-4 w-4" />
-        </Button>
-      )}
+      <button
+        type="button"
+        onClick={scrollToBottom}
+        className={`absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs text-[var(--text-secondary)] shadow-md transition-all duration-300 ease-[var(--ease-standard)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${showJumpButton ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0 pointer-events-none"}`}
+        aria-label="Scroll to bottom"
+      >
+        <ArrowDown size={14} />
+        <span>New messages</span>
+      </button>
     </section>
   );
 }

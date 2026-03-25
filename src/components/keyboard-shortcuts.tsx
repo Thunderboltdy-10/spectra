@@ -12,11 +12,16 @@ interface Shortcut {
 
 const SHORTCUTS: Shortcut[] = [
   { keys: ["⌘", "K"], description: "Open command palette", context: "global" },
+  { keys: ["⌘", "Shift", "N"], description: "New chat", context: "global" },
+  { keys: ["⌘", "Shift", "S"], description: "Open settings panel", context: "global" },
+  { keys: ["⌘", "/"], description: "Focus composer", context: "global" },
+  { keys: ["⌘", "Shift", "O"], description: "Toggle orchestration panel", context: "global" },
+  { keys: ["⌘", "Shift", "E"], description: "Export as markdown", context: "global" },
+  { keys: ["Escape"], description: "Close modals/sidebar", context: "global" },
+  { keys: ["/"], description: "Focus search", context: "global" },
   { keys: ["⌘", "Enter"], description: "Send message", context: "composer" },
   { keys: ["Shift", "Enter"], description: "New line", context: "composer" },
-  { keys: ["Escape"], description: "Close modals/sidebar", context: "global" },
   { keys: ["↑"], description: "Edit last message", context: "composer" },
-  { keys: ["/"], description: "Focus search", context: "global" },
 ];
 
 function ShortcutKey({ children }: { children: string }) {
@@ -138,19 +143,64 @@ export function ShortcutsButton() {
 
 type KeyboardShortcutsRegistrarProps = {
   onEscape?: () => void;
+  onNewChat?: () => void;
+  onOpenSettings?: () => void;
+  onFocusComposer?: () => void;
+  onToggleOrchestration?: () => void;
+  onExportMarkdown?: () => void;
 };
 
-export function KeyboardShortcutsRegistrar({ onEscape }: KeyboardShortcutsRegistrarProps) {
+export function KeyboardShortcutsRegistrar({
+  onEscape,
+  onNewChat,
+  onOpenSettings,
+  onFocusComposer,
+  onToggleOrchestration,
+  onExportMarkdown,
+}: KeyboardShortcutsRegistrarProps) {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      const mod = event.metaKey || event.ctrlKey;
+
       if (event.key === "Escape") {
         onEscape?.();
+        return;
+      }
+
+      if (mod && event.shiftKey && event.key === "N") {
+        event.preventDefault();
+        onNewChat?.();
+        return;
+      }
+
+      if (mod && event.shiftKey && event.key === "S") {
+        event.preventDefault();
+        onOpenSettings?.();
+        return;
+      }
+
+      if (mod && !event.shiftKey && event.key === "/") {
+        event.preventDefault();
+        onFocusComposer?.();
+        return;
+      }
+
+      if (mod && event.shiftKey && event.key === "O") {
+        event.preventDefault();
+        onToggleOrchestration?.();
+        return;
+      }
+
+      if (mod && event.shiftKey && event.key === "E") {
+        event.preventDefault();
+        onExportMarkdown?.();
+        return;
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onEscape]);
+  }, [onEscape, onNewChat, onOpenSettings, onFocusComposer, onToggleOrchestration, onExportMarkdown]);
 
   return null;
 }

@@ -20,6 +20,7 @@ import type * as compaction from "../compaction.js";
 import type * as constants from "../constants.js";
 import type * as crons from "../crons.js";
 import type * as curatedModelRegistry from "../curatedModelRegistry.js";
+import type * as env from "../env.js";
 import type * as errorEvents from "../errorEvents.js";
 import type * as feedback from "../feedback.js";
 import type * as flashcards from "../flashcards.js";
@@ -64,6 +65,7 @@ declare const fullApi: ApiFromModules<{
   constants: typeof constants;
   crons: typeof crons;
   curatedModelRegistry: typeof curatedModelRegistry;
+  env: typeof env;
   errorEvents: typeof errorEvents;
   feedback: typeof feedback;
   flashcards: typeof flashcards;

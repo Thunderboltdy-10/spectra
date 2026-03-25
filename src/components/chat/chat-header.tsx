@@ -1,7 +1,8 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Bot, Download, Layers, LoaderCircle, Menu, MoreHorizontal, Search, Settings2, Square } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Bot, Download, Layers, LoaderCircle, Menu, MoreHorizontal, Search, Settings2, Square, WifiOff } from "lucide-react";
 import { useKBar } from "kbar";
 import { ContextualTip } from "@/components/ui/contextual-tip";
 import { Button } from "@/components/ui/button";
@@ -27,7 +28,71 @@ type ChatHeaderProps = {
   orchestrationActive?: boolean;
   settingsActive?: boolean;
   mobileUtilitySlot?: ReactNode;
+  isOffline?: boolean;
 };
+
+const PHASE_CONFIG: Record<string, { label: string; color: string }> = {
+  compacting:   { label: "compacting...",   color: "var(--text-tertiary)" },
+  routing:      { label: "routing...",      color: "var(--accent-cyan)" },
+  searching:    { label: "searching...",    color: "var(--accent-mint)" },
+  thinking:     { label: "thinking...",     color: "var(--warning)" },
+  generating:   { label: "generating...",   color: "var(--success)" },
+  synthesizing: { label: "synthesizing...", color: "var(--accent-orange)" },
+};
+
+function StreamingIndicator({ phase, sending }: { phase?: string; sending: boolean }) {
+  const [elapsed, setElapsed] = useState(0);
+  const [showDone, setShowDone] = useState(false);
+  const startTimeRef = useRef<number>(0);
+  const prevSendingRef = useRef(false);
+
+  // Detect sending start/stop transitions
+  useEffect(() => {
+    if (sending && !prevSendingRef.current) {
+      startTimeRef.current = Date.now();
+      setElapsed(0);
+      setShowDone(false);
+    }
+    if (!sending && prevSendingRef.current) {
+      setShowDone(true);
+      const timer = setTimeout(() => setShowDone(false), 2000);
+      prevSendingRef.current = sending;
+      return () => clearTimeout(timer);
+    }
+    prevSendingRef.current = sending;
+  }, [sending]);
+
+  // Tick elapsed every second while active
+  useEffect(() => {
+    if (!sending) return;
+    const interval = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [sending]);
+
+  if (!sending && !showDone) return null;
+
+  if (showDone && !sending) {
+    return (
+      <div className="flex items-center gap-2 transition-opacity duration-500">
+        <div className="h-1.5 w-1.5 rounded-full bg-[var(--success)]" />
+        <span className="text-xs text-[var(--success)]">done</span>
+        {elapsed > 0 && <span className="text-[10px] text-[var(--text-tertiary)]">{elapsed}s</span>}
+      </div>
+    );
+  }
+
+  const config = PHASE_CONFIG[phase ?? ""] ?? { label: "generating...", color: "var(--success)" };
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ background: config.color }} />
+      <span className="text-xs" style={{ color: config.color }}>{config.label}</span>
+      {elapsed > 0 && <span className="text-[10px] text-[var(--text-tertiary)]">{elapsed}s</span>}
+    </div>
+  );
+}
 
 function formatRelativeTime(timestamp: number) {
   const deltaMs = Date.now() - timestamp;
@@ -60,6 +125,7 @@ export function ChatHeader({
   orchestrationActive = false,
   settingsActive = false,
   mobileUtilitySlot,
+  isOffline = false,
 }: ChatHeaderProps) {
   const { query } = useKBar();
   const responseAgo = lastResponseAt
@@ -90,16 +156,8 @@ export function ChatHeader({
               {title}
             </h1>
             <div className="mt-0.5 flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-              {sending && streamPhase && onOpenOrchestration ? (
-                <button
-                  type="button"
-                  onClick={onOpenOrchestration}
-                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-0.5 -ml-1.5 transition hover:bg-[var(--bg-hover)]"
-                >
-                  <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent-cyan)] animate-pulse" />
-                  <span className="thinking-wave">{streamPhase}</span>
-                </button>
-              ) : (
+              <StreamingIndicator phase={streamPhase} sending={sending} />
+              {!sending && (
                 <>
                   {agentLabel && <span className="truncate">{agentLabel}</span>}
                   {responseAgo && (
@@ -114,6 +172,12 @@ export function ChatHeader({
           </div>
 
           <div className="relative flex items-center gap-1.5">
+            {isOffline && (
+              <div className="flex items-center gap-1.5 rounded-md bg-[color-mix(in_oklab,var(--warning)_15%,var(--bg-secondary))] px-2 py-0.5 text-[10px] text-[var(--warning)]">
+                <WifiOff size={12} />
+                <span>Offline</span>
+              </div>
+            )}
             <Button
               type="button"
               variant="secondary"
@@ -137,27 +201,26 @@ export function ChatHeader({
                 <Bot className={`h-3.5 w-3.5 ${orchestrationActive ? "text-[var(--brand-primary)]" : ""}`} />
               </Button>
             ) : null}
-            {sending ? (
-              <Button type="button" variant="secondary" size="sm" className="h-9 gap-1.5" onClick={onStop}>
-                <Square className="h-3.5 w-3.5" />
-                Stop
-              </Button>
-            ) : (
-              <>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="icon"
-                  className="h-9 w-9"
-                  onClick={onOpenSettings}
-                  data-tour="settings-trigger"
-                  aria-label="Open settings"
-                  title="Open settings"
-                >
-                  <Settings2 className={`h-3.5 w-3.5 ${settingsActive ? "text-[var(--brand-primary)]" : ""}`} />
+            <div className="flex items-center gap-1.5">
+              {sending && (
+                <Button type="button" variant="secondary" size="sm" className="h-9 gap-1.5" onClick={onStop}>
+                  <Square className="h-3.5 w-3.5" />
+                  Stop
                 </Button>
-              </>
-            )}
+              )}
+              <Button
+                type="button"
+                variant="secondary"
+                size="icon"
+                className="h-9 w-9"
+                onClick={onOpenSettings}
+                data-tour="settings-trigger"
+                aria-label="Open settings"
+                title="Open settings"
+              >
+                <Settings2 className={`h-3.5 w-3.5 ${settingsActive ? "text-[var(--brand-primary)]" : ""}`} />
+              </Button>
+            </div>
             {!sending && messageCount > 8 && onCompact ? (
               <Button
                 type="button"

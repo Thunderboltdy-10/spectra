@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Image from "next/image";
-import { Bookmark, BookmarkCheck, ChevronLeft, ChevronRight, Code2, Copy, FileText, GitBranch, Globe, Info, MoreHorizontal, Paperclip, Pencil, RefreshCw, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Bookmark, BookmarkCheck, Brain, ChevronLeft, ChevronRight, Code2, Copy, Cpu, FileText, GitBranch, Globe, Info, MoreHorizontal, Paperclip, Pencil, RefreshCw, ThumbsDown, ThumbsUp, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -44,7 +44,7 @@ type ChatMessageProps = {
   onRegenerate?: () => void;
   onRegenerateWithModel?: (modelId: string) => void;
   regenModels?: Array<{ modelId: string; name: string }>;
-  onEdit?: (newContent: string) => void;
+  onEdit?: (newContent: string) => void | Promise<void>;
   onFeedback?: (messageId: string, positive: boolean, modelId?: string) => void;
   usageIn?: number;
   usageOut?: number;
@@ -60,6 +60,10 @@ type ChatMessageProps = {
   onNavigateSibling?: (direction: "prev" | "next") => void;
   preferRouteTraceModel?: boolean;
   animateIn?: boolean;
+  memoryUpdated?: boolean;
+  memoryUpdateSummary?: string;
+  onPinModel?: (modelId: string) => void;
+  isPinned?: boolean;
   children?: React.ReactNode;
 };
 
@@ -181,6 +185,10 @@ export function ChatMessage({
   onNavigateSibling,
   preferRouteTraceModel = false,
   animateIn = true,
+  memoryUpdated = false,
+  memoryUpdateSummary,
+  onPinModel,
+  isPinned = false,
   children,
 }: ChatMessageProps) {
   const isUser = role === "user";
@@ -191,9 +199,10 @@ export function ChatMessage({
   const { openPanel } = usePanel();
   const [editing, setEditing] = useState(false);
   const [editedContent, setEditedContent] = useState(content);
+  const [editPending, setEditPending] = useState(false);
+  const [pendingContent, setPendingContent] = useState<string | null>(null);
   const tts = useTextToSpeech();
   const validCitations = citations.filter((c) => c.url || c.resourceId || c.filename);
-  const searchCitations = validCitations.filter((citation) => citation.sourceType === "search");
   const activeModelId = preferRouteTraceModel
     ? routeTrace?.selected?.modelId ?? modelUsed
     : modelUsed ?? routeTrace?.selected?.modelId;
@@ -207,7 +216,8 @@ export function ChatMessage({
   const displayOutputTokens = hasSubcallTotals ? subcallOutputTokens : (usageOut ?? 0);
   const timeLabel = useMemo(() => formatRelativeTime(createdAt), [createdAt]);
   const hasEnhanced = Boolean(enhancedContent && enhancedContent.trim());
-  const displayUserContent = isUser && showEnhanced && hasEnhanced ? enhancedContent ?? content : content;
+  const displayedContent = pendingContent ?? content;
+  const displayUserContent = isUser && showEnhanced && hasEnhanced ? enhancedContent ?? displayedContent : displayedContent;
   const hasSiblingVersions =
     typeof siblingCount === "number" && siblingCount > 1 && typeof siblingIndex === "number";
   const siblingIndexValue = typeof siblingIndex === "number" ? siblingIndex : 0;
@@ -231,14 +241,30 @@ export function ChatMessage({
     toast.success("Copied to clipboard");
   }
 
-  function handleSaveEdit() {
+  async function handleSaveEdit() {
     const clean = editedContent.trim();
     if (!clean || clean === content.trim()) {
       setEditing(false);
       return;
     }
-    onEdit?.(clean);
+    if (!onEdit) {
+      setEditing(false);
+      return;
+    }
+    setPendingContent(clean);
+    setEditPending(true);
     setEditing(false);
+    try {
+      await onEdit(clean);
+    } catch {
+      // Revert: restore editing state with original content
+      setPendingContent(null);
+      setEditedContent(content);
+      setEditing(true);
+    } finally {
+      setEditPending(false);
+      setPendingContent(null);
+    }
   }
 
   return (
@@ -248,16 +274,17 @@ export function ChatMessage({
     >
       <div className={cn("w-full", isUser ? "w-fit max-w-[60%]" : "max-w-5xl xl:max-w-6xl")}>
         {isUser ? (
-          <div className="ml-auto rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3 shadow-[var(--shadow-soft)]">
+          <div className={cn("ml-auto rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3 shadow-[var(--shadow-soft)]", editing && "min-w-[min(600px,90vw)]")}>
             {editing ? (
               <div className="space-y-2">
                 <textarea
                   value={editedContent}
                   onChange={(event) => setEditedContent(event.target.value)}
                   className="min-h-[96px] w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[14px] outline-none focus:ring-2 focus:ring-[var(--accent-cyan)]/35"
+                  autoFocus
                 />
                 <div className="flex items-center gap-2">
-                  <Button type="button" size="sm" onClick={handleSaveEdit}>
+                  <Button type="button" size="sm" onClick={() => void handleSaveEdit()}>
                     Save
                   </Button>
                   <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(false)}>
@@ -266,7 +293,9 @@ export function ChatMessage({
                 </div>
               </div>
             ) : (
-              <MarkdownRenderer content={displayUserContent} userMessage />
+              <div className={editPending ? "opacity-60" : undefined}>
+                <MarkdownRenderer content={displayUserContent} userMessage />
+              </div>
             )}
             {attachmentPreviews && attachmentPreviews.length > 0 ? (
               <div className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
@@ -394,6 +423,16 @@ export function ChatMessage({
                   whyThisResponse={whyThisResponse}
                   routeTrace={routeTrace}
                 />
+                {activeModelId && !isPinned && onPinModel ? (
+                  <button
+                    type="button"
+                    onClick={() => onPinModel(activeModelId)}
+                    className="text-[10px] text-[var(--text-tertiary)] transition hover:text-[var(--accent-cyan)]"
+                    title="Pin this model for the rest of this conversation"
+                  >
+                    Pin model
+                  </button>
+                ) : null}
                 {cancelled ? (
                   <span className="inline-flex items-center rounded-full border border-[color-mix(in_oklab,var(--warning)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_12%,var(--bg-secondary))] px-2 py-0.5 text-[10px] text-[var(--warning)]">
                     Cancelled
@@ -442,31 +481,6 @@ export function ChatMessage({
                 <MarkdownRenderer content={renderedContent} citations={citations} mode={mode} onOpenCanvas={onOpenCanvas} onSubmitQuizAnswers={onSubmitQuizAnswers} />
               )}
               <CollaboratorsBadge collaborators={routeTrace?.collaborators} />
-              {searchCitations.length > 0 && (
-                <div className="mt-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2.5">
-                  <p className="mb-1 text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
-                    Live Sources
-                  </p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {searchCitations.slice(0, 4).map((citation, index) => {
-                      const href = citation.url;
-                      if (!href) return null;
-                      return (
-                        <a
-                          key={`${href}-${index}`}
-                          href={href}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="cursor-pointer rounded-md border border-[var(--border-default)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                          title={citation.domain ?? citation.filename}
-                        >
-                          Source {index + 1}: {citation.title || citation.filename}
-                        </a>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
               {assistantAttachmentLinks.length > 0 ? (
                 <section className="mt-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
                   <p className="mb-2 text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
@@ -642,17 +656,49 @@ export function ChatMessage({
                   )}
                 </div>
               )}
-              <div className="mt-2 flex items-center gap-2 text-[11px] text-[var(--text-secondary)]">
-                <span>
-                  Input: {displayInputTokens.toLocaleString()} tokens | Output: {displayOutputTokens.toLocaleString()} tokens
-                </span>
-                {timeLabel ? <span>{timeLabel}</span> : null}
-              </div>
-              {routeTrace?.inputTokenBreakdown ? (
-                <div className="mt-1 text-[10px] text-[var(--text-tertiary)]">
-                  Context: system {routeTrace.inputTokenBreakdown.systemPrompt.toLocaleString()} | history {routeTrace.inputTokenBreakdown.history.toLocaleString()} | memory {routeTrace.inputTokenBreakdown.memory.toLocaleString()} | sources {routeTrace.inputTokenBreakdown.sources.toLocaleString()}
+              <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[10px] text-[var(--text-secondary)]">
+                <div className="flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-gradient-to-r from-[var(--bg-secondary)] to-[var(--bg-elevated)] px-2.5 py-[3px] shadow-sm">
+                  <Zap className="h-3 w-3 text-[var(--accent-cyan)]" />
+                  <span className="font-medium text-[var(--text-primary)]">{displayInputTokens.toLocaleString()}</span>
+                  <span className="text-[var(--text-tertiary)]">in</span>
+                  <span className="px-0.5 text-[var(--text-tertiary)] opacity-50">/</span>
+                  <span className="font-medium text-[var(--text-primary)]">{displayOutputTokens.toLocaleString()}</span>
+                  <span className="text-[var(--text-tertiary)]">out</span>
                 </div>
-              ) : null}
+                {routeTrace?.inputTokenBreakdown ? (
+                  <div className="flex items-center gap-2 rounded-full border border-[var(--border-default)] bg-gradient-to-r from-[var(--bg-secondary)] to-[var(--bg-elevated)] px-2.5 py-[3px] shadow-sm">
+                    <Cpu className="h-3 w-3 text-[var(--accent-purple)]" />
+                    <span className="text-[var(--text-secondary)]">
+                      <span className="font-medium text-[var(--text-primary)]">{routeTrace.inputTokenBreakdown.systemPrompt.toLocaleString()}</span> sys
+                    </span>
+                    <span className="h-1 w-1 rounded-full bg-[var(--text-tertiary)] opacity-40" />
+                    <span className="text-[var(--text-secondary)]">
+                      <span className="font-medium text-[var(--text-primary)]">{routeTrace.inputTokenBreakdown.history.toLocaleString()}</span> hist
+                    </span>
+                    <span className="h-1 w-1 rounded-full bg-[var(--text-tertiary)] opacity-40" />
+                    <span className="text-[var(--text-secondary)]">
+                      <span className="font-medium text-[var(--text-primary)]">{routeTrace.inputTokenBreakdown.memory.toLocaleString()}</span> mem
+                    </span>
+                    <span className="h-1 w-1 rounded-full bg-[var(--text-tertiary)] opacity-40" />
+                    <span className="text-[var(--text-secondary)]">
+                      <span className="font-medium text-[var(--text-primary)]">{routeTrace.inputTokenBreakdown.sources.toLocaleString()}</span> src
+                    </span>
+                  </div>
+                ) : null}
+                {timeLabel ? <span className="ml-1 text-[10px] text-[var(--text-tertiary)]">{timeLabel}</span> : null}
+              </div>
+              {memoryUpdated && (
+                <div className="group/memory relative mt-1.5 inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] text-[var(--text-tertiary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]">
+                  <Brain size={12} />
+                  <span>Memory updated</span>
+                  {memoryUpdateSummary && (
+                    <div className="invisible absolute bottom-full left-0 z-30 mb-1 w-64 rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2.5 text-xs text-[var(--text-secondary)] shadow-lg group-hover/memory:visible">
+                      <p className="font-medium text-[var(--text-primary)]">What was saved</p>
+                      <p className="mt-1 leading-relaxed">{memoryUpdateSummary}</p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}

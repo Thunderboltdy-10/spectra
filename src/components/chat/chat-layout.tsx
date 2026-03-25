@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { ChatComposer } from "@/components/chat/chat-composer";
 import { ChatHeader } from "@/components/chat/chat-header";
 import { ChatMessages } from "@/components/chat/chat-messages";
+import { ChatErrorBoundary } from "@/components/chat/chat-error-boundary";
 import { UnifiedPanel } from "@/components/chat/unified-panel";
 import { ChatSidebar } from "@/components/chat/chat-sidebar";
 import { ChatWelcome } from "@/components/chat/chat-welcome";
@@ -118,10 +119,19 @@ export function ChatLayout() {
   const { activeView: panelActiveView, openPanel, closePanel, togglePanel, backPanel, canGoBack } = usePanel();
   const [tourOpen, setTourOpen] = useState(false);
   const [activityCutoffTs, setActivityCutoffTs] = useState<number | null>(null);
+  const [isWideScreen, setIsWideScreen] = useState(false);
   const [liveProgressAutoOpen, setLiveProgressAutoOpen] = useState(true);
   const autoOpenedRouteTraceForSendRef = useRef(false);
   const routeTraceDismissedForSendRef = useRef(false);
   const previousStreamPhaseRef = useRef(chat.streamPhase);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1280px)");
+    setIsWideScreen(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsWideScreen(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -167,6 +177,25 @@ export function ChatLayout() {
     return () => window.removeEventListener("ai-school:open-tour", onOpenTour);
   }, []);
 
+  const [modelTransitioning, setModelTransitioning] = useState(false);
+  const [pinnedModelId, setPinnedModelId] = useState<string | undefined>(undefined);
+  const prevSelectedChatRef = useRef(chat.selectedChatId);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const modelId = (e as CustomEvent<{ modelId: string }>).detail?.modelId;
+      if (modelId) {
+        chat.setManualModel(modelId);
+        chat.setRouterMode("manual");
+        setPinnedModelId(modelId);
+        void chat.updateExistingChatSettings({ routerMode: "manual", manualModel: modelId }).catch(() => {});
+        toast.success(`Pinned ${modelId.split("/").pop()} for this conversation`, { duration: 4000 });
+      }
+    };
+    window.addEventListener("ai-school:pin-model", handler);
+    return () => window.removeEventListener("ai-school:pin-model", handler);
+  }, [chat]);
+
   const handleModeChange = useCallback((nextMode: StudyMode) => {
     if (!isModeAvailable(nextMode)) {
       toast.info("This mode is coming soon.");
@@ -177,7 +206,7 @@ export function ChatLayout() {
     }
     chat.setMode(nextMode);
     void chat.updateExistingChatSettings({ mode: nextMode }).catch((error: unknown) =>
-      toast.error(error instanceof Error ? error.message : "Failed to update mode"),
+      toast.error(error instanceof Error ? error.message : "Failed to update mode", { duration: 8000 }),
     );
   }, [chat]);
 
@@ -204,12 +233,10 @@ export function ChatLayout() {
     }
   }
 
-  const [modelTransitioning, setModelTransitioning] = useState(false);
-  const prevSelectedChatRef = useRef(chat.selectedChatId);
-
   useEffect(() => {
     if (prevSelectedChatRef.current !== chat.selectedChatId) {
       setModelTransitioning(true);
+      setPinnedModelId(undefined);
       const timer = window.setTimeout(() => setModelTransitioning(false), 600);
       prevSelectedChatRef.current = chat.selectedChatId;
       return () => window.clearTimeout(timer);
@@ -293,8 +320,13 @@ export function ChatLayout() {
       && !autoOpenedRouteTraceForSendRef.current
       && !routeTraceDismissedForSendRef.current
     ) {
-      openPanel("route-trace");
       autoOpenedRouteTraceForSendRef.current = true;
+      setTimeout(() => {
+        // If still relevant after 2 seconds (e.g., hasn't finished sending or been dismissed)
+        if (autoOpenedRouteTraceForSendRef.current && !routeTraceDismissedForSendRef.current) {
+          openPanel("orchestration");
+        }
+      }, 2000);
     }
 
     previousStreamPhaseRef.current = currentPhase;
@@ -335,7 +367,7 @@ export function ChatLayout() {
       const arg = parsed.args[0] ?? "";
       const normalized = normalizeModeArg(arg);
       if (!normalized) {
-        toast.error("Invalid mode");
+        toast.error("Invalid mode", { duration: 8000 });
         return true;
       }
       handleModeChange(normalized);
@@ -346,7 +378,7 @@ export function ChatLayout() {
     if (parsed.id === "model") {
       const modelId = parsed.args.join(" ").trim();
       if (!modelId) {
-        toast.error("Provide a model id");
+        toast.error("Provide a model id", { duration: 8000 });
         return true;
       }
       chat.setManualModel(modelId);
@@ -457,15 +489,30 @@ export function ChatLayout() {
             closePanel();
           }
         }}
+        onNewChat={() => chat.startNewChat(chat.selectedAgentId)}
+        onOpenSettings={() => togglePanel("settings")}
+        onFocusComposer={() => {
+          window.dispatchEvent(new CustomEvent("ai-school:focus-composer"));
+        }}
+        onToggleOrchestration={() => {
+          if (canOpenOrchestration) togglePanel("orchestration");
+        }}
+        onExportMarkdown={() => {
+          const markdown = exportConversationMarkdown({
+            title: chat.selectedChat?.title ?? "Conversation",
+            messages: chat.messages,
+          });
+          downloadTextFile("conversation.md", markdown);
+        }}
       />
 
       <aside
         data-tour="sidebar"
         className={`hidden md:block transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${
-          chat.sidebarOpen && !canvas.isOpen ? "w-[clamp(220px,18vw,280px)]" : "w-[64px]"
+          chat.sidebarOpen && !(canvas.isOpen && !isWideScreen) ? "w-[clamp(220px,18vw,280px)]" : "w-[64px]"
         }`}
       >
-        <ChatSidebar {...sidebarProps} collapsed={!chat.sidebarOpen || canvas.isOpen} />
+        <ChatSidebar {...sidebarProps} collapsed={!chat.sidebarOpen || (canvas.isOpen && !isWideScreen)} />
       </aside>
 
       {chat.mobileSidebarOpen && (
@@ -497,18 +544,7 @@ export function ChatLayout() {
           sending={chat.sending}
           messageCount={chat.messages.length}
           compacting={chat.compactingConversation}
-          streamPhase={chat.sending ? (
-            chat.streamPhase === "compacting" ? "Compacting context" :
-            chat.streamPhase === "routing" ? "Selecting model" :
-            chat.streamPhase === "searching" ? "Checking sources" :
-            chat.streamPhase === "thinking" ? "Reasoning" :
-            chat.streamPhase === "synthesizing" ? "Formatting result" :
-            chat.streamPhase === "generating" ? "Generating response" :
-            chat.collaboratorPhase === "synthesizing" ? "Formatting result" :
-            chat.lastAutoResult?.searchEnabled ? "Using search" :
-            chat.activeCollaborators.length > 0 ? "Running specialists" :
-            "Generating response"
-          ) : undefined}
+          streamPhase={chat.sending ? chat.streamPhase : undefined}
           onStop={chat.stopGeneration}
           onCompact={() => void chat.compactConversation()}
           onCompactWithDepth={(keepLatestMessages) => void chat.compactConversation(keepLatestMessages)}
@@ -520,6 +556,7 @@ export function ChatLayout() {
           orchestrationActive={panelActiveView === "orchestration"}
           settingsActive={panelActiveView === "settings"}
           mobileUtilitySlot={<GlobalUtilityDock placement="profile-bar" className="w-full" />}
+          isOffline={chat.isOffline}
           onExport={(format) => {
             if (format === "pdf") {
               const node = document.querySelector("[data-conversation-export]") ?? document.querySelector("main");
@@ -545,6 +582,7 @@ export function ChatLayout() {
         />
 
         <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
+        <ChatErrorBoundary chatId={chat.selectedChatId}>
         <ChatMessages
           messages={chat.messages}
           draftResponse={chat.draftResponse}
@@ -600,15 +638,15 @@ export function ChatLayout() {
             try {
               await chat.editAndResend(messageId, newContent);
             } catch (error) {
-              toast.error(error instanceof Error ? error.message : "Failed to edit message");
+              toast.error(error instanceof Error ? error.message : "Failed to edit message", { duration: 8000 });
             }
           }}
           onBranchMessage={async (messageId) => {
             try {
               await chat.branchFromMessage(messageId);
-              toast.success("Branch created");
+              toast.success("Branch created", { duration: 4000 });
             } catch (error) {
-              toast.error(error instanceof Error ? error.message : "Failed to create branch");
+              toast.error(error instanceof Error ? error.message : "Failed to create branch", { duration: 8000 });
             }
           }}
           onToggleBookmarkMessage={async (messageId) => {
@@ -632,6 +670,10 @@ export function ChatLayout() {
           lastAutoResult={chat.lastAutoResult}
           activeCollaborators={chat.activeCollaborators}
           collaboratorPhase={chat.collaboratorPhase}
+          onPinModel={(modelId) => {
+            window.dispatchEvent(new CustomEvent("ai-school:pin-model", { detail: { modelId } }));
+          }}
+          pinnedModelId={pinnedModelId}
           onOpenCanvas={(payload) => {
             canvas.openCanvas({
               code: payload.code,
@@ -681,6 +723,7 @@ export function ChatLayout() {
               )
           }
         />
+        </ChatErrorBoundary>
 
         <ChatComposer
           sidebarExpanded={chat.sidebarOpen}
@@ -703,6 +746,7 @@ export function ChatLayout() {
               if (available <= 0) {
                 toast.error(
                   `Attachment limit reached (${FILE_LIMITS.maxConversationAttachments} files per conversation).`,
+                  { duration: 8000 },
                 );
                 return prev;
               }
@@ -726,7 +770,7 @@ export function ChatLayout() {
             if (!chat.agentSuggestion) return;
             chat.setSelectedAgentId(chat.agentSuggestion.id);
             chat.setAgentSuggestion(null);
-            toast.success(`Using suggested agent: ${chat.agentSuggestion.name}`);
+            toast.success(`Using suggested agent: ${chat.agentSuggestion.name}`, { duration: 4000 });
           }}
           onSelectAgent={(agentId) => {
             chat.setSelectedAgentId(agentId);
@@ -734,19 +778,20 @@ export function ChatLayout() {
           }}
           models={chat.models}
           userSpending={chat.userSpending}
+          isSuperAdmin={chat.isSuperAdmin}
           routerMode={chat.routerMode}
           manualModel={chat.manualModel}
           onSelectAuto={() => {
             chat.setRouterMode("auto");
             void chat.updateExistingChatSettings({ routerMode: "auto" }).catch((error: unknown) =>
-              toast.error(error instanceof Error ? error.message : "Failed to update routing"),
+              toast.error(error instanceof Error ? error.message : "Failed to update routing", { duration: 8000 }),
             );
           }}
           onSelectModel={(modelId) => {
             chat.setManualModel(modelId);
             chat.setRouterMode("manual");
             void chat.updateExistingChatSettings({ routerMode: "manual", manualModel: modelId })
-              .catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Failed to update model"));
+              .catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Failed to update model", { duration: 8000 }));
           }}
           imageModel={chat.imageModel}
           onSelectImageModel={chat.setImageModel}
@@ -794,7 +839,7 @@ export function ChatLayout() {
           onTogglePersonalResources: (usePersonalResources) => {
             chat.setUsePersonalResources(usePersonalResources);
             void chat.updateExistingChatSettings({ usePersonalResources }).catch((error: unknown) =>
-              toast.error(error instanceof Error ? error.message : "Failed to save setting"));
+              toast.error(error instanceof Error ? error.message : "Failed to save setting", { duration: 8000 }));
           },
           onAutoSaveConversationFilesToLibraryChange: (enabled) => {
             chat.setAutoSaveConversationFilesToLibrary(enabled);
@@ -805,17 +850,17 @@ export function ChatLayout() {
           onAutoCompactionChange: chat.setAutoCompaction,
           onDeleteResource: (resourceId) => {
             void chat.deletePersonalResource(resourceId).catch((error: unknown) =>
-              toast.error(error instanceof Error ? error.message : "Failed to delete file"),
+              toast.error(error instanceof Error ? error.message : "Failed to delete file", { duration: 8000 }),
             );
           },
           onRetryResource: (resourceId) => {
             void chat.retryPersonalResource(resourceId).catch((error: unknown) =>
-              toast.error(error instanceof Error ? error.message : "Failed to retry processing"),
+              toast.error(error instanceof Error ? error.message : "Failed to retry processing", { duration: 8000 }),
             );
           },
           onUploadPersonalFiles: (files) => {
             void chat.uploadPersonalResources(files).catch((error: unknown) =>
-              toast.error(error instanceof Error ? error.message : "Failed to upload file"),
+              toast.error(error instanceof Error ? error.message : "Failed to upload file", { duration: 8000 }),
             );
           },
         }}

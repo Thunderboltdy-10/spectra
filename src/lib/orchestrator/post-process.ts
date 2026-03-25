@@ -15,8 +15,8 @@ import {
 } from "@/lib/orchestrator/learning-context";
 import type { Citation } from "@/types";
 
-const TITLE_MIN_WORDS = 2;
-const TITLE_MAX_WORDS = 6;
+const TITLE_MIN_WORDS = 3;
+const TITLE_MAX_WORDS = 5;
 const MEMORY_MAX_ENTRIES = 80;
 const MEMORY_MAX_RAW_CHARS = 1500;
 const MEMORY_PROFILE_MAX_ENTRIES = 8;
@@ -952,14 +952,33 @@ function heuristicTitle(source: string) {
   return "General Study";
 }
 
+const STRIP_PREFIXES = [
+  /^(user\s+asks?\s+(about|for|to)\s+)/i,
+  /^(help(ing)?\s+with\s+)/i,
+  /^(question\s+(about|on)\s+)/i,
+  /^(discussion\s+(about|on)\s+)/i,
+  /^(request\s+for\s+)/i,
+  /^(conversation\s+about\s+)/i,
+];
+
 function normalizeTitle(candidate: string, fallbackSource: string) {
-  const cleaned = compactText(
+  let stripped = compactText(
     candidate
       .replace(/^title\s*:\s*/i, "")
       .replace(/[\n\r]+/g, " ")
       .replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, "")
       .replace(/["'`*#_]/g, ""),
   );
+
+  // Strip surrounding quotes
+  stripped = stripped.replace(/^["'"]+|["'"]+$/g, "");
+
+  // Strip common AI title prefixes
+  for (const prefix of STRIP_PREFIXES) {
+    stripped = stripped.replace(prefix, "");
+  }
+
+  const cleaned = compactText(stripped);
 
   const words = tokenizeWords(cleaned).slice(0, TITLE_MAX_WORDS);
   const fallbackWords = tokenizeWords(fallbackSource);
@@ -1010,7 +1029,7 @@ async function generateTitleFromSnippet(
         {
           role: "system",
           content:
-            "Generate a conversation title in 2 to 6 words. Keep the same language as the user when possible. Return plain title text only with no quotes.",
+            "Generate a conversation title in 3 to 5 words. Rules:\n- Just the topic, no quotes, no prefixes like \"User asks about\" or \"Help with\"\n- Be specific: \"WW2 Flashcards for IB\" not \"History Help\"\n- Include subject/context clues when present\n- Never start with articles (a, an, the)\n- Keep the same language as the user\n- Return plain title text only",
         },
         {
           role: "user",

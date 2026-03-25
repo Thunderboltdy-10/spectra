@@ -168,7 +168,7 @@ function ColorPalettePicker() {
     if (typeof window === "undefined") return "warm";
     return window.localStorage.getItem("ai-school:color-theme") ?? "warm";
   });
-  const [customPrimary, setCustomPrimary] = useState(() => {
+  const [customColor, setCustomColor] = useState(() => {
     if (typeof window === "undefined") return "#0e8ee8";
     return (
       window.localStorage.getItem("ai-school:custom-primary-color")
@@ -176,26 +176,18 @@ function ColorPalettePicker() {
       ?? "#0e8ee8"
     );
   });
-  const [customSecondary, setCustomSecondary] = useState(() => {
-    if (typeof window === "undefined") return "#20b8b2";
-    return window.localStorage.getItem("ai-school:custom-secondary-color") ?? "#20b8b2";
-  });
   const isDark = typeof window !== "undefined" && document.documentElement.classList.contains("dark");
 
-  function applyPalette(key: string, colors?: { primary?: string; secondary?: string }) {
-    const nextPrimary = colors?.primary ?? customPrimary;
-    const nextSecondary = colors?.secondary ?? customSecondary;
+  function applyPalette(key: string, primary?: string) {
+    const nextPrimary = primary ?? customColor;
     setSelected(key);
     try {
       window.localStorage.setItem("ai-school:color-theme", key);
-      if (colors?.primary) {
+      if (primary) {
         window.localStorage.setItem("ai-school:custom-primary-color", nextPrimary);
       }
-      if (colors?.secondary) {
-        window.localStorage.setItem("ai-school:custom-secondary-color", nextSecondary);
-      }
     } catch { /* ignore */ }
-    
+
     if (key === "warm") {
       document.documentElement.removeAttribute("data-theme-palette");
       document.documentElement.style.removeProperty("--brand-accent");
@@ -203,12 +195,13 @@ function ColorPalettePicker() {
       document.documentElement.style.removeProperty("--custom-theme-light");
       document.documentElement.style.removeProperty("--custom-theme-dark");
     } else if (key === "custom") {
-      const mixedCore = `color-mix(in oklab, ${nextPrimary} 56%, ${nextSecondary})`;
+      // Auto-derive a complementary accent by shifting hue via color-mix with a contrasting neutral
+      const accent = `color-mix(in oklab, ${nextPrimary} 70%, #20b8b2)`;
       document.documentElement.setAttribute("data-theme-palette", "custom");
       document.documentElement.style.setProperty("--brand-primary", nextPrimary);
-      document.documentElement.style.setProperty("--brand-accent", nextSecondary);
-      document.documentElement.style.setProperty("--custom-theme-light", `color-mix(in oklab, ${mixedCore} 14%, #ffffff)`);
-      document.documentElement.style.setProperty("--custom-theme-dark", `color-mix(in oklab, ${mixedCore} 28%, #000000)`);
+      document.documentElement.style.setProperty("--brand-accent", accent);
+      document.documentElement.style.setProperty("--custom-theme-light", `color-mix(in oklab, ${nextPrimary} 14%, #ffffff)`);
+      document.documentElement.style.setProperty("--custom-theme-dark", `color-mix(in oklab, ${nextPrimary} 28%, #000000)`);
     } else {
       document.documentElement.setAttribute("data-theme-palette", key);
       document.documentElement.style.removeProperty("--brand-accent");
@@ -237,7 +230,7 @@ function ColorPalettePicker() {
           >
             <span
               className="h-8 w-8 rounded-md border border-[var(--border-default)]"
-              style={{ background: opt.key === "custom" && active ? customPrimary : swatch }}
+              style={{ background: opt.key === "custom" && active ? customColor : swatch }}
             />
             <span className="text-[9px] font-medium uppercase tracking-[0.08em] text-[var(--text-secondary)]">
               {opt.label}
@@ -245,35 +238,21 @@ function ColorPalettePicker() {
           </button>
         );
       })}
-      
+
       {selected === "custom" && (
         <div className="ml-2 flex items-center gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-1.5">
-          <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
-            Primary
+          <label className="flex items-center gap-1.5 text-[10px] text-[var(--text-secondary)]">
+            Accent color
             <input
               type="color"
-              value={customPrimary}
+              value={customColor}
               onChange={(event) => {
                 const next = event.target.value;
-                setCustomPrimary(next);
-                applyPalette("custom", { primary: next });
+                setCustomColor(next);
+                applyPalette("custom", next);
               }}
               className="h-8 w-8 cursor-pointer rounded-md border border-[var(--border-default)] p-0"
-              title="Primary color"
-            />
-          </label>
-          <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
-            Secondary
-            <input
-              type="color"
-              value={customSecondary}
-              onChange={(event) => {
-                const next = event.target.value;
-                setCustomSecondary(next);
-                applyPalette("custom", { secondary: next });
-              }}
-              className="h-8 w-8 cursor-pointer rounded-md border border-[var(--border-default)] p-0"
-              title="Secondary color"
+              title="Pick your accent color"
             />
           </label>
         </div>
@@ -567,7 +546,7 @@ export function SettingsView({
         <TabsContent value="app" className="space-y-4">
           <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
             <h3 className="mb-2 text-xs font-medium text-[var(--text-secondary)]">Color theme</h3>
-            <p className="mb-3 text-[11px] text-[var(--text-secondary)]">Pick a surface tone and custom primary/secondary colors. Changes apply instantly.</p>
+            <p className="mb-3 text-[11px] text-[var(--text-secondary)]">Pick a preset palette or choose a single accent color. Changes apply instantly.</p>
             <ColorPalettePicker />
           </section>
 
@@ -603,7 +582,7 @@ function CandidateBar({ score }: { score?: number }) {
   );
 }
 
-function RouteTraceView({ trace }: { trace?: RouteTrace }) {
+function RouteTraceView({ trace, showCostDetails = false }: { trace?: RouteTrace; showCostDetails?: boolean }) {
   if (!trace) {
     return <p className="text-sm text-[var(--text-secondary)]">No route trace available.</p>;
   }
@@ -615,7 +594,7 @@ function RouteTraceView({ trace }: { trace?: RouteTrace }) {
         <div className="grid gap-2 sm:grid-cols-2">
           {[
             { label: "Mode", value: trace.inputs.mode },
-            { label: "Tier", value: trace.inputs.spendingTier },
+            ...(showCostDetails ? [{ label: "Tier", value: trace.inputs.spendingTier }] : []),
             { label: "Thinking", value: trace.inputs.thinkingLevel },
             { label: "Complex", value: trace.inputs.complexPrompt ? "Yes" : "No" },
             { label: "Prompt Category", value: trace.inputs.promptCategory },
@@ -909,9 +888,7 @@ function OrchestrationView({
           <ol className="space-y-1.5">
             {displaySteps.map((item, index) => {
               const isComplete = stage === "complete";
-              const done = isComplete
-                ? index < displaySteps.length - 1
-                : stage !== "idle" && index < stageIndex;
+              const done = isComplete || (stage !== "idle" && index < stageIndex);
               const active = stage !== "idle" && stage !== "complete" && item === stage;
               const skipped = !done && !active && stage !== "idle" && index < stageIndex;
               return (
@@ -1222,27 +1199,31 @@ export function UnifiedPanel({ settingsProps, orchestrationProps, canvasProps }:
   const { activeView, panelData, closePanel, backPanel, canGoBack } = usePanel();
   const compact = useCompactSheet(980);
   const mobileOverlay = useCompactSheet(767);
+  const [internalView, setInternalView] = useState<string | null>(activeView);
+  const currentView = activeView || internalView;
+
   const maxWidthPx =
-    activeView === "quiz"
+    currentView === "quiz"
       ? 460
-      : activeView === "canvas"
+      : currentView === "canvas"
         ? 1100
-      : activeView === "route-trace"
+      : currentView === "route-trace"
         ? 620
-        : activeView === "settings"
+        : currentView === "settings"
           ? 400
           : 360;
+
   const { docked, panelWidth } = useRightPanelDock({
     id: "unified-panel",
-    open: !!activeView,
+    open: !!currentView,
     compact,
     maxWidthPx,
-    minMainWidthPx: activeView === "settings" ? 620 : activeView === "canvas" ? 520 : 720,
+    minMainWidthPx: currentView === "settings" ? 620 : currentView === "canvas" ? 520 : 720,
     reserveLeftPx: 160,
   });
+
   const [collapsed, setCollapsed] = useState(false);
   const [animateIn, setAnimateIn] = useState(false);
-  const [internalView, setInternalView] = useState<string | null>(activeView);
   const shellRef = useRef<HTMLElement>(null);
   const prevViewRef = useRef<string | null>(null);
 
@@ -1255,31 +1236,14 @@ export function UnifiedPanel({ settingsProps, orchestrationProps, canvasProps }:
         requestAnimationFrame(() => setAnimateIn(true));
       }
     } else if (internalView) {
-      const w = panelWidth;
+      // Trigger slide-out: animateIn=false moves aside to translateX(100%) via CSS transition,
+      // and the outer wrapper width collapses to 0 simultaneously.
       setAnimateIn(false);
-      const shell = shellRef.current;
-      if (shell) {
-        shell.style.width = `${w}px`; // fix width so aside doesn't shrink with wrapper
-        void shell.offsetWidth; // force layout so CSS transition and WAAPI start same frame
-        const closeAnim = shell.animate(
-          [
-            { transform: "translateX(0)" },
-            { transform: `translateX(${w}px)` },
-          ],
-          { duration: 600, easing: "cubic-bezier(0.16, 1, 0.3, 1)", fill: "none" },
-        );
-        closeAnim.onfinish = () => {
-          shell.style.transform = `translateX(${w}px)`;
-        };
-      }
       const timer = setTimeout(() => {
         setInternalView(null);
-      }, 600);
+      }, 400);
       return () => {
         clearTimeout(timer);
-        if (shell) {
-          shell.getAnimations().forEach((a) => a.cancel());
-        }
       };
     }
     prevViewRef.current = activeView;
@@ -1300,8 +1264,8 @@ export function UnifiedPanel({ settingsProps, orchestrationProps, canvasProps }:
 
   return (
     <div
-      className={docked ? "relative z-40 h-full shrink-0" : "fixed inset-0 z-50"}
-      style={docked ? { width: animateIn ? `${panelWidth}px` : "0px", transition: "width 0.6s cubic-bezier(0.16, 1, 0.3, 1)", overflow: "hidden" } : undefined}
+      className={docked ? "relative z-40 h-full shrink-0 overflow-hidden" : "fixed inset-0 z-50"}
+      style={docked ? { width: animateIn ? `${panelWidth}px` : "0px", transition: "width 0.35s cubic-bezier(0.22, 1, 0.36, 1)" } : undefined}
     >
       {!docked ? (
         <button
@@ -1318,7 +1282,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps, canvasProps }:
           docked ? "right-panel-shell--docked" : "right-panel-shell--sheet"
         } ${
           docked
-            ? "relative h-full w-full border-l border-[var(--border-default)] p-0"
+            ? "relative h-full border-l border-[var(--border-default)] p-0"
             : mobileOverlay
               ? "absolute inset-0 rounded-none border-0 p-0"
               : compact
@@ -1327,7 +1291,13 @@ export function UnifiedPanel({ settingsProps, orchestrationProps, canvasProps }:
         }`}
         style={{
           ...(docked
-            ? { width: animateIn ? `${panelWidth}px` : "0px", height: "100%", opacity: 1, transition: "width 0.6s cubic-bezier(0.16, 1, 0.3, 1)" }
+            ? {
+                width: `${panelWidth}px`,
+                height: "100%",
+                opacity: 1,
+                transition: "transform 0.35s cubic-bezier(0.22, 1, 0.36, 1)",
+                transform: animateIn ? "translateX(0)" : "translateX(100%)",
+              }
             : mobileOverlay
               ? { width: "100%", height: "100%" }
               : compact
@@ -1366,9 +1336,11 @@ export function UnifiedPanel({ settingsProps, orchestrationProps, canvasProps }:
         </div>
 
         {!collapsed ? (
-          <div className={`right-panel-content min-h-0 flex-1 overflow-x-hidden overflow-y-auto ${activeView === "canvas" ? "p-0" : docked ? "pl-4 pr-2 py-4" : "pr-1"}`}>
+          <div className={`right-panel-content w-full min-w-0 min-h-0 flex-1 overflow-x-hidden overflow-y-auto ${activeView === "canvas" ? "p-0" : docked ? "px-5 py-4" : "pr-1"}`}>
             {activeView === "settings" && settingsProps && <SettingsView {...settingsProps} />}
-            {activeView === "route-trace" && <RouteTraceView trace={panelData.routeTrace ?? orchestrationProps?.routeTrace} />}
+            {activeView === "route-trace" && (
+              <RouteTraceView trace={panelData.routeTrace ?? orchestrationProps?.routeTrace} showCostDetails={Boolean(settingsProps?.showCostDetails)} />
+            )}
             {activeView === "sources" && <SourcesView citations={panelData.sources ?? []} />}
             {activeView === "orchestration" && (
               orchestrationProps

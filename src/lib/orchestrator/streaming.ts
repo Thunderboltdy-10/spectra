@@ -2,6 +2,7 @@ import {
   openRouterChatCompletion,
   openRouterStreamChat,
   type OpenRouterMessage,
+  type OpenRouterReasoningEffort,
   type OpenRouterUsage,
 } from "@/lib/openrouter";
 import { executeGraph, synthesize, type TaskNode } from "@/lib/orchestrator/task-graph";
@@ -16,10 +17,20 @@ export function chunkString(value: string, size: number) {
   return chunks ?? [];
 }
 
+function reasoningEffortForThinkingLevel(
+  thinkingLevel: "low" | "medium" | "high" | undefined,
+): OpenRouterReasoningEffort | undefined {
+  if (!thinkingLevel) return undefined;
+  if (thinkingLevel === "high") return "high";
+  if (thinkingLevel === "medium") return "medium";
+  return "low";
+}
+
 export async function runAssistantStreaming(params: {
   actorClerkId?: string;
   chatId?: string;
   shouldVerify: boolean;
+  thinkingLevel?: "low" | "medium" | "high";
   primaryModel: string;
   fallbackModels: string[];
   verificationModel?: string;
@@ -81,6 +92,7 @@ export async function runAssistantStreaming(params: {
         fallbackModels: params.fallbackModels,
         messages: continuationMessages,
         maxTokens: params.maxTokens,
+        reasoningEffort: reasoningEffortForThinkingLevel(params.thinkingLevel),
         onFallback: params.onFallback,
       })) {
         if (event.type === "delta") {
@@ -129,7 +141,7 @@ export async function runAssistantStreaming(params: {
       });
       continuationMessages = [
         ...continuationMessages,
-        { role: "assistant", content: responseText },
+        { role: "assistant", content: roundResponse },
         { role: "user", content: "Continue from where you stopped." },
       ];
     }
@@ -142,6 +154,7 @@ export async function runAssistantStreaming(params: {
       messages: params.messages,
       maxTokens: params.maxTokens,
       verificationModel: params.verificationModel,
+      thinkingLevel: params.thinkingLevel,
       onFallback: params.onFallback,
       logger: params.logger,
     });
@@ -284,6 +297,7 @@ export async function runCollaborativeStreaming(params: {
   catalog?: CatalogModelEntry[];
   modelRuntimeStats?: Record<string, ModelRuntimeStat>;
   spendingTier?: SpendingTier;
+  thinkingLevel?: "low" | "medium" | "high";
   maxTokens?: number;
   maxSubcalls?: number;
   maxTokensPerSpecialist?: number;
@@ -364,6 +378,10 @@ export async function runCollaborativeStreaming(params: {
             },
           ],
           temperature: 0.2,
+          reasoningEffort:
+            params.thinkingLevel === "high"
+              ? "medium"
+              : reasoningEffortForThinkingLevel(params.thinkingLevel),
           maxTokens: Math.min(1800, Math.max(800, params.maxTokens ?? 1800)),
           onFallback: params.onFallback,
         });
@@ -503,6 +521,7 @@ export async function runCollaborativeStreaming(params: {
       fallbackModels: params.synthesisFallbackModels ?? params.fallbackModels,
       messages: continuationMessages,
       temperature: 0.2,
+      reasoningEffort: reasoningEffortForThinkingLevel(params.thinkingLevel),
       maxTokens: params.maxTokens,
       onFallback: params.onFallback,
     })) {
@@ -545,7 +564,7 @@ export async function runCollaborativeStreaming(params: {
     await params.send({ type: "notice", message: "Expanding response..." });
     continuationMessages = [
       ...continuationMessages,
-      { role: "assistant", content: responseText },
+      { role: "assistant", content: roundResponse },
       { role: "user", content: "Continue from where you stopped." },
     ];
   }

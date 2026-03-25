@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RichText } from "@/components/chat/rich-text";
+import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { usePanel } from "@/context/panel-context";
 import { parseQuiz, type ParsedQuizQuestion } from "@/lib/quiz-parser";
 
@@ -79,7 +80,11 @@ export function QuizReveal({
   onFollowUp,
   onModeChange,
 }: QuizRevealProps) {
-  const questions = useMemo(() => parseQuiz(content), [content]);
+  const allParsedQuestions = useMemo(() => parseQuiz(content), [content]);
+  const questions = useMemo(
+    () => allParsedQuestions.filter((q) => q.options.length >= 2),
+    [allParsedQuestions],
+  );
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState(false);
   const panelInstanceId = useId();
@@ -350,7 +355,9 @@ export function QuizReveal({
     }
   }, [autoOpen, didAutoOpen, openQuizPanel, questions.length, submitted]);
 
-  if (questions.length === 0) return null;
+  if (questions.length === 0) {
+    return <MarkdownRenderer content={content} citations={[]} />;
+  }
 
   const longQuiz = questions.length >= 3;
   const currentQuestion = questions[Math.min(activeIndex, Math.max(0, questions.length - 1))];

@@ -8,9 +8,11 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { SidebarProvider } from "@/context/sidebar-context";
 import { PanelProvider } from "@/context/panel-context";
 import { DynamicFavicon } from "@/components/spectra-logo";
+import { GlobalErrorBoundary } from "@/components/global-error-boundary";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
+    <GlobalErrorBoundary>
     <ThemeProvider>
       <SidebarProvider>
         <PanelProvider>
@@ -23,6 +25,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
               theme="system"
               position="top-right"
               richColors
+              visibleToasts={3}
               toastOptions={{
                 className: "!rounded-xl !border-[var(--border-default)] !bg-[var(--bg-elevated)] !text-[var(--text-primary)] !shadow-[var(--shadow-soft)]",
                 descriptionClassName: "!text-[var(--text-secondary)]",
@@ -32,5 +35,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
         </PanelProvider>
       </SidebarProvider>
     </ThemeProvider>
+    </GlobalErrorBoundary>
   );
 }

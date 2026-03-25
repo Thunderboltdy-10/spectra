@@ -28,11 +28,15 @@ function toQueryString(searchParams: Record<string, string | string[] | undefine
   return query ? `?${query}` : "";
 }
 
+type HomePageSearchParams = Record<string, string | string[] | undefined>;
+
 export default async function HomePage({
-  searchParams = {},
+  searchParams,
 }: {
-  searchParams?: Record<string, string | string[] | undefined>;
+  searchParams?: Promise<HomePageSearchParams>;
 }) {
+  const resolvedSearchParams = (await searchParams) ?? {};
+
   if (hasClerkServerConfig()) {
     const authData = await auth();
     if (authData.userId) {
@@ -44,7 +48,7 @@ export default async function HomePage({
           redirect(message.startsWith("AUTH_ORG_INACTIVE") ? "/no-access?reason=inactive" : "/no-access");
         }
       }
-      redirect(`/chat${toQueryString(searchParams)}`);
+      redirect(`/chat${toQueryString(resolvedSearchParams)}`);
     }
   }
   return <LandingClient />;

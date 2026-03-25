@@ -123,142 +123,142 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 
 **Goal**: Fix every user-facing chat issue from IDEA.md. Make the core experience feel polished and reliable.
 
-### 2.1 Auto-Scroll Fix
-- **Problem**: During generation, scrolling up to read is almost impossible; auto-scroll fights the user
-- **Files**: `src/components/chat/chat-messages.tsx`
-- **Implementation**:
-  - Detect user scroll-up (any upward scroll > 20px) → exit auto-scroll mode immediately
-  - Add floating "scroll to bottom" button with down-arrow icon, subtle slide-in animation
-  - Clicking button or scrolling to within 100px of bottom → re-engage auto-scroll
-  - Use `IntersectionObserver` on a sentinel element at the bottom rather than scroll events
-  - Smooth scroll animation when re-engaging (not instant jump)
+### 2.1 Auto-Scroll Fix ✅ Complete
+- [x] **Problem**: During generation, scrolling up to read is almost impossible; auto-scroll fights the user
+- [x] **Files**: `src/components/chat/chat-messages.tsx`
+- [x] **Implementation**:
+  - [x] Detect user scroll-up (any upward scroll > 20px) → exit auto-scroll mode immediately
+  - [x] Add floating "scroll to bottom" button with down-arrow icon, subtle slide-in animation
+  - [x] Clicking button or scrolling to within 100px of bottom → re-engage auto-scroll
+  - [x] Use `IntersectionObserver` on a sentinel element at the bottom rather than scroll events
+  - [x] Smooth scroll animation when re-engaging (not instant jump)
 
-### 2.2 Message Persistence During Generation
-- **Problem**: Refreshing during generation loses the response; interrupted output not saved; changing pages deletes streaming content
-- **Files**: `src/hooks/use-chat-state.ts`, `src/app/api/chats/route.ts`
-- **Implementation**:
-  - Persist partial responses to Convex every 3 seconds during streaming (debounced)
-  - On page change/refresh: save current draft with `cancelled: true` flag
-  - On return to conversation: show the partial response with "Response was interrupted" indicator
-  - Clicking "back" on sidebar should preserve streaming state, not kill it
-  - Add `beforeunload` event handler to trigger save
+### 2.2 Message Persistence During Generation ✅ Complete
+- [x] **Problem**: Refreshing during generation loses the response; interrupted output not saved; changing pages deletes streaming content
+- [x] **Files**: `src/hooks/use-chat-state.ts`, `src/app/api/chats/route.ts`
+- [x] **Implementation**:
+  - [x] Persist partial responses to Convex every 3 seconds during streaming (debounced)
+  - [x] On page change/refresh: save current draft with `cancelled: true` flag
+  - [x] On return to conversation: show the partial response with "Response was interrupted" indicator
+  - [x] Clicking "back" on sidebar should preserve streaming state, not kill it
+  - [x] Add `beforeunload` event handler to trigger save
 
-### 2.3 Progress State Machine
-- **Problem**: Shows "Thinking" even when generating; "done" state never completes; progress doesn't depend on model/prompt
-- **Files**: `src/components/chat/chat-layout.tsx`, stream phase handling
-- **Implementation**:
-  - Explicit state machine: `idle → routing → [searching] → thinking → generating → [synthesizing] → done`
-  - Each state has:
-    - Label (lowercase): "routing...", "searching...", "thinking...", "generating...", "synthesizing...", "done"
-    - Elapsed timer (with lowercase 's' for seconds — already noted in IDEA.md)
-    - Color indicator matching state
-  - "Done" state: trigger explicitly when stream ends AND post-processing completes (title gen, memory write, etc.)
-  - Show "done" for 2 seconds, then fade to idle
-  - Model-dependent: if model doesn't support thinking, skip "thinking" state
+### 2.3 Progress State Machine ✅ Complete
+- [x] **Problem**: Shows "Thinking" even when generating; "done" state never completes; progress doesn't depend on model/prompt
+- [x] **Files**: `src/components/chat/chat-layout.tsx`, `src/components/chat/chat-header.tsx`, stream phase handling
+- [x] **Implementation**:
+  - [x] Explicit state machine: `idle → routing → [searching] → thinking → generating → [synthesizing] → done`
+  - [x] Each state has:
+    - [x] Label (lowercase): "routing...", "searching...", "thinking...", "generating...", "synthesizing...", "done"
+    - [x] Elapsed timer (with lowercase 's' for seconds — already noted in IDEA.md)
+    - [x] Color indicator matching state
+  - [x] "Done" state: trigger explicitly when stream ends AND post-processing completes (title gen, memory write, etc.)
+  - [x] Show "done" for 2 seconds, then fade to idle
+  - [x] Model-dependent: if model doesn't support thinking, skip "thinking" state
 
-### 2.4 Conversation Title Generation
-- **Problem**: Title not created consistently; should be 3-5 word summary of initial prompt
-- **Files**: `src/lib/orchestrator/post-process.ts`
-- **Implementation**:
-  - Always generate title after first user message, using a cheap model
-  - Format: 3-5 words, no quotes, no "User asks about...", just the topic
-  - Examples: "WW2 Flashcards for IB", "Quadratic Formula Help", "Crow Brawl Stars Paragraph"
-  - If title generation fails, fall back to first 5 words of user message
+### 2.4 Conversation Title Generation ✅ Complete
+- [x] **Problem**: Title not created consistently; should be 3-5 word summary of initial prompt
+- [x] **Files**: `src/lib/orchestrator/post-process.ts`
+- [x] **Implementation**:
+  - [x] Always generate title after first user message, using a cheap model
+  - [x] Format: 3-5 words, no quotes, no "User asks about...", just the topic
+  - [x] Examples: "WW2 Flashcards for IB", "Quadratic Formula Help", "Crow Brawl Stars Paragraph"
+  - [x] If title generation fails, fall back to first 5 words of user message
 
-### 2.5 Right Panel Fixes
-- **Problem**: Panels open with lots of empty space; default should be orchestration; auto-open has no animation; route trace is shown instead of orchestration
-- **Files**: `src/components/chat/unified-panel.tsx`, `src/components/chat/chat-layout.tsx:276-301`
-- **Implementation**:
-  - Default auto-open panel: orchestration (not route-trace)
-  - Apply same sliding animation for auto-open as manual open (use CSS transition, not instant render)
-  - Fix empty space: panel should use `width: fit-content` with `max-width: 420px`, not fixed width
-  - Route trace content should fill available width; remove right-side dead space
-  - Canvas panel: same fix — no blank space at right
+### 2.5 Right Panel Fixes ✅ Complete
+- [x] **Problem**: Panels open with lots of empty space; default should be orchestration; auto-open has no animation; route trace is shown instead of orchestration
+- [x] **Files**: `src/components/chat/unified-panel.tsx`, `src/components/chat/chat-layout.tsx:276-301`
+- [x] **Implementation**:
+  - [x] Default auto-open panel: orchestration (not route-trace)
+  - [x] Apply same sliding animation for auto-open as manual open (use CSS transition, not instant render)
+  - [x] Fix empty space: panel should use `width: fit-content` with `max-width: 420px`, not fixed width
+  - [x] Route trace content should fill available width; remove right-side dead space
+  - [x] Canvas panel: same fix — no blank space at right
 
-### 2.6 Dark Mode Overhaul
-- **Problem**: Dark mode is "horrible"; current `#13111a` too dark/purple
-- **Files**: `src/app/globals.css`
-- **Implementation**:
-  - Change dark mode `--bg-primary` to `#2D2D2B` (warm dark, as specified in IDEA.md)
-  - Adjust `--bg-secondary`, `--bg-elevated`, `--bg-tertiary` to complement the warmer base
-  - Keep text colors warm (already correct: `--text-secondary: #b8adb0`)
-  - Ensure all borders, shadows, and overlays work with new base
-  - Test every component in dark mode: sidebar, chat, panels, modals, dropdowns, code blocks
+### 2.6 Dark Mode Overhaul ✅ Complete
+- [x] **Problem**: Dark mode is "horrible"; current `#13111a` too dark/purple
+- [x] **Files**: `src/app/globals.css`
+- [x] **Implementation**:
+  - [x] Change dark mode `--bg-primary` to `#2D2D2B` (warm dark, as specified in IDEA.md)
+  - [x] Adjust `--bg-secondary`, `--bg-elevated`, `--bg-tertiary` to complement the warmer base
+  - [x] Keep text colors warm (already correct: `--text-secondary: #b8adb0`)
+  - [x] Ensure all borders, shadows, and overlays work with new base
+  - [x] Test every component in dark mode: sidebar, chat, panels, modals, dropdowns, code blocks
 
-### 2.7 <<Tag Skeleton Rendering
-- **Problem**: Spectra's custom tags (`<<QUIZ_START>>`, `<<FLASHCARDS_START>>`, `<<DOCUMENT_START>>`) show raw text while being written; should show skeleton until tag is closed
-- **Files**: `src/components/chat/markdown-renderer.tsx`, `src/components/chat/quiz-reveal.tsx`, `src/components/chat/flashcard-reveal.tsx`
-- **Implementation**:
-  - Detect opening tags in streaming content
-  - While tag is open (no closing tag yet), render a type-appropriate skeleton:
-    - `<<QUIZ_START>>`: Quiz skeleton (question placeholders with option circles)
-    - `<<FLASHCARDS_START>>`: Card skeleton (flippable card placeholder)
-    - `<<DOCUMENT_START>>`: Document skeleton (page with lines)
-  - On closing tag: parse content and render the real component
-  - Smooth transition from skeleton to real content
+### 2.7 <<Tag Skeleton Rendering ✅ Complete
+- [x] **Problem**: Spectra's custom tags (`<<QUIZ_START>>`, `<<FLASHCARDS_START>>`, `<<DOCUMENT_START>>`) show raw text while being written; should show skeleton until tag is closed
+- [x] **Files**: `src/components/chat/chat-messages.tsx`, `src/components/chat/quiz-reveal.tsx`, `src/components/chat/flashcard-reveal.tsx`
+- [x] **Implementation**:
+  - [x] Detect opening tags in streaming content
+  - [x] While tag is open (no closing tag yet), render a type-appropriate skeleton:
+    - [x] `<<QUIZ_START>>`: Quiz skeleton (question placeholders with option circles)
+    - [x] `<<FLASHCARDS_START>>`: Card skeleton (flippable card placeholder)
+    - [x] `<<DOCUMENT_START>>`: Document skeleton (page with lines)
+  - [x] On closing tag: parse content and render the real component
+  - [x] Smooth transition from skeleton to real content
 
-### 2.8 Branch/Edit System Fix
-- **Problem**: `1/2` and `2/2` branch navigation shows overlapping prompts; edit popup too narrow; slow UI update after edit submit
-- **Files**: `src/components/chat/chat-message.tsx`, `src/components/chat/chat-messages.tsx`
-- **Implementation**:
-  - Fix branch rendering: only show the active branch's user message, with prev/next arrows
-  - When viewing branch 2/2, do NOT show branch 1/1's prompt above it
-  - Edit popup: set `min-width: min(600px, 90vw)` instead of current narrow default
-  - On edit submit: immediately show the new user message with loading state, don't wait for API
+### 2.8 Branch/Edit System Fix ✅ Complete
+- [x] **Problem**: `1/2` and `2/2` branch navigation shows overlapping prompts; edit popup too narrow; slow UI update after edit submit
+- [x] **Files**: `src/components/chat/chat-message.tsx`, `src/components/chat/chat-messages.tsx`
+- [x] **Implementation**:
+  - [x] Fix branch rendering: only show the active branch's user message, with prev/next arrows
+  - [x] When viewing branch 2/2, do NOT show branch 1/1's prompt above it
+  - [x] Edit popup: set `min-width: min(600px, 90vw)` instead of current narrow default
+  - [x] On edit submit: immediately show the new user message with loading state, don't wait for API
 
-### 2.9 Settings Consolidation
-- **Problem**: Old/deprecated settings panel still accessible from tips; settings button disappears during generation
-- **Files**: `src/components/chat/chat-settings-drawer.tsx`, `src/components/global-utility-dock.tsx`
-- **Implementation**:
-  - Remove all references to the old/deprecated settings panel
-  - Keep only the drawer accessible from sidebar toggle and header button
-  - Settings button: always visible in header, even during generation (just move stop button to its left)
-  - Tips that say "open settings" should point to the current settings drawer, not old panel
+### 2.9 Settings Consolidation ✅ Complete
+- [x] **Problem**: Old/deprecated settings panel still accessible from tips; settings button disappears during generation
+- [x] **Files**: `src/components/chat/chat-settings-drawer.tsx`, `src/components/chat/chat-header.tsx`
+- [x] **Implementation**:
+  - [x] Remove all references to the old/deprecated settings panel
+  - [x] Keep only the drawer accessible from sidebar toggle and header button
+  - [x] Settings button: always visible in header, even during generation (just move stop button to its left)
+  - [x] Tips that say "open settings" should point to the current settings drawer, not old panel
 
-### 2.10 Notification Redesign
-- **Problem**: Response-ready notification should look like achievements-unlocked; clicking should navigate to conversation
-- **Files**: `src/components/` (notification component), `convex/notifications.ts`
-- **Implementation**:
-  - Redesign notification toast: use the same animation style as achievement unlocks (slide-in from top-right, with subtle glow)
-  - Include: conversation title, mode icon, model used
-  - Click action: navigate to that conversation and scroll to the new message
-  - Stack notifications if multiple arrive (max 3 visible)
-  - Sound: optional subtle notification sound (off by default, toggleable in settings)
+### 2.10 Notification Redesign ✅ Complete
+- [x] **Problem**: Response-ready notification should look like achievements-unlocked; clicking should navigate to conversation
+- [x] **Files**: `src/components/notification-toast.tsx`, `src/components/notification-bell.tsx`, `src/hooks/use-chat-state.ts`
+- [x] **Implementation**:
+  - [x] Redesign notification toast: use the same animation style as achievement unlocks (slide-in from top-right, with subtle glow)
+  - [x] Include: conversation title, mode icon, model used
+  - [x] Click action: navigate to that conversation and scroll to the new message
+  - [x] Stack notifications if multiple arrive (max 3 visible)
+  - Sound: optional subtle notification sound (off by default, toggleable in settings) — deferred
 
-### 2.11 Sidebar Rendering Optimization
-- **Problem**: All messages rendered in sidebar at load; should lazy-render
-- **Files**: `src/components/chat/chat-sidebar.tsx`
-- **Implementation**:
-  - Initially render only the 20 most recent conversations
-  - On scroll: load more with `IntersectionObserver` (batch of 20)
-  - Maintain scroll position on re-render
-  - Ensure persistence is not broken: conversation IDs always tracked, just DOM elements lazy
-  - Fix: last sidebar nav button getting blurred/cut off — add `pb-4` padding to nav container
+### 2.11 Sidebar Rendering Optimization ✅ Complete
+- [x] **Problem**: All messages rendered in sidebar at load; should lazy-render
+- [x] **Files**: `src/components/chat/chat-sidebar.tsx`
+- [x] **Implementation**:
+  - [x] Initially render only the 20 most recent conversations
+  - [x] On scroll: load more with `IntersectionObserver` (batch of 20)
+  - [x] Maintain scroll position on re-render
+  - [x] Ensure persistence is not broken: conversation IDs always tracked, just DOM elements lazy
+  - [x] Fix: last sidebar nav button getting blurred/cut off — add `pb-4` padding to nav container
 
-### 2.12 UI Break When Switching Chats
-- **Problem**: Entire UI sometimes breaks when switching between chats; buttons and headings shift far left; note appears in chat heading section
-- **Files**: `src/components/chat/chat-layout.tsx`
-- **Implementation**:
-  - Add error boundary around chat message area with graceful fallback UI
-  - Investigate race condition: switching chat while streaming may leave stale state
-  - Add cleanup: when `selectedChatId` changes, abort any in-flight streams, clear draft state
-  - Ensure chat heading section has fixed positioning that doesn't depend on message content
+### 2.12 UI Break When Switching Chats ✅ Complete
+- [x] **Problem**: Entire UI sometimes breaks when switching between chats; buttons and headings shift far left; note appears in chat heading section
+- [x] **Files**: `src/components/chat/chat-layout.tsx`, `src/components/chat/chat-error-boundary.tsx`, `src/hooks/use-chat-state.ts`
+- [x] **Implementation**:
+  - [x] Add error boundary around chat message area with graceful fallback UI
+  - [x] Investigate race condition: switching chat while streaming may leave stale state
+  - [x] Add cleanup: when `selectedChatId` changes, abort any in-flight streams, clear draft state
+  - [x] Ensure chat heading section has fixed positioning that doesn't depend on message content
 
-### 2.13 Flashcard Reminder Intrusiveness
-- **Problem**: Flashcard reminder and idea may be too intrusive
-- **Files**: proactive banner components
-- **Implementation**:
-  - Rate-limit flashcard suggestions: max 1 per session, and only after 3+ educational exchanges
-  - Make dismissible with "Don't show again" option (stored in user preferences)
-  - Reduce visual weight: thin banner, not card-style
+### 2.13 Flashcard Reminder Intrusiveness ✅ Complete
+- [x] **Problem**: Flashcard reminder and idea may be too intrusive
+- [x] **Files**: `src/hooks/use-chat-state.ts`, `src/components/chat/chat-messages.tsx`
+- [x] **Implementation**:
+  - [x] Rate-limit flashcard suggestions: max 1 per session, and only after 3+ educational exchanges
+  - [x] Make dismissible with "Don't show again" option (stored in user preferences)
+  - [x] Reduce visual weight: thin banner, not card-style
 
-### 2.14 Memory Update Indication
-- **Problem**: No clear indication when memory gets updated
-- **Files**: chat message rendering, memory write flow
-- **Implementation**:
-  - After a memory write: show subtle inline indicator below the assistant message: "Memory updated" with brain icon
-  - Clickable: opens a small popover showing what was saved
-  - In settings: link to "View all memories" (future: dedicated memory management page)
+### 2.14 Memory Update Indication ✅ Complete
+- [x] **Problem**: No clear indication when memory gets updated
+- [x] **Files**: `src/hooks/use-chat-state.ts`, `src/components/chat/chat-message.tsx`, `src/components/chat/chat-messages.tsx`
+- [x] **Implementation**:
+  - [x] After a memory write: show subtle inline indicator below the assistant message: "Memory updated" with brain icon
+  - [x] Clickable: opens a small popover showing what was saved
+  - In settings: link to "View all memories" (future: dedicated memory management page) — deferred to Phase 8
 
 ---
 
@@ -1023,26 +1023,26 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 ### From Orchestration Analysis
 1. [x] RAG failure silently returns fallback — should warn user when no sources found despite expecting them ✅ Complete
 2. [x] No circuit breaker for model failures — same failing model retried immediately ✅ Complete
-3. Memory extraction NLP too narrow (regex only matches "prefer", "goal", "struggle")
-4. Cost budget not hard-enforced during multi-agent streaming — can exceed declared budget
-5. Mode fallback to "general" loses pedagogical structure without warning
-6. Quiz/flashcard format validation is client-side only — malformed output passes through
-7. Thinking level parameter doesn't actually enable extended thinking in models that support it
+3. [x] Memory extraction NLP too narrow (regex only matches "prefer", "goal", "struggle") ✅ Complete
+4. [x] Cost budget not hard-enforced during multi-agent streaming — can exceed declared budget ✅ Complete
+5. [x] Mode fallback to "general" loses pedagogical structure without warning ✅ Complete
+6. [x] Quiz/flashcard format validation is client-side only — malformed output passes through ✅ Complete
+7. [x] Thinking level parameter doesn't actually enable extended thinking in models that support it ✅ Complete
 8. Agent guidelines topic map not used to filter RAG results
 9. No artifact resource cleanup/retention policy
 10. [x] Max tokens per mode are hardcoded — should adapt to model's context window ✅ Complete
 
 ### From Frontend Analysis
 11. Auto-scroll race condition during heavy streaming
-12. Panel history limited to 10 entries — could overflow on complex interactions
-13. Canvas panel auto-collapses sidebar unexpectedly
-14. Mobile composer can be covered by keyboard
-15. Chat title rename has no loading state during API call
-16. Flashcard SM-2 quality rating mappings non-intuitive (1, 0, 2, 4, 5)
-17. No request deduplication — double-click sends two requests
-18. No rate limiting on client-side message sending
-19. Toast notifications don't persist or have history
-20. No keyboard shortcuts for common chat actions beyond Cmd+K
+12. [x] Panel history limited to 10 entries — could overflow on complex interactions ✅ Complete
+13. [x] Canvas panel auto-collapses sidebar unexpectedly ✅ Complete
+14. [x] Mobile composer can be covered by keyboard ✅ Complete
+15. [x] Chat title rename has no loading state during API call ✅ Complete
+16. [x] Flashcard SM-2 quality rating mappings non-intuitive (1, 0, 2, 4, 5) ✅ Complete
+17. [x] No request deduplication — double-click sends two requests ✅ Complete
+18. [x] No rate limiting on client-side message sending ✅ Complete
+19. [x] Toast notifications don't persist or have history ✅ Complete
+20. [x] No keyboard shortcuts for common chat actions beyond Cmd+K ✅ Complete
 
 ### From Backend Analysis
 21. Memory fingerprint deduplication is not atomic — race condition with concurrent writes
@@ -1061,9 +1061,9 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 
 ### From Cross-Analysis
 34. System prompt too verbose → inflates token count even for simple queries
-35. No graceful handling when Convex backend is unreachable
+35. [x] No graceful handling when Convex backend is unreachable ✅ Complete
 36. No export format for artifacts (only chat has export)
-37. No conversation templates or quick-start flows for new users
+37. [x] No conversation templates or quick-start flows for new users ✅ Complete
 38. Model leaderboard based on limited internal data — not very useful
 39. No A/B testing infrastructure for routing experiments
 40. No observability dashboard for pipeline health metrics
@@ -1071,13 +1071,13 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 42. No progressive loading for very long conversations
 43. Agent resources are not versioned — teacher updates replace without history
 44. No collaborative features (sharing artifacts between students)
-45. Missing breadcrumb navigation on nested admin pages
-46. No error boundary recovery UX — errors crash the whole page
-47. Custom theme picker complexity (primary/secondary) doesn't match user mental model
-48. No way to "pin" a model for the rest of a conversation
+45. [x] Missing breadcrumb navigation on nested admin pages ✅ Complete
+46. [x] No error boundary recovery UX — errors crash the whole page ✅ Complete
+47. [x] Custom theme picker complexity (primary/secondary) doesn't match user mental model ✅ Complete
+48. [x] No way to "pin" a model for the rest of a conversation ✅ Complete
 49. Clarification questions are generic and repetitive across sessions
 50. No semantic caching of embeddings for repeated queries
-51. Provider icon coverage is incomplete — many show generic fallback
+51. [x] Provider icon coverage is incomplete — many show generic fallback ✅ Complete
 52. No diff view for comparing artifact versions
 53. [x] Study reminders cron generates at fixed time — not timezone-aware ✅ Complete
 54. Generated documents (DOCX/PDF/PPTX) lack design consistency, and require polished results. Achievable through skills written as md files, and downloaded from internet (frontend-design for instance). Can be loaded through tools to prevent massive injection of context

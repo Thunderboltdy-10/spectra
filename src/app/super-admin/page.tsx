@@ -27,6 +27,7 @@ import {
 } from "recharts";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
+import { Breadcrumb } from "@/components/ui/breadcrumb";
 
 type GlobalStats = {
   totalOrgs: number;
@@ -471,7 +472,8 @@ export default function SuperAdminDashboard() {
         {/* Header */}
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="font-display text-3xl text-[var(--text-primary)]">Platform Overview</h1>
+            <Breadcrumb items={[{ label: "Chat", href: "/" }, { label: "Super Admin" }]} />
+            <h1 className="font-display text-3xl text-[var(--text-primary)] mt-2">Platform Overview</h1>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">
               Global management for all schools and users on the platform.
             </p>

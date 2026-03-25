@@ -26,12 +26,25 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const body = (await request.json()) as {
       name?: string;
       description?: string;
+      subjectArea?: string;
+      gradeLevel?: string;
       systemPrompt?: string;
       avatarEmoji?: string;
       avatarIcon?: string;
       category?: string;
       preferredModel?: string;
       preferredMode?: StudyMode;
+      allowedTools?: string[];
+      modelAllowlist?: string[];
+      modelDenylist?: string[];
+      accessLevel?: "private" | "class" | "school";
+      moderationStatus?: "approved" | "pending";
+      guidelinesSummary?: string;
+      guidelinesTopicMap?: string[];
+      guidelinesRubricHints?: string[];
+      guidelinesMisconceptions?: string[];
+      guidelinesVocabulary?: string[];
+      guidelinesExamStructure?: string[];
       visibility?: "public" | "private" | "shared";
     };
 

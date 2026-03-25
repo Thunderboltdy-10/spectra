@@ -15,7 +15,7 @@ import {
 } from "@/lib/orchestrator/learning-context";
 import type { Citation } from "@/types";
 
-const TITLE_MIN_WORDS = 3;
+const TITLE_MIN_WORDS = 2;
 const TITLE_MAX_WORDS = 5;
 const MEMORY_MAX_ENTRIES = 80;
 const MEMORY_MAX_RAW_CHARS = 1500;
@@ -929,6 +929,27 @@ function tokenizeWords(value: string) {
     .filter((word) => word.length > 1 || /\d/.test(word));
 }
 
+const TITLE_STOP_WORDS = new Set([
+  "a",
+  "an",
+  "the",
+  "please",
+  "can",
+  "could",
+  "would",
+  "help",
+  "me",
+  "with",
+  "about",
+  "for",
+  "this",
+  "that",
+  "my",
+  "your",
+  "and",
+  "to",
+]);
+
 function looksCodeHeavy(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return false;
@@ -942,7 +963,7 @@ function heuristicTitle(source: string) {
   if (!source.trim()) return "General Study Session";
   if (looksCodeHeavy(source)) return "Code Debugging Session";
 
-  const words = tokenizeWords(source);
+  const words = tokenizeWords(source).filter((word, index) => index > 1 || !TITLE_STOP_WORDS.has(word.toLowerCase()));
   if (words.length >= TITLE_MIN_WORDS) {
     return words.slice(0, TITLE_MAX_WORDS).join(" ");
   }
@@ -980,7 +1001,9 @@ function normalizeTitle(candidate: string, fallbackSource: string) {
 
   const cleaned = compactText(stripped);
 
-  const words = tokenizeWords(cleaned).slice(0, TITLE_MAX_WORDS);
+  const words = tokenizeWords(cleaned)
+    .filter((word, index) => index > 1 || !TITLE_STOP_WORDS.has(word.toLowerCase()))
+    .slice(0, TITLE_MAX_WORDS);
   const fallbackWords = tokenizeWords(fallbackSource);
   while (words.length < TITLE_MIN_WORDS && fallbackWords.length > 0) {
     const next = fallbackWords.shift();
@@ -1029,7 +1052,7 @@ async function generateTitleFromSnippet(
         {
           role: "system",
           content:
-            "Generate a conversation title in 3 to 5 words. Rules:\n- Just the topic, no quotes, no prefixes like \"User asks about\" or \"Help with\"\n- Be specific: \"WW2 Flashcards for IB\" not \"History Help\"\n- Include subject/context clues when present\n- Never start with articles (a, an, the)\n- Keep the same language as the user\n- Return plain title text only",
+            "Generate a conversation title in 2 to 5 words. Rules:\n- Just the topic, no quotes, no prefixes like \"User asks about\" or \"Help with\"\n- Be specific: \"WW2 Flashcards for IB\" not \"History Help\"\n- Include subject/context clues when present\n- Never start with filler words (a, an, the, please, can)\n- Keep the same language as the user\n- Return plain title text only",
         },
         {
           role: "user",

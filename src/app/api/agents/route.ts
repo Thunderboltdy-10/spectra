@@ -34,12 +34,26 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as {
       name?: string;
       description?: string;
+      subjectArea?: string;
+      gradeLevel?: string;
       systemPrompt?: string;
       avatarEmoji?: string;
       avatarIcon?: string;
       category?: string;
       preferredModel?: string;
       preferredMode?: StudyMode;
+      allowedTools?: string[];
+      modelAllowlist?: string[];
+      modelDenylist?: string[];
+      accessLevel?: "private" | "class" | "school";
+      moderationStatus?: "approved" | "pending";
+      guidelinesSummary?: string;
+      guidelinesTopicMap?: string[];
+      guidelinesRubricHints?: string[];
+      guidelinesMisconceptions?: string[];
+      guidelinesVocabulary?: string[];
+      guidelinesExamStructure?: string[];
+      resourceIds?: string[];
       visibility?: "public" | "private" | "shared";
     };
 
@@ -49,18 +63,42 @@ export async function POST(request: NextRequest) {
 
     const validMode = body.preferredMode ? safeStudyMode(body.preferredMode, "POST /api/agents") : undefined;
 
-    const result = await convexMutation("agents:createAgent", {
+    const result = (await convexMutation("agents:createAgent", {
       actorClerkId: actor.clerkId,
       name: body.name,
       description: body.description,
+      subjectArea: body.subjectArea,
+      gradeLevel: body.gradeLevel,
       systemPrompt: body.systemPrompt,
       avatarEmoji: body.avatarEmoji,
       avatarIcon: body.avatarIcon,
       category: body.category,
       preferredModel: body.preferredModel,
       preferredMode: validMode,
+      allowedTools: body.allowedTools,
+      modelAllowlist: body.modelAllowlist,
+      modelDenylist: body.modelDenylist,
+      accessLevel: body.accessLevel,
+      moderationStatus: body.moderationStatus,
+      guidelinesSummary: body.guidelinesSummary,
+      guidelinesTopicMap: body.guidelinesTopicMap,
+      guidelinesRubricHints: body.guidelinesRubricHints,
+      guidelinesMisconceptions: body.guidelinesMisconceptions,
+      guidelinesVocabulary: body.guidelinesVocabulary,
+      guidelinesExamStructure: body.guidelinesExamStructure,
       visibility: body.visibility ?? "public",
-    });
+    })) as { agentId: string };
+
+    const resourceIds = Array.isArray(body.resourceIds)
+      ? body.resourceIds.filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+      : [];
+    if (resourceIds.length > 0) {
+      await convexMutation("resources:assignResourcesToAgent", {
+        actorClerkId: actor.clerkId,
+        agentId: result.agentId,
+        resourceIds,
+      });
+    }
 
     return ok(result);
   });

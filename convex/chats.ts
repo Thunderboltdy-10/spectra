@@ -686,6 +686,7 @@ export const updateChatSettings = mutation({
     thinkingLevel: v.optional(vThinkingLevel),
     routerMode: v.optional(vRouterMode),
     manualModel: v.optional(v.string()),
+    agentId: v.optional(v.union(v.id("agents"), v.null())),
     usePersonalResources: v.optional(v.boolean()),
     title: v.optional(v.string()),
   },
@@ -700,11 +701,33 @@ export const updateChatSettings = mutation({
       throw new Error("Chat not found");
     }
 
+    let nextAgentId = chat.agentId;
+    if (args.agentId !== undefined) {
+      if (args.agentId === null) {
+        nextAgentId = undefined;
+      } else {
+        const agent = await ctx.db.get(args.agentId);
+        if (!agent || agent.orgId !== actor.orgId) {
+          throw new Error("Agent not found");
+        }
+        const canAccess =
+          actor.role === "admin"
+          || agent.visibility === "public"
+          || agent.creatorUserId === actor._id
+          || (agent.collaborators ?? []).includes(actor._id);
+        if (!canAccess) {
+          throw new Error("Not authorized for this agent");
+        }
+        nextAgentId = agent._id;
+      }
+    }
+
     await ctx.db.patch(args.chatId, {
       mode: args.mode ?? chat.mode,
       thinkingLevel: args.thinkingLevel ?? chat.thinkingLevel,
       routerMode: args.routerMode ?? chat.routerMode,
       manualModel: args.manualModel ?? chat.manualModel,
+      agentId: nextAgentId,
       usePersonalResources: args.usePersonalResources ?? chat.usePersonalResources,
       title: args.title ?? chat.title,
       updatedAt: Date.now(),

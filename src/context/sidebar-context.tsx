@@ -48,7 +48,7 @@ export type SidebarSpending = {
 };
 
 type BootstrapResponse = {
-  actor: { role: "student" | "teacher" | "admin" };
+  actor: { role: "student" | "teacher" | "admin"; userId?: string };
   isSuperAdmin?: boolean;
   chats: SidebarChat[];
   models: SidebarModel[];
@@ -73,6 +73,7 @@ type BootstrapResponse = {
 type SidebarContextValue = {
   loading: boolean;
   role: "student" | "teacher" | "admin";
+  userId?: string;
   isSuperAdmin: boolean;
   chats: SidebarChat[];
   models: SidebarModel[];
@@ -106,6 +107,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [loading, setLoading] = useState(true);
   const [role, setRole] = useState<"student" | "teacher" | "admin">("student");
+  const [userId, setUserId] = useState<string | undefined>(undefined);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [chats, setChats] = useState<SidebarChat[]>([]);
   const [models, setModels] = useState<SidebarModel[]>([]);
@@ -146,6 +148,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
     const data = (await response.json()) as BootstrapResponse;
     setRole(data.actor?.role ?? "student");
+    setUserId(data.actor?.userId);
     setIsSuperAdmin(data.isSuperAdmin ?? false);
     setChats(data.chats ?? []);
     setModels(data.models ?? []);
@@ -297,6 +300,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       value={{
         loading,
         role,
+        userId,
         isSuperAdmin,
         chats,
         models,

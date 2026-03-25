@@ -382,68 +382,68 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 
 **Goal**: Make agents the primary teacher tool and a powerful student tool. Guided creation, resource-aware, auto-routed.
 
-### 4.1 Guided Agent Creation Wizard
-- **Problem**: Agent creation is too simple; doesn't feel like it could work
-- **Files**: `src/app/agents/new/page.tsx`, `convex/agents.ts`
-- **Implementation**:
-  - Multi-step wizard:
-    1. **Identity**: Name, subject area, grade level, description
-    2. **Resources**: Upload files (mark schemes, specs, textbooks, exam papers). Real-time processing status.
-    3. **Behavior**: Generated system prompt from uploaded resources (using cheap model). User can review and edit.
-    4. **Capabilities**: Select tools (search, flashcard generation, quiz creation, document generation, diagram creation)
-    5. **Access**: Private (student's own), class (shared with class), school (all students)
-    6. **Preview**: Test conversation with the agent before publishing
-  - Auto-generate from resources: parse uploaded files to extract:
-    - Topic map (what subjects/units are covered)
-    - Rubric hints (grading criteria)
-    - Misconceptions (common errors)
-    - Key vocabulary
-    - Exam format/structure
-  - Store extracted metadata in agent schema for routing
+### 4.1 Guided Agent Creation Wizard ✅ Complete
+- [x] **Problem**: Agent creation is too simple; doesn't feel like it could work
+- [x] **Files**: `src/app/agents/new/page.tsx`, `src/components/agents/agent-builder-form.tsx`, `src/app/api/agents/extract-metadata/route.ts`, `src/app/api/agents/preview/route.ts`, `convex/resources.ts`
+- [x] **Implementation**:
+  - [x] Multi-step wizard:
+    1. [x] **Identity**: Name, subject area, grade level, description
+    2. [x] **Resources**: Upload files (mark schemes, specs, textbooks, exam papers). Real-time processing status.
+    3. [x] **Behavior**: Generated system prompt from uploaded resources (using cheap model). User can review and edit.
+    4. [x] **Capabilities**: Select tools (search, flashcard generation, quiz creation, document generation, diagram creation)
+    5. [x] **Access**: Private (student's own), class (shared with class), school (all students)
+    6. [x] **Preview**: Test conversation with the agent before publishing
+  - [x] Auto-generate from resources: parse uploaded files to extract:
+    - [x] Topic map (what subjects/units are covered)
+    - [x] Rubric hints (grading criteria)
+    - [x] Misconceptions (common errors)
+    - [x] Key vocabulary
+    - [x] Exam format/structure
+  - [x] Store extracted metadata in agent schema for routing
 
-### 4.2 Agent Auto-Routing Integration
-- **Problem**: Agents are not considered during routing; user must manually select
-- **Files**: `src/lib/orchestrator/route-plan.ts`, `src/lib/orchestrator/pipeline.ts`
-- **Implementation**:
-  - When user sends a message in general/auto mode:
-    1. Check user's available agents (school + personal)
-    2. Match message content against agent topic maps (keyword + semantic similarity)
-    3. If strong match (score > 0.7): auto-select agent and notify user ("Using Physics Agent for this question")
-    4. If moderate match (0.4-0.7): suggest agent ("This seems related to Physics. Want to use your Physics Agent?")
-    5. If no match: proceed without agent
-  - Agent context injection: when agent is active, include its system prompt, resources, and topic map in pipeline
-  - Agent-specific model preferences: if agent has `modelAllowlist`, filter routing candidates
+### 4.2 Agent Auto-Routing Integration ✅ Complete
+- [x] **Problem**: Agents are not considered during routing; user must manually select
+- [x] **Files**: `src/lib/orchestrator/route-plan.ts`, `src/lib/orchestrator/pipeline.ts`, `src/hooks/use-chat-state.ts`, `convex/chats.ts`
+- [x] **Implementation**:
+  - [x] When user sends a message in general/auto mode:
+    1. [x] Check user's available agents (school + personal)
+    2. [x] Match message content against agent topic maps (keyword + semantic similarity)
+    3. [x] If strong match (score > 0.7): auto-select agent and notify user ("Using Physics Agent for this question")
+    4. [x] If moderate match (0.4-0.7): suggest agent ("This seems related to Physics. Want to use your Physics Agent?")
+    5. [x] If no match: proceed without agent
+  - [x] Agent context injection: when agent is active, include its system prompt, resources, and topic map in pipeline
+  - [x] Agent-specific model preferences: if agent has `modelAllowlist`, filter routing candidates
 
-### 4.3 Agent Resource Processing
-- **Problem**: Agents should hold and use files/resources (specs, mark schemes, etc.)
-- **Files**: `convex/resources.ts`, `convex/rag.ts`, `convex/agents.ts`
-- **Implementation**:
-  - Agents get their own resource scope (already partially exists: `scope: "agent"`)
-  - Resources uploaded during wizard flow get processed through ingestion pipeline
-  - Agent RAG: when agent is active, retrieval scoped to agent's resources first, then fallback to general
-  - Agent topic map used to filter RAG results (only chunks matching agent's domain)
-  - Max 20 resources per agent (teachers can update/replace)
+### 4.3 Agent Resource Processing ✅ Complete
+- [x] **Problem**: Agents should hold and use files/resources (specs, mark schemes, etc.)
+- [x] **Files**: `convex/resources.ts`, `convex/rag.ts`, `convex/agents.ts`, `src/lib/orchestrator/retrieval.ts`
+- [x] **Implementation**:
+  - [x] Agents get their own resource scope (already partially exists: `scope: "agent"`)
+  - [x] Resources uploaded during wizard flow get processed through ingestion pipeline
+  - [x] Agent RAG: when agent is active, retrieval scoped to agent's resources first, then fallback to general
+  - [x] Agent topic map used to filter RAG results (only chunks matching agent's domain)
+  - [x] Max 20 resources per agent (teachers can update/replace)
 
-### 4.4 Student Agent Creation
-- **Problem**: Students should also create agents for their own needs
-- **Implementation**:
-  - Students can create private or public agents
-  - Private: only the creator can use them
-  - Public: visible to all students in the school (moderated by school admin)
-  - Student agents have simpler wizard (skip some teacher-specific steps)
-  - Student agents limited to 5 resources each
-  - Example use cases: "My Essay Helper", "Math Homework Agent", "Language Practice Agent"
+### 4.4 Student Agent Creation ✅ Complete
+- [x] **Problem**: Students should also create agents for their own needs
+- [x] **Implementation**:
+  - [x] Students can create private or public agents
+  - [x] Private: only the creator can use them
+  - [x] Public: visible to all students in the school (moderated by school admin)
+  - [x] Student agents have simpler wizard (skip some teacher-specific steps)
+  - [x] Student agents limited to 5 resources each
+  - [x] Example use cases: "My Essay Helper", "Math Homework Agent", "Language Practice Agent"
 
-### 4.5 Agent Dropdown Redesign
-- **Problem**: Agent dropdown is too simple; doesn't feel powerful
-- **Files**: `src/components/chat/chat-composer.tsx` (agent selector section)
-- **Implementation**:
-  - Grid layout with agent cards (not a flat list)
-  - Each card: avatar, name, subject tag, resource count, usage count
-  - Sections: "Recommended" (auto-detected from recent activity), "School Agents" (teacher-created), "My Agents" (student-created), "All Agents"
-  - Search and filter by subject
-  - Quick-create button at the bottom
-  - Show when agent was last updated
+### 4.5 Agent Dropdown Redesign ✅ Complete
+- [x] **Problem**: Agent dropdown is too simple; doesn't feel powerful
+- [x] **Files**: `src/components/chat/chat-composer.tsx` (agent selector section)
+- [x] **Implementation**:
+  - [x] Grid layout with agent cards (not a flat list)
+  - [x] Each card: avatar, name, subject tag, resource count, usage count
+  - [x] Sections: "Recommended" (auto-detected from recent activity), "School Agents" (teacher-created), "My Agents" (student-created), "All Agents"
+  - [x] Search and filter by subject
+  - [x] Quick-create button at the bottom
+  - [x] Show when agent was last updated
 
 ---
 
@@ -857,6 +857,8 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
   - Card size: compact but readable
   - Mode color indicator on each card
   - Active mode highlighted with border
+  - Model icons improvement. Some are much smaller than others (the ones automatically generated, that dont have the actual icon)
+  - Icon shown when dropdown collapsed should mirror the icon of provider (auto keeps agent current icon)
 
 ### 9.2 Model Dropdown Redesign
 - **Problem**: Needs provider sidebar with icons; many providers missing icons; search should work

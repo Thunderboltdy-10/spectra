@@ -208,6 +208,7 @@ export default defineSchema({
   })
     .index("by_owner", ["ownerUserId"])
     .index("by_owner_updated", ["ownerUserId", "updatedAt"])
+    .index("by_owner_pack_updated", ["ownerUserId", "packId", "updatedAt"])
     .index("by_org", ["orgId"]),
 
   messages: defineTable({
@@ -689,6 +690,15 @@ export default defineSchema({
     failureCount: v.number(),
     totalLatencyMs: v.number(),
     avgLatencyMs: v.number(),
+    consecutiveFailureCount: v.optional(v.number()),
+    lastFailureAt: v.optional(v.number()),
+    lengthFinishCount: v.optional(v.number()),
+    totalResponseChars: v.optional(v.number()),
+    positiveFeedbackCount: v.optional(v.number()),
+    negativeFeedbackCount: v.optional(v.number()),
+    qualityScore: v.optional(v.number()),
+    challengerState: v.optional(v.union(v.literal("challenger"), v.literal("normal"), v.literal("deprioritized"))),
+    lastEvaluatedAt: v.optional(v.number()),
     lastUsedAt: v.number(),
     createdAt: v.number(),
     updatedAt: v.number(),

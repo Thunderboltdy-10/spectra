@@ -641,6 +641,7 @@ export const retryStaleResourcesInternal = internalMutation({
     let requeued = 0;
     let exhausted = 0;
     let failed = 0;
+    const pendingScheduleResources: typeof candidates = [];
 
     for (const resource of candidates) {
       if (resource.status !== "uploaded" && resource.status !== "processing") {
@@ -675,20 +676,35 @@ export const retryStaleResourcesInternal = internalMutation({
         processingAttempts: nextAttempts,
         updatedAt: now,
       });
+      pendingScheduleResources.push(resource);
+    }
 
-      try {
-        await ctx.scheduler.runAfter(0, internal.ingestQueue.processResource, {
+    const scheduleResults = await Promise.allSettled(
+      pendingScheduleResources.map((resource) =>
+        ctx.scheduler.runAfter(0, internal.ingestQueue.processResource, {
           resourceId: resource._id,
-        });
+        })
+      ),
+    );
+
+    for (let index = 0; index < scheduleResults.length; index += 1) {
+      const scheduleResult = scheduleResults[index];
+      const resource = pendingScheduleResources[index];
+      if (!resource) continue;
+      if (scheduleResult?.status === "fulfilled") {
         requeued += 1;
-      } catch (error) {
-        await ctx.db.patch(resource._id, {
-          status: "failed",
-          error: error instanceof Error ? error.message.slice(0, 400) : "Unable to schedule file processing.",
-          updatedAt: Date.now(),
-        });
-        failed += 1;
+        continue;
       }
+
+      await ctx.db.patch(resource._id, {
+        status: "failed",
+        error:
+          scheduleResult?.reason instanceof Error
+            ? scheduleResult.reason.message.slice(0, 400)
+            : "Unable to schedule file processing.",
+        updatedAt: Date.now(),
+      });
+      failed += 1;
     }
 
     return {

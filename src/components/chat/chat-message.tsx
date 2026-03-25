@@ -203,18 +203,8 @@ export function ChatMessage({
   const subcallInputTokens = routeTrace?.subcalls?.reduce((sum, item) => sum + (item.inputTokens ?? 0), 0) ?? 0;
   const subcallOutputTokens = routeTrace?.subcalls?.reduce((sum, item) => sum + (item.outputTokens ?? 0), 0) ?? 0;
   const hasSubcallTotals = subcallInputTokens + subcallOutputTokens > 0;
-  const directTokens = hasSubcallTotals
-    ? subcallInputTokens + subcallOutputTokens
-    : (usageIn ?? 0) + (usageOut ?? 0);
-  const collaboratorExtraTokens =
-    routeTrace?.collaborators
-      ?.filter((item) => item.role !== "synthesizer")
-      .reduce((sum, item) => sum + (item.tokensUsed ?? 0), 0) ?? 0;
-  const collaboratorTotalTokens = routeTrace?.collaborators?.reduce((sum, item) => sum + (item.tokensUsed ?? 0), 0) ?? 0;
-  const totalTokens =
-    directTokens > 0
-      ? (hasSubcallTotals ? directTokens : directTokens + collaboratorExtraTokens)
-      : collaboratorTotalTokens;
+  const displayInputTokens = hasSubcallTotals ? subcallInputTokens : (usageIn ?? 0);
+  const displayOutputTokens = hasSubcallTotals ? subcallOutputTokens : (usageOut ?? 0);
   const timeLabel = useMemo(() => formatRelativeTime(createdAt), [createdAt]);
   const hasEnhanced = Boolean(enhancedContent && enhancedContent.trim());
   const displayUserContent = isUser && showEnhanced && hasEnhanced ? enhancedContent ?? content : content;
@@ -653,9 +643,16 @@ export function ChatMessage({
                 </div>
               )}
               <div className="mt-2 flex items-center gap-2 text-[11px] text-[var(--text-secondary)]">
-                {totalTokens > 0 ? <span>{totalTokens.toLocaleString()} tokens</span> : null}
+                <span>
+                  Input: {displayInputTokens.toLocaleString()} tokens | Output: {displayOutputTokens.toLocaleString()} tokens
+                </span>
                 {timeLabel ? <span>{timeLabel}</span> : null}
               </div>
+              {routeTrace?.inputTokenBreakdown ? (
+                <div className="mt-1 text-[10px] text-[var(--text-tertiary)]">
+                  Context: system {routeTrace.inputTokenBreakdown.systemPrompt.toLocaleString()} | history {routeTrace.inputTokenBreakdown.history.toLocaleString()} | memory {routeTrace.inputTokenBreakdown.memory.toLocaleString()} | sources {routeTrace.inputTokenBreakdown.sources.toLocaleString()}
+                </div>
+              ) : null}
             </div>
           </div>
         )}

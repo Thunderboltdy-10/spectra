@@ -245,6 +245,7 @@ type SendMessageOptions = {
   modeOverride?: StudyMode;
   routerModeOverride?: RouterMode;
   manualModelOverride?: string;
+  confirmExpensiveModelOverride?: boolean;
   forcedModelOverride?: string;
   parentMessageIdOverride?: string;
   attemptedModels?: string[];
@@ -1960,6 +1961,10 @@ export function useChatState() {
           thinkingLevel,
           routerMode: effectiveRouterMode,
           manualModel: effectiveRouterMode === "manual" ? effectiveManualModel : undefined,
+          confirmExpensiveModel:
+            effectiveRouterMode === "manual"
+              ? Boolean(options?.confirmExpensiveModelOverride)
+              : undefined,
           imageModel: requestedMode === "image" ? imageModel : undefined,
           usePersonalResources,
           regenerate: isRegenerate,
@@ -1990,11 +1995,47 @@ export function useChatState() {
       if (!response.ok || !response.body) {
         const errorText = await response.text();
         let normalizedError = errorText;
+        let errorCode: string | undefined;
+        let requiredConfirmation = false;
         try {
-          const parsed = JSON.parse(errorText) as { error?: { message?: string }; message?: string };
+          const parsed = JSON.parse(errorText) as {
+            error?: { code?: string; message?: string };
+            message?: string;
+            requiredConfirmation?: boolean;
+          };
+          errorCode = parsed.error?.code;
+          requiredConfirmation = Boolean(parsed.requiredConfirmation);
           normalizedError = parsed.error?.message ?? parsed.message ?? errorText;
         } catch {
           // Keep plain text error.
+        }
+        if (
+          errorCode === "MANUAL_MODEL_CONFIRM_REQUIRED"
+          && effectiveRouterMode === "manual"
+          && !options?.confirmExpensiveModelOverride
+          && requiredConfirmation
+        ) {
+          const confirmed = typeof window !== "undefined"
+            ? window.confirm(`${normalizedError}\n\nConfirm to run this model for this request.`)
+            : false;
+          if (confirmed) {
+            return await sendMessage(override ?? text, {
+              regenerate: options?.regenerate,
+              skipLocalUser: true,
+              skipServerUserPersist: true,
+              retryAttempt,
+              chatIdOverride: activeChatId,
+              modeOverride: requestedMode,
+              routerModeOverride: requestedRouterMode,
+              manualModelOverride: requestedManualModel,
+              confirmExpensiveModelOverride: true,
+              forcedModelOverride: options?.forcedModelOverride,
+              attemptedModels: options?.attemptedModels,
+              preservedText,
+              preservedFiles,
+              localUserMessageId,
+            });
+          }
         }
         throw new Error(normalizedError || "Failed to send message");
       }
@@ -2703,6 +2744,7 @@ export function useChatState() {
             modeOverride: requestedMode,
             routerModeOverride: requestedRouterMode,
             manualModelOverride: requestedManualModel,
+            confirmExpensiveModelOverride: options?.confirmExpensiveModelOverride,
             forcedModelOverride: backupModel,
             attemptedModels,
             preservedText,

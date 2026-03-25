@@ -2,6 +2,7 @@ import { MODEL_CONFIG } from "@/lib/model-config";
 import { isModeAvailable } from "@/lib/modes";
 import { openRouterChatCompletion } from "@/lib/openrouter";
 import { recordOpenRouterUsage } from "@/lib/usage-tracking";
+import { fuzzyScore } from "@/lib/fuzzy-model-search";
 import type { SpendingTier, StudyMode, ThinkingLevel } from "@/types";
 
 const SEARCH_KEYWORDS = [
@@ -70,6 +71,10 @@ export type ExplainDepth = "introductory" | "intermediate" | "advanced";
 export type UserDirectives = {
   forcedModel?: string;
   forceMultiAgent?: boolean;
+  detectedModelPhrase?: string;
+  detectedModelScore?: number;
+  detectedModelSource?: "fuzzy_catalog" | "alias_fallback";
+  orchestrationPhraseDetected?: boolean;
   memoryActions?: Array<
     | { type: "forget"; target?: string }
     | { type: "negative_topic"; topic: string; target?: string }
@@ -85,43 +90,124 @@ export type RequestClassification = {
   reason: string;
 };
 
-const MODEL_ALIASES: Record<string, string> = {
-  "claude": "anthropic/claude-sonnet-4",
-  "claude sonnet": "anthropic/claude-sonnet-4",
-  "claude opus": "anthropic/claude-opus-4",
-  "claude haiku": "anthropic/claude-haiku-4",
-  "gpt-4": "openai/gpt-4.1",
-  "gpt-4o": "openai/gpt-4o",
-  "gpt4": "openai/gpt-4.1",
-  "gpt 4": "openai/gpt-4.1",
-  "gemini": "google/gemini-2.5-pro-preview",
-  "gemini pro": "google/gemini-2.5-pro-preview",
-  "gemini flash": "google/gemini-2.5-flash-preview",
-  "o3": "openai/o3",
-  "o4-mini": "openai/o4-mini",
-  "deepseek": "deepseek/deepseek-chat-v3-0324",
-  "llama": "meta-llama/llama-4-maverick",
-  "perplexity": "perplexity/sonar-reasoning-pro",
+const MODEL_ALIAS_QUERIES: Record<string, string> = {
+  "claude": "anthropic claude sonnet",
+  "claude sonnet": "anthropic claude sonnet",
+  "claude opus": "anthropic claude opus",
+  "claude haiku": "anthropic claude haiku",
+  "gpt-4": "openai gpt-4o",
+  "gpt4": "openai gpt-4o",
+  "gpt 4": "openai gpt-4o",
+  "gpt-4o": "openai gpt-4o",
+  "gemini": "google gemini",
+  "gemini pro": "google gemini pro",
+  "gemini flash": "google gemini flash",
+  "o3": "openai o3",
+  "o4-mini": "openai o4 mini",
+  "deepseek": "deepseek",
+  "llama": "meta llama",
+  "perplexity": "perplexity sonar",
 };
 
-export function parseUserDirectives(message: string): UserDirectives {
+type ParseUserDirectivesOptions = {
+  modelCatalog?: Array<{
+    modelId: string;
+    name?: string;
+    provider?: string;
+    description?: string;
+  }>;
+  minModelMatchScore?: number;
+};
+
+function normalizeModelPhrase(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[“”"']/g, "")
+    .trim();
+}
+
+function resolveRequestedModel(params: {
+  phrase: string;
+  modelCatalog?: ParseUserDirectivesOptions["modelCatalog"];
+  minModelMatchScore: number;
+}) {
+  const normalizedPhrase = normalizeModelPhrase(params.phrase);
+  if (!normalizedPhrase) return undefined;
+  const query = MODEL_ALIAS_QUERIES[normalizedPhrase] ?? normalizedPhrase;
+  const catalog = params.modelCatalog ?? [];
+
+  if (catalog.length > 0) {
+    let best: { modelId: string; score: number } | undefined;
+    for (const model of catalog) {
+      const base = fuzzyScore(query, {
+        name: model.name ?? model.modelId,
+        modelId: model.modelId,
+        provider: model.provider ?? model.modelId.split("/")[0] ?? "unknown",
+        description: model.description,
+      });
+      const haystack = `${model.modelId} ${model.name ?? ""} ${model.provider ?? ""}`.toLowerCase();
+      let score = base;
+      if (haystack.includes(normalizedPhrase)) score += 0.2;
+      if (haystack.includes(query)) score += 0.1;
+      if (!best || score > best.score) best = { modelId: model.modelId, score };
+    }
+    if (best && best.score >= params.minModelMatchScore) {
+      return {
+        modelId: best.modelId,
+        score: Number(best.score.toFixed(3)),
+        source: "fuzzy_catalog" as const,
+      };
+    }
+  }
+
+  const knownAlias = MODEL_ALIAS_QUERIES[normalizedPhrase];
+  if (knownAlias) {
+    const fallbackLeaf = knownAlias.split(" ").slice(-2).join("-");
+    const fallbackModelId = Object.values(MODEL_CONFIG).find((modelId) =>
+      typeof modelId === "string" && modelId.toLowerCase().includes(fallbackLeaf),
+    );
+    if (fallbackModelId) {
+      return {
+        modelId: fallbackModelId,
+        score: 0.4,
+        source: "alias_fallback" as const,
+      };
+    }
+  }
+
+  return undefined;
+}
+
+export function parseUserDirectives(message: string, options?: ParseUserDirectivesOptions): UserDirectives {
   const result: UserDirectives = {};
   const lower = message.toLowerCase();
   const memoryActions: NonNullable<UserDirectives["memoryActions"]> = [];
+  const minModelMatchScore = options?.minModelMatchScore ?? 0.36;
 
   // Detect model requests like "use Claude", "with GPT-4", "use Gemini"
-  const modelMatch = lower.match(/(?:use|with|via|switch to|try)\s+([\w\s-]+?)(?:\s+(?:model|for|to|$)|[.,!?]|$)/i);
+  const modelMatch = lower.match(
+    /\b(?:use|with|via|switch to|try|run with|select)\s+([\w\s./:-]+(?:\s+[\w\s./:-]+){0,5}?)(?:\s+(?:model|for|to)\b|[.,!?]|$)/i,
+  );
   if (modelMatch) {
     const requested = modelMatch[1]!.trim();
-    const alias = MODEL_ALIASES[requested];
-    if (alias) {
-      result.forcedModel = alias;
+    const resolved = resolveRequestedModel({
+      phrase: requested,
+      modelCatalog: options?.modelCatalog,
+      minModelMatchScore,
+    });
+    if (resolved?.modelId) {
+      result.forcedModel = resolved.modelId;
+      result.detectedModelPhrase = requested;
+      result.detectedModelScore = resolved.score;
+      result.detectedModelSource = resolved.source;
     }
   }
 
   // Detect multi-agent requests
-  if (/(?:use|launch|run|enable)\s+(?:sub[- ]?agents?|specialists?|multi[- ]?agent|collaborat)/i.test(lower)) {
+  if (/(?:use|launch|run|enable|get)\s+(?:sub[- ]?agents?|specialists?|multi[- ]?agent|multiple models?|different perspectives?|collaborat)/i.test(lower)) {
     result.forceMultiAgent = true;
+    result.orchestrationPhraseDetected = true;
   }
 
   const forgetMatch =

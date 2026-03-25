@@ -21,6 +21,19 @@ type BuildRoutePlanParams = {
   schoolSoulVersion?: string;
 };
 
+function detectRequestedModelPhrase(message: string) {
+  const match = message.match(
+    /\b(?:use|switch to|try|run with|with)\s+(?:the\s+)?([a-z0-9][a-z0-9\s._:/-]{1,64}?)(?:\s+(?:model|for this|for now|please)\b|[.!?,]|$)/i,
+  );
+  return match?.[1]?.trim();
+}
+
+function detectOrchestrationIntent(message: string) {
+  return /\b(use multiple models|multiple models|multi[- ]?agent|collaborat(?:e|ion)|different perspectives|multiple perspectives|specialists?)\b/i.test(
+    message,
+  );
+}
+
 function isExplicitSearchRequest(message: string) {
   return /\b(search (the )?web|look up online|find online|browse the web|web search|check online|verify online|use current sources|cite sources)\b/i.test(message);
 }
@@ -197,9 +210,14 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
       : params.complexity === "medium"
         ? "normal"
         : "simple";
+  const requestedOrchestration = detectOrchestrationIntent(params.message);
   const shouldUseMultiStep =
-    params.complexity === "complex"
-    && (params.mode === "research" || (artifactRequest && requestedArtifactFormats.includes("pptx")) || (params.hasAgent && shouldUseSchoolResources));
+    (
+      params.complexity === "complex"
+      && (params.mode === "research" || (artifactRequest && requestedArtifactFormats.includes("pptx")) || (params.hasAgent && shouldUseSchoolResources))
+    )
+    || requestedOrchestration;
+  const requestedModelPhrase = detectRequestedModelPhrase(params.message);
 
   const retrievalScopes: RetrievalScope[] = [
     ...(params.hasPack ? ["pack" as const] : []),
@@ -270,5 +288,9 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
     modeContract,
     agentContract,
     schoolSoulVersion: params.schoolSoulVersion,
+    intentSignals: {
+      requestedModelPhrase,
+      requestedOrchestration,
+    },
   };
 }

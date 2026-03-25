@@ -405,12 +405,14 @@ export function ChatComposer(props: ChatComposerProps) {
           cautions.push("Context too small");
         }
         const hasKnownCost = typeof model.inputCostPerM === "number" || typeof model.outputCostPerM === "number";
-        const expensiveBlock = hasKnownCost && isExpensiveModel(model) ? "Model exceeds the maximum cost limit." : null;
-        const restrictionReason = expensiveBlock ?? restrictionReasonForTier(model, userSpending?.tier);
+        const expensiveWarning = hasKnownCost && isExpensiveModel(model)
+          ? "Exceeds 30/M cap (manual confirmation required)."
+          : null;
+        const restrictionReason = restrictionReasonForTier(model, userSpending?.tier);
         return {
           model,
           recommended: recommendedModelIds.has(model.modelId),
-          cautionReason: cautions.join(" · "),
+          cautionReason: [...cautions, expensiveWarning].filter(Boolean).join(" · "),
           restrictionReason,
         };
       });

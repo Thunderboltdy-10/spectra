@@ -84,7 +84,7 @@ function mapLiveModel(model: {
   return {
     modelId: model.id,
     name: model.name || model.id,
-    provider: model.top_provider?.name || model.id.split("/")[0] || "Unknown",
+    provider: model.id.split("/")[0] || model.top_provider?.name || "Unknown",
     description: model.description || "",
     contextLength: model.context_length,
     releaseDate: typeof model.created === "number" ? new Date(model.created * 1000).toISOString() : undefined,

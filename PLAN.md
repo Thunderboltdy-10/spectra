@@ -25,65 +25,65 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 
 **Goal**: Fix the broken infrastructure that everything else depends on.
 
-### 1.1 OPENROUTER_API_KEY Error Chain
-- **Problem**: `OPENROUTER_API_KEY missing for ingestion` when attaching files; `OPENROUTER_API_KEY missing for catalog sync` in cron jobs
-- **Files**: `convex/ingestQueue.ts:232`, `convex/catalogSync.ts:434`, `convex/soul.ts:106`
-- **Fix**: Add proper env var validation at startup. Add graceful degradation paths: lexical fallback for soul (already exists), queue-and-retry for ingestion, skip-and-warn for catalog sync. Surface clear error messages in admin UI when key is missing.
+### 1.1 OPENROUTER_API_KEY Error Chain ✅ Complete
+- [x] **Problem**: `OPENROUTER_API_KEY missing for ingestion` when attaching files; `OPENROUTER_API_KEY missing for catalog sync` in cron jobs
+- [x] **Files**: `convex/ingestQueue.ts:232`, `convex/catalogSync.ts:434`, `convex/soul.ts:106`
+- [x] **Fix**: Add proper env var validation at startup. Add graceful degradation paths: lexical fallback for soul (already exists), queue-and-retry for ingestion, skip-and-warn for catalog sync. Surface clear error messages in admin UI when key is missing.
 
-### 1.2 File Policy: 7-Day Auto-Expiry
-- **Problem**: No retention policy for conversation-attached files; storage grows unbounded
-- **Files**: `convex/resources.ts`, `convex/crons.ts`
-- **Implementation**:
-  - Add `expiresAt` field to resources schema (7 days from upload for conversation files, null for My Files and agent resources)
-  - New cron job: `cleanup-expired-resources` (daily at 2:00 UTC)
-  - Cascade: delete chunks, then storage blob, then resource record
-  - No user warning needed (per user preference)
-  - Keep: My Files (scope=personal with explicit save), agent resources, pack resources
+### 1.2 File Policy: 7-Day Auto-Expiry ✅ Complete
+- [x] **Problem**: No retention policy for conversation-attached files; storage grows unbounded
+- [x] **Files**: `convex/resources.ts`, `convex/crons.ts`
+- [x] **Implementation**:
+  - [x] Add `expiresAt` field to resources schema (7 days from upload for conversation files, null for My Files and agent resources)
+  - [x] New cron job: `cleanup-expired-resources` (daily at 2:00 UTC)
+  - [x] Cascade: delete chunks, then storage blob, then resource record
+  - [x] No user warning needed (per user preference)
+  - [x] Keep: My Files (scope=personal with explicit save), agent resources, pack resources
 
-### 1.3 File Limits & Blocked Extensions
-- **Files**: `convex/resources.ts`, `convex/ingestQueue.ts`
-- **Implementation**:
-  - Enforce max 5 files per conversation attachment
-  - Enforce max 25 files in My Files (already exists but verify)
-  - Block video extensions at upload validation: mp4, mov, avi, mkv, webm, flv, wmv
-  - Block unsupported: exe, dll, bin, iso, dmg, apk, ipa
-  - Add compaction precautions: warn if conversation has many large file contexts
+### 1.3 File Limits & Blocked Extensions ✅ Complete
+- [x] **Files**: `convex/resources.ts`, `convex/ingestQueue.ts`
+- [x] **Implementation**:
+  - [x] Enforce max 5 files per conversation attachment
+  - [x] Enforce max 25 files in My Files (already exists but verify)
+  - [x] Block video extensions at upload validation: mp4, mov, avi, mkv, webm, flv, wmv
+  - [x] Block unsupported: exe, dll, bin, iso, dmg, apk, ipa
+  - [x] Add compaction precautions: warn if conversation has many large file contexts
 
-### 1.4 finish_reason Handling
-- **Problem**: `finish_reason: "length"` parsed but never communicated to UI or handled
-- **Files**: `src/lib/openrouter.ts:503,526,566`
-- **Implementation**:
-  - Include `finishReason` in the `type: "done"` stream event
-  - When `finish_reason === "length"`: auto-continue with the partial response as context, prepend "Continue from where you stopped"
-  - Cap at 2 continuation rounds to prevent runaway costs
-  - Surface subtle indicator: "Expanding response..." during continuation
-  - Track truncation rate per model in usage events for routing feedback
+### 1.4 finish_reason Handling ✅ Complete
+- [x] **Problem**: `finish_reason: "length"` parsed but never communicated to UI or handled
+- [x] **Files**: `src/lib/openrouter.ts:503,526,566`
+- [x] **Implementation**:
+  - [x] Include `finishReason` in the `type: "done"` stream event
+  - [x] When `finish_reason === "length"`: auto-continue with the partial response as context, prepend "Continue from where you stopped"
+  - [x] Cap at 2 continuation rounds to prevent runaway costs
+  - [x] Surface subtle indicator: "Expanding response..." during continuation
+  - [x] Track truncation rate per model in usage events for routing feedback
 
-### 1.5 Manual Model Selection Fix
-- **Problem**: "Use model" button on model page doesn't work; dropdown doesn't allow manual selection
-- **Files**: `src/app/models/page.tsx`, `src/components/chat/chat-composer.tsx`, chat state
-- **Fix**: Ensure `routerMode: "manual"` + `manualModel: selectedModelId` propagates correctly from model page to chat state. Fix the model page routing to `/chat?model=...&router=manual`.
+### 1.5 Manual Model Selection Fix ✅ Complete
+- [x] **Problem**: "Use model" button on model page doesn't work; dropdown doesn't allow manual selection
+- [x] **Files**: `src/app/models/page.tsx`, `src/components/chat/chat-composer.tsx`, chat state
+- [x] **Fix**: Ensure `routerMode: "manual"` + `manualModel: selectedModelId` propagates correctly from model page to chat state. Fix the model page routing to `/chat?model=...&router=manual`.
 
-### 1.6 System Prompt Token Bloat
-- **Problem**: Even simple prompts show 3500+ tokens. System prompt is too verbose for simple queries.
-- **Files**: `src/lib/prompts/policy.ts`
-- **Implementation**:
-  - Tier the system prompt by pipeline complexity:
-    - T0 (simple): Base identity (50 tokens) + mode rules only
-    - T1 (light): + memory profile + context summary
-    - T2 (full): + guidelines + skills + search block + source rules
-    - T3 (multi-agent): Full system prompt
-  - Remove redundant instructions that repeat across modes
-  - Compress mode rules into denser format
-  - Target: T0 system prompt < 400 tokens, T1 < 800, T2 < 1500
+### 1.6 System Prompt Token Bloat ✅ Complete
+- [x] **Problem**: Even simple prompts show 3500+ tokens. System prompt is too verbose for simple queries.
+- [x] **Files**: `src/lib/prompts/policy.ts`
+- [x] **Implementation**:
+  - [x] Tier the system prompt by pipeline complexity:
+    - [x] T0 (simple): Base identity (50 tokens) + mode rules only
+    - [x] T1 (light): + memory profile + context summary
+    - [x] T2 (full): + guidelines + skills + search block + source rules
+    - [x] T3 (multi-agent): Full system prompt
+  - [x] Remove redundant instructions that repeat across modes
+  - [x] Compress mode rules into denser format
+  - [x] Target: T0 system prompt < 400 tokens, T1 < 800, T2 < 1500
 
-### 1.7 Catalog Sync Error Fix
-- **Files**: `convex/catalogSync.ts:434,522`
-- **Fix**: Guard `refreshCatalogBase` with env check. If key missing, log warning and return empty without throwing. Catalog data should degrade gracefully (use last cached data).
+### 1.7 Catalog Sync Error Fix ✅ Complete
+- [x] **Files**: `convex/catalogSync.ts:434,522`
+- [x] **Fix**: Guard `refreshCatalogBase` with env check. If key missing, log warning and return empty without throwing. Catalog data should degrade gracefully (use last cached data).
 
-### 1.8 Schema Preparations for Artifacts
-- **Files**: `convex/schema.ts`
-- **New tables** (designed now, populated in Phase 5):
+### 1.8 Schema Preparations for Artifacts ✅ Complete
+- [x] **Files**: `convex/schema.ts`
+- [x] **New tables** (designed now, populated in Phase 5):
   ```
   artifacts: {
     ownerUserId, orgId, type, title, content (JSON),
@@ -97,25 +97,25 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
     createdAt
   }
   ```
-- **Indexes**: `artifacts.by_owner_updated`, `artifacts.by_org`, `artifacts.by_type`
-- **Migration path**: flashcardDecks, images, bookmarks → artifacts with type field
+- [x] **Indexes**: `artifacts.by_owner_updated`, `artifacts.by_org`, `artifacts.by_type`
+- [x] **Migration path**: flashcardDecks, images, bookmarks → artifacts with type field
 
-### 1.9 Compaction Improvements
-- **Problem**: Manual summary only (no LLM summarization); minimum 20 messages; single compaction boundary
-- **Files**: `convex/compaction.ts`, `convex/chats.ts`
-- **Implementation**:
-  - Use a cheap model (via pipeline budget T0) to generate compaction summary instead of manual extraction
-  - Lower minimum to 12 messages
-  - Preserve unresolved user goals and artifact references in summary
-  - Add `compactionQuality` field: "manual" | "llm" | "hybrid"
+### 1.9 Compaction Improvements ✅ Complete
+- [x] **Problem**: Manual summary only (no LLM summarization); minimum 20 messages; single compaction boundary
+- [x] **Files**: `convex/compaction.ts`, `convex/chats.ts`
+- [x] **Implementation**:
+  - [x] Use a cheap model (via pipeline budget T0) to generate compaction summary instead of manual extraction
+  - [x] Lower minimum to 12 messages
+  - [x] Preserve unresolved user goals and artifact references in summary
+  - [x] Add `compactionQuality` field: "manual" | "llm" | "hybrid"
 
-### 1.10 Missing Database Indexes
-- **Files**: `convex/schema.ts`
-- Add indexes:
-  - `messages.by_chat_created` (for efficient history loading)
-  - `resources.by_org_updated` (for batch processing)
-  - `usageEvents.by_org_model_day` (for per-model analytics)
-  - `artifacts.by_owner_type` (for filtered artifact views)
+### 1.10 Missing Database Indexes ✅ Complete
+- [x] **Files**: `convex/schema.ts`
+- [x] Add indexes:
+  - [x] `messages.by_chat_created` (for efficient history loading)
+  - [x] `resources.by_org_updated` (for batch processing)
+  - [x] `usageEvents.by_org_model_day` (for per-model analytics)
+  - [x] `artifacts.by_owner_type` (for filtered artifact views)
 
 ---
 
@@ -266,47 +266,47 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 
 **Goal**: Fundamentally reimagine heuristic routing to be diverse, cache-aware, reliable, and transparent.
 
-### 3.1 Provider Coverage Expansion
-- **Problem**: Always the same candidates (Seed, Claude, Gemini). Missing OpenAI, Mistral, MiniMax, Moonshot, Z.ai
-- **Files**: `convex/catalogSync.ts`, `convex/curatedModelRegistry.ts`, `src/lib/routing/heuristic.ts`
-- **Implementation**:
-  - Expand curated model registry with models from all major providers
-  - Add provider diversity as a first-class routing signal
-  - Curated tiers (illustrative examples — **never hardcode specific models**; tiers are populated dynamically from catalog sync):
-    - **Budget heroes**: e.g. DeepSeek V3.x, Qwen 3.x, Seed 2.x, Gemma — whatever is cheapest and capable at any given time
-    - **Balanced**: e.g. GPT-4o-mini class, Claude Haiku class, Gemini Flash class, Mistral Small class
-    - **Premium**: e.g. GPT-4o class, Claude Sonnet class, Gemini Pro class, DeepSeek R1 class
-    - **Heavy**: e.g. Claude Opus class, GPT-5 class, Gemini Ultra class (gated by cost cap)
-  - **Note**: Model landscape changes rapidly. Tier assignment must be derived from catalog pricing + capability scores, not from a hardcoded list. New models entering the catalog auto-slot into the correct tier.
-  - Each tier: minimum 4 different providers represented
+### 3.1 Provider Coverage Expansion ✅ Complete
+- [x] **Problem**: Always the same candidates (Seed, Claude, Gemini). Missing OpenAI, Mistral, MiniMax, Moonshot, Z.ai
+- [x] **Files**: `convex/catalogSync.ts`, `convex/curatedModelRegistry.ts`, `src/lib/routing/heuristic.ts`
+- [x] **Implementation**:
+  - [x] Expand curated model registry with models from all major providers
+  - [x] Add provider diversity as a first-class routing signal
+  - [x] Curated tiers (illustrative examples — **never hardcode specific models**; tiers are populated dynamically from catalog sync):
+    - [x] **Budget heroes**: e.g. DeepSeek V3.x, Qwen 3.x, Seed 2.x, Gemma — whatever is cheapest and capable at any given time
+    - [x] **Balanced**: e.g. GPT-4o-mini class, Claude Haiku class, Gemini Flash class, Mistral Small class
+    - [x] **Premium**: e.g. GPT-4o class, Claude Sonnet class, Gemini Pro class, DeepSeek R1 class
+    - [x] **Heavy**: e.g. Claude Opus class, GPT-5 class, Gemini Ultra class (gated by cost cap)
+  - [x] **Note**: Model landscape changes rapidly. Tier assignment must be derived from catalog pricing + capability scores, not from a hardcoded list. New models entering the catalog auto-slot into the correct tier.
+  - [x] Each tier: minimum 4 different providers represented
 
-### 3.2 Diversity Scoring
-- **Problem**: Same models chosen repeatedly; scores feel unreliable
-- **Files**: `src/lib/routing/phase-router.ts`
-- **Implementation**:
-  - Add `recentModelUsage` tracking (last 20 requests per user, stored in session/memory)
-  - Diversity penalty: if model was used in last 3 requests, apply 0.7x score multiplier; last 5: 0.85x; last 10: 0.92x
-  - Provider diversity: if same provider used in last 2 requests, apply 0.8x multiplier
-  - **Exceptions** (no diversity penalty applied):
-    - User explicitly pins a model (manual mode)
-    - Model supports prompt caching AND cache is not stale (conversation has recent messages within cache TTL, typically < 5 min, and history has not been compacted since last use)
-  - Surface the diversity logic in route trace so user can see why a different model was chosen
+### 3.2 Diversity Scoring ✅ Complete
+- [x] **Problem**: Same models chosen repeatedly; scores feel unreliable
+- [x] **Files**: `src/lib/routing/phase-router.ts`
+- [x] **Implementation**:
+  - [x] Add `recentModelUsage` tracking (last 20 requests per user, stored in session/memory)
+  - [x] Diversity penalty: if model was used in last 3 requests, apply 0.7x score multiplier; last 5: 0.85x; last 10: 0.92x
+  - [x] Provider diversity: if same provider used in last 2 requests, apply 0.8x multiplier
+  - [x] **Exceptions** (no diversity penalty applied):
+    - [x] User explicitly pins a model (manual mode)
+    - [x] Model supports prompt caching AND cache is not stale (conversation has recent messages within cache TTL, typically < 5 min, and history has not been compacted since last use)
+  - [x] Surface the diversity logic in route trace so user can see why a different model was chosen
 
-### 3.3 Cache-Aware Prioritization
-- **Problem**: If a model has cached tokens from recent conversation, it should be prioritized (lower latency, lower cost)
-- **Files**: `src/lib/routing/phase-router.ts`, `src/lib/openrouter.ts`
-- **Implementation**:
-  - Track which model was last used per conversation
-  - If conversation has recent messages (< 5 min) with same model, apply 1.3x boost (cache likely warm)
-  - If conversation history was compacted, cache is stale — no boost
-  - OpenRouter supports prompt caching for some models; track which models support it
-  - Include cache-awareness in route trace explanation
+### 3.3 Cache-Aware Prioritization ✅ Complete
+- [x] **Problem**: If a model has cached tokens from recent conversation, it should be prioritized (lower latency, lower cost)
+- [x] **Files**: `src/lib/routing/phase-router.ts`, `src/lib/openrouter.ts`
+- [x] **Implementation**:
+  - [x] Track which model was last used per conversation
+  - [x] If conversation has recent messages (< 5 min) with same model, apply 1.3x boost (cache likely warm)
+  - [x] If conversation history was compacted, cache is stale — no boost
+  - [x] OpenRouter supports prompt caching for some models; track which models support it
+  - [x] Include cache-awareness in route trace explanation
 
-### 3.4 Scoring Overhaul
-- **Problem**: Current scoring (reliability, latency, freshness) produces unreliable results; lane weights feel arbitrary
-- **Files**: `src/lib/routing/phase-router.ts:87-244`
-- **Implementation**:
-  - Replace lane system (stable/fresh/challenger) with a unified weighted score:
+### 3.4 Scoring Overhaul ✅ Complete
+- [x] **Problem**: Current scoring (reliability, latency, freshness) produces unreliable results; lane weights feel arbitrary
+- [x] **Files**: `src/lib/routing/phase-router.ts:87-244`
+- [x] **Implementation**:
+  - [x] Replace lane system (stable/fresh/challenger) with a unified weighted score:
     ```
     score = (0.30 * capability_match)
           + (0.25 * cost_fit)
@@ -316,65 +316,65 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
           + (0.07 * cache_bonus)
           + (0.05 * freshness)
     ```
-  - `capability_match`: How well the model's capabilities match the request requirements (vision, reasoning, code, search)
-  - `cost_fit`: How well the model's cost fits the tier budget
-  - Normalize all scores to 0-1 range
-  - Add randomized exploration: with 10% probability, boost a random non-top candidate by 1.5x (prevents lock-in)
-  - Show full scoring breakdown in route trace
+  - [x] `capability_match`: How well the model's capabilities match the request requirements (vision, reasoning, code, search)
+  - [x] `cost_fit`: How well the model's cost fits the tier budget
+  - [x] Normalize all scores to 0-1 range
+  - [x] Add randomized exploration: with 10% probability, boost a random non-top candidate by 1.5x (prevents lock-in)
+  - [x] Show full scoring breakdown in route trace
 
-### 3.5 Prompt Interpretation for Model/Orchestration Requests
-- **Problem**: User says "use GPT-4" but system doesn't listen; searching through all model names by keyword doesn't work; orchestration keywords not detected
-- **Files**: `src/lib/orchestrator/route-plan.ts`, `src/lib/auto-settings.ts`
-- **Implementation**:
-  - Add explicit intent detection for model requests: "use [model]", "switch to [model]", "try [model]"
-  - Fuzzy match against model names/aliases (GPT-4 → openai/gpt-4o, Claude → anthropic/claude-sonnet)
-  - If match found: override router mode to manual for that request
-  - For orchestration: detect "use multiple models", "collaborate", "get different perspectives"
-  - Surface what was detected in route trace
+### 3.5 Prompt Interpretation for Model/Orchestration Requests ✅ Complete
+- [x] **Problem**: User says "use GPT-4" but system doesn't listen; searching through all model names by keyword doesn't work; orchestration keywords not detected
+- [x] **Files**: `src/lib/orchestrator/route-plan.ts`, `src/lib/auto-settings.ts`
+- [x] **Implementation**:
+  - [x] Add explicit intent detection for model requests: "use [model]", "switch to [model]", "try [model]"
+  - [x] Fuzzy match against model names/aliases (GPT-4 → openai/gpt-4o, Claude → anthropic/claude-sonnet)
+  - [x] If match found: override router mode to manual for that request
+  - [x] For orchestration: detect "use multiple models", "collaborate", "get different perspectives"
+  - [x] Surface what was detected in route trace
 
-### 3.6 Cost Cap Enforcement
-- **Problem**: 30/M cap not consistently enforced; budget not hard-enforced during streaming
-- **Files**: `src/lib/model-selection.ts:156-168`, `src/lib/orchestrator/pipeline-controller.ts:166-236`
-- **Implementation**:
-  - Strict 30/M input+output cap for automatic routing (no exceptions)
-  - Manual selection: warn if model exceeds 30/M, require explicit confirmation
-  - During streaming: track cumulative token usage. If multi-agent total exceeds budget by 150%, abort remaining specialists
-  - Add `usageBudgetRemaining` to pipeline state, decrement as tokens arrive
+### 3.6 Cost Cap Enforcement ✅ Complete
+- [x] **Problem**: 30/M cap not consistently enforced; budget not hard-enforced during streaming
+- [x] **Files**: `src/lib/model-selection.ts:156-168`, `src/lib/orchestrator/pipeline-controller.ts:166-236`
+- [x] **Implementation**:
+  - [x] Strict 30/M input+output cap for automatic routing (no exceptions)
+  - [x] Manual selection: warn if model exceeds 30/M, require explicit confirmation
+  - [x] During streaming: track cumulative token usage. If multi-agent total exceeds budget by 150%, abort remaining specialists
+  - [x] Add `usageBudgetRemaining` to pipeline state, decrement as tokens arrive
 
-### 3.7 Parallel Specialist Execution
-- **Problem**: Multi-agent specialists run sequentially (5x latency)
-- **Files**: `src/lib/orchestrator/streaming.ts:237`, `src/lib/orchestrator/task-graph.ts`
-- **Implementation**:
-  - Build dependency DAG from task graph
-  - Independent specialists (no `dependsOn` overlap) execute in parallel via `Promise.all`
-  - Dependent specialists wait for their dependencies
-  - Cap concurrent specialists at 3 (balance between speed and cost)
-  - Stream specialist progress to UI in real-time (which specialists are active)
+### 3.7 Parallel Specialist Execution ✅ Complete
+- [x] **Problem**: Multi-agent specialists run sequentially (5x latency)
+- [x] **Files**: `src/lib/orchestrator/streaming.ts:237`, `src/lib/orchestrator/task-graph.ts`
+- [x] **Implementation**:
+  - [x] Build dependency DAG from task graph
+  - [x] Independent specialists (no `dependsOn` overlap) execute in parallel via `Promise.all`
+  - [x] Dependent specialists wait for their dependencies
+  - [x] Cap concurrent specialists at 3 (balance between speed and cost)
+  - [x] Stream specialist progress to UI in real-time (which specialists are active)
 
-### 3.8 Token Count Accuracy
-- **Problem**: Simple prompts show 3500+ tokens because the system prompt is bloated with mode rules, memory, skills, and guidelines even for trivial requests. This is the real issue — not display, but actual waste.
-- **Root cause**: System prompt tiering (Phase 1.6) is the primary fix. With a T0 system prompt < 400 tokens, simple requests will show reasonable token counts.
-- **Implementation**:
-  - Display actual token usage from API response, not estimated
-  - Separate display: "Input: X tokens | Output: Y tokens" (not combined)
-  - For context: show what contributed to input (system prompt, history, memory, sources) — helps debug why tokens are high
-  - Token count always visible to all users (no toggle/hiding — transparency matters)
+### 3.8 Token Count Accuracy ✅ Complete
+- [x] **Problem**: Simple prompts show 3500+ tokens because the system prompt is bloated with mode rules, memory, skills, and guidelines even for trivial requests. This is the real issue — not display, but actual waste.
+- [x] **Root cause**: System prompt tiering (Phase 1.6) is the primary fix. With a T0 system prompt < 400 tokens, simple requests will show reasonable token counts.
+- [x] **Implementation**:
+  - [x] Display actual token usage from API response, not estimated
+  - [x] Separate display: "Input: X tokens | Output: Y tokens" (not combined)
+  - [x] For context: show what contributed to input (system prompt, history, memory, sources) — helps debug why tokens are high
+  - [x] Token count always visible to all users (no toggle/hiding — transparency matters)
 
-### 3.9 New Model Onboarding & Challenger Lane
-- **Problem**: When new models appear in the catalog (via catalog sync), they have no reliability/latency data. They need a path to get tested without destabilizing routing for all users.
-- **Implementation**:
-  - **Challenger lane**: New models (< 5 total runs across all users) are flagged as `challenger`
-  - Challengers are eligible for selection but only when:
-    - The request is low-stakes (T0/T1 tier, simple question)
-    - Random exploration roll succeeds (10% probability from 3.4)
-    - No other model with warm cache is available for this conversation
-  - **Light offline evaluation loop**:
-    - After each response from a challenger model, store quality signals: finish_reason, user feedback (thumbs), response length, latency
-    - Weekly batch job: compute reliability + latency scores for challengers that have accumulated 5+ data points
-    - If reliability > 0.6 after 12 runs: promote to normal routing pool
-    - If reliability < 0.3 after 12 runs: demote to deprioritized (0.3x score multiplier, not fully removed)
-  - **Catalog sync**: New models from OpenRouter catalog automatically enter as challengers. No manual curation needed for entry — only tier assignment is automatic based on pricing + capabilities.
-  - This ensures the routing system adapts to the model landscape over time without manual intervention, while protecting users from untested models on important requests.
+### 3.9 New Model Onboarding & Challenger Lane ✅ Complete
+- [x] **Problem**: When new models appear in the catalog (via catalog sync), they have no reliability/latency data. They need a path to get tested without destabilizing routing for all users.
+- [x] **Implementation**:
+  - [x] **Challenger lane**: New models (< 5 total runs across all users) are flagged as `challenger`
+  - [x] Challengers are eligible for selection but only when:
+    - [x] The request is low-stakes (T0/T1 tier, simple question)
+    - [x] Random exploration roll succeeds (10% probability from 3.4)
+    - [x] No other model with warm cache is available for this conversation
+  - [x] **Light offline evaluation loop**:
+    - [x] After each response from a challenger model, store quality signals: finish_reason, user feedback (thumbs), response length, latency
+    - [x] Weekly batch job: compute reliability + latency scores for challengers that have accumulated 5+ data points
+    - [x] If reliability > 0.6 after 12 runs: promote to normal routing pool
+    - [x] If reliability < 0.3 after 12 runs: demote to deprioritized (0.3x score multiplier, not fully removed)
+  - [x] **Catalog sync**: New models from OpenRouter catalog automatically enter as challengers. No manual curation needed for entry — only tier assignment is automatic based on pricing + capabilities.
+  - [x] This ensures the routing system adapts to the model landscape over time without manual intervention, while protecting users from untested models on important requests.
 
 ---
 
@@ -1021,8 +1021,8 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 ## Additional Issues Found (50+ beyond IDEA.md)
 
 ### From Orchestration Analysis
-1. RAG failure silently returns fallback — should warn user when no sources found despite expecting them
-2. No circuit breaker for model failures — same failing model retried immediately
+1. [x] RAG failure silently returns fallback — should warn user when no sources found despite expecting them ✅ Complete
+2. [x] No circuit breaker for model failures — same failing model retried immediately ✅ Complete
 3. Memory extraction NLP too narrow (regex only matches "prefer", "goal", "struggle")
 4. Cost budget not hard-enforced during multi-agent streaming — can exceed declared budget
 5. Mode fallback to "general" loses pedagogical structure without warning
@@ -1030,7 +1030,7 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 7. Thinking level parameter doesn't actually enable extended thinking in models that support it
 8. Agent guidelines topic map not used to filter RAG results
 9. No artifact resource cleanup/retention policy
-10. Max tokens per mode are hardcoded — should adapt to model's context window
+10. [x] Max tokens per mode are hardcoded — should adapt to model's context window ✅ Complete
 
 ### From Frontend Analysis
 11. Auto-scroll race condition during heavy streaming
@@ -1047,14 +1047,14 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 ### From Backend Analysis
 21. Memory fingerprint deduplication is not atomic — race condition with concurrent writes
 22. `negativeTopicLinks` array grows unbounded (up to 12 items, no cleanup)
-23. No hybrid search (BM25 + vector) — vector-only misses keyword matches
-24. Resource processing is serial in cron job — no parallelization
+23. [x] No hybrid search (BM25 + vector) — vector-only misses keyword matches ✅ Complete
+24. [x] Resource processing is serial in cron job — no parallelization ✅ Complete
 25. Message branching parent/sibling tracking has no foreign key constraints
 26. Orphaned chunks possible if resource deletion doesn't cascade properly
 27. No bulk mutation API for resources — each upload is separate
 28. Content deduplication via `contentHash` exists in schema but is unused
-29. Chat listing by pack requires full scan — missing index
-30. Vector search returns topK*8 then filters — wastes compute on irrelevant results
+29. [x] Chat listing by pack requires full scan — missing index ✅ Complete
+30. [x] Vector search returns topK*8 then filters — wastes compute on irrelevant results ✅ Complete
 31. Usage aggregation upsert runs in critical path on every message
 32. Compaction summary is manual-only — no LLM-driven summarization
 33. Embedding model change would require complete re-index of all data
@@ -1079,9 +1079,10 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 50. No semantic caching of embeddings for repeated queries
 51. Provider icon coverage is incomplete — many show generic fallback
 52. No diff view for comparing artifact versions
-53. Study reminders cron generates at fixed time — not timezone-aware
-54. Generated documents (DOCX/PDF/PPTX) lack design consistency
+53. [x] Study reminders cron generates at fixed time — not timezone-aware ✅ Complete
+54. Generated documents (DOCX/PDF/PPTX) lack design consistency, and require polished results. Achievable through skills written as md files, and downloaded from internet (frontend-design for instance). Can be loaded through tools to prevent massive injection of context
 55. No telemetry for measuring actual learning outcomes
+56. Memory upload through "My Files" (or automatically saved after attached through chat) is not reliable, and usually fails
 
 ---
 

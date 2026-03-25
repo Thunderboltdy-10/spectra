@@ -186,6 +186,8 @@ export async function POST(request: NextRequest) {
       hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
       requiredCapabilities: (body.attachmentTypes?.length ?? 0) > 0 ? ["vision"] : [],
       preferredCapabilities: auto.searchEnabled ? ["reasoning", "search"] : ["reasoning"],
+      requestClass: auto.requestClass,
+      manualModelConfirmedExpensive: false,
       modelCatalog: catalog,
       modelRuntimeStats: runtimeStatMap,
       seedKey: `dry-run:${actor.clerkId}:${normalizedMessage}`,
@@ -233,6 +235,7 @@ export async function POST(request: NextRequest) {
         })),
         searchStatus: costGates.searchEnabled ? "real_search" : "skipped",
         costBudgetUsd: costGates.costBudgetUsd,
+        usageBudgetRemaining: costGates.usageBudgetRemaining,
       },
     });
   });

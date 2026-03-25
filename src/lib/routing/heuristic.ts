@@ -221,13 +221,13 @@ function estimateComplexity(input: ModelRouteInput, complexPrompt: boolean) {
 }
 
 function isReasoningHeavyModel(modelId: string) {
-  return /(reason|r1|o3|o4|opus|sonnet|gemini.*pro|sonar-pro)/i.test(modelId);
+  return /(reason|r1|o3|o4|opus|sonnet|gemini.*pro|sonar-pro|minimax|kimi|glm|moonshot|z-ai)/i.test(modelId);
 }
 
 function isExpensiveModel(modelId: string) {
   if (modelId.includes(":free")) return false;
   if (CHEAP_MODEL_DEFAULTS.has(modelId)) return false;
-  return /(opus|o3|o4|sonar-pro|gemini-2\.5-pro|gpt-5|claude-4)/i.test(modelId);
+  return /(opus|o3|o4|sonar-pro|gemini-2\.5-pro|gpt-5|claude-4|minimax-[^:]+$|moonshotai\/kimi|z-ai\/glm-4\.5$)/i.test(modelId);
 }
 
 function modelProviderKey(modelId: string) {

@@ -134,6 +134,31 @@ export const CURATED_MODEL_REGISTRY: Record<string, CuratedModelMeta> = {
     benchmarkHumanEval: 85.6,
     arenaElo: 1228,
   },
+  "minimax/minimax-m2.5:free": {
+    releaseDate: "2025-12",
+    knowledgeCutoff: "2025-02",
+    curatedNotes: "Free deep-reasoning model useful for budget-constrained analysis-heavy turns.",
+  },
+  "moonshotai/kimi-k2": {
+    releaseDate: "2026-01",
+    knowledgeCutoff: "2025-03",
+    curatedNotes: "Long-context multilingual model suited to synthesis and reading-heavy tasks.",
+  },
+  "z-ai/glm-4.5-air:free": {
+    releaseDate: "2025-11",
+    knowledgeCutoff: "2025-01",
+    curatedNotes: "Fast low-cost route for everyday tutoring and concise classroom workflows.",
+  },
+  "z-ai/glm-4.5": {
+    releaseDate: "2025-11",
+    knowledgeCutoff: "2025-01",
+    curatedNotes: "Higher-capability GLM tier for premium reasoning and extended context tasks.",
+  },
+  "mistralai/mistral-small": {
+    releaseDate: "2025-10",
+    knowledgeCutoff: "2025-03",
+    curatedNotes: "Balanced multilingual model with strong cost/performance for everyday requests.",
+  },
 };
 
 export function lookupCuratedModelMeta(modelId: string) {

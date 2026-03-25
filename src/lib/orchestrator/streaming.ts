@@ -26,6 +26,7 @@ export async function runAssistantStreaming(params: {
   messages: OpenRouterMessage[];
   maxTokens?: number;
   send: (payload: Record<string, unknown>) => Promise<void>;
+  onUsageTokens?: (tokens: number) => void;
   onFallback?: (event: RouteTraceFallback) => void;
   logger?: {
     info: (message: string, context?: Record<string, unknown>) => void;
@@ -106,6 +107,9 @@ export async function runAssistantStreaming(params: {
       modelUsed = roundModelUsed;
       usageIn += Math.max(0, roundUsageIn);
       usageOut += Math.max(0, roundUsageOut);
+      if (roundUsageIn + roundUsageOut > 0) {
+        params.onUsageTokens?.(roundUsageIn + roundUsageOut);
+      }
       usage = mergeUsage(usage, roundUsage);
       finishReason = roundFinishReason ?? finishReason;
       if (roundFinishReason === "length") {
@@ -284,7 +288,10 @@ export async function runCollaborativeStreaming(params: {
   maxSubcalls?: number;
   maxTokensPerSpecialist?: number;
   maxWallTimeMs?: number;
+  usageBudgetTokens?: number;
+  budgetOverrunFactor?: number;
   send: (payload: Record<string, unknown>) => Promise<void>;
+  onUsageTokens?: (tokens: number) => void;
   onFallback?: (event: RouteTraceFallback) => void;
   logger?: {
     info: (message: string, context?: Record<string, unknown>) => void;
@@ -383,6 +390,9 @@ export async function runCollaborativeStreaming(params: {
       }
 
       const durationMs = Date.now() - startedAt;
+      if (tokens > 0) {
+        params.onUsageTokens?.(tokens);
+      }
       if (node.role === "web_researcher" || node.role === "fact_checker") {
         for (const hint of extractSourceHintsFromResult(result)) {
           sourceHintsByUrl.set(hint.url, hint);
@@ -405,6 +415,9 @@ export async function runCollaborativeStreaming(params: {
       maxSubcalls: params.maxSubcalls ?? 4,
       maxTokensPerSpecialist: params.maxTokensPerSpecialist ?? 1200,
       maxWallTimeMs: params.maxWallTimeMs ?? 120_000,
+      maxConcurrency: 3,
+      usageBudgetTokens: params.usageBudgetTokens,
+      budgetOverrunFactor: params.budgetOverrunFactor ?? 1.5,
     },
   );
 
@@ -545,6 +558,9 @@ export async function runCollaborativeStreaming(params: {
       model: modelUsed,
       usage,
     }).catch(() => {});
+  }
+  if (usageIn + usageOut > 0) {
+    params.onUsageTokens?.(usageIn + usageOut);
   }
 
   const collaborators: CollaboratorTrace[] = executed

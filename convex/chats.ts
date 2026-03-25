@@ -165,25 +165,17 @@ export const listChats = query({
     }
 
     const max = Math.max(1, Math.min(args.limit ?? 120, 300));
-    const indexedChats = await ctx.db
-      .query("chats")
-      .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id))
-      .order("desc")
-      .take(args.packId ? Math.max(max * 6, max) : max);
-
-    const orderedChats = (() => {
-      if (!args.packId) return indexedChats;
-      const filteredFromIndexed = indexedChats.filter((chat) => chat.packId === args.packId && !chat.deletedAt);
-      if (filteredFromIndexed.length >= max) return indexedChats;
-      // Fallback only for pack-scoped views when the initial indexed window is insufficient.
-      return null;
-    })();
-
-    const chats = orderedChats ?? (await ctx.db
-      .query("chats")
-      .withIndex("by_owner", (q) => q.eq("ownerUserId", actor._id))
-      .collect())
-      .sort((a, b) => b.updatedAt - a.updatedAt);
+    const chats = args.packId
+      ? await ctx.db
+          .query("chats")
+          .withIndex("by_owner_pack_updated", (q) => q.eq("ownerUserId", actor._id).eq("packId", args.packId))
+          .order("desc")
+          .take(max)
+      : await ctx.db
+          .query("chats")
+          .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id))
+          .order("desc")
+          .take(max);
 
     return chats
       .filter((chat) => !chat.deletedAt)

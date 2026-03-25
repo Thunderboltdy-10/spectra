@@ -37,6 +37,9 @@ type ExecutionLimits = {
   maxSubcalls?: number;
   maxTokensPerSpecialist?: number;
   maxWallTimeMs?: number;
+  maxConcurrency?: number;
+  usageBudgetTokens?: number;
+  budgetOverrunFactor?: number;
 };
 
 function normalizeComplexityScore(value: number | "simple" | "medium" | "complex") {
@@ -309,12 +312,19 @@ export async function executeGraph(
   const maxSubcalls = Math.max(1, limits?.maxSubcalls ?? 5);
   const maxTokens = Math.max(500, limits?.maxTokensPerSpecialist ?? 8000);
   const maxWall = Math.max(5000, limits?.maxWallTimeMs ?? 120_000);
+  const maxConcurrency = Math.max(1, Math.min(3, limits?.maxConcurrency ?? 3));
+  const usageBudgetTokens = Math.max(0, Math.round(limits?.usageBudgetTokens ?? 0));
+  const budgetOverrunFactor = Math.max(1, limits?.budgetOverrunFactor ?? 1.5);
   const startedAt = Date.now();
 
   let calls = 0;
+  let consumedTokens = 0;
   const byId = new Map(graph.map((node) => [node.id, { ...node }]));
 
   while (true) {
+    if (usageBudgetTokens > 0 && consumedTokens > usageBudgetTokens * budgetOverrunFactor) {
+      break;
+    }
     if (Date.now() - startedAt > maxWall) {
       break;
     }
@@ -331,7 +341,7 @@ export async function executeGraph(
     if (calls >= maxSubcalls) break;
 
     const remaining = maxSubcalls - calls;
-    const batchSize = Math.min(ready.length, Math.max(1, remaining));
+    const batchSize = Math.min(ready.length, Math.max(1, remaining), maxConcurrency);
     const batch = ready.slice(0, batchSize);
     calls += batch.length;
     await Promise.all(
@@ -344,6 +354,7 @@ export async function executeGraph(
           const out = await runNode(node, dependencies);
           node.result = out.result.slice(0, 8_000);
           node.tokens = Math.min(Math.max(0, out.tokens), maxTokens);
+          consumedTokens += node.tokens;
           node.durationMs = out.durationMs;
           node.status = "done";
         } catch {

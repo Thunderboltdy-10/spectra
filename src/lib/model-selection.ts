@@ -39,6 +39,15 @@ export type ModelRuntimeStat = {
   successCount: number;
   failureCount: number;
   avgLatencyMs?: number;
+  consecutiveFailureCount?: number;
+  lastFailureAt?: number;
+  lengthFinishCount?: number;
+  totalResponseChars?: number;
+  positiveFeedbackCount?: number;
+  negativeFeedbackCount?: number;
+  qualityScore?: number;
+  challengerState?: "challenger" | "normal" | "deprioritized";
+  lastEvaluatedAt?: number;
 };
 
 export type ModelCapability =

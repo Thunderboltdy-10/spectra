@@ -162,6 +162,10 @@ export type RoutePlan = {
   modeContract: ModeContract;
   agentContract?: AgentContract;
   schoolSoulVersion?: string;
+  intentSignals?: {
+    requestedModelPhrase?: string;
+    requestedOrchestration?: boolean;
+  };
 };
 
 export type ModelRouteInput = {
@@ -291,6 +295,7 @@ export type RouteTrace = {
     classificationReason?: string;
     previousModelUsed?: string;
     agentPreferredModel?: string;
+    detectedIntents?: string[];
   };
   candidates: RouteTraceCandidate[];
   selected: {
@@ -318,6 +323,13 @@ export type RouteTrace = {
   }>;
   clarificationBlock?: ClarificationBlock;
   collaborators?: Array<{ role: string; model: string; tokensUsed: number; durationMs: number }>;
+  inputTokenBreakdown?: {
+    systemPrompt: number;
+    history: number;
+    memory: number;
+    sources: number;
+  };
+  usageBudgetRemaining?: number;
   usedMemory?: Array<{
     key: string;
     text: string;

@@ -1,16 +1,18 @@
 import type { ThinkingLevel } from "@/lib/contracts/studyModes";
 import {
   isModelAllowedInTier,
+  isModelTooExpensivePerMillion,
   modelSupportsCapability,
   type CatalogModelEntry,
   type ModelCapability,
   type ModelRuntimeStat,
 } from "@/lib/model-selection";
-import { modelFamily } from "@/lib/model-roles";
 import type { RouteTraceCandidate, RouteTracePhase, SpendingTier, StudyMode } from "@/types";
 
-export type RoutingLane = "stable" | "fresh" | "challenger";
+export type RoutingLane = "scored" | "challenger";
 type StakeLevel = "low" | "medium" | "high";
+type RequestClass = "T0" | "T1" | "T2" | "T3";
+type DynamicTier = "budget" | "balanced" | "premium" | "heavy";
 
 export type PhaseRoutingInput = {
   phaseId: string;
@@ -18,6 +20,7 @@ export type PhaseRoutingInput = {
   mode: StudyMode;
   routerMode: "auto" | "manual" | "openrouter_auto";
   manualModel?: string;
+  manualModelConfirmedExpensive?: boolean;
   spendingTier: SpendingTier;
   thinkingLevel: ThinkingLevel;
   stakes: StakeLevel;
@@ -30,6 +33,13 @@ export type PhaseRoutingInput = {
   previousModelUsed?: string;
   conversationTurnCount?: number;
   recentModels?: string[];
+  requestClass?: RequestClass;
+  cacheWindow?: {
+    lastModel?: string;
+    lastUsedAt?: number;
+    compactedAt?: number;
+    ttlMs?: number;
+  };
   modelCatalog: CatalogModelEntry[];
   modelRuntimeStats?: Record<string, ModelRuntimeStat>;
   seedKey: string;
@@ -46,18 +56,19 @@ export type PhaseRoutingDecision = {
 };
 
 type ScoredCandidate = {
-  model: CatalogModelEntry;
   modelId: string;
   provider: string;
-  family: string;
-  lane: RoutingLane;
-  score: number;
-  reliability: number;
-  context: number;
-  stickinessBonus: number;
-  reasons: string[];
+  dynamicTier: DynamicTier;
+  rawScore: number;
+  normalizedScore: number;
   breakdown: string[];
+  reasonTags: string[];
+  isChallenger: boolean;
+  cacheWarm: boolean;
 };
+
+const CACHE_TTL_MS = 5 * 60 * 1000;
+const FAILURE_CIRCUIT_WINDOW_MS = 10 * 60 * 1000;
 
 function nowMs() {
   if (typeof performance !== "undefined" && typeof performance.now === "function") return performance.now();
@@ -79,8 +90,8 @@ function providerFromModelId(modelId: string) {
 
 function normalizeCost(model: CatalogModelEntry) {
   if (model.isFree || model.modelId.includes(":free")) return 0;
-  const input = typeof model.inputCostPerM === "number" ? Math.max(0, model.inputCostPerM) : 6;
-  const output = typeof model.outputCostPerM === "number" ? Math.max(0, model.outputCostPerM) : 8;
+  const input = typeof model.inputCostPerM === "number" ? Math.max(0, model.inputCostPerM) : 8;
+  const output = typeof model.outputCostPerM === "number" ? Math.max(0, model.outputCostPerM) : 10;
   return (input + output) / 2;
 }
 
@@ -88,17 +99,17 @@ function reliabilityScore(stat?: ModelRuntimeStat) {
   if (!stat) return 0.56;
   const success = Math.max(0, stat.successCount);
   const failure = Math.max(0, stat.failureCount);
-  return (success + 1) / (success + failure + 2);
+  return Math.max(0, Math.min(1, (success + 1) / (success + failure + 2)));
 }
 
-function latencyScore(stat?: ModelRuntimeStat) {
+function latencyFit(stat?: ModelRuntimeStat) {
   const ms = stat?.avgLatencyMs;
   if (typeof ms !== "number" || !Number.isFinite(ms) || ms <= 0) return 0.58;
   if (ms <= 2500) return 1;
-  if (ms <= 4500) return 0.8;
-  if (ms <= 7500) return 0.55;
-  if (ms <= 11_000) return 0.32;
-  return 0.18;
+  if (ms <= 4500) return 0.82;
+  if (ms <= 7500) return 0.6;
+  if (ms <= 11_000) return 0.36;
+  return 0.2;
 }
 
 function parseReleaseTime(model: CatalogModelEntry) {
@@ -118,45 +129,45 @@ function freshnessScore(model: CatalogModelEntry) {
   if (!releaseTs) return 0.55;
   const ageDays = Math.max(0, (Date.now() - releaseTs) / (24 * 60 * 60 * 1000));
   if (ageDays <= 30) return 1;
-  if (ageDays <= 90) return 0.85;
-  if (ageDays <= 180) return 0.7;
-  if (ageDays <= 365) return 0.5;
-  return 0.32;
+  if (ageDays <= 90) return 0.87;
+  if (ageDays <= 180) return 0.72;
+  if (ageDays <= 365) return 0.52;
+  return 0.33;
 }
 
-function ageDaysFromModel(model: CatalogModelEntry) {
-  const releaseTs = parseReleaseTime(model);
-  if (!releaseTs) return undefined;
-  return Math.max(0, (Date.now() - releaseTs) / (24 * 60 * 60 * 1000));
+function clamp01(value: number) {
+  return Math.max(0, Math.min(1, value));
 }
 
-function stalenessPenalty(model: CatalogModelEntry) {
-  const ageDays = ageDaysFromModel(model);
-  if (typeof ageDays !== "number") return 0;
-  if (ageDays <= 365) return 0;
-  if (ageDays <= 720) return 0.05;
-  if (ageDays <= 1080) return 0.1;
-  return 0.16;
+function dynamicTierForModel(model: CatalogModelEntry): DynamicTier {
+  const cost = normalizeCost(model);
+  const capability = (
+    (typeof model.capabilities?.reasoning === "number" ? model.capabilities.reasoning : 4)
+    + (typeof model.capabilities?.code === "number" ? model.capabilities.code : 4)
+    + (typeof model.capabilities?.vision === "number" ? model.capabilities.vision : 0)
+  ) / 30;
+
+  if (cost <= 2.5 || model.isFree || model.modelId.includes(":free")) return "budget";
+  if (cost <= 9) return capability >= 0.75 ? "premium" : "balanced";
+  if (cost <= 20) return capability >= 0.8 ? "heavy" : "premium";
+  return "heavy";
 }
 
-function deepResearchPenalty(modelId: string, mode: StudyMode, stakes: StakeLevel) {
-  if (!/deep[-_ ]?research/i.test(modelId)) return 0;
-  if (mode === "research" && stakes === "high") return 0.06;
-  if (mode === "research") return 0.14;
-  return 0.28;
+function tierProviderCoverage(catalog: CatalogModelEntry[]) {
+  const map: Record<DynamicTier, Set<string>> = {
+    budget: new Set<string>(),
+    balanced: new Set<string>(),
+    premium: new Set<string>(),
+    heavy: new Set<string>(),
+  };
+  for (const model of catalog) {
+    const tier = dynamicTierForModel(model);
+    map[tier].add(providerFromModelId(model.modelId));
+  }
+  return map;
 }
 
-function contextFit(model: CatalogModelEntry, messageLength: number) {
-  if (!model.contextLength || model.contextLength <= 0) return 0.62;
-  const ratio = messageLength / model.contextLength;
-  if (ratio <= 0.22) return 1;
-  if (ratio <= 0.42) return 0.85;
-  if (ratio <= 0.68) return 0.6;
-  if (ratio <= 0.9) return 0.35;
-  return 0.08;
-}
-
-function phaseFit(params: {
+function capabilityMatch(params: {
   model: CatalogModelEntry;
   required: ModelCapability[];
   preferred: ModelCapability[];
@@ -166,80 +177,90 @@ function phaseFit(params: {
   for (const requiredCapability of params.required) {
     if (!modelSupportsCapability(params.model, requiredCapability)) return 0;
   }
-  let score = 0.55;
-  for (const preferredCapability of params.preferred) {
-    if (modelSupportsCapability(params.model, preferredCapability)) score += 0.12;
+
+  const preferredHits = params.preferred.reduce((hits, capability) => {
+    return hits + (modelSupportsCapability(params.model, capability) ? 1 : 0);
+  }, 0);
+  const preferredScore = params.preferred.length > 0 ? preferredHits / params.preferred.length : 1;
+
+  let modeBias = 0.55;
+  if (params.mode === "research" || params.mode === "exam" || params.mode === "marker") {
+    modeBias += modelSupportsCapability(params.model, "reasoning") ? 0.2 : -0.12;
   }
-  if (params.mode === "research" || params.mode === "marker" || params.mode === "exam") {
-    if (modelSupportsCapability(params.model, "reasoning")) score += 0.1;
+  if (params.mode === "draft_coach") {
+    modeBias += modelSupportsCapability(params.model, "code") ? 0.14 : 0;
   }
-  if (params.needsSearch && modelSupportsCapability(params.model, "search")) {
-    score += 0.1;
+  if (params.needsSearch) {
+    modeBias += modelSupportsCapability(params.model, "search") ? 0.14 : -0.08;
   }
-  return Math.min(1, score);
+
+  return clamp01(modeBias * 0.55 + preferredScore * 0.45);
 }
 
 function costFit(costPerM: number, stakes: StakeLevel, isFree: boolean) {
-  if (isFree) return 0.7;
+  if (isFree) return stakes === "high" ? 0.66 : 0.88;
   const target = stakes === "low" ? 2.2 : stakes === "medium" ? 8.5 : 18;
-  if (costPerM <= 0.02) return 0.92;
-  if (costPerM <= target) return 0.92;
-  if (costPerM <= target * 1.6) return 0.65;
-  if (costPerM <= target * 2.8) return 0.4;
+  if (costPerM <= 0.02) return 0.95;
+  if (costPerM <= target) return 0.9;
+  if (costPerM <= target * 1.6) return 0.66;
+  if (costPerM <= target * 2.4) return 0.42;
   return 0.2;
 }
 
-function laneForCandidate(params: {
-  reliability: number;
-  freshness: number;
-  totalRuns: number;
+function hasWarmCache(params: {
+  modelId: string;
+  model: CatalogModelEntry;
+  cacheWindow?: PhaseRoutingInput["cacheWindow"];
 }) {
-  if (params.reliability >= 0.72 && params.totalRuns >= 12) return "stable" as const;
-  if (params.freshness >= 0.72 || params.totalRuns <= 5) return "fresh" as const;
-  return "challenger" as const;
+  const window = params.cacheWindow;
+  if (!window?.lastModel || !window.lastUsedAt) return false;
+  if (!params.model.promptCachingSupported) return false;
+  if (window.lastModel !== params.modelId) return false;
+
+  const ttlMs = window.ttlMs ?? CACHE_TTL_MS;
+  if (Date.now() - window.lastUsedAt > ttlMs) return false;
+  if (typeof window.compactedAt === "number" && window.compactedAt > window.lastUsedAt) {
+    return false;
+  }
+  return true;
 }
 
-function laneWeights(stakes: StakeLevel, needsSearch?: boolean) {
-  const base =
-    stakes === "high"
-      ? { stable: 0.68, fresh: 0.22, challenger: 0.1 }
-      : stakes === "low"
-        ? { stable: 0.44, fresh: 0.35, challenger: 0.21 }
-        : { stable: 0.56, fresh: 0.3, challenger: 0.14 };
-  if (!needsSearch) return base;
-  return {
-    stable: Math.max(0.3, base.stable - 0.04),
-    fresh: Math.min(0.46, base.fresh + 0.04),
-    challenger: base.challenger,
-  };
+function recentModelMultiplier(modelId: string, recentModels: string[]) {
+  const tail3 = recentModels.slice(-3);
+  if (tail3.includes(modelId)) return 0.7;
+  const tail5 = recentModels.slice(-5);
+  if (tail5.includes(modelId)) return 0.85;
+  const tail10 = recentModels.slice(-10);
+  if (tail10.includes(modelId)) return 0.92;
+  return 1;
 }
 
-function selectLane(weights: ReturnType<typeof laneWeights>, seed: number): RoutingLane {
-  const stableEnd = weights.stable;
-  const freshEnd = stableEnd + weights.fresh;
-  if (seed <= stableEnd) return "stable";
-  if (seed <= freshEnd) return "fresh";
-  return "challenger";
+function providerRepeatMultiplier(provider: string, recentProviders: string[]) {
+  const lastTwo = recentProviders.slice(-2);
+  if (lastTwo.length < 2) return 1;
+  if (lastTwo.every((item) => item === provider)) return 0.8;
+  return 1;
 }
 
-function repetitionPenalty(modelId: string, recentModels: string[]) {
-  const hits = recentModels.filter((item) => item === modelId).length;
-  if (hits <= 0) return 0;
-  return Math.min(0.3, hits * 0.09);
+function normalizeScores(rows: ScoredCandidate[]) {
+  if (rows.length === 0) return;
+  const raw = rows.map((row) => row.rawScore);
+  const min = Math.min(...raw);
+  const max = Math.max(...raw);
+  const spread = Math.max(1e-6, max - min);
+
+  for (const row of rows) {
+    row.normalizedScore = clamp01((row.rawScore - min) / spread);
+  }
 }
 
-function providerDiversityPenalty(provider: string, recentProviders: string[]) {
-  if (recentProviders.length < 3) return 0;
-  const providerHits = recentProviders.filter((item) => item === provider).length;
-  const share = providerHits / recentProviders.length;
-  return share > 0.25 ? Math.min(0.16, (share - 0.25) * 0.5) : 0;
-}
-
-function familyDiversityPenalty(family: string, recentFamilies: string[]) {
-  if (recentFamilies.length < 6) return 0;
-  const familyHits = recentFamilies.filter((item) => item === family).length;
-  const share = familyHits / recentFamilies.length;
-  return share > 0.4 ? Math.min(0.18, (share - 0.4) * 0.5) : 0;
+function modeAllowsChallengers(input: PhaseRoutingInput) {
+  const requestClass = input.requestClass;
+  if (requestClass && requestClass !== "T0" && requestClass !== "T1") return false;
+  if (input.stakes !== "low") return false;
+  if (input.messageLength > 260) return false;
+  if (input.mode === "research" || input.mode === "exam" || input.mode === "marker") return false;
+  return true;
 }
 
 export function buildPhasePlan(params: {
@@ -271,71 +292,57 @@ export function buildPhasePlan(params: {
   return phases;
 }
 
-function applyTopProviderDiversityBoost(scored: ScoredCandidate[]) {
-  if (scored.length <= 10) return;
-  const topWindowSize = Math.min(10, scored.length);
-  const topProviders = new Set(scored.slice(0, topWindowSize).map((row) => row.provider));
-  const allProviders = new Set(scored.map((row) => row.provider));
-  const targetProviderCount = Math.min(4, allProviders.size);
-
-  if (topProviders.size >= targetProviderCount || targetProviderCount <= 1) return;
-
-  const missingProviders = [...allProviders].filter((provider) => !topProviders.has(provider));
-  for (const provider of missingProviders) {
-    if (topProviders.size >= targetProviderCount) break;
-    const candidate = scored.find((row) => row.provider === provider);
-    if (!candidate) continue;
-    candidate.score += 0.06;
-    candidate.reasons.push("provider-balance");
-    candidate.breakdown.push("providerDiversityBoost +0.06");
-    topProviders.add(provider);
-  }
-}
-
 export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecision {
   const startedAt = nowMs();
   const recentModels = (input.recentModels ?? []).slice(-20);
   const recentProviders = recentModels.map(providerFromModelId);
-  const recentFamilies = recentModels.map((modelId) => modelFamily(modelId));
   const required = input.requiredCapabilities ?? [];
   const preferred = input.preferredCapabilities ?? [];
   const catalog = input.modelCatalog.filter((model) => model.modelId && model.modelId !== "openrouter/auto");
   const preferredIds = new Set((input.preferredModelIds ?? []).filter(Boolean));
-  const seed = hashToUnit(`${input.seedKey}:${input.phaseId}:${input.mode}:${input.messageLength}`);
-  const weights = laneWeights(input.stakes, input.needsSearch);
 
-  const allowedManual =
-    input.routerMode === "manual" &&
-    input.manualModel &&
-    input.modelCatalog.some((model) => model.modelId === input.manualModel && isModelAllowedInTier(model, input.spendingTier));
+  const manualEntry = input.manualModel
+    ? input.modelCatalog.find((model) => model.modelId === input.manualModel)
+    : undefined;
+  const manualBlockedByCap = Boolean(manualEntry && isModelTooExpensivePerMillion(manualEntry));
+  const manualAllowedByTier = Boolean(manualEntry && isModelAllowedInTier(manualEntry, input.spendingTier));
+  const manualAllowedWithOverride =
+    input.routerMode === "manual"
+    && Boolean(input.manualModel)
+    && (
+      manualAllowedByTier
+      || (
+        manualBlockedByCap
+        && input.manualModelConfirmedExpensive
+        && input.spendingTier === "normal"
+      )
+    );
 
-  if (allowedManual && input.manualModel) {
+  if (manualAllowedWithOverride && input.manualModel) {
     const candidates: RouteTraceCandidate[] = [
       {
         modelId: input.manualModel,
         allowed: true,
         score: 1,
-        reason: "Manual model lock",
-        scoreBreakdown: ["Manual selection"],
+        reason: manualBlockedByCap
+          ? "Manual model lock (cost-cap override confirmed by user)"
+          : "Manual model lock",
+        scoreBreakdown: [
+          manualBlockedByCap
+            ? "manual override confirmed"
+            : "manual selection",
+        ],
       },
     ];
     const fallbackModels: string[] = [];
     const routingDurationMs = Math.max(0, Math.round(nowMs() - startedAt));
-    console.info(JSON.stringify({
-      event: "route_decision",
-      mode: input.mode,
-      selectedModel: input.manualModel,
-      score: 1,
-      candidateCount: 1,
-      fallback: false,
-      latencyMs: routingDurationMs,
-      tier: input.spendingTier,
-    }));
     return {
       selectedModel: input.manualModel,
       fallbackModels,
-      lane: "stable",
-      reason: `Manual model lock for ${input.phaseLabel.toLowerCase()}`,
+      lane: "scored",
+      reason: manualBlockedByCap
+        ? `Manual override kept ${input.manualModel} for ${input.phaseLabel.toLowerCase()} despite cost cap.`
+        : `Manual model lock for ${input.phaseLabel.toLowerCase()}`,
       candidates,
       phase: {
         id: input.phaseId,
@@ -354,20 +361,10 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
       .slice(0, 5)
       .map((model) => model.modelId);
     const routingDurationMs = Math.max(0, Math.round(nowMs() - startedAt));
-    console.info(JSON.stringify({
-      event: "route_decision",
-      mode: input.mode,
-      selectedModel: "openrouter/auto",
-      score: 1,
-      candidateCount: 1,
-      fallback: false,
-      latencyMs: routingDurationMs,
-      tier: input.spendingTier,
-    }));
     return {
       selectedModel: "openrouter/auto",
       fallbackModels: rankedFallbacks,
-      lane: "stable",
+      lane: "scored",
       reason: `Delegated ${input.phaseLabel.toLowerCase()} to OpenRouter auto`,
       candidates: [
         {
@@ -389,156 +386,166 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
     };
   }
 
+  const coverageByTier = tierProviderCoverage(catalog);
+  const hasWarmCacheCandidate = catalog.some((model) =>
+    hasWarmCache({
+      modelId: model.modelId,
+      model,
+      cacheWindow: input.cacheWindow,
+    }),
+  );
+
+  const explorationRoll = hashToUnit(`${input.seedKey}:${input.phaseId}:explore`);
+  const shouldExplore = explorationRoll < 0.1;
+  const challengerAllowed = modeAllowsChallengers(input) && shouldExplore && !hasWarmCacheCandidate;
+
   const scored: ScoredCandidate[] = [];
   for (const model of catalog) {
     if (!isModelAllowedInTier(model, input.spendingTier)) continue;
-    const fit = phaseFit({
+
+    const capMatch = capabilityMatch({
       model,
       required,
       preferred,
       mode: input.mode,
       needsSearch: input.needsSearch,
     });
-    if (fit <= 0) continue;
+    if (capMatch <= 0) continue;
 
     const stat = input.modelRuntimeStats?.[model.modelId];
     const reliability = reliabilityScore(stat);
-    const latency = latencyScore(stat);
-    const freshness = freshnessScore(model);
-    const context = contextFit(model, input.messageLength);
-    const cost = costFit(normalizeCost(model), input.stakes, Boolean(model.isFree || model.modelId.includes(":free")));
-    const totalRuns = Math.max(0, (stat?.successCount ?? 0) + (stat?.failureCount ?? 0));
-    const lane = laneForCandidate({ reliability, freshness, totalRuns });
+    const latency = latencyFit(stat);
+    const fresh = freshnessScore(model);
     const provider = providerFromModelId(model.modelId);
-    const family = modelFamily(model.modelId);
+    const cost = costFit(normalizeCost(model), input.stakes, Boolean(model.isFree || model.modelId.includes(":free")));
+    const cacheWarm = hasWarmCache({ modelId: model.modelId, model, cacheWindow: input.cacheWindow });
+    const cacheBonus = cacheWarm ? 1 : model.promptCachingSupported ? 0.58 : 0.22;
 
-    const repeatPenalty = repetitionPenalty(model.modelId, recentModels);
-    const providerPenalty = providerDiversityPenalty(provider, recentProviders);
-    const familyPenalty = familyDiversityPenalty(family, recentFamilies);
-    const agePenalty = stalenessPenalty(model);
-    const researchPenalty = deepResearchPenalty(model.modelId, input.mode, input.stakes);
-    const conversationTurnCount = Math.max(0, input.conversationTurnCount ?? 0);
-    const isPreviousModel = input.previousModelUsed && input.previousModelUsed === model.modelId;
-    let stickinessBonus = 0;
-    if (isPreviousModel && conversationTurnCount > 2 && reliability > 0.6) {
-      stickinessBonus = 0.15;
-      if (model.promptCachingSupported) stickinessBonus += 0.05;
-      if (input.hasAttachments) stickinessBonus = Math.max(stickinessBonus, 0.25);
+    const tier = dynamicTierForModel(model);
+    const providerCoverage = clamp01((coverageByTier[tier]?.size ?? 1) / 4);
+    const providerRotationBonus = recentProviders.slice(-2).includes(provider) ? 0 : 0.08;
+    const diversityScore = clamp01(providerCoverage + providerRotationBonus);
+
+    const weightedScore =
+      (0.30 * capMatch)
+      + (0.25 * cost)
+      + (0.15 * reliability)
+      + (0.10 * latency)
+      + (0.08 * diversityScore)
+      + (0.07 * cacheBonus)
+      + (0.05 * fresh);
+
+    let multiplier = 1;
+    const reasonTags: string[] = [];
+    const breakdown: string[] = [
+      `capability_match ${capMatch.toFixed(2)} x0.30`,
+      `cost_fit ${cost.toFixed(2)} x0.25`,
+      `reliability ${reliability.toFixed(2)} x0.15`,
+      `latency_fit ${latency.toFixed(2)} x0.10`,
+      `diversity ${diversityScore.toFixed(2)} x0.08`,
+      `cache_bonus ${cacheBonus.toFixed(2)} x0.07`,
+      `freshness ${fresh.toFixed(2)} x0.05`,
+    ];
+
+    const recentModelPenalty = recentModelMultiplier(model.modelId, recentModels);
+    const providerPenalty = providerRepeatMultiplier(provider, recentProviders);
+
+    if (input.routerMode !== "manual" && !cacheWarm) {
+      if (recentModelPenalty < 1) {
+        multiplier *= recentModelPenalty;
+        breakdown.push(`recent_model_multiplier x${recentModelPenalty.toFixed(2)}`);
+        reasonTags.push("recent-model diversity");
+      }
+      if (providerPenalty < 1) {
+        multiplier *= providerPenalty;
+        breakdown.push(`provider_repeat_multiplier x${providerPenalty.toFixed(2)}`);
+        reasonTags.push("provider diversity");
+      }
+    } else if (cacheWarm) {
+      breakdown.push("diversity penalties skipped (warm cache)");
+      reasonTags.push("warm cache exception");
     }
-    const attachmentSwitchPenalty =
-      input.hasAttachments && input.previousModelUsed && input.previousModelUsed !== model.modelId ? 0.35 : 0;
-    const diversityBalance = Math.max(0, 1 - repeatPenalty - providerPenalty - familyPenalty);
-    const laneBoost = lane === selectLane(weights, seed) ? 0.08 : lane === "fresh" ? 0.03 : 0;
-    const preferredBoost = preferredIds.has(model.modelId) ? 0.05 : 0;
 
-    const score =
-      fit * 0.2 +
-      reliability * 0.16 +
-      freshness * 0.13 +
-      cost * 0.15 +
-      latency * 0.1 +
-      context * 0.1 +
-      diversityBalance * 0.13 +
-      stickinessBonus +
-      laneBoost +
-      preferredBoost -
-      agePenalty -
-      researchPenalty -
-      attachmentSwitchPenalty;
+    if (cacheWarm) {
+      multiplier *= 1.3;
+      breakdown.push("cache_warm_boost x1.30");
+      reasonTags.push("cache-aware priority");
+    }
+
+    if (preferredIds.has(model.modelId)) {
+      multiplier *= 1.08;
+      breakdown.push("preferred_model_multiplier x1.08");
+      reasonTags.push("preferred");
+    }
+
+    const recentFailureCircuitTriggered =
+      (stat?.consecutiveFailureCount ?? 0) >= 2
+      && typeof stat?.lastFailureAt === "number"
+      && Date.now() - stat.lastFailureAt <= FAILURE_CIRCUIT_WINDOW_MS
+      && !cacheWarm;
+    if (recentFailureCircuitTriggered && input.routerMode !== "manual") {
+      multiplier *= 0.15;
+      reasonTags.push("circuit breaker");
+      breakdown.push(
+        `recent_failure_circuit x0.15 (${Math.max(0, stat?.consecutiveFailureCount ?? 0)} consecutive failures)`,
+      );
+    }
+
+    const totalRuns = Math.max(0, (stat?.successCount ?? 0) + (stat?.failureCount ?? 0));
+    const challengerState: "challenger" | "normal" | "deprioritized" =
+      stat?.challengerState === "challenger" || stat?.challengerState === "normal" || stat?.challengerState === "deprioritized"
+        ? stat.challengerState
+        : totalRuns < 5
+          ? "challenger"
+          : totalRuns >= 12 && reliability < 0.3
+            ? "deprioritized"
+            : "normal";
+    const isChallenger = challengerState === "challenger";
+    if (challengerState === "challenger") {
+      if (challengerAllowed) {
+        reasonTags.push("challenger eligible");
+        breakdown.push("challenger_lane eligible (exploration + low stakes)");
+      } else {
+        multiplier *= 0.3;
+        reasonTags.push("challenger gated");
+        breakdown.push("challenger_gate_multiplier x0.30");
+      }
+    } else if (challengerState === "deprioritized") {
+      multiplier *= 0.3;
+      reasonTags.push("challenger demoted");
+      breakdown.push("deprioritized_multiplier x0.30");
+    } else if (totalRuns >= 12 && (stat?.qualityScore ?? reliability) > 0.6) {
+      reasonTags.push("challenger promoted");
+      breakdown.push("promotion_signal reliability>0.60 after 12 runs");
+    }
+
+    const rawScore = Math.max(0, weightedScore * multiplier);
 
     scored.push({
-      model,
       modelId: model.modelId,
       provider,
-      family,
-      lane,
-      score,
-      reliability,
-      context,
-      stickinessBonus,
-      reasons: [
-        lane === "stable" ? "stable lane" : lane === "fresh" ? "fresh lane" : "challenger lane",
-        stickinessBonus >= 0.2 ? "cache-aware stickiness" : stickinessBonus > 0 ? "conversation stickiness" : "",
-        preferredIds.has(model.modelId) ? "preferred" : "",
-      ].filter(Boolean),
+      dynamicTier: tier,
+      rawScore,
+      normalizedScore: 0,
       breakdown: [
-        `phaseFit ${fit.toFixed(2)}`,
-        `liveReward ${reliability.toFixed(2)}`,
-        `freshness ${freshness.toFixed(2)}`,
-        `costFit ${cost.toFixed(2)}`,
-        `latencyFit ${latency.toFixed(2)}`,
-        `contextFit ${context.toFixed(2)}`,
-        `diversityBalance ${diversityBalance.toFixed(2)}`,
-        stickinessBonus > 0 ? `stickinessBonus +${stickinessBonus.toFixed(2)}` : "stickinessBonus +0.00",
-        providerPenalty > 0 ? `providerDiversityPenalty ${providerPenalty.toFixed(2)}` : "providerDiversityPenalty 0.00",
-        familyPenalty > 0 ? `familyDiversityPenalty ${familyPenalty.toFixed(2)}` : "familyDiversityPenalty 0.00",
-        attachmentSwitchPenalty > 0 ? `attachmentSwitchPenalty -${attachmentSwitchPenalty.toFixed(2)}` : "attachmentSwitchPenalty 0.00",
-        agePenalty > 0 ? `stalenessPenalty -${agePenalty.toFixed(2)}` : "stalenessPenalty 0.00",
-        researchPenalty > 0 ? `deepResearchPenalty -${researchPenalty.toFixed(2)}` : "deepResearchPenalty 0.00",
-      ],
+      ...breakdown,
+      `weighted_score ${weightedScore.toFixed(3)}`,
+      `final_multiplier ${multiplier.toFixed(3)}`,
+      `challenger_state ${challengerState}`,
+    ],
+      reasonTags,
+      isChallenger,
+      cacheWarm,
     });
   }
 
-  scored.sort((a, b) => b.score - a.score || a.modelId.localeCompare(b.modelId));
-  applyTopProviderDiversityBoost(scored);
-  scored.sort((a, b) => b.score - a.score || a.modelId.localeCompare(b.modelId));
-  const preferredLane = selectLane(weights, seed);
-  const laneRows = scored.filter((row) => row.lane === preferredLane);
-  const primaryPool = (laneRows.length > 0 ? laneRows : scored).slice(0, 5);
-  const explorationSeed = hashToUnit(`${input.seedKey}:${input.phaseId}:epsilon`);
-  const shouldExplore = primaryPool.length > 1 && explorationSeed < (input.stakes === "low" ? 0.15 : 0.1);
-  let selected = laneRows[0] ?? scored[0];
-  let switchReason: string | undefined;
-  if (shouldExplore) {
-    const pickSeed = hashToUnit(`${input.seedKey}:${input.phaseId}:epsilon-pick`);
-    const randomIndex = Math.min(primaryPool.length - 1, Math.floor(pickSeed * primaryPool.length));
-    selected = primaryPool[randomIndex];
-  }
-
-  const previousRow = input.previousModelUsed ? scored.find((row) => row.modelId === input.previousModelUsed) : undefined;
-  const conversationTurnCount = Math.max(0, input.conversationTurnCount ?? 0);
-  const stickyEligible = Boolean(previousRow && conversationTurnCount > 2 && previousRow.reliability > 0.6);
-  const stickyMinImprovement = 0.12;
-  const previousContextOverflow = Boolean(previousRow && previousRow.context < 0.16);
-
-  if (selected && previousRow && input.hasAttachments) {
-    if (selected.modelId !== previousRow.modelId) {
-      selected = previousRow;
-      switchReason = `Staying on ${previousRow.modelId} to preserve attachment context.`;
-    }
-  } else if (selected && previousRow && stickyEligible && selected.modelId !== previousRow.modelId) {
-    const improvement = selected.score - previousRow.score;
-    if (improvement < stickyMinImprovement) {
-      selected = previousRow;
-      switchReason = `Kept ${previousRow.modelId} (conversation stickiness; switch requires +${stickyMinImprovement.toFixed(2)} score).`;
-    } else {
-      switchReason = `Switched from ${previousRow.modelId} to ${selected.modelId} (+${improvement.toFixed(2)} score gain).`;
-    }
-  } else if (selected && previousRow && selected.modelId !== previousRow.modelId) {
-    if (previousContextOverflow) {
-      switchReason = `Switched from ${previousRow.modelId} due to context-window pressure.`;
-    } else if (previousRow.reliability <= 0.6) {
-      switchReason = `Switched from ${previousRow.modelId} due to reliability drop (${previousRow.reliability.toFixed(2)}).`;
-    }
-  }
-
-  if (!selected) {
+  if (scored.length === 0) {
     const fallbackModel = input.manualModel || "openrouter/auto";
     const routingDurationMs = Math.max(0, Math.round(nowMs() - startedAt));
-    console.info(JSON.stringify({
-      event: "route_decision",
-      mode: input.mode,
-      selectedModel: fallbackModel,
-      score: 0.01,
-      candidateCount: scored.length,
-      fallback: true,
-      latencyMs: routingDurationMs,
-      tier: input.spendingTier,
-    }));
     return {
       selectedModel: fallbackModel,
       fallbackModels: [],
-      lane: preferredLane,
+      lane: "scored",
       reason: `No eligible catalog model for ${input.phaseLabel.toLowerCase()}`,
       candidates: [{ modelId: fallbackModel, allowed: true, score: 0.01, reason: "Emergency fallback" }],
       phase: {
@@ -552,6 +559,24 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
     };
   }
 
+  scored.sort((a, b) => b.rawScore - a.rawScore || a.modelId.localeCompare(b.modelId));
+
+  if (shouldExplore && scored.length > 1) {
+    const candidates = scored.slice(1);
+    const pickSeed = hashToUnit(`${input.seedKey}:${input.phaseId}:explore-pick`);
+    const picked = candidates[Math.min(candidates.length - 1, Math.floor(pickSeed * candidates.length))];
+    if (picked) {
+      picked.rawScore *= 1.5;
+      picked.breakdown.push("exploration_boost x1.50");
+      picked.reasonTags.push("exploration");
+      scored.sort((a, b) => b.rawScore - a.rawScore || a.modelId.localeCompare(b.modelId));
+    }
+  }
+
+  normalizeScores(scored);
+  scored.sort((a, b) => b.rawScore - a.rawScore || a.modelId.localeCompare(b.modelId));
+
+  const selected = scored[0]!;
   const fallbackModels: string[] = [];
   const usedProviders = new Set<string>([selected.provider]);
   for (const row of scored) {
@@ -566,32 +591,33 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
   const candidates: RouteTraceCandidate[] = scored.slice(0, 12).map((row) => ({
     modelId: row.modelId,
     allowed: true,
-    score: Number(Math.max(0, Math.min(1, row.score)).toFixed(3)),
-    reason: row.reasons.length > 0 ? row.reasons.join(" · ") : `Scored for ${input.phaseLabel.toLowerCase()}`,
-    scoreBreakdown: row.breakdown,
+    score: Number(row.normalizedScore.toFixed(3)),
+    reason:
+      row.reasonTags.length > 0
+        ? row.reasonTags.join(" · ")
+        : `Unified weighted routing for ${input.phaseLabel.toLowerCase()}`,
+    scoreBreakdown: [
+      ...row.breakdown,
+      `provider ${row.provider}`,
+      `tier ${row.dynamicTier}`,
+      row.cacheWarm ? "cache_state warm" : "cache_state cold",
+      row.isChallenger ? "pool challenger" : "pool standard",
+    ],
   }));
 
-  const reason = switchReason
-    ? switchReason
-    : shouldExplore
-      ? `Phase router selected ${selected.modelId} via exploration from top candidates for ${input.phaseLabel.toLowerCase()}`
-      : `Phase router selected ${selected.modelId} in ${preferredLane} lane for ${input.phaseLabel.toLowerCase()}`;
   const routingDurationMs = Math.max(0, Math.round(nowMs() - startedAt));
-  console.info(JSON.stringify({
-    event: "route_decision",
-    mode: input.mode,
-    selectedModel: selected.modelId,
-    score: Number(Math.max(0, Math.min(1, selected.score)).toFixed(3)),
-    candidateCount: scored.length,
-    fallback: false,
-    latencyMs: routingDurationMs,
-    tier: input.spendingTier,
-  }));
+  const reasonParts = [
+    `Unified weighted score selected ${selected.modelId} for ${input.phaseLabel.toLowerCase()}.`,
+    shouldExplore ? "Exploration mode was active." : "Exploration mode was inactive.",
+  ];
+  if (selected.cacheWarm) reasonParts.push("Prompt cache was warm for this conversation.");
+  if (selected.isChallenger) reasonParts.push("Selected model is currently in challenger onboarding.");
+
   return {
     selectedModel: selected.modelId,
     fallbackModels,
-    lane: preferredLane,
-    reason,
+    lane: selected.isChallenger ? "challenger" : "scored",
+    reason: reasonParts.join(" "),
     candidates,
     phase: {
       id: input.phaseId,

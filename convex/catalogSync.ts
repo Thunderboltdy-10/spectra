@@ -348,7 +348,7 @@ function mapOpenRouterModels(params: {
     const item = {
       modelId: model.id,
       name: model.name || model.id,
-      provider: model.top_provider?.name || model.id.split("/")[0] || "Unknown",
+      provider: model.id.split("/")[0] || model.top_provider?.name || "Unknown",
       description: model.description || "Model metadata from OpenRouter.",
       contextLength: model.context_length,
       inputCostPerM,

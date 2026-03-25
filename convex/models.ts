@@ -5,6 +5,7 @@ import { MODEL_DEFAULTS } from "./constants";
 
 type Rating = "low" | "medium" | "high";
 type MultiRating = "none" | "basic" | "strong";
+type ChallengerState = "challenger" | "normal" | "deprioritized";
 
 const FEATURED_LABELS: Record<string, string> = {
   "stepfun/step-3.5-flash:free": "Fast Included",
@@ -139,6 +140,61 @@ function asMulti(value: string | undefined): MultiRating {
     return value;
   }
   return "basic";
+}
+
+function clamp01(value: number) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function reliabilityFromCounts(successCount: number, failureCount: number) {
+  const success = Math.max(0, successCount);
+  const failure = Math.max(0, failureCount);
+  return clamp01((success + 1) / (success + failure + 2));
+}
+
+function latencyScore(avgLatencyMs: number) {
+  if (!Number.isFinite(avgLatencyMs) || avgLatencyMs <= 0) return 0.58;
+  if (avgLatencyMs <= 2_500) return 1;
+  if (avgLatencyMs <= 4_500) return 0.82;
+  if (avgLatencyMs <= 7_500) return 0.6;
+  if (avgLatencyMs <= 11_000) return 0.36;
+  return 0.2;
+}
+
+function feedbackScore(positiveCount: number, negativeCount: number) {
+  const positive = Math.max(0, positiveCount);
+  const negative = Math.max(0, negativeCount);
+  const total = positive + negative;
+  if (total <= 0) return 0.5;
+  const balance = (positive - negative) / total;
+  return clamp01((balance + 1) / 2);
+}
+
+function evaluateQuality(params: {
+  successCount: number;
+  failureCount: number;
+  avgLatencyMs: number;
+  lengthFinishCount?: number;
+  positiveFeedbackCount?: number;
+  negativeFeedbackCount?: number;
+}) {
+  const totalRuns = Math.max(0, params.successCount + params.failureCount);
+  const reliability = reliabilityFromCounts(params.successCount, params.failureCount);
+  const latency = latencyScore(params.avgLatencyMs);
+  const feedback = feedbackScore(params.positiveFeedbackCount ?? 0, params.negativeFeedbackCount ?? 0);
+  const lengthRate = totalRuns > 0 ? Math.max(0, (params.lengthFinishCount ?? 0) / totalRuns) : 0;
+  const qualityScore = clamp01(
+    (0.55 * reliability)
+    + (0.2 * latency)
+    + (0.15 * feedback)
+    + (0.1 * (1 - clamp01(lengthRate))),
+  );
+
+  return {
+    totalRuns,
+    reliability,
+    qualityScore,
+  };
 }
 
 const vModelInput = v.object({
@@ -526,6 +582,13 @@ export const recordModelRun = mutation({
         failureCount,
         totalLatencyMs: latency,
         avgLatencyMs: latency,
+        consecutiveFailureCount: args.success ? 0 : 1,
+        lastFailureAt: args.success ? undefined : now,
+        lengthFinishCount: 0,
+        totalResponseChars: 0,
+        positiveFeedbackCount: 0,
+        negativeFeedbackCount: 0,
+        challengerState: "challenger",
         lastUsedAt: now,
         createdAt: now,
         updatedAt: now,
@@ -538,17 +601,177 @@ export const recordModelRun = mutation({
     const totalLatencyMs = existing.totalLatencyMs + latency;
     const totalRuns = Math.max(1, successCount + failureCount);
     const avgLatencyMs = Math.round(totalLatencyMs / totalRuns);
+    const consecutiveFailureCount = args.success
+      ? 0
+      : (existing.consecutiveFailureCount ?? 0) + 1;
+    const lastFailureAt = args.success ? existing.lastFailureAt : now;
 
     await ctx.db.patch(existing._id, {
       successCount,
       failureCount,
       totalLatencyMs,
       avgLatencyMs,
+      consecutiveFailureCount,
+      lastFailureAt,
       lastUsedAt: now,
       updatedAt: now,
     });
 
     return { ok: true };
+  },
+});
+
+export const recordModelQualitySignals = mutation({
+  args: {
+    actorClerkId: v.string(),
+    modelId: v.string(),
+    finishReason: v.optional(v.string()),
+    responseLength: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Actor not found");
+    }
+
+    const now = Date.now();
+    const lengthFinishIncrement = args.finishReason?.trim().toLowerCase() === "length" ? 1 : 0;
+    const responseCharsIncrement = Math.max(0, Math.round(args.responseLength ?? 0));
+    if (lengthFinishIncrement <= 0 && responseCharsIncrement <= 0) {
+      return { ok: true, updated: false };
+    }
+
+    const existing = await ctx.db
+      .query("modelRuntimeStats")
+      .withIndex("by_org_model", (q) => q.eq("orgId", actor.orgId).eq("modelId", args.modelId))
+      .unique();
+
+    if (!existing) {
+      await ctx.db.insert("modelRuntimeStats", {
+        orgId: actor.orgId,
+        modelId: args.modelId,
+        successCount: 0,
+        failureCount: 0,
+        totalLatencyMs: 0,
+        avgLatencyMs: 0,
+        consecutiveFailureCount: 0,
+        lastFailureAt: undefined,
+        lengthFinishCount: lengthFinishIncrement,
+        totalResponseChars: responseCharsIncrement,
+        positiveFeedbackCount: 0,
+        negativeFeedbackCount: 0,
+        challengerState: "challenger",
+        lastUsedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+      return { ok: true, updated: true };
+    }
+
+    await ctx.db.patch(existing._id, {
+      lengthFinishCount: (existing.lengthFinishCount ?? 0) + lengthFinishIncrement,
+      totalResponseChars: (existing.totalResponseChars ?? 0) + responseCharsIncrement,
+      updatedAt: now,
+    });
+
+    return { ok: true, updated: true };
+  },
+});
+
+export const recordModelFeedbackSignal = mutation({
+  args: {
+    actorClerkId: v.string(),
+    modelId: v.string(),
+    positive: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Actor not found");
+    }
+
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("modelRuntimeStats")
+      .withIndex("by_org_model", (q) => q.eq("orgId", actor.orgId).eq("modelId", args.modelId))
+      .unique();
+
+    const positiveIncrement = args.positive ? 1 : 0;
+    const negativeIncrement = args.positive ? 0 : 1;
+
+    if (!existing) {
+      await ctx.db.insert("modelRuntimeStats", {
+        orgId: actor.orgId,
+        modelId: args.modelId,
+        successCount: 0,
+        failureCount: 0,
+        totalLatencyMs: 0,
+        avgLatencyMs: 0,
+        consecutiveFailureCount: 0,
+        lastFailureAt: undefined,
+        lengthFinishCount: 0,
+        totalResponseChars: 0,
+        positiveFeedbackCount: positiveIncrement,
+        negativeFeedbackCount: negativeIncrement,
+        challengerState: "challenger",
+        lastUsedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+      return { ok: true };
+    }
+
+    await ctx.db.patch(existing._id, {
+      positiveFeedbackCount: (existing.positiveFeedbackCount ?? 0) + positiveIncrement,
+      negativeFeedbackCount: (existing.negativeFeedbackCount ?? 0) + negativeIncrement,
+      updatedAt: now,
+    });
+
+    return { ok: true };
+  },
+});
+
+export const evaluateChallengerLane = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const rows = await ctx.db.query("modelRuntimeStats").collect();
+    const now = Date.now();
+    let updated = 0;
+
+    for (const row of rows) {
+      const quality = evaluateQuality({
+        successCount: row.successCount,
+        failureCount: row.failureCount,
+        avgLatencyMs: row.avgLatencyMs,
+        lengthFinishCount: row.lengthFinishCount,
+        positiveFeedbackCount: row.positiveFeedbackCount,
+        negativeFeedbackCount: row.negativeFeedbackCount,
+      });
+
+      const nextState: ChallengerState =
+        quality.totalRuns < 12
+          ? "challenger"
+          : quality.qualityScore < 0.3
+            ? "deprioritized"
+            : "normal";
+
+      const qualityRounded = Number(quality.qualityScore.toFixed(4));
+      const stateChanged = (row.challengerState ?? "challenger") !== nextState;
+      const qualityChanged = row.qualityScore !== qualityRounded;
+      if (!stateChanged && !qualityChanged) {
+        continue;
+      }
+
+      await ctx.db.patch(row._id, {
+        challengerState: nextState,
+        qualityScore: qualityRounded,
+        lastEvaluatedAt: now,
+        updatedAt: now,
+      });
+      updated += 1;
+    }
+
+    return { ok: true, evaluated: rows.length, updated };
   },
 });
 

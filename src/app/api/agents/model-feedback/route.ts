@@ -28,6 +28,14 @@ export async function POST(request: NextRequest) {
       positive: body.positive,
     });
 
+    if (body.modelId) {
+      await convexMutation("models:recordModelFeedbackSignal", {
+        actorClerkId: actor.clerkId,
+        modelId: body.modelId,
+        positive: body.positive,
+      });
+    }
+
     if (body.agentId && body.modelId) {
       await convexMutation("agents:recordAgentModelFeedback", {
         actorClerkId: actor.clerkId,

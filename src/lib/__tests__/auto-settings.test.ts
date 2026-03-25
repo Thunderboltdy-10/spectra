@@ -212,4 +212,26 @@ describe("auto-settings prompt analysis", () => {
       { type: "update_profile", statement: "I prefer concise explanations" },
     ]);
   });
+
+  it("detects model requests with fuzzy catalog matching", () => {
+    const directives = parseUserDirectives("Please use GPT-4 for this response.", {
+      modelCatalog: [
+        {
+          modelId: "openai/gpt-4o",
+          name: "GPT-4o",
+          provider: "openai",
+          description: "general",
+        },
+        {
+          modelId: "anthropic/claude-sonnet-4.5",
+          name: "Claude Sonnet 4.5",
+          provider: "anthropic",
+          description: "general",
+        },
+      ],
+    });
+
+    expect(directives.forcedModel).toBe("openai/gpt-4o");
+    expect(directives.detectedModelPhrase?.toLowerCase()).toContain("gpt-4");
+  });
 });

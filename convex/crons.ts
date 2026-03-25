@@ -17,9 +17,9 @@ crons.daily(
   internal.resources.cleanupExpired,
   { limit: 300 },
 );
-crons.daily(
+crons.interval(
   "generate-study-reminders",
-  { hourUTC: 5, minuteUTC: 10 },
+  { hours: 1 },
   internal.notifications.generateDailyStudyReminders,
   {},
 );
@@ -28,6 +28,12 @@ crons.interval(
   { minutes: 3 },
   internal.resources.retryStaleResourcesInternal,
   { limit: 30 },
+);
+crons.interval(
+  "evaluate-challenger-lane",
+  { hours: 168 },
+  internal.models.evaluateChallengerLane,
+  {},
 );
 
 export default crons;

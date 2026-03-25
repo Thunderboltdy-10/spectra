@@ -148,6 +148,7 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
             <InputRow label="Enhanced" value={trace.inputs.promptEnhanced ? "Yes" : "No"} />
             <InputRow label="Attachments" value={`${trace.inputs.attachmentTypes.join(", ") || "none"}`} />
             <InputRow label="Message Length" value={trace.inputs.messageLength} />
+            <InputRow label="Detected Intents" value={(trace.inputs.detectedIntents ?? []).join(", ") || "none"} />
           </div>
             </section>
 
@@ -241,6 +242,15 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
               </section>
             ) : null}
 
+            {trace.inputTokenBreakdown ? (
+              <section className="mb-5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+                <h4 className="mb-1 text-sm font-semibold text-[var(--text-primary)]">Input Token Breakdown</h4>
+                <p className="text-xs text-[var(--text-secondary)]">
+                  System: {trace.inputTokenBreakdown.systemPrompt.toLocaleString()} | History: {trace.inputTokenBreakdown.history.toLocaleString()} | Memory: {trace.inputTokenBreakdown.memory.toLocaleString()} | Sources: {trace.inputTokenBreakdown.sources.toLocaleString()}
+                </p>
+              </section>
+            ) : null}
+
             <section className="mb-5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
           <h4 className="mb-1 text-sm font-semibold text-[var(--text-primary)]">Selected</h4>
           <p className="break-all font-mono text-xs text-[var(--text-primary)]">{sanitizeModelId(trace.selected.modelId)}</p>
@@ -314,6 +324,9 @@ export function RouteTraceDrawer({ open, onClose, trace }: RouteTraceDrawerProps
                 </p>
                 <p>Total: {formatMs(trace.totalDurationMs)}</p>
                 <p>Budget guard: {trace.inputs.spendingTier}</p>
+                {typeof trace.usageBudgetRemaining === "number" ? (
+                  <p>Usage budget remaining: {trace.usageBudgetRemaining.toLocaleString()} tokens</p>
+                ) : null}
               </div>
             </section>
           </div>

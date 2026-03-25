@@ -26,6 +26,8 @@ export type PipelineState = {
   completedStages: PipelineStageId[];
   skippedStages: PipelineSkippedStage[];
   costBudgetUsd: number;
+  usageBudgetTokens: number;
+  usageBudgetRemaining: number;
 };
 
 type PipelineControllerInput = {
@@ -105,6 +107,11 @@ function requestClassAtLeast(requestClass: RequestClass, minimum: RequestClass) 
   return rank[requestClass] >= rank[minimum];
 }
 
+function usageTokenBudgetForUsd(costBudgetUsd: number) {
+  // Conservative budget conversion: assume worst-case 30 USD / 1M tokens.
+  return Math.max(300, Math.floor((costBudgetUsd * 1_000_000) / 30));
+}
+
 export function buildExecutionPlan(requestClass: RequestClass) {
   return [...EXECUTION_PLAN_BY_CLASS[requestClass]];
 }
@@ -124,6 +131,8 @@ export class PipelineController {
       completedStages: ["classifyRequest"],
       skippedStages: [],
       costBudgetUsd: budgetForRequestClass(input.requestClass),
+      usageBudgetTokens: usageTokenBudgetForUsd(budgetForRequestClass(input.requestClass)),
+      usageBudgetRemaining: usageTokenBudgetForUsd(budgetForRequestClass(input.requestClass)),
     };
 
     for (const stage of ALL_STAGES) {
@@ -139,6 +148,8 @@ export class PipelineController {
       executionPlan: [...this.state.executionPlan],
       completedStages: [...this.state.completedStages],
       skippedStages: [...this.state.skippedStages],
+      usageBudgetTokens: this.state.usageBudgetTokens,
+      usageBudgetRemaining: this.state.usageBudgetRemaining,
     };
   }
 
@@ -161,6 +172,12 @@ export class PipelineController {
       return;
     }
     this.state.skippedStages.push({ step: stage, reason });
+  }
+
+  consumeUsageTokens(tokens: number) {
+    if (!Number.isFinite(tokens) || tokens <= 0) return this.state.usageBudgetRemaining;
+    this.state.usageBudgetRemaining = Math.max(0, this.state.usageBudgetRemaining - Math.round(tokens));
+    return this.state.usageBudgetRemaining;
   }
 
   applyCostGates(params: {
@@ -232,6 +249,8 @@ export class PipelineController {
       completedStages: dedupe(this.state.completedStages),
       skippedStages: [...this.state.skippedStages],
       costBudgetUsd: this.state.costBudgetUsd,
+      usageBudgetTokens: this.state.usageBudgetTokens,
+      usageBudgetRemaining: this.state.usageBudgetRemaining,
     };
   }
 }

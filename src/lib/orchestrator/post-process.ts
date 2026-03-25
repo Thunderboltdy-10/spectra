@@ -1052,7 +1052,6 @@ async function generateTitleFromSnippet(
         {
           role: "system",
           content:
-            "Generate a conversation title in 3 to 5 words. Rules:\n- Just the topic, no quotes, no prefixes like \"User asks about\" or \"Help with\"\n- Be specific: \"WW2 Flashcards for IB\" not \"History Help\"\n- Include subject/context clues when present\n- Never start with articles (a, an, the)\n- Keep the same language as the user\n- Return plain title text only",
             "Generate a conversation title in 2 to 5 words. Rules:\n- Just the topic, no quotes, no prefixes like \"User asks about\" or \"Help with\"\n- Be specific: \"WW2 Flashcards for IB\" not \"History Help\"\n- Include subject/context clues when present\n- Never start with filler words (a, an, the, please, can)\n- Keep the same language as the user\n- Return plain title text only",
         },
         {

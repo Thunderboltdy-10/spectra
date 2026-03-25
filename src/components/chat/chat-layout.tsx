@@ -768,16 +768,17 @@ export function ChatLayout() {
           agentSuggestion={chat.agentSuggestion}
           onApplyAgentSuggestion={() => {
             if (!chat.agentSuggestion) return;
-            chat.setSelectedAgentId(chat.agentSuggestion.id);
+            chat.setActiveAgent(chat.agentSuggestion.id);
             chat.setAgentSuggestion(null);
             toast.success(`Using suggested agent: ${chat.agentSuggestion.name}`, { duration: 4000 });
           }}
           onSelectAgent={(agentId) => {
-            chat.setSelectedAgentId(agentId);
+            chat.setActiveAgent(agentId);
             chat.setAgentSuggestion(null);
           }}
           models={chat.models}
           userSpending={chat.userSpending}
+          currentUserId={chat.currentUserId}
           isSuperAdmin={chat.isSuperAdmin}
           routerMode={chat.routerMode}
           manualModel={chat.manualModel}

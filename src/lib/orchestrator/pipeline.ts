@@ -126,11 +126,15 @@ type AgentSnapshot = {
   name: string;
   category: string;
   description: string;
+  subjectArea?: string;
+  gradeLevel?: string;
   systemPrompt: string;
   avatarEmoji: string;
   avatarIcon?: string;
   preferredModel?: string;
   preferredMode?: StudyMode;
+  modelAllowlist?: string[];
+  modelDenylist?: string[];
   guidelinesSummary?: string;
   guidelinesTopicMap?: string[];
 };
@@ -1171,23 +1175,64 @@ export async function runChatPipeline(request: NextRequest) {
         reason: string;
       }
     | undefined;
+  let autoSelectedAgent:
+    | {
+        id: string;
+        name: string;
+        score: number;
+        reason: string;
+        emoji?: string;
+      }
+    | undefined;
   if (!selectedAgent && (safeMode === "auto" || body.routerMode === "auto")) {
     const availableAgents = (await convexQuery("agents:listAgents", {
       actorClerkId: actor.clerkId,
     })) as AgentSnapshot[];
     const matched = matchAgentToMessage(auto.message, availableAgents);
     if (matched) {
-      agentSuggestion = {
-        id: matched.agentId,
-        name: matched.agentName,
-        score: Number(matched.score.toFixed(2)),
-        reason: matched.reason,
-      };
-      logger.info("agent suggestion generated", {
-        agentId: matched.agentId,
-        score: matched.score,
-      });
+      const matchedScore = Number(matched.score.toFixed(2));
+      if (matched.score >= 0.7) {
+        const autoAgent = availableAgents.find((agent) => agent._id === matched.agentId);
+        if (autoAgent) {
+          selectedAgent = autoAgent;
+          autoSelectedAgent = {
+            id: autoAgent._id,
+            name: autoAgent.name,
+            score: matchedScore,
+            reason: matched.reason,
+            emoji: autoAgent.avatarEmoji,
+          };
+          logger.info("agent auto-selected", {
+            agentId: autoAgent._id,
+            score: matched.score,
+          });
+        }
+      } else if (matched.score >= 0.4) {
+        agentSuggestion = {
+          id: matched.agentId,
+          name: matched.agentName,
+          score: matchedScore,
+          reason: matched.reason,
+        };
+        logger.info("agent suggestion generated", {
+          agentId: matched.agentId,
+          score: matched.score,
+        });
+      }
     }
+  }
+  if (autoSelectedAgent?.id) {
+    void convexMutation("chats:updateChatSettings", {
+      actorClerkId: actor.clerkId,
+      chatId,
+      agentId: autoSelectedAgent.id,
+    }).catch(() => {});
+    earlyEventBuffer.push({
+      type: "agent_update",
+      status: "auto_selected",
+      agent: autoSelectedAgent,
+      message: `Using ${autoSelectedAgent.name} for this question`,
+    });
   }
 
   const existingSummary =
@@ -1628,10 +1673,35 @@ export async function runChatPipeline(request: NextRequest) {
       ...globalRecentAssistantModels.filter((model): model is string => Boolean(model && model.trim())),
     ],
   ).slice(-20);
+  const constrainedCatalog = (() => {
+    if (!selectedAgent) return catalog;
+    const allowlist = Array.from(
+      new Set((selectedAgent.modelAllowlist ?? []).map((model) => model.trim()).filter(Boolean)),
+    );
+    const denylist = new Set((selectedAgent.modelDenylist ?? []).map((model) => model.trim()).filter(Boolean));
+    let filtered = catalog;
+    if (allowlist.length > 0) {
+      const allowSet = new Set(allowlist);
+      filtered = filtered.filter((model) => model.modelId === "openrouter/auto" || allowSet.has(model.modelId));
+    }
+    if (denylist.size > 0) {
+      filtered = filtered.filter((model) => !denylist.has(model.modelId));
+    }
+    const hasRunnableModel = filtered.some((model) => model.modelId !== "openrouter/auto");
+    return hasRunnableModel ? filtered : catalog;
+  })();
+  if (selectedAgent?.modelAllowlist?.length || selectedAgent?.modelDenylist?.length) {
+    routePlan.intentSignals = {
+      ...(routePlan.intentSignals ?? {}),
+      requestedModelPhrase:
+        routePlan.intentSignals?.requestedModelPhrase
+        ?? `agent_model_constraints:${(selectedAgent.modelAllowlist ?? []).length} allow / ${(selectedAgent.modelDenylist ?? []).length} deny`,
+    };
+  }
 
   const fallbackManualModel =
     body.manualModel
-    ?? catalog.find((model) => model.modelId !== "openrouter/auto")?.modelId
+    ?? constrainedCatalog.find((model) => model.modelId !== "openrouter/auto")?.modelId
     ?? "openrouter/auto";
   const intentForcesManualModel = userDirectives.forcedModel
     && body.routerMode !== "manual"
@@ -1648,6 +1718,8 @@ export async function runChatPipeline(request: NextRequest) {
       : undefined,
     userDirectives.orchestrationPhraseDetected ? "orchestration_request:multi_model" : undefined,
     routePlan.intentSignals?.requestedOrchestration ? "route_plan_orchestration_signal" : undefined,
+    selectedAgent?.modelAllowlist?.length ? `agent_allowlist:${selectedAgent.modelAllowlist.length}` : undefined,
+    selectedAgent?.modelDenylist?.length ? `agent_denylist:${selectedAgent.modelDenylist.length}` : undefined,
   ].filter((value): value is string => Boolean(value));
   const phaseThinkingLevel =
     routePlan.responseBudget === "simple"
@@ -1684,7 +1756,7 @@ export async function runChatPipeline(request: NextRequest) {
     requestClass: auto.requestClass,
     cacheWindow,
     manualModelConfirmedExpensive: Boolean(body.confirmExpensiveModel),
-    modelCatalog: catalog,
+    modelCatalog: constrainedCatalog,
     modelRuntimeStats: runtimeStatMap,
     seedKey: `${chatId}:${normalizedMessage}`,
   });
@@ -1934,6 +2006,7 @@ export async function runChatPipeline(request: NextRequest) {
       route.trace.toolchain.push("search_provider_error");
     }
   }
+  if (autoSelectedAgent) route.trace.toolchain.push("agent_auto_selected");
   if (agentSuggestion) route.trace.toolchain.push("agent_suggestion");
   if (userDirectives.detectedModelPhrase && userDirectives.forcedModel) {
     route.trace.toolchain.push("intent_model_request");
@@ -1961,6 +2034,13 @@ export async function runChatPipeline(request: NextRequest) {
   if (existingSummary || scheduledCompaction) route.trace.toolchain.push("context_compaction");
   route.trace.toolchain.push("route_plan");
   route.trace.routePlan = routePlan;
+  if (selectedAgent?._id) {
+    (route.trace as { activeAgent?: { id: string; name: string; autoSelected?: boolean } }).activeAgent = {
+      id: selectedAgent._id,
+      name: selectedAgent.name,
+      autoSelected: Boolean(autoSelectedAgent && autoSelectedAgent.id === selectedAgent._id),
+    };
+  }
   if (runtimeSkills.length > 0) {
     route.trace.toolchain.push("skill_fetch");
   }
@@ -1992,7 +2072,7 @@ export async function runChatPipeline(request: NextRequest) {
     selectedModel: route.primaryModel,
     requiresVision,
     fallbackModels: route.fallbackModels,
-    modelCatalog: catalog,
+    modelCatalog: constrainedCatalog,
     spendingTier: budget.tier,
   });
 
@@ -2000,7 +2080,7 @@ export async function runChatPipeline(request: NextRequest) {
     if (manualLockRequested) {
       const manualVisionPrepassModel = capability.prepassModel
         ?? route.fallbackModels.find((candidate) => {
-          const fallbackMeta = catalog.find((model) => model.modelId === candidate);
+          const fallbackMeta = constrainedCatalog.find((model) => model.modelId === candidate);
           return fallbackMeta ? modelSupportsCapability(fallbackMeta, "vision") : false;
         });
       capability = {
@@ -2035,6 +2115,7 @@ export async function runChatPipeline(request: NextRequest) {
   earlyEventBuffer.push({
     type: "route_model",
     modelUsed: route.primaryModel,
+    routeTrace: route.trace,
   });
 
   let imageDescriptionBlock = "";
@@ -2508,7 +2589,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     requestClass: auto.requestClass,
     cacheWindow,
     manualModelConfirmedExpensive: Boolean(body.confirmExpensiveModel),
-    modelCatalog: catalog,
+    modelCatalog: constrainedCatalog,
     modelRuntimeStats: runtimeStatMap,
     seedKey: `${chatId}:${normalizedMessage}:support`,
   });
@@ -2542,7 +2623,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     requestClass: auto.requestClass,
     cacheWindow,
     manualModelConfirmedExpensive: Boolean(body.confirmExpensiveModel),
-    modelCatalog: catalog,
+    modelCatalog: constrainedCatalog,
     modelRuntimeStats: runtimeStatMap,
     seedKey: `${chatId}:${normalizedMessage}:synthesis`,
   });
@@ -2604,7 +2685,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
       requestClass: auto.requestClass,
       cacheWindow,
       manualModelConfirmedExpensive: Boolean(body.confirmExpensiveModel),
-      modelCatalog: catalog,
+      modelCatalog: constrainedCatalog,
       modelRuntimeStats: runtimeStatMap,
       seedKey: `${chatId}:${normalizedMessage}:verification`,
     });
@@ -3032,6 +3113,13 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         const whyThisResponse = summarizeWhyResponse(effectiveMode, route.reason);
         const modelRequested = primaryModel;
         const modelUsed = imageModel;
+        if (modelUsed && route.trace.selected.modelId !== modelUsed) {
+          route.trace.selected = {
+            modelId: modelUsed,
+            reason: `${route.trace.selected.reason} Final generation used ${modelUsed}.`,
+          };
+          route.trace.toolchain.push("final_model_reconciled");
+        }
         const usageIn = imageResult.usage?.prompt_tokens ?? 0;
         const usageOut = imageResult.usage?.completion_tokens ?? 0;
         const imageSubcallTotals = subcallTokenTotals();
@@ -3253,6 +3341,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
                   id: selectedAgent._id,
                   name: selectedAgent.name,
                   emoji: selectedAgent.avatarEmoji,
+                  autoSelected: Boolean(autoSelectedAgent && autoSelectedAgent.id === selectedAgent._id),
                 }
               : undefined,
         });
@@ -3375,6 +3464,13 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
       const verificationPassed = streamed.verificationPassed;
       const thinkingContent = streamed.thinkingContent;
       const modelRequested = primaryModel;
+      if (modelUsed && route.trace.selected.modelId !== modelUsed) {
+        route.trace.selected = {
+          modelId: modelUsed,
+          reason: `${route.trace.selected.reason} Final generation used ${modelUsed}.`,
+        };
+        route.trace.toolchain.push("final_model_reconciled");
+      }
       if (continuationCount > 0) {
         route.trace.toolchain.push("length_auto_continue");
       }
@@ -4172,6 +4268,7 @@ BACK: [answer or definition]`,
                 id: selectedAgent._id,
                 name: selectedAgent.name,
                 emoji: selectedAgent.avatarEmoji,
+                autoSelected: Boolean(autoSelectedAgent && autoSelectedAgent.id === selectedAgent._id),
               }
             : undefined,
       });

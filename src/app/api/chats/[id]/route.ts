@@ -28,6 +28,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       thinkingLevel?: "low" | "medium" | "high";
       routerMode?: "auto" | "manual" | "openrouter_auto";
       manualModel?: string;
+      agentId?: string | null;
       usePersonalResources?: boolean;
       title?: string;
     };

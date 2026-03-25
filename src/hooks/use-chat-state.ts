@@ -540,6 +540,7 @@ export function useChatState() {
   const sidebar = useSidebar();
   const [loading, setLoading] = useState(true);
   const role = sidebar.role;
+  const currentUserId = sidebar.userId;
   const isSuperAdmin = sidebar.isSuperAdmin;
   const chats = sidebar.chats;
   const setChats = sidebar.setChats;
@@ -1515,6 +1516,7 @@ export function useChatState() {
       mode?: StudyMode;
       routerMode?: RouterMode;
       manualModel?: string;
+      agentId?: string | null;
       thinkingLevel?: ThinkingLevel;
       usePersonalResources?: boolean;
       title?: string;
@@ -1538,6 +1540,7 @@ export function useChatState() {
       mode?: StudyMode;
       routerMode?: RouterMode;
       manualModel?: string;
+      agentId?: string | null;
       thinkingLevel?: ThinkingLevel;
       usePersonalResources?: boolean;
       title?: string;
@@ -1553,6 +1556,30 @@ export function useChatState() {
       }
     },
     [],
+  );
+
+  const setActiveAgent = useCallback(
+    (agentId?: string, options?: { persist?: boolean; chatId?: string }) => {
+      const nextAgentId = agentId?.trim() ? agentId.trim() : undefined;
+      setSelectedAgentId(nextAgentId);
+      const chatId = options?.chatId ?? selectedChatIdRef.current;
+      if (!chatId) return;
+      setChats((prev) =>
+        prev.map((chat) =>
+          chat._id === chatId
+            ? {
+                ...chat,
+                agentId: nextAgentId,
+                updatedAt: Date.now(),
+              }
+            : chat,
+        ),
+      );
+      if (options?.persist !== false) {
+        void updateChatSettingsById(chatId, { agentId: nextAgentId ?? null }).catch(() => {});
+      }
+    },
+    [setChats, updateChatSettingsById],
   );
 
   const applyProactiveBanner = useCallback(async () => {
@@ -2159,6 +2186,7 @@ export function useChatState() {
       let hasModelThinking = false;
       let orchestrationNotes: string[] = [];
       let memoryUpdateAccum: { updated: boolean; summary: string } | null = null;
+      let finalAgentIdForTurn = selectedAgentId;
 
       const buildThinkingContent = () => {
         const sections: string[] = [];
@@ -2225,6 +2253,7 @@ export function useChatState() {
               | "rag_used"
               | "soul_update"
               | "agent_summoned"
+              | "agent_update"
               | "phase"
               | "phase_update"
               | "search_status";
@@ -2255,7 +2284,6 @@ export function useChatState() {
             chatTitle?: string;
             suggestedMode?: string;
             agents?: string[];
-            agent?: string;
             preview?: string;
             tokensUsed?: number;
             model?: string;
@@ -2273,10 +2301,16 @@ export function useChatState() {
               startedAt?: number;
               finishedAt?: number;
             }>;
-            status?: "pending" | "running" | "done" | "failed" | "skipped" | "planned" | "in_progress" | "completed";
             searchStatus?: "model_fallback" | "real_search" | "error";
             sourceCount?: number;
             agentSuggestion?: AgentSuggestion;
+            agent?: {
+              id: string;
+              name: string;
+              emoji?: string;
+              autoSelected?: boolean;
+            } | string;
+            status?: "pending" | "running" | "done" | "failed" | "skipped" | "planned" | "in_progress" | "completed" | "auto_selected";
             unlockedAchievements?: AchievementToastData[];
             sources?: Array<{ filename: string; page?: number; sourceType: string }>;
             entries?: Array<{ key: string; value: string; confidence: number }>;
@@ -2433,10 +2467,29 @@ export function useChatState() {
             }
           }
 
+          if (payload.type === "agent_update") {
+            const agentPayload =
+              payload.agent && typeof payload.agent === "object" && "id" in payload.agent
+                ? payload.agent
+                : null;
+            if (agentPayload?.id) {
+              finalAgentIdForTurn = agentPayload.id;
+              setActiveAgent(agentPayload.id, { persist: false, chatId });
+              setAgentSuggestion(null);
+              if (payload.status === "auto_selected") {
+                const notice =
+                  typeof payload.message === "string" && payload.message.trim().length > 0
+                    ? payload.message.trim()
+                    : `Using ${agentPayload.name} for this question`;
+                toast.info(notice, { duration: 4000 });
+              }
+            }
+          }
+
           if (payload.type === "mode_update" && payload.suggestedMode) {
             const nextMode = payload.suggestedMode as StudyMode;
             if (isModeAvailable(nextMode)) {
-              if (requestedMode !== "general" && nextMode === "general") {
+              if (requestedMode !== "auto" && requestedMode !== "general" && nextMode === "general") {
                 toast.info(`Mode "${requestedMode}" was unavailable — using general mode instead.`);
               }
               setMode(nextMode);
@@ -2592,19 +2645,33 @@ export function useChatState() {
               payload.modelUsed && payload.modelUsed !== "openrouter/auto"
                 ? payload.modelUsed
                 : payload.modelRequested ?? payload.modelUsed;
-
-            const normalizedTrace =
-              payload.routeTrace && payload.modelUsed === "openrouter/auto"
-                ? {
-                    ...payload.routeTrace,
-                    toolchain: [...payload.routeTrace.toolchain, "openrouter_auto_unresolved_model"],
-                    selected: {
-                      ...payload.routeTrace.selected,
-                      reason: `${payload.routeTrace.selected.reason} (delegated model not reported by provider)`,
-                    },
-                  }
-                : payload.routeTrace;
             const resolvedStreamModel = actualModel ?? payload.modelRequested ?? payload.modelUsed;
+            const normalizedTrace = (() => {
+              if (!payload.routeTrace) return payload.routeTrace;
+              const currentTrace = payload.routeTrace;
+              let trace = currentTrace;
+              if (payload.modelUsed === "openrouter/auto") {
+                trace = {
+                  ...trace,
+                  toolchain: [...trace.toolchain, "openrouter_auto_unresolved_model"],
+                  selected: {
+                    ...trace.selected,
+                    reason: `${trace.selected.reason} (delegated model not reported by provider)`,
+                  },
+                };
+              }
+              if (resolvedStreamModel && trace.selected?.modelId !== resolvedStreamModel) {
+                trace = {
+                  ...trace,
+                  toolchain: [...trace.toolchain, "final_model_reconciled"],
+                  selected: {
+                    modelId: resolvedStreamModel,
+                    reason: `${trace.selected?.reason ?? "Route selected a candidate."} Final output used ${resolvedStreamModel}.`,
+                  },
+                };
+              }
+              return trace;
+            })();
             if (resolvedStreamModel) {
               streamModelUsedRef.current = resolvedStreamModel;
               setStreamModelUsed(resolvedStreamModel);
@@ -2651,21 +2718,38 @@ export function useChatState() {
                 prev.map((chat) => (chat._id === chatId ? { ...chat, title: nextTitle } : chat)),
               );
             } else if (messageCountBeforeSend === 0) {
-              // Fallback: no title from stream on first message — derive from user text
-              const fallbackTitle = text
-                .split(/\s+/)
-                .slice(0, 5)
-                .join(" ")
-                .replace(/[.,!?;:]+$/, "");
+              const compact = (value: string) => value.replace(/\s+/g, " ").trim();
+              const titleStopWords = new Set(["a", "an", "the", "please", "can", "could", "would", "help", "me", "with"]);
+              const tokenize = (value: string) =>
+                compact(value)
+                  .replace(/["'`*#_]/g, "")
+                  .split(" ")
+                  .map((word) => word.trim())
+                  .filter((word) => word.length > 1 || /\d/.test(word));
+              const fallbackWords = tokenize(text)
+                .filter((word, index) => index > 1 || !titleStopWords.has(word.toLowerCase()))
+                .slice(0, 5);
+              while (fallbackWords.length < 2) {
+                fallbackWords.push(fallbackWords.length === 0 ? "Study" : "Session");
+              }
+              const fallbackTitle = fallbackWords.join(" ").slice(0, 80);
               if (fallbackTitle.length > 2) {
                 setChats((prev) =>
                   prev.map((chat) =>
-                    chat._id === chatId && (!chat.title || chat.title === "New Chat")
+                    chat._id === chatId && (!chat.title || chat.title === "New Chat" || chat.title === "New chat")
                       ? { ...chat, title: fallbackTitle }
                       : chat,
                   ),
                 );
               }
+            }
+            const doneAgent =
+              payload.agent && typeof payload.agent === "object" && "id" in payload.agent
+                ? payload.agent
+                : null;
+            if (doneAgent?.id) {
+              finalAgentIdForTurn = doneAgent.id;
+              setActiveAgent(doneAgent.id, { persist: false, chatId });
             }
             if (payload.agentSuggestion && !selectedAgentId) {
               setAgentSuggestion(payload.agentSuggestion);
@@ -2673,7 +2757,7 @@ export function useChatState() {
               setAgentSuggestion(null);
             }
             if (payload.suggestedMode && payload.suggestedMode !== requestedMode) {
-              if (requestedMode !== "general" && payload.suggestedMode === "general") {
+              if (requestedMode !== "auto" && requestedMode !== "general" && payload.suggestedMode === "general") {
                 toast.info(`Mode "${requestedMode}" was unavailable — using general mode instead.`);
               }
               setMode(payload.suggestedMode as StudyMode);
@@ -2849,7 +2933,7 @@ export function useChatState() {
                 updatedAt: Date.now(),
                 title: chat.title,
                 mode: requestedMode,
-                agentId: selectedAgentId,
+                agentId: finalAgentIdForTurn,
               }
             : chat,
         ),
@@ -3422,6 +3506,7 @@ export function useChatState() {
     loading,
     sending,
     role,
+    currentUserId,
     isSuperAdmin,
     chats,
     models,
@@ -3479,6 +3564,7 @@ export function useChatState() {
     pinnedChatIds,
     setSelectedChatId,
     setSelectedAgentId,
+    setActiveAgent,
     setMode,
     setRouterMode,
     setManualModel,

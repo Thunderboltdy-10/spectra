@@ -512,7 +512,7 @@ export async function runRagRetrieval(params: {
       const status = (value as { status?: string }).status;
       return status === "processed";
     };
-    const [packResources, personalResources, agentResources] = await Promise.all([
+    const [packResources, personalResources, agentResources, selectedAgent] = await Promise.all([
       params.packId
         ? (convexQuery("resources:listPackResources", {
             actorClerkId: params.actorClerkId,
@@ -530,6 +530,12 @@ export async function runRagRetrieval(params: {
             agentId: params.selectedAgentId,
           }) as Promise<Array<unknown>>)
         : Promise.resolve([]),
+      params.selectedAgentId
+        ? (convexQuery("agents:getAgent", {
+            actorClerkId: params.actorClerkId,
+            agentId: params.selectedAgentId,
+          }) as Promise<{ _id: string; guidelinesTopicMap?: string[] }>)
+        : Promise.resolve(null),
     ]);
 
     const scopesAttempted = [
@@ -562,12 +568,40 @@ export async function runRagRetrieval(params: {
         actorClerkId: params.actorClerkId,
         packId: params.packId,
         agentId: processedAgentResources.length > 0 ? params.selectedAgentId : undefined,
+        topicMap:
+          processedAgentResources.length > 0
+            ? (selectedAgent?.guidelinesTopicMap ?? [])
+            : [],
         includePack: processedPackResources.length > 0 && Boolean(params.packId),
         includePersonal: processedPersonalResources.length > 0 && params.usePersonalResources,
         embedding: queryEmbedding,
         topK: 8,
       })) as RetrievalResult;
-      retrieval = limitRagRetrievalSources(rawRetrieval);
+      let retrievalCombined = rawRetrieval;
+      if (
+        params.selectedAgentId
+        && processedAgentResources.length > 0
+        && rawRetrieval.citations.length === 0
+        && (processedPackResources.length > 0 || processedPersonalResources.length > 0)
+      ) {
+        const fallbackRetrieval = (await convexAction("rag:retrieve", {
+          actorClerkId: params.actorClerkId,
+          packId: params.packId,
+          agentId: undefined,
+          topicMap: [],
+          includePack: processedPackResources.length > 0 && Boolean(params.packId),
+          includePersonal: processedPersonalResources.length > 0 && params.usePersonalResources,
+          embedding: queryEmbedding,
+          topK: 8,
+        })) as RetrievalResult;
+        retrievalCombined = {
+          citations: [...rawRetrieval.citations, ...fallbackRetrieval.citations],
+          sourceBlock: [rawRetrieval.sourceBlock, fallbackRetrieval.sourceBlock]
+            .filter((item) => item && item.trim().length > 0)
+            .join("\n\n"),
+        };
+      }
+      retrieval = limitRagRetrievalSources(retrievalCombined);
       retrieval.queryEmbedding = queryEmbedding;
       retrieval.diagnostics = {
         scopesAttempted,

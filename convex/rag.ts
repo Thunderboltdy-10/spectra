@@ -88,11 +88,49 @@ export const validateAgentForActor = internalQuery({
   },
 });
 
+function normalize(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenize(value: string) {
+  return normalize(value)
+    .split(" ")
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3);
+}
+
+function topicRelevance(text: string, filename: string, topicMap: string[]) {
+  if (!topicMap.length) return 0;
+  const haystack = normalize(`${filename} ${text}`);
+  const tokens = new Set(tokenize(haystack));
+  let score = 0;
+  for (const topic of topicMap) {
+    const clean = normalize(topic);
+    if (!clean) continue;
+    if (haystack.includes(clean)) {
+      score += 1;
+      continue;
+    }
+    const topicTokens = tokenize(clean);
+    if (topicTokens.length === 0) continue;
+    const hits = topicTokens.filter((token) => tokens.has(token)).length;
+    const coverage = hits / topicTokens.length;
+    if (coverage >= 0.66) score += 0.8;
+    else if (coverage >= 0.4) score += 0.45;
+  }
+  return Math.min(1, score / Math.max(1, Math.min(5, topicMap.length)));
+}
+
 export const retrieve: ReturnType<typeof action> = action({
   args: {
     actorClerkId: v.string(),
     packId: v.optional(v.id("packs")),
     agentId: v.optional(v.id("agents")),
+    topicMap: v.optional(v.array(v.string())),
     includePersonal: v.boolean(),
     includePack: v.optional(v.boolean()),
     embedding: v.array(v.float64()),
@@ -140,6 +178,13 @@ export const retrieve: ReturnType<typeof action> = action({
       chunkMap.set(String(doc._id), doc);
     }
 
+    const topicMap = Array.from(
+      new Set(
+        (args.topicMap ?? [])
+          .map((topic) => topic.trim())
+          .filter((topic) => topic.length > 0),
+      ),
+    ).slice(0, 24);
     const scored = allHits
       .map((hit) => {
         const doc = chunkMap.get(String(hit._id));
@@ -167,16 +212,29 @@ export const retrieve: ReturnType<typeof action> = action({
         const doc = row.doc as Record<string, unknown>;
         const scope = String(doc.scope ?? "pack");
         const sourceType = (scope === "personal" ? "personal" : "pack") as "personal" | "pack";
+        const baseScore = typeof row.hit._score === "number" ? row.hit._score : 0;
+        const filename = String(doc.filename ?? "unknown");
+        const text = String(doc.text ?? "");
+        const topicScore = scope === "agent" ? topicRelevance(text, filename, topicMap) : 0;
+        const score = baseScore + (scope === "agent" ? topicScore * 0.16 : 0);
         return {
           resourceId: String(doc.resourceId ?? ""),
-          filename: String(doc.filename ?? "unknown"),
+          filename,
           page: typeof doc.page === "number" ? doc.page : undefined,
           sourceType,
           scope,
-          score: row.hit._score,
-          text: String(doc.text ?? ""),
+          score,
+          topicScore,
+          text,
         };
       });
+
+    const prioritized = args.agentId
+      ? [
+          ...scored.filter((item) => item.scope === "agent"),
+          ...scored.filter((item) => item.scope !== "agent"),
+        ]
+      : scored;
 
     const dedupedByResource = new Map<
       string,
@@ -187,11 +245,19 @@ export const retrieve: ReturnType<typeof action> = action({
         sourceType: "pack" | "personal";
         scope: string;
         score?: number;
+        topicScore?: number;
         text: string;
       }
     >();
 
-    for (const item of scored) {
+    for (const item of prioritized) {
+      const minimumScore = item.scope === "agent" ? 0.42 : 0.52;
+      if ((item.score ?? 0) < minimumScore) {
+        continue;
+      }
+      if (item.scope === "agent" && topicMap.length > 0 && (item.topicScore ?? 0) < 0.18) {
+        continue;
+      }
       const key = item.resourceId || item.filename;
       const existing = dedupedByResource.get(key);
       if (!existing) {
@@ -201,6 +267,7 @@ export const retrieve: ReturnType<typeof action> = action({
 
       if ((item.score ?? 0) > (existing.score ?? 0)) {
         existing.score = item.score;
+        existing.topicScore = item.topicScore;
       }
 
       if (typeof existing.page !== "number" && typeof item.page === "number") {
@@ -212,9 +279,7 @@ export const retrieve: ReturnType<typeof action> = action({
       }
     }
 
-    const filtered = [...dedupedByResource.values()]
-      .filter((item) => (item.score ?? 0) >= 0.52)
-      .slice(0, topK);
+    const filtered = [...dedupedByResource.values()].slice(0, topK);
 
     if (filtered.length === 0) {
       return {

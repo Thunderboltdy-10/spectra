@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
+import Link from "next/link";
 import {
   AlertCircle,
   ArrowUp,
@@ -16,6 +17,7 @@ import {
   Mic,
   MoreHorizontal,
   Paperclip,
+  Plus,
   Search,
   Sparkles,
   Square,
@@ -56,6 +58,7 @@ type ChatComposerProps = {
   onApplyAgentSuggestion?: () => void;
   models: ModelOption[];
   userSpending: UserSpending | null;
+  currentUserId?: string;
   isSuperAdmin?: boolean;
   routerMode: RouterMode;
   manualModel: string;
@@ -269,6 +272,16 @@ function estimateTokens(message: string): number {
   return Math.ceil(message.length / 4);
 }
 
+function formatRelativeTimestamp(timestamp?: number) {
+  if (!timestamp || !Number.isFinite(timestamp)) return "Updated recently";
+  const elapsed = Date.now() - timestamp;
+  if (elapsed < 60_000) return "Updated just now";
+  if (elapsed < 3_600_000) return `Updated ${Math.max(1, Math.floor(elapsed / 60_000))}m ago`;
+  if (elapsed < 86_400_000) return `Updated ${Math.max(1, Math.floor(elapsed / 3_600_000))}h ago`;
+  if (elapsed < 7 * 86_400_000) return `Updated ${Math.max(1, Math.floor(elapsed / 86_400_000))}d ago`;
+  return `Updated ${new Date(timestamp).toLocaleDateString()}`;
+}
+
 function SettingPill({
   label,
   value,
@@ -328,6 +341,7 @@ export function ChatComposer(props: ChatComposerProps) {
     onApplyAgentSuggestion,
     models,
     userSpending,
+    currentUserId,
     isSuperAdmin = false,
     routerMode,
     manualModel,
@@ -345,6 +359,7 @@ export function ChatComposer(props: ChatComposerProps) {
   } = props;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const modelSearchRef = useRef<HTMLInputElement | null>(null);
+  const modelPortalRef = useRef<HTMLDivElement | null>(null);
   const dragDepthRef = useRef(0);
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
   const modelMenuRef = useRef<HTMLDivElement | null>(null);
@@ -357,6 +372,8 @@ export function ChatComposer(props: ChatComposerProps) {
   const [showAgentSelector, setShowAgentSelector] = useState(false);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
+  const [agentSearch, setAgentSearch] = useState("");
+  const [agentSubjectFilter, setAgentSubjectFilter] = useState("all");
   const [providerFilter, setProviderFilter] = useState("all");
   const [attachmentsExpanded, setAttachmentsExpanded] = useState(true);
   const [showVoiceStub, setShowVoiceStub] = useState(false);
@@ -379,6 +396,59 @@ export function ChatComposer(props: ChatComposerProps) {
   const selectedAgent = useMemo(
     () => agents.find((agent) => agent._id === selectedAgentId),
     [agents, selectedAgentId],
+  );
+  const recommendedAgentIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (agentSuggestion?.id) ids.add(agentSuggestion.id);
+    const topUsage = [...agents]
+      .sort((a, b) => b.usageCount - a.usageCount || b.updatedAt - a.updatedAt)
+      .slice(0, 3)
+      .map((agent) => agent._id);
+    for (const id of topUsage) ids.add(id);
+    return ids;
+  }, [agentSuggestion?.id, agents]);
+  const agentSubjectOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          agents
+            .map((agent) => (agent.subjectArea || agent.category || "").trim())
+            .filter(Boolean),
+        ),
+      ).sort((a, b) => a.localeCompare(b)),
+    [agents],
+  );
+  const filteredAgents = useMemo(() => {
+    const cleanSearch = agentSearch.trim().toLowerCase();
+    return agents
+      .filter((agent) => {
+        if (agentSubjectFilter === "all") return true;
+        const subject = (agent.subjectArea || agent.category || "").toLowerCase();
+        return subject === agentSubjectFilter.toLowerCase();
+      })
+      .filter((agent) => {
+        if (!cleanSearch) return true;
+        const haystack = `${agent.name} ${agent.description} ${agent.subjectArea ?? ""} ${agent.category}`.toLowerCase();
+        return haystack.includes(cleanSearch);
+      });
+  }, [agentSearch, agentSubjectFilter, agents]);
+  const myAgents = useMemo(
+    () =>
+      filteredAgents.filter((agent) => currentUserId && agent.creatorUserId === currentUserId),
+    [currentUserId, filteredAgents],
+  );
+  const schoolAgents = useMemo(
+    () =>
+      filteredAgents.filter((agent) => !currentUserId || agent.creatorUserId !== currentUserId),
+    [currentUserId, filteredAgents],
+  );
+  const recommendedAgents = useMemo(
+    () => filteredAgents.filter((agent) => recommendedAgentIds.has(agent._id)),
+    [filteredAgents, recommendedAgentIds],
+  );
+  const allAgentsSection = useMemo(
+    () => filteredAgents.filter((agent) => !recommendedAgentIds.has(agent._id)),
+    [filteredAgents, recommendedAgentIds],
   );
   
   const hasImages = useMemo(
@@ -606,7 +676,9 @@ export function ChatComposer(props: ChatComposerProps) {
       if (showModeSelector && modeMenuRef.current && !modeMenuRef.current.contains(target)) {
         setShowModeSelector(false);
       }
-      if (showModelSelector && modelMenuRef.current && !modelMenuRef.current.contains(target)) {
+      const insideModelTrigger = modelMenuRef.current?.contains(target) ?? false;
+      const insideModelPortal = modelPortalRef.current?.contains(target) ?? false;
+      if (showModelSelector && !insideModelTrigger && !insideModelPortal) {
         setShowModelSelector(false);
       }
       if (showAgentSelector && agentMenuRef.current && !agentMenuRef.current.contains(target)) {
@@ -1023,6 +1095,7 @@ export function ChatComposer(props: ChatComposerProps) {
 
                 {showModelSelector && createPortal(
                   <div
+                    ref={modelPortalRef}
                     className="fixed z-[9999] max-h-[480px] w-[min(92vw,32rem)] overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-soft)]"
                     style={(() => {
                       const rect = modelMenuRef.current?.getBoundingClientRect();
@@ -1212,40 +1285,186 @@ export function ChatComposer(props: ChatComposerProps) {
                 </button>
 
                 {showAgentSelector && (
-                  <div className="absolute bottom-full left-0 z-[340] mb-2 max-h-[360px] w-[min(92vw,22rem)] overflow-y-auto rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[var(--shadow-soft)]">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onSelectAgent(undefined);
-                        setShowAgentSelector(false);
-                      }}
-                      className={`flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm transition ${
-                        !selectedAgentId
-                          ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
-                          : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                      }`}
-                    >
-                      <span>🧠</span>
-                      <span>No agent</span>
-                    </button>
-                    {agents.map((agent) => (
+                  <div className="absolute bottom-full left-0 z-[340] mb-2 w-[min(95vw,38rem)] overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-soft)]">
+                    <div className="border-b border-[var(--border-default)] px-3 py-2">
+                      <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">Agent Workspace</p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <div className="relative min-w-[180px] flex-1">
+                          <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-[var(--text-secondary)]" />
+                          <input
+                            value={agentSearch}
+                            onChange={(event) => setAgentSearch(event.target.value)}
+                            placeholder="Search agents..."
+                            className="h-8 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] pl-8 pr-2 text-xs outline-none transition focus:border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))]"
+                          />
+                        </div>
+                        <select
+                          value={agentSubjectFilter}
+                          onChange={(event) => setAgentSubjectFilter(event.target.value)}
+                          className="h-8 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 text-xs text-[var(--text-primary)] outline-none"
+                        >
+                          <option value="all">All subjects</option>
+                          {agentSubjectOptions.map((subject) => (
+                            <option key={subject} value={subject}>
+                              {subject}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="max-h-[420px] overflow-y-auto p-2">
                       <button
-                        key={agent._id}
                         type="button"
                         onClick={() => {
-                          onSelectAgent(agent._id);
+                          onSelectAgent(undefined);
                           setShowAgentSelector(false);
                         }}
-                        className={`flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm transition ${
-                          selectedAgentId === agent._id
-                            ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
-                            : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                        className={`mb-2 flex w-full cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-left text-xs transition ${
+                          !selectedAgentId
+                            ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)] text-[var(--text-primary)]"
+                            : "border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                         }`}
                       >
-                        <span>{agent.avatarEmoji}</span>
-                        <span className="truncate">{agent.name}</span>
+                        <span className="inline-flex items-center gap-1.5">
+                          <span>🧠</span>
+                          No agent
+                        </span>
+                        {!selectedAgentId ? <span className="text-[10px] uppercase tracking-[0.08em]">Active</span> : null}
                       </button>
-                    ))}
+
+                      {recommendedAgents.length > 0 ? (
+                        <div className="mb-3">
+                          <p className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">Recommended</p>
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            {recommendedAgents.map((agent) => (
+                              <button
+                                key={`recommended-${agent._id}`}
+                                type="button"
+                                onClick={() => {
+                                  onSelectAgent(agent._id);
+                                  setShowAgentSelector(false);
+                                }}
+                                className={`rounded-lg border p-2.5 text-left transition ${
+                                  selectedAgentId === agent._id
+                                    ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)]"
+                                    : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <p className="text-base">{agent.avatarEmoji ?? "🧠"}</p>
+                                  <span className="rounded-full border border-[var(--border-default)] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em] text-[var(--accent-cyan)]">
+                                    Match
+                                  </span>
+                                </div>
+                                <p className="mt-1 truncate text-sm font-medium text-[var(--text-primary)]">{agent.name}</p>
+                                <p className="mt-0.5 text-[10px] text-[var(--text-secondary)]">
+                                  {(agent.subjectArea || agent.category || "General").slice(0, 28)}
+                                </p>
+                                <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
+                                  {agent.resourceCount ?? 0} resources · {agent.usageCount} uses
+                                </p>
+                                <p className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">{formatRelativeTimestamp(agent.updatedAt)}</p>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {schoolAgents.length > 0 ? (
+                        <div className="mb-3">
+                          <p className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">School Agents</p>
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            {schoolAgents.slice(0, 8).map((agent) => (
+                              <button
+                                key={`school-${agent._id}`}
+                                type="button"
+                                onClick={() => {
+                                  onSelectAgent(agent._id);
+                                  setShowAgentSelector(false);
+                                }}
+                                className={`rounded-lg border p-2 text-left transition ${
+                                  selectedAgentId === agent._id
+                                    ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)]"
+                                    : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
+                                }`}
+                              >
+                                <p className="truncate text-xs font-medium text-[var(--text-primary)]">{agent.avatarEmoji ?? "🧠"} {agent.name}</p>
+                                <p className="mt-0.5 text-[10px] text-[var(--text-secondary)]">
+                                  {(agent.subjectArea || agent.category || "General").slice(0, 24)}
+                                </p>
+                                <p className="mt-1 text-[10px] text-[var(--text-tertiary)]">{formatRelativeTimestamp(agent.updatedAt)}</p>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {myAgents.length > 0 ? (
+                        <div className="mb-3">
+                          <p className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">My Agents</p>
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            {myAgents.slice(0, 8).map((agent) => (
+                              <button
+                                key={`mine-${agent._id}`}
+                                type="button"
+                                onClick={() => {
+                                  onSelectAgent(agent._id);
+                                  setShowAgentSelector(false);
+                                }}
+                                className={`rounded-lg border p-2 text-left transition ${
+                                  selectedAgentId === agent._id
+                                    ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)]"
+                                    : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
+                                }`}
+                              >
+                                <p className="truncate text-xs font-medium text-[var(--text-primary)]">{agent.avatarEmoji ?? "🧠"} {agent.name}</p>
+                                <p className="mt-0.5 text-[10px] text-[var(--text-secondary)]">
+                                  {(agent.subjectArea || agent.category || "General").slice(0, 24)}
+                                </p>
+                                <p className="mt-1 text-[10px] text-[var(--text-tertiary)]">{formatRelativeTimestamp(agent.updatedAt)}</p>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {allAgentsSection.length > 0 ? (
+                        <div className="mb-2">
+                          <p className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">All Agents</p>
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            {allAgentsSection.slice(0, 10).map((agent) => (
+                              <button
+                                key={`all-${agent._id}`}
+                                type="button"
+                                onClick={() => {
+                                  onSelectAgent(agent._id);
+                                  setShowAgentSelector(false);
+                                }}
+                                className={`rounded-lg border p-2 text-left transition ${
+                                  selectedAgentId === agent._id
+                                    ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)]"
+                                    : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
+                                }`}
+                              >
+                                <p className="truncate text-xs font-medium text-[var(--text-primary)]">{agent.avatarEmoji ?? "🧠"} {agent.name}</p>
+                                <p className="mt-0.5 text-[10px] text-[var(--text-secondary)]">
+                                  {(agent.subjectArea || agent.category || "General").slice(0, 24)}
+                                </p>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="border-t border-[var(--border-default)] p-2">
+                      <Link
+                        href="/agents/new"
+                        className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Quick create agent
+                      </Link>
+                    </div>
                   </div>
                 )}
               </div>

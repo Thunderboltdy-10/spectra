@@ -588,10 +588,10 @@ function RouteTraceView({ trace, showCostDetails = false }: { trace?: RouteTrace
   }
 
   return (
-    <div className="space-y-5">
+    <div className="w-full space-y-5">
       <section>
         <h4 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Inputs</h4>
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="grid gap-2">
           {[
             { label: "Mode", value: trace.inputs.mode },
             ...(showCostDetails ? [{ label: "Tier", value: trace.inputs.spendingTier }] : []),
@@ -1208,7 +1208,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps, canvasProps }:
       : currentView === "canvas"
         ? 1100
       : currentView === "route-trace"
-        ? 620
+        ? 500
         : currentView === "settings"
           ? 400
           : 360;

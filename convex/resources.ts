@@ -22,6 +22,8 @@ import {
 } from "../shared/resource-processing";
 
 const CONVERSATION_RESOURCE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_AGENT_RESOURCES_TEACHER = 20;
+const MAX_AGENT_RESOURCES_STUDENT = 5;
 
 function resolveMaxResourceFileSizeBytes(value: number | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -89,6 +91,17 @@ function canManageAgentResources(
   return actor.role === "admin" || agent.creatorUserId === actor._id || isAgentCollaborator(agent, actor._id);
 }
 
+async function resolveAgentResourceLimit(
+  ctx: any,
+  agent: { creatorUserId: any },
+) {
+  const creator = await ctx.db.get(agent.creatorUserId);
+  if (!creator) {
+    return MAX_AGENT_RESOURCES_TEACHER;
+  }
+  return creator.role === "student" ? MAX_AGENT_RESOURCES_STUDENT : MAX_AGENT_RESOURCES_TEACHER;
+}
+
 function canAccessPackResources(
   pack: { orgId: string },
   actor: { orgId: string },
@@ -151,8 +164,9 @@ export const createUploadUrl = mutation({
         .query("resources")
         .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
         .collect();
-      if (count.length >= LIMITS.maxTeacherFilesPerPack) {
-        throw new Error(`Agent file limit reached (${LIMITS.maxTeacherFilesPerPack})`);
+      const agentLimit = await resolveAgentResourceLimit(ctx, agent);
+      if (count.length >= agentLimit) {
+        throw new Error(`Agent file limit reached (${agentLimit})`);
       }
     }
 
@@ -235,6 +249,14 @@ export const registerResource = mutation({
       const canUploadToAgent = canManageAgentResources(agent, actor);
       if (!canUploadToAgent) {
         throw new Error("Only agent creator/admin can upload agent resources");
+      }
+      const count = await ctx.db
+        .query("resources")
+        .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
+        .collect();
+      const agentLimit = await resolveAgentResourceLimit(ctx, agent);
+      if (count.length >= agentLimit) {
+        throw new Error(`Agent file limit reached (${agentLimit})`);
       }
     }
 
@@ -797,6 +819,156 @@ export const listAgentResources = query({
       .query("resources")
       .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
       .collect();
+  },
+});
+
+export const listPersonalTextsByIds = query({
+  args: {
+    actorClerkId: v.string(),
+    resourceIds: v.array(v.id("resources")),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const uniqueIds = Array.from(new Set(args.resourceIds));
+    const rows: Array<{
+      resourceId: string;
+      filename: string;
+      status: "uploaded" | "processing" | "processed" | "failed";
+      text: string;
+    }> = [];
+
+    for (const resourceId of uniqueIds) {
+      const resource = await ctx.db.get(resourceId);
+      if (!resource || resource.orgId !== actor.orgId) {
+        continue;
+      }
+      if (resource.scope !== "personal") {
+        continue;
+      }
+      if (resource.ownerUserId !== actor._id && actor.role !== "admin") {
+        continue;
+      }
+
+      const chunks = await ctx.db
+        .query("chunks")
+        .withIndex("by_resource", (q) => q.eq("resourceId", resource._id))
+        .collect();
+      const text = chunks
+        .map((chunk) => chunk.text)
+        .join("\n")
+        .slice(0, 16_000);
+      rows.push({
+        resourceId: resource._id,
+        filename: resource.filename,
+        status: resource.status,
+        text,
+      });
+    }
+
+    return rows;
+  },
+});
+
+export const assignResourcesToAgent = mutation({
+  args: {
+    actorClerkId: v.string(),
+    agentId: v.id("agents"),
+    resourceIds: v.array(v.id("resources")),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const agent = await ctx.db.get(args.agentId);
+    if (!agent || agent.orgId !== actor.orgId) {
+      throw new Error("Agent not found");
+    }
+    if (!canManageAgentResources(agent, actor)) {
+      throw new Error("Only agent creator/admin can assign resources");
+    }
+
+    const requestedIds = Array.from(new Set(args.resourceIds));
+    if (requestedIds.length === 0) {
+      return { assigned: 0, skipped: 0, limit: await resolveAgentResourceLimit(ctx, agent) };
+    }
+
+    const existingAgentResources = await ctx.db
+      .query("resources")
+      .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
+      .collect();
+    const agentLimit = await resolveAgentResourceLimit(ctx, agent);
+    const capacity = Math.max(0, agentLimit - existingAgentResources.length);
+    if (capacity <= 0) {
+      throw new Error(`Agent file limit reached (${agentLimit})`);
+    }
+
+    let assigned = 0;
+    let skipped = 0;
+    const now = Date.now();
+    for (const resourceId of requestedIds.slice(0, capacity)) {
+      const resource = await ctx.db.get(resourceId);
+      if (!resource || resource.orgId !== actor.orgId) {
+        skipped += 1;
+        continue;
+      }
+      if (resource.scope === "agent" && resource.agentId === args.agentId) {
+        skipped += 1;
+        continue;
+      }
+      if (resource.scope !== "personal") {
+        skipped += 1;
+        continue;
+      }
+      if (resource.ownerUserId !== actor._id && actor.role !== "admin") {
+        skipped += 1;
+        continue;
+      }
+
+      await ctx.db.patch(resource._id, {
+        scope: "agent",
+        agentId: args.agentId,
+        packId: undefined,
+        saveToLibrary: true,
+        expiresAt: undefined,
+        updatedAt: now,
+      });
+
+      const chunks = await ctx.db
+        .query("chunks")
+        .withIndex("by_resource", (q) => q.eq("resourceId", resource._id))
+        .collect();
+      for (const chunk of chunks) {
+        await ctx.db.patch(chunk._id, {
+          scope: "agent",
+          agentId: args.agentId,
+          packId: undefined,
+          ownerUserId: undefined,
+        });
+      }
+
+      assigned += 1;
+    }
+
+    const updatedCount = await ctx.db
+      .query("resources")
+      .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
+      .collect();
+    await ctx.db.patch(args.agentId, {
+      resourceCount: updatedCount.length,
+      updatedAt: now,
+    });
+
+    if (requestedIds.length > capacity) {
+      skipped += requestedIds.length - capacity;
+    }
+
+    return { assigned, skipped, limit: agentLimit };
   },
 });
 

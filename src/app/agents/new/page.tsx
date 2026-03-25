@@ -12,7 +12,7 @@ export default function NewAgentPage() {
 
   return (
     <AppShell>
-      <div className="mx-auto w-full max-w-2xl">
+      <div className="mx-auto w-full max-w-5xl">
         {/* Back link */}
         <Link
           href="/agents"
@@ -26,7 +26,7 @@ export default function NewAgentPage() {
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-[var(--text-primary)]">Create a new agent</h1>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            Answer a few questions and we&apos;ll generate a fully configured AI agent tailored to your users.
+            Follow the guided wizard to define identity, resources, behavior, capabilities, access, and preview before publishing.
           </p>
         </div>
 

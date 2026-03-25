@@ -7,6 +7,7 @@ type AgentDoc = {
   orgId: string;
   creatorUserId: string;
   visibility: "public" | "private" | "shared";
+  moderationStatus?: "approved" | "pending";
   collaborators?: string[];
 };
 
@@ -46,7 +47,30 @@ function canChangeVisibility(agent: AgentDoc, actor: ActorDoc) {
 }
 
 function canViewAgent(agent: AgentDoc, actor: ActorDoc) {
+  if (agent.moderationStatus === "pending" && !canEditAgent(agent, actor) && actor.role !== "admin") {
+    return false;
+  }
   return agent.visibility === "public" || canEditAgent(agent, actor);
+}
+
+function normalizeList(values: string[] | undefined, max = 24) {
+  return Array.from(
+    new Set(
+      (values ?? [])
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0),
+    ),
+  ).slice(0, max);
+}
+
+function resolveVisibilityFromAccess(
+  accessLevel: "private" | "class" | "school" | undefined,
+  fallback: "public" | "private" | "shared",
+) {
+  if (accessLevel === "private") return "private" as const;
+  if (accessLevel === "class") return "shared" as const;
+  if (accessLevel === "school") return "public" as const;
+  return fallback;
 }
 
 export const createAgent = mutation({
@@ -54,6 +78,8 @@ export const createAgent = mutation({
     actorClerkId: v.string(),
     name: v.string(),
     description: v.string(),
+    subjectArea: v.optional(v.string()),
+    gradeLevel: v.optional(v.string()),
     systemPrompt: v.string(),
     avatarEmoji: v.optional(v.string()),
     avatarIcon: v.optional(v.string()),
@@ -67,6 +93,14 @@ export const createAgent = mutation({
     modelAllowlist: v.optional(v.array(v.string())),
     modelDenylist: v.optional(v.array(v.string())),
     attachmentPolicy: v.optional(v.string()),
+    accessLevel: v.optional(v.union(v.literal("private"), v.literal("class"), v.literal("school"))),
+    moderationStatus: v.optional(v.union(v.literal("approved"), v.literal("pending"))),
+    guidelinesSummary: v.optional(v.string()),
+    guidelinesTopicMap: v.optional(v.array(v.string())),
+    guidelinesRubricHints: v.optional(v.array(v.string())),
+    guidelinesMisconceptions: v.optional(v.array(v.string())),
+    guidelinesVocabulary: v.optional(v.array(v.string())),
+    guidelinesExamStructure: v.optional(v.array(v.string())),
     visibility: v.union(v.literal("public"), v.literal("private"), v.literal("shared")),
   },
   handler: async (ctx, args) => {
@@ -76,11 +110,19 @@ export const createAgent = mutation({
     }
 
     const now = Date.now();
+    const accessLevel = args.accessLevel
+      ?? (args.visibility === "private" ? "private" : args.visibility === "shared" ? "class" : "school");
+    const visibility = resolveVisibilityFromAccess(accessLevel, args.visibility);
+    const requestedModeration = args.moderationStatus;
+    const needsStudentModeration = actor.role === "student" && visibility === "public";
+    const moderationStatus = requestedModeration ?? (needsStudentModeration ? "pending" : "approved");
     const agentId = await ctx.db.insert("agents", {
       orgId: actor.orgId,
       creatorUserId: actor._id,
       name: args.name,
       description: args.description,
+      subjectArea: args.subjectArea,
+      gradeLevel: args.gradeLevel,
       systemPrompt: args.systemPrompt,
       avatarEmoji: args.avatarEmoji || "🎓",
       avatarIcon: args.avatarIcon ?? defaultIconForCategory(args.category),
@@ -95,10 +137,18 @@ export const createAgent = mutation({
       modelDenylist: args.modelDenylist,
       collaborators: [],
       attachmentPolicy: args.attachmentPolicy,
-      visibility: args.visibility,
+      accessLevel,
+      moderationStatus,
+      isStudentCreated: actor.role === "student",
+      visibility,
       usageCount: 0,
-      guidelinesSummary: undefined,
-      guidelinesTopicMap: [],
+      lastUsedAt: undefined,
+      guidelinesSummary: args.guidelinesSummary,
+      guidelinesTopicMap: normalizeList(args.guidelinesTopicMap),
+      guidelinesRubricHints: normalizeList(args.guidelinesRubricHints),
+      guidelinesMisconceptions: normalizeList(args.guidelinesMisconceptions),
+      guidelinesVocabulary: normalizeList(args.guidelinesVocabulary),
+      guidelinesExamStructure: normalizeList(args.guidelinesExamStructure),
       resourceCount: 0,
       createdAt: now,
       updatedAt: now,
@@ -114,6 +164,8 @@ export const updateAgent = mutation({
     agentId: v.id("agents"),
     name: v.optional(v.string()),
     description: v.optional(v.string()),
+    subjectArea: v.optional(v.string()),
+    gradeLevel: v.optional(v.string()),
     systemPrompt: v.optional(v.string()),
     avatarEmoji: v.optional(v.string()),
     avatarIcon: v.optional(v.string()),
@@ -127,6 +179,14 @@ export const updateAgent = mutation({
     modelAllowlist: v.optional(v.array(v.string())),
     modelDenylist: v.optional(v.array(v.string())),
     attachmentPolicy: v.optional(v.string()),
+    accessLevel: v.optional(v.union(v.literal("private"), v.literal("class"), v.literal("school"))),
+    moderationStatus: v.optional(v.union(v.literal("approved"), v.literal("pending"))),
+    guidelinesSummary: v.optional(v.string()),
+    guidelinesTopicMap: v.optional(v.array(v.string())),
+    guidelinesRubricHints: v.optional(v.array(v.string())),
+    guidelinesMisconceptions: v.optional(v.array(v.string())),
+    guidelinesVocabulary: v.optional(v.array(v.string())),
+    guidelinesExamStructure: v.optional(v.array(v.string())),
     visibility: v.optional(v.union(v.literal("public"), v.literal("private"), v.literal("shared"))),
   },
   handler: async (ctx, args) => {
@@ -147,10 +207,22 @@ export const updateAgent = mutation({
     if (args.visibility !== undefined && !canChangeVisibility(agent, actor)) {
       throw new Error("Only the agent creator can change visibility");
     }
+    if (args.moderationStatus !== undefined && actor.role !== "admin") {
+      throw new Error("Only admin can change moderation status");
+    }
+
+    const nextAccessLevel = args.accessLevel ?? agent.accessLevel;
+    const requestedVisibility = args.visibility ?? agent.visibility;
+    const nextVisibility = resolveVisibilityFromAccess(nextAccessLevel, requestedVisibility);
+    const nextModerationStatus =
+      args.moderationStatus
+      ?? (actor.role === "student" && nextVisibility === "public" ? "pending" : agent.moderationStatus ?? "approved");
 
     await ctx.db.patch(args.agentId, {
       name: args.name ?? agent.name,
       description: args.description ?? agent.description,
+      subjectArea: args.subjectArea ?? agent.subjectArea,
+      gradeLevel: args.gradeLevel ?? agent.gradeLevel,
       systemPrompt: args.systemPrompt ?? agent.systemPrompt,
       avatarEmoji: args.avatarEmoji ?? agent.avatarEmoji,
       avatarIcon:
@@ -167,7 +239,15 @@ export const updateAgent = mutation({
       modelAllowlist: args.modelAllowlist ?? agent.modelAllowlist,
       modelDenylist: args.modelDenylist ?? agent.modelDenylist,
       attachmentPolicy: args.attachmentPolicy ?? agent.attachmentPolicy,
-      visibility: args.visibility ?? agent.visibility,
+      accessLevel: nextAccessLevel ?? agent.accessLevel,
+      moderationStatus: nextModerationStatus,
+      visibility: nextVisibility,
+      guidelinesSummary: args.guidelinesSummary ?? agent.guidelinesSummary,
+      guidelinesTopicMap: args.guidelinesTopicMap ? normalizeList(args.guidelinesTopicMap) : agent.guidelinesTopicMap,
+      guidelinesRubricHints: args.guidelinesRubricHints ? normalizeList(args.guidelinesRubricHints) : agent.guidelinesRubricHints,
+      guidelinesMisconceptions: args.guidelinesMisconceptions ? normalizeList(args.guidelinesMisconceptions) : agent.guidelinesMisconceptions,
+      guidelinesVocabulary: args.guidelinesVocabulary ? normalizeList(args.guidelinesVocabulary) : agent.guidelinesVocabulary,
+      guidelinesExamStructure: args.guidelinesExamStructure ? normalizeList(args.guidelinesExamStructure) : agent.guidelinesExamStructure,
       updatedAt: Date.now(),
     });
 
@@ -181,6 +261,10 @@ export const updateAgentGuidelines = mutation({
     agentId: v.id("agents"),
     guidelinesSummary: v.string(),
     guidelinesTopicMap: v.array(v.string()),
+    guidelinesRubricHints: v.optional(v.array(v.string())),
+    guidelinesMisconceptions: v.optional(v.array(v.string())),
+    guidelinesVocabulary: v.optional(v.array(v.string())),
+    guidelinesExamStructure: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
@@ -199,7 +283,51 @@ export const updateAgentGuidelines = mutation({
 
     await ctx.db.patch(args.agentId, {
       guidelinesSummary: args.guidelinesSummary,
-      guidelinesTopicMap: args.guidelinesTopicMap.slice(0, 24),
+      guidelinesTopicMap: normalizeList(args.guidelinesTopicMap),
+      guidelinesRubricHints: normalizeList(args.guidelinesRubricHints),
+      guidelinesMisconceptions: normalizeList(args.guidelinesMisconceptions),
+      guidelinesVocabulary: normalizeList(args.guidelinesVocabulary),
+      guidelinesExamStructure: normalizeList(args.guidelinesExamStructure),
+      updatedAt: Date.now(),
+    });
+
+    return { ok: true };
+  },
+});
+
+export const setAgentExtractedMetadata = mutation({
+  args: {
+    actorClerkId: v.string(),
+    agentId: v.id("agents"),
+    guidelinesSummary: v.optional(v.string()),
+    guidelinesTopicMap: v.optional(v.array(v.string())),
+    guidelinesRubricHints: v.optional(v.array(v.string())),
+    guidelinesMisconceptions: v.optional(v.array(v.string())),
+    guidelinesVocabulary: v.optional(v.array(v.string())),
+    guidelinesExamStructure: v.optional(v.array(v.string())),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const agent = await ctx.db.get(args.agentId);
+    if (!agent || agent.orgId !== actor.orgId) {
+      throw new Error("Agent not found");
+    }
+
+    if (!canEditAgent(agent, actor)) {
+      throw new Error("Only creator, collaborator, or admin can update this agent");
+    }
+
+    await ctx.db.patch(args.agentId, {
+      guidelinesSummary: args.guidelinesSummary ?? agent.guidelinesSummary,
+      guidelinesTopicMap: args.guidelinesTopicMap ? normalizeList(args.guidelinesTopicMap) : agent.guidelinesTopicMap,
+      guidelinesRubricHints: args.guidelinesRubricHints ? normalizeList(args.guidelinesRubricHints) : agent.guidelinesRubricHints,
+      guidelinesMisconceptions: args.guidelinesMisconceptions ? normalizeList(args.guidelinesMisconceptions) : agent.guidelinesMisconceptions,
+      guidelinesVocabulary: args.guidelinesVocabulary ? normalizeList(args.guidelinesVocabulary) : agent.guidelinesVocabulary,
+      guidelinesExamStructure: args.guidelinesExamStructure ? normalizeList(args.guidelinesExamStructure) : agent.guidelinesExamStructure,
       updatedAt: Date.now(),
     });
 
@@ -471,6 +599,7 @@ export const incrementUsageCount = mutation({
 
     await ctx.db.patch(agent._id, {
       usageCount: agent.usageCount + 1,
+      lastUsedAt: Date.now(),
       updatedAt: Date.now(),
     });
 

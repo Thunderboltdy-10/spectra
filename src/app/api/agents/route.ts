@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
 
     const validMode = body.preferredMode ? safeStudyMode(body.preferredMode, "POST /api/agents") : undefined;
 
-    const result = await convexMutation("agents:createAgent", {
+    const result = (await convexMutation("agents:createAgent", {
       actorClerkId: actor.clerkId,
       name: body.name,
       description: body.description,
@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
       guidelinesVocabulary: body.guidelinesVocabulary,
       guidelinesExamStructure: body.guidelinesExamStructure,
       visibility: body.visibility ?? "public",
-    });
+    })) as { agentId: string };
 
     const resourceIds = Array.isArray(body.resourceIds)
       ? body.resourceIds.filter((id): id is string => typeof id === "string" && id.trim().length > 0)

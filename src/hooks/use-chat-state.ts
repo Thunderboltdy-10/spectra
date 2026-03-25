@@ -2392,7 +2392,8 @@ export function useChatState() {
           }
 
           if (payload.type === "collab_progress" && payload.agent) {
-            const agentRole = payload.agent;
+            const agentRole = typeof payload.agent === "string" ? payload.agent : payload.agent.id;
+            const agentName = typeof payload.agent === "string" ? payload.agent.replace(/_/g, " ") : payload.agent.name;
             const collaboratorStatus =
               payload.status === "pending"
               || payload.status === "running"
@@ -2402,7 +2403,7 @@ export function useChatState() {
                 ? payload.status
                 : "running";
             pushThinkingNote(
-              `${agentRole.replace(/_/g, " ")} ${collaboratorStatus === "done" ? "completed" : "is running"}${
+              `${agentName} ${collaboratorStatus === "done" ? "completed" : "is running"}${
                 payload.model ? ` with ${payload.model}` : ""
               }${payload.preview ? `: ${payload.preview}` : ""}`,
             );
@@ -2436,9 +2437,10 @@ export function useChatState() {
           }
 
           if (payload.type === "collab_done" && payload.agent) {
-            const agentRole = payload.agent;
+            const agentRole = typeof payload.agent === "string" ? payload.agent : payload.agent.id;
+            const agentName = typeof payload.agent === "string" ? payload.agent.replace(/_/g, " ") : payload.agent.name;
             pushThinkingNote(
-              `${agentRole.replace(/_/g, " ")} finished${payload.model ? ` on ${payload.model}` : ""}${
+              `${agentName} finished${payload.model ? ` on ${payload.model}` : ""}${
                 payload.preview ? `: ${payload.preview}` : ""
               }`,
             );
@@ -2815,7 +2817,8 @@ export function useChatState() {
           }
 
           if (payload.type === "agent_summoned" && payload.agent && payload.model) {
-            pushThinkingNote(`Called specialist ${payload.agent.replace(/_/g, " ")} on ${payload.model}.`);
+            const agentName = typeof payload.agent === "string" ? payload.agent.replace(/_/g, " ") : payload.agent.name;
+            pushThinkingNote(`Called specialist ${agentName} on ${payload.model}.`);
           }
 
           if (payload.type === "error") {

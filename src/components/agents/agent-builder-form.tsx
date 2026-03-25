@@ -200,9 +200,9 @@ export function AgentBuilderForm({ onSubmit, onCancelHref = "/agents" }: AgentBu
             error: found.error,
             updatedAt: found.updatedAt,
             processingAttempts: found.processingAttempts,
-          } satisfies WizardResource;
+          };
         })
-        .filter((row): row is WizardResource => Boolean(row)),
+        .filter((row) => row !== null) as WizardResource[],
     );
   }, [resourceIds]);
 

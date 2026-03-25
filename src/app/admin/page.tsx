@@ -15,6 +15,11 @@ import { Switch } from "@/components/ui/switch";
 import { useSidebar } from "@/context/sidebar-context";
 
 type OrgSettings = { name?: string; description?: string; schoolType?: string; timezone?: string; maxStudents?: number; maxResourceFileSizeBytes?: number; monthlyBudgetCentsPerUser?: number; budgetMarginPercent?: number; soulEnabled?: boolean; orchestratorV2Enabled?: boolean; searxngEnabled?: boolean; adaptiveQuizEnabled?: boolean; spacedRepetitionEnabled?: boolean; agentModelBoostEnabled?: boolean };
+type OrgSettingsEnvelope = {
+  org: OrgSettings;
+  openRouterConfigured?: boolean;
+  openRouterWarnings?: string[];
+};
 type Member = { _id: string; name: string; email: string; role: "student" | "teacher" | "admin"; createdAt: number };
 type Invitation = { _id: string; email: string; role: "student" | "teacher" | "admin"; status: "pending" | "accepted" | "expired" | "cancelled"; expiresAt: number };
 type AccessRequest = { _id: string; email: string; name: string; message?: string; createdAt: number };
@@ -69,6 +74,7 @@ function AdminPageContent() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"student" | "teacher">("student");
   const [savingSettings, setSavingSettings] = useState(false);
+  const [infraWarnings, setInfraWarnings] = useState<string[]>([]);
   const [selectedUsageDay, setSelectedUsageDay] = useState<string | null>(null);
   const [notifTitle, setNotifTitle] = useState("");
   const [notifBody, setNotifBody] = useState("");
@@ -80,7 +86,7 @@ function AdminPageContent() {
 
   async function refresh() {
     const [bootstrap, schoolDashboard, membersPayload, usagePayload, schoolAnalytics, modelPayload, agentsPayload] = await Promise.all([
-      loadJson<{ actor: { onboardingComplete?: boolean }; orgSettings: { org: OrgSettings } }>("/api/bootstrap"),
+      loadJson<{ actor: { onboardingComplete?: boolean }; orgSettings: OrgSettingsEnvelope }>("/api/bootstrap"),
       loadJson<SchoolDashboard>("/api/school-admin/dashboard"),
       loadJson<{ members: { members: Member[] }; invitations: Invitation[]; accessRequests?: AccessRequest[] }>("/api/school-admin/members"),
       loadJson<{ usage: UsageRow[] }>("/api/admin/users"),
@@ -90,6 +96,7 @@ function AdminPageContent() {
     ]);
     setOnboardingComplete(Boolean(bootstrap.actor.onboardingComplete));
     setOrg(bootstrap.orgSettings?.org ?? null);
+    setInfraWarnings((bootstrap.orgSettings?.openRouterWarnings ?? []).filter((item) => item.trim().length > 0));
     setDashboard(schoolDashboard);
     setMembers(membersPayload.members?.members ?? []);
     setInvitations(membersPayload.invitations ?? []);
@@ -247,6 +254,13 @@ function AdminPageContent() {
   return (
     <AppShell fullBleed contentClassName="2xl:px-14">
       <div className="mx-auto max-w-4xl space-y-5 pb-10">
+        {infraWarnings.length > 0 ? (
+          <section className="rounded-xl border border-[color-mix(in_oklab,var(--warning)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_12%,var(--bg-secondary))] px-4 py-3">
+            <p className="text-sm font-medium text-[var(--warning)]">Infrastructure warning</p>
+            <p className="mt-1 text-xs text-[var(--text-secondary)]">{infraWarnings.join(" ")}</p>
+          </section>
+        ) : null}
+
         {/* Page header */}
         <div className="pb-2 pt-1">
           <h1 className="font-display text-3xl">Admin Console</h1>

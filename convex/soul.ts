@@ -4,6 +4,7 @@ import { getUserByClerkId } from "./helpers";
 import { MODEL_DEFAULTS } from "./constants";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
+import { getOpenRouterApiKey, warnOpenRouterMissing } from "./env";
 
 type SoulDocRow = {
   _id: Id<"orgSoulDocs">;
@@ -103,7 +104,7 @@ function toFiniteNumber(value: unknown) {
 }
 
 async function embeddingFor(text: string) {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiKey = getOpenRouterApiKey();
   if (!apiKey) throw new Error("OPENROUTER_API_KEY missing");
 
   const response = await fetch("https://openrouter.ai/api/v1/embeddings", {
@@ -349,7 +350,8 @@ export const publishSoul: ReturnType<typeof action> = action({
     })) as SoulDocRow[];
 
     const now = Date.now();
-    if (!process.env.OPENROUTER_API_KEY) {
+    if (!getOpenRouterApiKey()) {
+      warnOpenRouterMissing("soul_publish");
       await ctx.runMutation(internal.soul.markDocsPublishedWithoutEmbeddings, {
         orgId: actor.orgId,
         docIds: docs.map((doc) => doc._id),
@@ -455,7 +457,8 @@ export const retrieveSoulGuidance: ReturnType<typeof action> = action({
       orgId: actor.orgId,
     })) as SoulDocRow[];
 
-    if (!process.env.OPENROUTER_API_KEY) {
+    if (!getOpenRouterApiKey()) {
+      warnOpenRouterMissing("soul_retrieve");
       return {
         bullets: buildLexicalGuidance(args.query, docs, args.limit ?? 8),
       };

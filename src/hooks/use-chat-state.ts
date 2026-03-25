@@ -182,7 +182,7 @@ function streamPhaseFromPhaseId(phaseId?: string): StreamPhase | undefined {
   return undefined;
 }
 
-const AUTO_COMPACTION_MIN_MESSAGES = 14;
+const AUTO_COMPACTION_MIN_MESSAGES = 12;
 const AUTO_COMPACTION_KEEP_LATEST = 6;
 const SAVE_CONVERSATION_FILES_KEY = "ai-school:save-conversation-files-to-library";
 const LAST_ACTIVE_CHAT_TS_KEY = "ai-school:lastActiveChatTimestamp";
@@ -408,6 +408,7 @@ async function compressImageForUpload(file: File): Promise<File> {
 type UploadResponse = {
   resourceIds?: string[];
   chatOnlyResourceIds?: string[];
+  warning?: string;
   results?: Array<{
     file: string;
     resourceId?: string;
@@ -420,13 +421,14 @@ type UploadResponse = {
 async function uploadComposerFiles(
   files: File[],
   agentId?: string,
-  options?: { saveToLibrary?: boolean },
+  options?: { saveToLibrary?: boolean; conversationAttachment?: boolean },
 ): Promise<UploadResponse> {
   if (files.length === 0) return { resourceIds: [], results: [] };
 
   const formData = new FormData();
   formData.set("scope", "personal");
   formData.set("saveToLibrary", options?.saveToLibrary === false ? "0" : "1");
+  formData.set("conversationAttachment", options?.conversationAttachment === false ? "0" : "1");
   if (agentId) {
     formData.set("agentId", agentId);
   }
@@ -820,10 +822,17 @@ export function useChatState() {
 
     const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
     const modelParam = params?.get("model") ?? null;
+    const routerParam = params?.get("router") ?? null;
     const modeParam = (params?.get("mode") as StudyMode | null) ?? null;
     const chatIdParam = params?.get("chatId") ?? null;
+    const forceManualFromQuery =
+      routerParam === "manual" &&
+      Boolean(modelParam && modelParam.trim().length > 0);
 
-    if (modelParam) {
+    if (forceManualFromQuery && modelParam) {
+      setManualModel(modelParam);
+      setRouterMode("manual");
+    } else if (modelParam) {
       setManualModel(modelParam);
       setRouterMode("manual");
     } else {
@@ -838,7 +847,9 @@ export function useChatState() {
     }
 
     let firstChat: Chat | undefined;
-    if (chatIdParam) {
+    if (forceManualFromQuery && !chatIdParam) {
+      firstChat = undefined;
+    } else if (chatIdParam) {
       firstChat = chats.find((chat) => chat._id === chatIdParam);
       if (!firstChat) {
         const recentChatId = getRecentChatIdFromStorage();
@@ -1903,6 +1914,7 @@ export function useChatState() {
 
         const uploadResult = await uploadComposerFiles(outgoingFiles, selectedAgentId, {
           saveToLibrary: autoSaveConversationFilesToLibrary,
+          conversationAttachment: true,
         });
         uploadedResourceIds = uploadResult.resourceIds ?? [];
         chatOnlyResourceIds = uploadResult.chatOnlyResourceIds ?? [];
@@ -1930,6 +1942,9 @@ export function useChatState() {
           toast.warning(
             `${chatOnlyResourceIds.length} file${chatOnlyResourceIds.length === 1 ? "" : "s"} attached for this chat only. Personal library limit reached.`,
           );
+        }
+        if (typeof uploadResult.warning === "string" && uploadResult.warning.trim()) {
+          toast.warning(uploadResult.warning);
         }
       }
 
@@ -1993,6 +2008,7 @@ export function useChatState() {
         userMessageId?: string;
         modelUsed?: string;
         modelRequested?: string;
+        finishReason?: string;
         attachments?: string[];
         attachmentResourceIds?: string[];
         whyThisResponse?: string;
@@ -2077,6 +2093,7 @@ export function useChatState() {
             error?: string | { message?: string };
             modelUsed?: string;
             modelRequested?: string;
+            finishReason?: string;
             whyThisResponse?: string;
             citations?: Citation[];
             attachments?: string[];
@@ -2445,6 +2462,7 @@ export function useChatState() {
               userMessageId: payload.userMessageId,
               modelUsed: actualModel,
               modelRequested: payload.modelRequested,
+              finishReason: payload.finishReason,
               attachments: Array.isArray(payload.attachments) ? payload.attachments : undefined,
               attachmentResourceIds: Array.isArray(payload.attachmentResourceIds) ? payload.attachmentResourceIds : undefined,
               whyThisResponse: payload.whyThisResponse,
@@ -2970,6 +2988,7 @@ export function useChatState() {
     if (files.length === 0) return;
     const result = await uploadComposerFiles(files, undefined, {
       saveToLibrary: true,
+      conversationAttachment: false,
     });
     await refreshPersonalResources();
     personalResourcesPollMsRef.current = PERSONAL_RESOURCES_POLL_MIN_MS;
@@ -3021,7 +3040,7 @@ export function useChatState() {
       if (!result.ok) {
         if (!silent) {
           if (result.reason === "not_enough_messages") {
-            const minimum = Math.max(4, Math.round(result.minimumMessages ?? 20));
+            const minimum = Math.max(4, Math.round(result.minimumMessages ?? 12));
             const current = Math.max(0, Math.round(result.currentMessages ?? 0));
             toast.info(`Compaction works best after about ${minimum} messages (currently ${current}).`);
           } else {

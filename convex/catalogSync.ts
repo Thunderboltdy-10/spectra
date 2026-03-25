@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { MODEL_DEFAULTS } from "./constants";
 import { lookupCuratedModelMeta } from "./curatedModelRegistry";
+import { getOpenRouterApiKey, warnOpenRouterMissing } from "./env";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const ENDPOINT_SAMPLE_LIMIT = 60;
@@ -427,9 +428,17 @@ async function refreshCatalogBase(params: {
   limit?: number;
   includeEmbeddings: boolean;
 }) {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiKey = getOpenRouterApiKey();
   if (!apiKey) {
-    throw new Error("OPENROUTER_API_KEY missing for catalog sync");
+    warnOpenRouterMissing("catalog_sync");
+    return {
+      ok: true,
+      skipped: true,
+      reason: "openrouter_api_key_missing",
+      orgCount: 0,
+      modelCount: 0,
+      endpointStatsCount: 0,
+    };
   }
 
   const limit = Math.min(Math.max(params.limit ?? 400, 50), 400);

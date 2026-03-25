@@ -6,6 +6,8 @@ export type TutorGate = {
   hasReflection: boolean;
 };
 
+export type PromptTier = "T0" | "T1" | "T2" | "T3";
+
 export function inferAttempt(text: string) {
   const normalized = text.trim().toLowerCase();
   if (normalized.length < 40) return false;
@@ -30,6 +32,7 @@ export function tutorGate(attemptCount: number, hasReflection: boolean): TutorGa
 export function buildSystemPrompt(params: {
   mode: StudyMode;
   strictness: "hard" | "medium" | "soft";
+  promptTier?: PromptTier;
   guidelines?: PackGuidelines;
   sourceBlock?: string;
   gate: TutorGate;
@@ -47,6 +50,57 @@ export function buildSystemPrompt(params: {
   quizDifficultyLevel?: number;
   quizDifficultyLabel?: "easy" | "medium" | "hard";
 }) {
+  const promptTier = params.promptTier ?? "T2";
+  const guidelines = params.guidelines ?? {
+    summary: "General school guidance.",
+    topicMap: [],
+    rubricHints: [],
+    misconceptions: [],
+  };
+
+  if (promptTier === "T0" || promptTier === "T1") {
+    const modeGuide = (() => {
+      if (params.mode === "tutor") {
+        return `Tutor: coach with one next step and one check question when final solution is blocked. Strictness=${params.strictness}. attempts=${params.gate.attemptCount}, reflection=${params.gate.hasReflection}, allowFinal=${params.gate.allowFinalSolution}.`;
+      }
+      if (params.mode === "marker") return "Marker: rubric-style feedback, mark rationale, and 3 targeted drills.";
+      if (params.mode === "quiz") return "Quiz: output strict <<QUIZ_START>>...<<QUIZ_END>> format only.";
+      if (params.mode === "flashcard") return "Flashcards: output strict <<FLASHCARDS_START>>...<<FLASHCARDS_END>> format only.";
+      if (params.mode === "research") return "Research: structured analysis with evidence quality notes and clear conclusion.";
+      if (params.mode === "document") return "Document: emit valid JSON only inside <<DOCUMENT_START>>...<<DOCUMENT_END>> when document output is requested.";
+      if (params.mode === "image") return "Image: refine prompt and emit IMAGE_PROMPT line when ready.";
+      if (params.mode === "explain") return `Explain: Feynman-style teaching at ${params.explainDepth ?? "intermediate"} depth.`;
+      if (params.mode === "exam") return "Exam: produce concise mini-paper with mark allocations and self-check rubric.";
+      if (params.mode === "draft_coach") return "Draft coach: improve structure, rubric fit, and revision sequence.";
+      if (params.mode === "auto") return "Auto: choose best pedagogical format and keep response practical.";
+      return "General: be concise, accurate, and pedagogical.";
+    })();
+
+    const lines = [
+      "You are Spectra, a school AI tutor/marker.",
+      "Primary goals: clarity, correctness, and pedagogical usefulness.",
+      "Never invent citations or sources.",
+      "If web search was unavailable, explicitly say you are using model knowledge.",
+      `Mode: ${params.mode}. ${modeGuide}`,
+      "Response style: match depth to request; keep simple prompts short.",
+    ];
+
+    if (promptTier === "T1") {
+      lines.push(`Guidance summary: ${guidelines.summary.slice(0, 260)}`);
+      if (params.memoryProfile?.trim()) {
+        lines.push(`Student profile:\n${params.memoryProfile.trim().slice(0, 700)}`);
+      }
+      if (params.contextSummary?.trim()) {
+        lines.push(`Chat summary:\n${params.contextSummary.trim().slice(0, 700)}`);
+      }
+      if (params.searchBlock?.trim()) {
+        lines.push(`Web context:\n${params.searchBlock.trim().slice(0, 900)}`);
+      }
+    }
+
+    return lines.join("\n");
+  }
+
   const tutorRules =
     params.mode === "tutor"
       ? `Tutor mode policy:
@@ -271,13 +325,6 @@ BACK: [answer or definition]
   const searchBlock = params.searchBlock?.trim()
     ? `WEB SEARCH RESULTS:\n${params.searchBlock}`
     : "";
-
-  const guidelines = params.guidelines ?? {
-    summary: "General school guidance.",
-    topicMap: [],
-    rubricHints: [],
-    misconceptions: [],
-  };
 
   return `You are a school tutor and marker for students and teachers.
 You must follow study mode policy exactly and stay pedagogical.

@@ -12,6 +12,12 @@ crons.interval(
 );
 crons.daily("cleanup-expired-images", { hourUTC: 4, minuteUTC: 5 }, internal.images.cleanupExpiredImages, {});
 crons.daily(
+  "cleanup-expired-resources",
+  { hourUTC: 2, minuteUTC: 0 },
+  internal.resources.cleanupExpired,
+  { limit: 300 },
+);
+crons.daily(
   "generate-study-reminders",
   { hourUTC: 5, minuteUTC: 10 },
   internal.notifications.generateDailyStudyReminders,

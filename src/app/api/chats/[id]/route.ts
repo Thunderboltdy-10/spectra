@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { requireActor } from "@/lib/auth-server";
-import { convexMutation, convexQuery } from "@/lib/convex-server";
+import { convexAction, convexMutation, convexQuery } from "@/lib/convex-server";
 import { ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 import { safeStudyMode, type StudyMode } from "@/types";
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       keepLatestMessages?: number;
     };
 
-    const result = await convexMutation("chats:manualCompact", {
+    const result = await convexAction("chats:manualCompact", {
       actorClerkId: actor.clerkId,
       chatId: id,
       keepLatestMessages:

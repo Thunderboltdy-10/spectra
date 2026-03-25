@@ -514,7 +514,7 @@ export default function ModelsPage() {
   }, [availableModels.length, visibleCount]);
 
   function tryModel(modelId: string) {
-    router.push(`/chat?model=${encodeURIComponent(modelId)}`);
+    router.push(`/chat?model=${encodeURIComponent(modelId)}&router=manual`);
   }
 
   function toggleProvider(name: string) {

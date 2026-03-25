@@ -8,7 +8,7 @@ import { inferAttempt, inferReflection } from "@/lib/prompts/policy";
 
 const COMPACTION_TRIGGER_RATIO = 0.9;
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000;
-const MIN_MESSAGES_FOR_COMPACTION = 14;
+const MIN_MESSAGES_FOR_COMPACTION = 12;
 const MASK_OLDER_THAN_RECENT_TURNS = 8;
 
 export type MemoryEntry = {

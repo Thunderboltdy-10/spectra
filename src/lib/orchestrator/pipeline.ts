@@ -2164,9 +2164,21 @@ export async function runChatPipeline(request: NextRequest) {
     route.trace.toolchain.push("mode_transform_guidance");
   }
 
+  const systemPromptTier = auto.requestClass === "T3"
+    ? "T3"
+    : auto.requestClass === "T2"
+      ? "T2"
+      : auto.requestClass === "T1"
+        ? "T1"
+        : "T0";
+  const includeRuntimeContextBlocks = systemPromptTier !== "T0";
+  const includeRichContextBlocks = systemPromptTier === "T2" || systemPromptTier === "T3";
+  const includeFullContextBlocks = systemPromptTier === "T3";
+
   const systemPromptParts = [buildSystemPrompt({
     mode: effectiveMode,
     strictness: "medium",
+    promptTier: systemPromptTier,
     guidelines: {
       summary:
         selectedAgent?.guidelinesSummary ??
@@ -2194,15 +2206,18 @@ export async function runChatPipeline(request: NextRequest) {
     quizDifficultyLabel,
   })];
 
-  systemPromptParts.push(`=== RUNTIME CONTEXT ===\n${runtimeContextBlock}\n=== END RUNTIME CONTEXT ===`);
-  if (learningContextPrompt) {
+  if (includeRuntimeContextBlocks) {
+    systemPromptParts.push(`=== RUNTIME CONTEXT ===\n${runtimeContextBlock}\n=== END RUNTIME CONTEXT ===`);
+  }
+  if (includeRuntimeContextBlocks && learningContextPrompt) {
     systemPromptParts.push(`=== LEARNING CONTEXT ===\n${learningContextPrompt}\n=== END LEARNING CONTEXT ===`);
   }
-  if (modeTransformGuidance) {
+  if (includeRuntimeContextBlocks && modeTransformGuidance) {
     systemPromptParts.push(`=== MODE TRANSFORM GUIDANCE ===\n${modeTransformGuidance}\n=== END MODE TRANSFORM GUIDANCE ===`);
   }
-  systemPromptParts.push(
-    `=== MODE CONTRACT ===
+  if (includeRichContextBlocks) {
+    systemPromptParts.push(
+      `=== MODE CONTRACT ===
 Pedagogy: ${routePlan.modeContract.pedagogy}
 Output format: ${routePlan.modeContract.outputFormat}
 Response depth: ${routePlan.modeContract.responseDepth}
@@ -2210,9 +2225,9 @@ Escalation: ${routePlan.modeContract.escalationPolicy}
 Allowed bundles: ${routePlan.modeContract.toolBundles.join(", ") || "none"}
 Validator: ${routePlan.modeContract.validator}
 === END MODE CONTRACT ===`,
-  );
-  systemPromptParts.push(
-    `=== ROUTE PRIMITIVES ===
+    );
+    systemPromptParts.push(
+      `=== ROUTE PRIMITIVES ===
 Web search bundle: ${routePlan.shouldUseWebSearch || usedRecentContextCache ? "enabled" : "disabled"}.
 Retrieved school resources: ${retrieval.citations.length > 0 ? `${retrieval.citations.length} source(s) available` : routePlan.retrievalScopes.length > 0 ? "enabled but no high-confidence sources found" : "disabled"}.
 Memory bundle: ${useMemoryProfile ? "layered memory injected (global + topic-aware)" : memoryEnabled ? "enabled but no relevant memory injected" : "disabled"}.
@@ -2222,24 +2237,26 @@ If retrieval is enabled, ground claims in the provided classroom sources instead
 If sources exist, cite them inline where useful and finish with a compact sources section.
 Do not invent tool calls that were not actually run.
 === END ROUTE PRIMITIVES ===`,
-  );
-  const runtimeSkillBlock = formatRuntimeSkillBlock(runtimeSkills);
-  if (runtimeSkillBlock) {
-    systemPromptParts.push(runtimeSkillBlock);
-    route.trace.toolchain.push("skill_guidance_applied");
+    );
   }
-  if (routePlan.agentContract) {
-    systemPromptParts.push(
-      `=== AGENT CONTRACT ===
+  if (includeFullContextBlocks) {
+    const runtimeSkillBlock = formatRuntimeSkillBlock(runtimeSkills);
+    if (runtimeSkillBlock) {
+      systemPromptParts.push(runtimeSkillBlock);
+      route.trace.toolchain.push("skill_guidance_applied");
+    }
+    if (routePlan.agentContract) {
+      systemPromptParts.push(
+        `=== AGENT CONTRACT ===
 Agent: ${routePlan.agentContract.name ?? "Focused agent"}
 Scope: ${routePlan.agentContract.scope}
 Resource scopes: ${routePlan.agentContract.resourceScopes.join(", ") || "none"}
 Allowed bundles: ${routePlan.agentContract.toolBundles.join(", ") || "none"}
 === END AGENT CONTRACT ===`,
-    );
-  }
-  systemPromptParts.push(
-    `=== TOOL EXECUTION CONTEXT ===
+      );
+    }
+    systemPromptParts.push(
+      `=== TOOL EXECUTION CONTEXT ===
 Route-approved bundles: ${routePlan.allowedToolBundles.join(", ") || "none"}
 Search route enabled: ${routePlan.shouldUseWebSearch || usedRecentContextCache ? "yes" : "no"}
 Retrieval scopes enabled: ${routePlan.retrievalScopes.join(", ") || "none"}
@@ -2249,20 +2266,21 @@ Retrieved classroom/personal sources provided below: ${retrieval.citations.lengt
 If a route-approved capability returned no results, say that no usable results were found.
 Do not claim you lack a supported tool when search, retrieval, or memory context is already provided in this prompt.
 === END TOOL EXECUTION CONTEXT ===`,
-  );
-  if (featureEnabled(orgSettings.org?.soulEnabled) && schoolSoulCapsule.capsule.trim()) {
+    );
+  }
+  if (includeRichContextBlocks && featureEnabled(orgSettings.org?.soulEnabled) && schoolSoulCapsule.capsule.trim()) {
     systemPromptParts.push(
       `=== SCHOOL SOUL ${schoolSoulCapsule.version} ===\n${schoolSoulCapsule.capsule}\n=== END SCHOOL SOUL ===`,
     );
   }
 
-  if (attachments.quickExtractBlock) {
+  if (includeRichContextBlocks && attachments.quickExtractBlock) {
     systemPromptParts.push(attachments.quickExtractBlock);
   }
-  if (researchEvidenceBlock) {
+  if (includeRichContextBlocks && researchEvidenceBlock) {
     systemPromptParts.push(researchEvidenceBlock);
   }
-  if (imageDescriptionBlock) {
+  if (includeRichContextBlocks && imageDescriptionBlock) {
     systemPromptParts.push(`IMAGE DESCRIPTION:\n${imageDescriptionBlock}`);
   }
 
@@ -2714,6 +2732,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           whyThisResponse: "Clarification requested before executing the expensive stages.",
           citations: [],
           routeTrace: route.trace,
+          finishReason: undefined,
           autoResult: {
             modelUsed: undefined,
             searchEnabled: route.searchEnabled || routePlan.shouldUseWebSearch || usedRecentContextCache,
@@ -3059,6 +3078,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           citations,
           verificationPassed: undefined,
           thinkingContent: undefined,
+          finishReason: undefined,
           routeTrace: route.trace,
           spendingUpdate,
           autoResult: {
@@ -3186,9 +3206,18 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
       const usageIn = streamed.usageIn;
       const usageOut = streamed.usageOut;
       const usage = streamed.usage;
+      const finishReason = streamed.finishReason;
+      const truncatedByLength = streamed.truncatedByLength;
+      const continuationCount = streamed.continuationCount;
       const verificationPassed = streamed.verificationPassed;
       const thinkingContent = streamed.thinkingContent;
       const modelRequested = primaryModel;
+      if (continuationCount > 0) {
+        route.trace.toolchain.push("length_auto_continue");
+      }
+      if (truncatedByLength && continuationCount >= 2 && finishReason === "length") {
+        route.trace.toolchain.push("length_cap_reached");
+      }
       if (streamed.verificationSubcalls && streamed.verificationSubcalls.length > 0) {
         for (const verificationSubcall of streamed.verificationSubcalls) {
           appendSubcall({
@@ -3686,6 +3715,8 @@ BACK: [answer or definition]`,
           usage,
           inputTokens: finalUsageIn,
           outputTokens: finalUsageOut,
+          finishReason,
+          truncatedByLength,
           pricing,
         });
       }
@@ -3941,6 +3972,7 @@ BACK: [answer or definition]`,
         attachmentResourceIds: generatedArtifactResourceIds,
         verificationPassed,
         thinkingContent: thinkingContent || undefined,
+        finishReason,
         routeTrace: route.trace,
         spendingUpdate,
         autoResult: {

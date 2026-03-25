@@ -11,7 +11,7 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 **Key strategic decisions from user input**:
 - EU schools first (GDPR, EU AI Act, Moodle priority)
 - Tavily as selective agentic search tool layer (not always-on), SearXNG fully removed
-- Mem0 as memory layer (replacing custom memory system)
+- Mem0 integrated into Convex/Vercel infrastructure (no extra hosting costs)
 - tldraw SDK for diagrams/canvas
 - Teachers guide through Agents, not surveillance dashboards
 - Agents are central — guided wizard creation with resource upload
@@ -272,11 +272,12 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 - **Implementation**:
   - Expand curated model registry with models from all major providers
   - Add provider diversity as a first-class routing signal
-  - Curated tiers:
-    - **Budget heroes**: DeepSeek V3.2, Qwen 3.5, Seed 2.0 lite/mini, Gemma 3
-    - **Balanced**: GPT-4o-mini, Claude Haiku, Gemini Flash, Mistral Small
-    - **Premium**: GPT-4o, Claude Sonnet, Gemini Pro, DeepSeek R1
-    - **Heavy**: Claude Opus, GPT-5, Gemini Ultra (gated by cost cap)
+  - Curated tiers (illustrative examples — **never hardcode specific models**; tiers are populated dynamically from catalog sync):
+    - **Budget heroes**: e.g. DeepSeek V3.x, Qwen 3.x, Seed 2.x, Gemma — whatever is cheapest and capable at any given time
+    - **Balanced**: e.g. GPT-4o-mini class, Claude Haiku class, Gemini Flash class, Mistral Small class
+    - **Premium**: e.g. GPT-4o class, Claude Sonnet class, Gemini Pro class, DeepSeek R1 class
+    - **Heavy**: e.g. Claude Opus class, GPT-5 class, Gemini Ultra class (gated by cost cap)
+  - **Note**: Model landscape changes rapidly. Tier assignment must be derived from catalog pricing + capability scores, not from a hardcoded list. New models entering the catalog auto-slot into the correct tier.
   - Each tier: minimum 4 different providers represented
 
 ### 3.2 Diversity Scoring
@@ -286,7 +287,9 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
   - Add `recentModelUsage` tracking (last 20 requests per user, stored in session/memory)
   - Diversity penalty: if model was used in last 3 requests, apply 0.7x score multiplier; last 5: 0.85x; last 10: 0.92x
   - Provider diversity: if same provider used in last 2 requests, apply 0.8x multiplier
-  - Exception: if user explicitly pins a model (manual mode), no diversity penalty
+  - **Exceptions** (no diversity penalty applied):
+    - User explicitly pins a model (manual mode)
+    - Model supports prompt caching AND cache is not stale (conversation has recent messages within cache TTL, typically < 5 min, and history has not been compacted since last use)
   - Surface the diversity logic in route trace so user can see why a different model was chosen
 
 ### 3.3 Cache-Aware Prioritization
@@ -349,12 +352,29 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
   - Stream specialist progress to UI in real-time (which specialists are active)
 
 ### 3.8 Token Count Accuracy
-- **Problem**: Simple prompts show 3500+ tokens; scary for users
+- **Problem**: Simple prompts show 3500+ tokens because the system prompt is bloated with mode rules, memory, skills, and guidelines even for trivial requests. This is the real issue — not display, but actual waste.
+- **Root cause**: System prompt tiering (Phase 1.6) is the primary fix. With a T0 system prompt < 400 tokens, simple requests will show reasonable token counts.
 - **Implementation**:
   - Display actual token usage from API response, not estimated
   - Separate display: "Input: X tokens | Output: Y tokens" (not combined)
-  - For context: show what contributed to input (system prompt, history, memory, sources)
-  - Consider: only show token count to power users / behind a toggle
+  - For context: show what contributed to input (system prompt, history, memory, sources) — helps debug why tokens are high
+  - Token count always visible to all users (no toggle/hiding — transparency matters)
+
+### 3.9 New Model Onboarding & Challenger Lane
+- **Problem**: When new models appear in the catalog (via catalog sync), they have no reliability/latency data. They need a path to get tested without destabilizing routing for all users.
+- **Implementation**:
+  - **Challenger lane**: New models (< 5 total runs across all users) are flagged as `challenger`
+  - Challengers are eligible for selection but only when:
+    - The request is low-stakes (T0/T1 tier, simple question)
+    - Random exploration roll succeeds (10% probability from 3.4)
+    - No other model with warm cache is available for this conversation
+  - **Light offline evaluation loop**:
+    - After each response from a challenger model, store quality signals: finish_reason, user feedback (thumbs), response length, latency
+    - Weekly batch job: compute reliability + latency scores for challengers that have accumulated 5+ data points
+    - If reliability > 0.6 after 12 runs: promote to normal routing pool
+    - If reliability < 0.3 after 12 runs: demote to deprioritized (0.3x score multiplier, not fully removed)
+  - **Catalog sync**: New models from OpenRouter catalog automatically enter as challengers. No manual curation needed for entry — only tier assignment is automatic based on pricing + capabilities.
+  - This ensures the routing system adapts to the model landscape over time without manual intervention, while protecting users from untested models on important requests.
 
 ---
 
@@ -742,19 +762,27 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 
 **Goal**: Replace the current custom memory system with Mem0 for better relevance, less confusion, and hybrid search.
 
-### 8.1 Mem0 Integration Strategy
+### 8.1 Mem0 Integration — Real Migration on Convex/Vercel
 - **Research findings**: Mem0 delivers 26% accuracy uplift over OpenAI's memory, 91% latency reduction, 90% token reduction
-- **Implementation approach**:
-  - Option A (recommended): Use Mem0 as a library/service alongside Convex
-    - Self-host Mem0 or use Mem0 Cloud
-    - Mem0 manages memory storage, retrieval, and deduplication
-    - Convex stores the reference/metadata
-  - Option B: Implement Mem0's key innovations within the existing Convex-based system
-    - Hybrid search (BM25 + vector) with RRF fusion
-    - Three-factor scoring: `0.6 * relevance + 0.25 * recency + 0.15 * importance`
-    - Contradiction detection before storage
-    - Graph-based relationship tracking between memory entries
-  - **Decision**: Start with Option B (lower migration risk), evaluate Option A for future phases
+- **Commitment**: Full Mem0 integration, not partial. The current custom memory system is replaced.
+- **Architecture** (no extra hosting costs — runs on existing Convex + Vercel):
+  - Use `mem0` npm package as a library within Convex actions (not as a separate hosted service)
+  - Mem0's storage backend: configure to use Convex as the underlying store (custom adapter)
+    - Mem0 needs a vector store → use Convex's existing vector indexes on `userMemoryEntries`
+    - Mem0 needs a graph store → use a new `memoryGraph` Convex table for entity relationships
+    - Mem0 needs a KV store → use existing `userMemoryEntries` with category-based key structure
+  - Mem0's LLM calls: route through OpenRouter (same API key, same infrastructure, no extra cost beyond normal token usage)
+  - **Migration path**:
+    1. Create Convex adapter for Mem0's storage interfaces
+    2. Migrate existing `userMemoryEntries` data into Mem0-compatible format
+    3. Replace `routeMemoryWrite` and `retrieveRelevantEntries` with Mem0's `add()` and `search()`
+    4. Deprecate legacy `userMemory` table
+  - **What Mem0 gives us that the current system doesn't**:
+    - Hybrid graph+vector+KV retrieval (not just vector)
+    - Automatic entity extraction and relationship tracking
+    - Built-in contradiction detection and memory merging
+    - Configurable memory types with different retention policies
+    - Battle-tested deduplication (not fingerprint-based race condition)
 
 ### 8.2 Hybrid Search Implementation
 - **Problem**: Current vector-only search misses keyword-exact matches
@@ -958,43 +986,9 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 
 ---
 
-## Phase 11: Compliance & Integration Foundations
+## Phase 11: Testing & Verification Strategy
 
-**Goal**: Lay groundwork for EU school deployment.
-
-### 11.1 GDPR Preparation
-- Data processing documentation
-- Student data never used for model training (already true via OpenRouter)
-- Data export API for schools (all student data exportable)
-- Data deletion API (right to be forgotten — extend existing user purge)
-- Privacy policy updates for EU specifics
-- Cookie consent updates
-
-### 11.2 EU AI Act Readiness
-- Education AI classified as "high-risk" under EU AI Act
-- Required: quality management systems, risk assessments, human oversight
-- Prepare documentation templates
-- Ensure SOUL system is documented as the "human oversight" mechanism
-- Transparency: document what models are used, what data is processed
-
-### 11.3 LMS Integration Architecture (Moodle First)
-- Moodle is the priority for EU (open-source, GDPR-friendly, widely used)
-- Design LTI 1.3 integration architecture
-- Plan: SSO via Moodle auth, grade passback for quiz/exam modes
-- Canvas LTI as second priority
-- Architecture should be generic enough for any LTI 1.3 consumer
-
-### 11.4 SSO Architecture
-- Google Workspace for Education (common in EU K-12)
-- Microsoft Entra ID (common in EU secondary/higher)
-- Clerk already supports both — verify configuration
-- Auto-provisioning from SSO: create user + assign to org on first login
-
----
-
-## Phase 12: Testing & Verification Strategy
-
-### 12.1 End-to-End Test Scenarios
+### 11.1 End-to-End Test Scenarios
 - Full chat flow: send message → routing → model selection → streaming → persistence → title generation
 - Artifact flow: generate in chat → save as artifact → edit → version history → agent reads artifact
 - Agent flow: create agent with resources → auto-route to agent → agent uses resources in response
@@ -1004,7 +998,7 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 - Branch flow: edit message → create branch → navigate between branches
 - Compaction flow: long conversation → compact → summary preserved → continue chatting
 
-### 12.2 Edge Case Testing
+### 11.2 Edge Case Testing
 - Model returns `finish_reason: "length"` → auto-continuation works
 - Tavily API down → :online fallback kicks in
 - OPENROUTER_API_KEY missing → graceful degradation
@@ -1014,7 +1008,7 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 - Dark mode on every component
 - Mobile responsive on every page
 
-### 12.3 Performance Benchmarks
+### 11.3 Performance Benchmarks
 - Time to first token: < 2 seconds for T0/T1 requests
 - Full response time: < 10 seconds for simple questions
 - Artifact page load: < 1 second
@@ -1114,9 +1108,7 @@ Phase 1 (Foundation) ───────────────────�
     │
     ├── Phase 10 (Analytics Hub) ── depends on Phase 5
     │
-    └── Phase 11 (Compliance) ── independent, can parallel
-         │
-         └── Phase 12 (Testing) ── final, after all phases
+    └── Phase 11 (Testing) ── final, after all phases
 ```
 
 ---
@@ -1133,5 +1125,4 @@ Phase 1 (Foundation) ───────────────────�
 8. **Phase 8** — Memory quality improves over time
 9. **Phase 9** — Polish and visual refinement
 10. **Phase 10** — Hub consolidation
-11. **Phase 11** — Compliance for EU launch
-12. **Phase 12** — Ongoing verification
+11. **Phase 11** — Ongoing verification

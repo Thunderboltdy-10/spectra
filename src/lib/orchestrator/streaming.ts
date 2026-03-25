@@ -36,35 +36,98 @@ export async function runAssistantStreaming(params: {
   let usageIn = 0;
   let usageOut = 0;
   let usage: OpenRouterUsage | undefined;
+  let finishReason: string | undefined;
+  let truncatedByLength = false;
+  let continuationCount = 0;
   let verificationPassed: boolean | undefined;
   let thinkingContent = "";
   let verificationSubcalls: VerificationSubcall[] | undefined;
 
+  const mergeUsage = (base: OpenRouterUsage | undefined, incoming: OpenRouterUsage | undefined): OpenRouterUsage | undefined => {
+    if (!incoming) return base;
+    const next: OpenRouterUsage = { ...(base ?? {}) };
+    const sumField = (key: keyof OpenRouterUsage) => {
+      const current = typeof next[key] === "number" ? (next[key] as number) : 0;
+      const add = typeof incoming[key] === "number" ? (incoming[key] as number) : 0;
+      if (current === 0 && add === 0 && next[key] === undefined && incoming[key] === undefined) {
+        return;
+      }
+      next[key] = Number((current + add).toFixed(6));
+    };
+    sumField("prompt_tokens");
+    sumField("completion_tokens");
+    sumField("total_tokens");
+    sumField("cost");
+    sumField("cached_tokens");
+    sumField("cache_creation_input_tokens");
+    return next;
+  };
+
   if (!params.shouldVerify) {
-    for await (const event of openRouterStreamChat({
-      model: params.primaryModel,
-      fallbackModels: params.fallbackModels,
-      messages: params.messages,
-      maxTokens: params.maxTokens,
-      onFallback: params.onFallback,
-    })) {
-      if (event.type === "delta") {
-        responseText += event.content;
-        await params.send({ type: "delta", content: event.content });
+    const maxContinuations = 2;
+    let continuationMessages = params.messages;
+
+    while (true) {
+      let roundResponse = "";
+      let roundFinishReason: string | undefined;
+      let roundModelUsed = modelUsed;
+      let roundUsageIn = 0;
+      let roundUsageOut = 0;
+      let roundUsage: OpenRouterUsage | undefined;
+
+      for await (const event of openRouterStreamChat({
+        model: params.primaryModel,
+        fallbackModels: params.fallbackModels,
+        messages: continuationMessages,
+        maxTokens: params.maxTokens,
+        onFallback: params.onFallback,
+      })) {
+        if (event.type === "delta") {
+          roundResponse += event.content;
+          responseText += event.content;
+          await params.send({ type: "delta", content: event.content });
+        }
+        if (event.type === "thinking") {
+          thinkingContent += event.content;
+          await params.send({ type: "thinking", content: event.content });
+        }
+        if (event.type === "done") {
+          roundModelUsed = event.model ?? roundModelUsed;
+          roundUsageIn = event.inputTokens ?? roundUsageIn;
+          roundUsageOut = event.outputTokens ?? roundUsageOut;
+          roundUsage = event.usage ?? roundUsage;
+          roundFinishReason = event.finishReason?.trim() || undefined;
+        }
+        if (event.type === "error") {
+          throw new Error(event.error);
+        }
       }
-      if (event.type === "thinking") {
-        thinkingContent += event.content;
-        await params.send({ type: "thinking", content: event.content });
+
+      modelUsed = roundModelUsed;
+      usageIn += Math.max(0, roundUsageIn);
+      usageOut += Math.max(0, roundUsageOut);
+      usage = mergeUsage(usage, roundUsage);
+      finishReason = roundFinishReason ?? finishReason;
+      if (roundFinishReason === "length") {
+        truncatedByLength = true;
       }
-      if (event.type === "done") {
-        modelUsed = event.model ?? modelUsed;
-        usageIn = event.inputTokens ?? usageIn;
-        usageOut = event.outputTokens ?? usageOut;
-        usage = event.usage ?? usage;
-      }
-      if (event.type === "error") {
-        throw new Error(event.error);
-      }
+
+      const shouldContinue =
+        roundFinishReason === "length" &&
+        roundResponse.trim().length > 0 &&
+        continuationCount < maxContinuations;
+      if (!shouldContinue) break;
+
+      continuationCount += 1;
+      await params.send({
+        type: "notice",
+        message: "Expanding response...",
+      });
+      continuationMessages = [
+        ...continuationMessages,
+        { role: "assistant", content: responseText },
+        { role: "user", content: "Continue from where you stopped." },
+      ];
     }
   } else {
     const verified = await runMarkerVerificationPipeline({
@@ -98,6 +161,9 @@ export async function runAssistantStreaming(params: {
     usageIn,
     usageOut,
     usage,
+    finishReason,
+    truncatedByLength,
+    continuationCount,
     verificationPassed,
     thinkingContent,
     sourceHints: [] as SearchSourceHint[],
@@ -374,43 +440,101 @@ export async function runCollaborativeStreaming(params: {
   let usageOut = 0;
   let usage: OpenRouterUsage | undefined;
   let modelUsed = params.synthesisModel ?? params.primaryModel;
-  for await (const event of openRouterStreamChat({
-    model: params.synthesisModel ?? params.primaryModel,
-    fallbackModels: params.synthesisFallbackModels ?? params.fallbackModels,
-    messages: [
-      { role: "system", content: params.baseSystemPrompt },
-      {
-        role: "user",
-        content: [
-          "Merge these specialist findings into a coherent answer for the user.",
-          "Keep evidence grounded and include confidence notes if there were disagreements.",
-          params.conversationContext
-            ? `Conversation context (must stay consistent):\n${params.conversationContext}`
-            : "",
-          combinedFindings,
-        ].filter(Boolean).join("\n\n"),
-      },
-    ],
-    temperature: 0.2,
-    maxTokens: params.maxTokens,
-    onFallback: params.onFallback,
-  })) {
-    if (event.type === "delta") {
-      responseText += event.content;
-      await params.send({ type: "delta", content: event.content });
+  let finishReason: string | undefined;
+  let truncatedByLength = false;
+  const mergeUsage = (base: OpenRouterUsage | undefined, incoming: OpenRouterUsage | undefined): OpenRouterUsage | undefined => {
+    if (!incoming) return base;
+    const next: OpenRouterUsage = { ...(base ?? {}) };
+    const sumField = (key: keyof OpenRouterUsage) => {
+      const current = typeof next[key] === "number" ? (next[key] as number) : 0;
+      const add = typeof incoming[key] === "number" ? (incoming[key] as number) : 0;
+      if (current === 0 && add === 0 && next[key] === undefined && incoming[key] === undefined) return;
+      next[key] = Number((current + add).toFixed(6));
+    };
+    sumField("prompt_tokens");
+    sumField("completion_tokens");
+    sumField("total_tokens");
+    sumField("cost");
+    sumField("cached_tokens");
+    sumField("cache_creation_input_tokens");
+    return next;
+  };
+
+  const maxContinuations = 2;
+  let continuationCount = 0;
+  let continuationMessages: OpenRouterMessage[] = [
+    { role: "system", content: params.baseSystemPrompt },
+    {
+      role: "user",
+      content: [
+        "Merge these specialist findings into a coherent answer for the user.",
+        "Keep evidence grounded and include confidence notes if there were disagreements.",
+        params.conversationContext
+          ? `Conversation context (must stay consistent):\n${params.conversationContext}`
+          : "",
+        combinedFindings,
+      ].filter(Boolean).join("\n\n"),
+    },
+  ];
+
+  while (true) {
+    let roundResponse = "";
+    let roundFinishReason: string | undefined;
+    let roundUsageIn = 0;
+    let roundUsageOut = 0;
+    let roundUsage: OpenRouterUsage | undefined;
+    let roundModelUsed = modelUsed;
+
+    for await (const event of openRouterStreamChat({
+      model: params.synthesisModel ?? params.primaryModel,
+      fallbackModels: params.synthesisFallbackModels ?? params.fallbackModels,
+      messages: continuationMessages,
+      temperature: 0.2,
+      maxTokens: params.maxTokens,
+      onFallback: params.onFallback,
+    })) {
+      if (event.type === "delta") {
+        roundResponse += event.content;
+        responseText += event.content;
+        await params.send({ type: "delta", content: event.content });
+      }
+      if (event.type === "thinking") {
+        await params.send({ type: "thinking", content: event.content });
+      }
+      if (event.type === "done") {
+        roundModelUsed = event.model ?? roundModelUsed;
+        roundUsageIn = event.inputTokens ?? roundUsageIn;
+        roundUsageOut = event.outputTokens ?? roundUsageOut;
+        roundUsage = event.usage ?? roundUsage;
+        roundFinishReason = event.finishReason?.trim() || undefined;
+      }
+      if (event.type === "error") {
+        throw new Error(event.error);
+      }
     }
-    if (event.type === "thinking") {
-      await params.send({ type: "thinking", content: event.content });
+
+    modelUsed = roundModelUsed;
+    usageIn += Math.max(0, roundUsageIn);
+    usageOut += Math.max(0, roundUsageOut);
+    usage = mergeUsage(usage, roundUsage);
+    finishReason = roundFinishReason ?? finishReason;
+    if (roundFinishReason === "length") {
+      truncatedByLength = true;
     }
-    if (event.type === "done") {
-      modelUsed = event.model ?? modelUsed;
-      usageIn = event.inputTokens ?? usageIn;
-      usageOut = event.outputTokens ?? usageOut;
-      usage = event.usage ?? usage;
-    }
-    if (event.type === "error") {
-      throw new Error(event.error);
-    }
+
+    const shouldContinue =
+      roundFinishReason === "length" &&
+      roundResponse.trim().length > 0 &&
+      continuationCount < maxContinuations;
+    if (!shouldContinue) break;
+
+    continuationCount += 1;
+    await params.send({ type: "notice", message: "Expanding response..." });
+    continuationMessages = [
+      ...continuationMessages,
+      { role: "assistant", content: responseText },
+      { role: "user", content: "Continue from where you stopped." },
+    ];
   }
   const synthesisDurationMs = Date.now() - synthesisStartedAt;
 
@@ -451,6 +575,9 @@ export async function runCollaborativeStreaming(params: {
     usageIn,
     usageOut,
     usage,
+    finishReason,
+    truncatedByLength,
+    continuationCount,
     thinkingContent: "",
     sourceHints: [...sourceHintsByUrl.values()].slice(0, 12),
     verificationPassed: undefined,

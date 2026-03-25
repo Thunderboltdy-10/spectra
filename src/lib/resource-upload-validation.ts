@@ -1,4 +1,5 @@
 import {
+  BLOCKED_RESOURCE_EXTENSIONS,
   DEFAULT_MAX_RESOURCE_FILE_SIZE_BYTES,
   MAX_RESOURCE_FILE_SIZE_BYTES,
   MIN_RESOURCE_FILE_SIZE_BYTES,
@@ -26,6 +27,10 @@ export function formatMegabytes(bytes: number) {
 export function validateResourceUploadFile(file: Pick<File, "name" | "type">) {
   const ext = fileExtension(file.name);
   const mime = file.type.trim().toLowerCase();
+
+  if (BLOCKED_RESOURCE_EXTENSIONS.has(ext)) {
+    return `Blocked file type: .${ext}. Upload documents, code, images, or audio only.`;
+  }
 
   if (VIDEO_RESOURCE_EXTENSIONS.has(ext) || mime.startsWith("video/")) {
     return "Video uploads are not supported. Upload documents, code, images, or audio instead.";

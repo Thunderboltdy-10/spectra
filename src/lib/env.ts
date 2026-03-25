@@ -14,14 +14,16 @@ const envSchema = z.object({
 });
 
 const parsed = envSchema.safeParse(process.env);
+let warnedMissingOpenRouter = false;
 
 export function getEnv() {
   if (!parsed.success) {
     const message = parsed.error.issues.map((err) => `${err.path.join(".")}: ${err.message}`).join("; ");
     throw new Error(`Invalid environment variables: ${message}`);
   }
-  if (process.env.NODE_ENV === "production" && !parsed.data.OPENROUTER_API_KEY) {
-    throw new Error("Invalid environment variables: OPENROUTER_API_KEY is required in production");
+  if (!parsed.data.OPENROUTER_API_KEY && !warnedMissingOpenRouter) {
+    warnedMissingOpenRouter = true;
+    console.warn("[env] OPENROUTER_API_KEY missing; OpenRouter-backed features will run in degraded mode.");
   }
   return parsed.data;
 }

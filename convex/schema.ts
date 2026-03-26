@@ -22,7 +22,6 @@ export default defineSchema({
     verifyMarkerPassEnabled: v.boolean(),
     allowPaidModels: v.optional(v.boolean()),
     orchestratorV2Enabled: v.optional(v.boolean()),
-    searxngEnabled: v.optional(v.boolean()),
     monthlyBudgetCentsPerUser: v.optional(v.number()),
     budgetMarginPercent: v.optional(v.number()),
     maxResourceFileSizeBytes: v.optional(v.number()),

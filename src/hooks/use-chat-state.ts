@@ -192,7 +192,6 @@ const LAST_ACTIVE_CHAT_TS_KEY = "ai-school:lastActiveChatTimestamp";
 const LAST_ACTIVE_CHAT_ID_KEY = "ai-school:lastActiveChatId";
 const CHAT_SESSION_WINDOW_MS = 12 * 60 * 60 * 1000;
 const MEMORY_ENABLED_KEY = "ai-school:memory-enabled";
-const SEARXNG_ENABLED_KEY = "ai-school:searxng-enabled";
 const PROACTIVE_BANNER_DISMISSED_KEY = "ai-school:proactive-banner-dismissed-v1";
 const FLASHCARD_REMINDER_DISABLED_KEY = "ai-school:flashcard-reminder-disabled";
 const PERSONAL_RESOURCES_POLL_MIN_MS = 4_000;
@@ -2104,7 +2103,6 @@ export function useChatState() {
           },
           toolPreferences: {
             memoryEnabled: readStoredToggle(MEMORY_ENABLED_KEY, true),
-            searxngEnabled: readStoredToggle(SEARXNG_ENABLED_KEY, true),
           },
           clientMessageId: !isRegenerate ? localUserMessageId : undefined,
         }),

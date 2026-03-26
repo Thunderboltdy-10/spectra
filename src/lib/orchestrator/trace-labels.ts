@@ -1,6 +1,6 @@
 const TOOLCHAIN_LABELS: Record<string, string> = {
   web_search: 'Web search',
-  search_provider_searxng: 'SearXNG live search',
+  search_provider_tavily: 'Tavily live search',
   search_provider_model_fallback: 'Model-based search fallback',
   search_provider_error: 'Search provider error',
   rag_retrieval: 'Resource retrieval',
@@ -42,6 +42,9 @@ const TOOLCHAIN_LABELS: Record<string, string> = {
   context_window_token_cap: 'Output capped by model context window',
   intent_model_request: 'Prompt model request detected',
   intent_orchestration_request: 'Prompt orchestration request detected',
+  research_output_contract: 'Structured research output contract',
+  clarification_prompt_aware: 'Prompt-aware clarification',
+  clarification_prompt_aware_fallback: 'Heuristic clarification fallback',
   phase_router: 'Phase-based routing',
   route_trace: 'Route trace',
   route_model: 'Model route emitted',

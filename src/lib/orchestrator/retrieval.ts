@@ -4,14 +4,14 @@ import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
 import { openRouterChatCompletion, openRouterEmbeddingRequest } from "@/lib/openrouter";
 import { withTimeout } from "@/lib/orchestrator/history";
 import { isModelAllowedInTier, pickModelAndFallbacks, type CatalogModelEntry, type ModelRuntimeStat } from "@/lib/model-selection";
-import { searxngSearch } from "@/lib/search/searxng";
+import { tavily, type TavilyClient, type TavilyExtractResponse, type TavilyGetResearchResponse, type TavilySearchResponse } from "@tavily/core";
 import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 
 export type RetrievedCitation = {
   resourceId?: string;
   filename: string;
   page?: number;
-  sourceType: "pack" | "personal";
+  sourceType: "pack" | "personal" | "agent";
   text: string;
   score?: number;
 };
@@ -54,13 +54,57 @@ export type WebSearchSource = {
   title: string;
   domain: string;
   snippet?: string;
+  relevanceScore?: number;
+  reliabilityScore?: number;
+  reliabilityLabel?: "high" | "medium" | "low";
+  reliabilityReason?: string;
+  publishedDate?: string;
+  favicon?: string;
+  query?: string;
+};
+
+type SearchStrategy = "none" | "search" | "search_extract" | "extract_url" | "crawl" | "research";
+type SearchTrigger =
+  | "none"
+  | "time_sensitive"
+  | "explicit_search"
+  | "research_mode"
+  | "deep_research"
+  | "read_url"
+  | "crawl_request";
+
+type SearchPlan = {
+  strategy: SearchStrategy;
+  trigger: SearchTrigger;
+  query?: string;
+  targetUrl?: string;
+  maxResults?: number;
+  maxExtractResults?: number;
+  subqueries?: string[];
+};
+
+export type WebSearchOperation = {
+  tool: "search" | "extract" | "crawl" | "research" | "model_fallback";
+  status: "completed" | "failed" | "skipped";
+  query?: string;
+  targetUrl?: string;
+  resultCount?: number;
+  selectedUrls?: string[];
+  durationMs?: number;
+  costCredits?: number;
+  reason?: string;
 };
 
 export type WebSearchResult = {
   text: string;
   urls: string[];
   sources: WebSearchSource[];
-  provider: "searxng" | "model_fallback" | "disabled" | "error";
+  provider: "tavily" | "model_fallback" | "disabled" | "error";
+  strategy?: SearchStrategy;
+  triggeredBy?: SearchTrigger;
+  operations?: WebSearchOperation[];
+  costCredits?: number;
+  fallbackReason?: string;
   modelUsed?: string;
   usage?: {
     prompt_tokens?: number;
@@ -73,8 +117,13 @@ export type WebSearchResult = {
 
 const MAX_WEB_SOURCES = 6;
 export const MAX_RAG_SOURCES = 5;
+const MAX_RESEARCH_SUBQUESTIONS = 3;
+const SEARCH_CACHE_TTL_MS = 30 * 60 * 1000;
 const URL_VALIDATION_TIMEOUT_MS = 3500;
 const TITLE_PARSE_TIMEOUT_MS = 2000;
+const TAVILY_TIMEOUT_MS = 12_000;
+
+const tavilySearchCache = new Map<string, { expiresAt: number; response: TavilySearchResponse }>();
 
 function parseHttpUrl(raw: string) {
   const sanitized = raw.trim().replace(/[),.;]+$/, "");
@@ -110,7 +159,7 @@ function normalizeHost(url: string) {
   return parsed ? parsed.hostname.toLowerCase().replace(/^www\./, "") : "";
 }
 
-function scoreWebSource(url: string): ReliabilityScore {
+export function scoreWebSource(url: string): ReliabilityScore {
   const host = normalizeHost(url);
   if (!host) {
     return {
@@ -165,6 +214,192 @@ function scoreWebSource(url: string): ReliabilityScore {
     confidence: "medium",
     reason: "Unknown editorial controls; cross-check recommended.",
   };
+}
+
+function compactText(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function reliabilityLabelForScore(score: number | undefined): "high" | "medium" | "low" {
+  if (typeof score !== "number" || !Number.isFinite(score)) return "medium";
+  if (score >= 0.75) return "high";
+  if (score <= 0.45) return "low";
+  return "medium";
+}
+
+function clampSnippet(value: string | undefined, max = 280) {
+  if (!value) return undefined;
+  const compact = compactText(value);
+  if (!compact) return undefined;
+  return compact.slice(0, max);
+}
+
+function domainFromUrl(url: string) {
+  const parsed = parseHttpUrl(url);
+  return parsed ? parsed.hostname.toLowerCase().replace(/^www\./, "") : "";
+}
+
+function mergeWebSources(items: WebSearchSource[]) {
+  const deduped = new Map<string, WebSearchSource>();
+  for (const item of items) {
+    if (!item.url) continue;
+    const key = item.url;
+    const existing = deduped.get(key);
+    if (!existing) {
+      deduped.set(key, item);
+      continue;
+    }
+    deduped.set(key, {
+      ...existing,
+      title: existing.title || item.title,
+      domain: existing.domain || item.domain,
+      snippet: existing.snippet || item.snippet,
+      relevanceScore: Math.max(existing.relevanceScore ?? 0, item.relevanceScore ?? 0) || undefined,
+      reliabilityScore: Math.max(existing.reliabilityScore ?? 0, item.reliabilityScore ?? 0) || undefined,
+      reliabilityLabel:
+        reliabilityLabelForScore(
+          Math.max(existing.reliabilityScore ?? 0, item.reliabilityScore ?? 0) || undefined,
+        ),
+      reliabilityReason: existing.reliabilityReason || item.reliabilityReason,
+      publishedDate: existing.publishedDate || item.publishedDate,
+      favicon: existing.favicon || item.favicon,
+      query: existing.query || item.query,
+    });
+  }
+  return [...deduped.values()].slice(0, Math.max(MAX_WEB_SOURCES, 12));
+}
+
+function buildSearchCacheKey(query: string, options: {
+  maxResults: number;
+  topic?: "general" | "news" | "finance";
+  days?: number;
+  includeDomains?: string[];
+  excludeDomains?: string[];
+}) {
+  return JSON.stringify({
+    q: compactText(query).toLowerCase(),
+    maxResults: options.maxResults,
+    topic: options.topic ?? "general",
+    days: options.days ?? null,
+    includeDomains: (options.includeDomains ?? []).slice().sort(),
+    excludeDomains: (options.excludeDomains ?? []).slice().sort(),
+  });
+}
+
+function getTavilyClient(): TavilyClient | null {
+  const apiKey = (process.env.TAVILY_API_KEY ?? "").trim();
+  if (!apiKey) return null;
+  return tavily({ apiKey, clientSource: "ai-school" });
+}
+
+function extractTargetUrlFromMessage(message: string) {
+  const candidate = extractUrls(message)[0];
+  return candidate ?? undefined;
+}
+
+function buildResearchSubqueries(message: string, explicit?: string[]) {
+  if (Array.isArray(explicit) && explicit.length > 0) {
+    return explicit.map((item) => compactText(item)).filter(Boolean).slice(0, MAX_RESEARCH_SUBQUESTIONS);
+  }
+
+  const normalized = compactText(message);
+  if (!normalized) return [];
+
+  const cleaned = normalized
+    .replace(/\b(research|investigate|analy[sz]e|compare|evaluate|deep dive|thoroughly)\b/gi, "")
+    .replace(/[?]/g, "")
+    .trim();
+
+  const split = cleaned
+    .split(/\b(?: and | vs\.?| versus |,|;| also | plus )\b/i)
+    .map((item) => compactText(item))
+    .filter((item) => item.length >= 8);
+
+  if (split.length > 0) {
+    return split.slice(0, MAX_RESEARCH_SUBQUESTIONS);
+  }
+
+  return [cleaned || normalized].slice(0, MAX_RESEARCH_SUBQUESTIONS);
+}
+
+function formatSourcesAsBriefing(sources: WebSearchSource[], heading: string) {
+  if (!sources.length) return "";
+  return [
+    heading,
+    ...sources.slice(0, 12).map((source, index) => {
+      const rel = typeof source.relevanceScore === "number" ? ` | relevance ${source.relevanceScore.toFixed(2)}` : "";
+      const reliability = typeof source.reliabilityScore === "number" ? ` | reliability ${source.reliabilityScore.toFixed(2)} (${source.reliabilityLabel ?? "medium"})` : "";
+      return `${index + 1}. ${source.title}\n${source.snippet ?? "No snippet available."}\n${source.url}${rel}${reliability}`;
+    }),
+  ].join("\n\n");
+}
+
+function toWebSourceFromSearchResult(result: {
+  url: string;
+  title?: string;
+  content?: string;
+  score?: number;
+  publishedDate?: string;
+  favicon?: string;
+}, query: string): WebSearchSource {
+  const reliability = scoreWebSource(result.url);
+  const domain = domainFromUrl(result.url);
+  const title = compactText(result.title ?? "") || domain || result.url;
+  return {
+    url: result.url,
+    title,
+    domain,
+    snippet: clampSnippet(result.content),
+    relevanceScore: typeof result.score === "number" ? result.score : undefined,
+    reliabilityScore: reliability.score,
+    reliabilityLabel: reliability.confidence,
+    reliabilityReason: reliability.reason,
+    publishedDate: result.publishedDate,
+    favicon: result.favicon,
+    query,
+  };
+}
+
+async function runTavilySearchWithCache(client: TavilyClient, query: string, params: {
+  maxResults: number;
+  topic?: "general" | "news" | "finance";
+  days?: number;
+  includeDomains?: string[];
+  excludeDomains?: string[];
+}) {
+  const key = buildSearchCacheKey(query, params);
+  const now = Date.now();
+  const cached = tavilySearchCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return { response: cached.response, fromCache: true };
+  }
+
+  const response = await withTimeout(
+    client.search(query, {
+      searchDepth: "advanced",
+      topic: params.topic ?? "general",
+      days: params.days,
+      maxResults: params.maxResults,
+      includeRawContent: false,
+      includeFavicon: true,
+      includeUsage: true,
+      includeDomains: params.includeDomains,
+      excludeDomains: params.excludeDomains,
+      includeAnswer: false,
+      timeout: TAVILY_TIMEOUT_MS,
+    }),
+    TAVILY_TIMEOUT_MS + 1_000,
+  );
+
+  if (!response) {
+    throw new Error("Tavily search timed out.");
+  }
+
+  tavilySearchCache.set(key, {
+    response,
+    expiresAt: now + SEARCH_CACHE_TTL_MS,
+  });
+  return { response, fromCache: false };
 }
 
 function decodeHtmlEntities(value: string) {
@@ -226,10 +461,7 @@ async function resolveWebSearchSource(url: string, snippet?: string): Promise<We
   };
 }
 
-async function resolveWebSearchSources(
-  urls: string[],
-  snippetByUrl?: Map<string, string>,
-) {
+async function resolveWebSearchSources(urls: string[], snippetByUrl?: Map<string, string>) {
   const resolved = await Promise.all(
     urls.map((url) => resolveWebSearchSource(url, snippetByUrl?.get(url))),
   );
@@ -323,7 +555,7 @@ export function buildResearchEvidenceBlock(params: {
   ].join("\n");
 }
 
-export async function maybeSearchWeb(
+async function runOnlineModelFallbackSearch(
   message: string,
   thinkingLevel: "low" | "medium" | "high",
   options?: {
@@ -332,42 +564,11 @@ export async function maybeSearchWeb(
     modelCatalog?: CatalogModelEntry[];
     spendingTier?: "normal" | "expensive_blocked" | "cheap_only" | "free_only";
     modelRuntimeStats?: Record<string, ModelRuntimeStat>;
-    searxngEnabled?: boolean;
+    strategy?: SearchStrategy;
+    trigger?: SearchTrigger;
+    reason?: string;
   },
 ): Promise<WebSearchResult> {
-  const searxngResults = options?.searxngEnabled === false
-    ? []
-    : await searxngSearch(message, {
-      limit: thinkingLevel === "high" ? 8 : 6,
-      language: "en",
-    }).catch(() => []);
-  if (searxngResults.length > 0) {
-    const snippetByUrl = new Map(
-      searxngResults
-        .filter((result) => result.url)
-        .map((result) => [result.url, result.content?.trim() ?? ""]),
-    );
-    const sources = await resolveWebSearchSources(
-      searxngResults.map((result) => result.url),
-      snippetByUrl,
-    );
-    const sourceByUrl = new Map(sources.map((source) => [source.url, source]));
-    const text = searxngResults
-      .map((result, index) => {
-        const resolved = sourceByUrl.get(result.url);
-        return `${index + 1}. ${resolved?.title || result.title}\n${resolved?.snippet || result.content || ""}\n${resolved?.url || result.url}`;
-      })
-      .join("\n\n")
-      .trim();
-
-    return {
-      text,
-      urls: sources.map((source) => source.url),
-      sources,
-      provider: "searxng" as const,
-    };
-  }
-
   const liveCatalog = options?.modelCatalog?.length
     ? options.modelCatalog
     : (await getLiveCatalogSnapshot()).models;
@@ -392,6 +593,16 @@ export async function maybeSearchWeb(
       urls: [],
       sources: [],
       provider: "disabled",
+      strategy: options?.strategy,
+      triggeredBy: options?.trigger,
+      fallbackReason: options?.reason,
+      operations: [
+        {
+          tool: "model_fallback",
+          status: "skipped",
+          reason: "No search-capable model available in the active spending tier.",
+        },
+      ],
     };
   }
   const onlineModel = searchModel.endsWith(":online") ? searchModel : `${searchModel}:online`;
@@ -449,6 +660,19 @@ export async function maybeSearchWeb(
       urls: [],
       sources: [],
       provider: "error",
+      strategy: options?.strategy,
+      triggeredBy: options?.trigger,
+      fallbackReason: options?.reason,
+      operations: [
+        {
+          tool: "model_fallback",
+          status: "failed",
+          query: message,
+          resultCount: 0,
+          durationMs,
+          reason: "Model fallback did not return valid source URLs.",
+        },
+      ],
       modelUsed,
       usage,
       durationMs,
@@ -470,10 +694,412 @@ export async function maybeSearchWeb(
     urls: sources.map((source) => source.url),
     sources,
     provider: "model_fallback" as const,
+    strategy: options?.strategy,
+    triggeredBy: options?.trigger,
+    fallbackReason: options?.reason,
+    operations: [
+      {
+        tool: "model_fallback",
+        status: "completed",
+        query: message,
+        resultCount: sources.length,
+        selectedUrls: sources.map((source) => source.url),
+        durationMs,
+        reason: options?.reason,
+      },
+    ],
     modelUsed,
     usage,
     durationMs,
   };
+}
+
+export async function maybeSearchWeb(
+  message: string,
+  thinkingLevel: "low" | "medium" | "high",
+  options?: {
+    actorClerkId?: string;
+    chatId?: string;
+    modelCatalog?: CatalogModelEntry[];
+    spendingTier?: "normal" | "expensive_blocked" | "cheap_only" | "free_only";
+    modelRuntimeStats?: Record<string, ModelRuntimeStat>;
+    searchPlan?: SearchPlan;
+  },
+): Promise<WebSearchResult> {
+  const plan = options?.searchPlan ?? {
+    strategy: "search" as const,
+    trigger: "time_sensitive" as const,
+    query: message,
+    maxResults: thinkingLevel === "high" ? 5 : 3,
+    maxExtractResults: thinkingLevel === "high" ? 2 : 1,
+  };
+  const strategy = plan.strategy;
+  const trigger = plan.trigger;
+  const query = compactText(plan.query ?? message);
+  const targetUrl = plan.targetUrl ?? extractTargetUrlFromMessage(message);
+  const maxResults = Math.max(1, Math.min(strategy === "search_extract" || strategy === "research" ? 8 : 5, plan.maxResults ?? (thinkingLevel === "high" ? 5 : 3)));
+  const maxExtractResults = Math.max(1, Math.min(3, plan.maxExtractResults ?? (strategy === "search_extract" ? 2 : 1)));
+
+  if (strategy === "none" || !query) {
+    return {
+      text: "",
+      urls: [],
+      sources: [],
+      provider: "disabled",
+      strategy,
+      triggeredBy: trigger,
+      operations: [{ tool: "search", status: "skipped", reason: "Search strategy resolved to none." }],
+    };
+  }
+
+  const tavilyClient = getTavilyClient();
+  let tavilyFailureReason: string | undefined;
+  if (!tavilyClient) {
+    tavilyFailureReason = "TAVILY_API_KEY missing.";
+  }
+
+  if (tavilyClient) {
+    try {
+      const operations: WebSearchOperation[] = [];
+      const startAt = Date.now();
+      let costCredits = 0;
+
+      if (strategy === "extract_url") {
+        if (!targetUrl) {
+          throw new Error("No valid URL was provided for extract mode.");
+        }
+        const extractStartedAt = Date.now();
+        const extractResponse = await withTimeout(
+          tavilyClient.extract([targetUrl], {
+            extractDepth: "advanced",
+            format: "markdown",
+            includeFavicon: true,
+            includeUsage: true,
+            chunksPerSource: 3,
+            timeout: TAVILY_TIMEOUT_MS,
+          }),
+          TAVILY_TIMEOUT_MS + 1_000,
+        );
+        if (!extractResponse) {
+          throw new Error("Tavily extract timed out.");
+        }
+        costCredits += extractResponse.usage?.credits ?? 0;
+        const sources = extractResponse.results.map((result) => {
+          const reliability = scoreWebSource(result.url);
+          const domain = domainFromUrl(result.url);
+          return {
+            url: result.url,
+            title: result.title || domain || result.url,
+            domain,
+            snippet: clampSnippet(result.rawContent, 320),
+            relevanceScore: undefined,
+            reliabilityScore: reliability.score,
+            reliabilityLabel: reliability.confidence,
+            reliabilityReason: reliability.reason,
+            favicon: result.favicon,
+            query,
+          } satisfies WebSearchSource;
+        });
+
+        operations.push({
+          tool: "extract",
+          status: "completed",
+          query,
+          targetUrl,
+          selectedUrls: [targetUrl],
+          resultCount: sources.length,
+          durationMs: Date.now() - extractStartedAt,
+          costCredits: extractResponse.usage?.credits,
+        });
+        return {
+          text: formatSourcesAsBriefing(sources, "=== TAVILY EXTRACT BRIEFING ==="),
+          urls: sources.map((source) => source.url),
+          sources,
+          provider: "tavily",
+          strategy,
+          triggeredBy: trigger,
+          operations,
+          costCredits,
+          durationMs: Date.now() - startAt,
+        };
+      }
+
+      if (strategy === "crawl") {
+        if (!targetUrl) {
+          throw new Error("No valid URL was provided for crawl mode.");
+        }
+        const crawlStartedAt = Date.now();
+        const crawlResponse = await withTimeout(
+          tavilyClient.crawl(targetUrl, {
+            limit: 8,
+            maxDepth: 2,
+            maxBreadth: 8,
+            extractDepth: "basic",
+            format: "markdown",
+            includeFavicon: true,
+            includeUsage: true,
+            timeout: TAVILY_TIMEOUT_MS,
+            chunksPerSource: 2,
+          }),
+          TAVILY_TIMEOUT_MS + 2_000,
+        );
+        if (!crawlResponse) {
+          throw new Error("Tavily crawl timed out.");
+        }
+        costCredits += crawlResponse.usage?.credits ?? 0;
+        const sources = crawlResponse.results.map((result) => {
+          const reliability = scoreWebSource(result.url);
+          const domain = domainFromUrl(result.url);
+          return {
+            url: result.url,
+            title: domain || result.url,
+            domain,
+            snippet: clampSnippet(result.rawContent, 320),
+            reliabilityScore: reliability.score,
+            reliabilityLabel: reliability.confidence,
+            reliabilityReason: reliability.reason,
+            favicon: result.favicon,
+            query,
+          } satisfies WebSearchSource;
+        });
+
+        operations.push({
+          tool: "crawl",
+          status: "completed",
+          query,
+          targetUrl,
+          selectedUrls: sources.map((source) => source.url),
+          resultCount: sources.length,
+          durationMs: Date.now() - crawlStartedAt,
+          costCredits: crawlResponse.usage?.credits,
+        });
+        return {
+          text: formatSourcesAsBriefing(sources, "=== TAVILY CRAWL BRIEFING ==="),
+          urls: sources.map((source) => source.url),
+          sources,
+          provider: "tavily",
+          strategy,
+          triggeredBy: trigger,
+          operations,
+          costCredits,
+          durationMs: Date.now() - startAt,
+        };
+      }
+
+      if (strategy === "research") {
+        const researchStartedAt = Date.now();
+        const researchResponse = await withTimeout(
+          tavilyClient.research(query, {
+            model: "auto",
+            citationFormat: "numbered",
+            timeout: TAVILY_TIMEOUT_MS,
+          }),
+          TAVILY_TIMEOUT_MS + 2_000,
+        );
+
+        if (!researchResponse || typeof researchResponse !== "object" || !("requestId" in researchResponse)) {
+          throw new Error("Tavily research did not return a valid request id.");
+        }
+
+        let researchResult = await tavilyClient.getResearch(researchResponse.requestId);
+        const pollStartedAt = Date.now();
+        while (researchResult.status !== "completed" && Date.now() - pollStartedAt < 20_000) {
+          await new Promise((resolve) => setTimeout(resolve, 1_000));
+          researchResult = await tavilyClient.getResearch(researchResponse.requestId);
+        }
+
+        if (researchResult.status !== "completed") {
+          throw new Error(`Tavily research status remained ${researchResult.status}.`);
+        }
+
+        const completed = researchResult as TavilyGetResearchResponse;
+        const sources = (completed.sources ?? []).map((source) => {
+          const reliability = scoreWebSource(source.url);
+          const domain = domainFromUrl(source.url);
+          return {
+            url: source.url,
+            title: source.title || domain || source.url,
+            domain,
+            snippet: undefined,
+            reliabilityScore: reliability.score,
+            reliabilityLabel: reliability.confidence,
+            reliabilityReason: reliability.reason,
+            query,
+          } satisfies WebSearchSource;
+        });
+        operations.push({
+          tool: "research",
+          status: "completed",
+          query,
+          resultCount: sources.length,
+          selectedUrls: sources.map((source) => source.url),
+          durationMs: Date.now() - researchStartedAt,
+        });
+
+        const content = typeof completed.content === "string"
+          ? completed.content
+          : JSON.stringify(completed.content, null, 2);
+
+        return {
+          text: compactText(content),
+          urls: sources.map((source) => source.url),
+          sources,
+          provider: "tavily",
+          strategy,
+          triggeredBy: trigger,
+          operations,
+          costCredits,
+          durationMs: Date.now() - startAt,
+        };
+      }
+
+      if (strategy === "search_extract") {
+        const subqueries = buildResearchSubqueries(query, plan.subqueries);
+        const searchCalls = await Promise.all(
+          subqueries.map(async (subquery) => {
+            const searchStartedAt = Date.now();
+            const { response, fromCache } = await runTavilySearchWithCache(tavilyClient, subquery, {
+              maxResults,
+              topic: "general",
+            });
+            operations.push({
+              tool: "search",
+              status: "completed",
+              query: subquery,
+              resultCount: response.results.length,
+              durationMs: Date.now() - searchStartedAt,
+              costCredits: fromCache ? 0 : response.usage?.credits,
+              reason: fromCache ? "cache_hit_30m" : undefined,
+            });
+            costCredits += fromCache ? 0 : (response.usage?.credits ?? 0);
+            return { subquery, response };
+          }),
+        );
+
+        const searchSources = mergeWebSources(
+          searchCalls.flatMap(({ subquery, response }) =>
+            response.results.slice(0, maxResults).map((result) =>
+              toWebSourceFromSearchResult(result, subquery)),
+          ),
+        );
+
+        const urlsForExtract = Array.from(
+          new Set(
+            searchCalls.flatMap(({ response }) =>
+              response.results.slice(0, maxExtractResults).map((item) => item.url),
+            ),
+          ),
+        ).slice(0, 8);
+
+        let extractedSources: WebSearchSource[] = [];
+        if (urlsForExtract.length > 0) {
+          const extractStartedAt = Date.now();
+          const extractResponse: TavilyExtractResponse | undefined = await withTimeout(
+            tavilyClient.extract(urlsForExtract, {
+              extractDepth: "advanced",
+              format: "markdown",
+              includeFavicon: true,
+              includeUsage: true,
+              chunksPerSource: 2,
+              timeout: TAVILY_TIMEOUT_MS,
+            }),
+            TAVILY_TIMEOUT_MS + 1_000,
+          );
+          if (extractResponse) {
+            operations.push({
+              tool: "extract",
+              status: "completed",
+              query,
+              selectedUrls: urlsForExtract,
+              resultCount: extractResponse.results.length,
+              durationMs: Date.now() - extractStartedAt,
+              costCredits: extractResponse.usage?.credits,
+            });
+            costCredits += extractResponse.usage?.credits ?? 0;
+            extractedSources = extractResponse.results.map((result) => {
+              const reliability = scoreWebSource(result.url);
+              const domain = domainFromUrl(result.url);
+              return {
+                url: result.url,
+                title: result.title || domain || result.url,
+                domain,
+                snippet: clampSnippet(result.rawContent, 380),
+                reliabilityScore: reliability.score,
+                reliabilityLabel: reliability.confidence,
+                reliabilityReason: reliability.reason,
+                favicon: result.favicon,
+                query,
+              } satisfies WebSearchSource;
+            });
+          } else {
+            operations.push({
+              tool: "extract",
+              status: "failed",
+              query,
+              selectedUrls: urlsForExtract,
+              reason: "Tavily extract timed out.",
+            });
+          }
+        }
+
+        const mergedSources = mergeWebSources([...searchSources, ...extractedSources]).slice(0, 12);
+        return {
+          text: formatSourcesAsBriefing(
+            mergedSources,
+            "=== TAVILY RESEARCH BRIEFING (search + extract) ===",
+          ),
+          urls: mergedSources.map((source) => source.url),
+          sources: mergedSources,
+          provider: "tavily",
+          strategy,
+          triggeredBy: trigger,
+          operations,
+          costCredits,
+          durationMs: Date.now() - startAt,
+        };
+      }
+
+      const searchStartedAt = Date.now();
+      const { response, fromCache } = await runTavilySearchWithCache(tavilyClient, query, {
+        maxResults,
+        topic: trigger === "time_sensitive" ? "news" : "general",
+      });
+      operations.push({
+        tool: "search",
+        status: "completed",
+        query,
+        resultCount: response.results.length,
+        durationMs: Date.now() - searchStartedAt,
+        costCredits: fromCache ? 0 : response.usage?.credits,
+        reason: fromCache ? "cache_hit_30m" : undefined,
+      });
+      costCredits += fromCache ? 0 : (response.usage?.credits ?? 0);
+
+      const sources = mergeWebSources(
+        response.results.slice(0, maxResults).map((result) => toWebSourceFromSearchResult(result, query)),
+      );
+      return {
+        text: formatSourcesAsBriefing(sources, "=== TAVILY SEARCH BRIEFING ==="),
+        urls: sources.map((source) => source.url),
+        sources,
+        provider: "tavily",
+        strategy,
+        triggeredBy: trigger,
+        operations,
+        costCredits,
+        durationMs: Date.now() - startAt,
+      };
+    } catch (error) {
+      tavilyFailureReason = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  return runOnlineModelFallbackSearch(message, thinkingLevel, {
+    ...options,
+    strategy,
+    trigger,
+    reason: tavilyFailureReason ?? "Unknown Tavily failure.",
+  });
 }
 
 export async function runRagRetrieval(params: {

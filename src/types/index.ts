@@ -23,12 +23,19 @@ export {
 export type Citation = {
   filename: string;
   page?: number;
-  sourceType: "pack" | "personal" | "general" | "search";
+  sourceType: "pack" | "personal" | "agent" | "general" | "search";
   url?: string;
   title?: string;
   domain?: string;
   resourceId?: string;
   snippet?: string;
+  relevanceScore?: number;
+  inlinePositions?: number[];
+  reliabilityScore?: number;
+  reliabilityLabel?: "high" | "medium" | "low";
+  reliabilityReason?: string;
+  publishedDate?: string;
+  favicon?: string;
 };
 
 export type ClarificationOption = {
@@ -179,6 +186,22 @@ export type RoutePlan = {
     requestedModelPhrase?: string;
     requestedOrchestration?: boolean;
   };
+  searchPlan?: {
+    strategy: "none" | "search" | "search_extract" | "extract_url" | "crawl" | "research";
+    trigger:
+      | "none"
+      | "time_sensitive"
+      | "explicit_search"
+      | "research_mode"
+      | "deep_research"
+      | "read_url"
+      | "crawl_request";
+    query?: string;
+    targetUrl?: string;
+    maxResults?: number;
+    maxExtractResults?: number;
+    subqueries?: string[];
+  };
 };
 
 export type ModelRouteInput = {
@@ -326,6 +349,31 @@ export type RouteTrace = {
   stepsExecuted?: string[];
   stepsSkipped?: Array<{ step: string; reason: string }>;
   searchStatus?: "real_search" | "model_knowledge" | "skipped" | "error";
+  searchTrace?: {
+    provider?: "tavily" | "model_fallback" | "disabled" | "error";
+    strategy?: "none" | "search" | "search_extract" | "extract_url" | "crawl" | "research";
+    triggeredBy?:
+      | "none"
+      | "time_sensitive"
+      | "explicit_search"
+      | "research_mode"
+      | "deep_research"
+      | "read_url"
+      | "crawl_request";
+    fallbackReason?: string;
+    costCredits?: number;
+    operations?: Array<{
+      tool: "search" | "extract" | "crawl" | "research" | "model_fallback";
+      status: "completed" | "failed" | "skipped";
+      query?: string;
+      targetUrl?: string;
+      resultCount?: number;
+      selectedUrls?: string[];
+      durationMs?: number;
+      costCredits?: number;
+      reason?: string;
+    }>;
+  };
   costBudgetUsd?: number;
   totalDurationMs?: number;
   totalCostCents?: number;

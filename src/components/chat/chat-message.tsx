@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Image from "next/image";
-import { Bookmark, BookmarkCheck, Brain, ChevronLeft, ChevronRight, Code2, Copy, FileText, GitBranch, Globe, Info, Layers, MoreHorizontal, Paperclip, Pencil, RefreshCw, ThumbsDown, ThumbsUp, Zap } from "lucide-react";
+import { Bookmark, BookmarkCheck, Bot, Brain, ChevronDown, ChevronLeft, ChevronRight, Copy, FileText, GitBranch, Globe, Info, Layers, MoreHorizontal, Paperclip, Pencil, RefreshCw, ThumbsDown, ThumbsUp, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -87,66 +87,143 @@ function sanitizeNavigationHref(value: string | undefined) {
   return undefined;
 }
 
-function CitationCards({ citations, onOpen }: { citations: Citation[]; onOpen: () => void }) {
+function SourceBlock({ citations, onOpen }: { citations: Citation[]; onOpen: () => void }) {
+  const [expanded, setExpanded] = useState(false);
   if (citations.length === 0) return null;
-  const ragFiles = Array.from(
-    new Set(
-      citations
-        .filter((citation) => citation.sourceType === "pack" || citation.sourceType === "personal")
-        .map((citation) => citation.filename)
-        .filter(Boolean),
-    ),
-  ).slice(0, 5);
+  const grouped = [
+    {
+      id: "web",
+      label: "Web Sources",
+      Icon: Globe,
+      items: citations.filter((citation) => citation.sourceType === "search"),
+    },
+    {
+      id: "files",
+      label: "From Your Files",
+      Icon: FileText,
+      items: citations.filter(
+        (citation) => citation.sourceType === "pack" || citation.sourceType === "personal" || citation.sourceType === "general",
+      ),
+    },
+    {
+      id: "agent",
+      label: "From Agent Resources",
+      Icon: Bot,
+      items: citations.filter((citation) => citation.sourceType === "agent"),
+    },
+  ].filter((group) => group.items.length > 0);
+
+  const reliabilityTone = (label: Citation["reliabilityLabel"]) => {
+    if (label === "high") {
+      return "border-[color-mix(in_oklab,var(--success)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_10%,transparent)] text-[var(--success)]";
+    }
+    if (label === "low") {
+      return "border-[color-mix(in_oklab,var(--warning)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_10%,transparent)] text-[var(--warning)]";
+    }
+    return "border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)]";
+  };
 
   return (
     <section className="mt-6 border-t border-[var(--border-default)] pt-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)]">Sources</p>
-        <button
-          type="button"
-          onClick={onOpen}
-          className="cursor-pointer rounded-md border border-[var(--border-default)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
-        >
-          Open all
-        </button>
-      </div>
-      {ragFiles.length > 0 ? (
-        <p className="mb-2 text-[10px] text-[var(--text-secondary)]">
-          Files used: {ragFiles.join(", ")}
-        </p>
-      ) : null}
-      <div className="flex flex-wrap gap-1.5">
-        {citations.map((citation, idx) => {
-          const isSearch = citation.sourceType === "search";
-          const href = sanitizeNavigationHref(
-            citation.url ?? (citation.resourceId ? `/api/resources/${citation.resourceId}/download` : undefined),
-          );
-          const label = citation.title || citation.filename || citation.domain || citation.url || "Source";
-          const domain = citation.domain;
-          return (
-            <a
-              key={`${citation.filename}-${idx}`}
-              href={href ?? "#"}
-              onClick={(event) => {
-                if (!href) {
-                  event.preventDefault();
-                  onOpen();
-                }
-              }}
-              target={href ? "_blank" : undefined}
-              rel={href ? "noreferrer" : undefined}
-              className={`inline-flex max-w-[280px] cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] transition hover:bg-[var(--bg-hover)] ${
-                isSearch
-                  ? "border-[color-mix(in_oklab,var(--accent-cyan)_38%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_10%,transparent)]"
-                  : "border-[var(--border-default)] bg-[var(--bg-secondary)]"
-              }`}
-              title={label}
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            className="inline-flex cursor-pointer items-center gap-2 text-left"
+          >
+            <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">
+              Sources
+            </span>
+            <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]">
+              {citations.length}
+            </span>
+            <ChevronDown className={`h-3.5 w-3.5 text-[var(--text-secondary)] transition ${expanded ? "rotate-180" : ""}`} />
+          </button>
+          <button
+            type="button"
+            onClick={onOpen}
+            className="cursor-pointer rounded-md border border-[var(--border-default)] px-2 py-1 text-[10px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+          >
+            Full panel
+          </button>
+        </div>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {grouped.map((group) => (
+            <span
+              key={group.id}
+              className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]"
             >
-              {isSearch ? <Globe className="h-3 w-3 shrink-0" /> : <Code2 className="h-3 w-3 shrink-0" />}
-              <span className="truncate font-medium text-[var(--text-primary)]">{domain || label}</span>
-            </a>
-          );
-        })}
+              <group.Icon className="h-3 w-3" />
+              {group.label} {group.items.length}
+            </span>
+          ))}
+        </div>
+        {expanded ? (
+          <div className="mt-3 space-y-3">
+            {grouped.map((group) => (
+              <div key={group.id} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2.5">
+                <p className="mb-2 inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                  <group.Icon className="h-3.5 w-3.5" />
+                  {group.label}
+                </p>
+                <div className="space-y-2">
+                  {group.items.map((citation, index) => {
+                    const href = sanitizeNavigationHref(
+                      citation.url ?? (citation.resourceId ? `/api/resources/${citation.resourceId}/download` : undefined),
+                    );
+                    const title = citation.title || citation.filename || citation.domain || citation.url || "Source";
+                    const subtitle = citation.domain || citation.filename;
+                    return (
+                      <article key={`${group.id}:${citation.url ?? citation.resourceId ?? citation.filename}:${index}`} className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="truncate text-xs font-medium text-[var(--text-primary)]">{title}</p>
+                            <p className="truncate text-[10px] text-[var(--text-secondary)]">{subtitle}</p>
+                          </div>
+                          <a
+                            href={href ?? "#"}
+                            onClick={(event) => {
+                              if (!href) {
+                                event.preventDefault();
+                                onOpen();
+                              }
+                            }}
+                            target={href ? "_blank" : undefined}
+                            rel={href ? "noreferrer" : undefined}
+                            className="shrink-0 rounded-md border border-[var(--border-default)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+                          >
+                            {citation.url ? "Open" : "View"}
+                          </a>
+                        </div>
+                        {citation.snippet ? (
+                          <p className="mt-1.5 line-clamp-2 text-[11px] leading-relaxed text-[var(--text-secondary)]">{citation.snippet}</p>
+                        ) : null}
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                          {typeof citation.relevanceScore === "number" ? (
+                            <span className="inline-flex rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]">
+                              Relevance {citation.relevanceScore.toFixed(2)}
+                            </span>
+                          ) : null}
+                          {citation.reliabilityLabel ? (
+                            <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] capitalize ${reliabilityTone(citation.reliabilityLabel)}`}>
+                              {citation.reliabilityLabel} reliability
+                            </span>
+                          ) : null}
+                          {Array.isArray(citation.inlinePositions) && citation.inlinePositions.length > 0 ? (
+                            <span className="inline-flex rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]">
+                              Inline ×{citation.inlinePositions.length}
+                            </span>
+                          ) : null}
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
     </section>
   );
@@ -471,18 +548,26 @@ export function ChatMessage({
               {children ? children : parsedDocument.document ? (
                 <>
                   {parsedDocument.preamble ? (
-                    <MarkdownRenderer
+                  <MarkdownRenderer
                       content={parsedDocument.preamble}
                       citations={citations}
                       mode={mode}
                       onOpenCanvas={onOpenCanvas}
+                      onCitationClick={() => openPanel("sources", { sources: validCitations })}
                       onSubmitQuizAnswers={onSubmitQuizAnswers}
                     />
                   ) : null}
                   <DocumentPanel content={renderedContent} />
                 </>
               ) : (
-                <MarkdownRenderer content={renderedContent} citations={citations} mode={mode} onOpenCanvas={onOpenCanvas} onSubmitQuizAnswers={onSubmitQuizAnswers} />
+                <MarkdownRenderer
+                  content={renderedContent}
+                  citations={citations}
+                  mode={mode}
+                  onOpenCanvas={onOpenCanvas}
+                  onCitationClick={() => openPanel("sources", { sources: validCitations })}
+                  onSubmitQuizAnswers={onSubmitQuizAnswers}
+                />
               )}
               <CollaboratorsBadge collaborators={routeTrace?.collaborators} />
               {assistantAttachmentLinks.length > 0 ? (
@@ -514,7 +599,7 @@ export function ChatMessage({
                   </div>
                 </section>
               ) : null}
-              {validCitations.length > 0 && <CitationCards citations={validCitations} onOpen={() => openPanel("sources", { sources: validCitations })} />}
+              {validCitations.length > 0 && <SourceBlock citations={validCitations} onOpen={() => openPanel("sources", { sources: validCitations })} />}
 
               <div className="mt-5 flex flex-wrap items-center gap-1.5">
                 <Button

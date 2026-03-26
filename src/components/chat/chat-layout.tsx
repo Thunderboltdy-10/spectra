@@ -124,6 +124,7 @@ export function ChatLayout() {
   const autoOpenedRouteTraceForSendRef = useRef(false);
   const routeTraceDismissedForSendRef = useRef(false);
   const previousStreamPhaseRef = useRef(chat.streamPhase);
+  const [artifactSavedMessageIds, setArtifactSavedMessageIds] = useState<Map<string, string>>(new Map()); // messageId → artifactId
 
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 1280px)");
@@ -652,6 +653,71 @@ export function ChatLayout() {
           onToggleBookmarkMessage={async (messageId) => {
             await chat.toggleBookmark(messageId);
           }}
+          onSaveAsArtifact={(messageId, content) => {
+            // Toggle: if already saved, remove it
+            const existingArtifactId = artifactSavedMessageIds.get(messageId);
+            if (existingArtifactId) {
+              void fetch("/api/artifacts", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "delete", artifactId: existingArtifactId }),
+              }).then((res) => {
+                if (res.ok) {
+                  setArtifactSavedMessageIds((prev) => {
+                    const next = new Map(prev);
+                    next.delete(messageId);
+                    return next;
+                  });
+                  toast.success("Artifact removed");
+                } else {
+                  toast.error("Failed to remove artifact");
+                }
+              });
+              return;
+            }
+            let type = "note";
+            let title = "Saved from chat";
+            const artifactContent: Record<string, unknown> = { text: content };
+            const lower = content.toLowerCase();
+            if (lower.includes("<<flashcards_start>>") || lower.includes("<<flashcard_start>>")) {
+              type = "flashcard_deck";
+              title = "Flashcards from chat";
+            } else if (lower.includes("<<document_start>>") || lower.includes("<<doc_start>>")) {
+              type = "document";
+              title = "Document from chat";
+              artifactContent.body = content;
+            } else if (lower.includes("```")) {
+              type = "code_project";
+              title = "Code from chat";
+              artifactContent.code = content;
+              artifactContent.language = "javascript";
+            }
+            const firstLine = content.split("\n")[0]?.replace(/^#+\s*/, "").trim();
+            if (firstLine && firstLine.length > 3 && firstLine.length < 80) title = firstLine;
+            void fetch("/api/artifacts", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action: "create", type, title,
+                content: artifactContent,
+                linkedChatId: chat.selectedChatId || undefined,
+                sourceMessageId: messageId,
+              }),
+            }).then(async (res) => {
+              if (res.ok) {
+                const data = (await res.json()) as { artifactId?: string };
+                if (data.artifactId) {
+                  setArtifactSavedMessageIds((prev) => new Map(prev).set(messageId, data.artifactId!));
+                }
+                toast.success("Saved as artifact", {
+                  action: { label: "View", onClick: () => window.location.assign("/artifacts") },
+                });
+              } else {
+                toast.error("Failed to save artifact");
+              }
+            });
+          }}
+          artifactSavedMessageIds={artifactSavedMessageIds}
           bookmarkedMessageIds={chat.bookmarkedMessageIds}
           bookmarkingMessageId={chat.bookmarkingMessageId}
           onAssistantFeedback={(messageId, positive, modelId) => {

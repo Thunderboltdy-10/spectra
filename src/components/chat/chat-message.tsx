@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Image from "next/image";
-import { Bookmark, BookmarkCheck, Brain, ChevronLeft, ChevronRight, Code2, Copy, Cpu, FileText, GitBranch, Globe, Info, MoreHorizontal, Paperclip, Pencil, RefreshCw, ThumbsDown, ThumbsUp, Zap } from "lucide-react";
+import { Bookmark, BookmarkCheck, Brain, ChevronLeft, ChevronRight, Code2, Copy, FileText, GitBranch, Globe, Info, Layers, MoreHorizontal, Paperclip, Pencil, RefreshCw, ThumbsDown, ThumbsUp, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -55,6 +55,8 @@ type ChatMessageProps = {
   onToggleBookmark?: () => void;
   isBookmarked?: boolean;
   bookmarking?: boolean;
+  onSaveAsArtifact?: () => void;
+  isArtifactSaved?: boolean;
   siblingIndex?: number;
   siblingCount?: number;
   onNavigateSibling?: (direction: "prev" | "next") => void;
@@ -180,6 +182,8 @@ export function ChatMessage({
   onToggleBookmark,
   isBookmarked = false,
   bookmarking = false,
+  onSaveAsArtifact,
+  isArtifactSaved = false,
   siblingIndex,
   siblingCount,
   onNavigateSibling,
@@ -575,6 +579,19 @@ export function ChatMessage({
                   </Button>
                 ) : null}
 
+                {onSaveAsArtifact ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className={cn("h-8 cursor-pointer gap-1.5 text-xs", isArtifactSaved && "text-[var(--brand-primary)]")}
+                    onClick={onSaveAsArtifact}
+                  >
+                    <Layers className="h-3.5 w-3.5" />
+                    {isArtifactSaved ? "Saved" : "Artifact"}
+                  </Button>
+                ) : null}
+
                 {onFeedback ? (
                   <>
                     <Button
@@ -656,36 +673,51 @@ export function ChatMessage({
                   )}
                 </div>
               )}
-              <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[10px] text-[var(--text-secondary)]">
-                <div className="flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-gradient-to-r from-[var(--bg-secondary)] to-[var(--bg-elevated)] px-2.5 py-[3px] shadow-sm">
-                  <Zap className="h-3 w-3 text-[var(--accent-cyan)]" />
-                  <span className="font-medium text-[var(--text-primary)]">{displayInputTokens.toLocaleString()}</span>
-                  <span className="text-[var(--text-tertiary)]">in</span>
-                  <span className="px-0.5 text-[var(--text-tertiary)] opacity-50">/</span>
-                  <span className="font-medium text-[var(--text-primary)]">{displayOutputTokens.toLocaleString()}</span>
-                  <span className="text-[var(--text-tertiary)]">out</span>
-                </div>
+              <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[10px] text-[var(--text-tertiary)]">
+                <span className="inline-flex items-center gap-1">
+                  <Zap className="h-2.5 w-2.5" />
+                  <span className="tabular-nums">{displayInputTokens.toLocaleString()}</span>
+                  <span className="opacity-50">/</span>
+                  <span className="tabular-nums">{displayOutputTokens.toLocaleString()}</span>
+                </span>
                 {routeTrace?.inputTokenBreakdown ? (
-                  <div className="flex items-center gap-2 rounded-full border border-[var(--border-default)] bg-gradient-to-r from-[var(--bg-secondary)] to-[var(--bg-elevated)] px-2.5 py-[3px] shadow-sm">
-                    <Cpu className="h-3 w-3 text-[var(--accent-purple)]" />
-                    <span className="text-[var(--text-secondary)]">
-                      <span className="font-medium text-[var(--text-primary)]">{routeTrace.inputTokenBreakdown.systemPrompt.toLocaleString()}</span> sys
+                  <>
+                    <span className="opacity-30">·</span>
+                    <span className="group/tok relative cursor-default tabular-nums">
+                      {routeTrace.inputTokenBreakdown.systemPrompt.toLocaleString()} sys
+                      <span className="invisible absolute bottom-full left-1/2 z-30 mb-1.5 w-44 -translate-x-1/2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-secondary)] shadow-lg group-hover/tok:visible">
+                        <span className="font-medium text-[var(--text-primary)]">System prompt</span><br />Tokens used by the system prompt that defines the agent&apos;s behavior and capabilities.
+                      </span>
                     </span>
-                    <span className="h-1 w-1 rounded-full bg-[var(--text-tertiary)] opacity-40" />
-                    <span className="text-[var(--text-secondary)]">
-                      <span className="font-medium text-[var(--text-primary)]">{routeTrace.inputTokenBreakdown.history.toLocaleString()}</span> hist
+                    <span className="opacity-30">·</span>
+                    <span className="group/tok relative cursor-default tabular-nums">
+                      {routeTrace.inputTokenBreakdown.history.toLocaleString()} hist
+                      <span className="invisible absolute bottom-full left-1/2 z-30 mb-1.5 w-44 -translate-x-1/2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-secondary)] shadow-lg group-hover/tok:visible">
+                        <span className="font-medium text-[var(--text-primary)]">Conversation history</span><br />Tokens from previous messages in this chat session.
+                      </span>
                     </span>
-                    <span className="h-1 w-1 rounded-full bg-[var(--text-tertiary)] opacity-40" />
-                    <span className="text-[var(--text-secondary)]">
-                      <span className="font-medium text-[var(--text-primary)]">{routeTrace.inputTokenBreakdown.memory.toLocaleString()}</span> mem
+                    <span className="opacity-30">·</span>
+                    <span className="group/tok relative cursor-default tabular-nums">
+                      {routeTrace.inputTokenBreakdown.memory.toLocaleString()} mem
+                      <span className="invisible absolute bottom-full left-1/2 z-30 mb-1.5 w-44 -translate-x-1/2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-secondary)] shadow-lg group-hover/tok:visible">
+                        <span className="font-medium text-[var(--text-primary)]">Memory context</span><br />Tokens from your persistent memory and learning profile.
+                      </span>
                     </span>
-                    <span className="h-1 w-1 rounded-full bg-[var(--text-tertiary)] opacity-40" />
-                    <span className="text-[var(--text-secondary)]">
-                      <span className="font-medium text-[var(--text-primary)]">{routeTrace.inputTokenBreakdown.sources.toLocaleString()}</span> src
+                    <span className="opacity-30">·</span>
+                    <span className="group/tok relative cursor-default tabular-nums">
+                      {routeTrace.inputTokenBreakdown.sources.toLocaleString()} src
+                      <span className="invisible absolute bottom-full left-1/2 z-30 mb-1.5 w-44 -translate-x-1/2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-secondary)] shadow-lg group-hover/tok:visible">
+                        <span className="font-medium text-[var(--text-primary)]">Source documents</span><br />Tokens from retrieved files, packs, and web search results.
+                      </span>
                     </span>
-                  </div>
+                  </>
                 ) : null}
-                {timeLabel ? <span className="ml-1 text-[10px] text-[var(--text-tertiary)]">{timeLabel}</span> : null}
+                {timeLabel ? (
+                  <>
+                    <span className="opacity-30">·</span>
+                    <span>{timeLabel}</span>
+                  </>
+                ) : null}
               </div>
               {memoryUpdated && (
                 <div className="group/memory relative mt-1.5 inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] text-[var(--text-tertiary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]">

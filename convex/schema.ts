@@ -297,6 +297,9 @@ export default defineSchema({
     title: v.string(),
     content: v.any(),
     layout: v.optional(v.any()),
+    tags: v.optional(v.array(v.string())),
+    linkedAgentId: v.optional(v.id("agents")),
+    linkedChatId: v.optional(v.id("chats")),
     status: v.union(v.literal("active"), v.literal("archived")),
     pinnedAt: v.optional(v.number()),
     createdAt: v.number(),
@@ -310,10 +313,12 @@ export default defineSchema({
   artifactVersions: defineTable({
     artifactId: v.id("artifacts"),
     diff: v.any(),
-    authorType: v.union(v.literal("user"), v.literal("agent")),
+    snapshot: v.optional(v.any()),
+    authorType: v.union(v.literal("user"), v.literal("agent"), v.literal("system")),
     authorAgentId: v.optional(v.id("agents")),
     sourceChatId: v.optional(v.id("chats")),
     sourceMessageId: v.optional(v.id("messages")),
+    description: v.optional(v.string()),
     createdAt: v.number(),
   })
     .index("by_artifact", ["artifactId"])

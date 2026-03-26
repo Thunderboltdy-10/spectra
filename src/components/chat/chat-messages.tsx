@@ -53,6 +53,8 @@ type ChatMessagesProps = {
   onEditMessage?: (messageId: string, newContent: string) => Promise<void>;
   onBranchMessage?: (messageId: string) => Promise<void> | void;
   onToggleBookmarkMessage?: (messageId: string) => Promise<void> | void;
+  onSaveAsArtifact?: (messageId: string, content: string) => void;
+  artifactSavedMessageIds?: Map<string, string>;
   bookmarkedMessageIds?: Set<string>;
   bookmarkingMessageId?: string | null;
   onFollowUp?: (message: string, modeOverride?: StudyMode) => void;
@@ -161,6 +163,28 @@ function detectOpenTag(content: string): "quiz" | "flashcard" | "document" | nul
   return null;
 }
 
+/** Detects whether completed content has closed tag markers (for persisted messages). */
+function hasClosedTag(content: string): "quiz" | "flashcard" | "document" | null {
+  const lower = content.toLowerCase();
+
+  if (
+    (lower.includes("<<quiz_start>>") || lower.includes("<<quiz start>>")) &&
+    (lower.includes("<<quiz_end>>") || lower.includes("<<quiz end>>"))
+  ) return "quiz";
+
+  if (
+    (lower.includes("<<flashcards_start>>") || lower.includes("<<flashcard_start>>")) &&
+    (lower.includes("<<flashcards_end>>") || lower.includes("<<flashcard_end>>"))
+  ) return "flashcard";
+
+  if (
+    (lower.includes("<<document_start>>") || lower.includes("<<doc_start>>")) &&
+    (lower.includes("<<document_end>>") || lower.includes("<<doc_end>>"))
+  ) return "document";
+
+  return null;
+}
+
 export function ChatMessages({
   messages,
   draftResponse,
@@ -186,6 +210,8 @@ export function ChatMessages({
   onEditMessage,
   onBranchMessage,
   onToggleBookmarkMessage,
+  onSaveAsArtifact,
+  artifactSavedMessageIds = new Map<string, string>(),
   bookmarkedMessageIds = new Set<string>(),
   bookmarkingMessageId = null,
   onFollowUp,
@@ -764,6 +790,8 @@ export function ChatMessages({
                     onEdit={undefined}
                     onBranch={onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
                     onToggleBookmark={onToggleBookmarkMessage ? () => void onToggleBookmarkMessage(msg._id) : undefined}
+                    onSaveAsArtifact={onSaveAsArtifact ? () => onSaveAsArtifact(msg._id, msg.content) : undefined}
+                    isArtifactSaved={artifactSavedMessageIds.has(msg._id)}
                     isBookmarked={assistantIsBookmarked}
                     bookmarking={assistantBookmarking}
                     usageIn={msg.usageIn}
@@ -876,7 +904,7 @@ export function ChatMessages({
                       messageId={msg._id}
                       role={msg.role}
                       cancelled={msg.cancelled}
-                      content={msg.content}
+                      content={stripQuizMarkers(msg.content)}
                       thinkingContent={msg.thinkingContent}
                       enhancedContent={msg.enhancedContent}
                       attachments={msg.attachments}
@@ -929,7 +957,7 @@ export function ChatMessages({
                     messageId={msg._id}
                     role={msg.role}
                     cancelled={msg.cancelled}
-                    content={msg.content}
+                    content={stripQuizMarkers(msg.content)}
                     thinkingContent={msg.thinkingContent}
                     enhancedContent={msg.enhancedContent}
                     attachments={msg.attachments}
@@ -948,6 +976,8 @@ export function ChatMessages({
                     onEdit={undefined}
                     onBranch={onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
                     onToggleBookmark={onToggleBookmarkMessage ? () => void onToggleBookmarkMessage(msg._id) : undefined}
+                    onSaveAsArtifact={onSaveAsArtifact ? () => onSaveAsArtifact(msg._id, msg.content) : undefined}
+                    isArtifactSaved={artifactSavedMessageIds.has(msg._id)}
                     isBookmarked={assistantIsBookmarked}
                     bookmarking={assistantBookmarking}
                     usageIn={msg.usageIn}
@@ -968,6 +998,7 @@ export function ChatMessages({
             }
 
             if (msg.role === "assistant" && msgMode === "flashcard") {
+
               if (isFlashcardContent(msg.content)) {
                 const { preamble, structuredContent } = splitMixedContent(msg.content, msgMode);
                 return (
@@ -1064,7 +1095,7 @@ export function ChatMessages({
                     messageId={msg._id}
                     role={msg.role}
                     cancelled={msg.cancelled}
-                    content={msg.content}
+                    content={stripQuizMarkers(msg.content)}
                     thinkingContent={msg.thinkingContent}
                     enhancedContent={msg.enhancedContent}
                     attachments={msg.attachments}
@@ -1083,6 +1114,8 @@ export function ChatMessages({
                     onEdit={undefined}
                     onBranch={onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
                     onToggleBookmark={onToggleBookmarkMessage ? () => void onToggleBookmarkMessage(msg._id) : undefined}
+                    onSaveAsArtifact={onSaveAsArtifact ? () => onSaveAsArtifact(msg._id, msg.content) : undefined}
+                    isArtifactSaved={artifactSavedMessageIds.has(msg._id)}
                     isBookmarked={assistantIsBookmarked}
                     bookmarking={assistantBookmarking}
                     usageIn={msg.usageIn}
@@ -1134,6 +1167,8 @@ export function ChatMessages({
                     regenModels={regenModels}
                     onBranch={onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
                     onToggleBookmark={onToggleBookmarkMessage ? () => void onToggleBookmarkMessage(msg._id) : undefined}
+                    onSaveAsArtifact={onSaveAsArtifact ? () => onSaveAsArtifact(msg._id, msg.content) : undefined}
+                    isArtifactSaved={artifactSavedMessageIds.has(msg._id)}
                     isBookmarked={assistantIsBookmarked}
                     bookmarking={assistantBookmarking}
                     usageIn={msg.usageIn}
@@ -1148,6 +1183,114 @@ export function ChatMessages({
                   >
                     {parsed.preamble ? <MarkdownRenderer content={parsed.preamble} citations={[]} /> : null}
                     <DocumentPanel content={msg.content} />
+                  </ChatMessage>
+                </div>
+              );
+            }
+
+            // Last-resort tag detection: if the content has closed tags regardless of mode,
+            // strip the markers and pass cleaned content. This prevents raw <<TAG>> text from showing.
+            const closedTagType = msg.role === "assistant" ? hasClosedTag(msg.content) : null;
+            const cleanedContent = closedTagType
+              ? stripQuizMarkers(msg.content)
+              : msg.content;
+
+            // Force quiz rendering if content has closed quiz tags and parser finds valid content
+            if (closedTagType === "quiz" && msg.role === "assistant" && isQuizContent(msg.content)) {
+              const { preamble, structuredContent } = splitMixedContent(msg.content, "quiz");
+              return (
+                <div key={msg._id}>
+                  <ChatMessage
+                    {...siblingNavigationProps}
+                    messageId={msg._id}
+                    role={msg.role}
+                    cancelled={msg.cancelled}
+                    content=""
+                    thinkingContent={msg.thinkingContent}
+                    enhancedContent={msg.enhancedContent}
+                    modelUsed={msg.modelUsed}
+                    routeTrace={msg.routeTrace}
+                    citations={msg.citations}
+                    mode={msgMode}
+                    isLastAssistant={isLastAssistant}
+                    onRegenerate={isLastAssistant ? onRegenerate : undefined}
+                    onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
+                    regenModels={regenModels}
+                    onBranch={onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
+                    onToggleBookmark={onToggleBookmarkMessage ? () => void onToggleBookmarkMessage(msg._id) : undefined}
+                    onSaveAsArtifact={onSaveAsArtifact ? () => onSaveAsArtifact(msg._id, msg.content) : undefined}
+                    isArtifactSaved={artifactSavedMessageIds.has(msg._id)}
+                    isBookmarked={assistantIsBookmarked}
+                    bookmarking={assistantBookmarking}
+                    usageIn={msg.usageIn}
+                    usageOut={msg.usageOut}
+                    createdAt={msg.createdAt}
+                    onFeedback={onAssistantFeedback}
+                    onOpenCanvas={onOpenCanvas}
+                    onSubmitQuizAnswers={(result) => {
+                      onSubmitQuizAnswers?.({ messageId: msg._id, result });
+                    }}
+                    onPinModel={onPinModel}
+                    isPinned={Boolean(pinnedModelId && msg.modelUsed === pinnedModelId)}
+                  >
+                    {preamble ? <MarkdownRenderer content={preamble} citations={[]} /> : null}
+                    <QuizReveal
+                      content={structuredContent}
+                      onFollowUp={(answerMessage) => {
+                        onFollowUp?.(answerMessage);
+                      }}
+                    />
+                  </ChatMessage>
+                </div>
+              );
+            }
+
+            // Force flashcard rendering
+            if (closedTagType === "flashcard" && msg.role === "assistant" && isFlashcardContent(msg.content)) {
+              const { preamble, structuredContent } = splitMixedContent(msg.content, "flashcard");
+              return (
+                <div key={msg._id}>
+                  <ChatMessage
+                    {...siblingNavigationProps}
+                    messageId={msg._id}
+                    role={msg.role}
+                    cancelled={msg.cancelled}
+                    content=""
+                    thinkingContent={msg.thinkingContent}
+                    enhancedContent={msg.enhancedContent}
+                    modelUsed={msg.modelUsed}
+                    routeTrace={msg.routeTrace}
+                    citations={msg.citations}
+                    mode={msgMode}
+                    isLastAssistant={isLastAssistant}
+                    onRegenerate={isLastAssistant ? onRegenerate : undefined}
+                    onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
+                    regenModels={regenModels}
+                    onBranch={onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
+                    onToggleBookmark={onToggleBookmarkMessage ? () => void onToggleBookmarkMessage(msg._id) : undefined}
+                    onSaveAsArtifact={onSaveAsArtifact ? () => onSaveAsArtifact(msg._id, msg.content) : undefined}
+                    isArtifactSaved={artifactSavedMessageIds.has(msg._id)}
+                    isBookmarked={assistantIsBookmarked}
+                    bookmarking={assistantBookmarking}
+                    usageIn={msg.usageIn}
+                    usageOut={msg.usageOut}
+                    createdAt={msg.createdAt}
+                    onFeedback={onAssistantFeedback}
+                    onOpenCanvas={onOpenCanvas}
+                    onPinModel={onPinModel}
+                    isPinned={Boolean(pinnedModelId && msg.modelUsed === pinnedModelId)}
+                  >
+                    {preamble ? <MarkdownRenderer content={preamble} citations={[]} /> : null}
+                    <FlashcardReveal
+                      content={structuredContent}
+                      onSaveDeck={(payload) => {
+                        onSaveFlashcardDeck?.({
+                          messageId: msg._id,
+                          title: payload.title,
+                          cards: payload.cards,
+                        });
+                      }}
+                    />
                   </ChatMessage>
                 </div>
               );
@@ -1169,7 +1312,7 @@ export function ChatMessages({
                   messageId={msg._id}
                   role={msg.role}
                   cancelled={msg.cancelled}
-                  content={msg.content}
+                  content={cleanedContent}
                   thinkingContent={msg.thinkingContent}
                   enhancedContent={msg.enhancedContent}
                   attachments={msg.attachments}
@@ -1188,6 +1331,8 @@ export function ChatMessages({
                   onEdit={msg.role === "user" && onEditMessage ? (value) => onEditMessage(msg._id, value) : undefined}
                   onBranch={msg.role === "assistant" && onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
                   onToggleBookmark={msg.role === "assistant" && onToggleBookmarkMessage ? () => void onToggleBookmarkMessage(msg._id) : undefined}
+                  onSaveAsArtifact={msg.role === "assistant" && onSaveAsArtifact ? () => onSaveAsArtifact(msg._id, msg.content) : undefined}
+                  isArtifactSaved={msg.role === "assistant" ? artifactSavedMessageIds.has(msg._id) : undefined}
                   isBookmarked={msg.role === "assistant" ? assistantIsBookmarked : undefined}
                   bookmarking={msg.role === "assistant" ? assistantBookmarking : undefined}
                   usageIn={msg.usageIn}

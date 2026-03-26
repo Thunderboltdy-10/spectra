@@ -12,6 +12,14 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  async redirects() {
+    return [
+      { source: "/flashcards", destination: "/artifacts?type=flashcard_deck", permanent: false },
+      { source: "/images", destination: "/artifacts?type=image", permanent: false },
+      { source: "/bookmarks", destination: "/artifacts?type=bookmark", permanent: false },
+      { source: "/achievements", destination: "/artifacts", permanent: false },
+    ];
+  },
   async headers() {
     return [
       {

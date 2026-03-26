@@ -56,11 +56,19 @@ function JoinPageContent() {
           setState({ status: "error", message: "Invitation not found. Please ask your school admin for a new link." });
           return;
         }
-        if (!response.ok) {
-          const text = await response.text();
-          setState({ status: "error", message: text || "Failed to load invitation." });
-          return;
-        }
+     if (!response.ok) {
+           const text = await response.text();
+           // Try to parse as JSON first, fallback to text
+           let errorMessage = text || "Failed to load invitation.";
+           try {
+             const json = JSON.parse(text);
+             errorMessage = json.error?.message || json.message || errorMessage;
+           } catch (e) {
+             // Keep original text if not JSON
+           }
+           setState({ status: "error", message: errorMessage });
+           return;
+         }
 
         const data = (await response.json()) as InvitationData;
         setState({ status: "valid", data });
@@ -160,15 +168,14 @@ function JoinPageContent() {
     year: "numeric",
   });
 
-  function handleJoin() {
-    // Redirect to Clerk signup with the email pre-filled if possible
-    const signUpUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up";
-    const redirect = encodeURIComponent(
-      `${typeof window !== "undefined" ? window.location.origin : ""}/join?token=${encodeURIComponent(token ?? "")}`,
-    );
-    const emailParam = `email_address=${encodeURIComponent(data.email)}`;
-    window.location.href = `${signUpUrl}?${emailParam}&redirect_url=${redirect}`;
-  }
+    function handleJoin() {
+        // Redirect to Clerk signup with the email pre-filled if possible
+        const signUpUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up";
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? typeof window !== "undefined" ? window.location.origin : "";
+        const redirect = encodeURIComponent(`${appUrl}/join?token=${encodeURIComponent(token ?? "")}`);
+        const emailParam = `email_address=${encodeURIComponent(data.email)}`;
+        window.location.href = `${signUpUrl}?${emailParam}&redirect_url=${redirect}`;
+    }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)] px-4">

@@ -24,19 +24,23 @@ const authMiddleware = clerkMiddleware(async (auth, req) => {
   const url = new URL(req.url);
   const invitationToken = url.searchParams.get("token") ?? url.searchParams.get("invitation");
 
-  if (invitationToken) {
-    const response = url.pathname.startsWith("/join")
-      ? NextResponse.next()
-      : NextResponse.redirect(new URL("/sign-up", req.url));
-    response.cookies.set(INVITATION_TOKEN_COOKIE, invitationToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: INVITATION_TOKEN_MAX_AGE,
-      path: "/",
-    });
-    return response;
-  }
+    if (invitationToken) {
+      const response = url.pathname.startsWith("/join")
+        ? NextResponse.next()
+        : NextResponse.redirect(new URL("/sign-up", req.url));
+      // Only set cookie when redirecting to sign-up (to remember token after login)
+      // Don't set cookie when already on join page to avoid persistent redirect loops
+      if (!url.pathname.startsWith("/join")) {
+        response.cookies.set(INVITATION_TOKEN_COOKIE, invitationToken, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax",
+          maxAge: INVITATION_TOKEN_MAX_AGE,
+          path: "/",
+        });
+      }
+      return response;
+    }
 
   if (isPublicRoute(req)) {
     return NextResponse.next();

@@ -87,8 +87,8 @@ export async function POST(request: NextRequest) {
       throw err;
     }
 
-    const origin = new URL(request.url).origin;
-    const joinUrl = result.token ? `${origin}/join?token=${encodeURIComponent(result.token)}` : undefined;
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
+    const joinUrl = result.token ? `${appUrl}/join?token=${encodeURIComponent(result.token)}` : undefined;
     const emailResult = joinUrl
       ? await sendInvitationEmail({
           to: body.email.trim(),
@@ -97,8 +97,8 @@ export async function POST(request: NextRequest) {
           orgName: orgSettings.org?.name,
         })
       : { status: "skipped" as const, reason: "Invitation token was not generated." };
-    if (emailResult.status !== "sent") {
-      return badRequest(inviteDeliveryErrorMessage("reason" in emailResult ? emailResult.reason : undefined), 502);
+    if (emailResult.status === "failed") {
+      return badRequest(inviteDeliveryErrorMessage(emailResult.reason), 502);
     }
 
     return ok({
@@ -154,20 +154,20 @@ export async function PATCH(request: NextRequest) {
         actorClerkId: actor.clerkId,
         invitationId: body.invitationId,
       });
-      const origin = new URL(request.url).origin;
-      const joinUrl = result.token ? `${origin}/join?token=${encodeURIComponent(result.token)}` : undefined;
-      const emailResult =
-        result.email && result.role && joinUrl
-          ? await sendInvitationEmail({
-              to: result.email,
-              role: result.role,
-              joinUrl,
-              orgName: orgSettings.org?.name,
-            })
-          : { status: "skipped" as const, reason: "Invitation token was not generated." };
-      if (emailResult.status !== "sent") {
-        return badRequest(inviteDeliveryErrorMessage("reason" in emailResult ? emailResult.reason : undefined), 502);
-      }
+       const appUrl = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
+       const joinUrl = result.token ? `${appUrl}/join?token=${encodeURIComponent(result.token)}` : undefined;
+       const emailResult =
+         result.email && result.role && joinUrl
+           ? await sendInvitationEmail({
+               to: result.email,
+               role: result.role,
+               joinUrl,
+               orgName: orgSettings.org?.name,
+             })
+           : { status: "skipped" as const, reason: "Invitation token was not generated." };
+       if (emailResult.status === "failed") {
+         return badRequest(inviteDeliveryErrorMessage(emailResult.reason), 502);
+       }
       return ok({
         ok: true,
         joinUrl,
@@ -200,8 +200,8 @@ export async function PATCH(request: NextRequest) {
         role: body.role,
       });
 
-      const origin = new URL(request.url).origin;
-      const joinUrl = result.token ? `${origin}/join?token=${encodeURIComponent(result.token)}` : undefined;
+       const appUrl = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
+       const joinUrl = result.token ? `${appUrl}/join?token=${encodeURIComponent(result.token)}` : undefined;
       const emailResult = joinUrl
         ? await sendInvitationEmail({
             to: accessRequest.email,
@@ -210,9 +210,9 @@ export async function PATCH(request: NextRequest) {
             orgName: orgSettings.org?.name,
           })
         : { status: "skipped" as const, reason: "Invitation token was not generated." };
-      if (emailResult.status !== "sent") {
-        return badRequest(inviteDeliveryErrorMessage("reason" in emailResult ? emailResult.reason : undefined), 502);
-      }
+       if (emailResult.status === "failed") {
+         return badRequest(inviteDeliveryErrorMessage(emailResult.reason), 502);
+       }
 
       await convexMutation("accessRequests:resolveAccessRequest", {
         actorClerkId: actor.clerkId,

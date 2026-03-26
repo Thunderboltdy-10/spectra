@@ -1,3 +1,5 @@
+import nodemailer from "nodemailer";
+
 type InviteEmailParams = {
   to: string;
   role: string;
@@ -35,49 +37,44 @@ function inviteEmailHtml(params: InviteEmailParams) {
 }
 
 export async function sendInvitationEmail(params: InviteEmailParams): Promise<InviteEmailResult> {
-  if (!process.env.RESEND_API_KEY || !process.env.INVITE_FROM_EMAIL) {
+  const smtpHost = process.env.SMTP_HOST;
+  const smtpPort = parseInt(process.env.SMTP_PORT || "587", 10);
+  const smtpUser = process.env.SMTP_USER;
+  const smtpPass = process.env.SMTP_PASS;
+  const smtpFrom = process.env.SMTP_FROM_EMAIL || smtpUser;
+
+  if (!smtpHost || !smtpUser || !smtpPass) {
     return {
       status: "skipped",
-      reason: "Invite email environment is not configured.",
+      reason: "SMTP email environment is not configured.",
     };
   }
 
   try {
-    const response = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-        "Content-Type": "application/json",
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpPort === 465, // true for 465, false for other ports
+      auth: {
+        user: smtpUser,
+        pass: smtpPass,
       },
-      body: JSON.stringify({
-        from: process.env.INVITE_FROM_EMAIL,
-        to: [params.to],
-        subject: `Your ${params.orgName?.trim() || "Spectra"} invitation`,
-        html: inviteEmailHtml(params),
-      }),
     });
 
-    if (!response.ok) {
-      const reason = (await response.text()).replace(/\s+/g, " ").trim().slice(0, 400);
-      console.warn("[invite-email] resend delivery failed", {
-        to: params.to,
-        status: response.status,
-        reason,
-      });
-      return {
-        status: "failed",
-        reason: reason || `Provider returned HTTP ${response.status}`,
-      };
-    }
+    await transporter.sendMail({
+      from: smtpFrom,
+      to: params.to,
+      subject: `Your ${params.orgName?.trim() || "Spectra"} invitation`,
+      html: inviteEmailHtml(params),
+    });
 
-    const payload = (await response.json().catch(() => null)) as { id?: string } | null;
     return {
       status: "sent",
-      providerId: payload?.id,
+      providerId: "smtp",
     };
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Unknown email transport failure";
-    console.warn("[invite-email] resend delivery threw", {
+    console.warn("[invite-email] smtp delivery threw", {
       to: params.to,
       reason,
     });

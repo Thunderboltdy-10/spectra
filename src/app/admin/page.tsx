@@ -262,12 +262,12 @@ function AdminPageContent() {
           </section>
         ) : null}
 
-        {/* Page header */}
-        <div className="pb-2 pt-1">
-          <Breadcrumb items={[{ label: "Chat", href: "/" }, { label: "Admin" }]} />
-          <h1 className="font-display text-3xl mt-2">Admin Console</h1>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">Manage your school settings, members, and usage.</p>
-        </div>
+         {/* Page header */}
+         <div className="pb-2 pt-1">
+           <Breadcrumb items={[{ label: "Admin" }]} />
+           <h1 className="font-display text-3xl mt-2">Admin Console</h1>
+           <p className="mt-1 text-sm text-[var(--text-secondary)]">Manage your school settings, members, and usage.</p>
+         </div>
 
         <nav className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-xs text-[var(--text-secondary)]">
           <span className="font-medium text-[var(--text-primary)]">Jump to</span>

@@ -236,13 +236,25 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
   const explicitReadUrlRequest = Boolean(requestedUrl && isExplicitReadUrlRequest(params.message));
   const explicitCrawlRequest = Boolean(requestedUrl && isExplicitCrawlRequest(params.message));
   const deepResearchRequest = isDeepResearchRequest(params.message);
+  const evidenceHeavyResearchPrompt = /\b(citation|citations|source|sources|evidence|paper|papers|study|studies|journal|dataset|report|reports|statistics|statistical)\b/i.test(lowerMessage);
   const personalTask = isPersonalMessage(params.message);
   const artifactRequest = isArtifactRequest(params.mode, params.message);
   const requestedArtifactFormats = artifactRequest ? detectRequestedArtifactFormats(params.message) : [];
   const studyMode = params.mode === "quiz" || params.mode === "flashcard" || params.mode === "tutor";
   const multimodal = params.hasAttachments;
   const shouldUseSchoolResources = params.hasPack || params.hasAgentResources || /upload|attached|file|notes|resource|chapter|pack/i.test(lowerMessage);
-  const researchNeedsSearch = params.mode === "research";
+  const researchNeedsSearch =
+    params.mode === "research"
+    && (
+      explicitSearchRequest
+      || explicitReadUrlRequest
+      || explicitCrawlRequest
+      || deepResearchRequest
+      || timeSensitive
+      || evidenceHeavyResearchPrompt
+      || params.complexity === "complex"
+      || (params.autoSearchEnabled && params.complexity !== "simple")
+    );
   const simpleFactSearch = (explicitSearchRequest || timeSensitive) && params.complexity === "simple";
   const shouldUseWebSearch =
     explicitReadUrlRequest

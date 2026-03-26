@@ -309,10 +309,10 @@ describe("gamification route integration", () => {
 describe("manual compact route integration", () => {
   it("forwards compact mutation payload", async () => {
     const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_compact" });
-    const convexMutation = vi.fn().mockResolvedValue({ ok: true, compactedMessages: 12 });
+    const convexAction = vi.fn().mockResolvedValue({ ok: true, compactedMessages: 12 });
 
     vi.doMock("@/lib/auth-server", () => ({ requireActor }));
-    vi.doMock("@/lib/convex-server", () => ({ convexMutation, convexQuery: vi.fn() }));
+    vi.doMock("@/lib/convex-server", () => ({ convexAction, convexMutation: vi.fn(), convexQuery: vi.fn() }));
 
     const route = await import("@/app/api/chats/[id]/route");
     const response = await route.POST(
@@ -324,7 +324,7 @@ describe("manual compact route integration", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(convexMutation).toHaveBeenCalledWith("chats:manualCompact", {
+    expect(convexAction).toHaveBeenCalledWith("chats:manualCompact", {
       actorClerkId: "user_compact",
       chatId: "chat_99",
       keepLatestMessages: 18,

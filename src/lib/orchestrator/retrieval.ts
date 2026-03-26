@@ -994,7 +994,7 @@ export async function maybeSearchWeb(
         let extractedSources: WebSearchSource[] = [];
         if (urlsForExtract.length > 0) {
           const extractStartedAt = Date.now();
-          const extractResponse: TavilyExtractResponse | undefined = await withTimeout(
+          const extractResponse: TavilyExtractResponse | null = await withTimeout(
             tavilyClient.extract(urlsForExtract, {
               extractDepth: "advanced",
               format: "markdown",
@@ -1092,6 +1092,27 @@ export async function maybeSearchWeb(
     } catch (error) {
       tavilyFailureReason = error instanceof Error ? error.message : String(error);
     }
+  }
+
+  const allowModelFallback = strategy === "search" || strategy === "extract_url" || strategy === "crawl";
+  if (!allowModelFallback) {
+    return {
+      text: "",
+      urls: [],
+      sources: [],
+      provider: "error",
+      strategy,
+      triggeredBy: trigger,
+      fallbackReason: tavilyFailureReason ?? "Unknown Tavily failure.",
+      operations: [
+        {
+          tool: "search",
+          status: "failed",
+          query,
+          reason: "Tavily failed and online-model fallback is disabled for this research strategy.",
+        },
+      ],
+    };
   }
 
   return runOnlineModelFallbackSearch(message, thinkingLevel, {

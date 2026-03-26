@@ -1434,12 +1434,14 @@ export async function runChatPipeline(request: NextRequest) {
         })
       : Promise.resolve(defaultRetrievalResult);
 
-  const searchPromise = hasReusableRecentContext
+  const searchPromise: Promise<WebSearchResult> = hasReusableRecentContext
     ? Promise.resolve({
         text: recentContextCache?.search.text ?? "",
         urls: recentContextCache?.search.urls ?? [],
         sources: recentContextCache?.search.sources ?? [],
         provider: recentContextCache?.search.provider ?? ("disabled" as const),
+        strategy: routePlan.searchPlan?.strategy,
+        triggeredBy: routePlan.searchPlan?.trigger,
         modelUsed: undefined,
         usage: undefined,
         durationMs: undefined,
@@ -1457,6 +1459,14 @@ export async function runChatPipeline(request: NextRequest) {
           urls: [] as string[],
           sources: [] as Array<{ url: string; title: string; domain: string }>,
           provider: "error" as const,
+          strategy: routePlan.searchPlan?.strategy,
+          triggeredBy: routePlan.searchPlan?.trigger,
+          fallbackReason: "search_request_failed",
+          operations: [{
+            tool: "search",
+            status: "failed" as const,
+            reason: "Search request failed before response parsing.",
+          }],
           modelUsed: undefined,
           usage: undefined,
           durationMs: undefined,
@@ -3485,6 +3495,12 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
             spendingTier: budget.tier,
             thinkingLevel: effectiveThinkingLevel,
             maxTokens,
+            maxContinuations:
+              routePlan.responseBudget === "simple"
+                ? 0
+                : routePlan.responseBudget === "normal"
+                  ? 1
+                  : 2,
             maxSubcalls: collabLimits.maxSubcalls,
             maxTokensPerSpecialist: collabLimits.maxTokensPerSpecialist,
             maxWallTimeMs: collabLimits.maxWallTimeMs,
@@ -3505,6 +3521,12 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
             verificationModel: route.verificationModel,
             messages,
             maxTokens,
+            maxContinuations:
+              routePlan.responseBudget === "simple"
+                ? 0
+                : routePlan.responseBudget === "normal"
+                  ? 1
+                  : 2,
             send,
             onUsageTokens: consumeUsageTokens,
             onFallback,

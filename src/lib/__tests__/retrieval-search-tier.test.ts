@@ -30,4 +30,30 @@ describe("maybeSearchWeb", () => {
     expect(result.urls).toEqual([]);
     expect(openRouterChatCompletion).not.toHaveBeenCalled();
   });
+
+  it("does not use online-model fallback for research search strategies", async () => {
+    const result = await maybeSearchWeb("research this topic deeply", "high", {
+      spendingTier: "normal",
+      modelCatalog: [
+        {
+          modelId: "openai/gpt-5.4-mini",
+          name: "GPT-5.4 Mini",
+          provider: "openai",
+          tags: ["reasoning", "search"],
+          isFree: false,
+          inputCostPerM: 1,
+          outputCostPerM: 2,
+        },
+      ],
+      searchPlan: {
+        strategy: "search_extract",
+        trigger: "research_mode",
+        query: "research this topic deeply",
+      },
+    });
+
+    expect(result.provider).toBe("error");
+    expect(result.urls).toEqual([]);
+    expect(openRouterChatCompletion).not.toHaveBeenCalled();
+  });
 });

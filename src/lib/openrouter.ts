@@ -4,10 +4,17 @@ import type { RouteTraceFallback } from "@/types";
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const OPENROUTER_TIMEOUT_MS = (() => {
   const raw = Number.parseInt(process.env.OPENROUTER_TIMEOUT_MS ?? "", 10);
-  if (Number.isFinite(raw) && raw >= 30_000 && raw <= 300_000) {
+  if (Number.isFinite(raw) && raw >= 30_000 && raw <= 600_000) {
     return raw;
   }
   return 90_000;
+})();
+const OPENROUTER_STREAM_TIMEOUT_MS = (() => {
+  const raw = Number.parseInt(process.env.OPENROUTER_STREAM_TIMEOUT_MS ?? "", 10);
+  if (Number.isFinite(raw) && raw >= 60_000 && raw <= 900_000) {
+    return raw;
+  }
+  return Math.max(OPENROUTER_TIMEOUT_MS, 300_000);
 })();
 
 export type OpenRouterStreamEvent =
@@ -164,9 +171,9 @@ function buildChatCompletionBody(params: {
   };
 }
 
-async function fetchWithTimeout(url: string, init: RequestInit) {
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = OPENROUTER_TIMEOUT_MS) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort("Request timed out"), OPENROUTER_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(`Request timed out after ${timeoutMs}ms`), timeoutMs);
 
   try {
     return await fetch(url, {
@@ -348,7 +355,7 @@ export async function openRouterChatCompletion(params: {
               reasoningEffort: params.reasoningEffort,
             }),
           ),
-      });
+      }, OPENROUTER_STREAM_TIMEOUT_MS);
 
       if (!response.ok) {
         const errorText = await response.text();

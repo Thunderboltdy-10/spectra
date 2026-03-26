@@ -21,6 +21,45 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 
 ---
 
+## Stabilization Pass (March 26, 2026)
+
+### Why this pass was done
+- This plan is being stopped early to prepare a new workstream-first architecture.
+- The goal of this pass was not new feature design. It was to harden foundational pieces that will survive the redesign: routing, search, agents, reliability, security, and admin recoverability.
+
+### Implemented in this pass (backbone-safe)
+- [x] Fixed build-blocking pipeline typing issue in `src/lib/orchestrator/pipeline.ts` (`webResult.strategy` union mismatch).
+- [x] Fixed artifact editor autosave dropping metadata-only edits (title/tags) in `src/components/artifacts/artifact-editor.tsx`.
+- [x] Enabled restoring non-snapshot artifact versions in version history UI (backend path already supported).
+- [x] Added HTML sanitization before document preview injection to close stored XSS path (`src/lib/sanitize-html.ts`, wired in artifact editor).
+- [x] Improved phase-router model selection diversity and complexity-aware weighting in `src/lib/routing/phase-router.ts` (less repeated provider/model lock-in).
+- [x] Added quick-reply routing bias for true T0 requests in `src/lib/routing/phase-router.ts` (favor fast/mini/flash class models over heavy reasoning variants).
+- [x] Added text-first penalty for image-tuned models in non-image chat routing (`src/lib/routing/phase-router.ts`) to prevent normal chat turns from selecting image-specialized models.
+- [x] Disabled online-model fallback for research-only search strategies when Tavily fails (`src/lib/orchestrator/retrieval.ts`) to avoid unnecessary research-model spend.
+- [x] Increased OpenRouter stream timeout and separated it from base timeout in `src/lib/openrouter.ts` to reduce premature interrupted runs on longer generations.
+- [x] Made length auto-continuation budget-aware in `src/lib/orchestrator/streaming.ts` + pipeline wiring (simple=0, normal=1, deep=2).
+- [x] Added super-admin bypass for org-active gating so platform owners cannot be locked out when org state is empty (`src/lib/auth-server.ts`).
+- [x] Added super-admin platform reset operation (data wipe for runtime/workspace content while preserving core platform identity/school scaffolding) in `convex/superAdmin.ts` + `/api/super-admin/storage` + super-admin UI action.
+- [x] Added/updated tests for retrieval fallback behavior, HTML sanitization, dry-run routing API behavior, and compact route integration mocks.
+- [x] Verified with real commands:
+  - [x] `npm run test:run` passing (191 tests)
+  - [x] `npm run build` passing
+
+### Explicitly deferred to the next plan (do not optimize here)
+- [ ] Artifact-centric route/UI thesis (`/artifacts` as primary surface) and artifact-heavy UX refinements.
+- [ ] Visualization/pyodide/canvas UX polish and rendering redesign.
+- [ ] Large memory redesign (layering/relevance strategy) beyond essential stability fixes.
+- [ ] Broad UI polish backlog from Phase 7/8/9 and Additional Issues that are likely to be replaced by workstream-first architecture.
+
+### Carry-over focus for the next plan
+- Routing quality and transparent model selection.
+- Search strategy correctness (Tavily-first, bounded fallback policy).
+- Agent orchestration reliability and scoped tooling.
+- Core chat robustness under interruption/partial states.
+- Safe reset/recovery operations for alpha environment management.
+
+---
+
 ## Phase 1: Foundation & Infrastructure Fixes
 
 **Goal**: Fix the broken infrastructure that everything else depends on.

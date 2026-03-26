@@ -904,13 +904,7 @@ export function rewriteCitationMarkers(response: string, citations: Citation[]) 
       const token = String(rawToken ?? "").trim();
       if (!token) return match;
       if (/^\d+(?:\s*,\s*\d+)*$/.test(token)) {
-        const numbers = token
-          .split(",")
-          .map((part) => Number.parseInt(part.trim(), 10))
-          .filter((value) => Number.isFinite(value) && value > 0)
-          .slice(0, 4);
-        if (numbers.length === 0) return "";
-        return numbers.map((value) => `[${value}]`).join("");
+        return "";
       }
 
       const normalizedToken = normalizeCitationToken(token);

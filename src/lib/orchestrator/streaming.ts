@@ -39,6 +39,7 @@ export async function runAssistantStreaming(params: {
   send: (payload: Record<string, unknown>) => Promise<void>;
   onUsageTokens?: (tokens: number) => void;
   onFallback?: (event: RouteTraceFallback) => void;
+  maxContinuations?: number;
   logger?: {
     info: (message: string, context?: Record<string, unknown>) => void;
   };
@@ -76,7 +77,7 @@ export async function runAssistantStreaming(params: {
   };
 
   if (!params.shouldVerify) {
-    const maxContinuations = 2;
+    const maxContinuations = Math.max(0, Math.min(2, params.maxContinuations ?? 2));
     let continuationMessages = params.messages;
 
     while (true) {
@@ -307,6 +308,7 @@ export async function runCollaborativeStreaming(params: {
   send: (payload: Record<string, unknown>) => Promise<void>;
   onUsageTokens?: (tokens: number) => void;
   onFallback?: (event: RouteTraceFallback) => void;
+  maxContinuations?: number;
   logger?: {
     info: (message: string, context?: Record<string, unknown>) => void;
   };
@@ -491,7 +493,7 @@ export async function runCollaborativeStreaming(params: {
     return next;
   };
 
-  const maxContinuations = 2;
+  const maxContinuations = Math.max(0, Math.min(2, params.maxContinuations ?? 2));
   let continuationCount = 0;
   let continuationMessages: OpenRouterMessage[] = [
     { role: "system", content: params.baseSystemPrompt },

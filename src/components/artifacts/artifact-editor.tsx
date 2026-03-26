@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Clock,
@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { getArtifactMeta } from "@/lib/artifact-types";
+import { sanitizeArtifactDocumentHtml } from "@/lib/sanitize-html";
 import type { ArtifactItem } from "./artifact-card";
 import { cn } from "@/lib/utils";
 
@@ -38,6 +39,21 @@ function formatDateTime(ts: number) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function normalizeTagsInput(value: string) {
+  return value
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
+
+function areTagArraysEqual(a: string[], b: string[]) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -582,11 +598,16 @@ function ImageViewer({ content }: { content: { url?: string; prompt?: string } }
 }
 
 function DocumentViewer({ content }: { content: { title?: string; body?: string; downloadUrl?: string } }) {
+  const sanitizedBody = useMemo(
+    () => sanitizeArtifactDocumentHtml(content.body ?? ""),
+    [content.body],
+  );
+
   return (
     <div className="space-y-3">
-      {content.body ? (
+      {sanitizedBody ? (
         <div className="prose prose-sm max-w-none rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] p-6 text-[var(--text-primary)]">
-          <div dangerouslySetInnerHTML={{ __html: content.body }} />
+          <div dangerouslySetInnerHTML={{ __html: sanitizedBody }} />
         </div>
       ) : (
         <p className="text-sm text-[var(--text-secondary)]">No content preview available.</p>
@@ -712,6 +733,7 @@ export function ArtifactEditor({
   const [loadingVersions, setLoadingVersions] = useState(false);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestDirtyRef = useRef(false);
+  const contentDirtyRef = useRef(false);
 
   useEffect(() => {
     setTitle(artifact.title);
@@ -719,12 +741,14 @@ export function ArtifactEditor({
     setTagsInput((artifact.tags ?? []).join(", "));
     setDirty(false);
     latestDirtyRef.current = false;
+    contentDirtyRef.current = false;
   }, [artifact._id, artifact.title, artifact.content, artifact.tags]);
 
   const handleContentChange = useCallback((c: unknown) => {
     setContent(c);
     setDirty(true);
     latestDirtyRef.current = true;
+    contentDirtyRef.current = true;
   }, []);
 
   // Auto-save: debounce 1.5s after any change
@@ -747,19 +771,30 @@ export function ArtifactEditor({
   }, []);
 
   async function handleAutoSave() {
+    if (!latestDirtyRef.current) return;
+
     setSaving(true);
     try {
-      const tags = tagsInput
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean);
+      const tags = normalizeTagsInput(tagsInput);
+      const titleChanged = title !== artifact.title;
+      const tagsChanged = !areTagArraysEqual(tags, artifact.tags ?? []);
+      const shouldSaveContent = contentDirtyRef.current;
+
+      if (!titleChanged && !tagsChanged && !shouldSaveContent) {
+        setDirty(false);
+        latestDirtyRef.current = false;
+        contentDirtyRef.current = false;
+        return;
+      }
+
       await onSave({
-        title: title !== artifact.title ? title : undefined,
-        content: latestDirtyRef.current ? content : undefined,
-        tags,
+        title: titleChanged ? title : undefined,
+        content: shouldSaveContent ? content : undefined,
+        tags: tagsChanged ? tags : undefined,
       });
       setDirty(false);
       latestDirtyRef.current = false;
+      contentDirtyRef.current = false;
     } catch {
       // Silent fail for auto-save — user can manually retry
     } finally {
@@ -889,6 +924,7 @@ export function ArtifactEditor({
             onChange={(e) => {
               setTitle(e.target.value);
               setDirty(true);
+              latestDirtyRef.current = true;
             }}
             className="mb-2 w-full border-none bg-transparent font-display text-3xl font-semibold text-[var(--text-primary)] focus:outline-none"
             placeholder="Untitled"
@@ -900,12 +936,13 @@ export function ArtifactEditor({
             <input
               type="text"
               value={tagsInput}
-              onChange={(e) => {
-                setTagsInput(e.target.value);
-                setDirty(true);
-              }}
-              placeholder="Add tags (comma-separated)..."
-              className="flex-1 border-none bg-transparent text-sm text-[var(--text-secondary)] placeholder:text-[var(--text-tertiary)] focus:outline-none"
+            onChange={(e) => {
+              setTagsInput(e.target.value);
+              setDirty(true);
+              latestDirtyRef.current = true;
+            }}
+            placeholder="Add tags (comma-separated)..."
+            className="flex-1 border-none bg-transparent text-sm text-[var(--text-secondary)] placeholder:text-[var(--text-tertiary)] focus:outline-none"
             />
           </div>
 
@@ -953,16 +990,14 @@ export function ArtifactEditor({
                     {v.description ? (
                       <p className="mt-1 text-xs text-[var(--text-tertiary)]">{v.description}</p>
                     ) : null}
-                    {v.snapshot ? (
-                      <button
-                        type="button"
-                        className="mt-2 flex items-center gap-1 text-[10px] text-[var(--brand-primary)] hover:underline"
-                        onClick={() => onRestoreVersion(v._id)}
-                      >
-                        <RotateCcw className="h-3 w-3" />
-                        Restore this version
-                      </button>
-                    ) : null}
+                    <button
+                      type="button"
+                      className="mt-2 flex items-center gap-1 text-[10px] text-[var(--brand-primary)] hover:underline"
+                      onClick={() => onRestoreVersion(v._id)}
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                      Restore this version
+                    </button>
                   </div>
                 ))}
               </div>

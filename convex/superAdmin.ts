@@ -565,6 +565,134 @@ export const getStorageStats = query({
   },
 });
 
+export const resetPlatformData = mutation({
+  args: {
+    actorClerkId: v.string(),
+    confirmation: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireSuperAdmin(ctx, args.actorClerkId);
+    const normalizedConfirmation = args.confirmation.trim().toUpperCase();
+    if (normalizedConfirmation !== "RESET PLATFORM DATA") {
+      throw new Error("Invalid confirmation phrase. Type RESET PLATFORM DATA to continue.");
+    }
+
+    const summary: Record<string, number> = {};
+    const now = Date.now();
+
+    const deleteRowsFromTable = async (tableName: string) => {
+      const rows = await (ctx.db as any).query(tableName).collect() as Array<{ _id: Id<any> }>;
+      for (const row of rows) {
+        await ctx.db.delete(row._id);
+      }
+      summary[tableName] = rows.length;
+      return rows.length;
+    };
+
+    const resources = await ctx.db.query("resources").collect();
+    const resourceStorageIds = resources
+      .map((resource) => resource.storageId)
+      .filter((value): value is Id<"_storage"> => Boolean(value));
+    for (const storageId of resourceStorageIds) {
+      await ctx.storage.delete(storageId).catch(() => {});
+    }
+    for (const resource of resources) {
+      await ctx.db.delete(resource._id);
+    }
+    summary.resources = resources.length;
+
+    const generatedImages = await ctx.db.query("generatedImages").collect();
+    const imageStorageIds = new Set<Id<"_storage">>();
+    for (const image of generatedImages) {
+      if (image.storageId) imageStorageIds.add(image.storageId);
+      if (image.thumbnailStorageId) imageStorageIds.add(image.thumbnailStorageId);
+    }
+    for (const storageId of imageStorageIds) {
+      await ctx.storage.delete(storageId).catch(() => {});
+    }
+    for (const image of generatedImages) {
+      await ctx.db.delete(image._id);
+    }
+    summary.generatedImages = generatedImages.length;
+
+    const feedbackRows = await ctx.db.query("feedback").collect();
+    const feedbackStorageIds = feedbackRows
+      .map((item) => item.screenshotStorageId)
+      .filter((value): value is Id<"_storage"> => Boolean(value));
+    for (const storageId of feedbackStorageIds) {
+      await ctx.storage.delete(storageId).catch(() => {});
+    }
+    for (const item of feedbackRows) {
+      await ctx.db.delete(item._id);
+    }
+    summary.feedback = feedbackRows.length;
+
+    const tablesToClear = [
+      "packs",
+      "chunks",
+      "agents",
+      "agentModelStats",
+      "chats",
+      "messages",
+      "usageDaily",
+      "usageEvents",
+      "artifacts",
+      "artifactVersions",
+      "userSpending",
+      "userMemory",
+      "userMemoryEntries",
+      "studentAnalytics",
+      "weeklySummaries",
+      "nudges",
+      "achievements",
+      "userStreaks",
+      "studyTimers",
+      "messageBookmarks",
+      "chatBranches",
+      "notifications",
+      "conversationTemplates",
+      "flashcardProgress",
+      "quizResults",
+      "quizSessions",
+      "flashcardDecks",
+      "auditLog",
+      "modelRuntimeStats",
+      "schoolInvitations",
+      "accessRequests",
+      "userSoulPreferences",
+      "errorEvents",
+    ] as const;
+
+    for (const tableName of tablesToClear) {
+      await deleteRowsFromTable(tableName);
+    }
+
+    const users = await ctx.db.query("users").collect();
+    for (const user of users) {
+      await ctx.db.patch(user._id, {
+        userStreakId: undefined,
+        lastActiveAt: undefined,
+        updatedAt: now,
+      });
+    }
+    summary.userMetadataReset = users.length;
+
+    await ctx.runMutation(internal.auditLog.logAction, {
+      actorUserId: actor._id as Id<"users">,
+      action: "super_admin.platform_reset",
+      targetType: "platform",
+      targetId: "global",
+      details: JSON.stringify(summary),
+    });
+
+    return {
+      ok: true,
+      summary,
+      resetAt: now,
+    };
+  },
+});
+
 /**
  * List all admin users across schools.
  */

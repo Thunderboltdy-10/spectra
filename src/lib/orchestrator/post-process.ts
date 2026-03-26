@@ -789,7 +789,8 @@ export function inferCitations(
     resourceId?: string;
     filename: string;
     page?: number;
-    sourceType: "pack" | "personal";
+    sourceType: "pack" | "personal" | "agent";
+    text?: string;
     score?: number;
   }>,
   searchSources: WebSearchSource[],
@@ -800,7 +801,11 @@ export function inferCitations(
     filename: source.filename,
     page: source.page,
     sourceType: source.sourceType,
-    snippet: (source as { text?: string }).text?.slice(0, 220),
+    snippet: source.text?.slice(0, 220),
+    relevanceScore: source.score,
+    reliabilityScore: 0.82,
+    reliabilityLabel: "high" as const,
+    reliabilityReason: "Retrieved from scoped classroom or agent resources.",
   }));
 
   const inferred = extractCitationsFromText(response, fallback);
@@ -813,6 +818,12 @@ export function inferCitations(
       title: source.title,
       domain: source.domain,
       snippet: source.snippet,
+      relevanceScore: source.relevanceScore,
+      reliabilityScore: source.reliabilityScore,
+      reliabilityLabel: source.reliabilityLabel,
+      reliabilityReason: source.reliabilityReason,
+      publishedDate: source.publishedDate,
+      favicon: source.favicon,
     });
   }
 
@@ -892,30 +903,81 @@ export function rewriteCitationMarkers(response: string, citations: Citation[]) 
     .replace(/\[([^\]\n]{1,90})\](?!\()/g, (match, rawToken) => {
       const token = String(rawToken ?? "").trim();
       if (!token) return match;
-      if (/^\d+(?:\s*,\s*\d+)*$/.test(token)) return "";
+      if (/^\d+(?:\s*,\s*\d+)*$/.test(token)) {
+        return "";
+      }
 
       const normalizedToken = normalizeCitationToken(token);
       if (!normalizedToken) return match;
 
-      const matchedCitation = citations.some((citation) => {
+      const matchedIndex = citations.findIndex((citation) => {
         const filename = normalizeCitationToken(citation.filename);
         const title = normalizeCitationToken(citation.title ?? "");
         const domain = normalizeCitationToken(citation.domain ?? "");
         return filename.includes(normalizedToken) || title.includes(normalizedToken) || domain.includes(normalizedToken);
       });
 
-      if (matchedCitation || token.includes("§")) {
-        return "";
+      if (matchedIndex >= 0) {
+        return `[${matchedIndex + 1}]`;
       }
       return match;
     })
-    .replace(/\[(\d+(?:\s*,\s*\d+)*)\](?!\()/g, "")
     .replace(/\s+([,.;:!?])/g, "$1")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
   return rewritten;
+}
+
+export function ensureInlineCitationMarkers(response: string, citations: Citation[]) {
+  if (!response || citations.length === 0) return response;
+  if (/\[(\d+)\]/.test(response)) return response;
+
+  const maxInline = Math.min(3, citations.length);
+  const lines = response.split("\n");
+  const nextLines: string[] = [];
+  let markerIndex = 0;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (
+      markerIndex < maxInline
+      && trimmed.length >= 48
+      && !trimmed.startsWith("#")
+      && !trimmed.startsWith("```")
+      && !trimmed.startsWith(">")
+      && !trimmed.startsWith("- ")
+      && !trimmed.startsWith("* ")
+      && !/^\d+[.)]\s+/.test(trimmed)
+    ) {
+      nextLines.push(`${line}${/\s$/.test(line) ? "" : " "}[${
+        markerIndex + 1
+      }]`);
+      markerIndex += 1;
+      continue;
+    }
+    nextLines.push(line);
+  }
+
+  return nextLines.join("\n");
+}
+
+export function attachInlinePositionsToCitations(response: string, citations: Citation[]) {
+  if (!response || citations.length === 0) return citations;
+  const positions = citations.map(() => [] as number[]);
+  for (const match of response.matchAll(/\[(\d+)\]/g)) {
+    const rawIndex = Number.parseInt(match[1] ?? "", 10) - 1;
+    if (!Number.isFinite(rawIndex) || rawIndex < 0 || rawIndex >= citations.length) continue;
+    if (typeof match.index === "number") {
+      positions[rawIndex]?.push(match.index);
+    }
+  }
+
+  return citations.map((citation, index) => ({
+    ...citation,
+    inlinePositions: positions[index] ?? [],
+  }));
 }
 
 function compactText(value: string) {

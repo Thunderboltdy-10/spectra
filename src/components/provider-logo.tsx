@@ -121,23 +121,23 @@ export const ProviderLogo = memo(function ProviderLogo({ provider, modelId, clas
     );
   }
 
-  // Fallback: first letter in colored circle
+  // Fallback: first letter in colored circle — match Icon variant container (h-9 w-9)
   const letter = (provider ?? preset.label).charAt(0).toUpperCase();
   const bgColor = getProviderColor(provider ?? preset.label);
   return (
-    <div
-      className={cn("inline-flex items-center justify-center rounded-full text-white font-semibold", className)}
+    <span
+      className={cn(
+        "inline-flex aspect-square h-9 w-9 items-center justify-center overflow-hidden rounded-lg text-white font-semibold",
+        className,
+      )}
       style={{
-        width: size,
-        height: size,
         background: bgColor,
         fontSize: size * 0.5,
         lineHeight: 1,
-        flexShrink: 0,
       }}
       title={preset.label}
     >
       {letter}
-    </div>
+    </span>
   );
 });

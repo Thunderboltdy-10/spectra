@@ -15,7 +15,7 @@ import { Switch } from "@/components/ui/switch";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { useSidebar } from "@/context/sidebar-context";
 
-type OrgSettings = { name?: string; description?: string; schoolType?: string; timezone?: string; maxStudents?: number; maxResourceFileSizeBytes?: number; monthlyBudgetCentsPerUser?: number; budgetMarginPercent?: number; soulEnabled?: boolean; orchestratorV2Enabled?: boolean; searxngEnabled?: boolean; adaptiveQuizEnabled?: boolean; spacedRepetitionEnabled?: boolean; agentModelBoostEnabled?: boolean };
+type OrgSettings = { name?: string; description?: string; schoolType?: string; timezone?: string; maxStudents?: number; maxResourceFileSizeBytes?: number; monthlyBudgetCentsPerUser?: number; budgetMarginPercent?: number; soulEnabled?: boolean; orchestratorV2Enabled?: boolean; adaptiveQuizEnabled?: boolean; spacedRepetitionEnabled?: boolean; agentModelBoostEnabled?: boolean };
 type OrgSettingsEnvelope = {
   org: OrgSettings;
   openRouterConfigured?: boolean;
@@ -616,11 +616,10 @@ function AdminPageContent() {
 
           <div className="divide-y divide-[var(--border-default)] rounded-xl border border-[var(--border-default)]">
             {[
-              { key: "searxngEnabled", label: "SearXNG web search", text: "Prefer metasearch before model-generated web briefings." },
+              { key: "orchestratorV2Enabled", label: "Orchestrator v2", text: "Use the advanced routing pipeline across chats." },
               { key: "adaptiveQuizEnabled", label: "Adaptive quiz", text: "Adjust quiz difficulty from prior performance." },
               { key: "spacedRepetitionEnabled", label: "Spaced repetition", text: "Keep flashcard scheduling active." },
               { key: "agentModelBoostEnabled", label: "Agent model boost", text: "Allow specialist agents to escalate when needed." },
-              { key: "orchestratorV2Enabled", label: "Orchestrator v2", text: "Use the advanced routing pipeline across chats." },
             ].map((item) => (
               <div key={item.key} className="flex items-center justify-between gap-4 px-4 py-3.5">
                 <div className="min-w-0">

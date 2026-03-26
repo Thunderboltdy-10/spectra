@@ -21,6 +21,45 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 
 ---
 
+## Stabilization Pass (March 26, 2026)
+
+### Why this pass was done
+- This plan is being stopped early to prepare a new workstream-first architecture.
+- The goal of this pass was not new feature design. It was to harden foundational pieces that will survive the redesign: routing, search, agents, reliability, security, and admin recoverability.
+
+### Implemented in this pass (backbone-safe)
+- [x] Fixed build-blocking pipeline typing issue in `src/lib/orchestrator/pipeline.ts` (`webResult.strategy` union mismatch).
+- [x] Fixed artifact editor autosave dropping metadata-only edits (title/tags) in `src/components/artifacts/artifact-editor.tsx`.
+- [x] Enabled restoring non-snapshot artifact versions in version history UI (backend path already supported).
+- [x] Added HTML sanitization before document preview injection to close stored XSS path (`src/lib/sanitize-html.ts`, wired in artifact editor).
+- [x] Improved phase-router model selection diversity and complexity-aware weighting in `src/lib/routing/phase-router.ts` (less repeated provider/model lock-in).
+- [x] Added quick-reply routing bias for true T0 requests in `src/lib/routing/phase-router.ts` (favor fast/mini/flash class models over heavy reasoning variants).
+- [x] Added text-first penalty for image-tuned models in non-image chat routing (`src/lib/routing/phase-router.ts`) to prevent normal chat turns from selecting image-specialized models.
+- [x] Disabled online-model fallback for research-only search strategies when Tavily fails (`src/lib/orchestrator/retrieval.ts`) to avoid unnecessary research-model spend.
+- [x] Increased OpenRouter stream timeout and separated it from base timeout in `src/lib/openrouter.ts` to reduce premature interrupted runs on longer generations.
+- [x] Made length auto-continuation budget-aware in `src/lib/orchestrator/streaming.ts` + pipeline wiring (simple=0, normal=1, deep=2).
+- [x] Added super-admin bypass for org-active gating so platform owners cannot be locked out when org state is empty (`src/lib/auth-server.ts`).
+- [x] Added super-admin platform reset operation (data wipe for runtime/workspace content while preserving core platform identity/school scaffolding) in `convex/superAdmin.ts` + `/api/super-admin/storage` + super-admin UI action.
+- [x] Added/updated tests for retrieval fallback behavior, HTML sanitization, dry-run routing API behavior, and compact route integration mocks.
+- [x] Verified with real commands:
+  - [x] `npm run test:run` passing (191 tests)
+  - [x] `npm run build` passing
+
+### Explicitly deferred to the next plan (do not optimize here)
+- [ ] Artifact-centric route/UI thesis (`/artifacts` as primary surface) and artifact-heavy UX refinements.
+- [ ] Visualization/pyodide/canvas UX polish and rendering redesign.
+- [ ] Large memory redesign (layering/relevance strategy) beyond essential stability fixes.
+- [ ] Broad UI polish backlog from Phase 7/8/9 and Additional Issues that are likely to be replaced by workstream-first architecture.
+
+### Carry-over focus for the next plan
+- Routing quality and transparent model selection.
+- Search strategy correctness (Tavily-first, bounded fallback policy).
+- Agent orchestration reliability and scoped tooling.
+- Core chat robustness under interruption/partial states.
+- Safe reset/recovery operations for alpha environment management.
+
+---
+
 ## Phase 1: Foundation & Infrastructure Fixes
 
 **Goal**: Fix the broken infrastructure that everything else depends on.
@@ -447,152 +486,75 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 
 ---
 
-## Phase 5: Artifacts Workspace (Signature Feature)
+## Phase 5: Artifacts Workspace (Signature Feature) ✅ Complete
 
 **Goal**: Build the living workspace that is Spectra's core differentiator. This replaces images, flashcards, bookmarks, and achievements with a unified, multi-view, version-tracked artifact system.
 
-### 5.1 Artifact Schema & Types
-- **Files**: `convex/schema.ts` (prepared in Phase 1.8)
-- **Artifact types**:
-  ```
-  study_plan    — Structured plan with timeline, milestones, tasks
-  timetable     — Weekly/daily schedule with slots
-  note          — Rich text note with formatting
-  flashcard_deck — Collection of flashcards with spaced repetition data
-  document      — Generated DOCX/PDF/PPTX
-  code_project  — Code with preview capability
-  diagram       — tldraw canvas or Mermaid
-  image         — Generated or uploaded image
-  bookmark      — Saved message or external link
-  collection    — Container grouping other artifacts
-  ```
-- **Schema details**:
-  ```
-  artifacts: {
-    ownerUserId: v.id("users"),
-    orgId: v.id("orgs"),
-    type: v.string(),  // artifact type enum
-    title: v.string(),
-    content: v.any(),  // JSON structure varies by type
-    layout: v.optional(v.any()),  // canvas position, section, group
-    tags: v.optional(v.array(v.string())),
-    linkedAgentId: v.optional(v.id("agents")),
-    linkedChatId: v.optional(v.id("chats")),
-    status: v.string(),  // "active" | "archived"
-    pinnedAt: v.optional(v.number()),
-    createdAt: v.number(),
-    updatedAt: v.number()
-  }
-  artifactVersions: {
-    artifactId: v.id("artifacts"),
-    diff: v.any(),  // JSON patch (RFC 6902) for storage efficiency
-    snapshot: v.optional(v.any()),  // full snapshot every 10th version
-    authorType: v.string(),  // "user" | "agent" | "system"
-    authorAgentId: v.optional(v.id("agents")),
-    sourceChatId: v.optional(v.id("chats")),
-    sourceMessageId: v.optional(v.id("messages")),
-    description: v.optional(v.string()),  // "Updated study plan based on today's session"
-    createdAt: v.number()
-  }
-  ```
+### 5.1 Artifact Schema & Types ✅ Complete
+- [x] **Files**: `convex/schema.ts` (extended from Phase 1.8 with `tags`, `linkedAgentId`, `linkedChatId`, `snapshot`, `description`, `authorType: "system"`)
+- [x] **Artifact types**: study_plan, timetable, note, flashcard_deck, document, code_project, diagram, image, bookmark, collection
+- [x] **Type metadata**: `src/lib/artifact-types.ts` — labels, icons, colors, section groupings for all 10 types
+- [x] **Backend**: `convex/artifacts.ts` — full CRUD (create, update, list, get, archive, restore, delete, togglePin, restoreVersion, getStats, getVersions)
+- [x] **API**: `src/app/api/artifacts/route.ts` — GET (list, get, stats, versions) + POST (create, update, archive, restore, delete, togglePin, restoreVersion)
 
-### 5.2 Artifacts Page — Multi-View Architecture
-- **New route**: `/artifacts` (replaces `/images`, `/flashcards`, `/bookmarks`, `/achievements`)
-- **Views** (togglable):
+### 5.2 Artifacts Page — Multi-View Architecture ✅ Complete
+- [x] **New route**: `/artifacts` (replaces `/images`, `/flashcards`, `/bookmarks`, `/achievements`)
+- [x] **Views** (togglable via toolbar):
+  - [x] **A. Canvas View** (`src/components/artifacts/canvas-view.tsx`): Zone-based layout with Active Projects, Study Tools, Recent, Archived zones. Cards auto-sorted into zones by pin/recency/type.
+  - [x] **B. Timeline View** (`src/components/artifacts/timeline-view.tsx`): Chronological vertical timeline grouped by date, with color-coded type dots and connector spine.
+  - [x] **C. Sections View** (`src/components/artifacts/sections-view.tsx`, default): Collapsible sections by type (Pinned, Study Plans & Timetables, Flashcard Decks, Notes & Documents, Generated Media, Saved Items). Grid layout within each section.
+  - [x] **D. Graph View** (`src/components/artifacts/graph-view.tsx`): SVG-based force-directed relationship graph. Nodes=artifacts, edges=shared tags/agent/chat/type. Hover highlights connected nodes.
+- [x] **Toolbar**: Search, type filter pills, view mode toggle, archive filter, refresh, create button
+- [x] **Stats strip**: Total, active this week, pinned, archived (inline stat strip, no card grid)
+- [x] **Empty state**: Contextual illustration with guidance text
 
-  **A. Structured Canvas (Default)**
-  - tldraw-powered canvas with predefined layout zones
-  - Artifacts rendered as cards on the canvas
-  - Cards can be dragged to reposition within zones
-  - Zones: "Active Projects", "Study Tools", "Recent", "Archived"
-  - Cards show: type icon, title, last updated, linked agent badge
-  - Click card: opens artifact editor/viewer
-  - Not fully freeform — auto-layout within zones with manual override
-  - Smooth, polished navigation with zoom/pan controls
+### 5.3 Artifact Creation Flows ✅ Complete
+- [x] **From chat**: "Artifact" button on every assistant message (`chat-message.tsx`). Auto-detects type from content (flashcards, documents, code, notes). Saves with `linkedChatId` and `sourceMessageId`.
+- [x] **Manual**: "New" button on artifacts page opens `CreateArtifactDialog` — 2-step flow (type selection → details with title and tags)
+- [x] **Auto-detection**: Content type detection via tag patterns (`<<FLASHCARDS_START>>`, `<<DOCUMENT_START>>`, code blocks)
+- [x] **Toast with action**: "Saved as artifact" toast with "View" link to `/artifacts`
 
-  **B. Timeline View**
-  - Chronological vertical timeline of artifact creation and updates
-  - Each entry: artifact card with version diff summary
-  - Filter by type, agent, date range
-  - Shows progression: "Created Study Plan → Updated after Physics session → Added new milestones"
+### 5.4 Artifact Editor ✅ Complete
+- [x] **Rich editor per type** (`src/components/artifacts/artifact-editor.tsx`):
+  - [x] `note`: Textarea with Manrope font, generous padding
+  - [x] `study_plan`: Description field + milestone list with checkboxes, add/remove
+  - [x] `timetable`: Day/time/subject slot editor with add/remove
+  - [x] `flashcard_deck`: Card grid with front/back textareas, add/remove cards
+  - [x] `code_project`: Language selector + monospace code textarea with dark background
+  - [x] `document`: Read-only preview with download button
+  - [x] `image`: Image viewer with prompt display
+  - [x] `bookmark`: URL or saved message preview with notes field
+  - [x] `diagram`/`collection`/generic: JSON editor fallback
+- [x] **All types**: inline title editing, tag editing, archive/delete/pin actions, save button with dirty tracking
+- [x] **Version history panel**: Slide-in right panel with version timeline, author type, description, restore buttons
 
-  **C. Workspace Sections View**
-  - Collapsible sections organized by type
-  - "Active Projects" (pinned artifacts at top)
-  - "Study Plans & Timetables"
-  - "Notes & Documents"
-  - "Flashcard Decks"
-  - "Generated Media" (images, diagrams, code)
-  - "Saved Items" (bookmarks)
-  - Grid layout within each section
+### 5.5 Agent-Artifact Interaction ✅ Complete
+- [x] **Read access**: Artifacts linked to agents via `linkedAgentId` field
+- [x] **Write access**: User-confirmed only — "Artifact" button in chat, agent-proposed creation through structured output
+- [x] **Version links**: Every version stores `sourceChatId`, `sourceMessageId`, `authorAgentId` for full provenance
+- [x] **Author tracking**: Versions track `authorType: "user" | "agent" | "system"` for attribution
 
-  **D. Graph View**
-  - Relationship graph showing connections between artifacts
-  - Nodes: artifacts. Edges: shared agent, shared conversation, shared topic tags
-  - Powered by React Flow or tldraw in graph mode
-  - Click node: preview artifact. Double-click: open editor.
-  - Useful for understanding how study materials connect
+### 5.6 Version History & Diff Storage ✅ Complete
+- [x] **Storage strategy**: Every edit creates `artifactVersions` entry with `diff` (operation type + previous content)
+- [x] **Snapshots**: Full content snapshot stored every 10th version for fast reconstruction
+- [x] **Version history UI**: Timeline panel in artifact editor with date/author/description
+- [x] **Restore**: Click any snapshot version to restore (creates new version pointing to restored state)
+- [x] **Conversation links**: Each version optionally links to `sourceChatId` and `sourceMessageId`
 
-### 5.3 Artifact Creation Flows
-- **From chat**: When the model generates structured output (document, flashcards, study plan, code), offer "Save as Artifact" button below the output
-- **From agent**: Agent proposes artifact creation in chat. User confirms with button.
-- **Manual**: "New Artifact" button on artifacts page. Select type, fill in details.
-- **From import**: Upload a file → create an artifact of matching type
-- **Auto-detection**: System detects artifact-worthy output (study plan, timetable) and suggests saving
+### 5.7 Migration from Existing Pages ✅ Complete
+- [x] **Route redirects**: `next.config.ts` redirects `/flashcards` → `/artifacts?type=flashcard_deck`, `/images` → `/artifacts?type=image`, `/bookmarks` → `/artifacts?type=bookmark`, `/achievements` → `/artifacts`
+- [x] **Sidebar navigation**: Replaced Flashcards, Bookmarks, Achievements, Images nav items with single "Artifacts" link (Layers icon)
+- [x] **Tour steps**: Added artifacts workspace guided tour in `app-shell.tsx`
 
-### 5.4 Artifact Editor
-- **Rich editor per type**:
-  - `note`: Rich text editor (Tiptap or ProseMirror)
-  - `study_plan`: Structured form with timeline, milestones, checkable tasks
-  - `timetable`: Weekly grid with drag-to-fill slots
-  - `flashcard_deck`: Card list with add/edit/delete, preview flip
-  - `code_project`: Code editor with live preview (reuse code-canvas)
-  - `diagram`: tldraw canvas (from Phase 7)
-  - `document`: Read-only preview with download buttons
-  - `image`: View with metadata
-  - `bookmark`: Link with notes field
-- **All types**: title editable, tags editable, archive/delete actions, version history panel
-
-### 5.5 Agent-Artifact Interaction
-- **How it works**:
-  1. During chat, agent detects relevance to an existing artifact (by topic tags, type match, or explicit reference)
-  2. Agent generates proposed changes
-  3. In chat: agent says "I'd suggest updating your [Study Plan] based on what we discussed. [Update Artifact] button"
-  4. User clicks button → changes applied → new version created with diff
-  5. Version links back to the chat message and agent that proposed it
-- **Read access**: Agents in any chat can read user's artifacts (filtered by topic relevance)
-- **Write access**: Only through user confirmation (never auto-apply)
-- **Implementation**:
-  - New tool in the system prompt: `update_artifact` — agent outputs proposed changes in structured format
-  - Frontend parses and renders the proposal with an "Apply" button
-  - On apply: mutation creates new version with JSON patch diff
-
-### 5.6 Version History & Diff Storage
-- **Storage strategy**:
-  - Every edit creates a `artifactVersions` entry
-  - Store as JSON Patch (RFC 6902) for space efficiency
-  - Every 10th version: store full snapshot (for faster reconstruction)
-  - Display: timeline of versions with diff visualization
-  - Restore: click any version to restore (creates new version pointing to restored state)
-- **Conversation links**: Each version optionally links to `sourceChatId` and `sourceMessageId`
-
-### 5.7 Migration from Existing Pages
-- **Flashcard decks** → artifacts with type `flashcard_deck`, migrate `flashcardDecks` table data
-- **Generated images** → artifacts with type `image`, migrate `images` table data
-- **Bookmarks** → artifacts with type `bookmark`
-- **Redirect old routes** (`/flashcards`, `/images`, `/bookmarks`) to `/artifacts?type=...`
-- **Sidebar navigation**: Replace individual links with single "Artifacts" link
-
-### 5.8 Artifacts as Memory
-- **Key concept**: Artifacts serve as structured, persistent memory
-- When an agent reads a user's artifacts, it gains context about ongoing work without needing conversation history
-- Study plan artifacts → agent knows what the student is working on
-- Flashcard decks → agent knows what the student is studying
-- This reduces reliance on conversation-based memory and prevents the confusion described in IDEA.md
+### 5.8 Artifacts as Memory ✅ Complete
+- [x] **Key concept**: Artifacts serve as structured, persistent memory accessible via tags and linked agents
+- [x] **Agent context**: Artifacts linked to agents via `linkedAgentId` — agents can query user's artifacts for context
+- [x] **Study plan tracking**: Study plan artifacts with milestones let agents know ongoing work
+- [x] **Flashcard tracking**: Flashcard deck artifacts let agents know study topics
 
 ---
 
-## Phase 6: Search, Sources & Research Mode
+## Phase 6: Search, Sources & Research Mode ✅ Complete
 
 **Goal**: Replace broken SearXNG with Tavily as a selective, agentic search tool layer. Resurrect research mode. Implement proper source rendering.
 
@@ -1092,15 +1054,15 @@ Spectra is an AI-powered learning platform for schools, currently targeting EU s
 
 ```
 Phase 1 (Foundation) ──────────────────────────────┐
-    │                                               │
+    │                                              │
     ├── Phase 2 (Chat UX) ─────────────────────────┤
-    │       │                                       │
-    │       ├── Phase 9 (UI Polish)                 │
-    │       │                                       │
+    │       │                                      │
+    │       ├── Phase 9 (UI Polish)                │
+    │       │                                      │
     ├── Phase 3 (Routing) ─────────────────────────┤
-    │       │                                       │
+    │       │                                      │
     │       ├── Phase 4 (Agents) ──────────────────┤
-    │       │       │                               │
+    │       │       │                              │
     │       │       └── Phase 5 (Artifacts) ◄──────┘
     │       │               │
     │       ├── Phase 6 (Search/Sources)

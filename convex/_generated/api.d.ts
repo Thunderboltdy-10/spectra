@@ -12,6 +12,7 @@ import type * as accessRequests from "../accessRequests.js";
 import type * as admin from "../admin.js";
 import type * as agents from "../agents.js";
 import type * as analytics from "../analytics.js";
+import type * as artifacts from "../artifacts.js";
 import type * as auditLog from "../auditLog.js";
 import type * as bookmarks from "../bookmarks.js";
 import type * as catalogSync from "../catalogSync.js";
@@ -57,6 +58,7 @@ declare const fullApi: ApiFromModules<{
   admin: typeof admin;
   agents: typeof agents;
   analytics: typeof analytics;
+  artifacts: typeof artifacts;
   auditLog: typeof auditLog;
   bookmarks: typeof bookmarks;
   catalogSync: typeof catalogSync;

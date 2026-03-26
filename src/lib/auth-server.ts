@@ -176,7 +176,9 @@ export async function requireActor(): Promise<SessionActor> {
       }
     }
 
-    await assertActiveOrgAccess(userId);
+    if (!isSuperAdminEmail(current.email)) {
+      await assertActiveOrgAccess(userId);
+    }
 
     return {
       clerkId: userId,
@@ -233,7 +235,9 @@ export async function requireActor(): Promise<SessionActor> {
     });
 
     if (provisioned) {
-      await assertActiveOrgAccess(userId);
+      if (!isSuperAdminEmail(provisioned.email)) {
+        await assertActiveOrgAccess(userId);
+      }
       return {
         clerkId: userId,
         email: provisioned.email,

@@ -35,7 +35,7 @@ export type RecentContextSnapshot = {
       resourceId?: string;
       filename: string;
       page?: number;
-      sourceType: "pack" | "personal";
+      sourceType: "pack" | "personal" | "agent";
       text: string;
       score?: number;
     }>;
@@ -62,7 +62,7 @@ export type RecentContextSnapshot = {
       domain: string;
       snippet?: string;
     }>;
-    provider: "searxng" | "model_fallback" | "disabled" | "error";
+    provider: "tavily" | "model_fallback" | "disabled" | "error";
   };
   clarification: ClarificationBlock;
 };
@@ -405,7 +405,7 @@ export function buildRecentContextSnapshot(params: {
       resourceId?: string;
       filename: string;
       page?: number;
-      sourceType: "pack" | "personal";
+      sourceType: "pack" | "personal" | "agent";
       text: string;
       score?: number;
     }>;
@@ -432,7 +432,7 @@ export function buildRecentContextSnapshot(params: {
       domain: string;
       snippet?: string;
     }>;
-    provider: "searxng" | "model_fallback" | "disabled" | "error";
+    provider: "tavily" | "model_fallback" | "disabled" | "error";
   };
   clarification: ClarificationBlock;
   now?: number;

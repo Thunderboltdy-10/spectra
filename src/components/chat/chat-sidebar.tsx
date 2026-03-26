@@ -16,6 +16,7 @@ import {
   FileText,
   Flame,
   ImagePlus,
+  Layers,
   LayoutDashboard,
   Loader2,
   MessageSquare,
@@ -59,9 +60,7 @@ const EMPTY_PINNED_IDS = new Set<string>();
 
 const BASE_PRIMARY_NAV_ITEMS = [
   { href: "/chat", label: "Chat", icon: Sparkles },
-  { href: "/flashcards", label: "Flashcards", icon: BookOpen },
-  { href: "/bookmarks", label: "Bookmarks", icon: Bookmark },
-  { href: "/achievements", label: "Achievements", icon: Trophy },
+  { href: "/artifacts", label: "Artifacts", icon: Layers },
   { href: "/agents", label: "Agents", icon: Bot },
 ];
 
@@ -237,7 +236,6 @@ export function ChatSidebar({
   const primaryNavItems = BASE_PRIMARY_NAV_ITEMS;
   const secondaryNavItems = [
     { href: "/models", label: "Models", icon: Compass },
-    { href: "/images", label: "Images", icon: ImagePlus },
     { href: "/analytics", label: "Analytics", icon: BarChart3 },
     ...(canAccessAdminConsole || canAccessSchoolAdmin ? [{ href: "/admin", label: "Admin", icon: LayoutDashboard }] : []),
     ...(isSuperAdmin

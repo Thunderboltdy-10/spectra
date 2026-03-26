@@ -77,6 +77,7 @@ export const vScope = v.union(
 export const vSourceType = v.union(
   v.literal("pack"),
   v.literal("personal"),
+  v.literal("agent"),
   v.literal("general"),
   v.literal("search"),
 );
@@ -91,6 +92,13 @@ export const vCitation = v.object({
   domain: v.optional(v.string()),
   resourceId: v.optional(v.id("resources")),
   snippet: v.optional(v.string()),
+  relevanceScore: v.optional(v.number()),
+  inlinePositions: v.optional(v.array(v.number())),
+  reliabilityScore: v.optional(v.number()),
+  reliabilityLabel: v.optional(v.union(v.literal("high"), v.literal("medium"), v.literal("low"))),
+  reliabilityReason: v.optional(v.string()),
+  publishedDate: v.optional(v.string()),
+  favicon: v.optional(v.string()),
 });
 
 /** Route trace JSON blob validator */

@@ -85,7 +85,7 @@ describe("recent context cache", () => {
             snippet: "snippet",
           },
         ],
-        provider: "searxng",
+        provider: "tavily",
       },
       clarification: {
         context: "Need clarification",
@@ -107,7 +107,7 @@ describe("recent context cache", () => {
     });
 
     expect(parsed).not.toBeNull();
-    expect(parsed?.search.provider).toBe("searxng");
+    expect(parsed?.search.provider).toBe("tavily");
     expect(parsed?.retrieval.citations.length).toBe(1);
   });
 

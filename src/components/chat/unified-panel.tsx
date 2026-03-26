@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Bot, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Loader2, RotateCcw, X, XCircle, FileText, Milestone } from "lucide-react";
+import { Bot, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, FileText, Globe2, Link2, Loader2, Milestone, RotateCcw, ShieldAlert, ShieldCheck, X, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ProviderLogo } from "@/components/provider-logo";
 import { Switch } from "@/components/ui/switch";
@@ -285,14 +285,12 @@ export function SettingsView({
   onRetryResource,
   onUploadPersonalFiles,
 }: SettingsViewProps) {
-  const [searxngEnabled, setSearxngEnabled] = useState(true);
   const [documentModeEnabled, setDocumentModeEnabled] = useState(true);
   const [multiAgentVerbose, setMultiAgentVerbose] = useState(false);
   const [showSpecialists, setShowSpecialists] = useState(true);
 
   useEffect(() => {
     try {
-      setSearxngEnabled(window.localStorage.getItem("ai-school:searxng-enabled") !== "0");
       setDocumentModeEnabled(window.localStorage.getItem("ai-school:document-mode-enabled") !== "0");
       setMultiAgentVerbose(window.localStorage.getItem("ai-school:multi-agent-verbose") === "1");
       setShowSpecialists(window.localStorage.getItem("ai-school:show-specialists") !== "0");
@@ -399,10 +397,12 @@ export function SettingsView({
             </div>
             <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
               <div>
-                <p className="text-sm">SearXNG web search</p>
-                <p className="text-xs text-[var(--text-secondary)]">Prefer open metasearch before model-generated search</p>
+                <p className="text-sm">Tavily web research</p>
+                <p className="text-xs text-[var(--text-secondary)]">Search is applied selectively for time-sensitive and research requests.</p>
               </div>
-              <Switch checked={searxngEnabled} onCheckedChange={(value) => persistToggle("ai-school:searxng-enabled", value, setSearxngEnabled)} />
+              <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                Auto
+              </span>
             </div>
 
             <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
@@ -586,6 +586,24 @@ function RouteTraceView({ trace, showCostDetails = false }: { trace?: RouteTrace
   if (!trace) {
     return <p className="text-sm text-[var(--text-secondary)]">No route trace available.</p>;
   }
+  const searchTrace = trace.searchTrace;
+  const strategyLabelMap: Record<string, string> = {
+    none: "None",
+    search: "Search",
+    search_extract: "Search + Extract",
+    extract_url: "Extract URL",
+    crawl: "Crawl",
+    research: "Research",
+  };
+  const triggerLabelMap: Record<string, { label: string; origin: string }> = {
+    none: { label: "None", origin: "not triggered" },
+    time_sensitive: { label: "Time-sensitive query", origin: "heuristic" },
+    explicit_search: { label: "Explicit web-search request", origin: "user request" },
+    research_mode: { label: "Research mode", origin: "mode selection" },
+    deep_research: { label: "Deep research request", origin: "user request" },
+    read_url: { label: "Read URL request", origin: "user request" },
+    crawl_request: { label: "Crawl request", origin: "user request" },
+  };
 
   return (
     <div className="w-full space-y-5">
@@ -609,6 +627,101 @@ function RouteTraceView({ trace, showCostDetails = false }: { trace?: RouteTrace
           ))}
         </div>
       </section>
+
+      {searchTrace ? (
+        <section>
+          <h4 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Search Trace</h4>
+          <div className="grid gap-2">
+            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2.5">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Provider</p>
+              <p className="text-sm capitalize text-[var(--text-primary)]">{searchTrace.provider ?? "unknown"}</p>
+            </div>
+            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2.5">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Tool Strategy</p>
+              <p className="text-sm text-[var(--text-primary)]">{strategyLabelMap[searchTrace.strategy ?? "none"] ?? searchTrace.strategy ?? "—"}</p>
+            </div>
+            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2.5">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Trigger</p>
+              <p className="text-sm text-[var(--text-primary)]">
+                {triggerLabelMap[searchTrace.triggeredBy ?? "none"]?.label ?? searchTrace.triggeredBy ?? "—"}
+              </p>
+              <p className="text-[11px] text-[var(--text-secondary)]">
+                Origin: {triggerLabelMap[searchTrace.triggeredBy ?? "none"]?.origin ?? "unknown"}
+              </p>
+            </div>
+            {typeof searchTrace.costCredits === "number" ? (
+              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2.5">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Search Cost</p>
+                <p className="text-sm text-[var(--text-primary)]">{searchTrace.costCredits.toFixed(2)} credits</p>
+              </div>
+            ) : null}
+            {searchTrace.fallbackReason ? (
+              <div className="rounded-xl border border-[color-mix(in_oklab,var(--warning)_38%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_10%,transparent)] p-2.5">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--warning)]">Fallback reason</p>
+                <p className="text-xs text-[var(--text-secondary)]">{searchTrace.fallbackReason}</p>
+              </div>
+            ) : null}
+          </div>
+          {searchTrace.operations && searchTrace.operations.length > 0 ? (
+            <ol className="mt-3 space-y-2">
+              {searchTrace.operations.map((operation, index) => {
+                const StatusIcon = operation.status === "completed"
+                  ? ShieldCheck
+                  : operation.status === "failed"
+                    ? ShieldAlert
+                    : Milestone;
+                return (
+                  <li
+                    key={`${operation.tool}-${index}`}
+                    className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--text-primary)]">
+                        <StatusIcon className="h-3.5 w-3.5" />
+                        {operation.tool}
+                      </span>
+                      <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                        {operation.status}
+                      </span>
+                    </div>
+                    {operation.query ? (
+                      <p className="mt-1 break-words font-mono text-[11px] text-[var(--text-secondary)]">Query: {operation.query}</p>
+                    ) : null}
+                    {typeof operation.resultCount === "number" ? (
+                      <p className="mt-1 text-xs text-[var(--text-secondary)]">Results: {operation.resultCount}</p>
+                    ) : null}
+                    {Array.isArray(operation.selectedUrls) && operation.selectedUrls.length > 0 ? (
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {operation.selectedUrls.slice(0, 6).map((url) => (
+                          <a
+                            key={`${operation.tool}:${url}`}
+                            href={url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex max-w-full items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+                          >
+                            <Link2 className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{url}</span>
+                          </a>
+                        ))}
+                      </div>
+                    ) : null}
+                    {(typeof operation.costCredits === "number" || typeof operation.durationMs === "number") ? (
+                      <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+                        {typeof operation.costCredits === "number" ? `Cost ${operation.costCredits.toFixed(2)} credits` : "Cost n/a"}
+                        {typeof operation.durationMs === "number" ? ` • ${(operation.durationMs / 1000).toFixed(2)}s` : ""}
+                      </p>
+                    ) : null}
+                    {operation.reason ? (
+                      <p className="mt-1 text-[11px] text-[var(--text-secondary)]">{operation.reason}</p>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ol>
+          ) : null}
+        </section>
+      ) : null}
 
       <section>
         <h4 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Candidates</h4>
@@ -735,7 +848,7 @@ function phaseLabelForId(id: string) {
   const labels: Record<string, string> = {
     routing: "Plan route",
     retrieval: "Use your files",
-    search: "Check live sources",
+    search: "Check web sources",
     planning: "Split work",
     analysis: "Analyze",
     authoring: "Draft response",
@@ -948,64 +1061,195 @@ function hrefForCitation(citation: Citation) {
   return undefined;
 }
 
+function citationDomain(citation: Citation) {
+  if (citation.domain) return citation.domain;
+  if (!citation.url) return undefined;
+  try {
+    return new URL(citation.url).hostname.replace(/^www\./i, "");
+  } catch {
+    return undefined;
+  }
+}
+
+function citationReliabilityTone(label?: Citation["reliabilityLabel"]) {
+  if (label === "high") {
+    return "border-[color-mix(in_oklab,var(--success)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_10%,transparent)] text-[var(--success)]";
+  }
+  if (label === "low") {
+    return "border-[color-mix(in_oklab,var(--warning)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_10%,transparent)] text-[var(--warning)]";
+  }
+  return "border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)]";
+}
+
+function formatCitationDate(value?: string) {
+  if (!value) return undefined;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString();
+}
+
 function SourcesView({ citations }: { citations: Citation[] }) {
   if (citations.length === 0) {
     return <p className="text-sm text-[var(--text-secondary)]">No sources available for this response.</p>;
   }
 
+  const groups = [
+    {
+      id: "web",
+      label: "Web Sources",
+      Icon: Globe2,
+      items: citations
+        .map((citation, index) => ({ citation, index }))
+        .filter((entry) => entry.citation.sourceType === "search"),
+    },
+    {
+      id: "files",
+      label: "From Your Files",
+      Icon: FileText,
+      items: citations
+        .map((citation, index) => ({ citation, index }))
+        .filter((entry) =>
+          entry.citation.sourceType === "pack"
+          || entry.citation.sourceType === "personal"
+          || entry.citation.sourceType === "general"),
+    },
+    {
+      id: "agent",
+      label: "From Agent Resources",
+      Icon: Bot,
+      items: citations
+        .map((citation, index) => ({ citation, index }))
+        .filter((entry) => entry.citation.sourceType === "agent"),
+    },
+  ].filter((group) => group.items.length > 0);
+
   return (
-    <div className="space-y-3">
-      <div className="mb-1 flex items-center justify-between">
-        <p className="text-sm font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Sources</p>
-        <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">{citations.length}</span>
+    <div className="space-y-4">
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <p className="text-sm font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Sources</p>
+          <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+            {citations.length}
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {groups.map((group) => (
+            <span
+              key={group.id}
+              className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]"
+            >
+              <group.Icon className="h-3 w-3" />
+              {group.label} {group.items.length}
+            </span>
+          ))}
+        </div>
       </div>
-      {citations.map((citation, index) => {
-        const href = hrefForCitation(citation);
-        const isSearch = citation.sourceType === "search";
-        const label = citation.title || citation.filename;
+      {groups.map((group) => (
+        <section key={group.id} className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+          <p className="mb-2 inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">
+            <group.Icon className="h-3.5 w-3.5" />
+            {group.label}
+          </p>
+          <div className="space-y-2">
+            {group.items.map(({ citation, index }) => {
+              const href = hrefForCitation(citation);
+              const label = citation.title || citation.filename || citation.url || "Source";
+              const domain = citationDomain(citation);
+              const relevancePercent = typeof citation.relevanceScore === "number"
+                ? Math.max(6, Math.min(100, Math.round(citation.relevanceScore * 100)))
+                : null;
+              const publishedDate = formatCitationDate(citation.publishedDate);
+              return (
+                <article
+                  key={`${group.id}:${citation.url ?? citation.resourceId ?? citation.filename}:${index}`}
+                  className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2.5"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex min-w-0 items-start gap-2">
+                      {citation.favicon ? (
+                        <img
+                          src={citation.favicon}
+                          alt=""
+                          className="h-4 w-4 shrink-0 rounded border border-[var(--border-default)] bg-[var(--bg-primary)] object-cover"
+                        />
+                      ) : (
+                        <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-secondary)]">
+                          <group.Icon className="h-2.5 w-2.5" />
+                        </span>
+                      )}
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-semibold text-[var(--text-primary)]">
+                          [{index + 1}] {label}
+                        </p>
+                        <p className="truncate text-[10px] text-[var(--text-secondary)]">
+                          {domain || citation.filename}
+                        </p>
+                      </div>
+                    </div>
+                    {href ? (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-md border border-[var(--border-default)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+                      >
+                        <Link2 className="h-3 w-3" />
+                        {citation.url ? "Open" : "Download"}
+                      </a>
+                    ) : null}
+                  </div>
 
-        return (
-          <article
-            key={`${citation.filename}-${index}`}
-            className="min-h-[9.25rem] rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-3"
-          >
-            <div className="flex items-start justify-between gap-2">
-              <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-[var(--text-secondary)]">
-                {isSearch ? <Milestone className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
-                <span className="truncate uppercase tracking-[0.08em]">Source {index + 1} · {citation.sourceType}</span>
-              </span>
-              <div className="flex items-center gap-1.5">
-                {citation.page ? (
-                  <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] uppercase tracking-[0.06em]">
-                    Page {citation.page}
-                  </span>
-                ) : null}
-                {href ? (
-                  <a
-                    href={href}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex cursor-pointer rounded-md border border-[var(--border-default)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
-                  >
-                    {citation.url ? "Open" : "Download"}
-                  </a>
-                ) : null}
-              </div>
-            </div>
+                  {citation.snippet ? (
+                    <div className="mt-1.5 rounded-md bg-[var(--bg-primary)] px-2 py-1.5">
+                      <RichText content={citation.snippet} className="text-[11px] leading-relaxed text-[var(--text-secondary)]" />
+                    </div>
+                  ) : null}
 
-            <p className="mt-2 break-words text-sm font-semibold text-[var(--text-primary)]">{label}</p>
-            {isSearch && citation.domain ? <p className="mt-1 break-all text-xs text-[var(--text-secondary)]">{citation.domain}</p> : null}
+                  {relevancePercent !== null ? (
+                    <div className="mt-1.5">
+                      <div className="mb-1 flex items-center justify-between text-[10px] text-[var(--text-secondary)]">
+                        <span>Relevance</span>
+                        <span>{citation.relevanceScore?.toFixed(2)}</span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-[var(--bg-primary)]">
+                        <div className="h-full rounded-full bg-[var(--accent-cyan)]" style={{ width: `${relevancePercent}%` }} />
+                      </div>
+                    </div>
+                  ) : null}
 
-            <div className="mt-2 min-h-[4.5rem] rounded-md bg-[var(--bg-secondary)] px-2.5 py-2">
-              {citation.snippet ? (
-                <RichText content={citation.snippet} className="text-xs leading-relaxed text-[var(--text-secondary)]" />
-              ) : (
-                <p className="text-xs leading-relaxed text-[var(--text-secondary)]">No preview snippet available.</p>
-              )}
-            </div>
-          </article>
-        );
-      })}
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {citation.reliabilityLabel ? (
+                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] capitalize ${citationReliabilityTone(citation.reliabilityLabel)}`}>
+                        {citation.reliabilityLabel} reliability
+                      </span>
+                    ) : null}
+                    {citation.reliabilityReason ? (
+                      <span className="inline-flex rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]">
+                        {citation.reliabilityReason}
+                      </span>
+                    ) : null}
+                    {publishedDate ? (
+                      <span className="inline-flex rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]">
+                        Published {publishedDate}
+                      </span>
+                    ) : null}
+                    {citation.page ? (
+                      <span className="inline-flex rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]">
+                        Page {citation.page}
+                      </span>
+                    ) : null}
+                    {Array.isArray(citation.inlinePositions) && citation.inlinePositions.length > 0 ? (
+                      <span className="inline-flex rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]">
+                        Inline mentions {citation.inlinePositions.length}
+                      </span>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }
@@ -1207,6 +1451,8 @@ export function UnifiedPanel({ settingsProps, orchestrationProps, canvasProps }:
       ? 460
       : currentView === "canvas"
         ? 1100
+      : currentView === "sources"
+        ? 560
       : currentView === "route-trace"
         ? 500
         : currentView === "settings"
@@ -1254,7 +1500,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps, canvasProps }:
   const titles: Record<string, { subtitle: string; title: string }> = {
     settings: { subtitle: "Configuration", title: "Chat Settings" },
     "route-trace": { subtitle: "Route Trace", title: "Model Decision Timeline" },
-    sources: { subtitle: "Sources", title: "Citation Details" },
+    sources: { subtitle: "Sources", title: "Source Intelligence" },
     orchestration: { subtitle: "Orchestrator", title: "Live Progress" },
     quiz: { subtitle: "Quiz", title: "Quiz Review" },
     canvas: { subtitle: "Canvas", title: "Artifact Workspace" },

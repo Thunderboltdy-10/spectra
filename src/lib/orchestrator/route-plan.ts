@@ -38,6 +38,48 @@ function isExplicitSearchRequest(message: string) {
   return /\b(search (the )?web|look up online|find online|browse the web|web search|check online|verify online|use current sources|cite sources)\b/i.test(message);
 }
 
+function extractFirstUrl(message: string) {
+  const match = message.match(/https?:\/\/[^\s)\]>"']+/i);
+  const url = match?.[0]?.trim();
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return undefined;
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function isExplicitReadUrlRequest(message: string) {
+  return /\b(read|summari[sz]e|analy[sz]e|review|extract|use)\b.{0,24}\b(url|link|page|source|website|site)\b/i.test(message);
+}
+
+function isExplicitCrawlRequest(message: string) {
+  return /\b(crawl|map|scan|explore)\b.{0,28}\b(site|website|domain|url|link)\b/i.test(message);
+}
+
+function isDeepResearchRequest(message: string) {
+  return /\b(deep research|research this thoroughly|comprehensive research|exhaustive research|thorough investigation|literature review)\b/i.test(message);
+}
+
+function buildResearchSubqueries(message: string) {
+  const cleaned = message
+    .replace(/\b(research|investigate|analy[sz]e|compare|evaluate|deep dive|thoroughly)\b/gi, " ")
+    .replace(/[?]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return [];
+  const parts = cleaned
+    .split(/\b(?: and | vs\.?| versus |,|;| also | plus )\b/i)
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 8);
+  if (parts.length > 0) {
+    return parts.slice(0, 3);
+  }
+  return [cleaned].slice(0, 3);
+}
+
 function isTimeSensitiveMessage(message: string) {
   const normalized = message.toLowerCase();
   if (/\b(current ratio|current account|electrical current|current flow)\b/i.test(normalized)) {
@@ -190,18 +232,91 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
   const agentContract = buildAgentContract(params);
   const timeSensitive = isTimeSensitiveMessage(params.message);
   const explicitSearchRequest = isExplicitSearchRequest(params.message);
+  const requestedUrl = extractFirstUrl(params.message);
+  const explicitReadUrlRequest = Boolean(requestedUrl && isExplicitReadUrlRequest(params.message));
+  const explicitCrawlRequest = Boolean(requestedUrl && isExplicitCrawlRequest(params.message));
+  const deepResearchRequest = isDeepResearchRequest(params.message);
+  const evidenceHeavyResearchPrompt = /\b(citation|citations|source|sources|evidence|paper|papers|study|studies|journal|dataset|report|reports|statistics|statistical)\b/i.test(lowerMessage);
   const personalTask = isPersonalMessage(params.message);
   const artifactRequest = isArtifactRequest(params.mode, params.message);
   const requestedArtifactFormats = artifactRequest ? detectRequestedArtifactFormats(params.message) : [];
   const studyMode = params.mode === "quiz" || params.mode === "flashcard" || params.mode === "tutor";
   const multimodal = params.hasAttachments;
   const shouldUseSchoolResources = params.hasPack || params.hasAgentResources || /upload|attached|file|notes|resource|chapter|pack/i.test(lowerMessage);
-  const researchNeedsSearch = params.mode === "research" && !shouldUseSchoolResources && params.complexity !== "simple";
+  const researchNeedsSearch =
+    params.mode === "research"
+    && (
+      explicitSearchRequest
+      || explicitReadUrlRequest
+      || explicitCrawlRequest
+      || deepResearchRequest
+      || timeSensitive
+      || evidenceHeavyResearchPrompt
+      || params.complexity === "complex"
+      || (params.autoSearchEnabled && params.complexity !== "simple")
+    );
+  const simpleFactSearch = (explicitSearchRequest || timeSensitive) && params.complexity === "simple";
   const shouldUseWebSearch =
-    explicitSearchRequest
-    || timeSensitive
-    || (params.autoSearchEnabled && (timeSensitive || researchNeedsSearch))
-    || researchNeedsSearch;
+    explicitReadUrlRequest
+    || explicitCrawlRequest
+    || deepResearchRequest
+    || explicitSearchRequest
+    || researchNeedsSearch
+    || (params.autoSearchEnabled && timeSensitive);
+  const searchPlan = (() => {
+    if (!shouldUseWebSearch) {
+      return {
+        strategy: "none" as const,
+        trigger: "none" as const,
+      };
+    }
+    if (explicitCrawlRequest && requestedUrl) {
+      return {
+        strategy: "crawl" as const,
+        trigger: "crawl_request" as const,
+        query: params.message,
+        targetUrl: requestedUrl,
+        maxResults: 8,
+        maxExtractResults: 0,
+      };
+    }
+    if (explicitReadUrlRequest && requestedUrl) {
+      return {
+        strategy: "extract_url" as const,
+        trigger: "read_url" as const,
+        query: params.message,
+        targetUrl: requestedUrl,
+        maxResults: 1,
+        maxExtractResults: 1,
+      };
+    }
+    if (deepResearchRequest) {
+      return {
+        strategy: "research" as const,
+        trigger: "deep_research" as const,
+        query: params.message,
+        maxResults: 8,
+        maxExtractResults: 3,
+      };
+    }
+    if (params.mode === "research") {
+      return {
+        strategy: "search_extract" as const,
+        trigger: "research_mode" as const,
+        query: params.message,
+        maxResults: 8,
+        maxExtractResults: params.complexity === "complex" ? 3 : 2,
+        subqueries: buildResearchSubqueries(params.message),
+      };
+    }
+    return {
+      strategy: "search" as const,
+      trigger: explicitSearchRequest ? "explicit_search" as const : "time_sensitive" as const,
+      query: params.message,
+      maxResults: simpleFactSearch ? 3 : 5,
+      maxExtractResults: 1,
+    };
+  })();
   const responseBudget =
     params.complexity === "complex" || artifactRequest
       ? "deep"
@@ -292,5 +407,6 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
       requestedModelPhrase,
       requestedOrchestration,
     },
+    searchPlan,
   };
 }

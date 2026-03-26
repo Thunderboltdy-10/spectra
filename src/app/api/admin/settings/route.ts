@@ -36,7 +36,6 @@ export async function PATCH(request: NextRequest) {
       maxStudents?: number;
       maxResourceFileSizeBytes?: number;
       orchestratorV2Enabled?: boolean;
-      searxngEnabled?: boolean;
       soulEnabled?: boolean;
       agentModelBoostEnabled?: boolean;
       adaptiveQuizEnabled?: boolean;
@@ -63,7 +62,6 @@ export async function PATCH(request: NextRequest) {
       maxStudents: safeNumber(body.maxStudents),
       maxResourceFileSizeBytes: safeNumber(body.maxResourceFileSizeBytes),
       orchestratorV2Enabled: body.orchestratorV2Enabled,
-      searxngEnabled: body.searxngEnabled,
       soulEnabled: body.soulEnabled,
       agentModelBoostEnabled: body.agentModelBoostEnabled,
       adaptiveQuizEnabled: body.adaptiveQuizEnabled,

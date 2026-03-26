@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
-import { Check, Copy, ExternalLink } from "lucide-react";
+import { Check, Copy, ExternalLink, Globe2 } from "lucide-react";
 
 import { QuizReveal, isQuizContent, type QuizSubmitResult } from "@/components/chat/quiz-reveal";
 import { FlashcardReveal, isFlashcardContent } from "@/components/chat/flashcard-reveal";
@@ -195,6 +195,26 @@ function sanitizeImageSrc(value: string | undefined) {
   return sanitizeLinkHref(trimmed);
 }
 
+function displayCitationDomain(citation: Citation) {
+  if (citation.domain) return citation.domain;
+  if (!citation.url) return undefined;
+  try {
+    return new URL(citation.url).hostname.replace(/^www\./i, "");
+  } catch {
+    return undefined;
+  }
+}
+
+function reliabilityTone(label: Citation["reliabilityLabel"]) {
+  if (label === "high") {
+    return "border-[color-mix(in_oklab,var(--success)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_10%,transparent)] text-[var(--success)]";
+  }
+  if (label === "low") {
+    return "border-[color-mix(in_oklab,var(--warning)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_10%,transparent)] text-[var(--warning)]";
+  }
+  return "border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)]";
+}
+
 function normalizeCitationToken(value: string) {
   return value
     .toLowerCase()
@@ -350,11 +370,16 @@ export function MarkdownRenderer({
             const textValue = (Array.isArray(children) ? children : [children])
               .map((item) => (typeof item === "string" ? item : ""))
               .join("");
-            const isCitationRef = /^\[\d+\]$/.test(textValue.trim());
+            const citationMatch = textValue.trim().match(/^\[?(\d+)\]?$/);
+            const isCitationRef = Boolean(citationMatch);
             if (isCitationRef) {
-              const citationIndex = Number.parseInt(textValue.replace(/[[\]]/g, ""), 10) - 1;
+              const citationNumber = Number.parseInt(citationMatch?.[1] ?? "", 10);
+              const citationIndex = citationNumber - 1;
               const href = sanitizeLinkHref(props.href) ?? "";
               const isDeadAnchor = !href || href.startsWith("#source-");
+              const citation = citationIndex >= 0 ? citations[citationIndex] : undefined;
+              const citationDomain = citation ? displayCitationDomain(citation) : undefined;
+              const citationTitle = citation?.title || citation?.filename || citationDomain || `Source ${citationIndex + 1}`;
               const handleClick = (e: React.MouseEvent) => {
                 if (isDeadAnchor && onCitationClick) {
                   e.preventDefault();
@@ -362,26 +387,55 @@ export function MarkdownRenderer({
                 }
               };
               return (
-                <sup>
+                <sup className="group relative mx-0.5 align-super">
                   <a
                     {...props}
                     href={isDeadAnchor ? undefined : href}
                     target={isDeadAnchor ? undefined : "_blank"}
                     rel={isDeadAnchor ? undefined : "noreferrer"}
                     onClick={handleClick}
-                    title={
-                      citationIndex >= 0 && citations[citationIndex]
-                        ? `${citations[citationIndex].title || citations[citationIndex].filename}${
-                            citations[citationIndex].snippet
-                              ? ` — ${citations[citationIndex].snippet.slice(0, 140)}`
-                              : ""
-                          }`
-                        : undefined
-                    }
-                    className="mx-0.5 inline-flex cursor-pointer items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 py-0 text-[10px] font-medium text-[var(--accent-cyan)] no-underline transition hover:bg-[var(--bg-hover)]"
+                    className="inline-flex h-4 min-w-4 cursor-pointer items-center justify-center rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,var(--bg-secondary))] px-1 text-[9px] font-semibold leading-none text-[var(--accent-cyan)] no-underline transition hover:bg-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--bg-secondary))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cyan)]/40"
                   >
-                    {citationIndex >= 0 ? `S${citationIndex + 1}` : children}
+                    {citationIndex >= 0 ? citationNumber : children}
                   </a>
+                  {citation ? (
+                    <span className="pointer-events-none absolute bottom-[130%] left-1/2 z-20 hidden w-[min(24rem,80vw)] -translate-x-1/2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 text-left opacity-0 shadow-[var(--shadow-card)] transition group-hover:block group-hover:opacity-100 group-focus-within:block group-focus-within:opacity-100">
+                      <span className="mb-1 inline-flex w-full items-center gap-2 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                        {citation.favicon ? (
+                          <img
+                            src={citation.favicon}
+                            alt=""
+                            className="h-4 w-4 rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] object-cover"
+                          />
+                        ) : (
+                          <span className="inline-flex h-4 w-4 items-center justify-center rounded border border-[var(--border-default)] bg-[var(--bg-secondary)]">
+                            <Globe2 className="h-2.5 w-2.5" />
+                          </span>
+                        )}
+                        <span className="truncate">{citationDomain || "source"}</span>
+                      </span>
+                      <span className="line-clamp-2 block text-[11px] font-semibold leading-snug text-[var(--text-primary)]">
+                        {citationTitle}
+                      </span>
+                      {citation.snippet ? (
+                        <span className="mt-1 line-clamp-3 block text-[11px] leading-snug text-[var(--text-secondary)]">
+                          {citation.snippet}
+                        </span>
+                      ) : null}
+                      <span className="mt-2 inline-flex flex-wrap items-center gap-1.5">
+                        {typeof citation.relevanceScore === "number" ? (
+                          <span className="inline-flex items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]">
+                            Relevance {citation.relevanceScore.toFixed(2)}
+                          </span>
+                        ) : null}
+                        {citation.reliabilityLabel ? (
+                          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] capitalize ${reliabilityTone(citation.reliabilityLabel)}`}>
+                            Reliability {citation.reliabilityLabel}
+                          </span>
+                        ) : null}
+                      </span>
+                    </span>
+                  ) : null}
                 </sup>
               );
             }

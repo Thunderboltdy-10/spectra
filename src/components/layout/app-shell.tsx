@@ -97,6 +97,14 @@ const PAGE_TOUR_STEPS: Record<string, GuidedTourStep[]> = {
       position: "top",
     },
   ],
+  "/artifacts": [
+    {
+      selector: '[data-tour="artifacts-header"]',
+      title: "Artifacts workspace",
+      description: "Your living workspace for study plans, flashcards, notes, documents, and more.",
+      position: "bottom",
+    },
+  ],
   "/analytics": [
     {
       selector: '[data-tour="analytics-header"]',

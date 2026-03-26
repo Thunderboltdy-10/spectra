@@ -240,6 +240,7 @@ export default function SuperAdminDashboard() {
   const [announcementActionUrl, setAnnouncementActionUrl] = useState("");
   const [sendingAnnouncement, setSendingAnnouncement] = useState(false);
   const [selectedUsageDay, setSelectedUsageDay] = useState<string | null>(null);
+  const [resettingPlatform, setResettingPlatform] = useState(false);
   const [selectedOrgMembers, setSelectedOrgMembers] = useState("");
   const [orgMembers, setOrgMembers] = useState<Array<{_id: string; name: string; email: string; role: string; createdAt: number}>>([]);
   const [membersSearch, setMembersSearch] = useState("");
@@ -426,6 +427,36 @@ export default function SuperAdminDashboard() {
       toast.error(error instanceof Error ? error.message : "Failed to load members");
     } finally {
       setLoadingMembers(false);
+    }
+  }
+
+  async function resetPlatformData() {
+    const typed = window.prompt('Type "RESET PLATFORM DATA" to confirm full workspace reset (schools/users/settings stay).');
+    if (!typed) return;
+    if (typed.trim().toUpperCase() !== "RESET PLATFORM DATA") {
+      toast.error("Reset cancelled: confirmation phrase did not match.");
+      return;
+    }
+
+    setResettingPlatform(true);
+    try {
+      const response = await fetch("/api/super-admin/storage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "resetPlatformData",
+          confirmation: typed.trim(),
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      toast.success("Platform data reset completed.");
+      window.location.reload();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to reset platform data");
+    } finally {
+      setResettingPlatform(false);
     }
   }
 
@@ -874,7 +905,18 @@ export default function SuperAdminDashboard() {
 
         {storageStats && (
           <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
-            <h2 className="mb-4 font-display text-xl">Storage Insights</h2>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h2 className="font-display text-xl">Storage Insights</h2>
+              <Button
+                type="button"
+                variant="secondary"
+                className="cursor-pointer text-[var(--danger)] hover:text-[var(--danger)]"
+                disabled={resettingPlatform}
+                onClick={() => void resetPlatformData()}
+              >
+                {resettingPlatform ? "Resetting..." : "Reset Workspace Data"}
+              </Button>
+            </div>
             <div className="flex flex-wrap divide-x divide-[var(--border-default)] border-t border-b border-[var(--border-default)] mb-5">
               <div className="px-4 py-3 first:pl-0">
                 <p className="text-xs text-[var(--text-secondary)]">Storage</p>

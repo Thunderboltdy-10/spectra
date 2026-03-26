@@ -211,7 +211,13 @@ export const retrieve: ReturnType<typeof action> = action({
       .map((row) => {
         const doc = row.doc as Record<string, unknown>;
         const scope = String(doc.scope ?? "pack");
-        const sourceType = (scope === "personal" ? "personal" : "pack") as "personal" | "pack";
+        const sourceType = (
+          scope === "personal"
+            ? "personal"
+            : scope === "agent"
+              ? "agent"
+              : "pack"
+        ) as "personal" | "pack" | "agent";
         const baseScore = typeof row.hit._score === "number" ? row.hit._score : 0;
         const filename = String(doc.filename ?? "unknown");
         const text = String(doc.text ?? "");
@@ -242,7 +248,7 @@ export const retrieve: ReturnType<typeof action> = action({
         resourceId: string;
         filename: string;
         page?: number;
-        sourceType: "pack" | "personal";
+        sourceType: "pack" | "personal" | "agent";
         scope: string;
         score?: number;
         topicScore?: number;

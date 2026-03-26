@@ -192,7 +192,6 @@ const LAST_ACTIVE_CHAT_TS_KEY = "ai-school:lastActiveChatTimestamp";
 const LAST_ACTIVE_CHAT_ID_KEY = "ai-school:lastActiveChatId";
 const CHAT_SESSION_WINDOW_MS = 12 * 60 * 60 * 1000;
 const MEMORY_ENABLED_KEY = "ai-school:memory-enabled";
-const SEARXNG_ENABLED_KEY = "ai-school:searxng-enabled";
 const PROACTIVE_BANNER_DISMISSED_KEY = "ai-school:proactive-banner-dismissed-v1";
 const FLASHCARD_REMINDER_DISABLED_KEY = "ai-school:flashcard-reminder-disabled";
 const PERSONAL_RESOURCES_POLL_MIN_MS = 4_000;
@@ -651,11 +650,9 @@ export function useChatState() {
   const personalResourcesPollMsRef = useRef(PERSONAL_RESOURCES_POLL_MIN_MS);
   const personalResourcesRefreshInFlightRef = useRef<Promise<void> | null>(null);
 
-  function confirmModeSwitch(nextMode: StudyMode) {
-    if (mode === nextMode) return true;
-    const nonSystemCount = messages.filter((item) => item.role !== "system").length;
-    if (nonSystemCount <= 2) return true;
-    return window.confirm(`Switch to ${nextMode}? This may change how the AI responds.`);
+  function confirmModeSwitch(_nextMode: StudyMode) {
+    // Always allow mode switching without interruption
+    return true;
   }
 
   useEffect(() => {
@@ -2106,7 +2103,6 @@ export function useChatState() {
           },
           toolPreferences: {
             memoryEnabled: readStoredToggle(MEMORY_ENABLED_KEY, true),
-            searxngEnabled: readStoredToggle(SEARXNG_ENABLED_KEY, true),
           },
           clientMessageId: !isRegenerate ? localUserMessageId : undefined,
         }),
@@ -3152,14 +3148,9 @@ export function useChatState() {
         throw new Error(await response.text());
       }
       const result = (await response.json()) as { updated?: boolean; created?: boolean; appended?: number };
-      if (result.updated) {
-        if (typeof result.appended === "number" && result.appended > 0) {
-          toast.success(`Added ${result.appended} new flashcard${result.appended === 1 ? "" : "s"}`, { duration: 4000 });
-        } else {
-          toast.message("Flashcard deck updated");
-        }
-      } else {
-        toast.success("Flashcard deck saved", { duration: 4000 });
+      // Auto-save is silent — only show toast for meaningful changes
+      if (result.updated && typeof result.appended === "number" && result.appended > 0) {
+        toast.success(`Added ${result.appended} new card${result.appended === 1 ? "" : "s"}`, { duration: 3000 });
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save deck", { duration: 8000 });

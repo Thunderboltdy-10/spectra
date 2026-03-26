@@ -40,7 +40,9 @@ import {
   type MemoryEntry,
 } from "@/lib/orchestrator/history";
 import {
+  attachInlinePositionsToCitations,
   buildDirectiveMemoryEntries,
+  ensureInlineCitationMarkers,
   inferCitations,
   maybeExtractMemory,
   maybeGenerateTitle,
@@ -81,9 +83,10 @@ import {
   serializeRecentContext,
   type ClarificationBlock,
 } from "@/lib/orchestrator/clarification";
+import { generatePromptAwareClarification } from "@/lib/orchestrator/clarification-generator";
 import { formatSchoolNow } from "@/lib/timezone";
 import { recordOpenRouterUsage } from "@/lib/usage-tracking";
-import type { StudyMode } from "@/types";
+import type { RouteTrace, StudyMode } from "@/types";
 
 type ChatRequestBody = {
   chatId?: string;
@@ -116,7 +119,6 @@ type ChatRequestBody = {
   };
   toolPreferences?: {
     memoryEnabled?: boolean;
-    searxngEnabled?: boolean;
   };
   forceMultiAgent?: boolean;
 };
@@ -207,10 +209,6 @@ function toQuizDifficultyLabel(level: number): QuizDifficultyLabel {
 function featureEnabled(flag: boolean | undefined, defaultValue = true) {
   if (flag === undefined) return defaultValue;
   return flag;
-}
-
-function featureAllowed(orgFlag: boolean | undefined, userFlag: boolean | undefined, defaultValue = true) {
-  return featureEnabled(orgFlag, defaultValue) && featureEnabled(userFlag, defaultValue);
 }
 
 function isQuizStructured(value: string) {
@@ -374,12 +372,19 @@ async function appendAssistantMessageWithCitationFallback(params: {
   citations: Array<{
     filename: string;
     page?: number;
-    sourceType: "pack" | "personal" | "general" | "search";
+    sourceType: "pack" | "personal" | "agent" | "general" | "search";
     url?: string;
     title?: string;
     domain?: string;
     resourceId?: string;
     snippet?: string;
+    relevanceScore?: number;
+    inlinePositions?: number[];
+    reliabilityScore?: number;
+    reliabilityLabel?: "high" | "medium" | "low";
+    reliabilityReason?: string;
+    publishedDate?: string;
+    favicon?: string;
   }>;
   modelRequested?: string;
   modelUsed?: string;
@@ -428,6 +433,13 @@ async function appendAssistantMessageWithCitationFallback(params: {
         url: citation.url,
         resourceId: citation.resourceId,
         snippet: citation.snippet,
+        relevanceScore: citation.relevanceScore,
+        inlinePositions: citation.inlinePositions,
+        reliabilityScore: citation.reliabilityScore,
+        reliabilityLabel: citation.reliabilityLabel,
+        reliabilityReason: citation.reliabilityReason,
+        publishedDate: citation.publishedDate,
+        favicon: citation.favicon,
       })),
     };
     const withoutParent = {
@@ -938,7 +950,6 @@ export async function runChatPipeline(request: NextRequest) {
         timezone?: string;
         verifyMarkerPassEnabled: boolean;
         orchestratorV2Enabled?: boolean;
-        searxngEnabled?: boolean;
         soulEnabled?: boolean;
         agentModelBoostEnabled?: boolean;
         adaptiveQuizEnabled?: boolean;
@@ -1294,11 +1305,6 @@ export async function runChatPipeline(request: NextRequest) {
       ? chatData.chat.packId
       : undefined);
   const memoryEnabled = featureEnabled(body.toolPreferences?.memoryEnabled, true);
-  const searxngEnabled = featureAllowed(
-    orgSettings.org?.searxngEnabled,
-    body.toolPreferences?.searxngEnabled,
-    true,
-  );
   const routePlan = buildRoutePlan({
     message: auto.message,
     mode: effectiveMode,
@@ -1428,12 +1434,14 @@ export async function runChatPipeline(request: NextRequest) {
         })
       : Promise.resolve(defaultRetrievalResult);
 
-  const searchPromise = hasReusableRecentContext
+  const searchPromise: Promise<WebSearchResult> = hasReusableRecentContext
     ? Promise.resolve({
         text: recentContextCache?.search.text ?? "",
         urls: recentContextCache?.search.urls ?? [],
         sources: recentContextCache?.search.sources ?? [],
         provider: recentContextCache?.search.provider ?? ("disabled" as const),
+        strategy: routePlan.searchPlan?.strategy,
+        triggeredBy: routePlan.searchPlan?.trigger,
         modelUsed: undefined,
         usage: undefined,
         durationMs: undefined,
@@ -1445,12 +1453,20 @@ export async function runChatPipeline(request: NextRequest) {
           modelCatalog: catalog,
           spendingTier: budget.tier,
           modelRuntimeStats: runtimeStatMap,
-          searxngEnabled,
+          searchPlan: routePlan.searchPlan,
         }).catch(() => ({
           text: "",
           urls: [] as string[],
           sources: [] as Array<{ url: string; title: string; domain: string }>,
           provider: "error" as const,
+          strategy: routePlan.searchPlan?.strategy,
+          triggeredBy: routePlan.searchPlan?.trigger,
+          fallbackReason: "search_request_failed",
+          operations: [{
+            tool: "search",
+            status: "failed" as const,
+            reason: "Search request failed before response parsing.",
+          }],
           modelUsed: undefined,
           usage: undefined,
           durationMs: undefined,
@@ -1551,7 +1567,7 @@ export async function runChatPipeline(request: NextRequest) {
   const routeTraceSearchStatus =
     !routePlan.shouldUseWebSearch && !usedRecentContextCache
       ? "skipped"
-      : searchProvider === "searxng"
+      : searchProvider === "tavily"
         ? "real_search"
         : searchProvider === "model_fallback"
           ? "model_knowledge"
@@ -1568,6 +1584,14 @@ export async function runChatPipeline(request: NextRequest) {
   } else {
     pipelineController.markStageSkipped("webSearch", "Web search disabled after request-class and route gating.");
   }
+  const routeSearchTrace: RouteTrace["searchTrace"] = {
+    provider: searchProvider,
+    strategy: webResult.strategy ?? routePlan.searchPlan?.strategy,
+    triggeredBy: webResult.triggeredBy ?? routePlan.searchPlan?.trigger,
+    fallbackReason: webResult.fallbackReason,
+    costCredits: webResult.costCredits,
+    operations: webResult.operations,
+  };
   const diag = retrieval.diagnostics as any;
   if (diag?.embeddingModel || diag?.embeddingUsage) {
     deferSubcall({
@@ -1580,6 +1604,13 @@ export async function runChatPipeline(request: NextRequest) {
       outputTokens: diag.embeddingUsage?.completion_tokens,
       costCents: costCentsFromUsage(diag.embeddingUsage),
       durationMs: diag.embeddingDurationMs,
+    });
+  }
+  if (searchProvider === "model_fallback") {
+    logger.warn("Tavily search failed; using :online model fallback", {
+      reason: webResult.fallbackReason ?? "unknown",
+      strategy: webResult.strategy ?? routePlan.searchPlan?.strategy ?? "search",
+      trigger: webResult.triggeredBy ?? routePlan.searchPlan?.trigger ?? "none",
     });
   }
   if (searchProvider === "model_fallback" && (webResult.modelUsed || webResult.usage)) {
@@ -1605,7 +1636,7 @@ export async function runChatPipeline(request: NextRequest) {
         searchStatus: "model_fallback",
         sourceCount: fallbackSourceCount,
       });
-    } else if (searchProvider === "searxng") {
+    } else if (searchProvider === "tavily") {
       earlyEventBuffer.push({
         type: "search_status",
         status: "completed",
@@ -1814,6 +1845,7 @@ export async function runChatPipeline(request: NextRequest) {
         reason: row.reason,
       })),
       searchStatus: routeTraceSearchStatus,
+      searchTrace: routeSearchTrace,
       costBudgetUsd: pipelineSnapshot.costBudgetUsd,
       usageBudgetRemaining: pipelineSnapshot.usageBudgetRemaining,
       inputTokenBreakdown: undefined as
@@ -1998,8 +2030,8 @@ export async function runChatPipeline(request: NextRequest) {
   }
   if (routePlan.shouldUseWebSearch || usedRecentContextCache) route.trace.toolchain.push("web_search");
   if (routePlan.shouldUseWebSearch || usedRecentContextCache) {
-    if (searchProvider === "searxng") {
-      route.trace.toolchain.push("search_provider_searxng");
+    if (searchProvider === "tavily") {
+      route.trace.toolchain.push("search_provider_tavily");
     } else if (searchProvider === "model_fallback") {
       route.trace.toolchain.push("search_provider_model_fallback");
     } else if (searchProvider === "error") {
@@ -2258,7 +2290,8 @@ export async function runChatPipeline(request: NextRequest) {
   const learningContextStatus = storedLearningContext
     ? `topics=${storedLearningContext.topics.length}, facts=${storedLearningContext.keyFacts.length}, cards=${storedLearningContext.flashcardCandidates.length}`
     : "none";
-  const clarificationDecision = pipelineController.shouldRun("clarificationCheck")
+  const shouldRunClarificationCheck = pipelineController.shouldRun("clarificationCheck");
+  let clarificationDecision = shouldRunClarificationCheck
     ? needsClarification({
         requestClass: auto.requestClass,
         mode: effectiveMode,
@@ -2267,15 +2300,59 @@ export async function runChatPipeline(request: NextRequest) {
         lastAssistantWasClarification,
       })
     : null;
-  if (pipelineController.shouldRun("clarificationCheck")) {
+  if (shouldRunClarificationCheck) {
     pipelineController.markStageCompleted("clarificationCheck");
+  }
+  if (clarificationDecision?.block) {
+    const promptAwareClarification = await generatePromptAwareClarification({
+      mode: effectiveMode,
+      reason: clarificationDecision.reason,
+      message: normalizedMessage,
+      fallbackBlock: clarificationDecision.block,
+      onModelCall: (call) => {
+        appendSubcall({
+          phaseId: "clarificationCheck",
+          label: "Prompt-aware clarification generation",
+          endpoint: "chat.completions",
+          status: "ok",
+          modelUsed: call.model,
+          inputTokens: call.usage?.prompt_tokens,
+          outputTokens: call.usage?.completion_tokens,
+          costCents: costCentsFromUsage(call.usage),
+          durationMs: call.durationMs,
+        });
+        void recordOpenRouterUsage({
+          actorClerkId: actor.clerkId,
+          chatId,
+          model: call.model,
+          usage: call.usage,
+          pricing: resolveCatalogPricing(call.model),
+        }).catch(() => {});
+      },
+    }).catch((error) => {
+      logger.warn("prompt-aware clarification generation failed", {
+        chatId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    });
+
+    if (promptAwareClarification?.block) {
+      clarificationDecision = {
+        ...clarificationDecision,
+        block: promptAwareClarification.block,
+      };
+      route.trace.toolchain.push("clarification_prompt_aware");
+    } else {
+      route.trace.toolchain.push("clarification_prompt_aware_fallback");
+    }
   }
   const clarificationBlock = clarificationDecision?.block ?? null;
   const clarificationText = clarificationBlock ? formatClarificationAsText(clarificationBlock) : null;
   if (clarificationBlock) {
     route.trace.toolchain.push("clarification_interrupt");
     (route.trace as { clarificationBlock?: ClarificationBlock }).clarificationBlock = clarificationBlock;
-  } else if (pipelineController.shouldRun("clarificationCheck")) {
+  } else if (shouldRunClarificationCheck) {
     route.trace.toolchain.push("clarification_not_needed");
   }
   if (
@@ -2393,6 +2470,33 @@ export async function runChatPipeline(request: NextRequest) {
     quizDifficultyLevel,
     quizDifficultyLabel,
   })];
+  if (effectiveMode === "research") {
+    systemPromptParts.push(
+      `=== RESEARCH OUTPUT CONTRACT ===
+Return the response in this exact section order:
+## Findings
+- Provide evidence-backed findings.
+- For non-trivial claims, add compact inline citations like [1], [2], or [1][3].
+
+## Source Reliability
+- Briefly assess reliability per key source (high / medium / low) with one short reason.
+- Prefer institutional, academic, and primary reporting sources when available.
+
+## Conclusion
+- Give a direct conclusion tied to the strongest cited evidence.
+- Explicitly note uncertainty when evidence is mixed or weak.
+
+## Further Questions
+- Add 2-4 specific follow-up questions worth researching next.
+
+Rules:
+- Keep citations inline and compact; avoid verbose footnote prose.
+- Do not invent sources or source details.
+- If evidence is insufficient, say so clearly and narrow the claim scope.
+=== END RESEARCH OUTPUT CONTRACT ===`,
+    );
+    route.trace.toolchain.push("research_output_contract");
+  }
 
   if (includeRuntimeContextBlocks) {
     systemPromptParts.push(`=== RUNTIME CONTEXT ===\n${runtimeContextBlock}\n=== END RUNTIME CONTEXT ===`);
@@ -3129,7 +3233,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           filename: string;
           url?: string;
           page?: number;
-          sourceType: "pack" | "personal" | "general" | "search";
+          sourceType: "pack" | "personal" | "agent" | "general" | "search";
           resourceId?: string;
         }> = [];
 
@@ -3391,6 +3495,12 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
             spendingTier: budget.tier,
             thinkingLevel: effectiveThinkingLevel,
             maxTokens,
+            maxContinuations:
+              routePlan.responseBudget === "simple"
+                ? 0
+                : routePlan.responseBudget === "normal"
+                  ? 1
+                  : 2,
             maxSubcalls: collabLimits.maxSubcalls,
             maxTokensPerSpecialist: collabLimits.maxTokensPerSpecialist,
             maxWallTimeMs: collabLimits.maxWallTimeMs,
@@ -3411,6 +3521,12 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
             verificationModel: route.verificationModel,
             messages,
             maxTokens,
+            maxContinuations:
+              routePlan.responseBudget === "simple"
+                ? 0
+                : routePlan.responseBudget === "normal"
+                  ? 1
+                  : 2,
             send,
             onUsageTokens: consumeUsageTokens,
             onFallback,
@@ -3885,15 +4001,16 @@ BACK: [answer or definition]`,
 
       route.trace.toolchain = [...new Set(route.trace.toolchain)];
 
-      const citations = inferCitations(
+      let citations = inferCitations(
         correctedResponse,
         retrieval.citations,
         searchSources,
         attachmentCitations,
       );
       const rewrittenResponse = rewriteCitationMarkers(correctedResponse, citations);
-      // Strip orphan citation markers [N] that have no matching citation
-      let finalizedResponse = stripOrphanCitations(rewrittenResponse, citations);
+      const withInlineMarkers = ensureInlineCitationMarkers(rewrittenResponse, citations);
+      // Strip orphan citation markers [N] that have no matching citation.
+      let finalizedResponse = stripOrphanCitations(withInlineMarkers, citations);
       let generatedArtifactAttachments: string[] | undefined;
       let generatedArtifactResourceIds: string[] | undefined;
       if (effectiveMode === "document" || /<<DOCUMENT_START>>/i.test(finalizedResponse)) {
@@ -3917,6 +4034,7 @@ BACK: [answer or definition]`,
           route.trace.toolchain.push("artifact_generation");
         }
       }
+      citations = attachInlinePositionsToCitations(finalizedResponse, citations);
       const whyThisResponse = summarizeWhyResponse(effectiveMode, route.reason);
       const finalSubcallTotals = subcallTokenTotals();
       const finalUsageIn = finalSubcallTotals.input > 0 ? finalSubcallTotals.input : usageIn;

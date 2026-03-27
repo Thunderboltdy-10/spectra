@@ -159,4 +159,82 @@ describe("buildRoutePlan", () => {
     expect(plan.intentSignals?.requestedOrchestration).toBe(true);
     expect(plan.shouldUseMultiStep).toBe(true);
   });
+
+  it("promotes workspace-deep prompts to L4 with workstream memory scopes", () => {
+    const plan = buildRoutePlan({
+      message: "Continue this Biology HL workstream, check the planner, and synthesize my notes and artifacts.",
+      mode: "general",
+      selectedMode: "general",
+      hasAttachments: false,
+      hasAgent: true,
+      hasPack: false,
+      hasPersonalResources: false,
+      hasAgentResources: true,
+      autoSearchEnabled: true,
+      thinkingLevel: "high",
+      complexity: "medium",
+      assignmentLevel: "L4",
+      selectedAgent: {
+        _id: "agent_bio",
+        name: "Biology mentor",
+      },
+      workstreamContext: {
+        activeWorkstreamId: "ws_bio",
+        focusSurface: "panel",
+        activeWorkstream: {
+          _id: "ws_bio",
+          title: "Biology HL",
+          description: "Notes and IA prep",
+          linkedAgentId: "agent_bio",
+          artifactCount: 3,
+          noteCount: 2,
+          plannerItemCount: 2,
+          threadCount: 4,
+          recentArtifactTitles: ["IA draft", "Cell respiration summary"],
+          recentNoteTitles: ["Enzymes review"],
+          recentPlannerTitles: ["Finish IA section 2"],
+        },
+        candidates: [],
+      },
+      schoolSoulVersion: "school-soul-v8",
+    });
+
+    expect(plan.taskClass).toBe("workstream_deep");
+    expect(plan.assignmentLevel).toBe("L4");
+    expect(plan.memoryScopes).toEqual(["user_global", "workstream"]);
+    expect(plan.workstreamAssignment.status).toBe("assigned");
+    expect(plan.contextWindowStrategy.preferLargeContext).toBe(true);
+  });
+
+  it("keeps explicit same-thread replies unless continuity is badly degraded", () => {
+    const plan = buildRoutePlan({
+      message: "Yes, continue from the previous draft and tighten the conclusion.",
+      mode: "document",
+      selectedMode: "document",
+      hasAttachments: false,
+      hasAgent: false,
+      hasPack: false,
+      hasPersonalResources: false,
+      hasAgentResources: false,
+      autoSearchEnabled: false,
+      thinkingLevel: "medium",
+      complexity: "medium",
+      threadContext: {
+        currentChatId: "chat_1",
+        turnCount: 10,
+        turnsSinceCompaction: 6,
+        contextWindowUtilization: 0.42,
+        lastMessageAt: Date.now() - (30 * 60 * 1000),
+        recentMessages: [
+          { role: "user", content: "Help me improve this essay draft." },
+          { role: "assistant", content: "I suggested a clearer thesis and stronger conclusion." },
+        ],
+        explicitlySameThread: true,
+      },
+      schoolSoulVersion: "school-soul-v9",
+    });
+
+    expect(plan.threadStrategy.action).toBe("continue");
+    expect(plan.threadStrategy.contextWindowPressure).toBeLessThan(0.75);
+  });
 });

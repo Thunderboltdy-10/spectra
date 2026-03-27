@@ -125,8 +125,43 @@ export type ToolBundle =
 
 export type ArtifactFormat = "docx" | "pdf" | "pptx" | "html";
 
-export type MemoryScope = "user_global" | "project" | "chat" | "none";
+export type AssignmentLevel = "L0" | "L1" | "L2" | "L3" | "L4";
+
+export type MemoryScope = "user_global" | "workstream" | "project" | "chat" | "none";
 export type RetrievalScope = "pack" | "personal" | "agent" | "org";
+
+export type WorkstreamAssignment = {
+  status: "none" | "assigned" | "suggested" | "new_candidate";
+  workstreamId?: string;
+  title?: string;
+  confidence: number;
+  reason: string;
+  signals: string[];
+  alternateWorkstreamId?: string;
+  alternateTitle?: string;
+  candidateIds?: string[];
+};
+
+export type ThreadStrategy = {
+  action: "continue" | "fork" | "new_chat";
+  confidence: number;
+  reason: string;
+  contextWindowPressure: number;
+  topicContinuity: number;
+  timeGapHours?: number;
+  turnsSinceCompaction?: number;
+};
+
+export type ContextWindowStrategy = {
+  estimatedInputTokens: number;
+  estimatedOutputTokens: number;
+  desiredContextTokens: number;
+  minimumContextTokens: number;
+  compactionSuggested: boolean;
+  preferLargeContext: boolean;
+  contextWindowPressure: number;
+  rationale: string[];
+};
 
 export type ModeContract = {
   mode: import("@/lib/contracts/studyModes").StudyMode;
@@ -158,7 +193,9 @@ export type RoutePlan = {
     | "artifact_generation"
     | "research"
     | "study_mode"
-    | "multimodal";
+    | "multimodal"
+    | "workstream_deep";
+  assignmentLevel: AssignmentLevel;
   timeSensitive: boolean;
   hasAttachments: boolean;
   hasSelectedMode: boolean;
@@ -170,9 +207,19 @@ export type RoutePlan = {
   shouldUseWebSearch: boolean;
   shouldUseMultiStep: boolean;
   responseBudget: "simple" | "normal" | "deep";
+  tokenBudgetTarget: {
+    systemPrompt: number;
+    memory: number;
+    artifacts: number;
+    search: number;
+    total: number;
+  };
   allowedToolBundles: ToolBundle[];
   retrievalScopes: RetrievalScope[];
   memoryScopes: MemoryScope[];
+  workstreamAssignment: WorkstreamAssignment;
+  threadStrategy: ThreadStrategy;
+  contextWindowStrategy: ContextWindowStrategy;
   candidateModelRequirements: {
     required: Array<"vision" | "reasoning" | "code" | "search" | "image_generation">;
     preferred: Array<"vision" | "reasoning" | "code" | "search" | "image_generation">;
@@ -327,11 +374,13 @@ export type RouteTrace = {
     promptEnhanced: boolean;
     messageLength: number;
     conversationLength?: number;
+    assignmentLevel?: AssignmentLevel;
     requestClass?: "T0" | "T1" | "T2" | "T3";
     classificationReason?: string;
     previousModelUsed?: string;
     agentPreferredModel?: string;
     detectedIntents?: string[];
+    workstreamId?: string;
   };
   candidates: RouteTraceCandidate[];
   selected: {
@@ -344,6 +393,7 @@ export type RouteTrace = {
   toolchain: string[];
   fallbacks: RouteTraceFallback[];
   routingDurationMs: number;
+  assignmentLevel?: AssignmentLevel;
   requestClass?: "T0" | "T1" | "T2" | "T3";
   classificationReason?: string;
   stepsExecuted?: string[];
@@ -391,6 +441,9 @@ export type RouteTrace = {
     sources: number;
   };
   usageBudgetRemaining?: number;
+  workstreamAssignment?: WorkstreamAssignment;
+  threadStrategy?: ThreadStrategy;
+  contextWindowStrategy?: ContextWindowStrategy;
   usedMemory?: Array<{
     key: string;
     text: string;

@@ -34,6 +34,7 @@ export const list = query({
     actorClerkId: v.string(),
     type: v.optional(v.string()),
     status: v.optional(v.string()),
+    workstreamId: v.optional(v.id("workstreams")),
     search: v.optional(v.string()),
     limit: v.optional(v.number()),
   },
@@ -56,6 +57,10 @@ export const list = query({
     // Filter by type
     if (args.type) {
       rows = rows.filter((r) => r.type === args.type);
+    }
+
+    if (args.workstreamId) {
+      rows = rows.filter((r) => r.workstreamId === args.workstreamId);
     }
 
     // Search by title or tags

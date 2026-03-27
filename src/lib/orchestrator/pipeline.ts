@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireActor } from "@/lib/auth-server";
 import { convexAction, convexMutation, convexQuery } from "@/lib/convex-server";
-import { openRouterChatCompletion, openRouterGenerateImage } from "@/lib/openrouter";
+import { openRouterChatCompletion, openRouterEmbeddingRequest, openRouterGenerateImage } from "@/lib/openrouter";
 import { canUseInTier } from "@/lib/routing/heuristic";
 import { buildPhasePlan, selectModelForPhase } from "@/lib/routing/phase-router";
 import {
@@ -734,6 +734,7 @@ export async function runChatPipeline(request: NextRequest) {
         thinkingLevel: "low",
         complexity: earlyComplexity,
         requestClass: earlyClassification.requestClass,
+        assignmentLevel: earlyClassification.assignmentLevel,
         classificationReason: earlyClassification.reason,
         promptCategory: "general",
         questionType: "other",
@@ -990,6 +991,65 @@ export async function runChatPipeline(request: NextRequest) {
     })) as AgentSnapshot;
   }
 
+  let activeWorkstreamId =
+    typeof (chatData.chat as { workstreamId?: unknown }).workstreamId === "string"
+      ? String((chatData.chat as { workstreamId?: unknown }).workstreamId)
+      : undefined;
+  const [
+    workstreamCandidates,
+    initialActiveWorkstream,
+    initialActiveWorkstreamPlannerItems,
+    initialActiveWorkstreamNotes,
+    initialActiveWorkstreamArtifacts,
+  ] = await Promise.all([
+    convexQuery("workstreams:list", {
+      actorClerkId: actor.clerkId,
+      status: "active",
+      limit: 24,
+    }).catch(() => []) as Promise<Array<Record<string, unknown>>>,
+    activeWorkstreamId
+      ? convexQuery("workstreams:get", {
+          actorClerkId: actor.clerkId,
+          workstreamId: activeWorkstreamId,
+        }).catch(() => null)
+      : Promise.resolve(null),
+    activeWorkstreamId
+      ? convexQuery("plannerItems:list", {
+          actorClerkId: actor.clerkId,
+          workstreamId: activeWorkstreamId,
+          limit: 8,
+        }).catch(() => [])
+      : Promise.resolve([]),
+    activeWorkstreamId
+      ? convexQuery("notes:list", {
+          actorClerkId: actor.clerkId,
+          workstreamId: activeWorkstreamId,
+          limit: 8,
+        }).catch(() => [])
+      : Promise.resolve([]),
+    activeWorkstreamId
+      ? convexQuery("artifacts:list", {
+          actorClerkId: actor.clerkId,
+          workstreamId: activeWorkstreamId,
+          limit: 8,
+        }).catch(() => [])
+      : Promise.resolve([]),
+  ]);
+  let activeWorkstream = initialActiveWorkstream as Record<string, unknown> | null;
+  let activeWorkstreamPlannerItems = initialActiveWorkstreamPlannerItems as Array<Record<string, unknown>>;
+  let activeWorkstreamNotes = initialActiveWorkstreamNotes as Array<Record<string, unknown>>;
+  let activeWorkstreamArtifacts = initialActiveWorkstreamArtifacts as Array<Record<string, unknown>>;
+
+  if (!selectedAgent && activeWorkstream && typeof (activeWorkstream as { linkedAgentId?: unknown }).linkedAgentId === "string") {
+    const linkedWorkstreamAgent = (await convexQuery("agents:getAgent", {
+      actorClerkId: actor.clerkId,
+      agentId: String((activeWorkstream as { linkedAgentId?: unknown }).linkedAgentId),
+    }).catch(() => null)) as AgentSnapshot | null;
+    if (linkedWorkstreamAgent?._id) {
+      selectedAgent = linkedWorkstreamAgent;
+    }
+  }
+
   const history = toChatMessageShape(chatData.messages);
   const storedLearningContext = parseLearningContext((chatData.chat as { learningContext?: unknown }).learningContext);
   const recentContextCache = parseRecentContext({
@@ -1042,6 +1102,23 @@ export async function runChatPipeline(request: NextRequest) {
   })();
   const isFirstAssistantTurn = history.every((message) => message.role !== "assistant");
   const attemptStats = extractAttemptStats(history);
+  const currentWorkstreamFocusSurface = (): "workspace" | "panel" | "chat" | "none" =>
+    activeWorkstreamId
+      ? (body.chatId ? "chat" : "panel")
+      : "none";
+  const workstreamClassificationContext = {
+    activeWorkstreamId,
+    focusSurface: currentWorkstreamFocusSurface(),
+    artifactCount: Array.isArray(activeWorkstreamArtifacts) ? activeWorkstreamArtifacts.length : 0,
+    noteCount: Array.isArray(activeWorkstreamNotes) ? activeWorkstreamNotes.length : 0,
+    plannerItemCount: Array.isArray(activeWorkstreamPlannerItems) ? activeWorkstreamPlannerItems.length : 0,
+    threadCount: activeWorkstream ? Number((activeWorkstream as { threadCount?: unknown }).threadCount ?? 0) : 0,
+    linkedAgent: Boolean(selectedAgent?._id || (activeWorkstream as { linkedAgentId?: unknown } | null)?.linkedAgentId),
+    recentActivityAt:
+      activeWorkstream && typeof (activeWorkstream as { lastActivityAt?: unknown }).lastActivityAt === "number"
+        ? Number((activeWorkstream as { lastActivityAt?: unknown }).lastActivityAt)
+        : undefined,
+  };
   const directiveMemorySummary = {
     forgotten: 0,
     negativeLinks: 0,
@@ -1149,6 +1226,31 @@ export async function runChatPipeline(request: NextRequest) {
     }
   }
 
+  let workstreamDefaultMode: StudyMode | undefined;
+  let workstreamDefaultThinking: "low" | "medium" | "high" | undefined;
+  const syncWorkstreamDefaults = () => {
+    workstreamDefaultMode =
+      activeWorkstream && typeof (activeWorkstream as { defaultMode?: unknown }).defaultMode === "string"
+        ? safeStudyMode(String((activeWorkstream as { defaultMode?: unknown }).defaultMode), "pipeline workstream defaultMode")
+        : undefined;
+    workstreamDefaultThinking =
+      activeWorkstream && typeof (activeWorkstream as { defaultThinking?: unknown }).defaultThinking === "string"
+        ? ((activeWorkstream as { defaultThinking?: unknown }).defaultThinking as "low" | "medium" | "high")
+        : undefined;
+  };
+  syncWorkstreamDefaults();
+  if (safeMode === "auto" && workstreamDefaultMode && (effectiveMode === "general" || effectiveMode === "tutor")) {
+    effectiveMode = workstreamDefaultMode;
+    auto.suggestedMode = workstreamDefaultMode;
+    earlyEventBuffer.push({
+      type: "mode_update",
+      suggestedMode: effectiveMode,
+    });
+  }
+  if (workstreamDefaultThinking && auto.thinkingLevel === "low" && workstreamDefaultThinking !== "low") {
+    auto.thinkingLevel = workstreamDefaultThinking;
+  }
+
   // Vague request detection for quiz/flashcard modes.
   // When a request is ambiguous (no topic specified), skip format-repair so the
   // model can ask a clarifying question instead of generating empty/wrong content.
@@ -1165,10 +1267,12 @@ export async function runChatPipeline(request: NextRequest) {
     isFirstMessage: isFirstAssistantTurn,
     multiAgentRequested: Boolean(body.forceMultiAgent),
     spendingTier: budget.tier,
+    workstreamContext: workstreamClassificationContext,
   });
   auto.requestClass = requestClassification.requestClass;
+  auto.assignmentLevel = requestClassification.assignmentLevel;
   auto.classificationReason = requestClassification.reason;
-  const pipelineController = new PipelineController({
+  let pipelineController = new PipelineController({
     requestClass: requestClassification.requestClass,
     classificationReason: requestClassification.reason,
   });
@@ -1305,7 +1409,120 @@ export async function runChatPipeline(request: NextRequest) {
       ? chatData.chat.packId
       : undefined);
   const memoryEnabled = featureEnabled(body.toolPreferences?.memoryEnabled, true);
-  const routePlan = buildRoutePlan({
+  const estimatedHistoryTokens = Math.ceil(
+    historyForTurn.reduce(
+      (sum, message) => sum + (message.content?.length ?? 0) + Math.min(message.thinkingContent?.length ?? 0, 400),
+      0,
+    ) / 4,
+  );
+  const buildWorkstreamRouteContext = () => ({
+    activeWorkstreamId,
+    focusSurface: currentWorkstreamFocusSurface(),
+    activeWorkstream: activeWorkstream
+      ? {
+          _id: String((activeWorkstream as { _id: unknown })._id),
+          title: String((activeWorkstream as { title?: unknown }).title ?? "Workstream"),
+          description:
+            typeof (activeWorkstream as { description?: unknown }).description === "string"
+              ? String((activeWorkstream as { description?: unknown }).description)
+              : undefined,
+          subjectCode:
+            typeof (activeWorkstream as { subjectCode?: unknown }).subjectCode === "string"
+              ? String((activeWorkstream as { subjectCode?: unknown }).subjectCode)
+              : undefined,
+          linkedAgentId:
+            typeof (activeWorkstream as { linkedAgentId?: unknown }).linkedAgentId === "string"
+              ? String((activeWorkstream as { linkedAgentId?: unknown }).linkedAgentId)
+              : undefined,
+          lastActivityAt:
+            typeof (activeWorkstream as { lastActivityAt?: unknown }).lastActivityAt === "number"
+              ? Number((activeWorkstream as { lastActivityAt?: unknown }).lastActivityAt)
+              : undefined,
+          defaultMode: workstreamDefaultMode,
+          defaultThinking: workstreamDefaultThinking,
+          artifactCount: Array.isArray(activeWorkstreamArtifacts) ? activeWorkstreamArtifacts.length : 0,
+          noteCount: Array.isArray(activeWorkstreamNotes) ? activeWorkstreamNotes.length : 0,
+          plannerItemCount: Array.isArray(activeWorkstreamPlannerItems) ? activeWorkstreamPlannerItems.length : 0,
+          threadCount: historyForTurn.length,
+          recentArtifactTitles: Array.isArray(activeWorkstreamArtifacts)
+            ? activeWorkstreamArtifacts
+                .slice(0, 4)
+                .map((artifact) => String((artifact as { title?: unknown }).title ?? ""))
+                .filter(Boolean)
+            : [],
+          recentNoteTitles: Array.isArray(activeWorkstreamNotes)
+            ? activeWorkstreamNotes
+                .slice(0, 4)
+                .map((note) => String((note as { title?: unknown }).title ?? ""))
+                .filter(Boolean)
+            : [],
+          recentPlannerTitles: Array.isArray(activeWorkstreamPlannerItems)
+            ? activeWorkstreamPlannerItems
+                .slice(0, 4)
+                .map((item) => String((item as { title?: unknown }).title ?? ""))
+                .filter(Boolean)
+            : [],
+        }
+      : undefined,
+    candidates: Array.isArray(workstreamCandidates)
+      ? workstreamCandidates
+          .map((candidate) => ({
+            _id: String((candidate as { _id: unknown })._id),
+            title: String((candidate as { title?: unknown }).title ?? ""),
+            description:
+              typeof (candidate as { description?: unknown }).description === "string"
+                ? String((candidate as { description?: unknown }).description)
+                : undefined,
+            subjectCode:
+              typeof (candidate as { subjectCode?: unknown }).subjectCode === "string"
+                ? String((candidate as { subjectCode?: unknown }).subjectCode)
+                : undefined,
+            linkedAgentId:
+              typeof (candidate as { linkedAgentId?: unknown }).linkedAgentId === "string"
+                ? String((candidate as { linkedAgentId?: unknown }).linkedAgentId)
+                : undefined,
+            lastActivityAt:
+              typeof (candidate as { lastActivityAt?: unknown }).lastActivityAt === "number"
+                ? Number((candidate as { lastActivityAt?: unknown }).lastActivityAt)
+                : undefined,
+            defaultMode:
+              typeof (candidate as { defaultMode?: unknown }).defaultMode === "string"
+                ? safeStudyMode(String((candidate as { defaultMode?: unknown }).defaultMode), "pipeline workstream candidate defaultMode")
+                : undefined,
+          }))
+          .filter((candidate) => candidate.title)
+      : [],
+  });
+  const buildSelectedAgentSnapshot = () =>
+    selectedAgent
+      ? {
+          _id: selectedAgent._id,
+          name: selectedAgent.name,
+          preferredModel: selectedAgent.preferredModel,
+          preferredMode: selectedAgent.preferredMode,
+        }
+      : undefined;
+  const buildThreadContext = (): {
+    currentChatId: string;
+    turnCount: number;
+    turnsSinceCompaction: number;
+    contextWindowUtilization: number;
+    lastMessageAt: number | undefined;
+    recentMessages: Array<{ role: "user" | "assistant"; content: string }>;
+    explicitlySameThread: boolean;
+  } => ({
+    currentChatId: chatId,
+    turnCount: historyForTurn.length,
+    turnsSinceCompaction: existingSummary ? Math.min(historyForTurn.length, 8) : historyForTurn.length,
+    contextWindowUtilization: Math.max(0, Math.min(1, estimatedHistoryTokens / 128_000)),
+    lastMessageAt: historyForTurn[historyForTurn.length - 1]?.createdAt,
+    recentMessages: historyForTurn.slice(-6).map((message) => ({
+      role: message.role === "assistant" ? "assistant" : "user",
+      content: message.content,
+    })),
+    explicitlySameThread: Boolean(requestedParentMessageId),
+  });
+  let routePlan = buildRoutePlan({
     message: auto.message,
     mode: effectiveMode,
     selectedMode: safeMode,
@@ -1317,16 +1534,139 @@ export async function runChatPipeline(request: NextRequest) {
     autoSearchEnabled: auto.searchEnabled,
     thinkingLevel: auto.thinkingLevel,
     complexity: auto.complexity,
-    selectedAgent: selectedAgent
-      ? {
-          _id: selectedAgent._id,
-          name: selectedAgent.name,
-          preferredModel: selectedAgent.preferredModel,
-          preferredMode: selectedAgent.preferredMode,
-        }
-      : undefined,
+    assignmentLevel: auto.assignmentLevel,
+    selectedAgent: buildSelectedAgentSnapshot(),
+    workstreamContext: buildWorkstreamRouteContext(),
+    threadContext: buildThreadContext(),
     schoolSoulVersion: schoolSoulCapsule.version,
   });
+  const initialWorkstreamAssignment = routePlan.workstreamAssignment;
+  const routedWorkstreamId =
+    routePlan.workstreamAssignment.status === "assigned"
+      ? routePlan.workstreamAssignment.workstreamId
+      : undefined;
+  if (routedWorkstreamId && routedWorkstreamId !== activeWorkstreamId) {
+    activeWorkstreamId = routedWorkstreamId;
+    await convexMutation("chats:updateChatSettings", {
+      actorClerkId: actor.clerkId,
+      chatId,
+      workstreamId: routedWorkstreamId,
+    }).catch(() => {});
+    await convexMutation("workstreams:touchActivity", {
+      actorClerkId: actor.clerkId,
+      workstreamId: routedWorkstreamId,
+      at: Date.now(),
+    }).catch(() => {});
+    const [
+      hydratedWorkstream,
+      hydratedPlannerItems,
+      hydratedNotes,
+      hydratedArtifacts,
+    ] = await Promise.all([
+      convexQuery("workstreams:get", {
+        actorClerkId: actor.clerkId,
+        workstreamId: routedWorkstreamId,
+      }).catch(() => null),
+      convexQuery("plannerItems:list", {
+        actorClerkId: actor.clerkId,
+        workstreamId: routedWorkstreamId,
+        limit: 8,
+      }).catch(() => []),
+      convexQuery("notes:list", {
+        actorClerkId: actor.clerkId,
+        workstreamId: routedWorkstreamId,
+        limit: 8,
+      }).catch(() => []),
+      convexQuery("artifacts:list", {
+        actorClerkId: actor.clerkId,
+        workstreamId: routedWorkstreamId,
+        limit: 8,
+      }).catch(() => []),
+    ]);
+    activeWorkstream = (hydratedWorkstream as Record<string, unknown> | null) ?? activeWorkstream;
+    activeWorkstreamPlannerItems = Array.isArray(hydratedPlannerItems) ? hydratedPlannerItems as Array<Record<string, unknown>> : [];
+    activeWorkstreamNotes = Array.isArray(hydratedNotes) ? hydratedNotes as Array<Record<string, unknown>> : [];
+    activeWorkstreamArtifacts = Array.isArray(hydratedArtifacts) ? hydratedArtifacts as Array<Record<string, unknown>> : [];
+    syncWorkstreamDefaults();
+    if (!selectedAgent && activeWorkstream && typeof (activeWorkstream as { linkedAgentId?: unknown }).linkedAgentId === "string") {
+      const linkedWorkstreamAgent = (await convexQuery("agents:getAgent", {
+        actorClerkId: actor.clerkId,
+        agentId: String((activeWorkstream as { linkedAgentId?: unknown }).linkedAgentId),
+      }).catch(() => null)) as AgentSnapshot | null;
+      if (linkedWorkstreamAgent?._id) {
+        selectedAgent = linkedWorkstreamAgent;
+      }
+    }
+    if (safeMode === "auto" && workstreamDefaultMode && (effectiveMode === "general" || effectiveMode === "tutor")) {
+      effectiveMode = workstreamDefaultMode;
+      auto.suggestedMode = workstreamDefaultMode;
+      earlyEventBuffer.push({
+        type: "mode_update",
+        suggestedMode: effectiveMode,
+      });
+    }
+    if (workstreamDefaultThinking && auto.thinkingLevel === "low" && workstreamDefaultThinking !== "low") {
+      auto.thinkingLevel = workstreamDefaultThinking;
+    }
+    const refreshedClassification = classifyRequest({
+      message: auto.message,
+      complexity: auto.complexity,
+      mode: effectiveMode,
+      hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
+      isFirstMessage: history.length === 0,
+      multiAgentRequested: Boolean(body.forceMultiAgent),
+      spendingTier: budget.tier,
+      workstreamContext: {
+        activeWorkstreamId,
+        focusSurface: currentWorkstreamFocusSurface(),
+        artifactCount: Array.isArray(activeWorkstreamArtifacts) ? activeWorkstreamArtifacts.length : 0,
+        noteCount: Array.isArray(activeWorkstreamNotes) ? activeWorkstreamNotes.length : 0,
+        plannerItemCount: Array.isArray(activeWorkstreamPlannerItems) ? activeWorkstreamPlannerItems.length : 0,
+        threadCount: historyForTurn.length,
+        linkedAgent: Boolean(
+          selectedAgent?._id
+          || (activeWorkstream && typeof (activeWorkstream as { linkedAgentId?: unknown }).linkedAgentId === "string"),
+        ),
+        recentActivityAt:
+          activeWorkstream && typeof (activeWorkstream as { lastActivityAt?: unknown }).lastActivityAt === "number"
+            ? Number((activeWorkstream as { lastActivityAt?: unknown }).lastActivityAt)
+            : undefined,
+      },
+    });
+    auto.requestClass = refreshedClassification.requestClass;
+    auto.assignmentLevel = refreshedClassification.assignmentLevel;
+    auto.classificationReason = refreshedClassification.reason;
+    if (pipelineController.getState().requestClass !== refreshedClassification.requestClass) {
+      pipelineController = new PipelineController({
+        requestClass: refreshedClassification.requestClass,
+        classificationReason: refreshedClassification.reason,
+      });
+      if (skipAutoSettingsForT0) {
+        pipelineController.markStageSkipped("autoSettings", "Skipped for T0 request class.");
+      } else {
+        pipelineController.markStageCompleted("autoSettings");
+      }
+    }
+    routePlan = buildRoutePlan({
+      message: auto.message,
+      mode: effectiveMode,
+      selectedMode: safeMode,
+      hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
+      hasAgent: Boolean(selectedAgent?._id),
+      hasPack: Boolean(activePackId),
+      hasPersonalResources: body.usePersonalResources,
+      hasAgentResources: Boolean(selectedAgent?._id),
+      autoSearchEnabled: auto.searchEnabled,
+      thinkingLevel: auto.thinkingLevel,
+      complexity: auto.complexity,
+      assignmentLevel: auto.assignmentLevel,
+      selectedAgent: buildSelectedAgentSnapshot(),
+      workstreamContext: buildWorkstreamRouteContext(),
+      threadContext: buildThreadContext(),
+      schoolSoulVersion: schoolSoulCapsule.version,
+    });
+    routePlan.workstreamAssignment = initialWorkstreamAssignment;
+  }
   if (!memoryEnabled) {
     routePlan.shouldConsultMemory = false;
     routePlan.shouldWriteMemory = false;
@@ -1785,6 +2125,11 @@ export async function runChatPipeline(request: NextRequest) {
     conversationTurnCount: history.length,
     recentModels: combinedRecentAssistantModels,
     requestClass: auto.requestClass,
+    assignmentLevel: auto.assignmentLevel,
+    estimatedInputTokens: routePlan.contextWindowStrategy.estimatedInputTokens,
+    estimatedOutputTokens: routePlan.contextWindowStrategy.estimatedOutputTokens,
+    desiredContextTokens: routePlan.contextWindowStrategy.desiredContextTokens,
+    preferLargeContext: routePlan.contextWindowStrategy.preferLargeContext,
     cacheWindow,
     manualModelConfirmedExpensive: Boolean(body.confirmExpensiveModel),
     modelCatalog: constrainedCatalog,
@@ -1820,11 +2165,13 @@ export async function runChatPipeline(request: NextRequest) {
         promptEnhanced: auto.promptEnhanced,
         messageLength: auto.message.length,
         conversationLength: history.length,
+        assignmentLevel: auto.assignmentLevel,
         requestClass: auto.requestClass,
         classificationReason: auto.classificationReason,
         previousModelUsed: previousAssistantModel,
         agentPreferredModel: selectedAgent?.preferredModel,
         detectedIntents,
+        workstreamId: activeWorkstreamId,
       },
       candidates: routeDecision.candidates,
       selected: {
@@ -1837,6 +2184,7 @@ export async function runChatPipeline(request: NextRequest) {
       routingDurationMs: routeDecision.routingDurationMs,
       phasePlan: [routeDecision.phase],
       subcalls: deferredSubcalls,
+      assignmentLevel: auto.assignmentLevel,
       requestClass: auto.requestClass,
       classificationReason: auto.classificationReason,
       stepsExecuted: pipelineSnapshot.completedStages,
@@ -1848,6 +2196,9 @@ export async function runChatPipeline(request: NextRequest) {
       searchTrace: routeSearchTrace,
       costBudgetUsd: pipelineSnapshot.costBudgetUsd,
       usageBudgetRemaining: pipelineSnapshot.usageBudgetRemaining,
+      workstreamAssignment: routePlan.workstreamAssignment,
+      threadStrategy: routePlan.threadStrategy,
+      contextWindowStrategy: routePlan.contextWindowStrategy,
       inputTokenBreakdown: undefined as
         | {
           systemPrompt: number;
@@ -1899,6 +2250,16 @@ export async function runChatPipeline(request: NextRequest) {
     const repaired = Boolean(params?.repaired)
       || route.trace.toolchain.some((tool) => tool.includes("repair"));
     route.trace.phasePlan = route.trace.phasePlan.map((phase) => {
+      if (phase.id === "ws_memory") {
+        return workstreamMemoryMatches.length > 0
+          ? { ...phase, status: "completed", detail: `Used ${workstreamMemoryMatches.length} workstream memory entr${workstreamMemoryMatches.length === 1 ? "y" : "ies"}.` }
+          : { ...phase, status: "skipped", detail: "No matching workstream memory." };
+      }
+      if (phase.id === "ws_artifacts") {
+        return (workstreamPlannerSummary || workstreamArtifactSummary)
+          ? { ...phase, status: "completed", detail: "Planner and artifact workspace context injected." }
+          : { ...phase, status: "skipped", detail: "No planner or artifact context available." };
+      }
       if (phase.id === "retrieval") {
         if (!routePlan.retrievalScopes.length) return { ...phase, status: "skipped", detail: "No retrieval scope enabled." };
         if (retrieval.citations.length > 0) {
@@ -2065,6 +2426,14 @@ export async function runChatPipeline(request: NextRequest) {
   if (auto.promptEnhanced) route.trace.toolchain.push("prompt_enhancement");
   if (existingSummary || scheduledCompaction) route.trace.toolchain.push("context_compaction");
   route.trace.toolchain.push("route_plan");
+  if (routePlan.workstreamAssignment.status === "assigned") {
+    route.trace.toolchain.push("workstream_assigned");
+  } else if (routePlan.workstreamAssignment.status === "suggested") {
+    route.trace.toolchain.push("workstream_suggested");
+  } else if (routePlan.workstreamAssignment.status === "new_candidate") {
+    route.trace.toolchain.push("workstream_new_candidate");
+  }
+  route.trace.toolchain.push(`thread_${routePlan.threadStrategy.action}`);
   route.trace.routePlan = routePlan;
   if (selectedAgent?._id) {
     (route.trace as { activeAgent?: { id: string; name: string; autoSelected?: boolean } }).activeAgent = {
@@ -2243,6 +2612,101 @@ export async function runChatPipeline(request: NextRequest) {
     pipelineController.markStageSkipped("memoryRead", "Memory disabled by user preference.");
   }
 
+  let workstreamMemoryMatches: Array<{
+    key: string;
+    text: string;
+    category: string;
+    confidence: number;
+    freshness: number;
+    fusedScore: number;
+  }> = [];
+  let workstreamMemoryEmbeddingModel: string | undefined;
+  if (
+    routePlan.assignmentLevel === "L4"
+    && activeWorkstreamId
+    && budget.tier !== "free_only"
+  ) {
+    try {
+      const workstreamEmbedding = retrieval.queryEmbedding
+        ? {
+            embedding: retrieval.queryEmbedding,
+            model: (retrieval.diagnostics as { embeddingModel?: string } | undefined)?.embeddingModel,
+          }
+        : await (async () => {
+            const startedAt = Date.now();
+            const embedding = await openRouterEmbeddingRequest(auto.message.slice(0, 3000), "openai/text-embedding-3-small");
+            workstreamMemoryEmbeddingModel = embedding.model;
+            appendSubcall({
+              phaseId: "ws_memory",
+              label: "Workstream memory embedding",
+              endpoint: "embeddings",
+              status: "ok",
+              modelUsed: embedding.model,
+              inputTokens: embedding.usage?.prompt_tokens,
+              outputTokens: embedding.usage?.completion_tokens,
+              costCents: costCentsFromUsage(embedding.usage),
+              durationMs: Date.now() - startedAt,
+            });
+            return embedding;
+          })();
+      workstreamMemoryMatches = (await convexQuery("workstreamMemory:retrieveRelevantForPrompt", {
+        actorClerkId: actor.clerkId,
+        workstreamId: activeWorkstreamId,
+        embedding: workstreamEmbedding.embedding,
+        message: auto.message,
+        topK: 4,
+        minScore: 0.56,
+      }).catch(() => [])) as typeof workstreamMemoryMatches;
+      if (workstreamMemoryMatches.length > 0) {
+        route.trace.toolchain.push("workstream_memory_injection");
+      }
+    } catch {
+      workstreamMemoryMatches = [];
+    }
+  }
+
+  const workstreamPlannerSummary = activeWorkstreamId
+    ? (Array.isArray(activeWorkstreamPlannerItems)
+        ? activeWorkstreamPlannerItems
+            .filter((item) => String((item as { status?: unknown }).status ?? "pending") !== "completed")
+            .slice()
+            .sort((a, b) => {
+              const dueA = typeof (a as { dueAt?: unknown }).dueAt === "number" ? Number((a as { dueAt?: unknown }).dueAt) : Number.MAX_SAFE_INTEGER;
+              const dueB = typeof (b as { dueAt?: unknown }).dueAt === "number" ? Number((b as { dueAt?: unknown }).dueAt) : Number.MAX_SAFE_INTEGER;
+              return dueA - dueB;
+            })
+            .slice(0, 3)
+            .map((item) => {
+              const title = String((item as { title?: unknown }).title ?? "Untitled");
+              const type = String((item as { type?: unknown }).type ?? "item");
+              const dueAt = typeof (item as { dueAt?: unknown }).dueAt === "number" ? Number((item as { dueAt?: unknown }).dueAt) : undefined;
+              const dueLabel = dueAt ? new Date(dueAt).toISOString().slice(0, 10) : "no due date";
+              return `- ${title} (${type}; due ${dueLabel})`;
+            })
+            .join("\n")
+        : "")
+    : "";
+  const workstreamArtifactSummary = activeWorkstreamId
+    ? [
+        ...(Array.isArray(activeWorkstreamArtifacts)
+          ? activeWorkstreamArtifacts.slice(0, 3).map((artifact) => {
+              const title = String((artifact as { title?: unknown }).title ?? "Untitled artifact");
+              const type = String((artifact as { type?: unknown }).type ?? "artifact");
+              return `- ${title} [${type}]`;
+            })
+          : []),
+        ...(Array.isArray(activeWorkstreamNotes)
+          ? activeWorkstreamNotes.slice(0, 2).map((note) => `- ${String((note as { title?: unknown }).title ?? "Untitled note")} [note]`)
+          : []),
+      ].slice(0, 5).join("\n")
+    : "";
+  const workstreamMemoryBlock = workstreamMemoryMatches.length > 0
+    ? workstreamMemoryMatches
+        .slice(0, 3)
+        .map((entry) => `- ${entry.key}: ${entry.text}`)
+        .join("\n")
+    : "";
+
   const memoryStatus = memoryPlan.profileText
     ? `global ${memoryPlan.layer2Count} fact(s), topic ${memoryPlan.layer3Count} match(es)`
     : "no relevant memory entries";
@@ -2405,6 +2869,9 @@ export async function runChatPipeline(request: NextRequest) {
     `Retrieval: ${retrievalStatus}`,
     `Web search: ${searchStatus}`,
     `Memory profile: ${memoryStatus}`,
+    `Workstream routing: ${routePlan.workstreamAssignment.status}${routePlan.workstreamAssignment.title ? ` (${routePlan.workstreamAssignment.title})` : ""}`,
+    `Thread strategy: ${routePlan.threadStrategy.action}`,
+    `Context strategy: target ${routePlan.contextWindowStrategy.desiredContextTokens.toLocaleString()} tok, pressure ${(routePlan.contextWindowStrategy.contextWindowPressure * 100).toFixed(0)}%`,
     `Memory directives applied: ${directiveStatus}`,
     `Learning context: ${learningContextStatus}`,
   ].join("\n");
@@ -2503,6 +2970,22 @@ Rules:
   }
   if (includeRuntimeContextBlocks && learningContextPrompt) {
     systemPromptParts.push(`=== LEARNING CONTEXT ===\n${learningContextPrompt}\n=== END LEARNING CONTEXT ===`);
+  }
+  if (includeRichContextBlocks && routePlan.assignmentLevel === "L4" && activeWorkstream) {
+    systemPromptParts.push(
+      `=== WORKSTREAM CONTEXT ===
+Workstream: ${String((activeWorkstream as { title?: unknown }).title ?? "Workspace")}
+Description: ${typeof (activeWorkstream as { description?: unknown }).description === "string" ? String((activeWorkstream as { description?: unknown }).description) : "No description"}
+Routing reason: ${routePlan.workstreamAssignment.reason}
+Thread action: ${routePlan.threadStrategy.action} (${routePlan.threadStrategy.reason})
+Planner priorities:
+${workstreamPlannerSummary || "- No pending planner items"}
+Recent durable items:
+${workstreamArtifactSummary || "- No notes or artifacts yet"}
+Workstream memory:
+${workstreamMemoryBlock || "- No high-confidence workstream memory matched"}
+=== END WORKSTREAM CONTEXT ===`,
+    );
   }
   if (includeRuntimeContextBlocks && modeTransformGuidance) {
     systemPromptParts.push(`=== MODE TRANSFORM GUIDANCE ===\n${modeTransformGuidance}\n=== END MODE TRANSFORM GUIDANCE ===`);
@@ -2691,6 +3174,11 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     conversationTurnCount: history.length,
     recentModels: combinedRecentAssistantModels,
     requestClass: auto.requestClass,
+    assignmentLevel: auto.assignmentLevel,
+    estimatedInputTokens: routePlan.contextWindowStrategy.estimatedInputTokens,
+    estimatedOutputTokens: Math.max(640, Math.round(routePlan.contextWindowStrategy.estimatedOutputTokens * 0.7)),
+    desiredContextTokens: routePlan.contextWindowStrategy.minimumContextTokens,
+    preferLargeContext: routePlan.contextWindowStrategy.preferLargeContext,
     cacheWindow,
     manualModelConfirmedExpensive: Boolean(body.confirmExpensiveModel),
     modelCatalog: constrainedCatalog,
@@ -2725,6 +3213,11 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     conversationTurnCount: history.length,
     recentModels: combinedRecentAssistantModels,
     requestClass: auto.requestClass,
+    assignmentLevel: auto.assignmentLevel,
+    estimatedInputTokens: routePlan.contextWindowStrategy.estimatedInputTokens,
+    estimatedOutputTokens: routePlan.contextWindowStrategy.estimatedOutputTokens,
+    desiredContextTokens: routePlan.contextWindowStrategy.desiredContextTokens,
+    preferLargeContext: routePlan.contextWindowStrategy.preferLargeContext,
     cacheWindow,
     manualModelConfirmedExpensive: Boolean(body.confirmExpensiveModel),
     modelCatalog: constrainedCatalog,
@@ -2760,11 +3253,14 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
       (memoryPlan.profileText?.length ?? 0)
       + (memoryPlan.layer2Text?.length ?? 0)
       + (memoryPlan.layer3Text?.length ?? 0)
-      + (personalSoulExcerpt?.length ?? 0),
+      + (personalSoulExcerpt?.length ?? 0)
+      + (workstreamMemoryBlock?.length ?? 0),
     sourceChars:
       (retrieval.sourceBlock?.length ?? 0)
       + (searchBlock?.length ?? 0)
-      + (researchEvidenceBlock?.length ?? 0),
+      + (researchEvidenceBlock?.length ?? 0)
+      + (workstreamPlannerSummary?.length ?? 0)
+      + (workstreamArtifactSummary?.length ?? 0),
   };
   const specialistConversationContext = buildSpecialistConversationContext(historyForModel);
 
@@ -2787,6 +3283,11 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
       conversationTurnCount: history.length,
       recentModels: combinedRecentAssistantModels,
       requestClass: auto.requestClass,
+      assignmentLevel: auto.assignmentLevel,
+      estimatedInputTokens: routePlan.contextWindowStrategy.estimatedInputTokens,
+      estimatedOutputTokens: Math.max(512, Math.round(routePlan.contextWindowStrategy.estimatedOutputTokens * 0.65)),
+      desiredContextTokens: routePlan.contextWindowStrategy.minimumContextTokens,
+      preferLargeContext: routePlan.contextWindowStrategy.preferLargeContext,
       cacheWindow,
       manualModelConfirmedExpensive: Boolean(body.confirmExpensiveModel),
       modelCatalog: constrainedCatalog,
@@ -2796,6 +3297,8 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     route.verificationModel = verificationDecision.selectedModel;
   }
   route.trace.phasePlan = buildPhasePlan({
+    routeNeedsWorkstreamMemory: routePlan.assignmentLevel === "L4" && workstreamMemoryMatches.length > 0,
+    routeNeedsWorkstreamArtifacts: routePlan.assignmentLevel === "L4" && Boolean(workstreamPlannerSummary || workstreamArtifactSummary),
     routeNeedsRetrieval: retrieval.citations.length > 0 || routePlan.retrievalScopes.length > 0,
     routeNeedsSearch: routePlan.shouldUseWebSearch || usedRecentContextCache,
     multiAgentEnabled,
@@ -2816,6 +3319,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     }
     if (phase.id === "verification") return { ...phase, model: route.verificationModel ?? route.primaryModel, thinkingLevel: "medium" };
     if (phase.id === "repair") return { ...phase, model: supportModel, thinkingLevel: "low" };
+    if (phase.id === "ws_memory") return { ...phase, model: workstreamMemoryEmbeddingModel ?? (retrieval.diagnostics as any)?.embeddingModel };
     if (phase.id === "retrieval") return { ...phase, model: (retrieval.diagnostics as any)?.embeddingModel };
     if (phase.id === "search") return { ...phase, model: (webResult as any).modelUsed };
     return phase;
@@ -2866,6 +3370,24 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
       { input: 0, output: 0 },
     );
   };
+  if (route.trace.phasePlan?.some((phase) => phase.id === "ws_memory")) {
+    queuePhaseUpdate(
+      "ws_memory",
+      workstreamMemoryMatches.length > 0 ? "completed" : "skipped",
+      workstreamMemoryMatches.length > 0
+        ? `Used ${workstreamMemoryMatches.length} workstream memory entr${workstreamMemoryMatches.length === 1 ? "y" : "ies"}.`
+        : "No matching workstream memory.",
+    );
+  }
+  if (route.trace.phasePlan?.some((phase) => phase.id === "ws_artifacts")) {
+    queuePhaseUpdate(
+      "ws_artifacts",
+      workstreamPlannerSummary || workstreamArtifactSummary ? "completed" : "skipped",
+      workstreamPlannerSummary || workstreamArtifactSummary
+        ? "Planner and artifact workspace context injected."
+        : "No planner or artifact context available.",
+    );
+  }
   if (route.trace.phasePlan?.some((phase) => phase.id === "retrieval")) {
     if (!routePlan.retrievalScopes.length) {
       queuePhaseUpdate("retrieval", "skipped", "No retrieval scope enabled.");
@@ -2906,12 +3428,27 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
   // Lower token budget for vague quiz/flashcard requests - the model only needs
   // a short clarifying question, not a full quiz or flashcard deck.
   const modeMaxTokens = MODE_MAX_TOKENS[effectiveMode] ?? 2048;
-  const budgetAwareMaxTokens =
+  const baseBudgetAwareMaxTokens =
     routePlan.responseBudget === "simple"
       ? Math.min(modeMaxTokens, 900)
       : routePlan.responseBudget === "normal"
         ? Math.min(modeMaxTokens, effectiveMode === "research" || effectiveMode === "document" ? 2400 : 1800)
         : modeMaxTokens;
+  const assignmentOverflowSlack =
+    routePlan.assignmentLevel === "L4"
+      ? 384
+      : routePlan.assignmentLevel === "L3"
+        ? 256
+        : routePlan.assignmentLevel === "L2"
+          ? 160
+          : routePlan.assignmentLevel === "L1"
+            ? 96
+            : 64;
+  const softOutputFloor = routePlan.contextWindowStrategy.estimatedOutputTokens + assignmentOverflowSlack;
+  const budgetAwareMaxTokens = Math.max(
+    baseBudgetAwareMaxTokens,
+    Math.min(modeMaxTokens + assignmentOverflowSlack, softOutputFloor),
+  );
   const primaryCatalogEntry =
     catalog.find((model) => model.modelId === route.primaryModel)
     ?? catalog.find((model) => model.modelId.replace(/:free$/i, "") === route.primaryModel.replace(/:free$/i, ""));
@@ -2934,9 +3471,22 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
   if (typeof modelContextAwareCap === "number" && modelContextAwareCap < budgetAwareMaxTokens) {
     route.trace.toolchain.push("context_window_token_cap");
   }
+  if (routePlan.contextWindowStrategy.compactionSuggested) {
+    route.trace.toolchain.push("context_window_pressure");
+  }
   const maxTokens = isVagueRequest
     ? Math.min(512, contextAwareMaxTokens)
     : contextAwareMaxTokens;
+  const maxContinuations =
+    routePlan.assignmentLevel === "L4"
+      ? 4
+      : routePlan.assignmentLevel === "L3"
+        ? 3
+        : routePlan.responseBudget === "simple"
+          ? 0
+          : routePlan.responseBudget === "normal"
+            ? 1
+            : 2;
   const earlyTitlePromise = isFirstAssistantTurn
     ? maybeGenerateTitleFromUserPrompt({
         chatId,
@@ -3495,12 +4045,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
             spendingTier: budget.tier,
             thinkingLevel: effectiveThinkingLevel,
             maxTokens,
-            maxContinuations:
-              routePlan.responseBudget === "simple"
-                ? 0
-                : routePlan.responseBudget === "normal"
-                  ? 1
-                  : 2,
+            maxContinuations,
             maxSubcalls: collabLimits.maxSubcalls,
             maxTokensPerSpecialist: collabLimits.maxTokensPerSpecialist,
             maxWallTimeMs: collabLimits.maxWallTimeMs,
@@ -3521,12 +4066,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
             verificationModel: route.verificationModel,
             messages,
             maxTokens,
-            maxContinuations:
-              routePlan.responseBudget === "simple"
-                ? 0
-                : routePlan.responseBudget === "normal"
-                  ? 1
-                  : 2,
+            maxContinuations,
             send,
             onUsageTokens: consumeUsageTokens,
             onFallback,

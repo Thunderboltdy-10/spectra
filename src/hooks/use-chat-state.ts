@@ -18,6 +18,7 @@ export type Chat = {
   mode: StudyMode;
   packId?: string;
   agentId?: string;
+  workstreamId?: string;
   updatedAt: number;
 };
 
@@ -1514,6 +1515,7 @@ export function useChatState() {
       routerMode?: RouterMode;
       manualModel?: string;
       agentId?: string | null;
+      workstreamId?: string | null;
       thinkingLevel?: ThinkingLevel;
       usePersonalResources?: boolean;
       title?: string;
@@ -1538,6 +1540,7 @@ export function useChatState() {
       routerMode?: RouterMode;
       manualModel?: string;
       agentId?: string | null;
+      workstreamId?: string | null;
       thinkingLevel?: ThinkingLevel;
       usePersonalResources?: boolean;
       title?: string;
@@ -2679,6 +2682,83 @@ export function useChatState() {
             }
             if (normalizedTrace?.phasePlan?.length) {
               setLivePhasePlan(normalizedTrace.phasePlan);
+            }
+            const workstreamAssignment = normalizedTrace?.workstreamAssignment;
+            if (workstreamAssignment?.status === "assigned" && workstreamAssignment.workstreamId) {
+              setChats((prev) =>
+                prev.map((chat) =>
+                  chat._id === chatId
+                    ? { ...chat, workstreamId: workstreamAssignment.workstreamId }
+                    : chat,
+                ),
+              );
+              toast.info(
+                workstreamAssignment.title
+                  ? `Added to ${workstreamAssignment.title}`
+                  : "Added to a workstream",
+                workstreamAssignment.alternateWorkstreamId
+                  ? {
+                      duration: 5000,
+                      action: {
+                        label: "Move",
+                        onClick: () => {
+                          void updateChatSettingsById(chatId, {
+                            workstreamId: workstreamAssignment.alternateWorkstreamId ?? null,
+                          }).then(() => {
+                            setChats((prev) =>
+                              prev.map((chat) =>
+                                chat._id === chatId
+                                  ? { ...chat, workstreamId: workstreamAssignment.alternateWorkstreamId }
+                                  : chat,
+                              ),
+                            );
+                          }).catch(() => {});
+                        },
+                      },
+                    }
+                  : { duration: 4000 },
+              );
+            } else if (workstreamAssignment?.status === "suggested" && workstreamAssignment.workstreamId) {
+              toast.info(
+                workstreamAssignment.title
+                  ? `This may belong in ${workstreamAssignment.title}`
+                  : "This may belong in a workstream",
+                {
+                  duration: 6000,
+                  action: {
+                    label: "Add to workstream",
+                    onClick: () => {
+                      void updateChatSettingsById(chatId, {
+                        workstreamId: workstreamAssignment.workstreamId ?? null,
+                      }).then(() => {
+                        setChats((prev) =>
+                          prev.map((chat) =>
+                            chat._id === chatId
+                              ? { ...chat, workstreamId: workstreamAssignment.workstreamId }
+                              : chat,
+                          ),
+                        );
+                      }).catch(() => {});
+                    },
+                  },
+                },
+              );
+            } else if (workstreamAssignment?.status === "new_candidate") {
+              toast.info(
+                "This looks like a new project or subject.",
+                {
+                  duration: 6000,
+                  action: {
+                    label: "Open workspace",
+                    onClick: () => {
+                      window.location.href = "/workspace";
+                    },
+                  },
+                },
+              );
+            }
+            if (normalizedTrace?.threadStrategy?.action === "fork") {
+              toast.info("A fresh thread would fit this topic better.", { duration: 4000 });
             }
 
             const nextFinalMeta: typeof finalMeta = {

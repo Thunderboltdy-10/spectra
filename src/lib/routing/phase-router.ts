@@ -7,7 +7,7 @@ import {
   type ModelCapability,
   type ModelRuntimeStat,
 } from "@/lib/model-selection";
-import type { RouteTraceCandidate, RouteTracePhase, SpendingTier, StudyMode } from "@/types";
+import type { AssignmentLevel, RouteTraceCandidate, RouteTracePhase, SpendingTier, StudyMode } from "@/types";
 
 export type RoutingLane = "scored" | "challenger";
 type StakeLevel = "low" | "medium" | "high";
@@ -34,6 +34,11 @@ export type PhaseRoutingInput = {
   conversationTurnCount?: number;
   recentModels?: string[];
   requestClass?: RequestClass;
+  assignmentLevel?: AssignmentLevel;
+  estimatedInputTokens?: number;
+  estimatedOutputTokens?: number;
+  desiredContextTokens?: number;
+  preferLargeContext?: boolean;
   cacheWindow?: {
     lastModel?: string;
     lastUsedAt?: number;
@@ -207,6 +212,32 @@ function costFit(costPerM: number, stakes: StakeLevel, isFree: boolean) {
   return 0.2;
 }
 
+function contextFit(params: {
+  model: CatalogModelEntry;
+  estimatedInputTokens?: number;
+  estimatedOutputTokens?: number;
+  desiredContextTokens?: number;
+  preferLargeContext?: boolean;
+}) {
+  const contextLength = params.model.contextLength;
+  if (typeof contextLength !== "number" || !Number.isFinite(contextLength) || contextLength <= 0) {
+    return params.preferLargeContext ? 0.5 : 0.62;
+  }
+
+  const required = Math.max(
+    8_192,
+    (params.estimatedInputTokens ?? 0) + (params.estimatedOutputTokens ?? 0) + 2_048,
+    params.desiredContextTokens ?? 0,
+  );
+  const ratio = contextLength / required;
+  if (ratio >= 1.45) return 1;
+  if (ratio >= 1.2) return 0.9;
+  if (ratio >= 1.05) return 0.78;
+  if (ratio >= 0.92) return 0.52;
+  if (ratio >= 0.8) return 0.25;
+  return 0.04;
+}
+
 function quickReplyModelBias(model: CatalogModelEntry) {
   const token = `${model.modelId} ${model.name ?? ""}`.toLowerCase();
   let bias = 0;
@@ -269,6 +300,7 @@ function scoreWeights(input: PhaseRoutingInput) {
       diversity: 0.07,
       cache: 0.05,
       freshness: 0.03,
+      context: 0,
     };
   }
   if (input.stakes === "high" || input.requestClass === "T3" || input.mode === "research") {
@@ -280,6 +312,7 @@ function scoreWeights(input: PhaseRoutingInput) {
       diversity: 0.10,
       cache: 0.06,
       freshness: 0.08,
+      context: 0.10,
     };
   }
   if (input.stakes === "medium" || input.requestClass === "T2") {
@@ -291,6 +324,7 @@ function scoreWeights(input: PhaseRoutingInput) {
       diversity: 0.09,
       cache: 0.07,
       freshness: 0.05,
+      context: 0.07,
     };
   }
   return {
@@ -301,6 +335,7 @@ function scoreWeights(input: PhaseRoutingInput) {
     diversity: 0.08,
     cache: 0.07,
     freshness: 0.05,
+    context: 0.05,
   };
 }
 
@@ -328,6 +363,8 @@ function modeAllowsChallengers(input: PhaseRoutingInput) {
 export function buildPhasePlan(params: {
   routeNeedsRetrieval: boolean;
   routeNeedsSearch: boolean;
+  routeNeedsWorkstreamMemory?: boolean;
+  routeNeedsWorkstreamArtifacts?: boolean;
   multiAgentEnabled: boolean;
   shouldVerify: boolean;
   shouldRepair: boolean;
@@ -337,6 +374,12 @@ export function buildPhasePlan(params: {
   const phases: RouteTracePhase[] = [
     { id: "routing", label: "Planning the route", status: "completed" },
   ];
+  if (params.routeNeedsWorkstreamMemory) {
+    phases.push({ id: "ws_memory", label: "Loading workstream memory", status: "planned" });
+  }
+  if (params.routeNeedsWorkstreamArtifacts) {
+    phases.push({ id: "ws_artifacts", label: "Loading workstream artifacts", status: "planned" });
+  }
   if (params.routeNeedsRetrieval) phases.push({ id: "retrieval", label: "Checking your uploaded materials", status: "planned" });
   if (params.routeNeedsSearch) phases.push({ id: "search", label: "Checking live sources", status: "planned" });
   if (params.multiAgentEnabled) {
@@ -474,6 +517,14 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
       needsSearch: input.needsSearch,
     });
     if (capMatch <= 0) continue;
+    const context = contextFit({
+      model,
+      estimatedInputTokens: input.estimatedInputTokens,
+      estimatedOutputTokens: input.estimatedOutputTokens,
+      desiredContextTokens: input.desiredContextTokens,
+      preferLargeContext: input.preferLargeContext,
+    });
+    if ((input.preferLargeContext || input.assignmentLevel === "L4") && context <= 0.08) continue;
 
     const stat = input.modelRuntimeStats?.[model.modelId];
     const reliability = reliabilityScore(stat);
@@ -496,7 +547,8 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
       + (weights.latency * latency)
       + (weights.diversity * diversityScore)
       + (weights.cache * cacheBonus)
-      + (weights.freshness * fresh);
+      + (weights.freshness * fresh)
+      + (weights.context * context);
     const quickReplyBonus =
       input.requestClass === "T0" && !input.needsSearch && !input.hasAttachments
         ? (latency * 0.08) + (cost * 0.06) + quickReplyModelBias(model)
@@ -512,6 +564,7 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
       `diversity ${diversityScore.toFixed(2)} x${weights.diversity.toFixed(2)}`,
       `cache_bonus ${cacheBonus.toFixed(2)} x${weights.cache.toFixed(2)}`,
       `freshness ${fresh.toFixed(2)} x${weights.freshness.toFixed(2)}`,
+      `context_fit ${context.toFixed(2)} x${weights.context.toFixed(2)}`,
     ];
     if (quickReplyBonus > 0) {
       breakdown.push(`quick_reply_bonus +${quickReplyBonus.toFixed(3)}`);
@@ -561,6 +614,12 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
       multiplier *= 1.08;
       breakdown.push("preferred_model_multiplier x1.08");
       reasonTags.push("preferred");
+    }
+
+    if ((input.assignmentLevel === "L4" || input.preferLargeContext) && context >= 0.85) {
+      multiplier *= 1.04;
+      breakdown.push("large_context_bonus x1.04");
+      reasonTags.push("large-context fit");
     }
 
     if (input.mode !== "image" && !input.hasAttachments && looksImageTunedModel(model)) {

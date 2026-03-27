@@ -42,6 +42,7 @@ export async function GET(request: NextRequest) {
       actorClerkId: actor.clerkId,
       type: params.get("type") ?? undefined,
       status: params.get("status") ?? undefined,
+      workstreamId: params.get("workstreamId") ?? undefined,
       search: params.get("search") ?? undefined,
       limit: params.has("limit") ? Number(params.get("limit")) : undefined,
     });

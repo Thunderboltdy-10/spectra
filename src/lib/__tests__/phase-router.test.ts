@@ -229,4 +229,43 @@ describe("phase-router", () => {
     const challenger = decision.candidates.find((row) => row.modelId === "gamma/challenger");
     expect(challenger?.scoreBreakdown?.join(" ")).toContain("challenger_state deprioritized");
   });
+
+  it("prefers models that fit the desired context window on L4 routes", () => {
+    const decision = selectModelForPhase({
+      phaseId: "analysis",
+      phaseLabel: "Primary response",
+      mode: "research",
+      routerMode: "auto",
+      spendingTier: "normal",
+      thinkingLevel: "high",
+      stakes: "high",
+      messageLength: 500,
+      requestClass: "T3",
+      assignmentLevel: "L4",
+      estimatedInputTokens: 52_000,
+      estimatedOutputTokens: 2_200,
+      desiredContextTokens: 72_000,
+      preferLargeContext: true,
+      modelCatalog: [
+        {
+          ...baseCatalog()[0],
+          modelId: "alpha/short-context",
+          contextLength: 32_000,
+        },
+        {
+          ...baseCatalog()[1],
+          modelId: "beta/long-context",
+          contextLength: 128_000,
+        },
+      ],
+      modelRuntimeStats: {
+        "alpha/short-context": { successCount: 30, failureCount: 1, avgLatencyMs: 2200 },
+        "beta/long-context": { successCount: 28, failureCount: 1, avgLatencyMs: 2400 },
+      },
+      seedKey: "l4-context-fit",
+    });
+
+    expect(decision.selectedModel).toBe("beta/long-context");
+    expect(decision.candidates.some((row) => row.modelId === "alpha/short-context")).toBe(false);
+  });
 });

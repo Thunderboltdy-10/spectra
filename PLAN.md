@@ -109,6 +109,7 @@ An infinite canvas containing:
 - **Completed workstreams** — faded to 30% opacity, slightly smaller, toggleable via toolbar
 
 The workspace is calm and minimal at the default zoom. No floating-card chaos. Strong default layout (hub center, workstreams radiating outward) with user customization freedom (drag-and-drop repositioning).
+The workspaces should also be able to be ordered and structured within the canvas, ordered as visual 'folder' blocks of space. Everything interactible and draggable, but should also happen and get structured automatically
 
 ### 3.3 Google Maps Semantic Zoom
 
@@ -144,7 +145,7 @@ Toolbar toggle: "Show completed" on/off. When off, completed shapes hidden.
 
 A special central shape connected to all workstreams. Always visible at any zoom level (minimum visual size enforced via `getMinDimensions()`).
 
-**At low zoom:** Circle with user's initial/avatar.
+**At low zoom:** Circle with user's avatar. Profile and other things taken from Managebac
 **At higher zoom, expands to reveal:**
 - Quick notes inbox (recent unattached notes)
 - Cross-workstream planner (upcoming deadlines from all workstreams)
@@ -799,7 +800,6 @@ The existing sidebar (`src/components/chat/chat-sidebar.tsx`) adapts based on ro
 - [ ] AI workstream suggestion from chat (toast UI)
 - [ ] Override & correction UI (toast with Move action)
 - [ ] L4 pipeline: workstream memory retrieval, deadline injection, cross-artifact summaries
-- [ ] Token budget enforcement per level
 
 ### Wave 5: Memory Enhancement
 *Depends on Wave 1, partially on Wave 4.*

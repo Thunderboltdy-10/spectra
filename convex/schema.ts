@@ -43,6 +43,27 @@ export default defineSchema({
     maxStudents: v.optional(v.number()),
     isActive: v.optional(v.boolean()),
     createdBy: v.optional(v.string()),
+    managebacConfig: v.optional(
+      v.object({
+        encryptedToken: v.string(),
+        tokenLastFour: v.optional(v.string()),
+        studentMappings: v.optional(
+          v.array(
+            v.object({
+              clerkId: v.string(),
+              managebacStudentId: v.string(),
+              email: v.optional(v.string()),
+            }),
+          ),
+        ),
+        syncEnabled: v.optional(v.boolean()),
+        syncFrequencyHours: v.optional(v.number()),
+        lastSyncAt: v.optional(v.number()),
+        lastSyncStatus: v.optional(v.union(v.literal("idle"), v.literal("success"), v.literal("error"))),
+        lastSyncError: v.optional(v.string()),
+        updatedAt: v.optional(v.number()),
+      }),
+    ),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -64,6 +85,21 @@ export default defineSchema({
     .index("by_clerk_id", ["clerkId"])
     .index("by_org", ["orgId"])
     .index("by_org_role", ["orgId", "role"]),
+
+  userPreferences: defineTable({
+    userId: v.id("users"),
+    orgId: v.id("orgs"),
+    defaultLanding: v.union(v.literal("smart"), v.literal("workspace"), v.literal("chat")),
+    workspaceLayout: v.optional(
+      v.object({
+        x: v.number(),
+        y: v.number(),
+        z: v.number(),
+      }),
+    ),
+    editorDefaultMode: v.optional(v.union(v.literal("agentic"), v.literal("notion"), v.literal("simple"))),
+    updatedAt: v.number(),
+  }).index("by_user", ["userId"]),
 
   packs: defineTable({
     orgId: v.id("orgs"),
@@ -190,10 +226,132 @@ export default defineSchema({
     .index("by_agent", ["agentId"])
     .index("by_agent_model", ["agentId", "modelId"]),
 
+  workstreams: defineTable({
+    ownerUserId: v.id("users"),
+    orgId: v.id("orgs"),
+    type: v.union(v.literal("subject"), v.literal("project"), v.literal("general")),
+    title: v.string(),
+    description: v.optional(v.string()),
+    emoji: v.optional(v.string()),
+    color: v.optional(v.string()),
+    status: v.union(v.literal("active"), v.literal("completed"), v.literal("archived")),
+    canvasX: v.optional(v.number()),
+    canvasY: v.optional(v.number()),
+    canvasWidth: v.optional(v.number()),
+    canvasHeight: v.optional(v.number()),
+    subjectCode: v.optional(v.string()),
+    managebacClassId: v.optional(v.string()),
+    linkedAgentId: v.optional(v.id("agents")),
+    linkedPackId: v.optional(v.id("packs")),
+    defaultMode: v.optional(vStudyMode),
+    defaultThinking: v.optional(vThinkingLevel),
+    artifactCount: v.optional(v.number()),
+    lastActivityAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_owner", ["ownerUserId"])
+    .index("by_owner_status", ["ownerUserId", "status"])
+    .index("by_owner_updated", ["ownerUserId", "updatedAt"])
+    .index("by_org", ["orgId"])
+    .searchIndex("search_title", {
+      searchField: "title",
+      filterFields: ["ownerUserId", "orgId", "status", "type"],
+    }),
+
+  workstreamMemory: defineTable({
+    workstreamId: v.id("workstreams"),
+    ownerUserId: v.id("users"),
+    orgId: v.id("orgs"),
+    key: v.string(),
+    text: v.string(),
+    embedding: v.array(v.float64()),
+    category: v.union(
+      v.literal("concept"),
+      v.literal("progress"),
+      v.literal("preference"),
+      v.literal("deadline"),
+      v.literal("correction"),
+      v.literal("resource_link"),
+    ),
+    confidence: v.number(),
+    freshness: v.number(),
+    sourceType: v.union(
+      v.literal("chat_extraction"),
+      v.literal("artifact_link"),
+      v.literal("user_explicit"),
+      v.literal("managebac_sync"),
+      v.literal("agent_inference"),
+    ),
+    sourceChatId: v.optional(v.id("chats")),
+    sourceMessageId: v.optional(v.id("messages")),
+    sourceArtifactId: v.optional(v.id("artifacts")),
+    status: v.union(v.literal("active"), v.literal("superseded"), v.literal("dismissed")),
+    supersededBy: v.optional(v.id("workstreamMemory")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_workstream", ["workstreamId"])
+    .index("by_workstream_category", ["workstreamId", "category"])
+    .index("by_workstream_status", ["workstreamId", "status"])
+    .index("by_source_chat", ["sourceChatId"])
+    .vectorIndex("by_embedding", {
+      vectorField: "embedding",
+      dimensions: EMBEDDING_DIMENSIONS,
+      filterFields: ["workstreamId", "ownerUserId", "orgId", "status", "category"],
+    }),
+
+  plannerItems: defineTable({
+    ownerUserId: v.id("users"),
+    orgId: v.id("orgs"),
+    workstreamId: v.optional(v.id("workstreams")),
+    title: v.string(),
+    description: v.optional(v.string()),
+    type: v.union(v.literal("deadline"), v.literal("milestone"), v.literal("goal"), v.literal("reminder")),
+    priority: v.union(v.literal("low"), v.literal("medium"), v.literal("high")),
+    status: v.union(v.literal("pending"), v.literal("in_progress"), v.literal("completed"), v.literal("cancelled")),
+    dueAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    sourceType: v.union(v.literal("user_manual"), v.literal("ai_suggested"), v.literal("managebac_sync")),
+    sourceArtifactId: v.optional(v.id("artifacts")),
+    sourceChatId: v.optional(v.id("chats")),
+    managebacItemId: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_owner", ["ownerUserId"])
+    .index("by_owner_status", ["ownerUserId", "status"])
+    .index("by_workstream", ["workstreamId"])
+    .index("by_due", ["dueAt"]),
+
+  notes: defineTable({
+    ownerUserId: v.id("users"),
+    orgId: v.id("orgs"),
+    workstreamId: v.optional(v.id("workstreams")),
+    artifactId: v.optional(v.id("artifacts")),
+    title: v.string(),
+    content: v.any(),
+    contentPlaintext: v.optional(v.string()),
+    editorMode: v.union(v.literal("agentic"), v.literal("notion"), v.literal("simple")),
+    lastAiEditId: v.optional(v.string()),
+    pendingDiffs: v.optional(v.any()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_owner_updated", ["ownerUserId", "updatedAt"])
+    .index("by_workstream", ["workstreamId"])
+    .index("by_artifact", ["artifactId"])
+    .searchIndex("search_content", {
+      searchField: "contentPlaintext",
+      filterFields: ["ownerUserId", "orgId"],
+    }),
+
   chats: defineTable({
     orgId: v.id("orgs"),
     packId: v.optional(v.id("packs")),
     agentId: v.optional(v.id("agents")),
+    workstreamId: v.optional(v.id("workstreams")),
     ownerUserId: v.id("users"),
     title: v.string(),
     latestUserPrompt: v.optional(v.string()),
@@ -218,6 +376,7 @@ export default defineSchema({
     .index("by_owner", ["ownerUserId"])
     .index("by_owner_updated", ["ownerUserId", "updatedAt"])
     .index("by_owner_pack_updated", ["ownerUserId", "packId", "updatedAt"])
+    .index("by_workstream", ["workstreamId"])
     .index("by_org", ["orgId"]),
 
   messages: defineTable({
@@ -292,6 +451,7 @@ export default defineSchema({
   artifacts: defineTable({
     ownerUserId: v.id("users"),
     orgId: v.id("orgs"),
+    workstreamId: v.optional(v.id("workstreams")),
     type: v.string(),
     title: v.string(),
     content: v.any(),
@@ -307,6 +467,7 @@ export default defineSchema({
     .index("by_owner_updated", ["ownerUserId", "updatedAt"])
     .index("by_org", ["orgId"])
     .index("by_type", ["type"])
+    .index("by_workstream", ["workstreamId"])
     .index("by_owner_type", ["ownerUserId", "type"]),
 
   artifactVersions: defineTable({
@@ -368,6 +529,11 @@ export default defineSchema({
     status: v.union(v.literal("pending"), v.literal("confirmed")),
     sourceType: v.union(v.literal("extraction"), v.literal("user_explicit"), v.literal("correction")),
     sourceChatId: v.optional(v.id("chats")),
+    sourceMessageId: v.optional(v.id("messages")),
+    sourceArtifactId: v.optional(v.id("artifacts")),
+    sourceWorkstreamId: v.optional(v.id("workstreams")),
+    freshness: v.optional(v.number()),
+    scope: v.optional(v.union(v.literal("global"), v.literal("workstream"))),
     relatedArtifacts: v.optional(v.array(v.string())),
     negativeTopicLinks: v.optional(v.array(v.string())),
     createdAt: v.number(),

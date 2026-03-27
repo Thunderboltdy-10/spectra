@@ -1,23 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ArrowUpRight,
   CalendarClock,
+  ChevronRight,
+  Clock,
   Columns3,
   FileText,
   GitBranch,
+  GripVertical,
   Layers,
   MessageSquare,
+  Notebook,
   Plus,
   Sparkles,
   StickyNote,
   X,
+  Zap,
 } from "lucide-react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Background,
   BackgroundVariant,
@@ -47,6 +52,8 @@ const TiptapEditor = dynamic(
   },
 );
 
+/* ─── Types ──────────────────────────────────────────────── */
+
 type WorkstreamView = "structured" | "columns" | "graph";
 type WorkspacePanelKind = "chat" | "note" | "artifact" | undefined;
 type RouteHistoryMode = "push" | "replace";
@@ -72,10 +79,87 @@ type WorkstreamChatSummary = {
   workstreamId?: string;
 };
 
+/* ─── Module System ──────────────────────────────────────── */
+
+type ModuleType = "threads" | "notes" | "planner" | "artifacts" | "agents";
+
+interface ModuleConfig {
+  type: ModuleType;
+  label: string;
+  icon: typeof MessageSquare;
+  visible: boolean;
+  priority: number;
+}
+
+function getActiveModules(
+  workstream: Workstream,
+  chats: WorkstreamChatSummary[],
+  notes: WorkspaceNote[],
+  plannerItems: PlannerItem[],
+): ModuleConfig[] {
+  const modules: ModuleConfig[] = [
+    {
+      type: "threads",
+      label: "Threads",
+      icon: MessageSquare,
+      visible: true,
+      priority: chats.length > 0 ? 10 : 40,
+    },
+    {
+      type: "notes",
+      label: "Notes",
+      icon: StickyNote,
+      visible: true,
+      priority: notes.length > 0 ? 15 : 45,
+    },
+    {
+      type: "planner",
+      label: "Planner",
+      icon: CalendarClock,
+      visible: true,
+      priority: plannerItems.length > 0 ? 20 : 50,
+    },
+    {
+      type: "artifacts",
+      label: "Artifacts",
+      icon: FileText,
+      visible: (workstream.artifactCount ?? 0) > 0 || chats.length > 0,
+      priority: 30,
+    },
+    {
+      type: "agents",
+      label: "Agent",
+      icon: Zap,
+      visible: Boolean(workstream.linkedAgentId),
+      priority: 25,
+    },
+  ];
+
+  return modules.filter((m) => m.visible).sort((a, b) => a.priority - b.priority);
+}
+
+/* ─── Constants ──────────────────────────────────────────── */
+
 const EMPTY_DOC = {
   type: "doc",
   content: [{ type: "paragraph" }],
 };
+
+const SPRING_ENTER = {
+  type: "spring" as const,
+  stiffness: 280,
+  damping: 32,
+  mass: 0.9,
+};
+
+const SPRING_EXIT = {
+  type: "spring" as const,
+  stiffness: 320,
+  damping: 36,
+  mass: 0.8,
+};
+
+/* ─── Helpers ────────────────────────────────────────────── */
 
 function defaultBounds(containerBounds: { w: number; h: number }): CardBounds {
   return {
@@ -97,11 +181,13 @@ function formatRelativeTime(timestamp?: number) {
 }
 
 function excerptFromNote(note?: WorkspaceNote | null) {
-  if (!note) return "Open the note panel to keep writing inside the focused workspace.";
+  if (!note) return "";
   const text = note.contentPlaintext?.trim();
-  if (!text) return "This note is ready for drafting in any of the existing editor modes.";
-  return text.slice(0, 180);
+  if (!text) return "Empty note — start writing to see a preview.";
+  return text.slice(0, 160);
 }
+
+/* ─── Data hooks ─────────────────────────────────────────── */
 
 function useWorkstreamChats(workstreamId: string) {
   const [chats, setChats] = useState<WorkstreamChatSummary[]>([]);
@@ -115,31 +201,22 @@ function useWorkstreamChats(workstreamId: string) {
         const response = await fetch(`/api/chats?workstreamId=${encodeURIComponent(workstreamId)}&limit=30`);
         if (!response.ok) throw new Error("Failed to load workstream chats");
         const data = (await response.json()) as { chats: WorkstreamChatSummary[] };
-        if (active) {
-          setChats(data.chats ?? []);
-        }
+        if (active) setChats(data.chats ?? []);
       } catch {
-        if (active) {
-          setChats([]);
-        }
+        if (active) setChats([]);
       } finally {
-        if (active) {
-          setLoading(false);
-        }
+        if (active) setLoading(false);
       }
     }
 
     void run();
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, [workstreamId]);
 
-  return {
-    chats,
-    loading,
-  };
+  return { chats, loading };
 }
+
+/* ─── Main Focus Panel ───────────────────────────────────── */
 
 export function WorkstreamFocusPanel({
   workstream,
@@ -173,6 +250,7 @@ export function WorkstreamFocusPanel({
   });
   const { plannerItems, loading: plannerLoading } = usePlannerData(workstream._id);
   const { editorMode, setEditorMode } = useEditorStore();
+  const [isExiting, setIsExiting] = useState(false);
 
   useEffect(() => {
     if (activeNote?.editorMode) {
@@ -187,7 +265,7 @@ export function WorkstreamFocusPanel({
           onRouteChange({ panel: undefined, note: undefined, prompt: undefined }, "replace");
           return;
         }
-        onClose();
+        handleCloseWithAnimation();
       }
     };
 
@@ -198,35 +276,16 @@ export function WorkstreamFocusPanel({
   const stageItem = useMemo(() => {
     const upcoming = plannerItems.find((item) => item.status !== "completed");
     if (upcoming) {
-      return {
-        eyebrow: "Planner",
-        title: upcoming.title,
-        description: upcoming.description || "This item is the clearest next milestone in the workstream.",
-      };
+      return { eyebrow: "Next up", title: upcoming.title, description: upcoming.description || "Upcoming milestone in this workstream." };
     }
-
     if (activeNote || notes[0]) {
       const note = activeNote ?? notes[0]!;
-      return {
-        eyebrow: "Notes",
-        title: note.title,
-        description: excerptFromNote(note),
-      };
+      return { eyebrow: "Active note", title: note.title, description: excerptFromNote(note) };
     }
-
     if (chats[0]) {
-      return {
-        eyebrow: "Threads",
-        title: chats[0].title,
-        description: chats[0].latestUserPrompt || "Resume the conversation from the right-side chat panel.",
-      };
+      return { eyebrow: "Last thread", title: chats[0].title, description: chats[0].latestUserPrompt || "Continue the conversation." };
     }
-
-    return {
-      eyebrow: "Workspace",
-      title: "Focus the work",
-      description: "Use the stable layout grammar to keep notes, chat, artifacts, and planning inside one anchored state.",
-    };
+    return { eyebrow: "Ready", title: "Start working", description: "Open chat, create notes, or add planner items to this workstream." };
   }, [activeNote, chats, notes, plannerItems]);
 
   const startBounds = cardBounds ?? defaultBounds(containerBounds);
@@ -255,85 +314,113 @@ export function WorkstreamFocusPanel({
       editorMode: "notion",
       workstreamId: workstream._id,
     });
-
     onRouteChange({ panel: "note", note: noteId }, "push");
   }, [createNote, onRouteChange, workstream._id, workstream.title]);
 
   const handleOpenFullChat = useCallback((chatId?: string) => {
-    const query = new URLSearchParams({
-      from: "workspace",
-      ws: workstream._id,
-    });
-    if (chatId) {
-      query.set("chatId", chatId);
-    }
+    const query = new URLSearchParams({ from: "workspace", ws: workstream._id });
+    if (chatId) query.set("chatId", chatId);
     router.push(`/chat?${query.toString()}`);
   }, [router, workstream._id]);
 
   const handleOpenFullNote = useCallback((noteId: string) => {
-    const query = new URLSearchParams({
-      note: noteId,
-      from: "workspace",
-      ws: workstream._id,
-    });
+    const query = new URLSearchParams({ note: noteId, from: "workspace", ws: workstream._id });
     router.push(`/notes?${query.toString()}`);
   }, [router, workstream._id]);
 
+  const handleCloseWithAnimation = useCallback(() => {
+    setIsExiting(true);
+    setTimeout(() => onClose(), 380);
+  }, [onClose]);
+
+  const activeModules = useMemo(
+    () => getActiveModules(workstream, chats, notes, plannerItems),
+    [workstream, chats, notes, plannerItems],
+  );
+
   return (
     <div className="absolute inset-0 z-50">
+      {/* Backdrop */}
       <motion.div
         className="absolute inset-0"
         initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.24 }}
-        style={{ background: "rgba(10, 12, 16, 0.28)", backdropFilter: "blur(4px)" }}
-        onClick={onClose}
+        animate={{ opacity: isExiting ? 0 : 1 }}
+        transition={{ duration: 0.32 }}
+        style={{ background: "color-mix(in oklab, var(--bg-primary) 72%, transparent)", backdropFilter: "blur(12px)" }}
+        onClick={handleCloseWithAnimation}
       />
 
+      {/* Focus container — morphs from card bounds */}
       <motion.div
-        className="absolute overflow-hidden border border-[var(--border-default)] bg-[var(--bg-primary)]"
+        className="absolute overflow-hidden bg-[var(--bg-primary)]"
         initial={{
           left: startBounds.x,
           top: startBounds.y,
           width: startBounds.w,
           height: startBounds.h,
           borderRadius: 28,
-          opacity: 0.96,
+          opacity: 0.85,
+          scale: 0.96,
         }}
-        animate={{
-          left: 16,
-          top: 16,
-          width: containerBounds.w - 32,
-          height: containerBounds.h - 32,
-          borderRadius: 30,
+        animate={isExiting ? {
+          left: startBounds.x,
+          top: startBounds.y,
+          width: startBounds.w,
+          height: startBounds.h,
+          borderRadius: 28,
+          opacity: 0,
+          scale: 0.92,
+        } : {
+          left: 0,
+          top: 0,
+          width: containerBounds.w,
+          height: containerBounds.h,
+          borderRadius: 0,
           opacity: 1,
+          scale: 1,
         }}
-        transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1] }}
-        style={{
-          boxShadow: `0 42px 110px -34px ${color.value}42`,
-          background:
-            "linear-gradient(180deg, color-mix(in oklab, var(--bg-elevated) 72%, white), color-mix(in oklab, var(--bg-primary) 92%, black))",
-        }}
+        transition={isExiting ? SPRING_EXIT : SPRING_ENTER}
         onClick={(event) => event.stopPropagation()}
       >
+        {/* Top accent line */}
+        <motion.div
+          className="absolute inset-x-0 top-0 z-10 h-[2px]"
+          initial={{ scaleX: 0 }}
+          animate={{ scaleX: isExiting ? 0 : 1 }}
+          transition={{ delay: 0.18, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+          style={{
+            background: `linear-gradient(90deg, transparent, ${color.value}, ${color.value}80, transparent)`,
+            transformOrigin: "left",
+          }}
+        />
+
+        {/* Subtle ambient glow */}
         <div
-          className="absolute inset-x-0 top-0 h-[3px]"
-          style={{ background: `linear-gradient(90deg, ${color.value}, color-mix(in oklab, ${color.value} 48%, transparent))` }}
+          className="pointer-events-none absolute inset-0 opacity-40"
+          style={{
+            background: `radial-gradient(ellipse 60% 40% at 20% 0%, ${color.value}18 0%, transparent 70%)`,
+          }}
         />
 
         <div className="flex h-full min-h-0 flex-col">
+          {/* Top bar */}
           <FocusTopBar
             workstream={workstream}
             activeView={focusView}
             activePanel={resolvedPanel}
-            onClose={onClose}
+            onClose={handleCloseWithAnimation}
             onOpenChat={openChatPanel}
             onChangeView={handleChangeView}
           />
 
+          {/* Content + optional panel */}
           <div className="flex min-h-0 flex-1">
-            <div className={cn("min-h-0 flex-1 overflow-y-auto", resolvedPanel && "border-r border-[var(--border-default)]")}>
+            <motion.div
+              className="min-h-0 flex-1 overflow-y-auto"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.22, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+            >
               {focusView === "structured" ? (
                 <StructuredView
                   workstream={workstream}
@@ -344,6 +431,7 @@ export function WorkstreamFocusPanel({
                   plannerItems={plannerItems}
                   plannerLoading={plannerLoading}
                   stageItem={stageItem}
+                  activeModules={activeModules}
                   onOpenChat={openChatPanel}
                   onOpenNote={handleOpenNote}
                   onCreateNote={handleCreateNote}
@@ -368,58 +456,65 @@ export function WorkstreamFocusPanel({
                   plannerItems={plannerItems}
                 />
               )}
-            </div>
+            </motion.div>
 
-            {resolvedPanel === "chat" && (
-              <WorkspaceDetailPanel title="Chat" onClose={closeDetailPanel}>
-                <WorkspaceChatPanel
-                  workstream={workstream}
-                  initialDraft={initialQuery}
-                  onOpenFull={handleOpenFullChat}
-                />
-              </WorkspaceDetailPanel>
-            )}
+            {/* Right panel */}
+            <AnimatePresence mode="wait">
+              {resolvedPanel === "chat" && (
+                <WorkspaceDetailPanel key="chat" title="Chat" onClose={closeDetailPanel}>
+                  <WorkspaceChatPanel
+                    workstream={workstream}
+                    initialDraft={initialQuery}
+                    onOpenFull={handleOpenFullChat}
+                  />
+                </WorkspaceDetailPanel>
+              )}
 
-            {resolvedPanel === "note" && (
-              <WorkspaceDetailPanel
-                title={activeNote?.title || "Note"}
-                onClose={closeDetailPanel}
-                onMaximize={activeNote ? () => handleOpenFullNote(activeNote._id) : undefined}
-                maximizeLabel="Open full note"
-              >
-                <WorkspaceNotePanel
-                  note={activeNote}
-                  editorMode={editorMode}
-                  onModeChange={setEditorMode}
-                  onSave={async (content, text) => {
-                    if (!activeNote) return;
-                    await updateNote(activeNote._id, {
-                      title: text.trim().split("\n")[0] || activeNote.title || "Untitled note",
-                      content,
-                      contentPlaintext: text,
-                      editorMode,
-                    });
-                  }}
-                />
-              </WorkspaceDetailPanel>
-            )}
+              {resolvedPanel === "note" && (
+                <WorkspaceDetailPanel
+                  key="note"
+                  title={activeNote?.title || "Note"}
+                  onClose={closeDetailPanel}
+                  onMaximize={activeNote ? () => handleOpenFullNote(activeNote._id) : undefined}
+                  maximizeLabel="Open in /notes"
+                >
+                  <WorkspaceNotePanel
+                    note={activeNote}
+                    editorMode={editorMode}
+                    onModeChange={setEditorMode}
+                    onSave={async (content, text) => {
+                      if (!activeNote) return;
+                      await updateNote(activeNote._id, {
+                        title: text.trim().split("\n")[0] || activeNote.title || "Untitled note",
+                        content,
+                        contentPlaintext: text,
+                        editorMode,
+                      });
+                    }}
+                  />
+                </WorkspaceDetailPanel>
+              )}
 
-            {resolvedPanel === "artifact" && (
-              <WorkspaceDetailPanel
-                title="Artifacts"
-                onClose={closeDetailPanel}
-                onMaximize={() => handleOpenFullChat()}
-                maximizeLabel="Open full chat"
-              >
-                <ArtifactPanelPlaceholder workstream={workstream} />
-              </WorkspaceDetailPanel>
-            )}
+              {resolvedPanel === "artifact" && (
+                <WorkspaceDetailPanel
+                  key="artifact"
+                  title="Artifacts"
+                  onClose={closeDetailPanel}
+                  onMaximize={() => handleOpenFullChat()}
+                  maximizeLabel="Open full"
+                >
+                  <ArtifactPanelPlaceholder workstream={workstream} />
+                </WorkspaceDetailPanel>
+              )}
+            </AnimatePresence>
           </div>
         </div>
       </motion.div>
     </div>
   );
 }
+
+/* ─── Top Bar ────────────────────────────────────────────── */
 
 function FocusTopBar({
   workstream,
@@ -439,61 +534,70 @@ function FocusTopBar({
   const color = getWorkstreamColor(workstream.color);
 
   return (
-    <div className="border-b border-[var(--border-default)] bg-[color:color-mix(in_oklab,var(--bg-elevated)_84%,transparent)] px-5 py-4 backdrop-blur-xl">
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          onClick={onClose}
-          className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
+    <motion.div
+      className="flex items-center gap-3 border-b border-[var(--border-default)] px-5 py-3"
+      style={{
+        background: "color-mix(in oklab, var(--bg-elevated) 60%, transparent)",
+        backdropFilter: "blur(16px)",
+      }}
+      initial={{ opacity: 0, y: -8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.12, duration: 0.3 }}
+    >
+      {/* Back */}
+      <button
+        type="button"
+        onClick={onClose}
+        className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium text-[var(--text-secondary)] transition-all hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+      >
+        <ArrowLeft className="h-3.5 w-3.5" />
+        Map
+      </button>
+
+      <div className="h-4 w-px bg-[var(--border-default)]" />
+
+      {/* Identity */}
+      <div className="flex min-w-0 flex-1 items-center gap-2.5">
+        <span className="text-lg">{workstream.emoji || "📚"}</span>
+        <h1 className="truncate font-display text-base font-semibold text-[var(--text-primary)]">
+          {workstream.title}
+        </h1>
+        <span
+          className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+          style={{ background: color.bg, color: color.value }}
         >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          Map
-        </button>
-
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-xl">{workstream.emoji || "📚"}</span>
-            <h1 className="truncate font-display text-xl text-[var(--text-primary)]">
-              {workstream.title}
-            </h1>
-            <span
-              className="rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]"
-              style={{ background: color.bg, color: color.value }}
-            >
-              {workstream.type}
-            </span>
-          </div>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            Route-backed focus state with stable workspace views and panel-first detail flows.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <ViewToggle activeView={activeView} onChange={onChangeView} />
-          <button
-            type="button"
-            onClick={onOpenChat}
-            className={cn(
-              "inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition-all",
-              activePanel === "chat"
-                ? "bg-[var(--accent-cyan)] text-white"
-                : "border border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
-            )}
-          >
-            <MessageSquare className="h-4 w-4" />
-            Chat
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] p-2 text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
-            aria-label="Close focused workstream"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
+          {workstream.type}
+        </span>
       </div>
-    </div>
+
+      {/* View toggle */}
+      <ViewToggle activeView={activeView} onChange={onChangeView} />
+
+      {/* Chat toggle */}
+      <button
+        type="button"
+        onClick={onOpenChat}
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition-all",
+          activePanel === "chat"
+            ? "bg-[var(--accent-cyan)] text-white shadow-[0_2px_8px_-2px_rgba(14,142,232,0.4)]"
+            : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+        )}
+      >
+        <MessageSquare className="h-3.5 w-3.5" />
+        Chat
+      </button>
+
+      {/* Close */}
+      <button
+        type="button"
+        onClick={onClose}
+        className="rounded-xl p-2 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+        aria-label="Close"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </motion.div>
   );
 }
 
@@ -511,29 +615,32 @@ function ViewToggle({
   ];
 
   return (
-    <div className="flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] p-1">
+    <div className="flex items-center gap-0.5 rounded-xl bg-[var(--bg-secondary)] p-0.5">
       {items.map((item) => {
         const Icon = item.icon;
+        const active = activeView === item.id;
         return (
           <button
             key={item.id}
             type="button"
             onClick={() => onChange(item.id)}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors",
-              activeView === item.id
-                ? "bg-[var(--accent-cyan)] text-white"
-                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+              "relative inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all duration-200",
+              active
+                ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm"
+                : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]",
             )}
           >
-            <Icon className="h-3.5 w-3.5" />
-            {item.label}
+            <Icon className="h-3 w-3" />
+            <span className="hidden sm:inline">{item.label}</span>
           </button>
         );
       })}
     </div>
   );
 }
+
+/* ─── STRUCTURED VIEW ────────────────────────────────────── */
 
 function StructuredView({
   workstream,
@@ -544,6 +651,7 @@ function StructuredView({
   plannerItems,
   plannerLoading,
   stageItem,
+  activeModules,
   onOpenChat,
   onOpenNote,
   onCreateNote,
@@ -558,149 +666,387 @@ function StructuredView({
   plannerItems: PlannerItem[];
   plannerLoading: boolean;
   stageItem: { eyebrow: string; title: string; description: string };
+  activeModules: ModuleConfig[];
   onOpenChat: () => void;
   onOpenNote: (noteId: string) => void;
   onCreateNote: () => void;
   onOpenFullChat: () => void;
   onViewChange: (view: WorkstreamView) => void;
 }) {
+  const color = getWorkstreamColor(workstream.color);
+
   return (
-    <div className="space-y-6 px-6 py-6">
-      <div className="grid gap-6 xl:grid-cols-[1.35fr_0.9fr]">
-        <section className="overflow-hidden rounded-[28px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
-          <div className="border-b border-[var(--border-default)] px-6 py-4">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-              {stageItem.eyebrow}
-            </div>
-            <h2 className="mt-3 font-display text-3xl leading-tight text-[var(--text-primary)]">
-              {stageItem.title}
-            </h2>
-            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[var(--text-secondary)]">
-              {stageItem.description}
-            </p>
+    <div className="h-full overflow-y-auto">
+      {/* Main stage — no card wrapper */}
+      <div className="border-b border-[var(--border-default)] px-8 py-8">
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.28, duration: 0.4 }}
+        >
+          <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+            <div className="h-1.5 w-1.5 rounded-full" style={{ background: color.value }} />
+            {stageItem.eyebrow}
           </div>
+          <h2 className="mt-3 max-w-2xl font-display text-3xl leading-tight text-[var(--text-primary)]">
+            {stageItem.title}
+          </h2>
+          <p className="mt-2 max-w-xl text-sm leading-relaxed text-[var(--text-secondary)]">
+            {stageItem.description}
+          </p>
 
-          <div className="grid gap-4 p-6 md:grid-cols-3">
-            <ActionTile icon={MessageSquare} label="Threads" value={chats.length} helper="Continue the active conversation." onClick={onOpenChat} />
-            <ActionTile icon={StickyNote} label="Notes" value={notes.length} helper="Open in panel first, maximize when needed." onClick={() => notes[0] ? onOpenNote(notes[0]._id) : onCreateNote()} />
-            <ActionTile icon={GitBranch} label="Graph" value="View" helper="Switch to the relationship graph." onClick={() => onViewChange("graph")} />
+          {/* Quick action strip */}
+          <div className="mt-6 flex flex-wrap items-center gap-2">
+            <QuickAction icon={MessageSquare} label={`${chats.length} threads`} onClick={onOpenChat} />
+            <QuickAction icon={StickyNote} label={`${notes.length} notes`} onClick={() => notes[0] ? onOpenNote(notes[0]._id) : onCreateNote()} />
+            <QuickAction icon={CalendarClock} label={`${plannerItems.filter((i) => i.status !== "completed").length} upcoming`} />
+            <QuickAction icon={GitBranch} label="Graph" onClick={() => onViewChange("graph")} />
           </div>
-        </section>
-
-        <section className="rounded-[28px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-                Identity
-              </div>
-              <h3 className="mt-2 font-display text-xl text-[var(--text-primary)]">
-                {workstream.title}
-              </h3>
-            </div>
-            <Sparkles className="h-5 w-5 text-[var(--accent-cyan)]" />
-          </div>
-
-          <div className="mt-5 grid gap-3">
-            <InfoRow label="Last active" value={formatRelativeTime(workstream.lastActivityAt)} />
-            <InfoRow label="Default mode" value={workstream.defaultMode || "tutor"} />
-            <InfoRow label="Panels" value="Chat, notes, artifacts" />
-            <InfoRow label="Views" value="Structured, columns, graph" />
-          </div>
-        </section>
+        </motion.div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        <ModuleCard
-          title="Threads"
-          icon={MessageSquare}
-          actionLabel="Open chat"
-          onAction={onOpenChat}
-        >
-          {chatsLoading ? (
-            <PanelLoading label="Loading conversations" />
-          ) : chats.length > 0 ? (
-            <div className="space-y-3">
-              {chats.slice(0, 3).map((chat) => (
-                <button
-                  key={chat._id}
-                  type="button"
-                  onClick={onOpenFullChat}
-                  className="w-full rounded-2xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3 text-left transition-colors hover:bg-[var(--bg-hover)]"
-                >
-                  <div className="text-sm font-semibold text-[var(--text-primary)]">
-                    {chat.title}
-                  </div>
-                  <div className="mt-1 text-xs text-[var(--text-secondary)]">
-                    {chat.latestUserPrompt || "Resume the workstream conversation."}
-                  </div>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <ModuleEmptyState
-              icon="💬"
-              title="No threads yet"
-              description="The right-side chat panel is the primary entry point inside the focused workstream."
-            />
-          )}
-        </ModuleCard>
-
-        <ModuleCard
-          title="Notes"
-          icon={StickyNote}
-          actionLabel="New note"
-          onAction={onCreateNote}
-        >
-          {notesLoading ? (
-            <PanelLoading label="Loading notes" />
-          ) : notes.length > 0 ? (
-            <div className="space-y-3">
-              {notes.slice(0, 4).map((note) => (
-                <NotePreviewCard key={note._id} note={note} onOpen={() => onOpenNote(note._id)} />
-              ))}
-            </div>
-          ) : (
-            <ModuleEmptyState
-              icon="📝"
-              title="No notes yet"
-              description="Notes appear here as objects first, then open into the reusable side panel."
-            />
-          )}
-        </ModuleCard>
-
-        <ModuleCard title="Planner" icon={CalendarClock}>
-          {plannerLoading ? (
-            <PanelLoading label="Loading planner" />
-          ) : plannerItems.length > 0 ? (
-            <div className="space-y-3">
-              {plannerItems.slice(0, 4).map((item) => (
-                <PlannerCard key={item._id} item={item} />
-              ))}
-            </div>
-          ) : (
-            <ModuleEmptyState
-              icon="📅"
-              title="No deadlines yet"
-              description="Planner items stay in the same layout grammar instead of becoming a separate tool."
-            />
-          )}
-        </ModuleCard>
-
-        <ModuleCard
-          title="Artifacts"
-          icon={FileText}
-          actionLabel="Open detail panel"
-          onAction={() => onViewChange("columns")}
-        >
-          <div className="grid gap-3 md:grid-cols-2">
-            <ArtifactCard title="Generated outputs" description="Artifacts remain durable underneath the workspace and open through the panel flow." />
-            <ArtifactCard title="Relationship-ready" description="Use Graph view when the internal object network matters more than the fixed structure." />
-          </div>
-        </ModuleCard>
+      {/* Adaptive modules — rendered from registry, not hard-coded */}
+      <div className="px-8 py-6">
+        <div className="grid gap-8 xl:grid-cols-2">
+          {activeModules.map((mod, idx) => (
+            <motion.div
+              key={mod.type}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 + idx * 0.06, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+            >
+              {mod.type === "threads" && (
+                <ThreadsModule
+                  chats={chats}
+                  loading={chatsLoading}
+                  onOpenChat={onOpenChat}
+                  onOpenFullChat={onOpenFullChat}
+                />
+              )}
+              {mod.type === "notes" && (
+                <NotesModule
+                  notes={notes}
+                  loading={notesLoading}
+                  onOpenNote={onOpenNote}
+                  onCreateNote={onCreateNote}
+                />
+              )}
+              {mod.type === "planner" && (
+                <PlannerModule
+                  items={plannerItems}
+                  loading={plannerLoading}
+                />
+              )}
+              {mod.type === "artifacts" && (
+                <ArtifactsModule
+                  workstream={workstream}
+                  onViewChange={onViewChange}
+                />
+              )}
+              {mod.type === "agents" && (
+                <AgentModule workstream={workstream} />
+              )}
+            </motion.div>
+          ))}
+        </div>
       </div>
     </div>
   );
 }
+
+/* ─── Quick Action Button (inline strip, not card) ──────── */
+
+function QuickAction({
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  icon: typeof MessageSquare;
+  label: string;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium text-[var(--text-secondary)] transition-all hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-[0.97]"
+    >
+      <Icon className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
+      {label}
+    </button>
+  );
+}
+
+/* ─── Module: Threads ────────────────────────────────────── */
+
+function ThreadsModule({
+  chats,
+  loading,
+  onOpenChat,
+  onOpenFullChat,
+}: {
+  chats: WorkstreamChatSummary[];
+  loading: boolean;
+  onOpenChat: () => void;
+  onOpenFullChat: () => void;
+}) {
+  return (
+    <ModuleSection
+      title="Threads"
+      icon={MessageSquare}
+      count={chats.length}
+      actionLabel="New chat"
+      onAction={onOpenChat}
+    >
+      {loading ? (
+        <LoadingSkeleton lines={2} />
+      ) : chats.length > 0 ? (
+        <div className="space-y-1">
+          {chats.slice(0, 4).map((chat, idx) => (
+            <motion.button
+              key={chat._id}
+              type="button"
+              onClick={() => onOpenFullChat()}
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: idx * 0.04, duration: 0.25 }}
+              className="group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-all hover:bg-[var(--bg-hover)]"
+            >
+              <MessageSquare className="h-3.5 w-3.5 shrink-0 text-[var(--text-tertiary)] transition-colors group-hover:text-[var(--accent-cyan)]" />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm text-[var(--text-primary)]">
+                  {chat.title}
+                </div>
+                {chat.latestUserPrompt && (
+                  <div className="mt-0.5 truncate text-xs text-[var(--text-tertiary)]">
+                    {chat.latestUserPrompt}
+                  </div>
+                )}
+              </div>
+              <span className="shrink-0 text-[10px] text-[var(--text-tertiary)]">
+                {formatRelativeTime(chat.updatedAt)}
+              </span>
+              <ChevronRight className="h-3 w-3 shrink-0 text-[var(--text-tertiary)] opacity-0 transition-opacity group-hover:opacity-100" />
+            </motion.button>
+          ))}
+        </div>
+      ) : (
+        <EmptyHint icon={MessageSquare} text="Open the chat panel to start a conversation." action="Start chat" onAction={onOpenChat} />
+      )}
+    </ModuleSection>
+  );
+}
+
+/* ─── Module: Notes ──────────────────────────────────────── */
+
+function NotesModule({
+  notes,
+  loading,
+  onOpenNote,
+  onCreateNote,
+}: {
+  notes: WorkspaceNote[];
+  loading: boolean;
+  onOpenNote: (noteId: string) => void;
+  onCreateNote: () => void;
+}) {
+  return (
+    <ModuleSection
+      title="Notes"
+      icon={StickyNote}
+      count={notes.length}
+      actionLabel="New note"
+      onAction={onCreateNote}
+    >
+      {loading ? (
+        <LoadingSkeleton lines={2} />
+      ) : notes.length > 0 ? (
+        <div className="space-y-1">
+          {notes.slice(0, 5).map((note, idx) => (
+            <motion.button
+              key={note._id}
+              type="button"
+              onClick={() => onOpenNote(note._id)}
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: idx * 0.04, duration: 0.25 }}
+              className="group flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-all hover:bg-[var(--bg-hover)]"
+            >
+              <StickyNote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--text-tertiary)] transition-colors group-hover:text-[var(--accent-coral)]" />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm text-[var(--text-primary)]">
+                  {note.title}
+                </div>
+                <div className="mt-0.5 line-clamp-1 text-xs text-[var(--text-tertiary)]">
+                  {excerptFromNote(note)}
+                </div>
+              </div>
+              <span className="mt-0.5 shrink-0 rounded-md bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)]">
+                {note.editorMode}
+              </span>
+            </motion.button>
+          ))}
+        </div>
+      ) : (
+        <EmptyHint icon={StickyNote} text="Create a note to begin drafting." action="New note" onAction={onCreateNote} />
+      )}
+    </ModuleSection>
+  );
+}
+
+/* ─── Module: Planner ────────────────────────────────────── */
+
+function PlannerModule({
+  items,
+  loading,
+}: {
+  items: PlannerItem[];
+  loading: boolean;
+}) {
+  const pending = items.filter((i) => i.status !== "completed");
+  const completed = items.filter((i) => i.status === "completed");
+
+  return (
+    <ModuleSection title="Planner" icon={CalendarClock} count={pending.length}>
+      {loading ? (
+        <LoadingSkeleton lines={2} />
+      ) : items.length > 0 ? (
+        <div className="space-y-1">
+          {pending.slice(0, 5).map((item, idx) => (
+            <motion.div
+              key={item._id}
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: idx * 0.04, duration: 0.25 }}
+              className="flex items-center gap-3 rounded-xl px-3 py-2.5"
+            >
+              <div
+                className="h-2 w-2 shrink-0 rounded-full"
+                style={{
+                  background: item.priority === "high" ? "var(--danger)" : item.priority === "medium" ? "var(--warning)" : "var(--accent-mint)",
+                }}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm text-[var(--text-primary)]">
+                  {item.title}
+                </div>
+                {item.dueAt && (
+                  <div className="mt-0.5 flex items-center gap-1 text-[10px] text-[var(--text-tertiary)]">
+                    <Clock className="h-2.5 w-2.5" />
+                    Due {formatRelativeTime(item.dueAt)}
+                  </div>
+                )}
+              </div>
+              <span className="rounded-md bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[10px] uppercase text-[var(--text-tertiary)]">
+                {item.priority}
+              </span>
+            </motion.div>
+          ))}
+          {completed.length > 0 && (
+            <div className="mt-2 border-t border-[var(--border-default)] pt-2 text-xs text-[var(--text-tertiary)]">
+              {completed.length} completed
+            </div>
+          )}
+        </div>
+      ) : (
+        <EmptyHint icon={CalendarClock} text="No deadlines or milestones yet." />
+      )}
+    </ModuleSection>
+  );
+}
+
+/* ─── Module: Artifacts ──────────────────────────────────── */
+
+function ArtifactsModule({
+  workstream,
+  onViewChange,
+}: {
+  workstream: Workstream;
+  onViewChange: (view: WorkstreamView) => void;
+}) {
+  const count = workstream.artifactCount ?? 0;
+
+  return (
+    <ModuleSection
+      title="Artifacts"
+      icon={FileText}
+      count={count}
+      actionLabel="Column view"
+      onAction={() => onViewChange("columns")}
+    >
+      {count > 0 ? (
+        <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-[var(--text-secondary)]">
+          <FileText className="h-3.5 w-3.5 text-[var(--accent-mint)]" />
+          {count} durable {count === 1 ? "artifact" : "artifacts"} in this workstream
+        </div>
+      ) : (
+        <EmptyHint icon={FileText} text="Artifacts are auto-saved when AI generates outputs." />
+      )}
+    </ModuleSection>
+  );
+}
+
+/* ─── Module: Agent ──────────────────────────────────────── */
+
+function AgentModule({ workstream }: { workstream: Workstream }) {
+  return (
+    <ModuleSection title="Linked Agent" icon={Zap}>
+      <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-[var(--text-secondary)]">
+        <Zap className="h-3.5 w-3.5 text-[var(--warning)]" />
+        Agent attached to this workstream for domain-specific help.
+      </div>
+    </ModuleSection>
+  );
+}
+
+/* ─── Module Section (shared shell — NOT a card) ─────────── */
+
+function ModuleSection({
+  title,
+  icon: Icon,
+  count,
+  actionLabel,
+  onAction,
+  children,
+}: {
+  title: string;
+  icon: typeof MessageSquare;
+  count?: number;
+  actionLabel?: string;
+  onAction?: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <section>
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Icon className="h-4 w-4 text-[var(--text-tertiary)]" />
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+            {title}
+          </h3>
+          {count !== undefined && count > 0 && (
+            <span className="text-[10px] tabular-nums text-[var(--text-tertiary)]">
+              {count}
+            </span>
+          )}
+        </div>
+        {actionLabel && onAction && (
+          <button
+            type="button"
+            onClick={onAction}
+            className="inline-flex items-center gap-1 text-xs text-[var(--text-tertiary)] transition-colors hover:text-[var(--accent-cyan)]"
+          >
+            <Plus className="h-3 w-3" />
+            {actionLabel}
+          </button>
+        )}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/* ─── COLUMNS VIEW ───────────────────────────────────────── */
 
 function ColumnView({
   workstream,
@@ -719,37 +1065,159 @@ function ColumnView({
   onOpenNote: (noteId: string) => void;
   onCreateNote: () => void;
 }) {
+  const pending = plannerItems.filter((i) => i.status !== "completed");
+  const completed = plannerItems.filter((i) => i.status === "completed");
+
   return (
-    <div className="h-full overflow-x-auto px-6 py-6">
-      <div className="grid min-w-[1100px] grid-cols-4 gap-4">
-        <ColumnGroup title="Threads" icon={MessageSquare} actionLabel="Chat" onAction={onOpenChat}>
-          {chats.length > 0 ? chats.map((chat) => (
-            <ColumnCard key={chat._id} title={chat.title} description={chat.latestUserPrompt || "Continue the thread from the panel."} />
-          )) : <ModuleEmptyState icon="💬" title="No threads" description="Open chat to create the first workstream conversation." />}
-        </ColumnGroup>
+    <div className="h-full overflow-x-auto">
+      <div className="grid h-full min-w-[960px] grid-cols-3 divide-x divide-[var(--border-default)]">
+        {/* Column: Threads & Notes */}
+        <div className="flex flex-col">
+          <ColumnHeader title="Threads" count={chats.length} icon={MessageSquare} actionLabel="Chat" onAction={onOpenChat} />
+          <div className="flex-1 overflow-y-auto px-4 pb-4">
+            <div className="space-y-1.5">
+              {chats.map((chat, idx) => (
+                <motion.div
+                  key={chat._id}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: idx * 0.04, duration: 0.3 }}
+                  className="group cursor-pointer rounded-xl px-3 py-3 transition-all hover:bg-[var(--bg-hover)]"
+                  onClick={onOpenChat}
+                >
+                  <div className="text-sm font-medium text-[var(--text-primary)]">{chat.title}</div>
+                  {chat.latestUserPrompt && (
+                    <div className="mt-1 line-clamp-2 text-xs text-[var(--text-tertiary)]">{chat.latestUserPrompt}</div>
+                  )}
+                  <div className="mt-1.5 text-[10px] text-[var(--text-tertiary)]">{formatRelativeTime(chat.updatedAt)}</div>
+                </motion.div>
+              ))}
+              {chats.length === 0 && (
+                <EmptyHint icon={MessageSquare} text="No threads yet." action="Start chat" onAction={onOpenChat} />
+              )}
+            </div>
+          </div>
+        </div>
 
-        <ColumnGroup title="Notes" icon={StickyNote} actionLabel="New" onAction={onCreateNote}>
-          {notes.length > 0 ? notes.map((note) => (
-            <button key={note._id} type="button" onClick={() => onOpenNote(note._id)}>
-              <ColumnCard title={note.title} description={excerptFromNote(note)} />
-            </button>
-          )) : <ModuleEmptyState icon="📝" title="No notes" description="Notes open in the right panel before they expand into the full notes area." />}
-        </ColumnGroup>
+        {/* Column: Notes */}
+        <div className="flex flex-col">
+          <ColumnHeader title="Notes" count={notes.length} icon={StickyNote} actionLabel="New" onAction={onCreateNote} />
+          <div className="flex-1 overflow-y-auto px-4 pb-4">
+            <div className="space-y-1.5">
+              {notes.map((note, idx) => (
+                <motion.button
+                  key={note._id}
+                  type="button"
+                  onClick={() => onOpenNote(note._id)}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: idx * 0.04, duration: 0.3 }}
+                  className="group w-full cursor-pointer rounded-xl px-3 py-3 text-left transition-all hover:bg-[var(--bg-hover)]"
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-medium text-[var(--text-primary)]">{note.title}</div>
+                    <span className="rounded-md bg-[var(--bg-secondary)] px-1 py-0.5 text-[9px] text-[var(--text-tertiary)]">{note.editorMode}</span>
+                  </div>
+                  <div className="mt-1 line-clamp-3 text-xs leading-relaxed text-[var(--text-tertiary)]">
+                    {excerptFromNote(note)}
+                  </div>
+                </motion.button>
+              ))}
+              {notes.length === 0 && (
+                <EmptyHint icon={StickyNote} text="No notes yet." action="New note" onAction={onCreateNote} />
+              )}
+            </div>
+          </div>
+        </div>
 
-        <ColumnGroup title="Planner" icon={CalendarClock}>
-          {plannerItems.length > 0 ? plannerItems.map((item) => (
-            <ColumnCard key={item._id} title={item.title} description={item.description || `${item.priority} priority ${item.type}`} />
-          )) : <ModuleEmptyState icon="📅" title="Clear" description={`${workstream.title} does not have active planner items yet.`} />}
-        </ColumnGroup>
-
-        <ColumnGroup title="Artifacts" icon={FileText}>
-          <ColumnCard title="Durable outputs" description="Artifacts stay durable underneath the workstream and use the same panel-maximize-return pattern." />
-          <ColumnCard title="Adaptive modules" description="The column layout groups note, task, and artifact surfaces without inventing a new UI per workstream." />
-        </ColumnGroup>
+        {/* Column: Planner */}
+        <div className="flex flex-col">
+          <ColumnHeader title="Planner" count={pending.length} icon={CalendarClock} />
+          <div className="flex-1 overflow-y-auto px-4 pb-4">
+            {pending.length > 0 && (
+              <div className="mb-3">
+                <div className="mb-2 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">Active</div>
+                <div className="space-y-1.5">
+                  {pending.map((item, idx) => (
+                    <motion.div
+                      key={item._id}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: idx * 0.04, duration: 0.3 }}
+                      className="rounded-xl px-3 py-3"
+                    >
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="h-2 w-2 rounded-full"
+                          style={{
+                            background: item.priority === "high" ? "var(--danger)" : item.priority === "medium" ? "var(--warning)" : "var(--accent-mint)",
+                          }}
+                        />
+                        <div className="text-sm font-medium text-[var(--text-primary)]">{item.title}</div>
+                      </div>
+                      {item.dueAt && (
+                        <div className="mt-1 flex items-center gap-1 pl-4 text-[10px] text-[var(--text-tertiary)]">
+                          <Clock className="h-2.5 w-2.5" />
+                          Due {formatRelativeTime(item.dueAt)}
+                        </div>
+                      )}
+                    </motion.div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {completed.length > 0 && (
+              <div>
+                <div className="mb-2 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">Done</div>
+                <div className="space-y-1">
+                  {completed.slice(0, 5).map((item) => (
+                    <div key={item._id} className="rounded-xl px-3 py-2 text-sm text-[var(--text-tertiary)] line-through">
+                      {item.title}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {plannerItems.length === 0 && (
+              <EmptyHint icon={CalendarClock} text="No planner items yet." />
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
 }
+
+function ColumnHeader({
+  title,
+  count,
+  icon: Icon,
+  actionLabel,
+  onAction,
+}: {
+  title: string;
+  count: number;
+  icon: typeof MessageSquare;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between border-b border-[var(--border-default)] px-4 py-3">
+      <div className="flex items-center gap-2">
+        <Icon className="h-3.5 w-3.5 text-[var(--text-tertiary)]" />
+        <span className="text-sm font-semibold text-[var(--text-primary)]">{title}</span>
+        <span className="text-[10px] tabular-nums text-[var(--text-tertiary)]">{count}</span>
+      </div>
+      {actionLabel && onAction && (
+        <button type="button" onClick={onAction} className="text-xs text-[var(--text-tertiary)] transition-colors hover:text-[var(--accent-cyan)]">
+          + {actionLabel}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* ─── GRAPH VIEW ─────────────────────────────────────────── */
 
 function GraphWorkspaceView({
   workstream,
@@ -762,54 +1230,71 @@ function GraphWorkspaceView({
   notes: WorkspaceNote[];
   plannerItems: PlannerItem[];
 }) {
+  const color = getWorkstreamColor(workstream.color);
+
   const nodes = useMemo<Node[]>(() => {
     const graphNodes: Node[] = [
       {
         id: "root",
-        position: { x: 240, y: 180 },
-        draggable: false,
+        position: { x: 300, y: 220 },
+        draggable: true,
         selectable: false,
         data: { label: workstream.title },
         style: {
-          width: 220,
-          borderRadius: 24,
-          border: "1px solid var(--border-default)",
+          width: 200,
+          borderRadius: 16,
+          border: `2px solid ${color.value}`,
           background: "var(--bg-elevated)",
           color: "var(--text-primary)",
           fontWeight: 700,
-          padding: 18,
-          boxShadow: "var(--shadow-card)",
+          fontSize: 14,
+          padding: "14px 16px",
+          boxShadow: `0 8px 24px -8px ${color.value}30`,
         },
       },
     ];
 
-    notes.slice(0, 4).forEach((note, index) => {
+    const noteRadius = 220;
+    notes.slice(0, 6).forEach((note, index) => {
+      const angle = (-Math.PI / 2) + (index / Math.max(notes.length, 1)) * Math.PI;
       graphNodes.push({
         id: `note-${note._id}`,
-        position: { x: 20, y: 40 + index * 108 },
-        draggable: false,
+        position: {
+          x: 300 + Math.cos(angle) * noteRadius - 80,
+          y: 220 + Math.sin(angle) * noteRadius - 20,
+        },
+        draggable: true,
         selectable: false,
         data: { label: note.title },
         style: graphNodeStyle("var(--accent-coral)"),
       });
     });
 
-    chats.slice(0, 3).forEach((chat, index) => {
+    const chatRadius = 240;
+    chats.slice(0, 4).forEach((chat, index) => {
+      const angle = (Math.PI / 2) + (index / Math.max(chats.length, 1)) * Math.PI * 0.8;
       graphNodes.push({
         id: `chat-${chat._id}`,
-        position: { x: 520, y: 60 + index * 128 },
-        draggable: false,
+        position: {
+          x: 300 + Math.cos(angle) * chatRadius - 80,
+          y: 220 + Math.sin(angle) * chatRadius - 20,
+        },
+        draggable: true,
         selectable: false,
         data: { label: chat.title },
         style: graphNodeStyle("var(--accent-cyan)"),
       });
     });
 
-    plannerItems.slice(0, 3).forEach((item, index) => {
+    plannerItems.slice(0, 4).forEach((item, index) => {
+      const angle = Math.PI + (index / Math.max(plannerItems.length, 1)) * Math.PI * 0.6;
       graphNodes.push({
         id: `planner-${item._id}`,
-        position: { x: 250, y: 360 + index * 104 },
-        draggable: false,
+        position: {
+          x: 300 + Math.cos(angle) * 200 - 80,
+          y: 220 + Math.sin(angle) * 200 - 20,
+        },
+        draggable: true,
         selectable: false,
         data: { label: item.title },
         style: graphNodeStyle("var(--warning)"),
@@ -817,63 +1302,86 @@ function GraphWorkspaceView({
     });
 
     return graphNodes;
-  }, [chats, notes, plannerItems, workstream.title]);
+  }, [chats, color.value, notes, plannerItems, workstream.title]);
 
   const edges = useMemo<Edge[]>(() => {
     const graphEdges: Edge[] = [];
-
-    notes.slice(0, 4).forEach((note) => {
-      graphEdges.push(graphEdge(`note-edge-${note._id}`, `note-${note._id}`, "root"));
+    notes.slice(0, 6).forEach((note) => {
+      graphEdges.push(graphEdge(`note-edge-${note._id}`, `note-${note._id}`, "root", "var(--accent-coral)"));
     });
-    chats.slice(0, 3).forEach((chat) => {
-      graphEdges.push(graphEdge(`chat-edge-${chat._id}`, "root", `chat-${chat._id}`));
+    chats.slice(0, 4).forEach((chat) => {
+      graphEdges.push(graphEdge(`chat-edge-${chat._id}`, "root", `chat-${chat._id}`, "var(--accent-cyan)"));
     });
-    plannerItems.slice(0, 3).forEach((item) => {
-      graphEdges.push(graphEdge(`planner-edge-${item._id}`, "root", `planner-${item._id}`));
+    plannerItems.slice(0, 4).forEach((item) => {
+      graphEdges.push(graphEdge(`planner-edge-${item._id}`, "root", `planner-${item._id}`, "var(--warning)"));
     });
-
     return graphEdges;
   }, [chats, notes, plannerItems]);
 
+  const totalItems = notes.length + chats.length + plannerItems.length;
+
   return (
-    <div className="h-full overflow-hidden px-6 py-6">
-      <div className="mb-4 max-w-2xl">
-        <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-          Internal graph
-        </div>
-        <h2 className="mt-2 font-display text-2xl text-[var(--text-primary)]">
-          Relationships inside the focused workstream
-        </h2>
-        <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
-          Graph view is secondary and visual. It reveals how notes, conversations, and planner items attach to the same workstream without replacing the stable structured layout.
-        </p>
+    <div className="flex h-full flex-col">
+      {/* Graph header */}
+      <div className="border-b border-[var(--border-default)] px-8 py-4">
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2, duration: 0.3 }}
+          className="flex items-center justify-between"
+        >
+          <div>
+            <h2 className="font-display text-lg text-[var(--text-primary)]">
+              Relationship graph
+            </h2>
+            <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
+              {totalItems} {totalItems === 1 ? "item" : "items"} connected to this workstream
+            </p>
+          </div>
+          <div className="flex items-center gap-4 text-[10px] text-[var(--text-tertiary)]">
+            <span className="flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-[var(--accent-coral)]" /> Notes
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-[var(--accent-cyan)]" /> Threads
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-[var(--warning)]" /> Planner
+            </span>
+          </div>
+        </motion.div>
       </div>
 
-      <div className="h-[calc(100%-6rem)] overflow-hidden rounded-[28px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+      {/* Graph canvas */}
+      <div className="flex-1 overflow-hidden">
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          nodesDraggable={false}
+          nodesDraggable
           elementsSelectable={false}
           panOnDrag
           zoomOnScroll
           zoomOnDoubleClick={false}
           fitView
-          fitViewOptions={{ padding: 0.22 }}
+          fitViewOptions={{ padding: 0.3 }}
           proOptions={{ hideAttribution: true }}
+          minZoom={0.4}
+          maxZoom={2}
         >
-          <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--border-default)" />
+          <Background variant={BackgroundVariant.Dots} gap={24} size={0.8} color="color-mix(in oklab, var(--border-default) 60%, transparent)" />
         </ReactFlow>
       </div>
     </div>
   );
 }
 
+/* ─── Right Panel Shell ──────────────────────────────────── */
+
 function WorkspaceDetailPanel({
   title,
   onClose,
   onMaximize,
-  maximizeLabel = "Open full view",
+  maximizeLabel = "Open full",
   children,
 }: {
   title: string;
@@ -884,43 +1392,45 @@ function WorkspaceDetailPanel({
 }) {
   return (
     <motion.aside
-      initial={{ x: 24, opacity: 0 }}
-      animate={{ x: 0, opacity: 1 }}
-      exit={{ x: 24, opacity: 0 }}
-      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-      className="flex h-full w-[430px] shrink-0 flex-col bg-[color:color-mix(in_oklab,var(--bg-elevated)_90%,transparent)] backdrop-blur-xl"
+      initial={{ width: 0, opacity: 0 }}
+      animate={{ width: 420, opacity: 1 }}
+      exit={{ width: 0, opacity: 0 }}
+      transition={{ type: "spring", stiffness: 300, damping: 34 }}
+      className="flex h-full shrink-0 flex-col overflow-hidden border-l border-[var(--border-default)]"
+      style={{
+        background: "color-mix(in oklab, var(--bg-elevated) 80%, transparent)",
+        backdropFilter: "blur(16px)",
+      }}
     >
+      {/* Panel header */}
       <div className="flex items-center gap-2 border-b border-[var(--border-default)] px-4 py-3">
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold text-[var(--text-primary)]">
-            {title}
-          </div>
-          <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
-            Panel first
-          </div>
+          <div className="truncate text-sm font-semibold text-[var(--text-primary)]">{title}</div>
         </div>
         {onMaximize && (
           <button
             type="button"
             onClick={onMaximize}
-            className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] px-3 py-1.5 text-xs text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
+            className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
           >
-            <ArrowUpRight className="h-3.5 w-3.5" />
+            <ArrowUpRight className="h-3 w-3" />
             {maximizeLabel}
           </button>
         )}
         <button
           type="button"
           onClick={onClose}
-          className="rounded-full border border-[var(--border-default)] p-2 text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
+          className="rounded-lg p-1.5 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
         >
-          <X className="h-4 w-4" />
+          <X className="h-3.5 w-3.5" />
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
     </motion.aside>
   );
 }
+
+/* ─── Chat Panel ─────────────────────────────────────────── */
 
 function WorkspaceChatPanel({
   workstream,
@@ -933,12 +1443,15 @@ function WorkspaceChatPanel({
 }) {
   const { chatId, messages, streaming, streamPhase, error, sendMessage, stopGeneration } = useCompactChat(workstream._id);
   const [draft, setDraft] = useState(initialDraft ?? "");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (initialDraft) {
-      setDraft(initialDraft);
-    }
+    if (initialDraft) setDraft(initialDraft);
   }, [initialDraft]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.length, streaming]);
 
   const handleSend = useCallback(async () => {
     if (!draft.trim() || streaming) return;
@@ -949,35 +1462,51 @@ function WorkspaceChatPanel({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b border-[var(--border-default)] px-4 py-3 text-xs text-[var(--text-secondary)]">
-        Workstream-aware compact chat. Maximize keeps the return path back to `/workspace?focus={workstream._id}`.
-      </div>
-
-      <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
-        {messages.length === 0 && (
-          <ModuleEmptyState
-            icon="✨"
-            title={`Chat inside ${workstream.title}`}
-            description="This is a real panel flow backed by workstream-aware chat creation, not a redirect shell."
-          />
-        )}
-        {messages.map((message) => (
-          <ChatBubble key={message.id} message={message} />
-        ))}
-        {streaming && (
-          <div className="text-xs text-[var(--text-tertiary)]">
-            {streamPhase === "routing" ? "Routing..." : streamPhase === "thinking" ? "Thinking..." : "Working..."}
+      {/* Messages */}
+      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+        {messages.length === 0 && !streaming && (
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <Sparkles className="h-6 w-6 text-[var(--accent-cyan)] opacity-60" />
+            <p className="mt-3 text-sm text-[var(--text-secondary)]">Ask anything about {workstream.title}</p>
           </div>
         )}
+        <AnimatePresence mode="popLayout">
+          {messages.map((message) => (
+            <motion.div
+              key={message.id}
+              initial={{ opacity: 0, y: 8, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.25 }}
+            >
+              <ChatBubble message={message} />
+            </motion.div>
+          ))}
+        </AnimatePresence>
+        {streaming && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex items-center gap-2 px-1 text-xs text-[var(--text-tertiary)]"
+          >
+            <div className="flex gap-1">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--accent-cyan)]" />
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--accent-cyan)] [animation-delay:150ms]" />
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--accent-cyan)] [animation-delay:300ms]" />
+            </div>
+            {streamPhase === "routing" ? "Routing..." : streamPhase === "thinking" ? "Thinking..." : "Writing..."}
+          </motion.div>
+        )}
         {error && (
-          <div className="rounded-2xl border border-[var(--danger)]/20 bg-[var(--danger)]/10 px-3 py-2 text-xs text-[var(--danger)]">
+          <div className="rounded-xl border border-[var(--danger)]/20 bg-[var(--danger)]/8 px-3 py-2 text-xs text-[var(--danger)]">
             {error}
           </div>
         )}
+        <div ref={messagesEndRef} />
       </div>
 
-      <div className="border-t border-[var(--border-default)] p-4">
-        <div className="rounded-[24px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-3">
+      {/* Composer */}
+      <div className="border-t border-[var(--border-default)] p-3">
+        <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-primary)] transition-shadow focus-within:shadow-[0_0_0_2px_var(--accent-cyan)20]">
           <textarea
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
@@ -988,22 +1517,23 @@ function WorkspaceChatPanel({
               }
             }}
             placeholder="Ask about this workstream..."
-            className="min-h-[88px] w-full resize-none bg-transparent text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+            rows={3}
+            className="w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
           />
-          <div className="mt-3 flex items-center justify-between">
+          <div className="flex items-center justify-between px-3 pb-2">
             <button
               type="button"
               onClick={() => onOpenFull(chatId ?? undefined)}
-              className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+              className="text-[10px] text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-primary)]"
             >
               Open full chat
             </button>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               {streaming && (
                 <button
                   type="button"
                   onClick={stopGeneration}
-                  className="rounded-full border border-[var(--border-default)] px-3 py-1.5 text-xs text-[var(--text-secondary)]"
+                  className="rounded-lg px-2 py-1 text-[10px] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)]"
                 >
                   Stop
                 </button>
@@ -1013,9 +1543,9 @@ function WorkspaceChatPanel({
                 onClick={() => void handleSend()}
                 disabled={!draft.trim()}
                 className={cn(
-                  "rounded-full px-4 py-2 text-sm font-semibold transition-all",
+                  "rounded-lg px-3 py-1.5 text-xs font-semibold transition-all",
                   draft.trim()
-                    ? "bg-[var(--accent-cyan)] text-white"
+                    ? "bg-[var(--accent-cyan)] text-white shadow-[0_2px_8px_-2px_rgba(14,142,232,0.3)] hover:brightness-110"
                     : "bg-[var(--bg-tertiary)] text-[var(--text-tertiary)]",
                 )}
               >
@@ -1028,6 +1558,8 @@ function WorkspaceChatPanel({
     </div>
   );
 }
+
+/* ─── Note Panel ─────────────────────────────────────────── */
 
 function WorkspaceNotePanel({
   note,
@@ -1042,31 +1574,24 @@ function WorkspaceNotePanel({
 }) {
   if (!note) {
     return (
-      <ModuleEmptyState
-        icon="📝"
-        title="Choose a note"
-        description="Open a note from the focused workstream first, then maximize it into the dedicated notes area when needed."
-      />
+      <EmptyHint icon={StickyNote} text="Select a note from the workstream to edit it here." />
     );
   }
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b border-[var(--border-default)] px-4 py-3">
-        <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
-          Editor mode
-        </div>
-        <div className="mt-2 flex gap-2">
+      <div className="border-b border-[var(--border-default)] px-4 py-2.5">
+        <div className="flex gap-1">
           {(["simple", "notion", "agentic"] as const).map((mode) => (
             <button
               key={mode}
               type="button"
               onClick={() => onModeChange(mode)}
               className={cn(
-                "rounded-full px-3 py-1.5 text-xs font-semibold transition-colors",
+                "rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all",
                 editorMode === mode
-                  ? "bg-[var(--accent-cyan)] text-white"
-                  : "border border-[var(--border-default)] text-[var(--text-secondary)]",
+                  ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm"
+                  : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]",
               )}
             >
               {mode}
@@ -1074,7 +1599,6 @@ function WorkspaceNotePanel({
           ))}
         </div>
       </div>
-
       <div className="min-h-0 flex-1">
         <TiptapEditor
           noteId={note._id}
@@ -1087,262 +1611,17 @@ function WorkspaceNotePanel({
   );
 }
 
+/* ─── Artifact Panel Placeholder ─────────────────────────── */
+
 function ArtifactPanelPlaceholder({ workstream }: { workstream: Workstream }) {
   return (
-    <div className="space-y-4 px-4 py-4">
-      <ModuleEmptyState
-        icon="📄"
-        title="Artifact details stay in the panel system"
-        description={`Generated outputs for ${workstream.title} should open here first, then maximize into a richer full page when needed.`}
-      />
+    <div className="px-4 py-8">
+      <EmptyHint icon={FileText} text={`Generated artifacts for ${workstream.title} will appear here.`} />
     </div>
   );
 }
 
-function ActionTile({
-  icon: Icon,
-  label,
-  value,
-  helper,
-  onClick,
-}: {
-  icon: typeof MessageSquare;
-  label: string;
-  value: string | number;
-  helper: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="rounded-[24px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-4 text-left transition-colors hover:bg-[var(--bg-hover)]"
-    >
-      <Icon className="h-4 w-4 text-[var(--accent-cyan)]" />
-      <div className="mt-4 text-2xl font-semibold text-[var(--text-primary)]">
-        {value}
-      </div>
-      <div className="mt-1 text-sm font-medium text-[var(--text-primary)]">
-        {label}
-      </div>
-      <div className="mt-1 text-xs leading-relaxed text-[var(--text-secondary)]">
-        {helper}
-      </div>
-    </button>
-  );
-}
-
-function ModuleCard({
-  title,
-  icon: Icon,
-  actionLabel,
-  onAction,
-  children,
-}: {
-  title: string;
-  icon: typeof MessageSquare;
-  actionLabel?: string;
-  onAction?: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-[28px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5">
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Icon className="h-4 w-4 text-[var(--accent-cyan)]" />
-          <h3 className="font-display text-xl text-[var(--text-primary)]">
-            {title}
-          </h3>
-        </div>
-        {actionLabel && onAction && (
-          <button
-            type="button"
-            onClick={onAction}
-            className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] px-3 py-1.5 text-xs text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            {actionLabel}
-          </button>
-        )}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function ColumnGroup({
-  title,
-  icon: Icon,
-  actionLabel,
-  onAction,
-  children,
-}: {
-  title: string;
-  icon: typeof MessageSquare;
-  actionLabel?: string;
-  onAction?: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-[28px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Icon className="h-4 w-4 text-[var(--accent-cyan)]" />
-          <h3 className="font-display text-lg text-[var(--text-primary)]">
-            {title}
-          </h3>
-        </div>
-        {actionLabel && onAction && (
-          <button type="button" onClick={onAction} className="text-xs text-[var(--text-secondary)]">
-            {actionLabel}
-          </button>
-        )}
-      </div>
-      <div className="space-y-3">{children}</div>
-    </section>
-  );
-}
-
-function ColumnCard({
-  title,
-  description,
-}: {
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3 text-left">
-      <div className="text-sm font-semibold text-[var(--text-primary)]">
-        {title}
-      </div>
-      <div className="mt-1 text-xs leading-relaxed text-[var(--text-secondary)]">
-        {description}
-      </div>
-    </div>
-  );
-}
-
-function NotePreviewCard({
-  note,
-  onOpen,
-}: {
-  note: WorkspaceNote;
-  onOpen: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="w-full rounded-[24px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-4 text-left transition-colors hover:bg-[var(--bg-hover)]"
-    >
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-[var(--text-primary)]">
-            {note.title}
-          </div>
-          <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
-            {note.editorMode}
-          </div>
-        </div>
-        <ArrowUpRight className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
-      </div>
-      <p className="mt-3 text-xs leading-relaxed text-[var(--text-secondary)]">
-        {excerptFromNote(note)}
-      </p>
-    </button>
-  );
-}
-
-function PlannerCard({ item }: { item: PlannerItem }) {
-  return (
-    <div className="rounded-[24px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-sm font-semibold text-[var(--text-primary)]">
-          {item.title}
-        </div>
-        <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-[var(--text-secondary)]">
-          {item.priority}
-        </span>
-      </div>
-      <div className="mt-2 text-xs text-[var(--text-secondary)]">
-        {item.description || `${item.type} · ${item.status.replace("_", " ")}`}
-      </div>
-      {item.dueAt && (
-        <div className="mt-3 text-[11px] uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
-          Due {formatRelativeTime(item.dueAt)}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ArtifactCard({
-  title,
-  description,
-}: {
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="rounded-[24px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-4">
-      <div className="text-sm font-semibold text-[var(--text-primary)]">
-        {title}
-      </div>
-      <div className="mt-2 text-xs leading-relaxed text-[var(--text-secondary)]">
-        {description}
-      </div>
-    </div>
-  );
-}
-
-function InfoRow({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
-      <span className="text-xs uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
-        {label}
-      </span>
-      <span className="text-sm font-medium text-[var(--text-primary)]">
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function ModuleEmptyState({
-  icon,
-  title,
-  description,
-}: {
-  icon: string;
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="flex flex-col items-center justify-center rounded-[24px] border border-dashed border-[var(--border-default)] bg-[var(--bg-primary)] px-6 py-8 text-center">
-      <div className="text-3xl">{icon}</div>
-      <div className="mt-3 text-sm font-semibold text-[var(--text-primary)]">
-        {title}
-      </div>
-      <div className="mt-2 max-w-sm text-xs leading-relaxed text-[var(--text-secondary)]">
-        {description}
-      </div>
-    </div>
-  );
-}
-
-function PanelLoading({ label }: { label: string }) {
-  return (
-    <div className="rounded-[24px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-6 text-center text-xs text-[var(--text-secondary)]">
-      {label}
-    </div>
-  );
-}
+/* ─── Shared primitives ──────────────────────────────────── */
 
 function ChatBubble({ message }: { message: CompactMessage }) {
   const isUser = message.role === "user";
@@ -1351,33 +1630,75 @@ function ChatBubble({ message }: { message: CompactMessage }) {
     <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "max-w-[92%] rounded-[24px] px-4 py-3 text-sm leading-relaxed",
+          "max-w-[88%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
           isUser
             ? "bg-[var(--accent-cyan)] text-white"
-            : "border border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-primary)]",
+            : "bg-[var(--bg-primary)] text-[var(--text-primary)]",
         )}
       >
-        {message.content || "Thinking..."}
+        {message.content || "..."}
       </div>
+    </div>
+  );
+}
+
+function EmptyHint({
+  icon: Icon,
+  text,
+  action,
+  onAction,
+}: {
+  icon: typeof MessageSquare;
+  text: string;
+  action?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl px-3 py-4 text-xs text-[var(--text-tertiary)]">
+      <Icon className="h-4 w-4 shrink-0 opacity-40" />
+      <span className="flex-1">{text}</span>
+      {action && onAction && (
+        <button
+          type="button"
+          onClick={onAction}
+          className="shrink-0 text-[var(--accent-cyan)] transition-colors hover:underline"
+        >
+          {action}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function LoadingSkeleton({ lines }: { lines: number }) {
+  return (
+    <div className="space-y-2 px-3">
+      {Array.from({ length: lines }).map((_, i) => (
+        <div
+          key={i}
+          className="h-10 animate-pulse rounded-lg bg-[var(--bg-secondary)]"
+          style={{ animationDelay: `${i * 100}ms`, width: `${85 - i * 10}%` }}
+        />
+      ))}
     </div>
   );
 }
 
 function graphNodeStyle(accent: string) {
   return {
-    width: 180,
-    borderRadius: 20,
+    width: 170,
+    borderRadius: 14,
     border: "1px solid var(--border-default)",
+    borderLeft: `3px solid ${accent}`,
     background: "var(--bg-primary)",
     color: "var(--text-primary)",
-    padding: 14,
-    boxShadow: "var(--shadow-card)",
-    boxSizing: "border-box" as const,
-    borderLeft: `4px solid ${accent}`,
+    fontSize: 12,
+    padding: "10px 12px",
+    boxShadow: "0 2px 8px -2px rgba(0,0,0,0.08)",
   };
 }
 
-function graphEdge(id: string, source: string, target: string): Edge {
+function graphEdge(id: string, source: string, target: string, accent: string = "var(--accent-cyan)"): Edge {
   return {
     id,
     source,
@@ -1385,17 +1706,19 @@ function graphEdge(id: string, source: string, target: string): Edge {
     selectable: false,
     deletable: false,
     style: {
-      stroke: "color-mix(in oklab, var(--accent-cyan) 38%, var(--border-default))",
-      strokeWidth: 1.25,
+      stroke: `color-mix(in oklab, ${accent} 50%, var(--border-default))`,
+      strokeWidth: 1.5,
     },
     markerEnd: {
       type: MarkerType.ArrowClosed,
-      color: "color-mix(in oklab, var(--accent-cyan) 38%, var(--border-default))",
-      width: 16,
-      height: 16,
+      color: `color-mix(in oklab, ${accent} 50%, var(--border-default))`,
+      width: 14,
+      height: 14,
     },
   };
 }
+
+/* ─── Hub Focus Panel ────────────────────────────────────── */
 
 interface HubFocusPanelProps {
   cardBounds?: CardBounds;
@@ -1414,78 +1737,228 @@ export function HubFocusPanel({
 }: HubFocusPanelProps) {
   const router = useRouter();
   const start = cardBounds ?? { x: 120, y: 120, w: 220, h: 220 };
+  const [isExiting, setIsExiting] = useState(false);
+  const [activeTab, setActiveTab] = useState<"notes" | "planner" | "memory" | "recent">("notes");
+
+  const handleClose = useCallback(() => {
+    setIsExiting(true);
+    setTimeout(() => onClose(), 350);
+  }, [onClose]);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape") handleClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [handleClose]);
+
+  const tabs = [
+    { id: "notes" as const, label: "Notes", icon: StickyNote },
+    { id: "planner" as const, label: "Planner", icon: CalendarClock },
+    { id: "memory" as const, label: "Memory", icon: Sparkles },
+    { id: "recent" as const, label: "Recent", icon: Clock },
+  ];
 
   return (
     <div className="absolute inset-0 z-50">
       <motion.div
         className="absolute inset-0"
         initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.24 }}
-        style={{ background: "rgba(10, 12, 16, 0.28)", backdropFilter: "blur(4px)" }}
-        onClick={onClose}
+        animate={{ opacity: isExiting ? 0 : 1 }}
+        transition={{ duration: 0.3 }}
+        style={{ background: "color-mix(in oklab, var(--bg-primary) 72%, transparent)", backdropFilter: "blur(12px)" }}
+        onClick={handleClose}
       />
       <motion.div
-        className="absolute overflow-hidden rounded-[32px] border border-[var(--border-default)] bg-[var(--bg-elevated)]"
-        initial={{ left: start.x, top: start.y, width: start.w, height: start.h }}
-        animate={{ left: "50%", top: "50%", width: 520, height: 620, x: "-50%", y: "-50%" }}
-        transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1] }}
-        style={{ boxShadow: "0 40px 110px -34px rgba(14, 142, 232, 0.45)" }}
+        className="absolute overflow-hidden bg-[var(--bg-primary)]"
+        initial={{
+          left: start.x,
+          top: start.y,
+          width: start.w,
+          height: start.h,
+          borderRadius: 32,
+          opacity: 0.85,
+          scale: 0.96,
+        }}
+        animate={isExiting ? {
+          left: start.x,
+          top: start.y,
+          width: start.w,
+          height: start.h,
+          borderRadius: 32,
+          opacity: 0,
+          scale: 0.9,
+        } : {
+          left: "10%",
+          top: "5%",
+          width: "80%",
+          height: "90%",
+          borderRadius: 24,
+          opacity: 1,
+          scale: 1,
+        }}
+        transition={isExiting ? SPRING_EXIT : SPRING_ENTER}
+        style={{ boxShadow: "0 40px 120px -40px rgba(14, 142, 232, 0.25)" }}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex h-full flex-col px-6 py-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              {userAvatar ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={userAvatar} alt="" className="h-12 w-12 rounded-full object-cover" />
-              ) : (
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[linear-gradient(135deg,var(--accent-cyan),var(--accent-mint))] text-lg font-semibold text-white">
-                  {(userName || "Y")[0]?.toUpperCase()}
-                </div>
-              )}
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
-                  Personal hub
-                </div>
-                <h2 className="mt-1 font-display text-2xl text-[var(--text-primary)]">
-                  {userName}
-                </h2>
+        {/* Top accent */}
+        <motion.div
+          className="absolute inset-x-0 top-0 z-10 h-[2px]"
+          initial={{ scaleX: 0 }}
+          animate={{ scaleX: isExiting ? 0 : 1 }}
+          transition={{ delay: 0.18, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+          style={{ background: "linear-gradient(90deg, transparent, var(--accent-cyan), var(--accent-mint), transparent)", transformOrigin: "center" }}
+        />
+
+        <div className="flex h-full flex-col">
+          {/* Hub header */}
+          <motion.div
+            className="flex items-center gap-4 border-b border-[var(--border-default)] px-6 py-4"
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15, duration: 0.3 }}
+          >
+            {userAvatar ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={userAvatar} alt="" className="h-10 w-10 rounded-full object-cover ring-2 ring-[var(--accent-cyan)]/20" />
+            ) : (
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[linear-gradient(135deg,var(--accent-cyan),var(--accent-mint))] text-base font-semibold text-white">
+                {(userName || "Y")[0]?.toUpperCase()}
               </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <h2 className="font-display text-lg text-[var(--text-primary)]">{userName}</h2>
+              <p className="text-xs text-[var(--text-tertiary)]">
+                Personal hub · {totalWorkstreams} active {totalWorkstreams === 1 ? "workstream" : "workstreams"}
+              </p>
             </div>
             <button
               type="button"
-              onClick={onClose}
-              className="rounded-full border border-[var(--border-default)] p-2 text-[var(--text-secondary)]"
+              onClick={handleClose}
+              className="rounded-xl p-2 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
             >
               <X className="h-4 w-4" />
             </button>
+          </motion.div>
+
+          {/* Tabs */}
+          <div className="flex items-center gap-1 border-b border-[var(--border-default)] px-6 py-2">
+            {tabs.map((tab) => {
+              const Icon = tab.icon;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition-all",
+                    activeTab === tab.id
+                      ? "bg-[var(--bg-secondary)] text-[var(--text-primary)]"
+                      : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]",
+                  )}
+                >
+                  <Icon className="h-3 w-3" />
+                  {tab.label}
+                </button>
+              );
+            })}
           </div>
 
-          <div className="mt-6 grid gap-4">
-            <InfoRow label="Active workstreams" value={String(totalWorkstreams)} />
-            <InfoRow label="Notes area" value="Dedicated /notes route" />
-            <InfoRow label="Focus return" value="Route-backed workspace" />
-          </div>
-
-          <div className="mt-8 grid gap-4">
-            <ModuleCard title="Cross-workstream notes" icon={StickyNote}>
-              <ModuleEmptyState icon="🧠" title="Hub notes arrive here" description="The hub uses the same calm visual language as workstreams instead of behaving like a broken special object." />
-            </ModuleCard>
-            <ModuleCard title="Return paths" icon={ArrowUpRight}>
-              <button
-                type="button"
-                onClick={() => router.push("/notes")}
-                className="inline-flex items-center gap-2 rounded-full border border-[var(--border-default)] px-3 py-2 text-sm text-[var(--text-secondary)]"
+          {/* Tab content */}
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={activeTab}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.2 }}
               >
-                Open notes area
-                <ArrowUpRight className="h-4 w-4" />
-              </button>
-            </ModuleCard>
+                {activeTab === "notes" && (
+                  <HubSection
+                    title="Quick Notes"
+                    description="Unattached notes and inbox items across all workstreams."
+                    icon={StickyNote}
+                    actionLabel="Open /notes"
+                    onAction={() => router.push("/notes")}
+                  >
+                    <EmptyHint icon={Notebook} text="Quick notes you create here will appear across workstreams." action="Open notes" onAction={() => router.push("/notes")} />
+                  </HubSection>
+                )}
+                {activeTab === "planner" && (
+                  <HubSection
+                    title="Cross-Workstream Planner"
+                    description="Upcoming deadlines and milestones from all your workstreams."
+                    icon={CalendarClock}
+                  >
+                    <EmptyHint icon={CalendarClock} text="Planner items from all workstreams will aggregate here." />
+                  </HubSection>
+                )}
+                {activeTab === "memory" && (
+                  <HubSection
+                    title="Personal Memory"
+                    description="What Spectra remembers about you across all your work."
+                    icon={Sparkles}
+                  >
+                    <EmptyHint icon={Sparkles} text="Memory entries build up as you work with Spectra across workstreams." />
+                  </HubSection>
+                )}
+                {activeTab === "recent" && (
+                  <HubSection
+                    title="Recent Activity"
+                    description="Your latest actions across all workstreams."
+                    icon={Clock}
+                  >
+                    <EmptyHint icon={Clock} text="Recent threads, notes, and artifacts will appear here." />
+                  </HubSection>
+                )}
+              </motion.div>
+            </AnimatePresence>
           </div>
         </div>
       </motion.div>
+    </div>
+  );
+}
+
+function HubSection({
+  title,
+  description,
+  icon: Icon,
+  actionLabel,
+  onAction,
+  children,
+}: {
+  title: string;
+  description: string;
+  icon: typeof MessageSquare;
+  actionLabel?: string;
+  onAction?: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <Icon className="h-4 w-4 text-[var(--accent-cyan)]" />
+            <h3 className="text-base font-semibold text-[var(--text-primary)]">{title}</h3>
+          </div>
+          <p className="mt-1 text-xs text-[var(--text-tertiary)]">{description}</p>
+        </div>
+        {actionLabel && onAction && (
+          <button
+            type="button"
+            onClick={onAction}
+            className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+          >
+            <ArrowUpRight className="h-3 w-3" />
+            {actionLabel}
+          </button>
+        )}
+      </div>
+      {children}
     </div>
   );
 }

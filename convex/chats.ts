@@ -178,6 +178,7 @@ export const listChats = query({
             .withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId))
             .order("desc")
             .take(max)
+            .then((rows) => rows.filter((c) => c.ownerUserId === actor._id && c.orgId === actor.orgId))
         : await ctx.db
             .query("chats")
             .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id))

@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
 import { toast } from "sonner";
 import { AppShell } from "@/components/layout/app-shell";
@@ -38,8 +38,14 @@ function CanvasLoader() {
 }
 
 function WorkspaceContent() {
+  const router = useRouter();
   const params = useSearchParams();
   const focusId = params.get("focus") ?? undefined;
+  const focusView = params.get("view") ?? "structured";
+  const focusPanel = params.get("panel") ?? undefined;
+  const focusNoteId = params.get("note") ?? undefined;
+  const focusPrompt = params.get("prompt") ?? undefined;
+  const hubOpen = params.get("hub") === "1";
   const { user } = useUser();
   const {
     workstreams,
@@ -63,6 +69,7 @@ function WorkspaceContent() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerBounds, setContainerBounds] = useState({ w: 1024, h: 768 });
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Track container size for animation origin
   useEffect(() => {
@@ -77,6 +84,27 @@ function WorkspaceContent() {
   }, []);
 
   const handleNewWorkstream = useCallback(() => openCreateDialog(), [openCreateDialog]);
+
+  const updateWorkspaceRoute = useCallback(
+    (updates: Record<string, string | undefined | null>, history: "push" | "replace" = "replace") => {
+      const next = new URLSearchParams(params.toString());
+      for (const [key, value] of Object.entries(updates)) {
+        if (value === undefined || value === null || value === "") {
+          next.delete(key);
+        } else {
+          next.set(key, value);
+        }
+      }
+      const query = next.toString();
+      const href = query ? `/workspace?${query}` : "/workspace";
+      if (history === "push") {
+        router.push(href);
+      } else {
+        router.replace(href, { scroll: false });
+      }
+    },
+    [params, router],
+  );
 
   const handleCreate = useCallback(
     async (data: {
@@ -100,10 +128,56 @@ function WorkspaceContent() {
   );
 
   const activeCount = workstreams.filter((ws) => ws.status === "active").length;
+  const activeFocusId = focusId ?? focusedWorkstreamId;
 
-  const focusedWorkstream = focusedWorkstreamId
-    ? workstreams.find((ws) => ws._id === focusedWorkstreamId)
+  const focusedWorkstream = activeFocusId
+    ? workstreams.find((ws) => ws._id === activeFocusId)
     : undefined;
+
+  const handleOpenWorkstream = useCallback(
+    (workstreamId: string, extras?: { prompt?: string; panel?: string }) => {
+      const nextView = params.get("view") ?? "structured";
+      updateWorkspaceRoute(
+        {
+          focus: workstreamId,
+          view: nextView,
+          panel: extras?.panel,
+          prompt: extras?.prompt,
+          note: undefined,
+          hub: undefined,
+        },
+        "push",
+      );
+    },
+    [params, updateWorkspaceRoute],
+  );
+
+  const handleCloseWorkstream = useCallback(() => {
+    exitWorkstream();
+    updateWorkspaceRoute({
+      focus: undefined,
+      view: undefined,
+      panel: undefined,
+      prompt: undefined,
+      note: undefined,
+    });
+  }, [exitWorkstream, updateWorkspaceRoute]);
+
+  const handleOpenHub = useCallback(() => {
+    updateWorkspaceRoute({
+      hub: "1",
+      focus: undefined,
+      view: undefined,
+      panel: undefined,
+      prompt: undefined,
+      note: undefined,
+    }, "push");
+  }, [updateWorkspaceRoute]);
+
+  const handleCloseHub = useCallback(() => {
+    exitHub();
+    updateWorkspaceRoute({ hub: undefined });
+  }, [exitHub, updateWorkspaceRoute]);
 
   return (
     <AppShell fullBleed noScroll contentClassName="!p-0">
@@ -112,6 +186,8 @@ function WorkspaceContent() {
           onCenterHub={() => window.dispatchEvent(new CustomEvent("workspace:center-hub"))}
           onNewWorkstream={handleNewWorkstream}
           workstreamCount={activeCount}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
         />
 
         {/* Canvas container */}
@@ -125,38 +201,51 @@ function WorkspaceContent() {
               userAvatar={user?.imageUrl || ""}
               onWorkstreamUpdate={updateWorkstream}
               focusWorkstreamId={focusId}
+              searchQuery={searchQuery}
+              onOpenWorkstream={handleOpenWorkstream}
+              onOpenHub={handleOpenHub}
             />
           )}
 
           {/* Quick Chat bar — only shown when no workstream is focused */}
-          <QuickChatBar />
+          <QuickChatBar
+            hidden={Boolean(activeFocusId)}
+            workstreams={workstreams}
+            onOpenWorkstreamChat={(workstreamId, query) =>
+              handleOpenWorkstream(workstreamId, { panel: "chat", prompt: query })
+            }
+          />
 
           {/* Workstream focus overlay */}
-          {focusedWorkstreamId && focusedWorkstream && focusCardBounds && (
+          {activeFocusId && focusedWorkstream && (
             <WorkstreamFocusPanel
-              key={focusedWorkstreamId}
+              key={`${activeFocusId}:${focusView}:${focusPanel ?? "none"}:${focusNoteId ?? "none"}`}
               workstream={focusedWorkstream}
               cardBounds={focusCardBounds}
-              onClose={exitWorkstream}
+              onClose={handleCloseWorkstream}
               containerBounds={containerBounds}
-              initialChatOpen={!!openChatQuery}
-              initialQuery={openChatQuery}
+              focusView={focusView === "columns" || focusView === "graph" ? focusView : "structured"}
+              activePanel={focusPanel}
+              activeNoteId={focusNoteId}
+              initialChatOpen={focusPanel === "chat" || !!openChatQuery}
+              initialQuery={focusPrompt ?? openChatQuery}
+              onRouteChange={(updates, history) => updateWorkspaceRoute(updates, history)}
             />
           )}
 
           {/* Hub focus overlay */}
-          {hubFocusOpen && hubCardBounds && (
+          {(hubOpen || hubFocusOpen) && (
             <HubFocusPanel
               cardBounds={hubCardBounds}
               userName={user?.fullName || user?.firstName || "Student"}
               userAvatar={user?.imageUrl || ""}
               totalWorkstreams={activeCount}
-              onClose={exitHub}
+              onClose={handleCloseHub}
             />
           )}
 
           {/* Empty state */}
-          {!loading && workstreams.length === 0 && !focusedWorkstreamId && (
+          {!loading && workstreams.length === 0 && !activeFocusId && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
               <div className="flex flex-col items-center gap-4 pointer-events-auto">
                 <div className="text-5xl">🌱</div>

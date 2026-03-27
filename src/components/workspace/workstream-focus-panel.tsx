@@ -1,60 +1,144 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type KeyboardEvent as ReactKeyboardEvent,
-} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ArrowUpRight,
+  CalendarClock,
+  Columns3,
   FileText,
+  GitBranch,
   Layers,
   MessageSquare,
   Plus,
+  Sparkles,
   StickyNote,
   X,
 } from "lucide-react";
+import { motion } from "framer-motion";
+import {
+  Background,
+  BackgroundVariant,
+  MarkerType,
+  ReactFlow,
+  type Edge,
+  type Node,
+} from "@xyflow/react";
 import { cn } from "@/lib/utils";
 import { type CardBounds } from "@/stores/workspace-store";
 import type { Workstream } from "@/hooks/use-workspace-data";
 import { getWorkstreamColor } from "@/lib/workspace/zoom-helpers";
 import { useCompactChat, type CompactMessage } from "@/hooks/use-compact-chat";
+import { useNotesData, type WorkspaceNote } from "@/hooks/use-notes-data";
+import { usePlannerData, type PlannerItem } from "@/hooks/use-planner-data";
+import { useEditorStore, type EditorMode } from "@/stores/editor-store";
 
 const TiptapEditor = dynamic(
-  () => import("@/components/editor/tiptap-editor").then((m) => m.TiptapEditor),
-  { ssr: false, loading: () => <div className="flex items-center justify-center h-40 text-xs text-[var(--text-tertiary)]">Loading editor…</div> },
+  () => import("@/components/editor/tiptap-editor").then((module) => module.TiptapEditor),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-48 items-center justify-center text-xs text-[var(--text-tertiary)]">
+        Loading editor...
+      </div>
+    ),
+  },
 );
 
-// ─── Types ─────────────────────────────────────────────────────────────────
+type WorkstreamView = "structured" | "columns" | "graph";
+type WorkspacePanelKind = "chat" | "note" | "artifact" | undefined;
+type RouteHistoryMode = "push" | "replace";
 
-type PanelSection = "overview" | "chat" | "notes" | "artifacts" | "planner";
+type WorkstreamFocusPanelProps = {
+  workstream: Workstream;
+  cardBounds?: CardBounds;
+  onClose: () => void;
+  containerBounds: { w: number; h: number };
+  focusView: WorkstreamView;
+  activePanel?: string;
+  activeNoteId?: string;
+  initialChatOpen?: boolean;
+  initialQuery?: string;
+  onRouteChange: (updates: Record<string, string | undefined | null>, history?: RouteHistoryMode) => void;
+};
 
-// ─── Animation helpers ──────────────────────────────────────────────────────
+type WorkstreamChatSummary = {
+  _id: string;
+  title: string;
+  latestUserPrompt?: string;
+  updatedAt: number;
+  workstreamId?: string;
+};
 
-function boundsToCSS(bounds: CardBounds) {
+const EMPTY_DOC = {
+  type: "doc",
+  content: [{ type: "paragraph" }],
+};
+
+function defaultBounds(containerBounds: { w: number; h: number }): CardBounds {
   return {
-    left: bounds.x,
-    top: bounds.y,
-    width: bounds.w,
-    height: bounds.h,
-    borderRadius: 18,
+    x: Math.max(32, containerBounds.w / 2 - 220),
+    y: Math.max(72, containerBounds.h / 2 - 140),
+    w: Math.min(440, containerBounds.w - 64),
+    h: Math.min(280, containerBounds.h - 144),
   };
 }
 
-// ─── Main panel ────────────────────────────────────────────────────────────
+function formatRelativeTime(timestamp?: number) {
+  if (!timestamp) return "Fresh";
+  const delta = Date.now() - timestamp;
+  if (delta < 60_000) return "just now";
+  if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}m ago`;
+  if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}h ago`;
+  if (delta < 604_800_000) return `${Math.floor(delta / 86_400_000)}d ago`;
+  return new Date(timestamp).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
 
-interface WorkstreamFocusPanelProps {
-  workstream: Workstream;
-  cardBounds: CardBounds;
-  onClose: () => void;
-  containerBounds: { w: number; h: number };
-  initialChatOpen?: boolean;
-  initialQuery?: string;
+function excerptFromNote(note?: WorkspaceNote | null) {
+  if (!note) return "Open the note panel to keep writing inside the focused workspace.";
+  const text = note.contentPlaintext?.trim();
+  if (!text) return "This note is ready for drafting in any of the existing editor modes.";
+  return text.slice(0, 180);
+}
+
+function useWorkstreamChats(workstreamId: string) {
+  const [chats, setChats] = useState<WorkstreamChatSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+
+    async function run() {
+      try {
+        const response = await fetch(`/api/chats?workstreamId=${encodeURIComponent(workstreamId)}&limit=30`);
+        if (!response.ok) throw new Error("Failed to load workstream chats");
+        const data = (await response.json()) as { chats: WorkstreamChatSummary[] };
+        if (active) {
+          setChats(data.chats ?? []);
+        }
+      } catch {
+        if (active) {
+          setChats([]);
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void run();
+    return () => {
+      active = false;
+    };
+  }, [workstreamId]);
+
+  return {
+    chats,
+    loading,
+  };
 }
 
 export function WorkstreamFocusPanel({
@@ -62,249 +146,350 @@ export function WorkstreamFocusPanel({
   cardBounds,
   onClose,
   containerBounds,
+  focusView,
+  activePanel,
+  activeNoteId,
   initialChatOpen,
   initialQuery,
+  onRouteChange,
 }: WorkstreamFocusPanelProps) {
   const router = useRouter();
-  const [entered, setEntered] = useState(false);
-  const [activeSection, setActiveSection] = useState<PanelSection>("overview");
-  const [chatOpen, setChatOpen] = useState(initialChatOpen ?? false);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const c = getWorkstreamColor(workstream.color);
+  const color = getWorkstreamColor(workstream.color);
+  const routePanel: WorkspacePanelKind =
+    activePanel === "chat" || activePanel === "note" || activePanel === "artifact"
+      ? activePanel
+      : undefined;
+  const resolvedPanel = routePanel ?? (initialChatOpen ? "chat" : undefined);
+  const { chats, loading: chatsLoading } = useWorkstreamChats(workstream._id);
+  const {
+    notes,
+    activeNote,
+    loading: notesLoading,
+    createNote,
+    updateNote,
+  } = useNotesData({
+    workstreamId: workstream._id,
+    noteId: activeNoteId,
+  });
+  const { plannerItems, loading: plannerLoading } = usePlannerData(workstream._id);
+  const { editorMode, setEditorMode } = useEditorStore();
 
-  // Enter animation: first render uses card bounds, then immediately animate to full
   useEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      setEntered(true);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, []);
+    if (activeNote?.editorMode) {
+      setEditorMode(activeNote.editorMode);
+    }
+  }, [activeNote?.editorMode, setEditorMode]);
 
-  // Escape key to close
   useEffect(() => {
-    const handler = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        if (resolvedPanel) {
+          onRouteChange({ panel: undefined, note: undefined, prompt: undefined }, "replace");
+          return;
+        }
+        onClose();
+      }
     };
+
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
+  }, [onClose, onRouteChange, resolvedPanel]);
 
-  const handleBackdropClick = useCallback(
-    (e: React.MouseEvent) => {
-      if (e.target === e.currentTarget) onClose();
-    },
-    [onClose],
-  );
+  const stageItem = useMemo(() => {
+    const upcoming = plannerItems.find((item) => item.status !== "completed");
+    if (upcoming) {
+      return {
+        eyebrow: "Planner",
+        title: upcoming.title,
+        description: upcoming.description || "This item is the clearest next milestone in the workstream.",
+      };
+    }
 
-  const handleOpenFullChat = useCallback(() => {
-    router.push(
-      `/chat?from=workspace&ws=${encodeURIComponent(workstream._id)}`,
-    );
+    if (activeNote || notes[0]) {
+      const note = activeNote ?? notes[0]!;
+      return {
+        eyebrow: "Notes",
+        title: note.title,
+        description: excerptFromNote(note),
+      };
+    }
+
+    if (chats[0]) {
+      return {
+        eyebrow: "Threads",
+        title: chats[0].title,
+        description: chats[0].latestUserPrompt || "Resume the conversation from the right-side chat panel.",
+      };
+    }
+
+    return {
+      eyebrow: "Workspace",
+      title: "Focus the work",
+      description: "Use the stable layout grammar to keep notes, chat, artifacts, and planning inside one anchored state.",
+    };
+  }, [activeNote, chats, notes, plannerItems]);
+
+  const startBounds = cardBounds ?? defaultBounds(containerBounds);
+
+  const openChatPanel = useCallback(() => {
+    onRouteChange({ panel: "chat", note: undefined, prompt: initialQuery ?? undefined }, "push");
+  }, [initialQuery, onRouteChange]);
+
+  const closeDetailPanel = useCallback(() => {
+    onRouteChange({ panel: undefined, note: undefined, prompt: undefined }, "replace");
+  }, [onRouteChange]);
+
+  const handleChangeView = useCallback((view: WorkstreamView) => {
+    onRouteChange({ view }, "replace");
+  }, [onRouteChange]);
+
+  const handleOpenNote = useCallback((noteId: string) => {
+    onRouteChange({ panel: "note", note: noteId }, "push");
+  }, [onRouteChange]);
+
+  const handleCreateNote = useCallback(async () => {
+    const noteId = await createNote({
+      title: `${workstream.title} note`,
+      content: EMPTY_DOC,
+      contentPlaintext: "",
+      editorMode: "notion",
+      workstreamId: workstream._id,
+    });
+
+    onRouteChange({ panel: "note", note: noteId }, "push");
+  }, [createNote, onRouteChange, workstream._id, workstream.title]);
+
+  const handleOpenFullChat = useCallback((chatId?: string) => {
+    const query = new URLSearchParams({
+      from: "workspace",
+      ws: workstream._id,
+    });
+    if (chatId) {
+      query.set("chatId", chatId);
+    }
+    router.push(`/chat?${query.toString()}`);
   }, [router, workstream._id]);
 
-  // Animated container: starts at card position, expands to full
-  const panelStyle = entered
-    ? {
-        left: 0,
-        top: 0,
-        width: "100%",
-        height: "100%",
-        borderRadius: 0,
-      }
-    : boundsToCSS(cardBounds);
+  const handleOpenFullNote = useCallback((noteId: string) => {
+    const query = new URLSearchParams({
+      note: noteId,
+      from: "workspace",
+      ws: workstream._id,
+    });
+    router.push(`/notes?${query.toString()}`);
+  }, [router, workstream._id]);
 
   return (
-    // Backdrop — click outside to close
-    <div
-      className="absolute inset-0 z-50"
-      onClick={handleBackdropClick}
-      style={{
-        background: entered ? "rgba(0,0,0,0.4)" : "transparent",
-        backdropFilter: entered ? "blur(2px)" : "none",
-        transition: "background 380ms cubic-bezier(0.22,1,0.36,1), backdrop-filter 380ms cubic-bezier(0.22,1,0.36,1)",
-      }}
-    >
-      {/* The expanding panel */}
-      <div
-        ref={panelRef}
-        style={{
-          position: "absolute",
-          ...panelStyle,
-          background: "var(--bg-primary, #13111a)",
-          overflow: "hidden",
-          transition: entered
-            ? "left 380ms cubic-bezier(0.22,1,0.36,1), top 380ms cubic-bezier(0.22,1,0.36,1), width 380ms cubic-bezier(0.22,1,0.36,1), height 380ms cubic-bezier(0.22,1,0.36,1), border-radius 380ms cubic-bezier(0.22,1,0.36,1)"
-            : "none",
-          display: "flex",
-          flexDirection: "column",
-          boxShadow: entered
-            ? "0 0 0 1px var(--border-default, #2d2a3a), 0 32px 80px -16px rgba(0,0,0,0.5)"
-            : "none",
+    <div className="absolute inset-0 z-50">
+      <motion.div
+        className="absolute inset-0"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.24 }}
+        style={{ background: "rgba(10, 12, 16, 0.28)", backdropFilter: "blur(4px)" }}
+        onClick={onClose}
+      />
+
+      <motion.div
+        className="absolute overflow-hidden border border-[var(--border-default)] bg-[var(--bg-primary)]"
+        initial={{
+          left: startBounds.x,
+          top: startBounds.y,
+          width: startBounds.w,
+          height: startBounds.h,
+          borderRadius: 28,
+          opacity: 0.96,
         }}
-        onClick={(e) => e.stopPropagation()}
+        animate={{
+          left: 16,
+          top: 16,
+          width: containerBounds.w - 32,
+          height: containerBounds.h - 32,
+          borderRadius: 30,
+          opacity: 1,
+        }}
+        transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1] }}
+        style={{
+          boxShadow: `0 42px 110px -34px ${color.value}42`,
+          background:
+            "linear-gradient(180deg, color-mix(in oklab, var(--bg-elevated) 72%, white), color-mix(in oklab, var(--bg-primary) 92%, black))",
+        }}
+        onClick={(event) => event.stopPropagation()}
       >
-        {/* Color accent bar */}
         <div
-          style={{
-            height: 3,
-            background: `linear-gradient(90deg, ${c.value}, ${c.value}60)`,
-            flexShrink: 0,
-            opacity: entered ? 1 : 0,
-            transition: "opacity 400ms cubic-bezier(0.22,1,0.36,1) 200ms",
-          }}
+          className="absolute inset-x-0 top-0 h-[3px]"
+          style={{ background: `linear-gradient(90deg, ${color.value}, color-mix(in oklab, ${color.value} 48%, transparent))` }}
         />
 
-        {/* Header */}
-        <PanelHeader
-          workstream={workstream}
-          onClose={onClose}
-          onOpenFullChat={handleOpenFullChat}
-          activeSection={activeSection}
-          onSectionChange={setActiveSection}
-          chatOpen={chatOpen}
-          onToggleChat={() => setChatOpen((v) => !v)}
-          entered={entered}
-        />
-
-        {/* Body */}
-        <div
-          className="flex flex-1 min-h-0"
-          style={{
-            opacity: entered ? 1 : 0,
-            transform: entered ? "translateY(0)" : "translateY(12px)",
-            transition: "opacity 350ms cubic-bezier(0.22,1,0.36,1) 180ms, transform 350ms cubic-bezier(0.22,1,0.36,1) 180ms",
-          }}
-        >
-          {/* Left sidebar — workstream sections */}
-          <WorkstreamSidebar
+        <div className="flex h-full min-h-0 flex-col">
+          <FocusTopBar
             workstream={workstream}
-            activeSection={activeSection}
-            onSectionChange={setActiveSection}
+            activeView={focusView}
+            activePanel={resolvedPanel}
+            onClose={onClose}
+            onOpenChat={openChatPanel}
+            onChangeView={handleChangeView}
           />
 
-          {/* Main content area */}
-          <div className="flex-1 flex flex-col min-w-0 min-h-0 relative">
-            <MainContent
-              workstream={workstream}
-              activeSection={activeSection}
-              onSectionChange={setActiveSection}
-              chatOpen={chatOpen}
-              onOpenFullChat={handleOpenFullChat}
-              onToggleChat={() => setChatOpen((v) => !v)}
-            />
-          </div>
+          <div className="flex min-h-0 flex-1">
+            <div className={cn("min-h-0 flex-1 overflow-y-auto", resolvedPanel && "border-r border-[var(--border-default)]")}>
+              {focusView === "structured" ? (
+                <StructuredView
+                  workstream={workstream}
+                  chats={chats}
+                  chatsLoading={chatsLoading}
+                  notes={notes}
+                  notesLoading={notesLoading}
+                  plannerItems={plannerItems}
+                  plannerLoading={plannerLoading}
+                  stageItem={stageItem}
+                  onOpenChat={openChatPanel}
+                  onOpenNote={handleOpenNote}
+                  onCreateNote={handleCreateNote}
+                  onOpenFullChat={handleOpenFullChat}
+                  onViewChange={handleChangeView}
+                />
+              ) : focusView === "columns" ? (
+                <ColumnView
+                  workstream={workstream}
+                  chats={chats}
+                  notes={notes}
+                  plannerItems={plannerItems}
+                  onOpenChat={openChatPanel}
+                  onOpenNote={handleOpenNote}
+                  onCreateNote={handleCreateNote}
+                />
+              ) : (
+                <GraphWorkspaceView
+                  workstream={workstream}
+                  chats={chats}
+                  notes={notes}
+                  plannerItems={plannerItems}
+                />
+              )}
+            </div>
 
-          {/* Chat panel — slides in from right */}
-          {chatOpen && (
-            <CompactChatDrawer
-              workstream={workstream}
-              onClose={() => setChatOpen(false)}
-              onOpenFull={handleOpenFullChat}
-              initialDraft={initialQuery}
-            />
-          )}
+            {resolvedPanel === "chat" && (
+              <WorkspaceDetailPanel title="Chat" onClose={closeDetailPanel}>
+                <WorkspaceChatPanel
+                  workstream={workstream}
+                  initialDraft={initialQuery}
+                  onOpenFull={handleOpenFullChat}
+                />
+              </WorkspaceDetailPanel>
+            )}
+
+            {resolvedPanel === "note" && (
+              <WorkspaceDetailPanel
+                title={activeNote?.title || "Note"}
+                onClose={closeDetailPanel}
+                onMaximize={activeNote ? () => handleOpenFullNote(activeNote._id) : undefined}
+                maximizeLabel="Open full note"
+              >
+                <WorkspaceNotePanel
+                  note={activeNote}
+                  editorMode={editorMode}
+                  onModeChange={setEditorMode}
+                  onSave={async (content, text) => {
+                    if (!activeNote) return;
+                    await updateNote(activeNote._id, {
+                      title: text.trim().split("\n")[0] || activeNote.title || "Untitled note",
+                      content,
+                      contentPlaintext: text,
+                      editorMode,
+                    });
+                  }}
+                />
+              </WorkspaceDetailPanel>
+            )}
+
+            {resolvedPanel === "artifact" && (
+              <WorkspaceDetailPanel
+                title="Artifacts"
+                onClose={closeDetailPanel}
+                onMaximize={() => handleOpenFullChat()}
+                maximizeLabel="Open full chat"
+              >
+                <ArtifactPanelPlaceholder workstream={workstream} />
+              </WorkspaceDetailPanel>
+            )}
+          </div>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }
 
-// ─── Panel Header ───────────────────────────────────────────────────────────
-
-function PanelHeader({
+function FocusTopBar({
   workstream,
+  activeView,
+  activePanel,
   onClose,
-  onOpenFullChat,
-  activeSection,
-  onSectionChange,
-  chatOpen,
-  onToggleChat,
-  entered,
+  onOpenChat,
+  onChangeView,
 }: {
   workstream: Workstream;
+  activeView: WorkstreamView;
+  activePanel?: WorkspacePanelKind;
   onClose: () => void;
-  onOpenFullChat: () => void;
-  activeSection: PanelSection;
-  onSectionChange: (s: PanelSection) => void;
-  chatOpen: boolean;
-  onToggleChat: () => void;
-  entered: boolean;
+  onOpenChat: () => void;
+  onChangeView: (view: WorkstreamView) => void;
 }) {
-  const c = getWorkstreamColor(workstream.color);
+  const color = getWorkstreamColor(workstream.color);
 
   return (
-    <div
-      className="shrink-0 border-b border-[var(--border-default)]"
-      style={{
-        background: "var(--bg-elevated, #211e2e)",
-        opacity: entered ? 1 : 0,
-        transition: "opacity 300ms cubic-bezier(0.22,1,0.36,1) 100ms",
-      }}
-    >
-      {/* Top row: back + title + actions */}
-      <div className="flex items-center gap-3 px-5 h-13" style={{ height: 52 }}>
-        {/* Back */}
+    <div className="border-b border-[var(--border-default)] bg-[color:color-mix(in_oklab,var(--bg-elevated)_84%,transparent)] px-5 py-4 backdrop-blur-xl">
+      <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
           onClick={onClose}
-          className="flex items-center gap-1.5 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+          className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
         >
-          <ArrowLeft className="w-4 h-4" />
-          <span className="hidden sm:inline">Canvas</span>
+          <ArrowLeft className="h-3.5 w-3.5" />
+          Map
         </button>
 
-        <div className="w-px h-5 bg-[var(--border-default)] mx-1" />
-
-        {/* Emoji + title */}
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          <span className="text-xl leading-none">{workstream.emoji || "📚"}</span>
-          <h1 className="font-display text-base font-bold text-[var(--text-primary)] truncate">
-            {workstream.title}
-          </h1>
-          {/* Status dot */}
-          <div
-            className="w-2 h-2 rounded-full shrink-0"
-            style={{
-              background: workstream.status === "active" ? c.value : "var(--text-tertiary)",
-              boxShadow: workstream.status === "active" ? `0 0 6px ${c.value}60` : "none",
-            }}
-          />
-          {workstream.description && (
-            <span className="text-xs text-[var(--text-tertiary)] truncate hidden md:block ml-1">
-              {workstream.description}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">{workstream.emoji || "📚"}</span>
+            <h1 className="truncate font-display text-xl text-[var(--text-primary)]">
+              {workstream.title}
+            </h1>
+            <span
+              className="rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]"
+              style={{ background: color.bg, color: color.value }}
+            >
+              {workstream.type}
             </span>
-          )}
+          </div>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">
+            Route-backed focus state with stable workspace views and panel-first detail flows.
+          </p>
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-2">
+          <ViewToggle activeView={activeView} onChange={onChangeView} />
           <button
             type="button"
-            onClick={onToggleChat}
+            onClick={onOpenChat}
             className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
-              chatOpen
-                ? "bg-[var(--accent-cyan)] text-white shadow-sm"
-                : "bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+              "inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition-all",
+              activePanel === "chat"
+                ? "bg-[var(--accent-cyan)] text-white"
+                : "border border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
             )}
           >
-            <MessageSquare className="w-3.5 h-3.5" />
+            <MessageSquare className="h-4 w-4" />
             Chat
           </button>
           <button
             type="button"
-            onClick={onOpenFullChat}
-            title="Open full chat"
-            className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-          >
-            <ArrowUpRight className="w-4 h-4" />
-          </button>
-          <button
-            type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+            className="rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] p-2 text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
+            aria-label="Close focused workstream"
           >
-            <X className="w-4 h-4" />
+            <X className="h-4 w-4" />
           </button>
         </div>
       </div>
@@ -312,714 +497,908 @@ function PanelHeader({
   );
 }
 
-// ─── Left Sidebar ───────────────────────────────────────────────────────────
-
-const SECTIONS: Array<{ id: PanelSection; label: string; icon: typeof MessageSquare; count?: number }> = [
-  { id: "overview", label: "Overview", icon: Layers },
-  { id: "chat", label: "Threads", icon: MessageSquare },
-  { id: "notes", label: "Notes", icon: StickyNote },
-  { id: "artifacts", label: "Artifacts", icon: FileText },
-];
-
-function WorkstreamSidebar({
-  workstream,
-  activeSection,
-  onSectionChange,
+function ViewToggle({
+  activeView,
+  onChange,
 }: {
-  workstream: Workstream;
-  activeSection: PanelSection;
-  onSectionChange: (s: PanelSection) => void;
+  activeView: WorkstreamView;
+  onChange: (view: WorkstreamView) => void;
 }) {
-  const c = getWorkstreamColor(workstream.color);
-
-  return (
-    <div
-      className="shrink-0 flex flex-col border-r border-[var(--border-default)]"
-      style={{
-        width: 220,
-        background: "var(--bg-elevated, #211e2e)",
-      }}
-    >
-      {/* Navigation sections */}
-      <nav className="flex-1 p-3 space-y-0.5">
-        {SECTIONS.map((sec) => {
-          const Icon = sec.icon;
-          const count =
-            sec.id === "chat"
-              ? workstream.threadCount
-              : sec.id === "artifacts"
-                ? workstream.artifactCount
-                : undefined;
-
-          return (
-            <button
-              key={sec.id}
-              type="button"
-              onClick={() => onSectionChange(sec.id)}
-              className={cn(
-                "w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all text-left",
-                activeSection === sec.id
-                  ? "text-[var(--text-primary)] bg-[var(--bg-hover)]"
-                  : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]/50",
-              )}
-            >
-              <Icon
-                className="w-4 h-4 shrink-0"
-                style={{ color: activeSection === sec.id ? c.value : undefined }}
-              />
-              <span className="flex-1">{sec.label}</span>
-              {count !== undefined && count > 0 && (
-                <span className="text-[10px] font-semibold text-[var(--text-tertiary)] tabular-nums">
-                  {count}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </nav>
-
-      {/* Workstream meta */}
-      <div className="p-3 border-t border-[var(--border-default)]">
-        <div className="text-[10px] text-[var(--text-tertiary)] space-y-1">
-          <div className="flex justify-between">
-            <span>Type</span>
-            <span className="capitalize text-[var(--text-secondary)]">{workstream.type}</span>
-          </div>
-          <div className="flex justify-between">
-            <span>Status</span>
-            <span className="capitalize" style={{ color: c.value }}>{workstream.status}</span>
-          </div>
-          {workstream.lastActivityAt && (
-            <div className="flex justify-between">
-              <span>Last active</span>
-              <span className="text-[var(--text-secondary)]">
-                {formatRelativeTime(workstream.lastActivityAt)}
-              </span>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Main content area ──────────────────────────────────────────────────────
-
-function MainContent({
-  workstream,
-  activeSection,
-  onSectionChange,
-  chatOpen,
-  onOpenFullChat,
-  onToggleChat,
-}: {
-  workstream: Workstream;
-  activeSection: PanelSection;
-  onSectionChange: (s: PanelSection) => void;
-  chatOpen: boolean;
-  onOpenFullChat: () => void;
-  onToggleChat: () => void;
-}) {
-  switch (activeSection) {
-    case "overview":
-      return (
-        <WorkstreamOverview
-          workstream={workstream}
-          onSectionChange={onSectionChange}
-          onOpenFullChat={onOpenFullChat}
-          onToggleChat={onToggleChat}
-        />
-      );
-    case "chat":
-      return <ThreadsSection workstream={workstream} onOpenFullChat={onOpenFullChat} onToggleChat={onToggleChat} />;
-    case "notes":
-      return <NotesSection workstream={workstream} />;
-    case "artifacts":
-      return <ArtifactsSection workstream={workstream} />;
-    default:
-      return <WorkstreamOverview workstream={workstream} onSectionChange={onSectionChange} onOpenFullChat={onOpenFullChat} onToggleChat={onToggleChat} />;
-  }
-}
-
-// ─── Overview section ───────────────────────────────────────────────────────
-
-function WorkstreamOverview({
-  workstream,
-  onSectionChange,
-  onOpenFullChat,
-  onToggleChat,
-}: {
-  workstream: Workstream;
-  onSectionChange: (s: PanelSection) => void;
-  onOpenFullChat: () => void;
-  onToggleChat: () => void;
-}) {
-  const c = getWorkstreamColor(workstream.color);
-
-  const stats = [
-    { label: "Threads", value: workstream.threadCount ?? 0, section: "chat" as PanelSection, color: "var(--accent-cyan)" },
-    { label: "Artifacts", value: workstream.artifactCount ?? 0, section: "artifacts" as PanelSection, color: "var(--accent-mint)" },
-    { label: "Notes", value: 0, section: "notes" as PanelSection, color: "var(--accent-coral)" },
+  const items = [
+    { id: "structured" as const, label: "Structured", icon: Layers },
+    { id: "columns" as const, label: "Columns", icon: Columns3 },
+    { id: "graph" as const, label: "Graph", icon: GitBranch },
   ];
 
   return (
-    <div className="flex-1 overflow-y-auto p-6">
-      {/* Header */}
-      <div className="flex items-start gap-4 mb-8">
-        <div
-          className="w-14 h-14 rounded-2xl flex items-center justify-center text-3xl shrink-0"
-          style={{ background: c.bg, border: `1px solid ${c.border}` }}
-        >
-          {workstream.emoji || "📚"}
-        </div>
-        <div>
-          <h2 className="font-display text-2xl font-bold text-[var(--text-primary)]">
-            {workstream.title}
-          </h2>
-          {workstream.description && (
-            <p className="text-sm text-[var(--text-secondary)] mt-1 max-w-prose">
-              {workstream.description}
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* Stats row */}
-      <div className="grid grid-cols-3 gap-3 mb-8">
-        {stats.map((stat) => (
+    <div className="flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] p-1">
+      {items.map((item) => {
+        const Icon = item.icon;
+        return (
           <button
-            key={stat.label}
+            key={item.id}
             type="button"
-            onClick={() => onSectionChange(stat.section)}
-            className="p-4 rounded-xl border border-[var(--border-default)] text-left hover:border-[var(--accent-cyan)]/30 hover:bg-[var(--bg-hover)] transition-all group"
-            style={{ background: "var(--bg-elevated)" }}
+            onClick={() => onChange(item.id)}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors",
+              activeView === item.id
+                ? "bg-[var(--accent-cyan)] text-white"
+                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+            )}
           >
-            <div
-              className="text-2xl font-bold mb-1 tabular-nums"
-              style={{ color: stat.color }}
-            >
-              {stat.value}
-            </div>
-            <div className="text-xs text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)] transition-colors">
-              {stat.label}
-            </div>
+            <Icon className="h-3.5 w-3.5" />
+            {item.label}
           </button>
-        ))}
-      </div>
-
-      {/* Quick actions */}
-      <div className="mb-6">
-        <h3 className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-3">
-          Quick Actions
-        </h3>
-        <div className="flex flex-wrap gap-2">
-          <QuickAction
-            icon="💬"
-            label="Start a conversation"
-            onClick={onToggleChat}
-          />
-          <QuickAction
-            icon="📝"
-            label="New note"
-            onClick={() => onSectionChange("notes")}
-          />
-          <QuickAction
-            icon="📋"
-            label="View artifacts"
-            onClick={() => onSectionChange("artifacts")}
-          />
-        </div>
-      </div>
-
-      {/* Activity */}
-      {workstream.lastActivityAt && (
-        <div className="text-xs text-[var(--text-tertiary)]">
-          Last active {formatRelativeTime(workstream.lastActivityAt)}
-        </div>
-      )}
+        );
+      })}
     </div>
   );
 }
 
-function QuickAction({
-  icon,
-  label,
-  onClick,
-}: {
-  icon: string;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-[var(--text-secondary)] border border-[var(--border-default)] hover:text-[var(--text-primary)] hover:border-[var(--accent-cyan)]/30 hover:bg-[var(--bg-hover)] transition-all"
-      style={{ background: "var(--bg-elevated)" }}
-    >
-      <span>{icon}</span>
-      {label}
-    </button>
-  );
-}
-
-// ─── Threads section ────────────────────────────────────────────────────────
-
-function ThreadsSection({
+function StructuredView({
   workstream,
+  chats,
+  chatsLoading,
+  notes,
+  notesLoading,
+  plannerItems,
+  plannerLoading,
+  stageItem,
+  onOpenChat,
+  onOpenNote,
+  onCreateNote,
   onOpenFullChat,
-  onToggleChat,
+  onViewChange,
 }: {
   workstream: Workstream;
+  chats: WorkstreamChatSummary[];
+  chatsLoading: boolean;
+  notes: WorkspaceNote[];
+  notesLoading: boolean;
+  plannerItems: PlannerItem[];
+  plannerLoading: boolean;
+  stageItem: { eyebrow: string; title: string; description: string };
+  onOpenChat: () => void;
+  onOpenNote: (noteId: string) => void;
+  onCreateNote: () => void;
   onOpenFullChat: () => void;
-  onToggleChat: () => void;
+  onViewChange: (view: WorkstreamView) => void;
 }) {
   return (
-    <div className="flex-1 overflow-y-auto p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold text-[var(--text-primary)]">Conversations</h3>
-        <button
-          type="button"
-          onClick={onToggleChat}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--accent-cyan)] text-white hover:brightness-110 transition-all"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          New conversation
-        </button>
+    <div className="space-y-6 px-6 py-6">
+      <div className="grid gap-6 xl:grid-cols-[1.35fr_0.9fr]">
+        <section className="overflow-hidden rounded-[28px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+          <div className="border-b border-[var(--border-default)] px-6 py-4">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+              {stageItem.eyebrow}
+            </div>
+            <h2 className="mt-3 font-display text-3xl leading-tight text-[var(--text-primary)]">
+              {stageItem.title}
+            </h2>
+            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[var(--text-secondary)]">
+              {stageItem.description}
+            </p>
+          </div>
+
+          <div className="grid gap-4 p-6 md:grid-cols-3">
+            <ActionTile icon={MessageSquare} label="Threads" value={chats.length} helper="Continue the active conversation." onClick={onOpenChat} />
+            <ActionTile icon={StickyNote} label="Notes" value={notes.length} helper="Open in panel first, maximize when needed." onClick={() => notes[0] ? onOpenNote(notes[0]._id) : onCreateNote()} />
+            <ActionTile icon={GitBranch} label="Graph" value="View" helper="Switch to the relationship graph." onClick={() => onViewChange("graph")} />
+          </div>
+        </section>
+
+        <section className="rounded-[28px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+                Identity
+              </div>
+              <h3 className="mt-2 font-display text-xl text-[var(--text-primary)]">
+                {workstream.title}
+              </h3>
+            </div>
+            <Sparkles className="h-5 w-5 text-[var(--accent-cyan)]" />
+          </div>
+
+          <div className="mt-5 grid gap-3">
+            <InfoRow label="Last active" value={formatRelativeTime(workstream.lastActivityAt)} />
+            <InfoRow label="Default mode" value={workstream.defaultMode || "tutor"} />
+            <InfoRow label="Panels" value="Chat, notes, artifacts" />
+            <InfoRow label="Views" value="Structured, columns, graph" />
+          </div>
+        </section>
       </div>
 
-      {(workstream.threadCount ?? 0) === 0 ? (
-        <EmptyState
-          icon="💬"
-          title="No conversations yet"
-          description="Start a conversation to begin working with this workstream"
-          action={{ label: "Start conversation", onClick: onToggleChat }}
-        />
-      ) : (
-        <div className="space-y-2">
-          {/* Placeholder thread items — real data would come from Convex */}
-          <PlaceholderThreadItem index={0} workstream={workstream} onOpen={onOpenFullChat} />
-          {(workstream.threadCount ?? 0) > 1 && (
-            <button
-              type="button"
-              onClick={onOpenFullChat}
-              className="w-full text-center text-xs text-[var(--accent-cyan)] py-2 hover:underline"
-            >
-              View all {workstream.threadCount} conversations →
-            </button>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <ModuleCard
+          title="Threads"
+          icon={MessageSquare}
+          actionLabel="Open chat"
+          onAction={onOpenChat}
+        >
+          {chatsLoading ? (
+            <PanelLoading label="Loading conversations" />
+          ) : chats.length > 0 ? (
+            <div className="space-y-3">
+              {chats.slice(0, 3).map((chat) => (
+                <button
+                  key={chat._id}
+                  type="button"
+                  onClick={onOpenFullChat}
+                  className="w-full rounded-2xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3 text-left transition-colors hover:bg-[var(--bg-hover)]"
+                >
+                  <div className="text-sm font-semibold text-[var(--text-primary)]">
+                    {chat.title}
+                  </div>
+                  <div className="mt-1 text-xs text-[var(--text-secondary)]">
+                    {chat.latestUserPrompt || "Resume the workstream conversation."}
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <ModuleEmptyState
+              icon="💬"
+              title="No threads yet"
+              description="The right-side chat panel is the primary entry point inside the focused workstream."
+            />
           )}
-        </div>
-      )}
+        </ModuleCard>
+
+        <ModuleCard
+          title="Notes"
+          icon={StickyNote}
+          actionLabel="New note"
+          onAction={onCreateNote}
+        >
+          {notesLoading ? (
+            <PanelLoading label="Loading notes" />
+          ) : notes.length > 0 ? (
+            <div className="space-y-3">
+              {notes.slice(0, 4).map((note) => (
+                <NotePreviewCard key={note._id} note={note} onOpen={() => onOpenNote(note._id)} />
+              ))}
+            </div>
+          ) : (
+            <ModuleEmptyState
+              icon="📝"
+              title="No notes yet"
+              description="Notes appear here as objects first, then open into the reusable side panel."
+            />
+          )}
+        </ModuleCard>
+
+        <ModuleCard title="Planner" icon={CalendarClock}>
+          {plannerLoading ? (
+            <PanelLoading label="Loading planner" />
+          ) : plannerItems.length > 0 ? (
+            <div className="space-y-3">
+              {plannerItems.slice(0, 4).map((item) => (
+                <PlannerCard key={item._id} item={item} />
+              ))}
+            </div>
+          ) : (
+            <ModuleEmptyState
+              icon="📅"
+              title="No deadlines yet"
+              description="Planner items stay in the same layout grammar instead of becoming a separate tool."
+            />
+          )}
+        </ModuleCard>
+
+        <ModuleCard
+          title="Artifacts"
+          icon={FileText}
+          actionLabel="Open detail panel"
+          onAction={() => onViewChange("columns")}
+        >
+          <div className="grid gap-3 md:grid-cols-2">
+            <ArtifactCard title="Generated outputs" description="Artifacts remain durable underneath the workspace and open through the panel flow." />
+            <ArtifactCard title="Relationship-ready" description="Use Graph view when the internal object network matters more than the fixed structure." />
+          </div>
+        </ModuleCard>
+      </div>
     </div>
   );
 }
 
-function PlaceholderThreadItem({
-  index,
+function ColumnView({
   workstream,
-  onOpen,
+  chats,
+  notes,
+  plannerItems,
+  onOpenChat,
+  onOpenNote,
+  onCreateNote,
 }: {
-  index: number;
   workstream: Workstream;
-  onOpen: () => void;
+  chats: WorkstreamChatSummary[];
+  notes: WorkspaceNote[];
+  plannerItems: PlannerItem[];
+  onOpenChat: () => void;
+  onOpenNote: (noteId: string) => void;
+  onCreateNote: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="w-full flex items-start gap-3 p-3 rounded-xl border border-[var(--border-default)] text-left hover:border-[var(--accent-cyan)]/30 hover:bg-[var(--bg-hover)] transition-all"
-      style={{ background: "var(--bg-elevated)" }}
-    >
-      <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-[var(--accent-cyan)]/10">
-        <MessageSquare className="w-4 h-4 text-[var(--accent-cyan)]" />
+    <div className="h-full overflow-x-auto px-6 py-6">
+      <div className="grid min-w-[1100px] grid-cols-4 gap-4">
+        <ColumnGroup title="Threads" icon={MessageSquare} actionLabel="Chat" onAction={onOpenChat}>
+          {chats.length > 0 ? chats.map((chat) => (
+            <ColumnCard key={chat._id} title={chat.title} description={chat.latestUserPrompt || "Continue the thread from the panel."} />
+          )) : <ModuleEmptyState icon="💬" title="No threads" description="Open chat to create the first workstream conversation." />}
+        </ColumnGroup>
+
+        <ColumnGroup title="Notes" icon={StickyNote} actionLabel="New" onAction={onCreateNote}>
+          {notes.length > 0 ? notes.map((note) => (
+            <button key={note._id} type="button" onClick={() => onOpenNote(note._id)}>
+              <ColumnCard title={note.title} description={excerptFromNote(note)} />
+            </button>
+          )) : <ModuleEmptyState icon="📝" title="No notes" description="Notes open in the right panel before they expand into the full notes area." />}
+        </ColumnGroup>
+
+        <ColumnGroup title="Planner" icon={CalendarClock}>
+          {plannerItems.length > 0 ? plannerItems.map((item) => (
+            <ColumnCard key={item._id} title={item.title} description={item.description || `${item.priority} priority ${item.type}`} />
+          )) : <ModuleEmptyState icon="📅" title="Clear" description={`${workstream.title} does not have active planner items yet.`} />}
+        </ColumnGroup>
+
+        <ColumnGroup title="Artifacts" icon={FileText}>
+          <ColumnCard title="Durable outputs" description="Artifacts stay durable underneath the workstream and use the same panel-maximize-return pattern." />
+          <ColumnCard title="Adaptive modules" description="The column layout groups note, task, and artifact surfaces without inventing a new UI per workstream." />
+        </ColumnGroup>
       </div>
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium text-[var(--text-primary)] truncate">
-          {workstream.title} — conversation
-        </div>
-        <div className="text-xs text-[var(--text-tertiary)] mt-0.5">
-          {workstream.lastActivityAt ? formatRelativeTime(workstream.lastActivityAt) : "Recently"}
-        </div>
-      </div>
-      <ArrowUpRight className="w-3.5 h-3.5 text-[var(--text-tertiary)] shrink-0 mt-0.5" />
-    </button>
+    </div>
   );
 }
 
-// ─── Notes section ──────────────────────────────────────────────────────────
+function GraphWorkspaceView({
+  workstream,
+  chats,
+  notes,
+  plannerItems,
+}: {
+  workstream: Workstream;
+  chats: WorkstreamChatSummary[];
+  notes: WorkspaceNote[];
+  plannerItems: PlannerItem[];
+}) {
+  const nodes = useMemo<Node[]>(() => {
+    const graphNodes: Node[] = [
+      {
+        id: "root",
+        position: { x: 240, y: 180 },
+        draggable: false,
+        selectable: false,
+        data: { label: workstream.title },
+        style: {
+          width: 220,
+          borderRadius: 24,
+          border: "1px solid var(--border-default)",
+          background: "var(--bg-elevated)",
+          color: "var(--text-primary)",
+          fontWeight: 700,
+          padding: 18,
+          boxShadow: "var(--shadow-card)",
+        },
+      },
+    ];
 
-function NotesSection({ workstream }: { workstream: Workstream }) {
-  const [isCreating, setIsCreating] = useState(false);
-  const [savedContent, setSavedContent] = useState<object | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
-
-  const handleSave = useCallback(async (json: object, text: string) => {
-    if (!text.trim()) return;
-    setIsSaving(true);
-    try {
-      await fetch("/api/notes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "create",
-          workstreamId: workstream._id,
-          title: text.slice(0, 60).split("\n")[0] || "Untitled",
-          content: json,
-          contentPlaintext: text,
-          editorMode: "notion",
-        }),
+    notes.slice(0, 4).forEach((note, index) => {
+      graphNodes.push({
+        id: `note-${note._id}`,
+        position: { x: 20, y: 40 + index * 108 },
+        draggable: false,
+        selectable: false,
+        data: { label: note.title },
+        style: graphNodeStyle("var(--accent-coral)"),
       });
-      setIsCreating(false);
-      setSavedContent(null);
-    } catch {
-      // silent — user can retry
-    } finally {
-      setIsSaving(false);
-    }
-  }, [workstream._id]);
+    });
 
-  if (isCreating) {
-    return (
-      <div className="flex-1 flex flex-col min-h-0">
-        <div className="flex items-center justify-between px-6 py-3 border-b border-[var(--border-default)] shrink-0"
-          style={{ background: "var(--bg-elevated)" }}>
-          <h3 className="font-semibold text-[var(--text-primary)] text-sm">New note</h3>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setIsCreating(false)}
-              className="px-3 py-1.5 rounded-lg text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              disabled={isSaving}
-              onClick={() => {
-                // Save triggered by the editor's onSave
-                // This button is a visual affordance; actual save is in TiptapEditor onSave
-              }}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--accent-cyan)] text-white hover:brightness-110 transition-all disabled:opacity-60"
-            >
-              {isSaving ? "Saving…" : "Save"}
-            </button>
-          </div>
-        </div>
-        <div className="flex-1 overflow-y-auto p-6">
-          <TiptapEditor
-            placeholder="Start writing your note…"
-            content={savedContent}
-            onSave={handleSave}
-            onChange={(json) => setSavedContent(json)}
-            className="min-h-[300px]"
-          />
-        </div>
-      </div>
-    );
-  }
+    chats.slice(0, 3).forEach((chat, index) => {
+      graphNodes.push({
+        id: `chat-${chat._id}`,
+        position: { x: 520, y: 60 + index * 128 },
+        draggable: false,
+        selectable: false,
+        data: { label: chat.title },
+        style: graphNodeStyle("var(--accent-cyan)"),
+      });
+    });
+
+    plannerItems.slice(0, 3).forEach((item, index) => {
+      graphNodes.push({
+        id: `planner-${item._id}`,
+        position: { x: 250, y: 360 + index * 104 },
+        draggable: false,
+        selectable: false,
+        data: { label: item.title },
+        style: graphNodeStyle("var(--warning)"),
+      });
+    });
+
+    return graphNodes;
+  }, [chats, notes, plannerItems, workstream.title]);
+
+  const edges = useMemo<Edge[]>(() => {
+    const graphEdges: Edge[] = [];
+
+    notes.slice(0, 4).forEach((note) => {
+      graphEdges.push(graphEdge(`note-edge-${note._id}`, `note-${note._id}`, "root"));
+    });
+    chats.slice(0, 3).forEach((chat) => {
+      graphEdges.push(graphEdge(`chat-edge-${chat._id}`, "root", `chat-${chat._id}`));
+    });
+    plannerItems.slice(0, 3).forEach((item) => {
+      graphEdges.push(graphEdge(`planner-edge-${item._id}`, "root", `planner-${item._id}`));
+    });
+
+    return graphEdges;
+  }, [chats, notes, plannerItems]);
 
   return (
-    <div className="flex-1 overflow-y-auto p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold text-[var(--text-primary)]">Notes</h3>
+    <div className="h-full overflow-hidden px-6 py-6">
+      <div className="mb-4 max-w-2xl">
+        <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+          Internal graph
+        </div>
+        <h2 className="mt-2 font-display text-2xl text-[var(--text-primary)]">
+          Relationships inside the focused workstream
+        </h2>
+        <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+          Graph view is secondary and visual. It reveals how notes, conversations, and planner items attach to the same workstream without replacing the stable structured layout.
+        </p>
+      </div>
+
+      <div className="h-[calc(100%-6rem)] overflow-hidden rounded-[28px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodesDraggable={false}
+          elementsSelectable={false}
+          panOnDrag
+          zoomOnScroll
+          zoomOnDoubleClick={false}
+          fitView
+          fitViewOptions={{ padding: 0.22 }}
+          proOptions={{ hideAttribution: true }}
+        >
+          <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--border-default)" />
+        </ReactFlow>
+      </div>
+    </div>
+  );
+}
+
+function WorkspaceDetailPanel({
+  title,
+  onClose,
+  onMaximize,
+  maximizeLabel = "Open full view",
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  onMaximize?: () => void;
+  maximizeLabel?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <motion.aside
+      initial={{ x: 24, opacity: 0 }}
+      animate={{ x: 0, opacity: 1 }}
+      exit={{ x: 24, opacity: 0 }}
+      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+      className="flex h-full w-[430px] shrink-0 flex-col bg-[color:color-mix(in_oklab,var(--bg-elevated)_90%,transparent)] backdrop-blur-xl"
+    >
+      <div className="flex items-center gap-2 border-b border-[var(--border-default)] px-4 py-3">
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-semibold text-[var(--text-primary)]">
+            {title}
+          </div>
+          <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
+            Panel first
+          </div>
+        </div>
+        {onMaximize && (
+          <button
+            type="button"
+            onClick={onMaximize}
+            className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] px-3 py-1.5 text-xs text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
+          >
+            <ArrowUpRight className="h-3.5 w-3.5" />
+            {maximizeLabel}
+          </button>
+        )}
         <button
           type="button"
-          onClick={() => setIsCreating(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--accent-cyan)] text-white hover:brightness-110 transition-all"
+          onClick={onClose}
+          className="rounded-full border border-[var(--border-default)] p-2 text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
         >
-          <Plus className="w-3.5 h-3.5" />
-          New note
+          <X className="h-4 w-4" />
         </button>
       </div>
-      <EmptyState
-        icon="📝"
-        title="No notes yet"
-        description="Create notes to capture ideas, summaries, and key information"
-        action={{ label: "Create first note", onClick: () => setIsCreating(true) }}
-      />
-    </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+    </motion.aside>
   );
 }
 
-// ─── Artifacts section ──────────────────────────────────────────────────────
-
-function ArtifactsSection({ workstream }: { workstream: Workstream }) {
-  return (
-    <div className="flex-1 overflow-y-auto p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold text-[var(--text-primary)]">Artifacts</h3>
-      </div>
-      {(workstream.artifactCount ?? 0) === 0 ? (
-        <EmptyState
-          icon="📄"
-          title="No artifacts yet"
-          description="AI-generated content like study plans, flashcard decks, and documents will appear here"
-        />
-      ) : (
-        <div className="space-y-2">
-          {/* Placeholder — real data from Convex */}
-          <div className="p-3 rounded-xl border border-[var(--border-default)] text-sm text-[var(--text-secondary)]"
-            style={{ background: "var(--bg-elevated)" }}>
-            {workstream.artifactCount} artifact{workstream.artifactCount !== 1 ? "s" : ""} — open full chat to view
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Compact chat drawer ────────────────────────────────────────────────────
-
-function CompactChatDrawer({
+function WorkspaceChatPanel({
   workstream,
-  onClose,
-  onOpenFull,
   initialDraft,
+  onOpenFull,
 }: {
   workstream: Workstream;
-  onClose: () => void;
-  onOpenFull: () => void;
   initialDraft?: string;
+  onOpenFull: (chatId?: string) => void;
 }) {
-  const { messages, streaming, streamPhase, error, sendMessage, stopGeneration } =
-    useCompactChat(workstream._id);
+  const { chatId, messages, streaming, streamPhase, error, sendMessage, stopGeneration } = useCompactChat(workstream._id);
   const [draft, setDraft] = useState(initialDraft ?? "");
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-scroll on new messages
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    if (initialDraft) {
+      setDraft(initialDraft);
+    }
+  }, [initialDraft]);
 
   const handleSend = useCallback(async () => {
     if (!draft.trim() || streaming) return;
     const text = draft;
     setDraft("");
     await sendMessage(text);
-  }, [draft, streaming, sendMessage]);
-
-  const handleKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      void handleSend();
-    }
-  };
-
-  const phaseLabel: Record<string, string> = {
-    routing: "thinking...",
-    searching: "searching...",
-    generating: "writing...",
-    thinking: "reasoning...",
-    synthesizing: "synthesizing...",
-  };
+  }, [draft, sendMessage, streaming]);
 
   return (
-    <div
-      className="shrink-0 flex flex-col border-l border-[var(--border-default)]"
-      style={{
-        width: 380,
-        background: "var(--bg-primary, #13111a)",
-      }}
-    >
-      {/* Chat header */}
-      <div className="flex items-center gap-2 px-4 h-12 shrink-0 border-b border-[var(--border-default)]"
-        style={{ background: "var(--bg-elevated)" }}>
-        <MessageSquare className="w-4 h-4 text-[var(--accent-cyan)]" />
-        <span className="text-sm font-semibold text-[var(--text-primary)] flex-1 truncate">
-          {workstream.title}
-        </span>
-        <button
-          type="button"
-          onClick={onOpenFull}
-          title="Open full chat"
-          className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-        >
-          <ArrowUpRight className="w-3.5 h-3.5" />
-        </button>
-        <button
-          type="button"
-          onClick={onClose}
-          className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-        >
-          <X className="w-3.5 h-3.5" />
-        </button>
+    <div className="flex h-full flex-col">
+      <div className="border-b border-[var(--border-default)] px-4 py-3 text-xs text-[var(--text-secondary)]">
+        Workstream-aware compact chat. Maximize keeps the return path back to `/workspace?focus={workstream._id}`.
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-        {messages.length === 0 && !streaming && (
-          <div className="flex flex-col items-center justify-center h-full gap-3 text-center py-8">
-            <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl"
-              style={{ background: getWorkstreamColor(workstream.color).bg }}>
-              {workstream.emoji || "📚"}
-            </div>
-            <p className="text-sm font-semibold text-[var(--text-primary)]">
-              Chat with {workstream.title}
-            </p>
-            <p className="text-xs text-[var(--text-tertiary)] max-w-[220px]">
-              Ask questions, generate content, and explore this workstream
-            </p>
-          </div>
+      <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+        {messages.length === 0 && (
+          <ModuleEmptyState
+            icon="✨"
+            title={`Chat inside ${workstream.title}`}
+            description="This is a real panel flow backed by workstream-aware chat creation, not a redirect shell."
+          />
         )}
-
-        {messages.map((msg) => (
-          <ChatMessage key={msg.id} message={msg} />
+        {messages.map((message) => (
+          <ChatBubble key={message.id} message={message} />
         ))}
-
-        {streaming && messages.length > 0 && messages[messages.length - 1]?.role === "assistant" && messages[messages.length - 1]?.content === "" && (
-          <div className="flex items-center gap-2 text-xs text-[var(--text-tertiary)]">
-            <LoadingDots />
-            <span>{phaseLabel[streamPhase] ?? "..."}</span>
+        {streaming && (
+          <div className="text-xs text-[var(--text-tertiary)]">
+            {streamPhase === "routing" ? "Routing..." : streamPhase === "thinking" ? "Thinking..." : "Working..."}
           </div>
         )}
-
         {error && (
-          <div className="text-xs text-[var(--error)] px-3 py-2 rounded-lg bg-[var(--error)]/10 border border-[var(--error)]/20">
+          <div className="rounded-2xl border border-[var(--danger)]/20 bg-[var(--danger)]/10 px-3 py-2 text-xs text-[var(--danger)]">
             {error}
           </div>
         )}
-
-        <div ref={messagesEndRef} />
       </div>
 
-      {/* Composer */}
-      <div className="shrink-0 border-t border-[var(--border-default)] p-3">
-        <div className="flex items-end gap-2 px-3 py-2 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-default)] focus-within:border-[var(--accent-cyan)]/50 focus-within:ring-1 focus-within:ring-[var(--accent-cyan)]/20 transition-all">
+      <div className="border-t border-[var(--border-default)] p-4">
+        <div className="rounded-[24px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-3">
           <textarea
-            ref={textareaRef}
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={handleKeyDown}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                void handleSend();
+              }
+            }}
             placeholder="Ask about this workstream..."
-            rows={1}
-            className="flex-1 bg-transparent border-none outline-none resize-none text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] max-h-[120px]"
-            style={{ height: "auto", minHeight: "1.5rem" }}
+            className="min-h-[88px] w-full resize-none bg-transparent text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
           />
-          {streaming ? (
+          <div className="mt-3 flex items-center justify-between">
             <button
               type="button"
-              onClick={stopGeneration}
-              className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--error)] transition-colors"
-              title="Stop"
+              onClick={() => onOpenFull(chatId ?? undefined)}
+              className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
             >
-              <div className="w-2.5 h-2.5 rounded-sm bg-current" />
+              Open full chat
             </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => void handleSend()}
-              disabled={!draft.trim()}
-              className={cn(
-                "w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-all",
-                draft.trim()
-                  ? "bg-[var(--accent-cyan)] text-white shadow-sm hover:brightness-110"
-                  : "bg-[var(--bg-tertiary)] text-[var(--text-tertiary)]",
+            <div className="flex items-center gap-2">
+              {streaming && (
+                <button
+                  type="button"
+                  onClick={stopGeneration}
+                  className="rounded-full border border-[var(--border-default)] px-3 py-1.5 text-xs text-[var(--text-secondary)]"
+                >
+                  Stop
+                </button>
               )}
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
-                <line x1="12" y1="19" x2="12" y2="5" />
-                <polyline points="5 12 12 5 19 12" />
-              </svg>
-            </button>
-          )}
+              <button
+                type="button"
+                onClick={() => void handleSend()}
+                disabled={!draft.trim()}
+                className={cn(
+                  "rounded-full px-4 py-2 text-sm font-semibold transition-all",
+                  draft.trim()
+                    ? "bg-[var(--accent-cyan)] text-white"
+                    : "bg-[var(--bg-tertiary)] text-[var(--text-tertiary)]",
+                )}
+              >
+                Send
+              </button>
+            </div>
+          </div>
         </div>
-        <p className="text-[10px] text-[var(--text-tertiary)] mt-1.5 text-center">
-          Shift+Enter for new line · Enter to send
-        </p>
       </div>
     </div>
   );
 }
 
-// ─── Chat message component ─────────────────────────────────────────────────
-
-function ChatMessage({ message }: { message: CompactMessage }) {
-  const isUser = message.role === "user";
+function WorkspaceNotePanel({
+  note,
+  editorMode,
+  onModeChange,
+  onSave,
+}: {
+  note: WorkspaceNote | null;
+  editorMode: EditorMode;
+  onModeChange: (mode: EditorMode) => void;
+  onSave: (content: object, text: string) => Promise<void>;
+}) {
+  if (!note) {
+    return (
+      <ModuleEmptyState
+        icon="📝"
+        title="Choose a note"
+        description="Open a note from the focused workstream first, then maximize it into the dedicated notes area when needed."
+      />
+    );
+  }
 
   return (
-    <div className={cn("flex gap-2.5", isUser ? "justify-end" : "justify-start")}>
-      {!isUser && (
-        <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5 bg-[var(--accent-cyan)]/15 text-xs">
-          ✨
+    <div className="flex h-full flex-col">
+      <div className="border-b border-[var(--border-default)] px-4 py-3">
+        <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
+          Editor mode
         </div>
-      )}
-      <div
-        className={cn(
-          "max-w-[85%] px-3 py-2.5 rounded-2xl text-sm leading-relaxed",
-          isUser
-            ? "bg-[var(--accent-cyan)] text-white rounded-br-sm"
-            : "bg-[var(--bg-elevated)] text-[var(--text-primary)] rounded-bl-sm border border-[var(--border-default)]",
-          message.streaming && "animate-pulse",
-        )}
-      >
-        {message.content || (
-          <span className="text-[var(--text-tertiary)] italic text-xs">Thinking...</span>
-        )}
-        {message.modelUsed && !isUser && (
-          <div className="text-[10px] text-[var(--text-tertiary)] mt-1 opacity-70">
-            {message.modelUsed}
-          </div>
-        )}
+        <div className="mt-2 flex gap-2">
+          {(["simple", "notion", "agentic"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => onModeChange(mode)}
+              className={cn(
+                "rounded-full px-3 py-1.5 text-xs font-semibold transition-colors",
+                editorMode === mode
+                  ? "bg-[var(--accent-cyan)] text-white"
+                  : "border border-[var(--border-default)] text-[var(--text-secondary)]",
+              )}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1">
+        <TiptapEditor
+          noteId={note._id}
+          content={note.content}
+          onSave={(content, text) => void onSave(content, text)}
+          className="h-full"
+        />
       </div>
     </div>
   );
 }
 
-// ─── Empty state ────────────────────────────────────────────────────────────
+function ArtifactPanelPlaceholder({ workstream }: { workstream: Workstream }) {
+  return (
+    <div className="space-y-4 px-4 py-4">
+      <ModuleEmptyState
+        icon="📄"
+        title="Artifact details stay in the panel system"
+        description={`Generated outputs for ${workstream.title} should open here first, then maximize into a richer full page when needed.`}
+      />
+    </div>
+  );
+}
 
-function EmptyState({
+function ActionTile({
+  icon: Icon,
+  label,
+  value,
+  helper,
+  onClick,
+}: {
+  icon: typeof MessageSquare;
+  label: string;
+  value: string | number;
+  helper: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-[24px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-4 text-left transition-colors hover:bg-[var(--bg-hover)]"
+    >
+      <Icon className="h-4 w-4 text-[var(--accent-cyan)]" />
+      <div className="mt-4 text-2xl font-semibold text-[var(--text-primary)]">
+        {value}
+      </div>
+      <div className="mt-1 text-sm font-medium text-[var(--text-primary)]">
+        {label}
+      </div>
+      <div className="mt-1 text-xs leading-relaxed text-[var(--text-secondary)]">
+        {helper}
+      </div>
+    </button>
+  );
+}
+
+function ModuleCard({
+  title,
+  icon: Icon,
+  actionLabel,
+  onAction,
+  children,
+}: {
+  title: string;
+  icon: typeof MessageSquare;
+  actionLabel?: string;
+  onAction?: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-[28px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Icon className="h-4 w-4 text-[var(--accent-cyan)]" />
+          <h3 className="font-display text-xl text-[var(--text-primary)]">
+            {title}
+          </h3>
+        </div>
+        {actionLabel && onAction && (
+          <button
+            type="button"
+            onClick={onAction}
+            className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] px-3 py-1.5 text-xs text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {actionLabel}
+          </button>
+        )}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function ColumnGroup({
+  title,
+  icon: Icon,
+  actionLabel,
+  onAction,
+  children,
+}: {
+  title: string;
+  icon: typeof MessageSquare;
+  actionLabel?: string;
+  onAction?: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-[28px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Icon className="h-4 w-4 text-[var(--accent-cyan)]" />
+          <h3 className="font-display text-lg text-[var(--text-primary)]">
+            {title}
+          </h3>
+        </div>
+        {actionLabel && onAction && (
+          <button type="button" onClick={onAction} className="text-xs text-[var(--text-secondary)]">
+            {actionLabel}
+          </button>
+        )}
+      </div>
+      <div className="space-y-3">{children}</div>
+    </section>
+  );
+}
+
+function ColumnCard({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3 text-left">
+      <div className="text-sm font-semibold text-[var(--text-primary)]">
+        {title}
+      </div>
+      <div className="mt-1 text-xs leading-relaxed text-[var(--text-secondary)]">
+        {description}
+      </div>
+    </div>
+  );
+}
+
+function NotePreviewCard({
+  note,
+  onOpen,
+}: {
+  note: WorkspaceNote;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="w-full rounded-[24px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-4 text-left transition-colors hover:bg-[var(--bg-hover)]"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold text-[var(--text-primary)]">
+            {note.title}
+          </div>
+          <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
+            {note.editorMode}
+          </div>
+        </div>
+        <ArrowUpRight className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
+      </div>
+      <p className="mt-3 text-xs leading-relaxed text-[var(--text-secondary)]">
+        {excerptFromNote(note)}
+      </p>
+    </button>
+  );
+}
+
+function PlannerCard({ item }: { item: PlannerItem }) {
+  return (
+    <div className="rounded-[24px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-semibold text-[var(--text-primary)]">
+          {item.title}
+        </div>
+        <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-[var(--text-secondary)]">
+          {item.priority}
+        </span>
+      </div>
+      <div className="mt-2 text-xs text-[var(--text-secondary)]">
+        {item.description || `${item.type} · ${item.status.replace("_", " ")}`}
+      </div>
+      {item.dueAt && (
+        <div className="mt-3 text-[11px] uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
+          Due {formatRelativeTime(item.dueAt)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ArtifactCard({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="rounded-[24px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-4">
+      <div className="text-sm font-semibold text-[var(--text-primary)]">
+        {title}
+      </div>
+      <div className="mt-2 text-xs leading-relaxed text-[var(--text-secondary)]">
+        {description}
+      </div>
+    </div>
+  );
+}
+
+function InfoRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
+      <span className="text-xs uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
+        {label}
+      </span>
+      <span className="text-sm font-medium text-[var(--text-primary)]">
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function ModuleEmptyState({
   icon,
   title,
   description,
-  action,
 }: {
   icon: string;
   title: string;
   description: string;
-  action?: { label: string; onClick: () => void };
 }) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
-      <div className="text-4xl">{icon}</div>
-      <h4 className="text-sm font-semibold text-[var(--text-primary)]">{title}</h4>
-      <p className="text-xs text-[var(--text-tertiary)] max-w-[240px]">{description}</p>
-      {action && (
-        <button
-          type="button"
-          onClick={action.onClick}
-          className="mt-2 px-4 py-2 rounded-lg text-xs font-semibold bg-[var(--accent-cyan)] text-white hover:brightness-110 transition-all"
-        >
-          {action.label}
-        </button>
-      )}
+    <div className="flex flex-col items-center justify-center rounded-[24px] border border-dashed border-[var(--border-default)] bg-[var(--bg-primary)] px-6 py-8 text-center">
+      <div className="text-3xl">{icon}</div>
+      <div className="mt-3 text-sm font-semibold text-[var(--text-primary)]">
+        {title}
+      </div>
+      <div className="mt-2 max-w-sm text-xs leading-relaxed text-[var(--text-secondary)]">
+        {description}
+      </div>
     </div>
   );
 }
 
-// ─── Loading dots ────────────────────────────────────────────────────────────
-
-function LoadingDots() {
+function PanelLoading({ label }: { label: string }) {
   return (
-    <div className="flex gap-1 items-center">
-      {[0, 1, 2].map((i) => (
-        <div
-          key={i}
-          className="w-1 h-1 rounded-full bg-[var(--text-tertiary)]"
-          style={{
-            animation: "pulse 1.4s ease-in-out infinite",
-            animationDelay: `${i * 0.2}s`,
-          }}
-        />
-      ))}
+    <div className="rounded-[24px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-6 text-center text-xs text-[var(--text-secondary)]">
+      {label}
     </div>
   );
 }
 
-// ─── Hub focus panel ────────────────────────────────────────────────────────
+function ChatBubble({ message }: { message: CompactMessage }) {
+  const isUser = message.role === "user";
+
+  return (
+    <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
+      <div
+        className={cn(
+          "max-w-[92%] rounded-[24px] px-4 py-3 text-sm leading-relaxed",
+          isUser
+            ? "bg-[var(--accent-cyan)] text-white"
+            : "border border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-primary)]",
+        )}
+      >
+        {message.content || "Thinking..."}
+      </div>
+    </div>
+  );
+}
+
+function graphNodeStyle(accent: string) {
+  return {
+    width: 180,
+    borderRadius: 20,
+    border: "1px solid var(--border-default)",
+    background: "var(--bg-primary)",
+    color: "var(--text-primary)",
+    padding: 14,
+    boxShadow: "var(--shadow-card)",
+    boxSizing: "border-box" as const,
+    borderLeft: `4px solid ${accent}`,
+  };
+}
+
+function graphEdge(id: string, source: string, target: string): Edge {
+  return {
+    id,
+    source,
+    target,
+    selectable: false,
+    deletable: false,
+    style: {
+      stroke: "color-mix(in oklab, var(--accent-cyan) 38%, var(--border-default))",
+      strokeWidth: 1.25,
+    },
+    markerEnd: {
+      type: MarkerType.ArrowClosed,
+      color: "color-mix(in oklab, var(--accent-cyan) 38%, var(--border-default))",
+      width: 16,
+      height: 16,
+    },
+  };
+}
 
 interface HubFocusPanelProps {
-  cardBounds: CardBounds;
+  cardBounds?: CardBounds;
   userName: string;
   userAvatar: string;
   totalWorkstreams: number;
@@ -1033,154 +1412,80 @@ export function HubFocusPanel({
   totalWorkstreams,
   onClose,
 }: HubFocusPanelProps) {
-  const [entered, setEntered] = useState(false);
-
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => setEntered(true));
-    return () => cancelAnimationFrame(frame);
-  }, []);
-
-  useEffect(() => {
-    const handler = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
-
-  const panelStyle = entered
-    ? { left: "50%", top: "50%", width: 480, height: 560, transform: "translate(-50%,-50%)", borderRadius: 24 }
-    : { left: cardBounds.x, top: cardBounds.y, width: cardBounds.w, height: cardBounds.h, transform: "none", borderRadius: "50%" };
+  const router = useRouter();
+  const start = cardBounds ?? { x: 120, y: 120, w: 220, h: 220 };
 
   return (
-    <div
-      className="absolute inset-0 z-50 flex items-center justify-center"
-      onClick={onClose}
-      style={{
-        background: entered ? "rgba(0,0,0,0.5)" : "transparent",
-        backdropFilter: entered ? "blur(4px)" : "none",
-        transition: "background 400ms cubic-bezier(0.22,1,0.36,1), backdrop-filter 400ms cubic-bezier(0.22,1,0.36,1)",
-      }}
-    >
-      <div
-        style={{
-          position: "absolute",
-          ...panelStyle,
-          background: "var(--bg-elevated, #211e2e)",
-          border: "1px solid var(--border-default, #3a3448)",
-          boxShadow: entered ? "0 32px 80px -16px rgba(0,0,0,0.6)" : "none",
-          overflow: "hidden",
-          transition: "all 420ms cubic-bezier(0.22,1,0.36,1)",
-        }}
-        onClick={(e) => e.stopPropagation()}
+    <div className="absolute inset-0 z-50">
+      <motion.div
+        className="absolute inset-0"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.24 }}
+        style={{ background: "rgba(10, 12, 16, 0.28)", backdropFilter: "blur(4px)" }}
+        onClick={onClose}
+      />
+      <motion.div
+        className="absolute overflow-hidden rounded-[32px] border border-[var(--border-default)] bg-[var(--bg-elevated)]"
+        initial={{ left: start.x, top: start.y, width: start.w, height: start.h }}
+        animate={{ left: "50%", top: "50%", width: 520, height: 620, x: "-50%", y: "-50%" }}
+        transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1] }}
+        style={{ boxShadow: "0 40px 110px -34px rgba(14, 142, 232, 0.45)" }}
+        onClick={(event) => event.stopPropagation()}
       >
-        {entered && (
-          <HubPanelContent
-            userName={userName}
-            userAvatar={userAvatar}
-            totalWorkstreams={totalWorkstreams}
-            onClose={onClose}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function HubPanelContent({
-  userName,
-  userAvatar,
-  totalWorkstreams,
-  onClose,
-}: {
-  userName: string;
-  userAvatar: string;
-  totalWorkstreams: number;
-  onClose: () => void;
-}) {
-  return (
-    <div className="flex flex-col h-full p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          {userAvatar ? (
-            <img
-              src={userAvatar}
-              alt=""
-              className="w-10 h-10 rounded-full object-cover border-2 border-[var(--accent-cyan)]/30"
-            />
-          ) : (
-            <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold bg-gradient-to-br from-[var(--accent-cyan)] to-[var(--accent-mint)]">
-              {(userName || "?")[0]?.toUpperCase()}
+        <div className="flex h-full flex-col px-6 py-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {userAvatar ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={userAvatar} alt="" className="h-12 w-12 rounded-full object-cover" />
+              ) : (
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[linear-gradient(135deg,var(--accent-cyan),var(--accent-mint))] text-lg font-semibold text-white">
+                  {(userName || "Y")[0]?.toUpperCase()}
+                </div>
+              )}
+              <div>
+                <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
+                  Personal hub
+                </div>
+                <h2 className="mt-1 font-display text-2xl text-[var(--text-primary)]">
+                  {userName}
+                </h2>
+              </div>
             </div>
-          )}
-          <div>
-            <h2 className="font-display text-lg font-bold text-[var(--text-primary)]">
-              {userName}
-            </h2>
-            <p className="text-xs text-[var(--text-tertiary)]">
-              {totalWorkstreams} active workstream{totalWorkstreams !== 1 ? "s" : ""}
-            </p>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full border border-[var(--border-default)] p-2 text-[var(--text-secondary)]"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="mt-6 grid gap-4">
+            <InfoRow label="Active workstreams" value={String(totalWorkstreams)} />
+            <InfoRow label="Notes area" value="Dedicated /notes route" />
+            <InfoRow label="Focus return" value="Route-backed workspace" />
+          </div>
+
+          <div className="mt-8 grid gap-4">
+            <ModuleCard title="Cross-workstream notes" icon={StickyNote}>
+              <ModuleEmptyState icon="🧠" title="Hub notes arrive here" description="The hub uses the same calm visual language as workstreams instead of behaving like a broken special object." />
+            </ModuleCard>
+            <ModuleCard title="Return paths" icon={ArrowUpRight}>
+              <button
+                type="button"
+                onClick={() => router.push("/notes")}
+                className="inline-flex items-center gap-2 rounded-full border border-[var(--border-default)] px-3 py-2 text-sm text-[var(--text-secondary)]"
+              >
+                Open notes area
+                <ArrowUpRight className="h-4 w-4" />
+              </button>
+            </ModuleCard>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* Content sections */}
-      <div className="space-y-4 flex-1 overflow-y-auto">
-        <HubSection title="Upcoming deadlines" icon="⏰">
-          <EmptyState icon="✅" title="No upcoming deadlines" description="Deadlines from your workstreams will appear here" />
-        </HubSection>
-
-        <HubSection title="Recent notes" icon="📝">
-          <EmptyState icon="📝" title="No recent notes" description="Notes from across your workstreams will appear here" />
-        </HubSection>
-
-        <HubSection title="Personal memory" icon="🧠">
-          <p className="text-xs text-[var(--text-tertiary)]">
-            Spectra remembers your learning preferences and academic context across all workstreams.
-          </p>
-        </HubSection>
-      </div>
+      </motion.div>
     </div>
   );
-}
-
-function HubSection({
-  title,
-  icon,
-  children,
-}: {
-  title: string;
-  icon: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <div className="flex items-center gap-2 mb-2">
-        <span className="text-sm">{icon}</span>
-        <h4 className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide">
-          {title}
-        </h4>
-      </div>
-      <div className="pl-5">{children}</div>
-    </div>
-  );
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function formatRelativeTime(ts: number): string {
-  const diff = Date.now() - ts;
-  if (diff < 60_000) return "just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  if (diff < 604_800_000) return `${Math.floor(diff / 86_400_000)}d ago`;
-  return new Date(ts).toLocaleDateString();
 }

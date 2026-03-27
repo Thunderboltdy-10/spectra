@@ -20,7 +20,7 @@ Spectra is an AI-powered learning platform for EU schools. After completing Phas
 | Phase 5 backend (artifact schema, versioning, CRUD) | **KEEP** | Powers the workspace layer underneath |
 | Phase 5 frontend (`/artifacts` route, views) | **REMOVE/TRANSFORM** | Route removed. Canvas/graph views inform workspace design |
 | Phase 6 (Tavily search, sources) | **COMPLETE** | Partially done, finish as-is |
-| Phase 7 (tldraw, diagrams) | **ABSORB** | tldraw becomes the workspace canvas instead |
+| Phase 7 (tldraw, diagrams) | **MIGRATE** | tldraw assumptions are replaced by a React Flow workspace graph foundation |
 | Phase 8 (Mem0 migration) | **REPLACE** | Enhanced custom memory with provenance, no Mem0 |
 | Phase 9 (UI polish, dropdowns) | **ADAPT** | Still relevant, applied to workspace context |
 | Phase 10 (analytics hub) | **KEEP** | Analytics stays as separate route |
@@ -77,8 +77,9 @@ A conversation not tied to any workstream. Lives in the chat sidebar only. Can b
 
 | Route | Purpose | Status |
 |-------|---------|--------|
-| `/workspace` | Main workspace — tldraw canvas with workstream islands | **NEW** |
-| `/workspace?focus={id}` | Focus camera on specific workstream | **NEW** |
+| `/workspace` | Main workspace — React Flow spatial graph with workstream nodes around the hub | **NEW** |
+| `/workspace?focus={id}&view={structured\|columns\|graph}` | Route-backed focused workstream state anchored to the map | **NEW** |
+| `/notes` | Dedicated notes area outside workstreams, with return path back into workspace focus | **NEW** |
 | `/chat` | Standalone chat for one-offs and quick questions | **ADAPT** |
 | `/chat?from=workspace&ws={id}` | Full chat with back-arrow to workspace | **NEW** |
 | `/agents` | Agent browser and creation | KEEP |
@@ -96,26 +97,26 @@ A conversation not tied to any workstream. Lives in the chat sidebar only. Can b
 
 ---
 
-## 3. Workspace UX — tldraw Canvas
+## 3. Workspace UX — React Flow Workspace Graph
 
 ### 3.1 Technology
-**tldraw SDK v4.4.0** as the canvas engine. Custom shapes for workstream islands and the personal hub node. Spatial indexing (R-tree) for performance. Persistence via Convex.
+**React Flow** as the workspace surface. Custom node components represent workstreams and the personal hub. Edges handle hub-to-workstream links and soft peer relationships. The map is a locked-down product surface: pan, zoom, drag, select/focus primitives, no whiteboard tools. Persistence stays in Convex for positions and in user preferences/local client state for viewport restoration.
 
 ### 3.2 The Global Workspace View
-An infinite canvas containing:
-- **Workstream islands** — custom tldraw shapes representing each workstream
-- **Personal hub node** — central node connected to all workstreams
-- **Connection lines** — arrows from hub to each workstream, opacity proportional to recency
+An infinite but calm spatial graph containing:
+- **Workstream nodes** — custom React Flow nodes representing each workstream
+- **Personal hub node** — central custom node connected to all workstreams
+- **Connection lines** — styled edges from hub to each workstream, plus optional derived peer links between related workstreams
 - **Completed workstreams** — faded to 30% opacity, slightly smaller, toggleable via toolbar
 
 The workspace is calm and minimal at the default zoom. No floating-card chaos. Strong default layout (hub center, workstreams radiating outward) with user customization freedom (drag-and-drop repositioning).
 The workspaces should also be able to be ordered and structured within the canvas, ordered as visual 'folder' blocks of space. Everything interactible and draggable, but should also happen and get structured automatically
 
-### 3.3 Google Maps Semantic Zoom
+### 3.3 Controlled Representation Bands
 
-The defining UX innovation. Like Google Maps, the canvas reveals progressive detail as you zoom in. Not a literal pixel zoom — a **semantic morph** where content transforms smoothly between detail levels.
+The defining UX innovation. Like Google Maps, the workspace reveals progressive detail as you zoom in. This is not raw whiteboard zoom and not naïve text scaling. It is a **controlled representation system** where each node moves through discrete reveal bands while preserving visual continuity.
 
-**Implementation:** `WorkstreamShapeUtil.component()` reads `editor.getCamera().z` and continuously interpolates visual properties using `lerp()` and `clamp01()`:
+**Implementation:** React Flow viewport zoom is translated into representation bands (`overview`, `summary`, `detail`). Within each band, motion and opacity can interpolate smoothly, but the system changes what is shown, not just how large the same text becomes.
 
 ```
 titleSize = lerp(10, 18, clamp01((zoom - 0.2) / 0.4))
@@ -125,14 +126,13 @@ artifactListTranslateY = lerp(20, 0, clamp01((zoom - 0.55) / 0.15))
 
 **Zoom Level Breakpoints:**
 
-| Camera.z | Level | What renders |
+| Viewport zoom | Level | What renders |
 |----------|-------|-------------|
-| < 0.3 | `overview` | Emoji + colored dot. Title as tiny label. Completed = 30% opacity. |
-| 0.3 - 0.6 | `summary` | Emoji + title + type badge + artifact count. Status indicator. |
-| 0.6 - 1.0 | `standard` | Full card: title, description snippet, 3 recent artifacts, deadline badge, last activity. Chat search bar appears. |
-| > 1.0 | `detail` | Everything above + full artifact list, active threads, memory context, inline quick-actions (new note, open chat, view planner). |
+| low zoom | `overview` | Emoji, title, type signal, status. High legibility, low density. |
+| mid zoom | `summary` | Title, description snippet, counts, activity state, stronger card identity. |
+| high zoom | `detail` | Main-stage preview, quick actions, note/thread/planner signals, clear enter affordance. |
 
-**Morph transitions:** Each element has CSS `transition` on opacity, transform, and font-size. As the camera zooms, elements continuously fade in/out and resize rather than switching discretely. Title text morphs from small label to full heading — same element, different size. Background and borders are consistent across all levels.
+**Morph transitions:** Elements can animate opacity, transform, blur, and local scale between bands, but representation changes are intentional. The card boundary can gradually soften as the user commits deeper, preparing the transition into focus mode.
 
 **Completed workstreams:**
 ```
@@ -143,7 +143,7 @@ Toolbar toggle: "Show completed" on/off. When off, completed shapes hidden.
 
 ### 3.4 Personal Hub Node
 
-A special central shape connected to all workstreams. Always visible at any zoom level (minimum visual size enforced via `getMinDimensions()`).
+A special central React Flow node connected to all workstreams. Always visible at any zoom level with custom visuals and no generic selection card behavior.
 
 **At low zoom:** Circle with user's avatar. Profile avatar sourced from ManageBac when available (see §10.1). If a student's Clerk email matches their school ManageBac account, their ManageBac profile photo replaces the Clerk avatar automatically — both in the hub node and on all workstream cards that show user context.
 **At higher zoom, expands to reveal:**
@@ -170,11 +170,11 @@ Not cluttered. No mode selectors, no model pickers, no settings. Just workspace-
 
 ### 3.6 Drag and Drop
 
-tldraw handles shape dragging natively. On drag end, persist new `canvasX`/`canvasY` to Convex via debounced mutation (300ms). Hub node is also draggable but snaps back to center if released without moving far (gravity behavior).
+React Flow handles node dragging natively. On drag end, persist new `canvasX`/`canvasY` to Convex. Workstream nodes stay user-draggable. The hub is a stable anchor and does not behave like a floating whiteboard object.
 
-### 3.7 Canvas State Persistence
+### 3.7 Workspace State Persistence
 
-Camera position (`{x, y, z}`) persisted to `userPreferences.workspaceLayout`. Restored on page load so users return to their last view.
+Viewport/camera state is persisted and restored. Focus state is route-backed. Panel state, selected view, and maximize/return flows must remain recoverable with browser back behavior.
 
 ---
 
@@ -182,30 +182,28 @@ Camera position (`{x, y, z}`) persisted to `userPreferences.workspaceLayout`. Re
 
 ### 4.1 Entering a Workstream
 
-At `detail` zoom level (camera.z > 1.0), the workstream shape reveals full internal content. This is the "zoomed-in" state — the workstream effectively takes over the visible viewport while other workstreams naturally shrink away in the canvas.
+At deeper zoom, or immediately on click, the workstream transitions into a **route-backed focused state**. This is not a modal and not a separate app. It is visually anchored to the same spatial system while the URL reflects the focused workstream and active internal view.
 
 ### 4.2 View Toggle
 
-Two view modes available via toggle inside the workstream shape at detail zoom:
+Three explicit views are available through a top-bar switcher inside focused workstream state:
 
-**A. Stacked/Categorized View (default)**
-Clear sections showing workstream contents:
-- **Threads** — list of conversations in this workstream, with most recent first
-- **Notes** — Tiptap documents linked to this workstream
-- **Artifacts** — versioned objects (study plans, flashcard decks, documents, code)
-- **Planner** — deadlines, milestones, reminders
+**A. Structured View (default)**
+Fixed layout grammar with:
+- Top identity/header zone
+- Main stage for the most important active item
+- Stable surrounding modules for Threads, Notes, Artifacts, Planner, and Agents when relevant
+- Right-side chat panel toggle
 
-Each section is collapsible. Items within sections are sortable (recent, alphabetical, type).
+**B. Column View**
+Grouped column layout for notes, tasks, artifacts, and conversation clusters. Inspired by productivity boards, but still native to Spectra's calm workspace language.
 
-**B. Linked View (sub-toggle: Graph | Timeline)**
-
-**Graph mode:** Mini force-directed graph inside the workstream. Nodes = threads, notes, artifacts, deadlines. Edges = created-from, references, same-topic, temporal sequence. Shows how a research thread led to a note which became an essay draft. Uses SVG (like existing `graph-view.tsx` pattern).
-
-**Timeline mode:** Vertical chronological flow. Items arranged by date with connections showing provenance. Emphasizes progression: "What happened when in this workstream."
+**C. Graph View**
+Secondary internal relationship view showing connections between notes, artifacts, planner items, chats, and agents.
 
 ### 4.3 Chat Panel
 
-At detail zoom, a search bar appears at the bottom of the workstream shape. Typing into it opens the **chat side panel** (see Section 5).
+On the outer map, quick chat can infer the likely workstream and open focus with chat already active. Inside focus, chat is a real right-side panel using the same routing/rendering surfaces as full chat, but with reduced chrome.
 
 ---
 
@@ -213,9 +211,9 @@ At detail zoom, a search bar appears at the bottom of the workstream shape. Typi
 
 ### 5.1 Architecture
 
-A right-side drawer panel within the workspace page. Does not navigate away from `/workspace`.
+A right-side drawer panel within the focused workspace state. It does not navigate away from `/workspace` until the user explicitly maximizes into full chat.
 
-**When closed:** A floating search/prompt bar at the bottom-right of the workstream (visible at detail zoom). Typing into it triggers the panel to open.
+**When closed:** Outer-map quick chat remains available for fast entry. Inside focus, panel triggers remain in the header and in module actions.
 
 **When open:** Panel takes ~380px on the right. Canvas resizes. Panel contains:
 
@@ -225,7 +223,7 @@ A right-side drawer panel within the workspace page. Does not navigate away from
    - Auto mode/model/search/thinking (no selectors in panel)
    - Uses workstream's default mode and linked agent automatically
    - Slash commands still available
-4. **No routing panels:** No route-trace, orchestration, or settings panels inside the workspace chat panel
+4. **No routing clutter:** No route-trace, orchestration, or settings drawers inside the workspace chat panel
 
 **Functionality preserved:** Visualizations, code previews, flashcard renders, quiz renders, source citations — all still work. The panel is a simplified *view*, not a reduced *capability*.
 
@@ -240,17 +238,7 @@ The `/chat` page detects `from=workspace` and renders a back-arrow button in the
 
 ### 5.3 State Management
 
-**New Zustand store: `chatPanelStore`**
-```
-isOpen, activeWorkstreamId, activeThreadId, draftMessage
-```
-
-**New hook: `useWorkspaceChat(workstreamId)`**
-- Wraps `useChatState` with workstream-specific defaults
-- Auto-sets mode from `workstream.defaultMode`
-- Auto-sets agent from `workstream.linkedAgentId`
-- Scopes thread listing to workstream
-- New chats auto-link to workstream
+Chat state must be workstream-aware. New chats created from focused workstream state persist `workstreamId`, so the panel and full chat route are looking at the same real thread scope.
 
 ---
 
@@ -488,14 +476,17 @@ When the system creates something worth keeping:
 
 ### 9.1 Note Categories
 
-- **Workstream notes**: Scoped to a workstream, appear in workstream stacked view
+- **Workstream notes**: Scoped to a workstream, appear as note objects/previews inside focused workstream views
 - **Subject notes**: Long-lived, tied to a subject area (but not a specific workstream)
 - **Quick notes / inbox**: Created from hub node, later filed or discarded
 - **Documents**: Durable long-form (essays, reports, lab writeups) — distinguished by length and structure
 
 ### 9.2 Notes in Workspace
 
-- Notes appear as items within workstream stacked view
+- Notes appear as previews/cards inside focused workstream modules and views
+- Clicking a note opens it in the right-side panel first
+- The panel can maximize into `/notes` while preserving a return path back to `/workspace?focus={id}`
+- `/notes` is also a dedicated standalone notes area outside workstreams
 - Quick notes accessible from hub node
 - AI can reference/quote notes in conversations when in workstream context
 - Notes auto-link to workstream when created within workstream chat
@@ -655,14 +646,14 @@ Index: `by_user`
 
 | Package | Purpose | Size |
 |---------|---------|------|
-| `tldraw` | Workspace canvas | ~2MB |
+| `@xyflow/react` | Workspace graph surface | ~200KB |
 | `zustand` | Ephemeral state management | ~1KB |
 | `@tiptap/react` + extensions | Note/artifact editor | ~200KB |
 | `framer-motion` | Smooth transitions and layout animations | ~150KB |
 
 ### 13.2 Zustand Stores
 
-**`workspaceStore`**: Camera state `{x,y,z}`, selected workstream, view options (show archived, show connections), creation dialog state
+**`workspaceStore`**: Viewport state, selected workstream, view options (show archived, show connections, background mode), creation dialog state, transition bounds for focus entry
 
 **`chatPanelStore`**: Panel open/closed, active workstream, active thread, draft message
 
@@ -677,19 +668,14 @@ src/app/workspace/
   page.tsx                        — Route: /workspace
 
 src/components/workspace/
-  workspace-canvas.tsx            — tldraw mount + custom shape registration
+  workspace-canvas.tsx            — React Flow mount + custom node/edge registration
   workspace-toolbar.tsx           — Fixed toolbar (search, +new, toggles)
-  chat-side-panel.tsx             — Right-side chat drawer
+  chat-side-panel.tsx             — Outer-map quick chat entry
   workstream-create-dialog.tsx    — Creation wizard (type, name, subject, agent)
-  hub-panel.tsx                   — Hub expanded view
+  workstream-focus-panel.tsx      — Route-backed focused workspace state + detail panels
 
 src/lib/workspace/
-  shapes/
-    workstream-shape.ts           — WorkstreamShapeUtil (semantic zoom)
-    hub-shape.ts                  — HubShapeUtil
-    connection-arrow.ts           — Custom arrow styling
-  zoom-helpers.ts                 — lerp, clamp01, getZoomLevel
-  canvas-persistence.ts           — Save/restore camera + positions
+  zoom-helpers.ts                 — reveal-band helpers + color system
 
 src/components/editor/
   tiptap-editor.tsx               — Root editor with mode switching
@@ -729,7 +715,7 @@ The existing sidebar (`src/components/chat/chat-sidebar.tsx`) adapts based on ro
 | Component | Action | Reasoning |
 |-----------|--------|-----------|
 | `src/app/artifacts/page.tsx` | **REMOVE** | No longer a visible route |
-| `src/components/artifacts/canvas-view.tsx` | **REMOVE** | Replaced by tldraw workspace |
+| `src/components/artifacts/canvas-view.tsx` | **REMOVE** | Replaced by React Flow workspace |
 | `src/components/artifacts/graph-view.tsx` | **ADAPT** | Pattern reused for workstream linked/graph view |
 | `src/components/artifacts/timeline-view.tsx` | **ADAPT** | Pattern reused for workstream timeline view |
 | `src/components/artifacts/sections-view.tsx` | **ADAPT** | Pattern informs workstream stacked view |
@@ -765,17 +751,16 @@ The existing sidebar (`src/components/chat/chat-sidebar.tsx`) adapts based on ro
 - [x] Install Zustand, create workspace/chatPanel/editor stores
 - [x] API routes: `/api/workstreams`, `/api/planner`, `/api/notes`, `/api/preferences`
 
-### Wave 2: Workspace Canvas
+### Wave 2: Workspace Graph
 *Depends on Wave 1.*
 
-- [x] Install tldraw v4.4.0
+- [x] Install React Flow
 - [x] `/workspace` route and page
-- [x] `workspace-canvas.tsx` — tldraw mount with custom shapes
-- [x] `WorkstreamShapeUtil` with semantic zoom (4 detail levels, morph transitions)
-- [x] `HubShapeUtil` with progressive reveal
+- [x] `workspace-canvas.tsx` — React Flow mount with custom hub/workstream nodes
+- [x] Reveal-band node states (`overview`, `summary`, `detail`) instead of literal whiteboard zoom
 - [x] Connection arrows with recency-based opacity
-- [x] Workspace toolbar (search, +new, toggle completed)
-- [x] Canvas persistence (camera state, shape positions)
+- [x] Workspace toolbar (search, +new, toggle completed, background mode)
+- [x] Viewport persistence (camera state, node positions)
 - [x] Drag-and-drop reordering
 - [x] Completed workstreams: faded + toggleable
 - [x] Workstream creation dialog (type, name, subject, agent)
@@ -783,13 +768,12 @@ The existing sidebar (`src/components/chat/chat-sidebar.tsx`) adapts based on ro
 ### Wave 3: Chat Integration
 *Depends on Wave 1. Partially parallel with Wave 2.*
 
-- [x] Chat side panel component within workspace
-- [x] Floating search bar (when panel closed)
-- [x] `useWorkspaceChat` hook wrapping `useChatState`
-- [x] Modify `useChatState` to accept `workstreamId` param
+- [x] Quick chat entry on outer workspace map
+- [x] Right-side chat panel inside focused workstream state
+- [x] Workstream-aware chat creation and routing
 - [x] Back-arrow navigation (`from=workspace` param)
 - [x] Sidebar adaptation: workstream list on `/workspace`, chat list on `/chat`
-- [x] Nav item update: "Artifacts" → "Workspace"
+- [x] Nav item update: "Artifacts" → "Workspace", dedicated `/notes` area added
 
 ### Wave 4: Prompt Routing Expansion
 *Depends on Wave 1 and 3.*
@@ -814,7 +798,7 @@ The existing sidebar (`src/components/chat/chat-sidebar.tsx`) adapts based on ro
 
 ### Wave 6: Agentic Editor
 *Depends on Wave 1 (notes table). Independent of Waves 2-5 — can be parallelized.*
-
+  
 - [x] Install Tiptap packages (`@tiptap/react`, `@tiptap/starter-kit`, `@tiptap/extension-placeholder`, `@tiptap/pm`)
 - [x] `tiptap-editor.tsx` with mode toggle (simple/notion/agentic)
 - [x] Simple mode: StarterKit only (no toolbar)
@@ -830,25 +814,25 @@ The existing sidebar (`src/components/chat/chat-sidebar.tsx`) adapts based on ro
 - [ ] Version history panel
 
 **Also implemented in this wave (Wave 2-3 quality fixes):**
-- [x] Semantic zoom with counter-scale text stabilization (Google Maps feel)
-- [x] Focus mode overlay: workstream card morphs into full-screen workspace
-- [x] Hub same interaction grammar as workstreams (click to expand, no tldraw selection card)
-- [x] WorkstreamFocusPanel with left sidebar + main content area + compact chat drawer
+- [x] Reveal-band representation system instead of naïve constant scaling
+- [x] Focus mode overlay: workstream node morphs into route-backed workspace state
+- [x] Hub same interaction grammar as workstreams (custom node, no generic selection card)
+- [x] WorkstreamFocusPanel with structured/columns/graph switcher + reusable detail panels
 - [x] useCompactChat hook: real streaming chat in the panel (same /api/chat protocol)
 - [x] QuickChatBar: intelligent workstream inference, manual picker when ambiguous
-- [x] Canvas initial centering (hub at center on load)
+- [x] Workspace initial centering (hub at center on load)
 - [x] Position persistence race condition fixed (props-only updates on re-sync)
-- [x] Center-hub toolbar button wired (custom event listener)
-- [x] Back gesture: click canvas backdrop, Escape key, visible back button
+- [x] Center-hub toolbar button wired
+- [x] Back gesture: click workspace backdrop, Escape key, visible back button
 
 ### Wave 7: Inside Workstreams
 *Depends on Waves 2, 3, 6.*
 
-- [ ] Stacked/categorized view inside workstream (at detail zoom)
-- [ ] Linked view: relationship graph (SVG force-directed)
-- [ ] Linked view: timeline (chronological flow)
-- [ ] View toggle between stacked and linked
-- [ ] Planner view inside workstream
+- [ ] Structured view inside focused workstream
+- [ ] Column view inside focused workstream
+- [ ] Graph view inside focused workstream
+- [ ] Reusable panel-first detail flow for notes, artifacts, code, documents
+- [ ] Planner view/module inside focused workstream
 - [ ] Hub panel: quick notes, cross-WS planner, personal memory, recent items
 
 ### Wave 8: ManageBac + Integrations
@@ -879,20 +863,20 @@ The existing sidebar (`src/components/chat/chat-sidebar.tsx`) adapts based on ro
 
 ### Core Flows to Test
 
-1. **Workspace lifecycle**: Create workstream → appears on canvas → zoom in → see internals → complete → fades → toggle visibility
-2. **Semantic zoom**: Zoom out → overview labels only → zoom in → card details appear → zoom further → full internals. Verify smooth morph transitions, no discrete jumps.
-3. **Chat panel**: Open panel in workspace → chat → artifact auto-saved → verify in workstream. Close panel → open search bar → type → panel reopens.
+1. **Workspace lifecycle**: Create workstream → appears on map → zoom in → richer representation bands appear → click/focus → complete → fades → toggle visibility
+2. **Representation bands**: Zoom out → overview labels only → zoom in → summary card → zoom further → detail card. Verify controlled reveal changes, not raw scaling.
+3. **Chat panel**: Open focused workstream chat panel → chat → artifact auto-saved → verify in workstream. Close panel → open outer-map quick chat → inferred workstream focus opens with chat active.
 4. **Full chat navigation**: Open full chat from panel → verify back-arrow → click back → return to workspace focused on correct workstream.
 5. **Routing**: Send prompt in chat → verify correct workstream assignment → override with Move → verify thread moved. Send one-off → verify stays in chat sidebar only.
 6. **Memory**: Chat in workstream → verify workstream memory extracted → switch workstream → verify isolation (no leakage). Check provenance on extracted entries.
 7. **Agentic editor**: Open artifact → switch to agentic mode → submit AI instruction → verify diff renders → accept → verify version created → undo → verify revert.
 8. **ManageBac**: Admin configures token → student sees timetable → subject workstreams suggested → deadlines appear in planner.
 9. **One-off flow**: Random question in /chat → verify stays outside workspace → promote to workstream → verify thread appears in workstream.
-10. **Hub node**: Zoom into hub → verify quick notes, planner items, memory summary all populate correctly.
+10. **Hub node**: Open hub → verify quick notes, planner items, memory summary all populate correctly.
 
 ### Performance Targets
-- Workspace canvas load with 15 workstreams: < 1.5s
-- Semantic zoom transition: 60fps
+- Workspace graph load with 15 workstreams: < 1.5s
+- Representation band transitions: 60fps
 - Chat panel open/close: < 200ms
 - Memory retrieval (personal + workstream): < 500ms
 - Workstream memory extraction: < 2s (async, non-blocking)

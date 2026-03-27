@@ -15,11 +15,14 @@ export type CardBounds = {
   h: number;
 };
 
+export type WorkspaceBackgroundMode = "dots" | "grid" | "blank";
+
 type WorkspaceStoreState = {
   camera: WorkspaceCameraState;
   selectedWorkstreamId?: string;
   showArchived: boolean;
   showConnections: boolean;
+  backgroundMode: WorkspaceBackgroundMode;
   isCreateDialogOpen: boolean;
   // Focus mode — "entering" a workstream or hub
   focusedWorkstreamId?: string;
@@ -33,6 +36,7 @@ type WorkspaceStoreState = {
   setSelectedWorkstreamId: (workstreamId?: string) => void;
   setShowArchived: (showArchived: boolean) => void;
   setShowConnections: (showConnections: boolean) => void;
+  setBackgroundMode: (backgroundMode: WorkspaceBackgroundMode) => void;
   openCreateDialog: () => void;
   closeCreateDialog: () => void;
   focusWorkstream: (workstreamId: string, bounds: CardBounds) => void;
@@ -54,6 +58,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set) => ({
   selectedWorkstreamId: undefined,
   showArchived: true,
   showConnections: true,
+  backgroundMode: "dots",
   isCreateDialogOpen: false,
   focusedWorkstreamId: undefined,
   focusCardBounds: undefined,
@@ -65,6 +70,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set) => ({
   setSelectedWorkstreamId: (selectedWorkstreamId) => set({ selectedWorkstreamId }),
   setShowArchived: (showArchived) => set({ showArchived }),
   setShowConnections: (showConnections) => set({ showConnections }),
+  setBackgroundMode: (backgroundMode) => set({ backgroundMode }),
   openCreateDialog: () => set({ isCreateDialogOpen: true }),
   closeCreateDialog: () => set({ isCreateDialogOpen: false }),
 
@@ -84,6 +90,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set) => ({
       selectedWorkstreamId: undefined,
       showArchived: true,
       showConnections: true,
+      backgroundMode: "dots",
       isCreateDialogOpen: false,
       focusedWorkstreamId: undefined,
       focusCardBounds: undefined,

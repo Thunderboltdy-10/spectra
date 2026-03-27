@@ -156,6 +156,7 @@ export const listChats = query({
   args: {
     actorClerkId: v.string(),
     packId: v.optional(v.id("packs")),
+    workstreamId: v.optional(v.id("workstreams")),
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -171,15 +172,22 @@ export const listChats = query({
           .withIndex("by_owner_pack_updated", (q) => q.eq("ownerUserId", actor._id).eq("packId", args.packId))
           .order("desc")
           .take(max)
-      : await ctx.db
-          .query("chats")
-          .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id))
-          .order("desc")
-          .take(max);
+      : args.workstreamId
+        ? await ctx.db
+            .query("chats")
+            .withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId))
+            .order("desc")
+            .take(max)
+        : await ctx.db
+            .query("chats")
+            .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id))
+            .order("desc")
+            .take(max);
 
     return chats
       .filter((chat) => !chat.deletedAt)
       .filter((chat) => (args.packId ? chat.packId === args.packId : true))
+      .filter((chat) => (args.workstreamId ? chat.workstreamId === args.workstreamId : true))
       .slice(0, max)
       .map((chat) => ({
         _id: chat._id,
@@ -188,6 +196,7 @@ export const listChats = query({
         mode: chat.mode,
         packId: chat.packId,
         agentId: chat.agentId,
+        workstreamId: chat.workstreamId,
         pinned: chat.pinned,
         updatedAt: chat.updatedAt,
       }));
@@ -228,6 +237,7 @@ export const createChat = mutation({
     actorClerkId: v.string(),
     packId: v.optional(v.id("packs")),
     agentId: v.optional(v.id("agents")),
+    workstreamId: v.optional(v.id("workstreams")),
     mode: vStudyMode,
     thinkingLevel: vThinkingLevel,
     routerMode: vRouterMode,
@@ -259,11 +269,19 @@ export const createChat = mutation({
       }
     }
 
+    if (args.workstreamId) {
+      const workstream = await ctx.db.get(args.workstreamId);
+      if (!workstream || workstream.ownerUserId !== actor._id || workstream.orgId !== actor.orgId) {
+        throw new Error("Workstream not found");
+      }
+    }
+
     const now = Date.now();
     const chatId = await ctx.db.insert("chats", {
       orgId: actor.orgId,
       packId: args.packId,
       agentId,
+      workstreamId: args.workstreamId,
       ownerUserId: actor._id,
       title: args.title ?? "New chat",
       latestUserPrompt: undefined,

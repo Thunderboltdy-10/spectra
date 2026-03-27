@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import {
+  Grid3X3,
   Eye,
   EyeOff,
   GitBranch,
@@ -16,21 +17,43 @@ type WorkspaceToolbarProps = {
   onCenterHub: () => void;
   onNewWorkstream: () => void;
   workstreamCount: number;
+  searchQuery: string;
+  onSearchChange: (value: string) => void;
 };
 
 export function WorkspaceToolbar({
   onCenterHub,
   onNewWorkstream,
   workstreamCount,
+  searchQuery,
+  onSearchChange,
 }: WorkspaceToolbarProps) {
   const {
     showArchived,
     setShowArchived,
     showConnections,
     setShowConnections,
+    backgroundMode,
+    setBackgroundMode,
   } = useWorkspaceStore();
   const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
+
+  const backgroundLabel =
+    backgroundMode === "dots"
+      ? "Dots"
+      : backgroundMode === "grid"
+        ? "Grid"
+        : "Blank";
+
+  function cycleBackground() {
+    setBackgroundMode(
+      backgroundMode === "dots"
+        ? "grid"
+        : backgroundMode === "grid"
+          ? "blank"
+          : "dots",
+    );
+  }
 
   return (
     <div
@@ -49,7 +72,7 @@ export function WorkspaceToolbar({
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => onSearchChange(e.target.value)}
               placeholder="Search workstreams..."
               autoFocus
               onBlur={() => {
@@ -57,7 +80,7 @@ export function WorkspaceToolbar({
               }}
               onKeyDown={(e) => {
                 if (e.key === "Escape") {
-                  setSearchQuery("");
+                  onSearchChange("");
                   setSearchOpen(false);
                 }
               }}
@@ -126,6 +149,12 @@ export function WorkspaceToolbar({
           label="Completed"
           onClick={() => setShowArchived(!showArchived)}
           active={showArchived}
+        />
+        <ToolbarBtn
+          icon={<Grid3X3 className="w-3.5 h-3.5" />}
+          label={backgroundLabel}
+          onClick={cycleBackground}
+          active={backgroundMode !== "blank"}
         />
 
         <div className="w-px h-5 bg-[var(--border-default)] mx-1" />

@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "katex/dist/katex.min.css";
+@import "../styles/react-flow.css";
 
 @utility grid-cols-14 {
   grid-template-columns: repeat(14, minmax(0, 1fr));
@@ -488,6 +489,37 @@ button:disabled {
 
 .right-panel-shell--sheet {
   animation: right-panel-enter-sheet 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.workspace-react-flow .react-flow__renderer,
+.workspace-react-flow .react-flow__pane,
+.workspace-react-flow .react-flow__viewport {
+  cursor: grab;
+}
+
+.workspace-react-flow .react-flow__pane.dragging,
+.workspace-react-flow .react-flow__viewport.dragging {
+  cursor: grabbing;
+}
+
+.workspace-react-flow .react-flow__controls {
+  border: 1px solid var(--border-default);
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+  background: color-mix(in oklab, var(--bg-elevated) 90%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.workspace-react-flow .react-flow__controls-button {
+  background: transparent;
+  color: var(--text-secondary);
+  border-bottom-color: var(--border-default);
+}
+
+.workspace-react-flow .react-flow__controls-button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .right-panel-content {

@@ -17,14 +17,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown, MessageSquare, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useWorkspaceStore } from "@/stores/workspace-store";
-import { useWorkspaceData } from "@/hooks/use-workspace-data";
 import type { Workstream } from "@/hooks/use-workspace-data";
 
-export function QuickChatBar() {
+type QuickChatBarProps = {
+  hidden?: boolean;
+  workstreams: Workstream[];
+  onOpenWorkstreamChat: (workstreamId: string, query: string) => void;
+};
+
+export function QuickChatBar({
+  hidden = false,
+  workstreams,
+  onOpenWorkstreamChat,
+}: QuickChatBarProps) {
   const router = useRouter();
-  const { workstreams } = useWorkspaceData();
-  const { focusedWorkstreamId, focusWorkstreamWithChat } = useWorkspaceStore();
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
@@ -32,17 +38,18 @@ export function QuickChatBar() {
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Don't render when a workstream is focused — chat is inside the focus panel
-  if (focusedWorkstreamId) return null;
-
   const activeWorkstreams = workstreams.filter((ws) => ws.status === "active");
 
   // Auto-select: if only one workstream, use it. If multiple, leave unselected (show picker).
   useEffect(() => {
     if (activeWorkstreams.length === 1 && !selectedWs) {
       setSelectedWs(activeWorkstreams[0] ?? null);
+      return;
     }
-  }, [activeWorkstreams.length]);
+    if (selectedWs && !activeWorkstreams.some((ws) => ws._id === selectedWs._id)) {
+      setSelectedWs(null);
+    }
+  }, [activeWorkstreams, selectedWs]);
 
   // Close picker on outside click
   useEffect(() => {
@@ -61,28 +68,14 @@ export function QuickChatBar() {
     const trimmed = query.trim();
 
     if (selectedWs) {
-      // Open the workstream focus panel with chat pre-filled — stay in workspace
-      const barEl = containerRef.current;
-      let bounds = { x: 0, y: 0, w: 0, h: 0 };
-      if (barEl) {
-        const barRect = barEl.getBoundingClientRect();
-        const container = barEl.parentElement;
-        const cRect = container?.getBoundingClientRect() ?? barRect;
-        bounds = {
-          x: barRect.left - cRect.left,
-          y: barRect.top - cRect.top,
-          w: barRect.width,
-          h: barRect.height,
-        };
-      }
-      focusWorkstreamWithChat(selectedWs._id, bounds, trimmed);
+      onOpenWorkstreamChat(selectedWs._id, trimmed);
     } else {
       // No workstream — general one-off chat
       router.push(`/chat?prompt=${encodeURIComponent(trimmed)}`);
     }
     setQuery("");
     setFocused(false);
-  }, [query, selectedWs, focusWorkstreamWithChat, router]);
+  }, [onOpenWorkstreamChat, query, router, selectedWs]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
@@ -96,6 +89,10 @@ export function QuickChatBar() {
       inputRef.current?.blur();
     }
   };
+
+  if (hidden) {
+    return null;
+  }
 
   return (
     <div

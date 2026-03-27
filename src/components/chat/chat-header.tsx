@@ -2,7 +2,8 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import { Bot, Download, Layers, LoaderCircle, Menu, MoreHorizontal, Search, Settings2, Square, WifiOff } from "lucide-react";
+import Link from "next/link";
+import { ArrowLeft, Bot, Download, Layers, LoaderCircle, Menu, MoreHorizontal, Search, Settings2, Square, WifiOff } from "lucide-react";
 import { useKBar } from "kbar";
 import { ContextualTip } from "@/components/ui/contextual-tip";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,8 @@ type ChatHeaderProps = {
   settingsActive?: boolean;
   mobileUtilitySlot?: ReactNode;
   isOffline?: boolean;
+  backHref?: string;
+  backLabel?: string;
 };
 
 const PHASE_CONFIG: Record<string, { label: string; color: string }> = {
@@ -126,6 +129,8 @@ export function ChatHeader({
   settingsActive = false,
   mobileUtilitySlot,
   isOffline = false,
+  backHref,
+  backLabel,
 }: ChatHeaderProps) {
   const { query } = useKBar();
   const responseAgo = lastResponseAt
@@ -137,6 +142,16 @@ export function ChatHeader({
     <header className="sticky top-0 z-20 relative after:content-[''] after:absolute after:top-[56px] after:left-0 after:right-0 after:h-px after:bg-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_92%,transparent)] backdrop-blur-xl min-h-[var(--header-height,56px)]">
       <div className="flex h-[var(--header-height,56px)] items-center px-3 sm:px-6 lg:px-10">
         <div className="mx-auto flex w-full max-w-[680px] xl:max-w-[780px] 2xl:max-w-[860px] items-center gap-2">
+          {backHref && (
+            <Link
+              href={backHref}
+              className="inline-flex items-center gap-1 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors mr-1 shrink-0"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span className="hidden sm:inline">{backLabel || "Back"}</span>
+            </Link>
+          )}
+
           <Button
             type="button"
             variant="secondary"

@@ -28,6 +28,11 @@
     "@radix-ui/react-switch": "^1.2.6",
     "@radix-ui/react-tabs": "^1.1.13",
     "@tavily/core": "^0.7.2",
+    "@tiptap/extension-placeholder": "^3.21.0",
+    "@tiptap/pm": "^3.21.0",
+    "@tiptap/react": "^3.21.0",
+    "@tiptap/starter-kit": "^3.21.0",
+    "@xyflow/react": "^12.10.2",
     "ai": "^6.0.77",
     "axios": "^1.13.6",
     "class-variance-authority": "^0.7.1",
@@ -36,6 +41,7 @@
     "date-fns": "^4.1.0",
     "docx": "^8.5.0",
     "es-toolkit": "^1.45.1",
+    "framer-motion": "^12.38.0",
     "html2canvas": "^1.4.1",
     "js-tiktoken": "^1.0.21",
     "jspdf": "^2.5.2",
@@ -59,7 +65,8 @@
     "sonner": "^2.0.7",
     "svix": "^1.84.1",
     "tailwind-merge": "^3.4.0",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

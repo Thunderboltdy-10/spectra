@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { ChatComposer } from "@/components/chat/chat-composer";
 import { ChatHeader } from "@/components/chat/chat-header";
@@ -116,6 +117,7 @@ const TOUR_STEPS: GuidedTourStep[] = [
 export function ChatLayout() {
   const chat = useChatState();
   const canvas = useCanvasState();
+  const searchParams = useSearchParams();
   const { activeView: panelActiveView, openPanel, closePanel, togglePanel, backPanel, canGoBack } = usePanel();
   const [tourOpen, setTourOpen] = useState(false);
   const [activityCutoffTs, setActivityCutoffTs] = useState<number | null>(null);
@@ -558,6 +560,8 @@ export function ChatLayout() {
           settingsActive={panelActiveView === "settings"}
           mobileUtilitySlot={<GlobalUtilityDock placement="profile-bar" className="w-full" />}
           isOffline={chat.isOffline}
+          backHref={searchParams.get("from") === "workspace" ? `/workspace${searchParams.get("ws") ? `?focus=${searchParams.get("ws")}` : ""}` : undefined}
+          backLabel="Workspace"
           onExport={(format) => {
             if (format === "pdf") {
               const node = document.querySelector("[data-conversation-export]") ?? document.querySelector("main");

@@ -33,6 +33,7 @@ import {
   Timer,
   Trash2,
   Trophy,
+  StickyNote,
   UserRound,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -60,7 +61,8 @@ const EMPTY_PINNED_IDS = new Set<string>();
 
 const BASE_PRIMARY_NAV_ITEMS = [
   { href: "/chat", label: "Chat", icon: Sparkles },
-  { href: "/artifacts", label: "Artifacts", icon: Layers },
+  { href: "/workspace", label: "Workspace", icon: Layers },
+  { href: "/notes", label: "Notes", icon: StickyNote },
   { href: "/agents", label: "Agents", icon: Bot },
 ];
 

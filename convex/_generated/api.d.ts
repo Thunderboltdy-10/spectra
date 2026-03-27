@@ -31,9 +31,11 @@ import type * as images from "../images.js";
 import type * as ingestQueue from "../ingestQueue.js";
 import type * as memory from "../memory.js";
 import type * as models from "../models.js";
+import type * as notes from "../notes.js";
 import type * as notifications from "../notifications.js";
 import type * as packs from "../packs.js";
 import type * as personalSoul from "../personalSoul.js";
+import type * as plannerItems from "../plannerItems.js";
 import type * as quizzes from "../quizzes.js";
 import type * as rag from "../rag.js";
 import type * as resources from "../resources.js";
@@ -45,7 +47,9 @@ import type * as streakLogic from "../streakLogic.js";
 import type * as superAdmin from "../superAdmin.js";
 import type * as usage from "../usage.js";
 import type * as userLifecycle from "../userLifecycle.js";
+import type * as userPreferences from "../userPreferences.js";
 import type * as users from "../users.js";
+import type * as workstreams from "../workstreams.js";
 
 import type {
   ApiFromModules,
@@ -77,9 +81,11 @@ declare const fullApi: ApiFromModules<{
   ingestQueue: typeof ingestQueue;
   memory: typeof memory;
   models: typeof models;
+  notes: typeof notes;
   notifications: typeof notifications;
   packs: typeof packs;
   personalSoul: typeof personalSoul;
+  plannerItems: typeof plannerItems;
   quizzes: typeof quizzes;
   rag: typeof rag;
   resources: typeof resources;
@@ -91,7 +97,9 @@ declare const fullApi: ApiFromModules<{
   superAdmin: typeof superAdmin;
   usage: typeof usage;
   userLifecycle: typeof userLifecycle;
+  userPreferences: typeof userPreferences;
   users: typeof users;
+  workstreams: typeof workstreams;
 }>;
 
 /**

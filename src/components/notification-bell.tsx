@@ -1,6 +1,6 @@
 "use client";
 
-import { createElement, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { Bell, CheckCheck, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -11,7 +11,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { NotificationToast } from "@/components/notification-toast";
 
 type NotificationItem = {
   _id: string;
@@ -53,6 +52,7 @@ export function NotificationBell({
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [expandedById, setExpandedById] = useState<Record<string, boolean>>({});
+  const [mounted, setMounted] = useState(false);
 
   const refreshNotifications = useCallback(async (options?: { silent?: boolean }) => {
     if (!options?.silent) {
@@ -74,46 +74,15 @@ export function NotificationBell({
   }, []);
 
   useEffect(() => {
-    let mounted = true;
+    setMounted(true);
     void (async () => {
-      const initialPayload = await refreshNotifications();
-      // Show a toast for missed notifications on session start
-      if (!mounted) return;
-      try {
-        const shown = window.sessionStorage.getItem("ai-school:missed-notif-shown");
-        if (shown === "1") return;
-        window.sessionStorage.setItem("ai-school:missed-notif-shown", "1");
-      } catch { return; }
-      const unread = (initialPayload?.notifications ?? []).filter((n) => !n.read);
-      if (unread.length === 0) return;
-      // Show up to 3 individual toasts (Toaster visibleToasts cap handles overflow)
-      const toShow = unread.slice(0, 3);
-      for (const notif of toShow) {
-        toast.custom(
-          (toastId) =>
-            createElement(NotificationToast, {
-              notification: {
-                title: notif.title,
-                body: notif.body,
-                type: notif.type,
-                actionUrl: notif.actionUrl,
-              },
-              onDismiss: () => toast.dismiss(toastId),
-              onNavigate: () => {
-                if (notif.actionUrl) {
-                  window.location.href = notif.actionUrl;
-                }
-              },
-            }),
-          { duration: 6000 },
-        );
-      }
+      await refreshNotifications();
     })();
     const interval = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
       void refreshNotifications({ silent: true });
     }, 180_000);
-    return () => { mounted = false; window.clearInterval(interval); };
+    return () => { window.clearInterval(interval); };
   }, [refreshNotifications]);
 
   useEffect(() => {
@@ -166,6 +135,8 @@ export function NotificationBell({
       setMarkingAllRead(false);
     }
   }
+
+  if (!mounted) return null;
 
   return (
     <DropdownMenu open={open} onOpenChange={(nextOpen) => {

@@ -1180,3 +1180,133 @@ button:disabled {
   30% { box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand-primary) 45%, transparent), 0 0 18px 0 color-mix(in oklab, var(--brand-primary) 25%, transparent); }
   100% { box-shadow: 0 0 0 0 transparent; }
 }
+
+/* ── Tiptap editor styles ────────────────────────────────────────────────── */
+
+.tiptap-root .ProseMirror {
+  min-height: 200px;
+  color: var(--text-primary);
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.tiptap-root .ProseMirror p {
+  margin: 0 0 0.75em;
+}
+
+.tiptap-root .ProseMirror h1 {
+  font-size: 1.75em;
+  font-weight: 800;
+  margin: 1.5em 0 0.5em;
+  color: var(--text-primary);
+  font-family: var(--font-display, inherit);
+  line-height: 1.25;
+}
+
+.tiptap-root .ProseMirror h2 {
+  font-size: 1.35em;
+  font-weight: 700;
+  margin: 1.25em 0 0.4em;
+  color: var(--text-primary);
+}
+
+.tiptap-root .ProseMirror h3 {
+  font-size: 1.1em;
+  font-weight: 600;
+  margin: 1em 0 0.3em;
+  color: var(--text-primary);
+}
+
+.tiptap-root .ProseMirror ul,
+.tiptap-root .ProseMirror ol {
+  padding-left: 1.5em;
+  margin: 0 0 0.75em;
+}
+
+.tiptap-root .ProseMirror li {
+  margin: 0.25em 0;
+}
+
+.tiptap-root .ProseMirror code {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 0.875em;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  color: var(--accent-mint);
+}
+
+.tiptap-root .ProseMirror pre {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  padding: 1em;
+  overflow-x: auto;
+  margin: 0.75em 0;
+}
+
+.tiptap-root .ProseMirror pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.85em;
+}
+
+.tiptap-root .ProseMirror blockquote {
+  border-left: 3px solid var(--accent-cyan);
+  padding-left: 1em;
+  margin: 0.75em 0;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.tiptap-root .ProseMirror hr {
+  border: none;
+  border-top: 1px solid var(--border-default);
+  margin: 1.5em 0;
+}
+
+.tiptap-root .ProseMirror strong {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.tiptap-root .ProseMirror em {
+  font-style: italic;
+  color: var(--text-secondary);
+}
+
+.tiptap-root .ProseMirror s {
+  text-decoration: line-through;
+  color: var(--text-tertiary);
+}
+
+.tiptap-root .ProseMirror.is-editor-empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-tertiary);
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+
+/* Selection highlight */
+.tiptap-root .ProseMirror ::selection {
+  background: var(--accent-cyan)25;
+}
+
+/* ── Workspace canvas overlay animations ────────────────────────────────── */
+
+@keyframes ws-focus-backdrop {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Tldraw override — hide default toolbars, style selectors */
+.workspace-canvas-root .tl-container {
+  background: transparent !important;
+}
+
+.workspace-canvas-root .tl-overlays__item {
+  display: none !important;
+}

@@ -288,10 +288,12 @@ const PAGE_TOUR_STEPS: Record<string, GuidedTourStep[]> = {
 export function AppShell({
   children,
   fullBleed = false,
+  noScroll = false,
   contentClassName,
 }: {
   children: React.ReactNode;
   fullBleed?: boolean;
+  noScroll?: boolean;
   contentClassName?: string;
 }) {
   const pathname = usePathname();
@@ -387,10 +389,11 @@ export function AppShell({
         />
       </aside>
 
-      <div className="min-w-0 flex-1 overflow-y-auto">
+      <div className={cn("min-w-0 flex-1", noScroll ? "overflow-hidden" : "overflow-y-auto")}>
         <main
           className={cn(
-            "w-full px-3 py-5 sm:px-6 lg:px-10",
+            "w-full",
+            noScroll ? "h-full" : "px-3 py-5 sm:px-6 lg:px-10",
             fullBleed ? "max-w-none" : "mx-auto max-w-6xl",
             contentClassName,
           )}

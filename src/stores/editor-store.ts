@@ -1,6 +1,6 @@
 "use client";
 
-import create from "zustand";
+import { create } from "zustand";
 
 export type EditorMode = "agentic" | "notion" | "simple";
 

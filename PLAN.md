@@ -145,7 +145,7 @@ Toolbar toggle: "Show completed" on/off. When off, completed shapes hidden.
 
 A special central shape connected to all workstreams. Always visible at any zoom level (minimum visual size enforced via `getMinDimensions()`).
 
-**At low zoom:** Circle with user's avatar. Profile and other things taken from Managebac
+**At low zoom:** Circle with user's avatar. Profile avatar sourced from ManageBac when available (see §10.1). If a student's Clerk email matches their school ManageBac account, their ManageBac profile photo replaces the Clerk avatar automatically — both in the hub node and on all workstream cards that show user context.
 **At higher zoom, expands to reveal:**
 - Quick notes inbox (recent unattached notes)
 - Cross-workstream planner (upcoming deadlines from all workstreams)
@@ -758,38 +758,38 @@ The existing sidebar (`src/components/chat/chat-sidebar.tsx`) adapts based on ro
 ### Wave 1: Data Foundation
 *Everything depends on this.*
 
-- [ ] New Convex tables: `workstreams`, `workstreamMemory`, `plannerItems`, `notes`, `userPreferences`
-- [ ] Schema modifications: add `workstreamId` to `chats` and `artifacts`, provenance fields to `userMemoryEntries`, `managebacConfig` to `orgs`
-- [ ] New indexes
-- [ ] Convex backend: `convex/workstreams.ts` (full CRUD), `convex/plannerItems.ts`, `convex/notes.ts`, `convex/userPreferences.ts`
-- [ ] Install Zustand, create workspace/chatPanel/editor stores
-- [ ] API routes: `/api/workstreams`, `/api/planner`, `/api/notes`, `/api/preferences`
+- [x] New Convex tables: `workstreams`, `workstreamMemory`, `plannerItems`, `notes`, `userPreferences`
+- [x] Schema modifications: add `workstreamId` to `chats` and `artifacts`, provenance fields to `userMemoryEntries`, `managebacConfig` to `orgs`
+- [x] New indexes
+- [x] Convex backend: `convex/workstreams.ts` (full CRUD), `convex/plannerItems.ts`, `convex/notes.ts`, `convex/userPreferences.ts`
+- [x] Install Zustand, create workspace/chatPanel/editor stores
+- [x] API routes: `/api/workstreams`, `/api/planner`, `/api/notes`, `/api/preferences`
 
 ### Wave 2: Workspace Canvas
 *Depends on Wave 1.*
 
-- [ ] Install tldraw v4.4.0
-- [ ] `/workspace` route and page
-- [ ] `workspace-canvas.tsx` — tldraw mount with custom shapes
-- [ ] `WorkstreamShapeUtil` with semantic zoom (4 detail levels, morph transitions)
-- [ ] `HubShapeUtil` with progressive reveal
-- [ ] Connection arrows with recency-based opacity
-- [ ] Workspace toolbar (search, +new, toggle completed)
-- [ ] Canvas persistence (camera state, shape positions)
-- [ ] Drag-and-drop reordering
-- [ ] Completed workstreams: faded + toggleable
-- [ ] Workstream creation dialog (type, name, subject, agent)
+- [x] Install tldraw v4.4.0
+- [x] `/workspace` route and page
+- [x] `workspace-canvas.tsx` — tldraw mount with custom shapes
+- [x] `WorkstreamShapeUtil` with semantic zoom (4 detail levels, morph transitions)
+- [x] `HubShapeUtil` with progressive reveal
+- [x] Connection arrows with recency-based opacity
+- [x] Workspace toolbar (search, +new, toggle completed)
+- [x] Canvas persistence (camera state, shape positions)
+- [x] Drag-and-drop reordering
+- [x] Completed workstreams: faded + toggleable
+- [x] Workstream creation dialog (type, name, subject, agent)
 
 ### Wave 3: Chat Integration
 *Depends on Wave 1. Partially parallel with Wave 2.*
 
-- [ ] Chat side panel component within workspace
-- [ ] Floating search bar (when panel closed)
-- [ ] `useWorkspaceChat` hook wrapping `useChatState`
-- [ ] Modify `useChatState` to accept `workstreamId` param
-- [ ] Back-arrow navigation (`from=workspace` param)
-- [ ] Sidebar adaptation: workstream list on `/workspace`, chat list on `/chat`
-- [ ] Nav item update: "Artifacts" → "Workspace"
+- [x] Chat side panel component within workspace
+- [x] Floating search bar (when panel closed)
+- [x] `useWorkspaceChat` hook wrapping `useChatState`
+- [x] Modify `useChatState` to accept `workstreamId` param
+- [x] Back-arrow navigation (`from=workspace` param)
+- [x] Sidebar adaptation: workstream list on `/workspace`, chat list on `/chat`
+- [x] Nav item update: "Artifacts" → "Workspace"
 
 ### Wave 4: Prompt Routing Expansion
 *Depends on Wave 1 and 3.*
@@ -815,16 +815,31 @@ The existing sidebar (`src/components/chat/chat-sidebar.tsx`) adapts based on ro
 ### Wave 6: Agentic Editor
 *Depends on Wave 1 (notes table). Independent of Waves 2-5 — can be parallelized.*
 
-- [ ] Install Tiptap packages
-- [ ] `tiptap-editor.tsx` with mode toggle (simple/notion/agentic)
-- [ ] Simple mode: StarterKit only
-- [ ] Notion-like mode: slash commands, drag handles, floating toolbar
-- [ ] Agentic mode: AI bar component
-- [ ] `/api/editor/ai-edit` route
-- [ ] Diff engine: compute and render diffs as decorations
-- [ ] Auto-accept toggle with undo
-- [ ] Artifact integration: open artifacts in editor, version tracking
+- [x] Install Tiptap packages (`@tiptap/react`, `@tiptap/starter-kit`, `@tiptap/extension-placeholder`, `@tiptap/pm`)
+- [x] `tiptap-editor.tsx` with mode toggle (simple/notion/agentic)
+- [x] Simple mode: StarterKit only (no toolbar)
+- [x] Notion-like mode: formatting toolbar (bold, italic, headings, lists, blockquote, code)
+- [x] Agentic mode: AI bar with natural language instructions
+- [x] `/api/editor/ai-edit` route (claude-haiku, returns structured diff ops)
+- [x] Auto-accept toggle (applies immediately vs. shows preview)
+- [x] Diff accept/reject UI in AI bar
+- [ ] Slash commands extension (notion mode): `/heading`, `/bullet`, `/code`, `/quote`
+- [ ] Drag-handle extension for block reordering
+- [ ] Artifact integration: load/save from `artifacts` table
 - [ ] Auto-save artifact flow (detection, toast, workstream binding)
+- [ ] Version history panel
+
+**Also implemented in this wave (Wave 2-3 quality fixes):**
+- [x] Semantic zoom with counter-scale text stabilization (Google Maps feel)
+- [x] Focus mode overlay: workstream card morphs into full-screen workspace
+- [x] Hub same interaction grammar as workstreams (click to expand, no tldraw selection card)
+- [x] WorkstreamFocusPanel with left sidebar + main content area + compact chat drawer
+- [x] useCompactChat hook: real streaming chat in the panel (same /api/chat protocol)
+- [x] QuickChatBar: intelligent workstream inference, manual picker when ambiguous
+- [x] Canvas initial centering (hub at center on load)
+- [x] Position persistence race condition fixed (props-only updates on re-sync)
+- [x] Center-hub toolbar button wired (custom event listener)
+- [x] Back gesture: click canvas backdrop, Escape key, visible back button
 
 ### Wave 7: Inside Workstreams
 *Depends on Waves 2, 3, 6.*

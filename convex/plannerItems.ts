@@ -145,6 +145,9 @@ export const create = mutation({
     sourceArtifactId: v.optional(v.id("artifacts")),
     sourceChatId: v.optional(v.id("chats")),
     managebacItemId: v.optional(v.string()),
+    sourceDeleted: v.optional(v.boolean()),
+    sourceUpdatedAt: v.optional(v.number()),
+    syncConflictSummary: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
@@ -174,6 +177,9 @@ export const create = mutation({
       sourceArtifactId: args.sourceArtifactId,
       sourceChatId: args.sourceChatId,
       managebacItemId: normalizeString(args.managebacItemId),
+      sourceDeleted: args.sourceDeleted,
+      sourceUpdatedAt: args.sourceUpdatedAt,
+      syncConflictSummary: normalizeString(args.syncConflictSummary),
       createdAt: now,
       updatedAt: now,
     });
@@ -198,6 +204,9 @@ export const update = mutation({
     sourceArtifactId: v.optional(v.union(v.id("artifacts"), v.null())),
     sourceChatId: v.optional(v.union(v.id("chats"), v.null())),
     managebacItemId: v.optional(v.union(v.string(), v.null())),
+    sourceDeleted: v.optional(v.union(v.boolean(), v.null())),
+    sourceUpdatedAt: v.optional(v.union(v.number(), v.null())),
+    syncConflictSummary: v.optional(v.union(v.string(), v.null())),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
@@ -230,6 +239,11 @@ export const update = mutation({
     if (args.sourceArtifactId !== undefined) updates.sourceArtifactId = toOptionalPatchValue(args.sourceArtifactId);
     if (args.sourceChatId !== undefined) updates.sourceChatId = toOptionalPatchValue(args.sourceChatId);
     if (args.managebacItemId !== undefined) updates.managebacItemId = normalizeString(toOptionalPatchValue(args.managebacItemId));
+    if (args.sourceDeleted !== undefined) updates.sourceDeleted = toOptionalPatchValue(args.sourceDeleted);
+    if (args.sourceUpdatedAt !== undefined) updates.sourceUpdatedAt = toOptionalPatchValue(args.sourceUpdatedAt);
+    if (args.syncConflictSummary !== undefined) {
+      updates.syncConflictSummary = normalizeString(toOptionalPatchValue(args.syncConflictSummary));
+    }
 
     if (args.status !== undefined) {
       updates.status = args.status;

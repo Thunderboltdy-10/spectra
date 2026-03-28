@@ -7,7 +7,6 @@ import {
   BarChart3,
   BookOpen,
   Building2,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   ExternalLink,

@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Pin } from "lucide-react";
 import { ARTIFACT_SECTIONS, getArtifactMeta } from "@/lib/artifact-types";
 import { ArtifactCard, type ArtifactItem } from "./artifact-card";
-import { cn } from "@/lib/utils";
 
 export function SectionsView({
   artifacts,

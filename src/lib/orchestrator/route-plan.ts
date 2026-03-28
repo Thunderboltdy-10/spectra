@@ -1,5 +1,6 @@
 import type {
   AgentContract,
+  AiToolName,
   ArtifactFormat,
   AssignmentLevel,
   ContextWindowStrategy,
@@ -574,6 +575,36 @@ function buildAgentContract(params: BuildRoutePlanParams): AgentContract | undef
   };
 }
 
+function allowedAiToolsForAssignmentLevel(assignmentLevel: AssignmentLevel): AiToolName[] {
+  if (assignmentLevel === "L0") return [];
+  if (assignmentLevel === "L1") return ["recall_memory"];
+  if (assignmentLevel === "L2") return ["recall_memory", "save_memory", "search_web"];
+  if (assignmentLevel === "L3") {
+    return [
+      "recall_memory",
+      "save_memory",
+      "update_memory",
+      "dismiss_memory",
+      "create_note",
+      "update_planner",
+      "search_web",
+      "switch_mode",
+    ];
+  }
+  return [
+    "recall_memory",
+    "save_memory",
+    "update_memory",
+    "dismiss_memory",
+    "get_workstream_context",
+    "create_note",
+    "update_planner",
+    "fork_thread",
+    "search_web",
+    "switch_mode",
+  ];
+}
+
 export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
   const assignmentLevel =
     params.assignmentLevel
@@ -705,6 +736,7 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
         : params.complexity === "medium"
           ? "normal"
         : "simple";
+  const allowedAiTools = allowedAiToolsForAssignmentLevel(assignmentLevel);
   const requestedOrchestration = detectOrchestrationIntent(params.message);
   const shouldUseMultiStep =
     (
@@ -773,6 +805,7 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
     shouldUseSchoolResources,
     shouldUseWebSearch,
     shouldUseMultiStep,
+    allowedAiTools,
     responseBudget,
     tokenBudgetTarget,
     allowedToolBundles: allowedToolBundles.length > 0 ? allowedToolBundles : ["none"],

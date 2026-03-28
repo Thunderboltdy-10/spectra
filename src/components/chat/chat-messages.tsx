@@ -697,7 +697,7 @@ export function ChatMessages({
                   }}
                   className="text-[10px] text-[var(--text-tertiary)] transition hover:text-[var(--text-secondary)]"
                 >
-                  Don't show again
+                  Don&apos;t show again
                 </button>
                 <button
                   type="button"

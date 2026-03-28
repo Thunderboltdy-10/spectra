@@ -12,19 +12,6 @@ async function requireActor(ctx: Parameters<typeof getUserByClerkId>[0], actorCl
   return actor;
 }
 
-const ARTIFACT_TYPES = [
-  "study_plan",
-  "timetable",
-  "note",
-  "flashcard_deck",
-  "document",
-  "code_project",
-  "diagram",
-  "image",
-  "bookmark",
-  "collection",
-] as const;
-
 // ---------------------------------------------------------------------------
 // Queries
 // ---------------------------------------------------------------------------

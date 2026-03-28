@@ -402,6 +402,7 @@ export function MarkdownRenderer({
                     <span className="pointer-events-none absolute bottom-[130%] left-1/2 z-20 hidden w-[min(24rem,80vw)] -translate-x-1/2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 text-left opacity-0 shadow-[var(--shadow-card)] transition group-hover:block group-hover:opacity-100 group-focus-within:block group-focus-within:opacity-100">
                       <span className="mb-1 inline-flex w-full items-center gap-2 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
                         {citation.favicon ? (
+                          // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={citation.favicon}
                             alt=""

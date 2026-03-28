@@ -4,6 +4,7 @@ import type { Id } from "./_generated/dataModel";
 import { getUserByClerkId } from "./helpers";
 
 const vEditorMode = v.union(v.literal("agentic"), v.literal("notion"), v.literal("simple"));
+const vNoteSourceType = v.union(v.literal("user_manual"), v.literal("ai_generated"), v.literal("managebac_sync"));
 
 async function requireActor(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string) {
   const actor = await getUserByClerkId(ctx, actorClerkId);
@@ -116,6 +117,11 @@ export const create = mutation({
     content: v.any(),
     contentPlaintext: v.optional(v.string()),
     editorMode: v.optional(vEditorMode),
+    sourceType: v.optional(vNoteSourceType),
+    managebacItemId: v.optional(v.string()),
+    sourceDeleted: v.optional(v.boolean()),
+    sourceUpdatedAt: v.optional(v.number()),
+    syncConflictSummary: v.optional(v.string()),
     workstreamId: v.optional(v.id("workstreams")),
     artifactId: v.optional(v.id("artifacts")),
     lastAiEditId: v.optional(v.string()),
@@ -139,6 +145,11 @@ export const create = mutation({
       content: args.content,
       contentPlaintext: normalizeString(args.contentPlaintext),
       editorMode: args.editorMode ?? "notion",
+      sourceType: args.sourceType ?? "user_manual",
+      managebacItemId: normalizeString(args.managebacItemId),
+      sourceDeleted: args.sourceDeleted,
+      sourceUpdatedAt: args.sourceUpdatedAt,
+      syncConflictSummary: normalizeString(args.syncConflictSummary),
       lastAiEditId: normalizeString(args.lastAiEditId),
       pendingDiffs: args.pendingDiffs,
       createdAt: now,
@@ -157,6 +168,11 @@ export const update = mutation({
     content: v.optional(v.any()),
     contentPlaintext: v.optional(v.union(v.string(), v.null())),
     editorMode: v.optional(vEditorMode),
+    sourceType: v.optional(v.union(vNoteSourceType, v.null())),
+    managebacItemId: v.optional(v.union(v.string(), v.null())),
+    sourceDeleted: v.optional(v.union(v.boolean(), v.null())),
+    sourceUpdatedAt: v.optional(v.union(v.number(), v.null())),
+    syncConflictSummary: v.optional(v.union(v.string(), v.null())),
     workstreamId: v.optional(v.union(v.id("workstreams"), v.null())),
     artifactId: v.optional(v.union(v.id("artifacts"), v.null())),
     lastAiEditId: v.optional(v.union(v.string(), v.null())),
@@ -185,6 +201,15 @@ export const update = mutation({
       updates.contentPlaintext = normalizeString(toOptionalPatchValue(args.contentPlaintext));
     }
     if (args.editorMode !== undefined) updates.editorMode = args.editorMode;
+    if (args.sourceType !== undefined) updates.sourceType = toOptionalPatchValue(args.sourceType);
+    if (args.managebacItemId !== undefined) {
+      updates.managebacItemId = normalizeString(toOptionalPatchValue(args.managebacItemId));
+    }
+    if (args.sourceDeleted !== undefined) updates.sourceDeleted = toOptionalPatchValue(args.sourceDeleted);
+    if (args.sourceUpdatedAt !== undefined) updates.sourceUpdatedAt = toOptionalPatchValue(args.sourceUpdatedAt);
+    if (args.syncConflictSummary !== undefined) {
+      updates.syncConflictSummary = normalizeString(toOptionalPatchValue(args.syncConflictSummary));
+    }
     if (args.workstreamId !== undefined) updates.workstreamId = toOptionalPatchValue(args.workstreamId);
     if (args.artifactId !== undefined) updates.artifactId = toOptionalPatchValue(args.artifactId);
     if (args.lastAiEditId !== undefined) {

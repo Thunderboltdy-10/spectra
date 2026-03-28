@@ -74,6 +74,10 @@ type ScoredCandidate = {
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const FAILURE_CIRCUIT_WINDOW_MS = 10 * 60 * 1000;
+const FRESHNESS_PENALTY_DAYS = 90;
+const FRESHNESS_BLOCK_DAYS = 180;
+const CLOSE_SCORE_NOISE_RANGE = 0.03;
+const WEIGHTED_RANDOM_WINDOW = 0.85;
 
 function nowMs() {
   if (typeof performance !== "undefined" && typeof performance.now === "function") return performance.now();
@@ -129,15 +133,28 @@ function parseReleaseTime(model: CatalogModelEntry) {
   return undefined;
 }
 
-function freshnessScore(model: CatalogModelEntry) {
+function modelAgeDays(model: CatalogModelEntry) {
   const releaseTs = parseReleaseTime(model);
-  if (!releaseTs) return 0.55;
-  const ageDays = Math.max(0, (Date.now() - releaseTs) / (24 * 60 * 60 * 1000));
+  if (!releaseTs) return undefined;
+  return Math.max(0, (Date.now() - releaseTs) / (24 * 60 * 60 * 1000));
+}
+
+function freshnessScore(model: CatalogModelEntry) {
+  const ageDays = modelAgeDays(model);
+  if (typeof ageDays !== "number") return 0.45;
   if (ageDays <= 30) return 1;
-  if (ageDays <= 90) return 0.87;
-  if (ageDays <= 180) return 0.72;
-  if (ageDays <= 365) return 0.52;
-  return 0.33;
+  if (ageDays <= 60) return 0.94;
+  if (ageDays <= FRESHNESS_PENALTY_DAYS) return 0.88;
+  if (ageDays <= FRESHNESS_BLOCK_DAYS) return 0.15;
+  return 0;
+}
+
+function freshnessMultiplier(model: CatalogModelEntry) {
+  const ageDays = modelAgeDays(model);
+  if (typeof ageDays !== "number") return 1;
+  if (ageDays > FRESHNESS_BLOCK_DAYS) return 0;
+  if (ageDays > FRESHNESS_PENALTY_DAYS) return 0.15;
+  return 1;
 }
 
 function clamp01(value: number) {
@@ -294,10 +311,10 @@ function scoreWeights(input: PhaseRoutingInput) {
   if (input.requestClass === "T0") {
     return {
       capability: 0.18,
-      cost: 0.33,
+      cost: 0.26,
       reliability: 0.10,
       latency: 0.24,
-      diversity: 0.07,
+      diversity: 0.14,
       cache: 0.05,
       freshness: 0.03,
       context: 0,
@@ -305,36 +322,36 @@ function scoreWeights(input: PhaseRoutingInput) {
   }
   if (input.stakes === "high" || input.requestClass === "T3" || input.mode === "research") {
     return {
-      capability: 0.36,
+      capability: 0.33,
       cost: 0.14,
       reliability: 0.18,
       latency: 0.08,
-      diversity: 0.10,
+      diversity: 0.12,
       cache: 0.06,
-      freshness: 0.08,
+      freshness: 0.09,
       context: 0.10,
     };
   }
   if (input.stakes === "medium" || input.requestClass === "T2") {
     return {
-      capability: 0.33,
-      cost: 0.19,
+      capability: 0.30,
+      cost: 0.18,
       reliability: 0.17,
       latency: 0.10,
-      diversity: 0.09,
+      diversity: 0.13,
       cache: 0.07,
-      freshness: 0.05,
+      freshness: 0.08,
       context: 0.07,
     };
   }
   return {
-    capability: 0.30,
-    cost: 0.25,
+    capability: 0.27,
+    cost: 0.23,
     reliability: 0.15,
     latency: 0.10,
-    diversity: 0.08,
+    diversity: 0.15,
     cache: 0.07,
-    freshness: 0.05,
+    freshness: 0.08,
     context: 0.05,
   };
 }
@@ -349,6 +366,22 @@ function normalizeScores(rows: ScoredCandidate[]) {
   for (const row of rows) {
     row.normalizedScore = clamp01((row.rawScore - min) / spread);
   }
+}
+
+function deterministicSignedNoise(seed: string, magnitude: number) {
+  return (hashToUnit(seed) - 0.5) * 2 * magnitude;
+}
+
+function chooseWeightedCandidate(rows: ScoredCandidate[], seedKey: string) {
+  if (rows.length === 0) return undefined;
+  const totalWeight = rows.reduce((sum, row) => sum + Math.max(0.0001, row.rawScore), 0);
+  if (totalWeight <= 0) return rows[0];
+  let remaining = hashToUnit(seedKey) * totalWeight;
+  for (const row of rows) {
+    remaining -= Math.max(0.0001, row.rawScore);
+    if (remaining <= 0) return row;
+  }
+  return rows[rows.length - 1];
 }
 
 function modeAllowsChallengers(input: PhaseRoutingInput) {
@@ -404,7 +437,11 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
   const weights = scoreWeights(input);
   const required = input.requiredCapabilities ?? [];
   const preferred = input.preferredCapabilities ?? [];
-  const catalog = input.modelCatalog.filter((model) => model.modelId && model.modelId !== "openrouter/auto");
+  const catalog = input.modelCatalog.filter((model) =>
+    model.modelId
+    && model.modelId !== "openrouter/auto"
+    && !model.modelId.includes(":online"),
+  );
   const preferredIds = new Set((input.preferredModelIds ?? []).filter(Boolean));
 
   const manualEntry = input.manualModel
@@ -508,6 +545,8 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
   const scored: ScoredCandidate[] = [];
   for (const model of catalog) {
     if (!isModelAllowedInTier(model, input.spendingTier)) continue;
+    const freshnessMultiplierValue = freshnessMultiplier(model);
+    if (freshnessMultiplierValue <= 0) continue;
 
     const capMatch = capabilityMatch({
       model,
@@ -530,6 +569,7 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
     const reliability = reliabilityScore(stat);
     const latency = latencyFit(stat);
     const fresh = freshnessScore(model);
+    const ageDays = modelAgeDays(model);
     const provider = providerFromModelId(model.modelId);
     const cost = costFit(normalizeCost(model), input.stakes, Boolean(model.isFree || model.modelId.includes(":free")));
     const cacheWarm = hasWarmCache({ modelId: model.modelId, model, cacheWindow: input.cacheWindow });
@@ -566,6 +606,9 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
       `freshness ${fresh.toFixed(2)} x${weights.freshness.toFixed(2)}`,
       `context_fit ${context.toFixed(2)} x${weights.context.toFixed(2)}`,
     ];
+    if (typeof ageDays === "number") {
+      breakdown.push(`age_days ${ageDays.toFixed(0)}`);
+    }
     if (quickReplyBonus > 0) {
       breakdown.push(`quick_reply_bonus +${quickReplyBonus.toFixed(3)}`);
       reasonTags.push("quick reply lane");
@@ -599,6 +642,12 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
       reasonTags.push("warm cache exception");
     } else if (cacheWarm) {
       breakdown.push("warm cache ignored for high-complexity route");
+    }
+
+    if (freshnessMultiplierValue < 1) {
+      multiplier *= freshnessMultiplierValue;
+      breakdown.push(`freshness_multiplier x${freshnessMultiplierValue.toFixed(2)}`);
+      reasonTags.push("freshness penalty");
     }
 
     if (cacheWarmEligible) {
@@ -656,14 +705,14 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
         reasonTags.push("challenger eligible");
         breakdown.push("challenger_lane eligible (exploration + low stakes)");
       } else {
-        multiplier *= 0.3;
+        multiplier *= 0.5;
         reasonTags.push("challenger gated");
-        breakdown.push("challenger_gate_multiplier x0.30");
+        breakdown.push("challenger_gate_multiplier x0.50");
       }
     } else if (challengerState === "deprioritized") {
-      multiplier *= 0.3;
+      multiplier *= 0.5;
       reasonTags.push("challenger demoted");
-      breakdown.push("deprioritized_multiplier x0.30");
+      breakdown.push("deprioritized_multiplier x0.50");
     } else if (totalRuns >= 12 && (stat?.qualityScore ?? reliability) > 0.6) {
       reasonTags.push("challenger promoted");
       breakdown.push("promotion_signal reliability>0.60 after 12 runs");
@@ -709,24 +758,6 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
     };
   }
 
-  scored.sort((a, b) => b.rawScore - a.rawScore || a.modelId.localeCompare(b.modelId));
-
-  if (input.routerMode !== "manual" && scored.length > 1) {
-    const top = scored[0]!;
-    const closeCandidates = scored.slice(0, 3);
-    const closeSpread = Math.abs(top.rawScore - closeCandidates[closeCandidates.length - 1]!.rawScore);
-    if (closeSpread <= Math.max(0.035, top.rawScore * 0.08)) {
-      const recentTail = recentModels.slice(-3);
-      const rotationPick = closeCandidates.find((row) => !recentTail.includes(row.modelId));
-      if (rotationPick && rotationPick.modelId !== top.modelId) {
-        rotationPick.rawScore = top.rawScore + 1e-4;
-        rotationPick.breakdown.push("close_score_rotation_bonus");
-        rotationPick.reasonTags.push("rotation");
-        scored.sort((a, b) => b.rawScore - a.rawScore || a.modelId.localeCompare(b.modelId));
-      }
-    }
-  }
-
   if (shouldExplore && scored.length > 1) {
     const candidates = scored.slice(1);
     const pickSeed = hashToUnit(`${input.seedKey}:${input.phaseId}:explore-pick`);
@@ -739,10 +770,38 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
     }
   }
 
+  scored.sort((a, b) => b.rawScore - a.rawScore || a.modelId.localeCompare(b.modelId));
+
+  if (input.routerMode !== "manual" && scored.length >= 3) {
+    const topThree = scored.slice(0, 3);
+    const spread = topThree[0]!.rawScore - topThree[2]!.rawScore;
+    if (spread <= 0.05) {
+      for (const row of topThree) {
+        const noise = deterministicSignedNoise(
+          `${input.seedKey}:${input.phaseId}:noise:${row.modelId}`,
+          CLOSE_SCORE_NOISE_RANGE,
+        );
+        row.rawScore = Math.max(0, row.rawScore + noise);
+        row.breakdown.push(`close_score_noise ${noise >= 0 ? "+" : ""}${noise.toFixed(3)}`);
+      }
+      scored.sort((a, b) => b.rawScore - a.rawScore || a.modelId.localeCompare(b.modelId));
+    }
+  }
+
   normalizeScores(scored);
   scored.sort((a, b) => b.rawScore - a.rawScore || a.modelId.localeCompare(b.modelId));
 
-  const selected = scored[0]!;
+  const topScore = scored[0]!.rawScore;
+  const weightedWindow = scored.filter((row) => row.rawScore >= topScore * WEIGHTED_RANDOM_WINDOW);
+  const weightedPick =
+    input.routerMode !== "manual" && weightedWindow.length > 1
+      ? chooseWeightedCandidate(weightedWindow, `${input.seedKey}:${input.phaseId}:weighted-pick`)
+      : undefined;
+  const selected = weightedPick ?? scored[0]!;
+  const selectionMethod =
+    weightedPick && weightedWindow.length > 1
+      ? `Weighted random from ${weightedWindow.length} close candidates`
+      : "Top pick";
   const fallbackModels: string[] = [];
   const usedProviders = new Set<string>([selected.provider]);
   for (const row of scored) {
@@ -764,16 +823,18 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
         : `Unified weighted routing for ${input.phaseLabel.toLowerCase()}`,
     scoreBreakdown: [
       ...row.breakdown,
+      row.modelId === selected.modelId ? `selection_method ${selectionMethod}` : undefined,
       `provider ${row.provider}`,
       `tier ${row.dynamicTier}`,
       row.cacheWarm ? "cache_state warm" : "cache_state cold",
       row.isChallenger ? "pool challenger" : "pool standard",
-    ],
+    ].filter((value): value is string => Boolean(value)),
   }));
 
   const routingDurationMs = Math.max(0, Math.round(nowMs() - startedAt));
   const reasonParts = [
     `Unified weighted score selected ${selected.modelId} for ${input.phaseLabel.toLowerCase()}.`,
+    `${selectionMethod}.`,
     shouldExplore ? "Exploration mode was active." : "Exploration mode was inactive.",
   ];
   if (selected.cacheWarm) reasonParts.push("Prompt cache was warm for this conversation.");

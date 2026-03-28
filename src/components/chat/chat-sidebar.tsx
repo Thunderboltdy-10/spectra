@@ -8,14 +8,11 @@ import { useClerk, useUser } from "@clerk/nextjs";
 import { formatDistanceToNow } from "date-fns";
 import {
   BarChart3,
-  Bookmark,
-  BookOpen,
   Bot,
   CircleHelp,
   Compass,
   FileText,
   Flame,
-  ImagePlus,
   Layers,
   LayoutDashboard,
   Loader2,
@@ -32,7 +29,6 @@ import {
   Star,
   Timer,
   Trash2,
-  Trophy,
   StickyNote,
   UserRound,
 } from "lucide-react";

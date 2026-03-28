@@ -1,6 +1,6 @@
 import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { getUserByClerkId } from "./helpers";
 import { EMBEDDING_DIMENSIONS } from "./constants";
@@ -316,10 +316,10 @@ export const getMemoryEntriesByIds = internalQuery({
     ids: v.array(v.id("userMemoryEntries")),
   },
   handler: async (ctx, args) => {
-    const rows: Array<Record<string, unknown>> = [];
+    const rows: Array<Doc<"userMemoryEntries">> = [];
     for (const id of args.ids) {
       const row = await ctx.db.get(id);
-      if (row) rows.push(row as Record<string, unknown>);
+      if (row) rows.push(row);
     }
     return rows;
   },
@@ -505,6 +505,7 @@ export const routeMemoryWrite = mutation({
           sourceWorkstreamId: args.sourceWorkstreamId,
           scope,
           archivedAt: undefined,
+          lastDecayedAt: undefined,
           relatedArtifacts: raw.relatedArtifacts?.slice(0, 12),
           negativeTopicLinks: raw.negativeTopicLinks?.map(normalizeTopicLabel).filter(Boolean).slice(0, 12),
           createdAt: now,
@@ -552,6 +553,7 @@ export const routeMemoryWrite = mutation({
         sourceWorkstreamId: args.sourceWorkstreamId ?? existing.sourceWorkstreamId,
         scope,
         archivedAt: undefined,
+        lastDecayedAt: existing.lastDecayedAt,
         relatedArtifacts: raw.relatedArtifacts?.slice(0, 12) ?? existing.relatedArtifacts,
         negativeTopicLinks: nextLinks.size > 0 ? [...nextLinks].slice(0, 12) : existing.negativeTopicLinks,
         updatedAt: now,
@@ -775,6 +777,72 @@ export const setMemoryEntryStatus = mutation({
   },
 });
 
+export const updateMemoryEntry = mutation({
+  args: {
+    actorClerkId: v.string(),
+    entryId: v.id("userMemoryEntries"),
+    key: v.optional(v.string()),
+    text: v.optional(v.string()),
+    embedding: v.optional(v.array(v.float64())),
+    confidence: v.optional(v.number()),
+    freshness: v.optional(v.number()),
+    category: v.optional(vMemoryCategory),
+    status: v.optional(vMemoryStatus),
+    scope: v.optional(v.union(v.literal("global"), v.literal("workstream"))),
+    sourceWorkstreamId: v.optional(v.union(v.id("workstreams"), v.null())),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) throw new Error("Unauthorized");
+
+    const entry = await ctx.db.get(args.entryId);
+    if (!entry || entry.userId !== actor._id || entry.orgId !== actor.orgId) {
+      throw new Error("Not found");
+    }
+
+    const updates: Partial<Doc<"userMemoryEntries">> & { updatedAt: number } = {
+      updatedAt: Date.now(),
+    };
+
+    if (args.key !== undefined) updates.key = normalizeMemoryKey(args.key);
+    if (args.text !== undefined) updates.text = normalizeMemoryText(args.text);
+    if (args.embedding !== undefined) updates.embedding = normalizeEmbedding(args.embedding);
+    if (args.confidence !== undefined) updates.confidence = normalizeConfidence(args.confidence, entry.confidence);
+    if (args.freshness !== undefined) updates.freshness = normalizeFreshness(args.freshness, entry.freshness ?? 1);
+    if (args.category !== undefined) updates.category = args.category;
+    if (args.status !== undefined) updates.status = args.status;
+    if (args.scope !== undefined) updates.scope = args.scope;
+    if (args.sourceWorkstreamId !== undefined) {
+      updates.sourceWorkstreamId = args.sourceWorkstreamId ?? undefined;
+    }
+
+    await ctx.db.patch(entry._id, updates);
+    return { ok: true };
+  },
+});
+
+export const dismissMemoryEntry = mutation({
+  args: {
+    actorClerkId: v.string(),
+    entryId: v.id("userMemoryEntries"),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) throw new Error("Unauthorized");
+
+    const entry = await ctx.db.get(args.entryId);
+    if (!entry || entry.userId !== actor._id || entry.orgId !== actor.orgId) {
+      throw new Error("Not found");
+    }
+
+    await ctx.db.patch(entry._id, {
+      archivedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    return { ok: true };
+  },
+});
+
 export const removeMemoryEntry = mutation({
   args: {
     actorClerkId: v.string(),
@@ -914,9 +982,9 @@ export const retrieveRelevantEntries: ReturnType<typeof action> = action({
       }
       if (unseen.length === 0) return;
 
-      const rows = await ctx.runQuery(internal.memory.getMemoryEntriesByIds, {
+      const rows = (await ctx.runQuery(internal.memory.getMemoryEntriesByIds, {
         ids: unseen.map((item) => item.hit._id),
-      });
+      })) as Doc<"userMemoryEntries">[];
       const rowById = new Map(rows.map((row) => [String(row._id), row]));
 
       for (let index = 0; index < unseen.length; index += 1) {
@@ -927,6 +995,8 @@ export const retrieveRelevantEntries: ReturnType<typeof action> = action({
         const rowStatus = String(row.status ?? "");
         const rowCategory = String(row.category ?? "");
         if (row.archivedAt) continue;
+        if (row.orgId !== actor.orgId) continue;
+        if (String(row.scope ?? "") === "workstream") continue;
         if (rowStatus !== "confirmed") continue;
         if (!TOPIC_MEMORY_CATEGORIES.has(rowCategory)) continue;
         if (
@@ -981,7 +1051,7 @@ export const retrieveRelevantEntries: ReturnType<typeof action> = action({
     });
     await collectFromHits(primaryHits);
 
-    if (results.length < topK && primaryHits.length === primaryLimit) {
+    if (results.length < topK) {
       const fallbackLimit = Math.min(60, Math.max(primaryLimit + topK * 2, topK * 5));
       if (fallbackLimit > primaryLimit) {
         const fallbackHits = await ctx.vectorSearch("userMemoryEntries", "by_embedding", {
@@ -1040,6 +1110,9 @@ export const runDailyMaintenance = internalMutation({
     let archivedUserEntries = 0;
 
     for (const entry of userMemoryEntries) {
+      if (typeof entry.lastDecayedAt === "number" && now - entry.lastDecayedAt < 12 * 60 * 60 * 1000) {
+        continue;
+      }
       const nextFreshness = normalizeFreshness(
         typeof entry.freshness === "number" ? entry.freshness * 0.99 : 0.99,
         0.99,
@@ -1047,8 +1120,9 @@ export const runDailyMaintenance = internalMutation({
       const shouldArchive = !entry.archivedAt && nextFreshness < 0.1 && normalizeConfidence(entry.confidence, 0) < 0.5;
       await ctx.db.patch(entry._id, {
         freshness: nextFreshness,
+        scope: entry.scope ?? "global",
         archivedAt: shouldArchive ? now : entry.archivedAt,
-        updatedAt: now,
+        lastDecayedAt: now,
       });
       decayedUserEntries += 1;
       if (shouldArchive) archivedUserEntries += 1;
@@ -1059,12 +1133,15 @@ export const runDailyMaintenance = internalMutation({
     let archivedWorkstreamEntries = 0;
 
     for (const entry of workstreamEntries) {
+      if (typeof entry.lastDecayedAt === "number" && now - entry.lastDecayedAt < 12 * 60 * 60 * 1000) {
+        continue;
+      }
       const nextFreshness = normalizeFreshness(entry.freshness * 0.98, 0.98);
       const shouldArchive = !entry.archivedAt && nextFreshness < 0.1 && normalizeConfidence(entry.confidence, 0) < 0.5;
       await ctx.db.patch(entry._id, {
         freshness: nextFreshness,
         archivedAt: shouldArchive ? now : entry.archivedAt,
-        updatedAt: now,
+        lastDecayedAt: now,
       });
       decayedWorkstreamEntries += 1;
       if (shouldArchive) archivedWorkstreamEntries += 1;

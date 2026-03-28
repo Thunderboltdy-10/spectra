@@ -1,5 +1,6 @@
-import { internalMutation, mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
 import { LIMITS } from "./constants";
 import { getUserByClerkId } from "./helpers";
 import { vScope } from "./shared";
@@ -92,8 +93,8 @@ function canManageAgentResources(
 }
 
 async function resolveAgentResourceLimit(
-  ctx: any,
-  agent: { creatorUserId: any },
+  ctx: Pick<MutationCtx, "db"> | Pick<QueryCtx, "db">,
+  agent: { creatorUserId: Id<"users"> },
 ) {
   const creator = await ctx.db.get(agent.creatorUserId);
   if (!creator) {

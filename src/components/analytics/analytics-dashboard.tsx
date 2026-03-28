@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import {
   Bar,
@@ -224,12 +224,7 @@ function monthKeyFromDay(day: string) {
   return day.slice(0, 7);
 }
 
-function formatMonthLabel(monthKey: string) {
-  const [year, month] = monthKey.split("-").map(Number);
-  const value = new Date(Date.UTC(year, (month ?? 1) - 1, 1));
-  return value.toLocaleDateString("en-US", { month: "long", year: "numeric" });
-}
-
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function listDaysInMonth(monthKey: string) {
   const [year, month] = monthKey.split("-").map(Number);
   if (!year || !month) return [];
@@ -253,22 +248,6 @@ function listDaysInRange(startDay: string, endDay: string) {
   return days;
 }
 
-function buildMonthOptions(items: Array<{ day: string }>) {
-  return Array.from(new Set(items.map((item) => monthKeyFromDay(item.day)).filter(Boolean))).sort();
-}
-
-function buildDailyActivity(rows: AnalyticsRow[], monthKey: string) {
-  const map = new Map<string, number>();
-  for (const row of rows) {
-    map.set(row.day, (map.get(row.day) ?? 0) + row.messagesCount);
-  }
-
-  return listDaysInMonth(monthKey).map((day) => ({
-    day,
-    count: map.get(day) ?? 0,
-  }));
-}
-
 function buildDailyActivityRange(rows: AnalyticsRow[], startDay: string, endDay: string) {
   const map = new Map<string, number>();
   for (const row of rows) {
@@ -279,22 +258,6 @@ function buildDailyActivityRange(rows: AnalyticsRow[], startDay: string, endDay:
     day,
     count: map.get(day) ?? 0,
   }));
-}
-
-function buildDailyStudyTime(
-  daily: EnhancedAnalytics["timeSpentDaily"],
-  monthKey: string,
-) {
-  const byDay = new Map(daily.map((item) => [item.day, item]));
-  return listDaysInMonth(monthKey).map((day) => {
-    const row = byDay.get(day);
-    return {
-      day,
-      totalSeconds: row?.totalSeconds ?? 0,
-      totalMinutes: Math.round((row?.totalSeconds ?? 0) / 60),
-      messages: row?.messages ?? 0,
-    };
-  });
 }
 
 function buildDailyStudyTimeRange(

@@ -23,6 +23,12 @@ crons.daily(
   internal.memory.runDailyMaintenance,
   {},
 );
+crons.daily(
+  "sync-managebac",
+  { hourUTC: 5, minuteUTC: 10 },
+  internal.managebacSync.runScheduledSync,
+  {},
+);
 crons.interval(
   "generate-study-reminders",
   { hours: 1 },

@@ -69,13 +69,6 @@ const ALLOWED_TAGS = new Set([
   "ul",
 ]);
 
-function escapeHtml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
-}
-
 function isSafeUrl(url: string, tagName: string, attrName: string) {
   const trimmed = url.trim();
   if (!trimmed) return false;

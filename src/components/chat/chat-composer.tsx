@@ -286,13 +286,11 @@ function SettingPill({
   label,
   value,
   onChange,
-  title,
   icon,
 }: {
   label: string;
   value: AutoPreference;
   onChange: (value: AutoPreference) => void;
-  title: string;
   icon: React.ReactNode;
 }) {
   const pillClass =
@@ -306,6 +304,7 @@ function SettingPill({
       <button
         type="button"
         onClick={() => onChange(nextPreference(value))}
+        aria-label={label}
         className={`inline-flex h-[34px] cursor-pointer items-center justify-center rounded-full border px-[9px] transition-all duration-200 group-hover/pill:px-3 ${pillClass}`}
       >
         <span className="shrink-0">{icon}</span>
@@ -354,7 +353,6 @@ export function ChatComposer(props: ChatComposerProps) {
     onAutoThinkingChange,
     onAutoSearchChange,
     onSlashCommand,
-    lastAutoResult,
     messageCount = 0,
   } = props;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -375,6 +373,7 @@ export function ChatComposer(props: ChatComposerProps) {
   const [agentSearch, setAgentSearch] = useState("");
   const [agentSubjectFilter, setAgentSubjectFilter] = useState("all");
   const [providerFilter, setProviderFilter] = useState("all");
+  const [modelSelectorPosition, setModelSelectorPosition] = useState<{ bottom: number; left: number } | null>(null);
   const [attachmentsExpanded, setAttachmentsExpanded] = useState(true);
   const [showVoiceStub, setShowVoiceStub] = useState(false);
   const [modeTransitioning, setModeTransitioning] = useState(false);
@@ -406,7 +405,7 @@ export function ChatComposer(props: ChatComposerProps) {
       .map((agent) => agent._id);
     for (const id of topUsage) ids.add(id);
     return ids;
-  }, [agentSuggestion?.id, agents]);
+  }, [agentSuggestion, agents]);
   const agentSubjectOptions = useMemo(
     () =>
       Array.from(
@@ -607,10 +606,31 @@ export function ChatComposer(props: ChatComposerProps) {
     if (!showModelSelector) {
       setModelSearch("");
       setProviderFilter("all");
+      setModelSelectorPosition(null);
       return;
     }
+
+    const updateModelSelectorPosition = () => {
+      const rect = modelMenuRef.current?.getBoundingClientRect();
+      if (!rect) {
+        setModelSelectorPosition(null);
+        return;
+      }
+      setModelSelectorPosition({
+        bottom: window.innerHeight - rect.top + 8,
+        left: Math.max(8, rect.left + rect.width / 2 - 256),
+      });
+    };
+
+    updateModelSelectorPosition();
+    window.addEventListener("resize", updateModelSelectorPosition);
+    window.addEventListener("scroll", updateModelSelectorPosition, true);
     const timer = window.setTimeout(() => modelSearchRef.current?.focus(), 10);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("resize", updateModelSelectorPosition);
+      window.removeEventListener("scroll", updateModelSelectorPosition, true);
+    };
   }, [showModelSelector]);
 
   useEffect(() => {
@@ -1097,14 +1117,7 @@ export function ChatComposer(props: ChatComposerProps) {
                   <div
                     ref={modelPortalRef}
                     className="fixed z-[9999] max-h-[480px] w-[min(92vw,32rem)] overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-soft)]"
-                    style={(() => {
-                      const rect = modelMenuRef.current?.getBoundingClientRect();
-                      if (!rect) return { top: 0, left: 0 };
-                      return {
-                        bottom: window.innerHeight - rect.top + 8,
-                        left: Math.max(8, rect.left + rect.width / 2 - 256),
-                      };
-                    })()}
+                    style={modelSelectorPosition ?? { top: 0, left: 0 }}
                   >
                     <div className="mb-2 flex items-center justify-between">
                       <p className="text-xs font-medium text-[var(--text-primary)]">Choose model</p>
@@ -1478,21 +1491,18 @@ export function ChatComposer(props: ChatComposerProps) {
                 label="Enhance"
                 value={autoEnhancePrompt}
                 onChange={onAutoEnhancePromptChange}
-                title="Enhance"
                 icon={<Sparkles className="h-3.5 w-3.5" />}
               />
               <SettingPill
                 label="Think"
                 value={autoThinking}
                 onChange={onAutoThinkingChange}
-                title="Think"
                 icon={<Brain className="h-3.5 w-3.5" />}
               />
               <SettingPill
                 label="Search"
                 value={autoSearch}
                 onChange={onAutoSearchChange}
-                title="Search"
                 icon={<Search className="h-3.5 w-3.5" />}
               />
             </div>

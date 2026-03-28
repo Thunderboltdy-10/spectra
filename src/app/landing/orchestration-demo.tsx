@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BookOpen, FileText, FlaskConical, PenLine, Cpu, CheckCircle2 } from "lucide-react";
 
 const SCENARIOS = [
@@ -85,13 +85,13 @@ export function OrchestrationDemo() {
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const charIntRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
-  function clearAll() {
+  const clearAll = useCallback(() => {
     timeoutsRef.current.forEach(clearTimeout);
     timeoutsRef.current = [];
     if (charIntRef.current) clearInterval(charIntRef.current);
-  }
+  }, []);
 
-  function triggerScenario(idx: number) {
+  const triggerScenario = useCallback((idx: number) => {
     clearAll();
     const i = (idx + SCENARIOS.length) % SCENARIOS.length;
     activeRef.current = i;
@@ -116,12 +116,12 @@ export function OrchestrationDemo() {
         if (c >= text.length && charIntRef.current) clearInterval(charIntRef.current);
       }, 18);
     }, completeAt));
-  }
+  }, [clearAll]);
 
   useEffect(() => {
     const t = setTimeout(() => triggerScenario(0), 500);
     return () => { clearTimeout(t); clearAll(); };
-  }, []);
+  }, [clearAll, triggerScenario]);
 
   useEffect(() => {
     const tick = setInterval(() => {
@@ -134,7 +134,7 @@ export function OrchestrationDemo() {
       }
     }, TICK_MS);
     return () => clearInterval(tick);
-  }, []);
+  }, [triggerScenario]);
 
   function handleClick(i: number) {
     isManualRef.current = true;

@@ -1,9 +1,10 @@
-import { internalAction, internalQuery } from "./_generated/server";
+import { internalAction, internalQuery, type ActionCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { MODEL_DEFAULTS } from "./constants";
 import { lookupCuratedModelMeta } from "./curatedModelRegistry";
 import { getOpenRouterApiKey, warnOpenRouterMissing } from "./env";
+import type { Id } from "./_generated/dataModel";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const ENDPOINT_SAMPLE_LIMIT = 60;
@@ -424,7 +425,7 @@ export const listModelUsageCounts = internalQuery({
 });
 
 async function refreshCatalogBase(params: {
-  ctx: any;
+  ctx: ActionCtx;
   limit?: number;
   includeEmbeddings: boolean;
 }) {
@@ -497,7 +498,7 @@ async function refreshCatalogBase(params: {
     }
   }
 
-  const orgIds = (await params.ctx.runQuery(internal.catalogSync.listOrgIds, {})) as string[];
+  const orgIds = (await params.ctx.runQuery(internal.catalogSync.listOrgIds, {})) as Id<"orgs">[];
   for (const orgId of orgIds) {
     await params.ctx.runMutation(internal.models.upsertModelCatalogForOrg, {
       orgId,

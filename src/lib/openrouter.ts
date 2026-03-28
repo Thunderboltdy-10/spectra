@@ -1,4 +1,3 @@
-import { getEnv } from "@/lib/env";
 import type { RouteTraceFallback } from "@/types";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
@@ -39,6 +38,27 @@ export type OpenRouterMessageContentPart =
 export type OpenRouterMessage = {
   role: string;
   content: string | OpenRouterMessageContentPart[];
+  name?: string;
+  tool_call_id?: string;
+  tool_calls?: OpenRouterToolCall[];
+};
+
+export type OpenRouterToolDefinition = {
+  type: "function";
+  function: {
+    name: string;
+    description?: string;
+    parameters?: Record<string, unknown>;
+  };
+};
+
+export type OpenRouterToolCall = {
+  id?: string;
+  type?: "function";
+  function?: {
+    name?: string;
+    arguments?: string;
+  };
 };
 
 export type OpenRouterUsage = {
@@ -55,7 +75,7 @@ export type OpenRouterChatCompletionResult = {
   model?: string;
   provider?: string;
   usage?: OpenRouterUsage;
-  choices?: Array<{ message?: { content?: string } }>;
+  choices?: Array<{ message?: { content?: string; tool_calls?: OpenRouterToolCall[] } }>;
   [key: string]: unknown;
 };
 
@@ -70,17 +90,19 @@ export type OpenRouterImageResult = {
 };
 
 function openRouterHeaders() {
-  const env = getEnv();
-  if (!env.OPENROUTER_API_KEY) {
+  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+  if (!apiKey) {
     throw new Error("OPENROUTER_API_KEY is missing.");
   }
 
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+    Authorization: `Bearer ${apiKey}`,
     "Content-Type": "application/json",
   };
-  if (env.OPENROUTER_APP_NAME) headers["X-Title"] = env.OPENROUTER_APP_NAME;
-  if (env.OPENROUTER_SITE_URL) headers["HTTP-Referer"] = env.OPENROUTER_SITE_URL;
+  const appName = process.env.OPENROUTER_APP_NAME?.trim();
+  const siteUrl = process.env.OPENROUTER_SITE_URL?.trim();
+  if (appName) headers["X-Title"] = appName;
+  if (siteUrl) headers["HTTP-Referer"] = siteUrl;
   return headers;
 }
 
@@ -115,6 +137,8 @@ function buildChatCompletionBody(params: {
   maxTokens?: number;
   stream?: boolean;
   reasoningEffort?: OpenRouterReasoningEffort;
+  tools?: OpenRouterToolDefinition[];
+  toolChoice?: "auto" | "none";
 }) {
   const supportsAnthropicCaching = params.model.toLowerCase().startsWith("anthropic/");
   const preparedMessages = supportsAnthropicCaching
@@ -167,6 +191,8 @@ function buildChatCompletionBody(params: {
           reasoning_effort: params.reasoningEffort,
         }
       : {}),
+    ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
+    ...(params.toolChoice ? { tool_choice: params.toolChoice } : {}),
     max_tokens: params.maxTokens,
   };
 }
@@ -334,6 +360,8 @@ export async function openRouterChatCompletion(params: {
   temperature?: number;
   maxTokens?: number;
   reasoningEffort?: OpenRouterReasoningEffort;
+  tools?: OpenRouterToolDefinition[];
+  toolChoice?: "auto" | "none";
   onFallback?: (event: RouteTraceFallback) => void;
 }): Promise<OpenRouterChatCompletionResult> {
   const candidates = uniqueModelList(params.model, params.fallbackModels);
@@ -353,6 +381,8 @@ export async function openRouterChatCompletion(params: {
               temperature: params.temperature,
               maxTokens: params.maxTokens,
               reasoningEffort: params.reasoningEffort,
+              tools: params.tools,
+              toolChoice: params.toolChoice,
             }),
           ),
       }, OPENROUTER_STREAM_TIMEOUT_MS);
@@ -485,6 +515,8 @@ export async function* openRouterStreamChat(params: {
   temperature?: number;
   maxTokens?: number;
   reasoningEffort?: OpenRouterReasoningEffort;
+  tools?: OpenRouterToolDefinition[];
+  toolChoice?: "auto" | "none";
   onFallback?: (event: RouteTraceFallback) => void;
 }): AsyncGenerator<OpenRouterStreamEvent> {
   const candidates = uniqueModelList(params.model, params.fallbackModels);
@@ -505,6 +537,8 @@ export async function* openRouterStreamChat(params: {
               maxTokens: params.maxTokens,
               stream: true,
               reasoningEffort: params.reasoningEffort,
+              tools: params.tools,
+              toolChoice: params.toolChoice,
             }),
           ),
       });

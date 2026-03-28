@@ -28,10 +28,6 @@ function isSuperAdminEmail(email: string) {
   return SUPER_ADMIN_EMAILS.has(email.trim().toLowerCase());
 }
 
-function dayKey(ts = Date.now()) {
-  return new Date(ts).toISOString().slice(0, 10);
-}
-
 function resolveSafeTimeZone(value: string | undefined) {
   if (!value || !value.trim()) return "UTC";
   try {

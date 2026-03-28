@@ -1,11 +1,10 @@
 import { convexAction, convexQuery } from "@/lib/convex-server";
 import { MODEL_CONFIG } from "@/lib/model-config";
-import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
-import { openRouterChatCompletion, openRouterEmbeddingRequest } from "@/lib/openrouter";
+import { openRouterEmbeddingRequest } from "@/lib/openrouter";
 import { withTimeout } from "@/lib/orchestrator/history";
-import { isModelAllowedInTier, pickModelAndFallbacks, type CatalogModelEntry, type ModelRuntimeStat } from "@/lib/model-selection";
+import type { CatalogModelEntry, ModelRuntimeStat } from "@/lib/model-selection";
 import { tavily, type TavilyClient, type TavilyExtractResponse, type TavilyGetResearchResponse, type TavilySearchResponse } from "@tavily/core";
-import { recordOpenRouterUsage } from "@/lib/usage-tracking";
+import { recordOpenRouterUsage, recordSearchUsage } from "@/lib/usage-tracking";
 
 export type RetrievedCitation = {
   resourceId?: string;
@@ -118,6 +117,13 @@ export type WebSearchResult = {
 const MAX_WEB_SOURCES = 6;
 export const MAX_RAG_SOURCES = 5;
 const MAX_RESEARCH_SUBQUESTIONS = 3;
+const DEFAULT_SEARCH_CREDITS: Record<WebSearchOperation["tool"], number> = {
+  search: 1,
+  extract: 1,
+  crawl: 2,
+  research: 5,
+  model_fallback: 0,
+};
 const SEARCH_CACHE_TTL_MS = 30 * 60 * 1000;
 const URL_VALIDATION_TIMEOUT_MS = 3500;
 const TITLE_PARSE_TIMEOUT_MS = 2000;
@@ -418,6 +424,7 @@ function extractHtmlTitle(html: string) {
   return decodeHtmlEntities(match[1]).replace(/\s+/g, " ").trim();
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function resolveWebSearchSource(url: string, snippet?: string): Promise<WebSearchSource | null> {
   const parsed = parseHttpUrl(url);
   if (!parsed) return null;
@@ -459,13 +466,6 @@ async function resolveWebSearchSource(url: string, snippet?: string): Promise<We
     domain,
     snippet: snippet?.trim() ? snippet.trim().slice(0, 280) : undefined,
   };
-}
-
-async function resolveWebSearchSources(urls: string[], snippetByUrl?: Map<string, string>) {
-  const resolved = await Promise.all(
-    urls.map((url) => resolveWebSearchSource(url, snippetByUrl?.get(url))),
-  );
-  return resolved.filter((item): item is WebSearchSource => Boolean(item)).slice(0, MAX_WEB_SOURCES);
 }
 
 function normalizeSourceFilename(value: string) {
@@ -555,163 +555,42 @@ export function buildResearchEvidenceBlock(params: {
   ].join("\n");
 }
 
-async function runOnlineModelFallbackSearch(
-  message: string,
-  thinkingLevel: "low" | "medium" | "high",
-  options?: {
-    actorClerkId?: string;
-    chatId?: string;
-    modelCatalog?: CatalogModelEntry[];
-    spendingTier?: "normal" | "expensive_blocked" | "cheap_only" | "free_only";
-    modelRuntimeStats?: Record<string, ModelRuntimeStat>;
-    strategy?: SearchStrategy;
-    trigger?: SearchTrigger;
-    reason?: string;
-  },
-): Promise<WebSearchResult> {
-  const liveCatalog = options?.modelCatalog?.length
-    ? options.modelCatalog
-    : (await getLiveCatalogSnapshot()).models;
-  const spendingTier = options?.spendingTier ?? "normal";
-  const searchModelSelection = pickModelAndFallbacks({
-    catalog: liveCatalog.filter((model) => model.modelId !== "openrouter/auto"),
-    tier: spendingTier,
-    requiredCapabilities: ["search"],
-    preferredCapabilities: thinkingLevel === "high" ? ["reasoning", "search"] : ["search"],
-    preferFast: thinkingLevel !== "high",
-    preferCheap: true,
-    runtimeStats: options?.modelRuntimeStats,
-    maxFallbacks: 3,
-  });
-  const searchModel = searchModelSelection.selected?.modelId
-    ?? searchModelSelection.fallbacks.find((candidate) =>
-      liveCatalog.some((model) => model.modelId === candidate && isModelAllowedInTier(model, spendingTier)))
-    ?? liveCatalog.find((model) => model.modelId !== "openrouter/auto" && isModelAllowedInTier(model, spendingTier))?.modelId;
-  if (!searchModel) {
-    return {
-      text: "",
-      urls: [],
-      sources: [],
-      provider: "disabled",
-      strategy: options?.strategy,
-      triggeredBy: options?.trigger,
-      fallbackReason: options?.reason,
-      operations: [
-        {
-          tool: "model_fallback",
-          status: "skipped",
-          reason: "No search-capable model available in the active spending tier.",
-        },
-      ],
-    };
-  }
-  const onlineModel = searchModel.endsWith(":online") ? searchModel : `${searchModel}:online`;
-  const onlineFallbackModels = searchModelSelection.fallbacks
-    .filter((candidate) => candidate !== searchModel)
-    .map((candidate) => (candidate.endsWith(":online") ? candidate : `${candidate}:online`));
-  const startedAt = Date.now();
-  const completionPromise = openRouterChatCompletion({
-    model: onlineModel,
-    fallbackModels: onlineFallbackModels,
-    messages: [
-      {
-        role: "system",
-        content:
-          "Use integrated web search to answer. Return concise bullets and include direct source URLs. Do not invent URLs.",
-      },
-      {
-        role: "user",
-        content: message,
-      },
-    ],
-    temperature: 0.2,
-  });
-  let usageRecorded = false;
-  const recordUsage = async (completion: Awaited<typeof completionPromise>) => {
-    if (!options?.actorClerkId || usageRecorded) return;
-    usageRecorded = true;
-    await recordOpenRouterUsage({
-      actorClerkId: options.actorClerkId,
-      chatId: options.chatId,
-      model: completion.model ?? onlineModel,
-      usage: completion.usage,
-    }).catch(() => {});
-  };
-  void completionPromise.then((completion) => {
-    void recordUsage(completion);
-  }).catch(() => {});
+function fallbackCreditsForOperations(operations: WebSearchOperation[] | undefined) {
+  if (!operations?.length) return 0;
+  return operations.reduce((sum, operation) => {
+    const explicit = typeof operation.costCredits === "number" ? operation.costCredits : undefined;
+    if (explicit && explicit > 0) return sum + explicit;
+    if (operation.status !== "completed") return sum;
+    return sum + (DEFAULT_SEARCH_CREDITS[operation.tool] ?? 0);
+  }, 0);
+}
 
-  const completion = await withTimeout(
-    completionPromise,
-    8000,
+async function recordTavilyUsage(params: {
+  actorClerkId?: string;
+  chatId?: string;
+  operations?: WebSearchOperation[];
+  costCredits?: number;
+}) {
+  if (!params.actorClerkId) return;
+  const creditsUsed = typeof params.costCredits === "number" && params.costCredits > 0
+    ? params.costCredits
+    : fallbackCreditsForOperations(params.operations);
+  if (creditsUsed <= 0) return;
+  const completedTools = Array.from(
+    new Set(
+      (params.operations ?? [])
+        .filter((operation) => operation.status === "completed")
+        .map((operation) => operation.tool)
+        .filter((tool) => tool !== "model_fallback"),
+    ),
   );
-
-  const text = completion?.choices?.[0]?.message?.content?.trim() ?? "";
-  const modelUsed = completion?.model ?? onlineModel;
-  const usage = completion?.usage;
-  const durationMs = Date.now() - startedAt;
-  if (completion) {
-    await recordUsage(completion);
-  }
-  const extractedUrls = extractUrls(text);
-  if (extractedUrls.length === 0) {
-    return {
-      text,
-      urls: [],
-      sources: [],
-      provider: "error",
-      strategy: options?.strategy,
-      triggeredBy: options?.trigger,
-      fallbackReason: options?.reason,
-      operations: [
-        {
-          tool: "model_fallback",
-          status: "failed",
-          query: message,
-          resultCount: 0,
-          durationMs,
-          reason: "Model fallback did not return valid source URLs.",
-        },
-      ],
-      modelUsed,
-      usage,
-      durationMs,
-    };
-  }
-  const sources = await resolveWebSearchSources(extractedUrls);
-  const validUrlSet = new Set(sources.map((source) => source.url));
-  const sanitizedText = text
-    .replace(/https?:\/\/[^\s)\]>"']+/g, (rawUrl) => {
-      const parsed = parseHttpUrl(rawUrl);
-      if (!parsed) return "";
-      const normalized = parsed.toString();
-      return validUrlSet.has(normalized) ? normalized : "";
-    })
-    .replace(/\s{2,}/g, " ")
-    .trim();
-  return {
-    text: sanitizedText || text,
-    urls: sources.map((source) => source.url),
-    sources,
-    provider: "model_fallback" as const,
-    strategy: options?.strategy,
-    triggeredBy: options?.trigger,
-    fallbackReason: options?.reason,
-    operations: [
-      {
-        tool: "model_fallback",
-        status: "completed",
-        query: message,
-        resultCount: sources.length,
-        selectedUrls: sources.map((source) => source.url),
-        durationMs,
-        reason: options?.reason,
-      },
-    ],
-    modelUsed,
-    usage,
-    durationMs,
-  };
+  await recordSearchUsage({
+    actorClerkId: params.actorClerkId,
+    chatId: params.chatId,
+    provider: "tavily",
+    operation: completedTools.join("+") || "search",
+    creditsUsed,
+  }).catch(() => {});
 }
 
 export async function maybeSearchWeb(
@@ -749,6 +628,18 @@ export async function maybeSearchWeb(
       strategy,
       triggeredBy: trigger,
       operations: [{ tool: "search", status: "skipped", reason: "Search strategy resolved to none." }],
+    };
+  }
+
+  if (options?.spendingTier === "free_only") {
+    return {
+      text: "",
+      urls: [],
+      sources: [],
+      provider: "disabled",
+      strategy,
+      triggeredBy: trigger,
+      operations: [{ tool: "search", status: "skipped", reason: "Search disabled in free-only tier." }],
     };
   }
 
@@ -811,7 +702,7 @@ export async function maybeSearchWeb(
           durationMs: Date.now() - extractStartedAt,
           costCredits: extractResponse.usage?.credits,
         });
-        return {
+        const result: WebSearchResult = {
           text: formatSourcesAsBriefing(sources, "=== TAVILY EXTRACT BRIEFING ==="),
           urls: sources.map((source) => source.url),
           sources,
@@ -822,6 +713,13 @@ export async function maybeSearchWeb(
           costCredits,
           durationMs: Date.now() - startAt,
         };
+        await recordTavilyUsage({
+          actorClerkId: options?.actorClerkId,
+          chatId: options?.chatId,
+          operations,
+          costCredits,
+        });
+        return result;
       }
 
       if (strategy === "crawl") {
@@ -873,7 +771,7 @@ export async function maybeSearchWeb(
           durationMs: Date.now() - crawlStartedAt,
           costCredits: crawlResponse.usage?.credits,
         });
-        return {
+        const result: WebSearchResult = {
           text: formatSourcesAsBriefing(sources, "=== TAVILY CRAWL BRIEFING ==="),
           urls: sources.map((source) => source.url),
           sources,
@@ -884,6 +782,13 @@ export async function maybeSearchWeb(
           costCredits,
           durationMs: Date.now() - startAt,
         };
+        await recordTavilyUsage({
+          actorClerkId: options?.actorClerkId,
+          chatId: options?.chatId,
+          operations,
+          costCredits,
+        });
+        return result;
       }
 
       if (strategy === "research") {
@@ -940,7 +845,7 @@ export async function maybeSearchWeb(
           ? completed.content
           : JSON.stringify(completed.content, null, 2);
 
-        return {
+        const result: WebSearchResult = {
           text: compactText(content),
           urls: sources.map((source) => source.url),
           sources,
@@ -951,6 +856,13 @@ export async function maybeSearchWeb(
           costCredits,
           durationMs: Date.now() - startAt,
         };
+        await recordTavilyUsage({
+          actorClerkId: options?.actorClerkId,
+          chatId: options?.chatId,
+          operations,
+          costCredits,
+        });
+        return result;
       }
 
       if (strategy === "search_extract") {
@@ -1043,7 +955,7 @@ export async function maybeSearchWeb(
         }
 
         const mergedSources = mergeWebSources([...searchSources, ...extractedSources]).slice(0, 12);
-        return {
+        const result: WebSearchResult = {
           text: formatSourcesAsBriefing(
             mergedSources,
             "=== TAVILY RESEARCH BRIEFING (search + extract) ===",
@@ -1057,6 +969,13 @@ export async function maybeSearchWeb(
           costCredits,
           durationMs: Date.now() - startAt,
         };
+        await recordTavilyUsage({
+          actorClerkId: options?.actorClerkId,
+          chatId: options?.chatId,
+          operations,
+          costCredits,
+        });
+        return result;
       }
 
       const searchStartedAt = Date.now();
@@ -1078,7 +997,7 @@ export async function maybeSearchWeb(
       const sources = mergeWebSources(
         response.results.slice(0, maxResults).map((result) => toWebSourceFromSearchResult(result, query)),
       );
-      return {
+      const result: WebSearchResult = {
         text: formatSourcesAsBriefing(sources, "=== TAVILY SEARCH BRIEFING ==="),
         urls: sources.map((source) => source.url),
         sources,
@@ -1089,38 +1008,35 @@ export async function maybeSearchWeb(
         costCredits,
         durationMs: Date.now() - startAt,
       };
+      await recordTavilyUsage({
+        actorClerkId: options?.actorClerkId,
+        chatId: options?.chatId,
+        operations,
+        costCredits,
+      });
+      return result;
     } catch (error) {
       tavilyFailureReason = error instanceof Error ? error.message : String(error);
     }
   }
 
-  const allowModelFallback = strategy === "search" || strategy === "extract_url" || strategy === "crawl";
-  if (!allowModelFallback) {
-    return {
-      text: "",
-      urls: [],
-      sources: [],
-      provider: "error",
-      strategy,
-      triggeredBy: trigger,
-      fallbackReason: tavilyFailureReason ?? "Unknown Tavily failure.",
-      operations: [
-        {
-          tool: "search",
-          status: "failed",
-          query,
-          reason: "Tavily failed and online-model fallback is disabled for this research strategy.",
-        },
-      ],
-    };
-  }
-
-  return runOnlineModelFallbackSearch(message, thinkingLevel, {
-    ...options,
+  return {
+    text: "",
+    urls: [],
+    sources: [],
+    provider: "error",
     strategy,
-    trigger,
-    reason: tavilyFailureReason ?? "Unknown Tavily failure.",
-  });
+    triggeredBy: trigger,
+    fallbackReason: tavilyFailureReason ?? "Unknown Tavily failure.",
+    operations: [
+      {
+        tool: "search",
+        status: "failed",
+        query,
+        reason: "Tavily failed and :online model fallback is disabled by routing policy.",
+      },
+    ],
+  };
 }
 
 export async function runRagRetrieval(params: {

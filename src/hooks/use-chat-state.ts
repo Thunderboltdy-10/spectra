@@ -133,8 +133,12 @@ export type UserSpending = {
   tokenUsagePercent?: number;
   monthlyTokens?: number;
   monthlyEvents?: number;
+  monthlyModelEvents?: number;
+  monthlySearchEvents?: number;
   monthlyTokenBudget?: number;
   monthlyCostCentsFromEvents?: number;
+  monthlyModelCostCents?: number;
+  monthlySearchCostCents?: number;
   marginPercent?: number;
 };
 
@@ -651,7 +655,7 @@ export function useChatState() {
   const personalResourcesPollMsRef = useRef(PERSONAL_RESOURCES_POLL_MIN_MS);
   const personalResourcesRefreshInFlightRef = useRef<Promise<void> | null>(null);
 
-  function confirmModeSwitch(_nextMode: StudyMode) {
+  function confirmModeSwitch() {
     // Always allow mode switching without interruption
     return true;
   }
@@ -989,7 +993,7 @@ export function useChatState() {
   }, [activeStreamIds]);
 
   useEffect(() => {
-    const handleBeforeUnload = (_e: BeforeUnloadEvent) => {
+    const handleBeforeUnload = () => {
       // Check if any stream is active
       if (activeStreamIdsRef.current.size === 0) return;
 
@@ -1621,7 +1625,7 @@ export function useChatState() {
       const nextMode = custom.detail;
       if (!nextMode) return;
       if (!isModeAvailable(nextMode)) return;
-      if (!confirmModeSwitch(nextMode)) return;
+      if (!confirmModeSwitch()) return;
       if (sendingRef.current) {
         abortReasonRef.current = "mode_switch";
         stopGeneration();
@@ -1638,7 +1642,7 @@ export function useChatState() {
       window.removeEventListener("ai-school:toggle-settings", handleSettings);
       window.removeEventListener("ai-school:set-mode", handleSetMode);
     };
-  }, [messages, mode, selectedAgentId, startNewChat, updateExistingChatSettings]);
+  }, [selectedAgentId, startNewChat, updateExistingChatSettings]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const handleContextRequest = () => {
@@ -2255,7 +2259,11 @@ export function useChatState() {
               | "agent_update"
               | "phase"
               | "phase_update"
-              | "search_status";
+              | "search_status"
+              | "tool_call"
+              | "tool_result"
+              | "thread_fork"
+              | "mode_switch";
             content?: string;
             message?: string;
             error?: string | { message?: string };
@@ -2313,6 +2321,15 @@ export function useChatState() {
             unlockedAchievements?: AchievementToastData[];
             sources?: Array<{ filename: string; page?: number; sourceType: string }>;
             entries?: Array<{ key: string; value: string; confidence: number }>;
+            toolName?: string;
+            toolCallId?: string;
+            arguments?: string;
+            summary?: string;
+            result?: Record<string, unknown>;
+            mode?: StudyMode;
+            chatId?: string;
+            threadUrl?: string;
+            title?: string;
           };
 
           // Guard: only update visual draft state if user is still viewing this chat
@@ -2542,6 +2559,27 @@ export function useChatState() {
               thinkingLevel: prev?.thinkingLevel ?? thinkingLevel,
               promptEnhanced: prev?.promptEnhanced ?? false,
             }));
+          }
+
+          if (payload.type === "tool_call" && payload.toolName) {
+            pushThinkingNote(`Tool call: ${payload.toolName.replace(/_/g, " ")}.`);
+            continue;
+          }
+
+          if (payload.type === "tool_result" && payload.toolName) {
+            pushThinkingNote(payload.summary ?? `${payload.toolName.replace(/_/g, " ")} completed.`);
+            continue;
+          }
+
+          if (payload.type === "mode_switch" && payload.mode) {
+            setMode(payload.mode);
+            pushThinkingNote(`Switched to ${payload.mode} mode${payload.reason ? `: ${payload.reason}` : ""}.`);
+            continue;
+          }
+
+          if (payload.type === "thread_fork" && payload.chatId) {
+            pushThinkingNote(`Forked a new thread${payload.title ? `: ${payload.title}` : ""}.`);
+            continue;
           }
 
           if (payload.type === "search_status") {

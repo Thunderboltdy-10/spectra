@@ -845,7 +845,7 @@ export const setRecentContext = mutation({
       recentContext: args.recentContext,
       recentContextAt: args.recentContextAt,
       updatedAt: Date.now(),
-    } as any);
+    });
 
     return { ok: true };
   },

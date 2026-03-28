@@ -1,4 +1,4 @@
-import { action, internalQuery, mutation, query } from "./_generated/server";
+import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
@@ -136,6 +136,11 @@ function normalizeMemoryText(rawValue: string) {
 }
 
 function normalizeConfidence(rawValue: number | undefined, fallback = 0.6) {
+  if (typeof rawValue !== "number" || !Number.isFinite(rawValue)) return fallback;
+  return Math.max(0, Math.min(1, rawValue));
+}
+
+function normalizeFreshness(rawValue: number | undefined, fallback = 1) {
   if (typeof rawValue !== "number" || !Number.isFinite(rawValue)) return fallback;
   return Math.max(0, Math.min(1, rawValue));
 }
@@ -412,14 +417,19 @@ export const routeMemoryWrite = mutation({
   args: {
     actorClerkId: v.string(),
     sourceChatId: v.optional(v.id("chats")),
+    sourceMessageId: v.optional(v.id("messages")),
+    sourceArtifactId: v.optional(v.id("artifacts")),
+    sourceWorkstreamId: v.optional(v.id("workstreams")),
     entries: v.array(v.object({
       key: v.string(),
       text: v.string(),
       embedding: v.optional(v.array(v.float64())),
       confidence: v.optional(v.number()),
+      freshness: v.optional(v.number()),
       category: v.optional(vMemoryCategory),
       sourceType: v.optional(vMemorySourceType),
       status: v.optional(vMemoryStatus),
+      scope: v.optional(v.union(v.literal("global"), v.literal("workstream"))),
       relatedArtifacts: v.optional(v.array(v.string())),
       negativeTopicLinks: v.optional(v.array(v.string())),
     })),
@@ -465,6 +475,8 @@ export const routeMemoryWrite = mutation({
       const sourceType = raw.sourceType ?? "extraction";
       const requestedStatus = raw.status;
       const confidence = normalizeConfidence(raw.confidence, 0.6);
+      const freshness = normalizeFreshness(raw.freshness, 1);
+      const scope = raw.scope ?? (args.sourceWorkstreamId ? "workstream" : "global");
       const baseStatus =
         requestedStatus
         ?? (GLOBAL_MEMORY_CATEGORIES.has(category) || sourceType !== "extraction" ? "confirmed" : "pending");
@@ -484,9 +496,15 @@ export const routeMemoryWrite = mutation({
           embedding: normalizeEmbedding(raw.embedding),
           category,
           confidence: effectiveConfidence,
+          freshness,
           status: finalStatus,
           sourceType,
           sourceChatId: args.sourceChatId,
+          sourceMessageId: args.sourceMessageId,
+          sourceArtifactId: args.sourceArtifactId,
+          sourceWorkstreamId: args.sourceWorkstreamId,
+          scope,
+          archivedAt: undefined,
           relatedArtifacts: raw.relatedArtifacts?.slice(0, 12),
           negativeTopicLinks: raw.negativeTopicLinks?.map(normalizeTopicLabel).filter(Boolean).slice(0, 12),
           createdAt: now,
@@ -522,12 +540,18 @@ export const routeMemoryWrite = mutation({
         embedding: normalizeEmbedding(raw.embedding),
         category,
         confidence: Math.max(existing.confidence, effectiveConfidence),
+        freshness: Math.max(normalizeFreshness(existing.freshness, 0), freshness),
         status: nextStatus,
         sourceType:
           sourceType === "user_explicit" || sourceType === "correction"
             ? sourceType
             : existing.sourceType,
         sourceChatId: args.sourceChatId ?? existing.sourceChatId,
+        sourceMessageId: args.sourceMessageId ?? existing.sourceMessageId,
+        sourceArtifactId: args.sourceArtifactId ?? existing.sourceArtifactId,
+        sourceWorkstreamId: args.sourceWorkstreamId ?? existing.sourceWorkstreamId,
+        scope,
+        archivedAt: undefined,
         relatedArtifacts: raw.relatedArtifacts?.slice(0, 12) ?? existing.relatedArtifacts,
         negativeTopicLinks: nextLinks.size > 0 ? [...nextLinks].slice(0, 12) : existing.negativeTopicLinks,
         updatedAt: now,
@@ -563,7 +587,8 @@ export const listMemoryEntries = query({
 
     return rows
       .filter((row) =>
-        !isMemoryEntryExpired({
+        !row.archivedAt
+        && !isMemoryEntryExpired({
           category: row.category,
           updatedAt: row.updatedAt,
           now: Date.now(),
@@ -579,8 +604,14 @@ export const listMemoryEntries = query({
         status: row.status,
         sourceType: row.sourceType,
         sourceChatId: row.sourceChatId,
+        sourceMessageId: row.sourceMessageId,
+        sourceArtifactId: row.sourceArtifactId,
+        sourceWorkstreamId: row.sourceWorkstreamId,
+        freshness: row.freshness,
+        scope: row.scope,
         relatedArtifacts: row.relatedArtifacts ?? [],
         negativeTopicLinks: row.negativeTopicLinks ?? [],
+        archivedAt: row.archivedAt,
         createdAt: row.createdAt,
         updatedAt: row.updatedAt,
       }));
@@ -604,6 +635,7 @@ export const getGlobalProfileEntries = query({
 
     return rows
       .filter((row) => {
+        if (row.archivedAt) return false;
         if (row.status !== "confirmed") return false;
         if (!GLOBAL_MEMORY_CATEGORIES.has(row.category)) return false;
         return !isMemoryEntryExpired({
@@ -620,6 +652,7 @@ export const getGlobalProfileEntries = query({
         text: row.text,
         category: row.category,
         confidence: row.confidence,
+        freshness: row.freshness,
         updatedAt: row.updatedAt,
       }));
   },
@@ -854,10 +887,13 @@ export const retrieveRelevantEntries: ReturnType<typeof action> = action({
       text: string;
       category: "topic" | "artifact" | "correction";
       confidence: number;
+      freshness: number;
       score: number;
       vectorRank: number;
       lexicalScore: number;
       sourceChatId?: Id<"chats">;
+      sourceWorkstreamId?: Id<"workstreams">;
+      scope?: "global" | "workstream";
       negativeTopicLinks: string[];
       updatedAt: number;
     }> = [];
@@ -890,6 +926,7 @@ export const retrieveRelevantEntries: ReturnType<typeof action> = action({
         if (!hit || !row) continue;
         const rowStatus = String(row.status ?? "");
         const rowCategory = String(row.category ?? "");
+        if (row.archivedAt) continue;
         if (rowStatus !== "confirmed") continue;
         if (!TOPIC_MEMORY_CATEGORIES.has(rowCategory)) continue;
         if (
@@ -917,10 +954,19 @@ export const retrieveRelevantEntries: ReturnType<typeof action> = action({
             typeof row.confidence === "number" ? row.confidence : Number(row.confidence ?? 0.6),
             0.6,
           ),
+          freshness: normalizeFreshness(
+            typeof row.freshness === "number" ? row.freshness : Number(row.freshness ?? 1),
+            1,
+          ),
           score,
           vectorRank,
           lexicalScore: lexicalOverlapScore(`${String(row.key ?? "")} ${String(row.text ?? "")}`),
           sourceChatId: row.sourceChatId as Id<"chats"> | undefined,
+          sourceWorkstreamId: row.sourceWorkstreamId as Id<"workstreams"> | undefined,
+          scope:
+            row.scope === "workstream" || row.scope === "global"
+              ? row.scope
+              : undefined,
           negativeTopicLinks,
           updatedAt: typeof row.updatedAt === "number" ? row.updatedAt : 0,
         });
@@ -982,5 +1028,55 @@ export const retrieveRelevantEntries: ReturnType<typeof action> = action({
       })
       .sort((a, b) => b.fusedScore - a.fusedScore || b.score - a.score || b.confidence - a.confidence || b.updatedAt - a.updatedAt)
       .slice(0, topK);
+  },
+});
+
+export const runDailyMaintenance = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    const userMemoryEntries = await ctx.db.query("userMemoryEntries").collect();
+    let decayedUserEntries = 0;
+    let archivedUserEntries = 0;
+
+    for (const entry of userMemoryEntries) {
+      const nextFreshness = normalizeFreshness(
+        typeof entry.freshness === "number" ? entry.freshness * 0.99 : 0.99,
+        0.99,
+      );
+      const shouldArchive = !entry.archivedAt && nextFreshness < 0.1 && normalizeConfidence(entry.confidence, 0) < 0.5;
+      await ctx.db.patch(entry._id, {
+        freshness: nextFreshness,
+        archivedAt: shouldArchive ? now : entry.archivedAt,
+        updatedAt: now,
+      });
+      decayedUserEntries += 1;
+      if (shouldArchive) archivedUserEntries += 1;
+    }
+
+    const workstreamEntries = await ctx.db.query("workstreamMemory").collect();
+    let decayedWorkstreamEntries = 0;
+    let archivedWorkstreamEntries = 0;
+
+    for (const entry of workstreamEntries) {
+      const nextFreshness = normalizeFreshness(entry.freshness * 0.98, 0.98);
+      const shouldArchive = !entry.archivedAt && nextFreshness < 0.1 && normalizeConfidence(entry.confidence, 0) < 0.5;
+      await ctx.db.patch(entry._id, {
+        freshness: nextFreshness,
+        archivedAt: shouldArchive ? now : entry.archivedAt,
+        updatedAt: now,
+      });
+      decayedWorkstreamEntries += 1;
+      if (shouldArchive) archivedWorkstreamEntries += 1;
+    }
+
+    return {
+      ok: true,
+      decayedUserEntries,
+      archivedUserEntries,
+      decayedWorkstreamEntries,
+      archivedWorkstreamEntries,
+      ranAt: now,
+    };
   },
 });

@@ -778,23 +778,23 @@ The existing sidebar (`src/components/chat/chat-sidebar.tsx`) adapts based on ro
 ### Wave 4: Prompt Routing Expansion
 *Depends on Wave 1 and 3.*
 
-- [ ] 5-level assignment system (L0-L4) in `auto-settings.ts`
-- [ ] Workstream detection signals in `route-plan.ts`
-- [ ] Thread continuation vs fork logic
-- [ ] AI workstream suggestion from chat (toast UI)
-- [ ] Override & correction UI (toast with Move action)
-- [ ] L4 pipeline: workstream memory retrieval, deadline injection, cross-artifact summaries
+- [x] 5-level assignment system (L0-L4) in `auto-settings.ts`
+- [x] Workstream detection signals in `route-plan.ts`
+- [x] Thread continuation vs fork logic
+- [x] AI workstream suggestion from chat (toast UI)
+- [x] Override & correction UI (toast with Move action)
+- [x] L4 pipeline: workstream memory retrieval, deadline injection, cross-artifact summaries
 
 ### Wave 5: Memory Enhancement
 *Depends on Wave 1, partially on Wave 4.*
 
-- [ ] Provenance fields on `userMemoryEntries`
-- [ ] `workstreamMemory` backend (CRUD, vector search)
-- [ ] Workstream memory extraction in `post-process.ts`
-- [ ] Layered injection logic in pipeline
-- [ ] "Surface but don't inject" UI (memory indicator below messages)
-- [ ] Freshness decay cron job
-- [ ] Contradiction detection (superseded entries)
+- [x] Provenance fields on `userMemoryEntries`
+- [x] `workstreamMemory` backend (CRUD, vector search)
+- [x] Workstream memory extraction in `post-process.ts`
+- [x] Layered injection logic in pipeline
+- [x] "Surface but don't inject" UI (memory indicator below messages)
+- [x] Freshness decay cron job
+- [x] Contradiction detection (superseded entries)
 
 ### Wave 6: Agentic Editor
 *Depends on Wave 1 (notes table). Independent of Waves 2-5 — can be parallelized.*

@@ -449,6 +449,16 @@ export type RouteTrace = {
     text: string;
     category: "identity" | "academic" | "preference" | "topic" | "artifact" | "correction";
   }>;
+  relatedMemory?: Array<{
+    id: string;
+    source: "personal" | "workstream";
+    key: string;
+    text: string;
+    category: string;
+    confidence: number;
+    freshness: number;
+    reason: "low_confidence" | "low_freshness" | "not_in_top_matches";
+  }>;
 };
 
 export type ModelRouteOutput = {

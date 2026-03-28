@@ -2251,9 +2251,11 @@ export async function runChatPipeline(request: NextRequest) {
       || route.trace.toolchain.some((tool) => tool.includes("repair"));
     route.trace.phasePlan = route.trace.phasePlan.map((phase) => {
       if (phase.id === "ws_memory") {
-        return workstreamMemoryMatches.length > 0
-          ? { ...phase, status: "completed", detail: `Used ${workstreamMemoryMatches.length} workstream memory entr${workstreamMemoryMatches.length === 1 ? "y" : "ies"}.` }
-          : { ...phase, status: "skipped", detail: "No matching workstream memory." };
+        return injectedWorkstreamMemory.length > 0
+          ? { ...phase, status: "completed", detail: `Injected ${injectedWorkstreamMemory.length} scoped workstream memory entr${injectedWorkstreamMemory.length === 1 ? "y" : "ies"}.` }
+          : surfacedWorkstreamMemory.length > 0
+            ? { ...phase, status: "skipped", detail: "Matched workstream memory was surfaced but not auto-injected." }
+            : { ...phase, status: "skipped", detail: "No matching workstream memory." };
       }
       if (phase.id === "ws_artifacts") {
         return (workstreamPlannerSummary || workstreamArtifactSummary)
@@ -2604,6 +2606,9 @@ export async function runChatPipeline(request: NextRequest) {
         layer3Text: "",
         layer2Count: 0,
         layer3Count: 0,
+        injectedProfileEntries: [],
+        injectedTopicEntries: [],
+        surfacedTopicEntries: [],
         retrievedTopicEntries: [],
       };
   if (shouldPlanMemoryRead) {
@@ -2613,11 +2618,17 @@ export async function runChatPipeline(request: NextRequest) {
   }
 
   let workstreamMemoryMatches: Array<{
+    _id: string;
     key: string;
     text: string;
     category: string;
     confidence: number;
     freshness: number;
+    score: number;
+    lexicalScore?: number;
+    sourceChatId?: string;
+    sourceMessageId?: string;
+    sourceArtifactId?: string;
     fusedScore: number;
   }> = [];
   let workstreamMemoryEmbeddingModel: string | undefined;
@@ -2649,20 +2660,39 @@ export async function runChatPipeline(request: NextRequest) {
             });
             return embedding;
           })();
-      workstreamMemoryMatches = (await convexQuery("workstreamMemory:retrieveRelevantForPrompt", {
+      workstreamMemoryMatches = (await convexAction("workstreamMemory:retrieveRelevantForPrompt", {
         actorClerkId: actor.clerkId,
         workstreamId: activeWorkstreamId,
         embedding: workstreamEmbedding.embedding,
         message: auto.message,
-        topK: 4,
-        minScore: 0.56,
+        topK: 6,
+        minScore: 0.34,
       }).catch(() => [])) as typeof workstreamMemoryMatches;
-      if (workstreamMemoryMatches.length > 0) {
+      if (workstreamMemoryMatches.some((entry) => entry.confidence >= 0.5 && entry.freshness >= 0.2)) {
         route.trace.toolchain.push("workstream_memory_injection");
       }
     } catch {
       workstreamMemoryMatches = [];
     }
+  }
+
+  const injectedWorkstreamMemory = workstreamMemoryMatches
+    .filter((entry) => entry.confidence >= 0.5 && entry.freshness >= 0.2)
+    .slice(0, 3);
+  const surfacedWorkstreamMemory = workstreamMemoryMatches
+    .filter((entry) => !injectedWorkstreamMemory.some((candidate) => candidate._id === entry._id))
+    .slice(0, 4)
+    .map((entry) => ({
+      ...entry,
+      reason:
+        entry.confidence < 0.5
+          ? "low_confidence" as const
+          : entry.freshness < 0.2
+            ? "low_freshness" as const
+            : "not_in_top_matches" as const,
+    }));
+  if (surfacedWorkstreamMemory.length > 0) {
+    route.trace.toolchain.push("workstream_memory_surfaced");
   }
 
   const workstreamPlannerSummary = activeWorkstreamId
@@ -2700,44 +2730,59 @@ export async function runChatPipeline(request: NextRequest) {
           : []),
       ].slice(0, 5).join("\n")
     : "";
-  const workstreamMemoryBlock = workstreamMemoryMatches.length > 0
-    ? workstreamMemoryMatches
-        .slice(0, 3)
+  const workstreamMemoryBlock = injectedWorkstreamMemory.length > 0
+    ? injectedWorkstreamMemory
         .map((entry) => `- ${entry.key}: ${entry.text}`)
         .join("\n")
     : "";
 
-  const memoryStatus = memoryPlan.profileText
-    ? `global ${memoryPlan.layer2Count} fact(s), topic ${memoryPlan.layer3Count} match(es)`
+  const memoryStatus = memoryPlan.profileText || injectedWorkstreamMemory.length > 0
+    ? `profile ${memoryPlan.layer2Count}, topic ${memoryPlan.layer3Count}, workstream ${injectedWorkstreamMemory.length}`
     : "no relevant memory entries";
-  const surfacedGlobalMemory = memoryPlan.layer2Text
-    .split("\n")
-    .map((line) => line.replace(/^-+\s*/, "").trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [labelPart, remainder = ""] = line.split(" - ", 2);
-      const [keyPart, textPart = ""] = remainder.split(":", 2);
-      const normalizedLabel = labelPart.toLowerCase();
-      const category = normalizedLabel.includes("identity")
-        ? "identity"
-        : normalizedLabel.includes("academic")
-          ? "academic"
-          : "preference";
-      return {
-        key: keyPart.trim() || labelPart.trim(),
-        text: textPart.trim(),
-        category: category as "identity" | "academic" | "preference",
-      };
-    })
-    .filter((entry) => entry.text.length > 0);
-  const surfacedTopicMemory = memoryPlan.retrievedTopicEntries.map((entry) => ({
-    key: entry.key,
-    text: entry.text,
-    category: entry.category,
-  }));
-  const usedMemory = [...surfacedGlobalMemory, ...surfacedTopicMemory].slice(0, 8);
+  const usedMemory = [
+    ...memoryPlan.injectedProfileEntries.map((entry) => ({
+      key: entry.key,
+      text: entry.text,
+      category: entry.category,
+    })),
+    ...memoryPlan.injectedTopicEntries.map((entry) => ({
+      key: entry.key,
+      text: entry.text,
+      category: entry.category,
+    })),
+    ...injectedWorkstreamMemory.map((entry) => ({
+      key: entry.key,
+      text: entry.text,
+      category: "topic" as const,
+    })),
+  ].slice(0, 8);
   if (usedMemory.length > 0) {
     (route.trace as { usedMemory?: typeof usedMemory }).usedMemory = usedMemory;
+  }
+  const relatedMemory = [
+    ...memoryPlan.surfacedTopicEntries.map((entry) => ({
+      id: entry._id,
+      source: "personal" as const,
+      key: entry.key,
+      text: entry.text,
+      category: entry.category,
+      confidence: entry.confidence,
+      freshness: entry.freshness,
+      reason: entry.reason,
+    })),
+    ...surfacedWorkstreamMemory.map((entry) => ({
+      id: entry._id,
+      source: "workstream" as const,
+      key: entry.key,
+      text: entry.text,
+      category: entry.category,
+      confidence: entry.confidence,
+      freshness: entry.freshness,
+      reason: entry.reason,
+    })),
+  ].slice(0, 6);
+  if (relatedMemory.length > 0) {
+    (route.trace as { relatedMemory?: typeof relatedMemory }).relatedMemory = relatedMemory;
   }
   const directiveStatus = directiveMemorySummary.forgotten > 0
     || directiveMemorySummary.negativeLinks > 0
@@ -3373,10 +3418,12 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
   if (route.trace.phasePlan?.some((phase) => phase.id === "ws_memory")) {
     queuePhaseUpdate(
       "ws_memory",
-      workstreamMemoryMatches.length > 0 ? "completed" : "skipped",
-      workstreamMemoryMatches.length > 0
-        ? `Used ${workstreamMemoryMatches.length} workstream memory entr${workstreamMemoryMatches.length === 1 ? "y" : "ies"}.`
-        : "No matching workstream memory.",
+      injectedWorkstreamMemory.length > 0 ? "completed" : "skipped",
+      injectedWorkstreamMemory.length > 0
+        ? `Injected ${injectedWorkstreamMemory.length} scoped workstream memory entr${injectedWorkstreamMemory.length === 1 ? "y" : "ies"}.`
+        : surfacedWorkstreamMemory.length > 0
+          ? "Matched workstream memory was surfaced but not auto-injected."
+          : "No matching workstream memory.",
     );
   }
   if (route.trace.phasePlan?.some((phase) => phase.id === "ws_artifacts")) {
@@ -4746,6 +4793,12 @@ BACK: [answer or definition]`,
         ].includes(effectiveMode)
         && finalizedResponse.trim().length >= 120;
       let extractedLearningContext: LearningContext | null = null;
+      let extractedWorkstreamMemory: Array<{
+        key: string;
+        text: string;
+        category: "concept" | "progress" | "preference" | "deadline" | "correction" | "resource_link";
+        confidence: number;
+      }> = [];
       const extractedMemory = (routePlan.shouldWriteMemory || shouldExtractLearningContext)
         ? await maybeExtractMemory({
             actorClerkId: actor.clerkId,
@@ -4754,6 +4807,37 @@ BACK: [answer or definition]`,
             userMessage: normalizedMessage,
             assistantResponse: finalizedResponse,
             persistMemory: routePlan.shouldWriteMemory,
+            workstreamContext: activeWorkstreamId && activeWorkstream
+              ? {
+                  workstreamId: activeWorkstreamId,
+                  title: String((activeWorkstream as { title?: unknown }).title ?? "Workstream"),
+                  description:
+                    typeof (activeWorkstream as { description?: unknown }).description === "string"
+                      ? String((activeWorkstream as { description?: unknown }).description)
+                      : undefined,
+                  plannerTitles: Array.isArray(activeWorkstreamPlannerItems)
+                    ? activeWorkstreamPlannerItems
+                        .slice(0, 4)
+                        .map((item) => String((item as { title?: unknown }).title ?? ""))
+                        .filter(Boolean)
+                    : [],
+                  artifactTitles: Array.isArray(activeWorkstreamArtifacts)
+                    ? activeWorkstreamArtifacts
+                        .slice(0, 4)
+                        .map((item) => String((item as { title?: unknown }).title ?? ""))
+                        .filter(Boolean)
+                    : [],
+                  noteTitles: Array.isArray(activeWorkstreamNotes)
+                    ? activeWorkstreamNotes
+                        .slice(0, 4)
+                        .map((item) => String((item as { title?: unknown }).title ?? ""))
+                        .filter(Boolean)
+                    : [],
+                }
+              : undefined,
+            onWorkstreamMemoryExtracted: (entries) => {
+              extractedWorkstreamMemory = entries;
+            },
             onLearningContextExtracted: (context) => {
               extractedLearningContext = context;
             },
@@ -4776,6 +4860,7 @@ BACK: [answer or definition]`,
         ? await routeMemoryWrite({
             actorClerkId: actor.clerkId,
             chatId,
+            sourceMessageId: appended.messageId,
             spendingTier: budget.tier,
             entries: extractedMemory,
             sourceType: "extraction",
@@ -4794,25 +4879,85 @@ BACK: [answer or definition]`,
             },
           }).catch(() => ({ written: 0, promoted: 0 }))
         : { written: 0, promoted: 0 };
+      const personalWorkstreamMirrorWrite =
+        routePlan.shouldWriteMemory && extractedWorkstreamMemory.length > 0
+          ? await routeMemoryWrite({
+              actorClerkId: actor.clerkId,
+              chatId,
+              sourceMessageId: appended.messageId,
+              sourceWorkstreamId: activeWorkstreamId,
+              spendingTier: budget.tier,
+              entries: extractedWorkstreamMemory.map((entry) => ({
+                key: entry.key,
+                value: entry.text,
+                confidence: entry.confidence,
+                extractedAt: Date.now(),
+              })),
+              sourceType: "extraction",
+              onModelCall: (call) => {
+                appendSubcall({
+                  phaseId: "memory",
+                  label: "Workstream memory mirror embedding",
+                  endpoint: "embeddings",
+                  status: "ok",
+                  modelUsed: call.model,
+                  inputTokens: call.usage?.prompt_tokens,
+                  outputTokens: call.usage?.completion_tokens,
+                  costCents: costCentsFromUsage(call.usage),
+                  durationMs: call.durationMs,
+                });
+              },
+            }).catch(() => ({ written: 0, promoted: 0 }))
+          : { written: 0, promoted: 0 };
+      const workstreamMemoryWrite =
+        routePlan.shouldWriteMemory && activeWorkstreamId && extractedWorkstreamMemory.length > 0
+          ? await convexMutation("workstreamMemory:upsertEntries", {
+              actorClerkId: actor.clerkId,
+              workstreamId: activeWorkstreamId,
+              sourceChatId: chatId,
+              sourceMessageId: appended.messageId,
+              entries: extractedWorkstreamMemory.map((entry) => ({
+                key: entry.key,
+                text: entry.text,
+                category: entry.category,
+                confidence: entry.confidence,
+                freshness: 1,
+                sourceType: "chat_extraction" as const,
+              })),
+            }).catch(() => ({ inserted: 0, updated: 0, superseded: 0 }))
+          : { inserted: 0, updated: 0, superseded: 0 };
       if (route.trace.phasePlan?.some((phase) => phase.id === "memory") && routePlan.shouldWriteMemory) {
         await emitPhaseUpdate(
           "memory",
-          routedMemoryWrite.written > 0 || extractedMemory.length > 0 ? "completed" : "skipped",
-          routedMemoryWrite.written > 0
-            ? `Layered memory updated (${routedMemoryWrite.written} write(s), ${routedMemoryWrite.promoted} promoted).`
-            : extractedMemory.length > 0
-              ? "Legacy memory updated; layered memory write skipped."
+          routedMemoryWrite.written > 0 || personalWorkstreamMirrorWrite.written > 0 || workstreamMemoryWrite.inserted > 0 || workstreamMemoryWrite.updated > 0 || extractedMemory.length > 0 || extractedWorkstreamMemory.length > 0
+            ? "completed"
+            : "skipped",
+          routedMemoryWrite.written > 0 || personalWorkstreamMirrorWrite.written > 0 || workstreamMemoryWrite.inserted > 0 || workstreamMemoryWrite.updated > 0
+            ? `Layered memory updated (personal ${routedMemoryWrite.written + personalWorkstreamMirrorWrite.written}, workstream ${workstreamMemoryWrite.inserted + workstreamMemoryWrite.updated}, superseded ${workstreamMemoryWrite.superseded}).`
+            : extractedMemory.length > 0 || extractedWorkstreamMemory.length > 0
+              ? "Memory extracted but no durable write completed."
               : "No durable memory update extracted.",
         );
       }
-      if (extractedMemory.length > 0) {
+      if (extractedMemory.length > 0 || extractedWorkstreamMemory.length > 0) {
         await send({
           type: "soul_update",
-          entries: extractedMemory.slice(0, 6).map((entry) => ({
-            key: entry.key,
-            value: entry.value,
-            confidence: entry.confidence,
-          })),
+          content:
+            extractedWorkstreamMemory.length > 0
+              ? `Saved ${extractedMemory.length} personal entr${extractedMemory.length === 1 ? "y" : "ies"} and ${extractedWorkstreamMemory.length} workstream cue${extractedWorkstreamMemory.length === 1 ? "" : "s"}.`
+              : undefined,
+          entries: [
+            ...extractedMemory.slice(0, 4).map((entry) => ({
+              key: entry.key,
+              value: entry.value,
+              confidence: entry.confidence,
+            })),
+            ...extractedWorkstreamMemory.slice(0, 2).map((entry) => ({
+              key: `${entry.category}:${entry.key}`,
+              value: entry.text,
+              confidence: entry.confidence,
+            })),
+          ],
         });
       }
       const mergedLearningContext = mergeLearningContexts(storedLearningContext, extractedLearningContext);
@@ -4871,7 +5016,7 @@ BACK: [answer or definition]`,
         );
       }
       finalizePhasePlan({
-        memoryUpdated: extractedMemory.length > 0,
+        memoryUpdated: extractedMemory.length > 0 || extractedWorkstreamMemory.length > 0,
         titleUpdated: Boolean(generatedTitle),
         repaired: route.trace.toolchain.some((tool) => tool.includes("repair")),
       });

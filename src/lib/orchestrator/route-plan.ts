@@ -1,4 +1,16 @@
-import type { AgentContract, ArtifactFormat, ModeContract, RoutePlan, RetrievalScope, StudyMode, ToolBundle } from "@/types";
+import type {
+  AgentContract,
+  ArtifactFormat,
+  AssignmentLevel,
+  ContextWindowStrategy,
+  ModeContract,
+  RoutePlan,
+  RetrievalScope,
+  StudyMode,
+  ThreadStrategy,
+  ToolBundle,
+  WorkstreamAssignment,
+} from "@/types";
 
 type BuildRoutePlanParams = {
   message: string;
@@ -12,14 +24,350 @@ type BuildRoutePlanParams = {
   autoSearchEnabled: boolean;
   thinkingLevel: "low" | "medium" | "high";
   complexity: "simple" | "medium" | "complex";
+  assignmentLevel?: AssignmentLevel;
   selectedAgent?: {
     _id: string;
     name: string;
     preferredModel?: string;
     preferredMode?: StudyMode;
   };
+  workstreamContext?: {
+    activeWorkstreamId?: string;
+    focusSurface?: "workspace" | "panel" | "chat" | "none";
+    activeWorkstream?: {
+      _id: string;
+      title: string;
+      description?: string;
+      subjectCode?: string;
+      linkedAgentId?: string;
+      lastActivityAt?: number;
+      defaultMode?: StudyMode;
+      defaultThinking?: "low" | "medium" | "high";
+      artifactCount?: number;
+      noteCount?: number;
+      plannerItemCount?: number;
+      threadCount?: number;
+      recentArtifactTitles?: string[];
+      recentNoteTitles?: string[];
+      recentPlannerTitles?: string[];
+    };
+    candidates?: Array<{
+      _id: string;
+      title: string;
+      description?: string;
+      subjectCode?: string;
+      linkedAgentId?: string;
+      lastActivityAt?: number;
+      defaultMode?: StudyMode;
+    }>;
+  };
+  threadContext?: {
+    currentChatId?: string;
+    turnCount?: number;
+    turnsSinceCompaction?: number;
+    contextWindowUtilization?: number;
+    lastMessageAt?: number;
+    recentMessages?: Array<{ role: "user" | "assistant"; content: string }>;
+    explicitlySameThread?: boolean;
+  };
   schoolSoulVersion?: string;
 };
+
+function compactText(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function tokenSet(value: string) {
+  return new Set(
+    compactText(value)
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((token) => token.length >= 3),
+  );
+}
+
+function lexicalSimilarity(left: string, right: string) {
+  const a = tokenSet(left);
+  const b = tokenSet(right);
+  if (a.size === 0 || b.size === 0) return 0;
+  let overlap = 0;
+  for (const token of a) {
+    if (b.has(token)) overlap += 1;
+  }
+  return overlap / Math.max(a.size, b.size, 1);
+}
+
+function normalizeConfidence(value: number) {
+  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+}
+
+function estimateMessageTokens(value: string) {
+  return Math.max(12, Math.ceil(compactText(value).length / 4));
+}
+
+function buildTokenBudgetTarget(params: {
+  assignmentLevel: AssignmentLevel;
+  complexity: BuildRoutePlanParams["complexity"];
+  hasAttachments: boolean;
+  shouldUseWebSearch: boolean;
+  hasWorkstreamContext: boolean;
+}) {
+  const baseByLevel: Record<AssignmentLevel, number> = {
+    L0: 600,
+    L1: 1200,
+    L2: 3000,
+    L3: 6000,
+    L4: 8000,
+  };
+  let total = baseByLevel[params.assignmentLevel];
+  if (params.complexity === "complex") total += 450;
+  if (params.hasAttachments) total += 350;
+  if (params.shouldUseWebSearch) total += 500;
+  if (params.hasWorkstreamContext && params.assignmentLevel === "L4") total += 350;
+  total = Math.round(total);
+  const systemPrompt = Math.round(total * (params.assignmentLevel === "L0" ? 0.45 : 0.28));
+  const memory = Math.round(total * (params.assignmentLevel === "L4" ? 0.12 : params.assignmentLevel === "L2" || params.assignmentLevel === "L3" ? 0.08 : 0.04));
+  const artifacts = Math.round(total * (params.assignmentLevel === "L4" ? 0.16 : 0.05));
+  const search = Math.round(total * (params.shouldUseWebSearch ? 0.18 : 0.02));
+  return {
+    systemPrompt,
+    memory,
+    artifacts,
+    search,
+    total,
+  };
+}
+
+function buildContextWindowStrategy(params: {
+  assignmentLevel: AssignmentLevel;
+  message: string;
+  complexity: BuildRoutePlanParams["complexity"];
+  hasAttachments: boolean;
+  shouldUseWebSearch: boolean;
+  workstreamAssignment: WorkstreamAssignment;
+  threadContext?: BuildRoutePlanParams["threadContext"];
+  tokenBudgetTarget: RoutePlan["tokenBudgetTarget"];
+}): ContextWindowStrategy {
+  const messageTokens = estimateMessageTokens(params.message);
+  const historyTokens = Math.round((params.threadContext?.contextWindowUtilization ?? 0) * 48_000);
+  const retrievalTokens = params.shouldUseWebSearch ? 900 : 0;
+  const workstreamTokens = params.workstreamAssignment.status === "assigned" ? 1100 : 0;
+  const attachmentTokens = params.hasAttachments ? 700 : 0;
+  const estimatedInputTokens =
+    messageTokens
+    + historyTokens
+    + retrievalTokens
+    + workstreamTokens
+    + attachmentTokens
+    + params.tokenBudgetTarget.systemPrompt
+    + params.tokenBudgetTarget.memory
+    + params.tokenBudgetTarget.artifacts;
+  const estimatedOutputTokens =
+    params.assignmentLevel === "L0"
+      ? 420
+      : params.assignmentLevel === "L1"
+        ? 750
+        : params.assignmentLevel === "L2"
+          ? 1300
+          : params.assignmentLevel === "L3"
+            ? 1900
+            : 2200;
+  const minimumContextTokens = estimatedInputTokens + estimatedOutputTokens + 4096;
+  const desiredContextTokens = Math.max(
+    minimumContextTokens,
+    Math.round(minimumContextTokens * (params.assignmentLevel === "L4" ? 1.35 : params.assignmentLevel === "L3" ? 1.22 : 1.12)),
+  );
+  const contextWindowPressure = normalizeConfidence(
+    Math.max(params.threadContext?.contextWindowUtilization ?? 0, estimatedInputTokens / Math.max(desiredContextTokens, 1)),
+  );
+  const compactionSuggested =
+    contextWindowPressure >= 0.72
+    || ((params.threadContext?.turnsSinceCompaction ?? 0) >= 15 && params.assignmentLevel !== "L0");
+  const preferLargeContext =
+    params.assignmentLevel === "L4"
+    || params.assignmentLevel === "L3"
+    || params.shouldUseWebSearch
+    || params.hasAttachments
+    || desiredContextTokens >= 64_000;
+  const rationale = [
+    `${params.assignmentLevel} assignment target`,
+    contextWindowPressure >= 0.72 ? "conversation is approaching context pressure" : "context pressure remains manageable",
+    preferLargeContext ? "prefer wide-context models for continuity" : "standard context is acceptable",
+  ];
+  return {
+    estimatedInputTokens,
+    estimatedOutputTokens,
+    desiredContextTokens,
+    minimumContextTokens,
+    compactionSuggested,
+    preferLargeContext,
+    contextWindowPressure,
+    rationale,
+  };
+}
+
+function resolveWorkstreamAssignment(params: {
+  message: string;
+  selectedAgentId?: string;
+  workstreamContext?: BuildRoutePlanParams["workstreamContext"];
+}): WorkstreamAssignment {
+  const active = params.workstreamContext?.activeWorkstream;
+  if (active && params.workstreamContext?.activeWorkstreamId === active._id) {
+    return {
+      status: "assigned",
+      workstreamId: active._id,
+      title: active.title,
+      confidence: 1,
+      reason: "Explicit workstream context is already active for this chat.",
+      signals: ["explicit_context"],
+    };
+  }
+
+  const candidates = params.workstreamContext?.candidates ?? [];
+  if (candidates.length === 0) {
+    return {
+      status: "none",
+      confidence: 0,
+      reason: "No candidate workstreams were available for assignment.",
+      signals: ["no_candidates"],
+    };
+  }
+
+  const scored = candidates
+    .map((candidate) => {
+      const lexicalScore = lexicalSimilarity(
+        params.message,
+        [
+          candidate.title,
+          candidate.description ?? "",
+          candidate.subjectCode ?? "",
+        ].join(" "),
+      );
+      const recencyHours = candidate.lastActivityAt
+        ? Math.max(0, (Date.now() - candidate.lastActivityAt) / (60 * 60 * 1000))
+        : 1_000;
+      const recencyScore = recencyHours <= 6 ? 0.18 : recencyHours <= 48 ? 0.09 : 0;
+      const agentScore =
+        params.selectedAgentId && candidate.linkedAgentId === params.selectedAgentId
+          ? 0.22
+          : 0;
+      const subjectCodeScore =
+        candidate.subjectCode && lexicalSimilarity(params.message, candidate.subjectCode) > 0
+          ? 0.12
+          : 0;
+      const totalScore = lexicalScore + recencyScore + agentScore + subjectCodeScore;
+      const signals = [
+        lexicalScore > 0 ? "topic_similarity" : "",
+        recencyScore > 0 ? "recent_activity" : "",
+        agentScore > 0 ? "linked_agent" : "",
+        subjectCodeScore > 0 ? "subject_code" : "",
+      ].filter(Boolean);
+      return {
+        candidate,
+        score: totalScore,
+        signals,
+      };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const top = scored[0];
+  const runnerUp = scored[1];
+  if (!top || top.score < 0.28) {
+    const newCandidateSignal = /\b(project|essay|assignment|deadline|subject|topic|research question|proposal)\b/i.test(params.message);
+    return {
+      status: newCandidateSignal ? "new_candidate" : "none",
+      confidence: normalizeConfidence(top?.score ?? 0),
+      reason: newCandidateSignal
+        ? "Prompt looks substantial but does not confidently match an existing workstream."
+        : "Prompt does not confidently match an existing workstream.",
+      signals: [newCandidateSignal ? "new_workstream_candidate" : "low_similarity"],
+    };
+  }
+
+  const assigned = top.score >= 0.72 || (top.score >= 0.58 && (!runnerUp || top.score - runnerUp.score >= 0.16));
+  return {
+    status: assigned ? "assigned" : "suggested",
+    workstreamId: top.candidate._id,
+    title: top.candidate.title,
+    confidence: normalizeConfidence(top.score),
+    reason: assigned
+      ? "Best workstream match from topic, recency, and linked-agent signals."
+      : "A plausible workstream match was found, but confidence is not high enough to auto-lock without correction.",
+    signals: top.signals,
+    alternateWorkstreamId: runnerUp?.candidate._id,
+    alternateTitle: runnerUp?.candidate.title,
+    candidateIds: scored.slice(0, 3).map((row) => row.candidate._id),
+  };
+}
+
+function decideThreadStrategy(params: {
+  message: string;
+  threadContext?: BuildRoutePlanParams["threadContext"];
+  workstreamAssignment: WorkstreamAssignment;
+}): ThreadStrategy {
+  if (!params.threadContext?.currentChatId) {
+    return {
+      action: "new_chat",
+      confidence: 1,
+      reason: "There is no active thread yet.",
+      contextWindowPressure: 0,
+      topicContinuity: 0,
+    };
+  }
+
+  const explicitFork = /\b(new question|different topic|separate thread|start fresh|new thread)\b/i.test(params.message);
+  const explicitContinue = Boolean(params.threadContext.explicitlySameThread) && !explicitFork;
+  const recentContext = (params.threadContext.recentMessages ?? [])
+    .slice(-6)
+    .map((entry) => entry.content)
+    .join(" ");
+  const topicContinuity = lexicalSimilarity(params.message, recentContext);
+  const timeGapHours = params.threadContext.lastMessageAt
+    ? Math.max(0, (Date.now() - params.threadContext.lastMessageAt) / (60 * 60 * 1000))
+    : undefined;
+  const contextWindowPressure = normalizeConfidence(params.threadContext.contextWindowUtilization ?? 0);
+  const turnsSinceCompaction = params.threadContext.turnsSinceCompaction ?? 0;
+  const continuityScore = [
+    explicitContinue ? 0.42 : 0,
+    topicContinuity >= 0.55 ? 0.28 : topicContinuity >= 0.42 ? 0.18 : 0,
+    contextWindowPressure < 0.75 ? 0.12 : 0,
+    turnsSinceCompaction < 15 ? 0.08 : 0,
+    typeof timeGapHours !== "number" || timeGapHours < 12 ? 0.08 : 0,
+  ].reduce((sum, value) => sum + value, 0);
+  const forkScore = [
+    explicitFork ? 0.52 : 0,
+    contextWindowPressure >= 0.75 ? 0.28 : contextWindowPressure >= 0.68 ? 0.14 : 0,
+    turnsSinceCompaction >= 15 ? 0.18 : turnsSinceCompaction >= 12 ? 0.08 : 0,
+    typeof timeGapHours === "number" && timeGapHours >= 12 ? 0.16 : 0,
+    topicContinuity < 0.3 ? 0.24 : topicContinuity < 0.42 ? 0.1 : 0,
+  ].reduce((sum, value) => sum + value, 0);
+  const shouldFork =
+    !explicitContinue && (forkScore >= 0.46 || forkScore > continuityScore + 0.12);
+  return {
+    action: shouldFork ? "fork" : "continue",
+    confidence: shouldFork
+      ? normalizeConfidence(0.5 + (forkScore * 0.4))
+      : normalizeConfidence(0.52 + (continuityScore * 0.38) + (topicContinuity * 0.14)),
+    reason: shouldFork
+      ? explicitFork
+        ? "User explicitly requested a fresh topic/thread."
+        : contextWindowPressure >= 0.75
+          ? "Current thread is approaching context saturation."
+          : turnsSinceCompaction >= 15
+            ? "Thread has run long enough that a clean fork is safer than continuing."
+            : typeof timeGapHours === "number" && timeGapHours >= 12
+              ? "Long gap since the last turn suggests a fresh thread is cleaner."
+              : "Topic continuity with the recent thread is too weak."
+      : explicitContinue
+        ? "User is explicitly continuing the active thread and continuity remains acceptable."
+        : "Prompt remains aligned with the active thread.",
+    contextWindowPressure,
+    topicContinuity,
+    timeGapHours,
+    turnsSinceCompaction,
+  };
+}
 
 function detectRequestedModelPhrase(message: string) {
   const match = message.match(
@@ -227,6 +575,9 @@ function buildAgentContract(params: BuildRoutePlanParams): AgentContract | undef
 }
 
 export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
+  const assignmentLevel =
+    params.assignmentLevel
+    ?? (params.complexity === "complex" || params.mode === "research" ? "L2" : params.complexity === "simple" ? "L0" : "L1");
   const lowerMessage = params.message.toLowerCase();
   const modeContract = buildModeContract(params.mode);
   const agentContract = buildAgentContract(params);
@@ -242,6 +593,16 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
   const requestedArtifactFormats = artifactRequest ? detectRequestedArtifactFormats(params.message) : [];
   const studyMode = params.mode === "quiz" || params.mode === "flashcard" || params.mode === "tutor";
   const multimodal = params.hasAttachments;
+  const workstreamAssignment = resolveWorkstreamAssignment({
+    message: params.message,
+    selectedAgentId: params.selectedAgent?._id,
+    workstreamContext: params.workstreamContext,
+  });
+  const threadStrategy = decideThreadStrategy({
+    message: params.message,
+    threadContext: params.threadContext,
+    workstreamAssignment,
+  });
   const shouldUseSchoolResources = params.hasPack || params.hasAgentResources || /upload|attached|file|notes|resource|chapter|pack/i.test(lowerMessage);
   const researchNeedsSearch =
     params.mode === "research"
@@ -317,13 +678,32 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
       maxExtractResults: 1,
     };
   })();
+  const tokenBudgetTarget = buildTokenBudgetTarget({
+    assignmentLevel,
+    complexity: params.complexity,
+    hasAttachments: params.hasAttachments,
+    shouldUseWebSearch,
+    hasWorkstreamContext: workstreamAssignment.status === "assigned",
+  });
+  const contextWindowStrategy = buildContextWindowStrategy({
+    assignmentLevel,
+    message: params.message,
+    complexity: params.complexity,
+    hasAttachments: params.hasAttachments,
+    shouldUseWebSearch,
+    workstreamAssignment,
+    threadContext: params.threadContext,
+    tokenBudgetTarget,
+  });
   const responseBudget =
-    params.complexity === "complex" || artifactRequest
+    assignmentLevel === "L3" || assignmentLevel === "L4"
+      ? "deep"
+      : params.complexity === "complex" || artifactRequest
       ? "deep"
       : params.mode === "research"
         ? "normal"
-      : params.complexity === "medium"
-        ? "normal"
+        : params.complexity === "medium"
+          ? "normal"
         : "simple";
   const requestedOrchestration = detectOrchestrationIntent(params.message);
   const shouldUseMultiStep =
@@ -349,7 +729,7 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
       ...(retrievalScopes.length > 0 ? (["retrieval"] as ToolBundle[]) : []),
       ...(artifactRequest ? (["artifact"] as ToolBundle[]) : []),
       ...(artifactRequest || params.mode === "research" ? (["skills"] as ToolBundle[]) : []),
-      ...(personalTask ? (["memory"] as ToolBundle[]) : []),
+      ...(personalTask || assignmentLevel === "L4" ? (["memory"] as ToolBundle[]) : []),
       ...(shouldUseMultiStep ? (["multi_agent"] as ToolBundle[]) : []),
     ]),
   ).filter((bundle) => bundle !== "none");
@@ -359,13 +739,15 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
     ...(artifactRequest ? [] : []),
   ];
   const preferred = [
-    ...(params.mode === "research" || shouldUseMultiStep ? ["reasoning" as const] : []),
+    ...(params.mode === "research" || shouldUseMultiStep || assignmentLevel === "L4" ? ["reasoning" as const] : []),
     ...(shouldUseWebSearch ? ["search" as const] : []),
     ...(artifactRequest ? ["reasoning" as const] : []),
   ];
 
   return {
-    taskClass: artifactRequest
+    taskClass: assignmentLevel === "L4"
+      ? "workstream_deep"
+      : artifactRequest
       ? "artifact_generation"
       : params.mode === "research"
         ? "research"
@@ -380,20 +762,30 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
                 : studyMode
                   ? "study_mode"
                   : "simple_question",
+    assignmentLevel,
     timeSensitive,
     hasAttachments: params.hasAttachments,
     hasSelectedMode: params.selectedMode !== "auto",
     hasSelectedAgent: params.hasAgent,
     personalTask,
-    shouldConsultMemory: personalTask,
-    shouldWriteMemory: shouldWriteMemoryFromMessage(params.message),
+    shouldConsultMemory: personalTask || assignmentLevel === "L4",
+    shouldWriteMemory: shouldWriteMemoryFromMessage(params.message) || assignmentLevel === "L4",
     shouldUseSchoolResources,
     shouldUseWebSearch,
     shouldUseMultiStep,
     responseBudget,
+    tokenBudgetTarget,
     allowedToolBundles: allowedToolBundles.length > 0 ? allowedToolBundles : ["none"],
     retrievalScopes,
-    memoryScopes: personalTask ? ["user_global"] : ["none"],
+    memoryScopes:
+      assignmentLevel === "L4"
+        ? (["user_global", "workstream"] as const)
+        : personalTask
+          ? (["user_global"] as const)
+          : (["none"] as const),
+    workstreamAssignment,
+    threadStrategy,
+    contextWindowStrategy,
     candidateModelRequirements: {
       required,
       preferred,

@@ -277,6 +277,7 @@ export function ChatMessage({
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
   const [showEnhanced, setShowEnhanced] = useState(false);
   const [showWhy, setShowWhy] = useState(false);
+  const [showRelatedMemory, setShowRelatedMemory] = useState(false);
   const { openPanel } = usePanel();
   const [editing, setEditing] = useState(false);
   const [editedContent, setEditedContent] = useState(content);
@@ -816,6 +817,55 @@ export function ChatMessage({
                   )}
                 </div>
               )}
+              {routeTrace?.relatedMemory && routeTrace.relatedMemory.length > 0 ? (
+                <section className="mt-3 max-w-2xl rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]/75 p-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowRelatedMemory((value) => !value)}
+                    className="flex w-full cursor-pointer items-center justify-between gap-3 text-left"
+                  >
+                    <span className="inline-flex items-center gap-2 text-[11px] font-medium text-[var(--text-secondary)]">
+                      <Brain className="h-3.5 w-3.5" />
+                      Related memory
+                      <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-1.5 py-0.5 text-[10px]">
+                        {routeTrace.relatedMemory.length}
+                      </span>
+                    </span>
+                    <ChevronDown className={`h-3.5 w-3.5 text-[var(--text-secondary)] transition ${showRelatedMemory ? "rotate-180" : ""}`} />
+                  </button>
+                  <p className="mt-1 text-[11px] leading-relaxed text-[var(--text-tertiary)]">
+                    These cues matched the prompt but were kept out of the prompt unless they were fresh and high-confidence enough.
+                  </p>
+                  {showRelatedMemory ? (
+                    <div className="mt-3 space-y-2">
+                      {routeTrace.relatedMemory.map((entry) => (
+                        <article
+                          key={entry.id}
+                          className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2.5"
+                        >
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0.5 text-[10px] capitalize text-[var(--text-secondary)]">
+                              {entry.source}
+                            </span>
+                            <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0.5 text-[10px] capitalize text-[var(--text-secondary)]">
+                              {entry.reason.replace(/_/g, " ")}
+                            </span>
+                            <span className="text-[10px] text-[var(--text-tertiary)]">
+                              conf {entry.confidence.toFixed(2)} · fresh {entry.freshness.toFixed(2)}
+                            </span>
+                          </div>
+                          <p className="mt-2 text-xs font-medium text-[var(--text-primary)]">
+                            {entry.key.replace(/_/g, " ")}
+                          </p>
+                          <p className="mt-1 text-xs leading-relaxed text-[var(--text-secondary)]">
+                            {entry.text}
+                          </p>
+                        </article>
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
             </div>
           </div>
         )}

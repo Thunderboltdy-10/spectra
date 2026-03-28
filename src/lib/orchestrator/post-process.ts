@@ -65,12 +65,48 @@ export type PlannedMemoryProfile = {
   layer3Text: string;
   layer2Count: number;
   layer3Count: number;
-  retrievedTopicEntries: Array<{
+  injectedProfileEntries: Array<{
+    key: string;
+    text: string;
+    category: "identity" | "academic" | "preference";
+    confidence: number;
+    freshness?: number;
+  }>;
+  injectedTopicEntries: Array<{
+    _id: string;
     key: string;
     text: string;
     category: "topic" | "artifact" | "correction";
     confidence: number;
+    freshness: number;
     score: number;
+    scope?: "global" | "workstream";
+    sourceWorkstreamId?: string;
+    sourceChatId?: string;
+  }>;
+  surfacedTopicEntries: Array<{
+    _id: string;
+    key: string;
+    text: string;
+    category: "topic" | "artifact" | "correction";
+    confidence: number;
+    freshness: number;
+    score: number;
+    scope?: "global" | "workstream";
+    sourceWorkstreamId?: string;
+    sourceChatId?: string;
+    reason: "low_confidence" | "low_freshness" | "not_in_top_matches";
+  }>;
+  retrievedTopicEntries: Array<{
+    _id: string;
+    key: string;
+    text: string;
+    category: "topic" | "artifact" | "correction";
+    confidence: number;
+    freshness: number;
+    score: number;
+    scope?: "global" | "workstream";
+    sourceWorkstreamId?: string;
     sourceChatId?: string;
   }>;
   embeddingCall?: {
@@ -83,6 +119,13 @@ export type PlannedMemoryProfile = {
     };
     durationMs?: number;
   };
+};
+
+export type ExtractedWorkstreamMemoryEntry = {
+  key: string;
+  text: string;
+  category: "concept" | "progress" | "preference" | "deadline" | "correction" | "resource_link";
+  confidence: number;
 };
 
 async function selectUtilityModel(params: {
@@ -512,6 +555,9 @@ function coerceRoutedMemoryEntries(params: {
 export async function routeMemoryWrite(params: {
   actorClerkId: string;
   chatId?: string;
+  sourceMessageId?: string;
+  sourceArtifactId?: string;
+  sourceWorkstreamId?: string;
   spendingTier?: "normal" | "expensive_blocked" | "cheap_only" | "free_only";
   entries: Array<MemoryEntry | MemoryDirectiveEntry>;
   sourceType?: MemoryEntrySourceType;
@@ -545,9 +591,11 @@ export async function routeMemoryWrite(params: {
     text: string;
     embedding?: number[];
     confidence: number;
+    freshness?: number;
     category: MemoryEntryCategory;
     sourceType: MemoryEntrySourceType;
     status?: "pending" | "confirmed";
+    scope?: "global" | "workstream";
     relatedArtifacts?: string[];
     negativeTopicLinks?: string[];
   }> = [];
@@ -558,9 +606,11 @@ export async function routeMemoryWrite(params: {
         key: entry.key,
         text: entry.text,
         confidence: entry.confidence,
+        freshness: params.sourceWorkstreamId ? 1 : undefined,
         category: entry.category,
         sourceType: entry.sourceType,
         status: entry.status,
+        scope: params.sourceWorkstreamId ? "workstream" : "global",
         relatedArtifacts: entry.relatedArtifacts,
         negativeTopicLinks: entry.negativeTopicLinks,
       });
@@ -590,9 +640,11 @@ export async function routeMemoryWrite(params: {
         text: entry.text,
         embedding: embeddingResult.embedding,
         confidence: entry.confidence,
+        freshness: params.sourceWorkstreamId ? 1 : undefined,
         category: entry.category,
         sourceType: entry.sourceType,
         status: entry.status,
+        scope: params.sourceWorkstreamId ? "workstream" : "global",
         relatedArtifacts: entry.relatedArtifacts,
         negativeTopicLinks: entry.negativeTopicLinks,
       });
@@ -609,12 +661,18 @@ export async function routeMemoryWrite(params: {
     {
       actorClerkId: string;
       sourceChatId?: string;
+      sourceMessageId?: string;
+      sourceArtifactId?: string;
+      sourceWorkstreamId?: string;
       entries: typeof payloadEntries;
     },
     { inserted: number; updated: number; promoted: number }
   >("memory:routeMemoryWrite", {
     actorClerkId: params.actorClerkId,
     sourceChatId: params.chatId,
+    sourceMessageId: params.sourceMessageId,
+    sourceArtifactId: params.sourceArtifactId,
+    sourceWorkstreamId: params.sourceWorkstreamId,
     entries: payloadEntries,
   }).catch(() => ({ inserted: 0, updated: 0, promoted: 0 }));
 
@@ -665,14 +723,19 @@ export async function planMemoryRead(params: {
   const [globalEntries] = await Promise.all([
     convexQuery<
       { actorClerkId: string },
-      Array<{ key: string; text: string; category: "identity" | "academic" | "preference"; confidence: number }>
+      Array<{ key: string; text: string; category: "identity" | "academic" | "preference"; confidence: number; freshness?: number }>
     >("memory:getGlobalProfileEntries", {
       actorClerkId: params.actorClerkId,
     }).catch(() => []),
   ]);
 
+  const injectedProfileEntries = globalEntries
+    .filter((entry) => entry.category === "identity" || entry.category === "preference")
+    .filter((entry) => (typeof entry.freshness !== "number" || entry.freshness >= 0.2) && entry.confidence >= 0.5)
+    .slice(0, 3);
+
   const layer2Lines: string[] = [];
-  for (const entry of globalEntries.slice(0, 12)) {
+  for (const entry of injectedProfileEntries) {
     const key = normalizeMemoryLine(entry.key.replace(/_/g, " "));
     const text = normalizeMemoryLine(entry.text);
     if (!text) continue;
@@ -700,7 +763,7 @@ export async function planMemoryRead(params: {
     layer2Lines.push(`Learning Preferences - guidance: ${normalizeMemoryLine(prefs.customGuidance)}`);
   }
 
-  const dedupedLayer2 = dedupeProfileLines(layer2Lines).slice(0, 16);
+  const dedupedLayer2 = dedupeProfileLines(layer2Lines).slice(0, 3);
   const layer2Text = dedupedLayer2.map((line) => `- ${line}`).join("\n");
 
   let embeddingCall: PlannedMemoryProfile["embeddingCall"];
@@ -740,24 +803,43 @@ export async function planMemoryRead(params: {
     ? await convexAction<
       { actorClerkId: string; embedding: number[]; message: string; topK: number; minScore: number },
       Array<{
+        _id: string;
         key: string;
         text: string;
         category: "topic" | "artifact" | "correction";
         confidence: number;
+        freshness: number;
         score: number;
+        scope?: "global" | "workstream";
+        sourceWorkstreamId?: string;
         sourceChatId?: string;
       }>
     >("memory:retrieveRelevantEntries", {
       actorClerkId: params.actorClerkId,
       embedding: queryEmbedding,
       message: params.message,
-      topK: MEMORY_TOPIC_MAX_ENTRIES,
-      minScore: MEMORY_TOPIC_SIMILARITY_MIN,
+      topK: 7,
+      minScore: 0.34,
     }).catch(() => [])
     : [];
 
-  const layer3Lines = retrievedTopicEntries
-    .slice(0, MEMORY_TOPIC_MAX_ENTRIES)
+  const injectedTopicEntries = retrievedTopicEntries
+    .filter((entry) => entry.confidence >= 0.5 && entry.freshness >= 0.2)
+    .slice(0, 2);
+  const surfacedTopicEntries = retrievedTopicEntries
+    .filter((entry) => !injectedTopicEntries.some((candidate) => candidate._id === entry._id))
+    .slice(0, 4)
+    .map((entry) => ({
+      ...entry,
+      reason:
+        entry.confidence < 0.5
+          ? "low_confidence" as const
+          : entry.freshness < 0.2
+            ? "low_freshness" as const
+            : "not_in_top_matches" as const,
+    }));
+
+  const layer3Lines = injectedTopicEntries
     .map((entry) => `- ${entry.key.replace(/_/g, " ")}: ${normalizeMemoryLine(entry.text)}`);
   const layer3Text = layer3Lines.join("\n");
 
@@ -776,8 +858,11 @@ export async function planMemoryRead(params: {
     profileText: sections.join("\n\n").trim(),
     layer2Text,
     layer3Text,
-    layer2Count: dedupedLayer2.length,
-    layer3Count: retrievedTopicEntries.length,
+    layer2Count: injectedProfileEntries.length,
+    layer3Count: injectedTopicEntries.length,
+    injectedProfileEntries,
+    injectedTopicEntries,
+    surfacedTopicEntries,
     retrievedTopicEntries,
     embeddingCall,
   };
@@ -1268,6 +1353,15 @@ export async function maybeExtractMemory(params: {
   userMessage: string;
   assistantResponse: string;
   persistMemory?: boolean;
+  workstreamContext?: {
+    workstreamId: string;
+    title: string;
+    description?: string;
+    plannerTitles?: string[];
+    artifactTitles?: string[];
+    noteTitles?: string[];
+  };
+  onWorkstreamMemoryExtracted?: (entries: ExtractedWorkstreamMemoryEntry[]) => void;
   onLearningContextExtracted?: (context: LearningContext) => void;
   onModelCall?: (call: {
     model: string;
@@ -1438,6 +1532,95 @@ export async function maybeExtractMemory(params: {
   }
   if (extractedLearningContext) {
     params.onLearningContextExtracted?.(extractedLearningContext);
+  }
+
+  if (params.workstreamContext?.workstreamId) {
+    const workstreamSnippet = [
+      `Workstream: ${params.workstreamContext.title}`,
+      params.workstreamContext.description ? `Description: ${params.workstreamContext.description}` : "",
+      params.workstreamContext.plannerTitles?.length
+        ? `Planner: ${params.workstreamContext.plannerTitles.slice(0, 4).join(" | ")}`
+        : "",
+      params.workstreamContext.artifactTitles?.length
+        ? `Artifacts: ${params.workstreamContext.artifactTitles.slice(0, 4).join(" | ")}`
+        : "",
+      params.workstreamContext.noteTitles?.length
+        ? `Notes: ${params.workstreamContext.noteTitles.slice(0, 4).join(" | ")}`
+        : "",
+      "",
+      snippet,
+    ].filter(Boolean).join("\n");
+
+    const wsStartedAt = Date.now();
+    const workstreamCompletionPromise = openRouterChatCompletion({
+      model: utility.model,
+      fallbackModels: utility.fallbackModels,
+      messages: [
+        {
+          role: "system",
+          content:
+            "Extract only workstream-scoped durable memory. Return JSON only in this shape: {\"workstreamMemory\":[{\"key\":\"...\",\"text\":\"...\",\"category\":\"concept|progress|preference|deadline|correction|resource_link\",\"confidence\":0.0}]}. Capture concepts mastered, progress state, decisions, deadlines, and important resource references. Do not restate the whole conversation. Prefer concise durable statements.",
+        },
+        {
+          role: "user",
+          content: workstreamSnippet,
+        },
+      ],
+      temperature: 0,
+    });
+    void workstreamCompletionPromise.then(async (completion) => {
+      const model = completion.model ?? utility.model;
+      const usage = completion.usage;
+      const durationMs = Date.now() - wsStartedAt;
+      await recordOpenRouterUsage({
+        actorClerkId: params.actorClerkId,
+        chatId: params.chatId,
+        model,
+        usage,
+      }).catch(() => {});
+      params.onModelCall?.({
+        model,
+        usage,
+        durationMs,
+      });
+    }).catch(() => {});
+
+    const workstreamCompletion = await withTimeout(
+      workstreamCompletionPromise,
+      4500,
+    );
+
+    if (workstreamCompletion) {
+      const raw = workstreamCompletion.choices?.[0]?.message?.content ?? "{}";
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[0]) as {
+            workstreamMemory?: Array<{
+              key?: string;
+              text?: string;
+              category?: ExtractedWorkstreamMemoryEntry["category"];
+              confidence?: number;
+            }>;
+          };
+          const workstreamEntries = (parsed.workstreamMemory ?? [])
+            .filter((entry) => typeof entry.key === "string" && typeof entry.text === "string" && typeof entry.category === "string")
+            .slice(0, 6)
+            .map((entry) => ({
+              key: canonicalMemoryKey(String(entry.key)),
+              text: normalizeMemoryLine(String(entry.text)).slice(0, 320),
+              category: entry.category as ExtractedWorkstreamMemoryEntry["category"],
+              confidence: Math.max(0, Math.min(1, Number(entry.confidence ?? 0.7))),
+            }))
+            .filter((entry) => entry.text.length > 0);
+          if (workstreamEntries.length > 0) {
+            params.onWorkstreamMemoryExtracted?.(workstreamEntries);
+          }
+        } catch {
+          // Ignore malformed workstream extraction payloads.
+        }
+      }
+    }
   }
 
   if (params.persistMemory === false) {

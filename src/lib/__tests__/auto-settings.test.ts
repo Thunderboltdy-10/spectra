@@ -161,6 +161,29 @@ describe("auto-settings prompt analysis", () => {
     expect(capped.requestClass).toBe("T2");
   });
 
+  it("elevates active workspace-continuity prompts to L4/T3", () => {
+    const workstreamDeep = classifyRequest({
+      message: "Continue this project, check what's left in the planner, and use the latest notes.",
+      complexity: "medium",
+      mode: "general",
+      hasAttachments: false,
+      isFirstMessage: false,
+      spendingTier: "normal",
+      workstreamContext: {
+        activeWorkstreamId: "ws_bio",
+        focusSurface: "panel",
+        artifactCount: 3,
+        noteCount: 2,
+        plannerItemCount: 2,
+        threadCount: 5,
+        linkedAgent: true,
+      },
+    });
+
+    expect(workstreamDeep.requestClass).toBe("T3");
+    expect(workstreamDeep.assignmentLevel).toBe("L4");
+  });
+
   it("skips paid prompt-enhancement model calls in free_only tier", async () => {
     const completionSpy = vi.spyOn(openRouter, "openRouterChatCompletion").mockResolvedValue({
       id: "mock",

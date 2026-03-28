@@ -77,7 +77,7 @@ export async function runAssistantStreaming(params: {
   };
 
   if (!params.shouldVerify) {
-    const maxContinuations = Math.max(0, Math.min(2, params.maxContinuations ?? 2));
+    const maxContinuations = Math.max(0, Math.min(4, params.maxContinuations ?? 2));
     let continuationMessages = params.messages;
 
     while (true) {
@@ -143,7 +143,7 @@ export async function runAssistantStreaming(params: {
       continuationMessages = [
         ...continuationMessages,
         { role: "assistant", content: roundResponse },
-        { role: "user", content: "Continue from where you stopped." },
+        { role: "user", content: "Continue from where you stopped. Do not restart, summarize, or repeat prior content unless needed for continuity." },
       ];
     }
   } else {
@@ -493,7 +493,7 @@ export async function runCollaborativeStreaming(params: {
     return next;
   };
 
-  const maxContinuations = Math.max(0, Math.min(2, params.maxContinuations ?? 2));
+  const maxContinuations = Math.max(0, Math.min(4, params.maxContinuations ?? 2));
   let continuationCount = 0;
   let continuationMessages: OpenRouterMessage[] = [
     { role: "system", content: params.baseSystemPrompt },
@@ -567,7 +567,7 @@ export async function runCollaborativeStreaming(params: {
     continuationMessages = [
       ...continuationMessages,
       { role: "assistant", content: roundResponse },
-      { role: "user", content: "Continue from where you stopped." },
+      { role: "user", content: "Continue from where you stopped. Do not restart, summarize, or repeat prior content unless needed for continuity." },
     ];
   }
   const synthesisDurationMs = Date.now() - synthesisStartedAt;

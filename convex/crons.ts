@@ -17,6 +17,12 @@ crons.daily(
   internal.resources.cleanupExpired,
   { limit: 300 },
 );
+crons.daily(
+  "decay-memory-freshness",
+  { hourUTC: 1, minuteUTC: 20 },
+  internal.memory.runDailyMaintenance,
+  {},
+);
 crons.interval(
   "generate-study-reminders",
   { hours: 1 },

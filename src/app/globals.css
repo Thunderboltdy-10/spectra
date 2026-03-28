@@ -491,6 +491,13 @@ button:disabled {
   animation: right-panel-enter-sheet 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* ─── Workspace React Flow ────────────────────────────────── */
+
+.workspace-react-flow {
+  /* Prevent page scroll — workspace is a spatial surface */
+  touch-action: none;
+}
+
 .workspace-react-flow .react-flow__renderer,
 .workspace-react-flow .react-flow__pane,
 .workspace-react-flow .react-flow__viewport {
@@ -504,22 +511,48 @@ button:disabled {
 
 .workspace-react-flow .react-flow__controls {
   border: 1px solid var(--border-default);
-  border-radius: 18px;
+  border-radius: 14px;
   overflow: hidden;
-  box-shadow: var(--shadow-card);
-  background: color-mix(in oklab, var(--bg-elevated) 90%, transparent);
-  backdrop-filter: blur(14px);
+  box-shadow: 0 4px 16px -4px rgba(0, 0, 0, 0.08);
+  background: color-mix(in oklab, var(--bg-elevated) 92%, transparent);
+  backdrop-filter: blur(16px);
+  gap: 0;
 }
 
 .workspace-react-flow .react-flow__controls-button {
   background: transparent;
   color: var(--text-secondary);
-  border-bottom-color: var(--border-default);
+  border-bottom: 1px solid var(--border-default);
+  transition: all 160ms ease;
+}
+
+.workspace-react-flow .react-flow__controls-button:last-child {
+  border-bottom: none;
 }
 
 .workspace-react-flow .react-flow__controls-button:hover {
   background: var(--bg-hover);
-  color: var(--text-primary);
+  color: var(--accent-cyan);
+}
+
+/* Smoother edge rendering */
+.workspace-react-flow .react-flow__edge-path {
+  transition: stroke-opacity 300ms ease;
+}
+
+/* Node entrance animations */
+.workspace-react-flow .react-flow__node {
+  transition: filter 300ms ease;
+}
+
+.workspace-react-flow .react-flow__node:hover {
+  filter: brightness(1.02);
+  z-index: 10 !important;
+}
+
+/* Background pattern refinement */
+.workspace-react-flow .react-flow__background {
+  opacity: 0.6;
 }
 
 .right-panel-content {

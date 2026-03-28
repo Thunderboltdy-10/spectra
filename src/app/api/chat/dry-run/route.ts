@@ -118,6 +118,7 @@ export async function POST(request: NextRequest) {
             thinkingLevel: "low",
             complexity: earlyComplexity,
             requestClass: earlyClassification.requestClass,
+            assignmentLevel: earlyClassification.assignmentLevel,
             classificationReason: earlyClassification.reason,
             promptCategory: "general",
             questionType: "other",
@@ -148,6 +149,7 @@ export async function POST(request: NextRequest) {
       spendingTier: budget.tier,
     });
     auto.requestClass = requestClassification.requestClass;
+    auto.assignmentLevel = requestClassification.assignmentLevel;
     auto.classificationReason = requestClassification.reason;
     const pipelineController = new PipelineController({
       requestClass: requestClassification.requestClass,
@@ -187,6 +189,20 @@ export async function POST(request: NextRequest) {
       requiredCapabilities: (body.attachmentTypes?.length ?? 0) > 0 ? ["vision"] : [],
       preferredCapabilities: auto.searchEnabled ? ["reasoning", "search"] : ["reasoning"],
       requestClass: auto.requestClass,
+      assignmentLevel: auto.assignmentLevel,
+      estimatedInputTokens: Math.ceil(auto.message.length / 4) + (body.attachmentTypes?.length ? 700 : 0),
+      estimatedOutputTokens:
+        auto.assignmentLevel === "L0"
+          ? 420
+          : auto.assignmentLevel === "L1"
+            ? 750
+            : auto.assignmentLevel === "L2"
+              ? 1300
+              : auto.assignmentLevel === "L3"
+                ? 1900
+                : 2200,
+      desiredContextTokens: auto.assignmentLevel === "L4" ? 80_000 : auto.assignmentLevel === "L3" ? 56_000 : 24_000,
+      preferLargeContext: auto.assignmentLevel === "L3" || auto.assignmentLevel === "L4" || auto.searchEnabled,
       manualModelConfirmedExpensive: false,
       modelCatalog: catalog,
       modelRuntimeStats: runtimeStatMap,
@@ -213,6 +229,7 @@ export async function POST(request: NextRequest) {
           attachmentTypes: body.attachmentTypes ?? [],
           promptEnhanced: auto.promptEnhanced,
           messageLength: auto.message.length,
+          assignmentLevel: auto.assignmentLevel,
           requestClass: auto.requestClass,
           classificationReason: auto.classificationReason,
         },
@@ -226,6 +243,7 @@ export async function POST(request: NextRequest) {
         routingDurationMs: routeDecision.routingDurationMs,
         phasePlan: [routeDecision.phase],
         subcalls: [],
+        assignmentLevel: auto.assignmentLevel,
         requestClass: auto.requestClass,
         classificationReason: auto.classificationReason,
         stepsExecuted: pipelineController.getState().completedStages,

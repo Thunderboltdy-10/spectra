@@ -289,6 +289,7 @@ export default defineSchema({
     sourceArtifactId: v.optional(v.id("artifacts")),
     status: v.union(v.literal("active"), v.literal("superseded"), v.literal("dismissed")),
     supersededBy: v.optional(v.id("workstreamMemory")),
+    archivedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -534,6 +535,7 @@ export default defineSchema({
     sourceWorkstreamId: v.optional(v.id("workstreams")),
     freshness: v.optional(v.number()),
     scope: v.optional(v.union(v.literal("global"), v.literal("workstream"))),
+    archivedAt: v.optional(v.number()),
     relatedArtifacts: v.optional(v.array(v.string())),
     negativeTopicLinks: v.optional(v.array(v.string())),
     createdAt: v.number(),

@@ -84,9 +84,22 @@ export type UserDirectives = {
 };
 
 export type RequestClass = "T0" | "T1" | "T2" | "T3";
+export type AssignmentLevel = "L0" | "L1" | "L2" | "L3" | "L4";
+
+export type WorkstreamClassificationContext = {
+  activeWorkstreamId?: string;
+  focusSurface?: "workspace" | "panel" | "chat" | "none";
+  artifactCount?: number;
+  noteCount?: number;
+  plannerItemCount?: number;
+  threadCount?: number;
+  linkedAgent?: boolean;
+  recentActivityAt?: number;
+};
 
 export type RequestClassification = {
   requestClass: RequestClass;
+  assignmentLevel: AssignmentLevel;
   reason: string;
 };
 
@@ -298,6 +311,7 @@ export type AutoSettingsResult = {
   thinkingLevel: ThinkingLevel;
   complexity: "simple" | "medium" | "complex";
   requestClass: RequestClass;
+  assignmentLevel: AssignmentLevel;
   classificationReason: string;
   promptCategory: PromptCategory;
   questionType: QuestionType;
@@ -394,6 +408,7 @@ export function classifyRequest(params: {
   isFirstMessage?: boolean;
   multiAgentRequested?: boolean;
   spendingTier: SpendingTier;
+  workstreamContext?: WorkstreamClassificationContext;
 }): RequestClassification {
   const complexity = params.complexity ?? classifyComplexity(params.message);
   const normalizedMessage = params.message.trim();
@@ -402,13 +417,34 @@ export function classifyRequest(params: {
   const isFirstMessage = Boolean(params.isFirstMessage);
   const explicitSearchDirective = hasExplicitSearchDirective(normalizedMessage);
   const isSearchMode = mode === "research";
+  const hasWorkstreamContext = Boolean(params.workstreamContext?.activeWorkstreamId);
+  const workstreamResourceCount =
+    (params.workstreamContext?.artifactCount ?? 0)
+    + (params.workstreamContext?.noteCount ?? 0)
+    + (params.workstreamContext?.plannerItemCount ?? 0)
+    + (params.workstreamContext?.threadCount ?? 0);
+  const workstreamFocusBoost =
+    params.workstreamContext?.focusSurface === "panel" || params.workstreamContext?.focusSurface === "workspace"
+      ? 0.22
+      : params.workstreamContext?.focusSurface === "chat"
+        ? 0.12
+        : 0;
+  const workstreamDeepCue =
+    hasWorkstreamContext
+    && (
+      /\b(this workstream|this project|this subject|our progress|next step|what'?s left|carry on|continue from|pick up where we left off|deadline|milestone|planner|artifact|artifacts|notes?)\b/i.test(normalizedMessage)
+      || workstreamResourceCount >= 3
+      || Boolean(params.workstreamContext?.linkedAgent)
+    );
   const isEnhanced =
     complexity === "complex"
     || isSearchMode
     || mode === "marker"
     || mode === "exam"
+    || mode === "document"
     || hasAttachments
-    || explicitSearchDirective;
+    || explicitSearchDirective
+    || workstreamDeepCue;
 
   const t0Eligible =
     complexity === "simple"
@@ -419,30 +455,58 @@ export function classifyRequest(params: {
     && !explicitSearchDirective;
 
   const tierAllowsT3 = params.spendingTier !== "cheap_only" && params.spendingTier !== "free_only";
-  if (params.multiAgentRequested && tierAllowsT3 && isEnhanced) {
-    return {
-      requestClass: "T3",
-      reason: "Complex request with multi-agent intent under a tier that allows advanced orchestration.",
-    };
-  }
+  const orchestrationSignals = [
+    params.multiAgentRequested ? 0.48 : 0,
+    /\b(compare .* strategies|multiple perspectives|different perspectives|trade[- ]?offs|plan this end to end|deep research|multi[- ]?step|orchestrate|synthesize across)\b/i.test(normalizedMessage) ? 0.26 : 0,
+    complexity === "complex" ? 0.18 : 0,
+    isSearchMode ? 0.08 : 0,
+  ].reduce((sum, value) => sum + value, 0);
+  const workstreamSignals = [
+    hasWorkstreamContext ? 0.25 : 0,
+    workstreamFocusBoost,
+    workstreamDeepCue ? 0.28 : 0,
+    /\b(deadline|milestone|planner|artifact|notes?|workspace|workstream|cross[- ]artifact|cross[- ]note)\b/i.test(normalizedMessage) ? 0.14 : 0,
+    complexity !== "simple" ? 0.08 : 0,
+  ].reduce((sum, value) => sum + value, 0);
 
   if (t0Eligible) {
     return {
       requestClass: "T0",
+      assignmentLevel: "L0",
       reason: "Short, simple follow-up with no attachments or search intent.",
+    };
+  }
+
+  if (hasWorkstreamContext && workstreamSignals >= 0.62) {
+    return {
+      requestClass: "T3",
+      assignmentLevel: "L4",
+      reason: "Active workstream context plus planner/artifact continuity cues require deep workspace-aware routing.",
+    };
+  }
+
+  if (orchestrationSignals >= 0.6 && tierAllowsT3 && isEnhanced) {
+    return {
+      requestClass: "T3",
+      assignmentLevel: "L3",
+      reason: "Request benefits from orchestration across specialists, deeper reasoning, or multi-step execution.",
     };
   }
 
   if (isEnhanced) {
     return {
       requestClass: "T2",
-      reason: "Complexity, mode, attachments, or explicit research/search intent requires enhanced execution.",
+      assignmentLevel: "L2",
+      reason: "Complexity, mode, attachments, explicit search, or workspace signals require enhanced execution.",
     };
   }
 
   return {
     requestClass: "T1",
-    reason: "Standard request with no explicit enhanced-routing triggers.",
+    assignmentLevel: "L1",
+    reason: hasWorkstreamContext
+      ? "Standard request inside a workstream, but without enough depth signals to require workspace-deep routing."
+      : "Standard request with no explicit enhanced-routing triggers.",
   };
 }
 
@@ -909,6 +973,7 @@ export async function runAutoSettingsPipeline(input: AutoSettingsInput): Promise
     thinkingLevel,
     complexity,
     requestClass: requestClassification.requestClass,
+    assignmentLevel: requestClassification.assignmentLevel,
     classificationReason: requestClassification.reason,
     promptCategory,
     questionType,

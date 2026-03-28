@@ -178,6 +178,7 @@ export const listChats = query({
             .withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId))
             .order("desc")
             .take(max)
+            .then((rows) => rows.filter((c) => c.ownerUserId === actor._id && c.orgId === actor.orgId))
         : await ctx.db
             .query("chats")
             .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id))
@@ -705,6 +706,7 @@ export const updateChatSettings = mutation({
     routerMode: v.optional(vRouterMode),
     manualModel: v.optional(v.string()),
     agentId: v.optional(v.union(v.id("agents"), v.null())),
+    workstreamId: v.optional(v.union(v.id("workstreams"), v.null())),
     usePersonalResources: v.optional(v.boolean()),
     title: v.optional(v.string()),
   },
@@ -740,12 +742,26 @@ export const updateChatSettings = mutation({
       }
     }
 
+    let nextWorkstreamId = chat.workstreamId;
+    if (args.workstreamId !== undefined) {
+      if (args.workstreamId === null) {
+        nextWorkstreamId = undefined;
+      } else {
+        const workstream = await ctx.db.get(args.workstreamId);
+        if (!workstream || workstream.ownerUserId !== actor._id || workstream.orgId !== actor.orgId) {
+          throw new Error("Workstream not found");
+        }
+        nextWorkstreamId = workstream._id;
+      }
+    }
+
     await ctx.db.patch(args.chatId, {
       mode: args.mode ?? chat.mode,
       thinkingLevel: args.thinkingLevel ?? chat.thinkingLevel,
       routerMode: args.routerMode ?? chat.routerMode,
       manualModel: args.manualModel ?? chat.manualModel,
       agentId: nextAgentId,
+      workstreamId: nextWorkstreamId,
       usePersonalResources: args.usePersonalResources ?? chat.usePersonalResources,
       title: args.title ?? chat.title,
       updatedAt: Date.now(),

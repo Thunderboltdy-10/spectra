@@ -56,6 +56,7 @@ export function TiptapEditor({
   ];
 
   const editor = useEditor({
+    immediatelyRender: false,
     extensions,
     content: content ?? undefined,
     editable,
@@ -86,27 +87,59 @@ export function TiptapEditor({
     }
   }, [editor, content]);
 
+  const charOffsetToPos = useCallback(
+    (charOffset: number): number => {
+      if (!editor) return 1;
+      const docSize = editor.state.doc.content.size;
+      // Walk through the document text to map character offset to ProseMirror position
+      let charCount = 0;
+      let pos = 0;
+      editor.state.doc.descendants((node, nodePos) => {
+        if (pos > 0) return false; // already found
+        if (node.isText && node.text) {
+          const textLen = node.text.length;
+          if (charCount + textLen >= charOffset) {
+            pos = nodePos + (charOffset - charCount);
+            return false;
+          }
+          charCount += textLen;
+        } else if (node.isLeaf) {
+          charCount += 1;
+        }
+        return undefined;
+      });
+      // If we never found it, clamp to document bounds
+      if (pos === 0 && charOffset > 0) pos = Math.min(charOffset + 1, docSize);
+      return Math.max(1, Math.min(pos || 1, docSize));
+    },
+    [editor],
+  );
+
   const applyAiEdits = useCallback(
     (ops: Array<{ type: string; from: number; to: number; content?: string }>) => {
       if (!editor) return;
       editor.chain().focus().run();
-      for (const op of ops) {
+      // Apply ops in reverse order to preserve positions
+      const sorted = [...ops].sort((a, b) => b.from - a.from);
+      for (const op of sorted) {
+        const from = charOffsetToPos(op.from);
+        const to = charOffsetToPos(op.to);
         if (op.type === "replace" || op.type === "insert") {
           editor
             .chain()
-            .setTextSelection({ from: op.from, to: op.to })
+            .setTextSelection({ from, to })
             .insertContent(op.content ?? "")
             .run();
         } else if (op.type === "delete") {
           editor
             .chain()
-            .setTextSelection({ from: op.from, to: op.to })
+            .setTextSelection({ from, to })
             .deleteSelection()
             .run();
         }
       }
     },
-    [editor],
+    [editor, charOffsetToPos],
   );
 
   if (!editor) return null;

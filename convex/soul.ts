@@ -3,7 +3,7 @@ import { v } from "convex/values";
 import { getUserByClerkId } from "./helpers";
 import { MODEL_DEFAULTS } from "./constants";
 import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { getOpenRouterApiKey, warnOpenRouterMissing } from "./env";
 
 type SoulDocRow = {
@@ -485,9 +485,9 @@ export const retrieveSoulGuidance: ReturnType<typeof action> = action({
       });
 
       const ids = hits.map((hit) => hit._id);
-      const rows = await ctx.runQuery(internal.soul.getChunksByIds, {
+      const rows = (await ctx.runQuery(internal.soul.getChunksByIds, {
         ids,
-      });
+      })) as Doc<"orgSoulChunks">[];
       const bullets = rows.slice(0, 10).map((row) => `- ${row.text.slice(0, 220)}`);
       if (bullets.length > 0) {
         return { bullets };

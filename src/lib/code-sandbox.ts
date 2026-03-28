@@ -21,9 +21,6 @@ function buildResizeScript(frameId: string): string {
 </script>`;
 }
 
-// Keep backward compat for callers that don't use frameId
-const RESIZE_SCRIPT = buildResizeScript("");
-
 export type PreviewLanguage =
   | "html"
   | "javascript"

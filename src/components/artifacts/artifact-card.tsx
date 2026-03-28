@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   MoreHorizontal,
@@ -90,10 +90,32 @@ export function ArtifactCard({
   compact?: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const meta = getArtifactMeta(artifact.type);
   const Icon = meta.icon;
   const preview = getContentPreview(artifact.type, artifact.content);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    const updateMenuPosition = () => {
+      const rect = menuBtnRef.current?.getBoundingClientRect();
+      if (!rect) {
+        setMenuPosition(null);
+        return;
+      }
+      setMenuPosition({ top: rect.bottom + 4, left: rect.right - 160 });
+    };
+
+    updateMenuPosition();
+    window.addEventListener("resize", updateMenuPosition);
+    window.addEventListener("scroll", updateMenuPosition, true);
+    return () => {
+      window.removeEventListener("resize", updateMenuPosition);
+      window.removeEventListener("scroll", updateMenuPosition, true);
+    };
+  }, [menuOpen]);
 
   return (
     <div
@@ -197,11 +219,7 @@ export function ArtifactCard({
               />
               <div
                 className="fixed z-[70] w-40 overflow-hidden rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] py-1 shadow-[var(--shadow-card)]"
-                style={(() => {
-                  const rect = menuBtnRef.current?.getBoundingClientRect();
-                  if (!rect) return {};
-                  return { top: rect.bottom + 4, left: rect.right - 160 };
-                })()}
+                style={menuPosition ?? undefined}
               >
                 {onPin ? (
                   <button

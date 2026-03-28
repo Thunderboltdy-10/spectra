@@ -23,6 +23,10 @@ type StreamPayload = {
   messageId?: string;
   citations?: Array<{ url: string; title: string }>;
   thinkingContent?: string;
+  toolName?: string;
+  summary?: string;
+  mode?: string;
+  title?: string;
 };
 
 export function useCompactChat(workstreamId?: string) {
@@ -151,6 +155,14 @@ export function useCompactChat(workstreamId?: string) {
               );
             } else if (payload.type === "thinking" && payload.content) {
               thinkingContent += payload.content;
+            } else if (payload.type === "tool_call" && payload.toolName) {
+              thinkingContent += `\n[Tool] ${payload.toolName.replace(/_/g, " ")}…`;
+            } else if (payload.type === "tool_result" && payload.summary) {
+              thinkingContent += `\n[Tool] ${payload.summary}`;
+            } else if (payload.type === "mode_switch" && payload.mode) {
+              thinkingContent += `\n[Mode] Switched to ${payload.mode}.`;
+            } else if (payload.type === "thread_fork") {
+              thinkingContent += `\n[Thread] Forked${payload.title ? ` ${payload.title}` : ""}.`;
             } else if (payload.type === "route_model" && payload.modelUsed) {
               modelUsed = payload.modelUsed;
             } else if (payload.type === "done") {

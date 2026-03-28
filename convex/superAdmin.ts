@@ -580,8 +580,45 @@ export const resetPlatformData = mutation({
     const summary: Record<string, number> = {};
     const now = Date.now();
 
-    const deleteRowsFromTable = async (tableName: string) => {
-      const rows = await (ctx.db as any).query(tableName).collect() as Array<{ _id: Id<any> }>;
+    const tablesToClear = [
+      "packs",
+      "chunks",
+      "agents",
+      "agentModelStats",
+      "chats",
+      "messages",
+      "usageDaily",
+      "usageEvents",
+      "artifacts",
+      "artifactVersions",
+      "userSpending",
+      "userMemory",
+      "userMemoryEntries",
+      "studentAnalytics",
+      "weeklySummaries",
+      "nudges",
+      "achievements",
+      "userStreaks",
+      "studyTimers",
+      "messageBookmarks",
+      "chatBranches",
+      "notifications",
+      "conversationTemplates",
+      "flashcardProgress",
+      "quizResults",
+      "quizSessions",
+      "flashcardDecks",
+      "auditLog",
+      "modelRuntimeStats",
+      "schoolInvitations",
+      "accessRequests",
+      "userSoulPreferences",
+      "errorEvents",
+    ] as const;
+    type ClearableTable = (typeof tablesToClear)[number];
+
+    const deleteRowsFromTable = async (tableName: ClearableTable) => {
+      const rows = await ctx.db.query(tableName).collect();
       for (const row of rows) {
         await ctx.db.delete(row._id);
       }
@@ -626,42 +663,6 @@ export const resetPlatformData = mutation({
       await ctx.db.delete(item._id);
     }
     summary.feedback = feedbackRows.length;
-
-    const tablesToClear = [
-      "packs",
-      "chunks",
-      "agents",
-      "agentModelStats",
-      "chats",
-      "messages",
-      "usageDaily",
-      "usageEvents",
-      "artifacts",
-      "artifactVersions",
-      "userSpending",
-      "userMemory",
-      "userMemoryEntries",
-      "studentAnalytics",
-      "weeklySummaries",
-      "nudges",
-      "achievements",
-      "userStreaks",
-      "studyTimers",
-      "messageBookmarks",
-      "chatBranches",
-      "notifications",
-      "conversationTemplates",
-      "flashcardProgress",
-      "quizResults",
-      "quizSessions",
-      "flashcardDecks",
-      "auditLog",
-      "modelRuntimeStats",
-      "schoolInvitations",
-      "accessRequests",
-      "userSoulPreferences",
-      "errorEvents",
-    ] as const;
 
     for (const tableName of tablesToClear) {
       await deleteRowsFromTable(tableName);

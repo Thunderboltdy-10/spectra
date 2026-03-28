@@ -190,7 +190,7 @@ describe("auto-settings prompt analysis", () => {
       model: "openai/gpt-5.4-nano",
       choices: [{ message: { content: "{\"prompt\":\"enhanced\"}" } }],
       usage: undefined,
-    } as any);
+    });
 
     const result = await runAutoSettingsPipeline({
       message: "Help me summarize this chapter.",

@@ -65,10 +65,6 @@ function getRepresentationBand(zoom: number): RepresentationBand {
   return "detail";
 }
 
-function lerp(a: number, b: number, t: number) {
-  return a + (b - a) * Math.max(0, Math.min(1, t));
-}
-
 function restoreViewport(): Viewport {
   if (typeof window === "undefined") {
     return { x: 0, y: 0, zoom: 0.78 };

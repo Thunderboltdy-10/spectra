@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { getArtifactMeta } from "@/lib/artifact-types";
 import { ArtifactCard, type ArtifactItem } from "./artifact-card";
 import { cn } from "@/lib/utils";
 

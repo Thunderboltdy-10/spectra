@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import { ARTIFACT_TYPES, ARTIFACT_TYPE_META, type ArtifactType } from "@/lib/artifact-types";
-import { cn } from "@/lib/utils";
 
 export function CreateArtifactDialog({
   open,

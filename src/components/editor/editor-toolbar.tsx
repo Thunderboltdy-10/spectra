@@ -4,6 +4,7 @@ import type { Editor } from "@tiptap/react";
 import {
   Bold,
   Code,
+  Download,
   Heading1,
   Heading2,
   Italic,
@@ -23,7 +24,7 @@ const MODES = [
   { id: "agentic", label: "AI" },
 ] as const;
 
-export function EditorToolbar({ editor }: { editor: Editor }) {
+export function EditorToolbar({ editor, onOpenImport }: { editor: Editor; onOpenImport?: () => void }) {
   const { editorMode, setEditorMode } = useEditorStore();
 
   return (
@@ -135,6 +136,19 @@ export function EditorToolbar({ editor }: { editor: Editor }) {
       >
         <Redo className="w-3.5 h-3.5" />
       </FormatBtn>
+
+      {onOpenImport ? (
+        <>
+          <div className="w-px h-4 bg-[var(--border-default)] mx-1" />
+          <FormatBtn
+            onClick={onOpenImport}
+            active={false}
+            title="Import document"
+          >
+            <Download className="w-3.5 h-3.5" />
+          </FormatBtn>
+        </>
+      ) : null}
     </div>
   );
 }

@@ -15,9 +15,7 @@ import {
   RotateCcw,
   Check,
   Plus,
-  GripVertical,
 } from "lucide-react";
-import { toast } from "sonner";
 import { getArtifactMeta } from "@/lib/artifact-types";
 import { sanitizeArtifactDocumentHtml } from "@/lib/sanitize-html";
 import type { ArtifactItem } from "./artifact-card";
@@ -578,6 +576,7 @@ function ImageViewer({ content }: { content: { url?: string; prompt?: string } }
     <div className="space-y-3">
       {content.url ? (
         <div className="overflow-hidden rounded-xl border border-[var(--border-default)]">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={content.url}
             alt={content.prompt ?? "Generated image"}
@@ -676,24 +675,31 @@ function ContentEditor({
   onChange: (c: unknown) => void;
 }) {
   const c = (content ?? {}) as Record<string, unknown>;
+  const studyPlanContent = c as { description?: string; milestones?: { id: string; title: string; done: boolean }[] };
+  const flashcardContent = c as { cards?: { front: string; back: string }[] };
+  const timetableContent = c as { slots?: { day: string; time: string; subject: string }[] };
+  const bookmarkContent = c as { url?: string; note?: string; messagePreview?: string };
+  const codeProjectContent = c as { language?: string; code?: string };
+  const imageContent = c as { url?: string; prompt?: string };
+  const documentContent = c as { title?: string; body?: string; downloadUrl?: string };
 
   switch (type) {
     case "note":
       return <NoteEditor content={c as { text?: string }} onChange={onChange} />;
     case "study_plan":
-      return <StudyPlanEditor content={c as any} onChange={onChange} />;
+      return <StudyPlanEditor content={studyPlanContent} onChange={onChange} />;
     case "flashcard_deck":
-      return <FlashcardDeckEditor content={c as any} onChange={onChange} />;
+      return <FlashcardDeckEditor content={flashcardContent} onChange={onChange} />;
     case "timetable":
-      return <TimetableEditor content={c as any} onChange={onChange} />;
+      return <TimetableEditor content={timetableContent} onChange={onChange} />;
     case "bookmark":
-      return <BookmarkEditor content={c as any} onChange={onChange} />;
+      return <BookmarkEditor content={bookmarkContent} onChange={onChange} />;
     case "code_project":
-      return <CodeProjectEditor content={c as any} onChange={onChange} />;
+      return <CodeProjectEditor content={codeProjectContent} onChange={onChange} />;
     case "image":
-      return <ImageViewer content={c as any} />;
+      return <ImageViewer content={imageContent} />;
     case "document":
-      return <DocumentViewer content={c as any} />;
+      return <DocumentViewer content={documentContent} />;
     default:
       return <GenericEditor content={c} onChange={onChange} />;
   }
@@ -751,26 +757,7 @@ export function ArtifactEditor({
     contentDirtyRef.current = true;
   }, []);
 
-  // Auto-save: debounce 1.5s after any change
-  useEffect(() => {
-    if (!dirty) return;
-    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-    autoSaveTimerRef.current = setTimeout(() => {
-      if (latestDirtyRef.current) void handleAutoSave();
-    }, 1500);
-    return () => {
-      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-    };
-  }, [dirty, title, content, tagsInput]);
-
-  // Save on unmount if dirty
-  useEffect(() => {
-    return () => {
-      if (latestDirtyRef.current) void handleAutoSave();
-    };
-  }, []);
-
-  async function handleAutoSave() {
+  const handleAutoSave = useCallback(async () => {
     if (!latestDirtyRef.current) return;
 
     setSaving(true);
@@ -800,7 +787,26 @@ export function ArtifactEditor({
     } finally {
       setSaving(false);
     }
-  }
+  }, [artifact.tags, artifact.title, content, onSave, tagsInput, title]);
+
+  // Auto-save: debounce 1.5s after any change
+  useEffect(() => {
+    if (!dirty) return;
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      if (latestDirtyRef.current) void handleAutoSave();
+    }, 1500);
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, [dirty, title, content, tagsInput, handleAutoSave]);
+
+  // Save on unmount if dirty
+  useEffect(() => {
+    return () => {
+      if (latestDirtyRef.current) void handleAutoSave();
+    };
+  }, [handleAutoSave]);
 
   async function loadVersions() {
     setLoadingVersions(true);

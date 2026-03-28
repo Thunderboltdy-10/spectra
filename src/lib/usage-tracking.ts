@@ -228,3 +228,42 @@ export async function recordOpenRouterUsage(params: {
     skipIfZeroTokens: params.skipIfZeroTokens,
   });
 }
+
+export async function recordSearchUsage(params: {
+  actorClerkId?: string;
+  chatId?: string;
+  messageId?: string;
+  provider?: string;
+  operation: string;
+  creditsUsed?: number;
+  costCents?: number;
+  finishReason?: string;
+}) {
+  const actorClerkId = params.actorClerkId?.trim();
+  if (!actorClerkId) return false;
+  const creditsUsed =
+    typeof params.creditsUsed === "number" && Number.isFinite(params.creditsUsed)
+      ? Math.max(0, params.creditsUsed)
+      : 0;
+  if (creditsUsed <= 0 && typeof params.costCents !== "number") return false;
+
+  try {
+    await convexMutation("usage:recordSearchUsage", {
+      actorClerkId,
+      chatId: params.chatId,
+      messageId: params.messageId,
+      provider: params.provider,
+      operation: params.operation,
+      creditsUsed,
+      costCents:
+        typeof params.costCents === "number" && Number.isFinite(params.costCents)
+          ? Math.max(0, params.costCents)
+          : undefined,
+      finishReason: params.finishReason,
+    });
+    return true;
+  } catch (error) {
+    console.warn("[usage-tracking] recordSearchUsage failed:", error);
+    return false;
+  }
+}

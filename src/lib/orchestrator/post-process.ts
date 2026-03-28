@@ -1,5 +1,6 @@
 import { convexAction, convexMutation, convexQuery } from "@/lib/convex-server";
 import { MODEL_CONFIG } from "@/lib/model-config";
+import { isWithinCostCap } from "@/lib/model-policy";
 import { resolveRoleModelBundle } from "@/lib/model-role-resolver";
 import { buildRuntimeStatMap, pickModelAndFallbacks } from "@/lib/model-selection";
 import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
@@ -21,8 +22,6 @@ const MEMORY_MAX_ENTRIES = 80;
 const MEMORY_MAX_RAW_CHARS = 1500;
 const MEMORY_PROFILE_MAX_ENTRIES = 8;
 const MEMORY_PROFILE_MIN_SCORE = 0.08;
-const MEMORY_TOPIC_SIMILARITY_MIN = 0.52;
-const MEMORY_TOPIC_MAX_ENTRIES = 5;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 type UtilityModelSelection = {
@@ -197,12 +196,18 @@ async function selectUtilityModel(params: {
       }>);
   const spendingTier = (budget as { tier?: "normal" | "expensive_blocked" | "cheap_only" | "free_only" })?.tier ?? "normal";
   const catalogWithoutAuto = catalog.filter((model) => model.modelId !== "openrouter/auto");
+  const backgroundCatalog = catalogWithoutAuto.filter((model) =>
+    model.isFree
+    || model.modelId.includes(":free")
+    || isWithinCostCap(model, 1),
+  );
+  const utilityCatalog = backgroundCatalog.length > 0 ? backgroundCatalog : catalogWithoutAuto;
   const runtimeStatMap = buildRuntimeStatMap(
     runtimeStats as Array<{ modelId: string; successCount: number; failureCount: number; avgLatencyMs?: number }>,
   );
 
   const picked = pickModelAndFallbacks({
-    catalog: catalogWithoutAuto,
+    catalog: utilityCatalog,
     tier: spendingTier,
     requiredCapabilities: params.requiredCapabilities,
     preferredCapabilities: params.preferredCapabilities,
@@ -218,7 +223,7 @@ async function selectUtilityModel(params: {
 
   if (!model) {
     const relaxed = pickModelAndFallbacks({
-      catalog: catalogWithoutAuto,
+      catalog: utilityCatalog,
       tier: spendingTier,
       preferFast: params.preferFast ?? true,
       preferCheap: params.preferCheap ?? true,

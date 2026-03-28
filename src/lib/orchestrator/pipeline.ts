@@ -63,6 +63,8 @@ import { buildRoutePlan } from "@/lib/orchestrator/route-plan";
 import { PipelineController } from "@/lib/orchestrator/pipeline-controller";
 import { formatRuntimeSkillBlock, selectRuntimeSkills } from "@/lib/orchestrator/skills";
 import { runAssistantStreaming, runCollaborativeStreaming } from "@/lib/orchestrator/streaming";
+import { getOpenRouterToolsForAssignmentLevel, formatToolUsageGuidance } from "@/lib/orchestrator/tool-definitions";
+import { executeOrchestratorTool } from "@/lib/orchestrator/tool-executor";
 import { buildTaskGraph, shouldUseMultiAgent } from "@/lib/orchestrator/task-graph";
 import {
   buildModeSuggestions,
@@ -86,7 +88,7 @@ import {
 import { generatePromptAwareClarification } from "@/lib/orchestrator/clarification-generator";
 import { formatSchoolNow } from "@/lib/timezone";
 import { recordOpenRouterUsage } from "@/lib/usage-tracking";
-import type { RouteTrace, StudyMode } from "@/types";
+import type { ModelRouteResult, RouteTrace, StudyMode } from "@/types";
 
 type ChatRequestBody = {
   chatId?: string;
@@ -1932,18 +1934,20 @@ export async function runChatPipeline(request: NextRequest) {
     costCredits: webResult.costCredits,
     operations: webResult.operations,
   };
-  const diag = retrieval.diagnostics as any;
-  if (diag?.embeddingModel || diag?.embeddingUsage) {
+  const diag = retrieval.diagnostics;
+  const embeddingUsage = diag && "embeddingUsage" in diag ? diag.embeddingUsage : undefined;
+  const embeddingDurationMs = diag && "embeddingDurationMs" in diag ? diag.embeddingDurationMs : undefined;
+  if (diag?.embeddingModel || embeddingUsage) {
     deferSubcall({
       phaseId: "retrieval",
       label: "Retrieval embedding",
       endpoint: "embeddings",
       status: "ok",
-      modelUsed: diag.embeddingModel,
-      inputTokens: diag.embeddingUsage?.prompt_tokens,
-      outputTokens: diag.embeddingUsage?.completion_tokens,
-      costCents: costCentsFromUsage(diag.embeddingUsage),
-      durationMs: diag.embeddingDurationMs,
+      modelUsed: diag?.embeddingModel,
+      inputTokens: embeddingUsage?.prompt_tokens,
+      outputTokens: embeddingUsage?.completion_tokens,
+      costCents: costCentsFromUsage(embeddingUsage),
+      durationMs: embeddingDurationMs,
     });
   }
   if (searchProvider === "model_fallback") {
@@ -2138,7 +2142,7 @@ export async function runChatPipeline(request: NextRequest) {
   });
   pipelineController.markStageCompleted("modelSelection");
   const pipelineSnapshot = pipelineController.getState();
-  const route = {
+  const route: ModelRouteResult = {
     primaryModel: routeDecision.selectedModel,
     fallbackModels: routeDecision.fallbackModels,
     verificationModel: undefined as string | undefined,
@@ -2920,6 +2924,9 @@ export async function runChatPipeline(request: NextRequest) {
     `Memory directives applied: ${directiveStatus}`,
     `Learning context: ${learningContextStatus}`,
   ].join("\n");
+  const openRouterTools = getOpenRouterToolsForAssignmentLevel(routePlan.assignmentLevel)
+    .filter((tool) => routePlan.allowedAiTools.includes(tool.function.name as typeof routePlan.allowedAiTools[number]));
+  const toolUsageGuidance = formatToolUsageGuidance(routePlan.allowedAiTools);
   const personalSoulExcerpt = buildPersonalSoulExcerpt({
     preferences: null,
     memoryProfile: memoryEnabled ? memoryPlan.profileText : "",
@@ -3087,6 +3094,9 @@ If a route-approved capability returned no results, say that no usable results w
 Do not claim you lack a supported tool when search, retrieval, or memory context is already provided in this prompt.
 === END TOOL EXECUTION CONTEXT ===`,
     );
+    if (toolUsageGuidance) {
+      systemPromptParts.push(toolUsageGuidance);
+    }
   }
   if (includeRichContextBlocks && featureEnabled(orgSettings.org?.soulEnabled) && schoolSoulCapsule.capsule.trim()) {
     systemPromptParts.push(
@@ -3364,9 +3374,9 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     }
     if (phase.id === "verification") return { ...phase, model: route.verificationModel ?? route.primaryModel, thinkingLevel: "medium" };
     if (phase.id === "repair") return { ...phase, model: supportModel, thinkingLevel: "low" };
-    if (phase.id === "ws_memory") return { ...phase, model: workstreamMemoryEmbeddingModel ?? (retrieval.diagnostics as any)?.embeddingModel };
-    if (phase.id === "retrieval") return { ...phase, model: (retrieval.diagnostics as any)?.embeddingModel };
-    if (phase.id === "search") return { ...phase, model: (webResult as any).modelUsed };
+    if (phase.id === "ws_memory") return { ...phase, model: workstreamMemoryEmbeddingModel ?? retrieval.diagnostics?.embeddingModel };
+    if (phase.id === "retrieval") return { ...phase, model: retrieval.diagnostics?.embeddingModel };
+    if (phase.id === "search") return { ...phase, model: webResult.modelUsed };
     return phase;
   });
   type PhaseUpdateStatus = "planned" | "in_progress" | "completed" | "skipped" | "failed";
@@ -3635,7 +3645,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           step: row.step,
           reason: row.reason,
         }));
-        (route.trace as any).totalDurationMs = Date.now() - requestStartedAt;
+        route.trace.totalDurationMs = Date.now() - requestStartedAt;
 
         const appended = await appendAssistantMessageWithCitationFallback({
           actorClerkId: actor.clerkId,
@@ -3771,7 +3781,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           prompt: refinedPrompt,
           size: "1024x1024",
           onFallback: (event) => {
-            (route.trace.fallbacks as any).push(event);
+            route.trace.fallbacks.push(event);
           },
         });
         appendSubcall({
@@ -3839,10 +3849,10 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           await emitPhaseUpdate("authoring", "completed", "Image generated successfully.");
         }
         pipelineController.markStageCompleted("generation");
-        (route.trace as any).totalCostCents = Number(
+        route.trace.totalCostCents = Number(
           ((route.trace.subcalls ?? []).reduce((sum, call) => sum + (call.costCents ?? 0), 0)).toFixed(4),
         );
-        (route.trace as any).totalDurationMs = Date.now() - requestStartedAt;
+        route.trace.totalDurationMs = Date.now() - requestStartedAt;
 
         const appended = await appendAssistantMessageWithCitationFallback({
           actorClerkId: actor.clerkId,
@@ -4000,10 +4010,10 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           step: row.step,
           reason: row.reason,
         }));
-        (route.trace as any).totalCostCents = Number(
+        route.trace.totalCostCents = Number(
           ((route.trace.subcalls ?? []).reduce((sum, call) => sum + (call.costCents ?? 0), 0)).toFixed(4),
         );
-        (route.trace as any).totalDurationMs = Date.now() - requestStartedAt;
+        route.trace.totalDurationMs = Date.now() - requestStartedAt;
 
         await send({
           type: "done",
@@ -4051,7 +4061,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
 
       const fallbackModels = manualLockRequested ? [] : route.fallbackModels;
       const onFallback = (event: { fromModel: string; toModel: string; error: string; attemptIndex: number }) => {
-        (route.trace.fallbacks as any).push(event);
+        route.trace.fallbacks.push(event);
       };
 
       if (route.trace.phasePlan?.some((phase) => phase.id === "analysis")) {
@@ -4074,6 +4084,31 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         route.trace.usageBudgetRemaining = remaining;
       };
       const usageBudgetState = pipelineController.getState();
+      const executeAssistantTool = async (tool: { name: string; rawArguments: string }) =>
+        executeOrchestratorTool({
+          name: tool.name as typeof routePlan.allowedAiTools[number],
+          rawArguments: tool.rawArguments,
+          context: {
+            actorClerkId: actor.clerkId,
+            chatId,
+            activeWorkstreamId,
+            mode: effectiveMode,
+            spendingTier: budget.tier,
+            onModelCall: (call) => {
+              appendSubcall({
+                phaseId: "analysis",
+                label: `Tool helper model: ${tool.name}`,
+                endpoint: "embeddings",
+                status: "ok",
+                modelUsed: call.model,
+                inputTokens: call.usage?.prompt_tokens,
+                outputTokens: call.usage?.completion_tokens,
+                costCents: costCentsFromUsage(call.usage),
+                durationMs: call.durationMs,
+              });
+            },
+          },
+        });
 
       const streamed = multiAgentEnabled
         ? await runCollaborativeStreaming({
@@ -4117,6 +4152,8 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
             send,
             onUsageTokens: consumeUsageTokens,
             onFallback,
+            tools: openRouterTools,
+            executeTool: executeAssistantTool,
             logger,
           });
       if (route.trace.phasePlan?.some((phase) => phase.id === "planning")) {
@@ -4208,7 +4245,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         });
       }
       if (streamed.collaborators && streamed.collaborators.length > 0) {
-        (route.trace as any).collaborators = streamed.collaborators;
+        route.trace.collaborators = streamed.collaborators;
         for (const collaborator of streamed.collaborators) {
           appendSubcall({
             phaseId: collaborator.role === "synthesizer" ? "synthesis" : "analysis",
@@ -4634,10 +4671,10 @@ BACK: [answer or definition]`,
         sourceChars: inputContextChars.sourceChars,
       });
       route.trace.usageBudgetRemaining = pipelineController.getState().usageBudgetRemaining;
-      (route.trace as any).totalCostCents = Number(
+      route.trace.totalCostCents = Number(
         ((route.trace.subcalls ?? []).reduce((sum, call) => sum + (call.costCents ?? 0), 0)).toFixed(4),
       );
-      (route.trace as any).totalDurationMs = Date.now() - requestStartedAt;
+      route.trace.totalDurationMs = Date.now() - requestStartedAt;
       logger.info("streaming complete", {
         modelUsed,
         usageIn: finalUsageIn,
@@ -4699,8 +4736,8 @@ BACK: [answer or definition]`,
         finishReason,
         responseLength: finalizedResponse.length,
       }).catch(() => {});
-      if ((route.trace as any).collaborators?.length) {
-        for (const collaborator of (route.trace as any).collaborators) {
+      if (route.trace.collaborators?.length) {
+        for (const collaborator of route.trace.collaborators) {
           await recordModelRuntime(
             collaborator.model,
             (collaborator.tokensUsed ?? 0) > 0,
@@ -4911,7 +4948,23 @@ BACK: [answer or definition]`,
           : { written: 0, promoted: 0 };
       const workstreamMemoryWrite =
         routePlan.shouldWriteMemory && activeWorkstreamId && extractedWorkstreamMemory.length > 0
-          ? await convexMutation("workstreamMemory:upsertEntries", {
+          ? await convexMutation<
+              {
+                actorClerkId: string;
+                workstreamId: string;
+                sourceChatId?: string;
+                sourceMessageId?: string;
+                entries: Array<{
+                  key: string;
+                  text: string;
+                  category: "concept" | "progress" | "preference" | "deadline" | "correction" | "resource_link";
+                  confidence: number;
+                  freshness: number;
+                  sourceType: "chat_extraction";
+                }>;
+              },
+              { inserted: number; updated: number; superseded: number }
+            >("workstreamMemory:upsertEntries", {
               actorClerkId: actor.clerkId,
               workstreamId: activeWorkstreamId,
               sourceChatId: chatId,
@@ -5027,10 +5080,10 @@ BACK: [answer or definition]`,
         step: row.step,
         reason: row.reason,
       }));
-      (route.trace as any).totalCostCents = Number(
+      route.trace.totalCostCents = Number(
         ((route.trace.subcalls ?? []).reduce((sum, call) => sum + (call.costCents ?? 0), 0)).toFixed(4),
       );
-      (route.trace as any).totalDurationMs = Date.now() - requestStartedAt;
+      route.trace.totalDurationMs = Date.now() - requestStartedAt;
 
       await send({
         type: "done",

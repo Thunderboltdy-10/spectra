@@ -127,6 +127,8 @@ export const create = mutation({
     canvasHeight: v.optional(v.number()),
     subjectCode: v.optional(v.string()),
     managebacClassId: v.optional(v.string()),
+    managebacContext: v.optional(v.any()),
+    managebacInactiveSince: v.optional(v.number()),
     linkedAgentId: v.optional(v.id("agents")),
     linkedPackId: v.optional(v.id("packs")),
     defaultMode: v.optional(vStudyMode),
@@ -160,6 +162,8 @@ export const create = mutation({
       canvasHeight: args.canvasHeight,
       subjectCode: normalizeString(args.subjectCode),
       managebacClassId: normalizeString(args.managebacClassId),
+      managebacContext: args.managebacContext,
+      managebacInactiveSince: args.managebacInactiveSince,
       linkedAgentId: args.linkedAgentId,
       linkedPackId: args.linkedPackId,
       defaultMode: args.defaultMode,
@@ -191,6 +195,8 @@ export const update = mutation({
     canvasHeight: v.optional(v.union(v.number(), v.null())),
     subjectCode: v.optional(v.union(v.string(), v.null())),
     managebacClassId: v.optional(v.union(v.string(), v.null())),
+    managebacContext: v.optional(v.union(v.any(), v.null())),
+    managebacInactiveSince: v.optional(v.union(v.number(), v.null())),
     linkedAgentId: v.optional(v.union(v.id("agents"), v.null())),
     linkedPackId: v.optional(v.union(v.id("packs"), v.null())),
     defaultMode: v.optional(v.union(vStudyMode, v.null())),
@@ -225,6 +231,10 @@ export const update = mutation({
     if (args.subjectCode !== undefined) updates.subjectCode = normalizeString(toOptionalPatchValue(args.subjectCode));
     if (args.managebacClassId !== undefined) {
       updates.managebacClassId = normalizeString(toOptionalPatchValue(args.managebacClassId));
+    }
+    if (args.managebacContext !== undefined) updates.managebacContext = toOptionalPatchValue(args.managebacContext);
+    if (args.managebacInactiveSince !== undefined) {
+      updates.managebacInactiveSince = toOptionalPatchValue(args.managebacInactiveSince);
     }
 
     if (args.canvasX !== undefined) updates.canvasX = toOptionalPatchValue(args.canvasX);

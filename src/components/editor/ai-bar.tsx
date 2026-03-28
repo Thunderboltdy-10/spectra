@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import type { Editor } from "@tiptap/react";
-import { Check, Loader2, RotateCcw, Sparkles, X } from "lucide-react";
+import { Check, Loader2, Sparkles, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/editor-store";
 

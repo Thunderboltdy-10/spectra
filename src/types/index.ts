@@ -127,6 +127,18 @@ export type ArtifactFormat = "docx" | "pdf" | "pptx" | "html";
 
 export type AssignmentLevel = "L0" | "L1" | "L2" | "L3" | "L4";
 
+export type AiToolName =
+  | "recall_memory"
+  | "save_memory"
+  | "update_memory"
+  | "dismiss_memory"
+  | "get_workstream_context"
+  | "create_note"
+  | "update_planner"
+  | "fork_thread"
+  | "search_web"
+  | "switch_mode";
+
 export type MemoryScope = "user_global" | "workstream" | "project" | "chat" | "none";
 export type RetrievalScope = "pack" | "personal" | "agent" | "org";
 
@@ -206,6 +218,7 @@ export type RoutePlan = {
   shouldUseSchoolResources: boolean;
   shouldUseWebSearch: boolean;
   shouldUseMultiStep: boolean;
+  allowedAiTools: AiToolName[];
   responseBudget: "simple" | "normal" | "deep";
   tokenBudgetTarget: {
     systemPrompt: number;

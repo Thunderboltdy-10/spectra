@@ -3,6 +3,8 @@ import { v } from "convex/values";
 import { dayKey, getUserByClerkId } from "./helpers";
 import { estimateUsageCostCents, summarizeEffectiveUsageCost, type UsagePricing } from "../shared/spending";
 
+const DEFAULT_TAVILY_COST_CENTS_PER_CREDIT = 0.8;
+
 function monthKey(ts = Date.now()) {
   return new Date(ts).toISOString().slice(0, 7);
 }
@@ -108,6 +110,7 @@ function resolveUsagePricing(
 
 function summarizeUsageWithPricing(
   rows: Array<{
+    eventType?: "model" | "search";
     model: string;
     totalTokens?: number;
     inputTokens?: number;
@@ -116,18 +119,19 @@ function summarizeUsageWithPricing(
   }>,
   pricingLookup: ReturnType<typeof buildPricingLookup>,
 ) {
-  const base = summarizeEffectiveUsageCost(rows);
+  const modelRows = rows.filter((row) => (row.eventType ?? "model") === "model");
+  const base = summarizeEffectiveUsageCost(modelRows);
   const estimatedUnpricedCostCents = Number(
-    rows
+    modelRows
       .filter((row) => Math.max(0, row.costCents ?? 0) <= 0 && Math.max(0, row.totalTokens ?? 0) > 0)
       .reduce((sum, row) => sum + estimateUsageCostCents(row, resolveUsagePricing(pricingLookup, row.model)), 0)
       .toFixed(6),
   );
 
-  return {
-    ...base,
-    estimatedUnpricedCostCents,
-    effectiveCostCents: base.knownCostCents + estimatedUnpricedCostCents,
+    return {
+      ...base,
+      estimatedUnpricedCostCents,
+      effectiveCostCents: base.knownCostCents + estimatedUnpricedCostCents,
   };
 }
 
@@ -179,6 +183,8 @@ export const recordUsage = mutation({
       userId: actor._id,
       chatId: args.chatId,
       messageId: args.messageId,
+      eventType: "model",
+      provider: "openrouter",
       model: args.model,
       inputTokens: args.inputTokens,
       outputTokens: args.outputTokens,
@@ -302,6 +308,8 @@ export const recordUsageWithCost = mutation({
       userId: actor._id,
       chatId: args.chatId,
       messageId: args.messageId,
+      eventType: "model",
+      provider: "openrouter",
       model: args.model,
       inputTokens: args.inputTokens,
       outputTokens: args.outputTokens,
@@ -455,6 +463,8 @@ export const recordUsageWithCostInternal = internalMutation({
       userId: args.userId,
       chatId: args.chatId,
       messageId: args.messageId,
+      eventType: "model",
+      provider: "openrouter",
       model: args.model,
       inputTokens: args.inputTokens,
       outputTokens: args.outputTokens,
@@ -488,6 +498,76 @@ export const recordUsageWithCostInternal = internalMutation({
       await ctx.db.insert("userSpending", {
         userId: args.userId,
         orgId: args.orgId,
+        monthKey: key,
+        totalCostCents: costCents,
+        lastUpdatedAt: now,
+      });
+    }
+
+    return { ok: true, costCents };
+  },
+});
+
+export const recordSearchUsage = mutation({
+  args: {
+    actorClerkId: v.string(),
+    chatId: v.optional(v.id("chats")),
+    messageId: v.optional(v.id("messages")),
+    provider: v.optional(v.string()),
+    operation: v.string(),
+    creditsUsed: v.number(),
+    costCents: v.optional(v.number()),
+    finishReason: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const day = dayKey();
+    const now = Date.now();
+    const creditsUsed = Math.max(0, Number(args.creditsUsed.toFixed(3)));
+    const provider = args.provider?.trim() || "tavily";
+    const costCents = typeof args.costCents === "number" && Number.isFinite(args.costCents)
+      ? Math.max(0, Number(args.costCents.toFixed(6)))
+      : Number((creditsUsed * DEFAULT_TAVILY_COST_CENTS_PER_CREDIT).toFixed(6));
+
+    await ctx.db.insert("usageEvents", {
+      orgId: actor.orgId,
+      userId: actor._id,
+      chatId: args.chatId,
+      messageId: args.messageId,
+      eventType: "search",
+      provider,
+      model: `${provider}/${args.operation}`,
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      costCents,
+      searchOperation: args.operation,
+      searchUnits: creditsUsed,
+      finishReason: args.finishReason,
+      pricingNote: `Search cost recorded at ${DEFAULT_TAVILY_COST_CENTS_PER_CREDIT.toFixed(3)} cents per credit.`,
+      day,
+      createdAt: now,
+    });
+
+    const key = monthKey(now);
+    const existingMonth = await ctx.db
+      .query("userSpending")
+      .withIndex("by_user_month", (q) => q.eq("userId", actor._id).eq("monthKey", key))
+      .unique();
+
+    if (existingMonth) {
+      await ctx.db.patch(existingMonth._id, {
+        totalCostCents: Math.max(0, existingMonth.totalCostCents + costCents),
+        lastUpdatedAt: now,
+      });
+    } else {
+      await ctx.db.insert("userSpending", {
+        userId: actor._id,
+        orgId: actor.orgId,
         monthKey: key,
         totalCostCents: costCents,
         lastUpdatedAt: now,
@@ -585,6 +665,20 @@ export const checkUserBudget = query({
     const pricingLookup = buildPricingLookup(modelRows);
     const monthlyTokens = monthlyUsage.reduce((sum, row) => sum + Math.max(0, row.totalTokens ?? 0), 0);
     const monthlyEvents = monthlyUsage.length;
+    const monthlySearchEvents = monthlyUsage.filter((row) => row.eventType === "search").length;
+    const monthlyModelEvents = monthlyEvents - monthlySearchEvents;
+    const monthlySearchCostCents = Number(
+      monthlyUsage
+        .filter((row) => row.eventType === "search")
+        .reduce((sum, row) => sum + Math.max(0, row.costCents ?? 0), 0)
+        .toFixed(6),
+    );
+    const monthlyModelCostCents = Number(
+      monthlyUsage
+        .filter((row) => (row.eventType ?? "model") === "model")
+        .reduce((sum, row) => sum + Math.max(0, row.costCents ?? 0), 0)
+        .toFixed(6),
+    );
     const monthlyCostCentsFromEvents = Number(
       monthlyUsage
         .reduce((sum, row) => sum + Math.max(0, row.costCents ?? 0), 0)
@@ -633,9 +727,13 @@ export const checkUserBudget = query({
       tokenUsagePercent,
       monthlyTokens,
       monthlyEvents,
+      monthlyModelEvents,
+      monthlySearchEvents,
       monthlyUnpricedEvents: usageCost.monthlyUnpricedEvents,
       monthlyTokenBudget,
       monthlyCostCentsFromEvents,
+      monthlyModelCostCents,
+      monthlySearchCostCents,
       marginPercent,
       monthKey: key,
     } as const;

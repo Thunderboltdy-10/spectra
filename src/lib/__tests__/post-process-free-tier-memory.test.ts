@@ -30,13 +30,13 @@ describe("routeMemoryWrite free_only behavior", () => {
   });
 
   it("persists explicit memory directives without embedding calls", async () => {
-    const module = await import("@/lib/orchestrator/post-process");
-    const entries = module.buildDirectiveMemoryEntries({
+    const postProcessModule = await import("@/lib/orchestrator/post-process");
+    const entries = postProcessModule.buildDirectiveMemoryEntries({
       statement: "I prefer concise answers",
       directiveType: "remember",
     });
 
-    const result = await module.routeMemoryWrite({
+    const result = await postProcessModule.routeMemoryWrite({
       actorClerkId: "clerk_user_1",
       spendingTier: "free_only",
       sourceType: "user_explicit",
@@ -59,8 +59,8 @@ describe("routeMemoryWrite free_only behavior", () => {
   });
 
   it("keeps extraction writes blocked in free_only tier", async () => {
-    const module = await import("@/lib/orchestrator/post-process");
-    const result = await module.routeMemoryWrite({
+    const postProcessModule = await import("@/lib/orchestrator/post-process");
+    const result = await postProcessModule.routeMemoryWrite({
       actorClerkId: "clerk_user_2",
       spendingTier: "free_only",
       sourceType: "extraction",
@@ -79,4 +79,3 @@ describe("routeMemoryWrite free_only behavior", () => {
     expect(mocks.openRouterEmbeddingRequest).not.toHaveBeenCalled();
   });
 });
-

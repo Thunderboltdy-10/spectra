@@ -38,6 +38,7 @@ declare module "@xyflow/react" {
     zoomTo: (zoom: number, options?: { duration?: number }) => void;
     setCenter: (x: number, y: number, options?: { zoom?: number; duration?: number }) => void;
     getNode: (id: string) => N | undefined;
+    getEdge?: (id: string) => E | undefined;
   };
 
   export const Position: {

@@ -156,7 +156,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         const parsed = await parseUploadedFile(file);
         const chunks = chunkTextWithPages(parsed.pages);
 
-        let embedded: Array<{ text: string; page?: number; embedding: number[] }> = [];
+        const embedded: Array<{ text: string; page?: number; embedding: number[] }> = [];
         const embeddingUsageTotals = {
           promptTokens: 0,
           completionTokens: 0,

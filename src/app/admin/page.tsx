@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { useSidebar } from "@/context/sidebar-context";
+import { cn } from "@/lib/utils";
 
 type OrgSettings = { name?: string; description?: string; schoolType?: string; timezone?: string; maxStudents?: number; maxResourceFileSizeBytes?: number; monthlyBudgetCentsPerUser?: number; budgetMarginPercent?: number; soulEnabled?: boolean; orchestratorV2Enabled?: boolean; adaptiveQuizEnabled?: boolean; spacedRepetitionEnabled?: boolean; agentModelBoostEnabled?: boolean };
 type OrgSettingsEnvelope = {
@@ -29,6 +30,37 @@ type UsageRow = { day: string; inputTokens: number; outputTokens: number; totalT
 type SchoolAnalytics = { avgQuizScore?: number; totalQuizAttempts: number };
 type LeaderboardEntry = { modelId: string; provider: string; name: string; totalTokens: number; usageCount: number };
 type SchoolAgent = { _id: string; name: string; description: string; avatarEmoji: string; visibility: "public" | "private" | "shared"; usageCount: number; createdAt: number };
+type ManagebacEndpoint = {
+  key: string;
+  label: string;
+  path: string;
+  status: "available" | "unavailable";
+  httpStatus?: number;
+  error?: string;
+};
+type ManagebacAdminConfig = {
+  configured: boolean;
+  baseUrl?: string;
+  tokenLastFour?: string;
+  studentMappings: Array<{ clerkId: string; managebacStudentId: string; email?: string }>;
+  syncEnabled: boolean;
+  syncFrequencyHours: number;
+  availableEndpoints: ManagebacEndpoint[];
+  lastSyncAt?: number;
+  lastSyncStatus?: "idle" | "success" | "error";
+  lastSyncError?: string;
+  lastSyncDetails?: {
+    syncedStudents?: number;
+    workstreamsCreated?: number;
+    workstreamsUpdated?: number;
+    plannerCreated?: number;
+    plannerUpdated?: number;
+    notesCreated?: number;
+    notesUpdated?: number;
+    conflicts?: number;
+    warnings?: string[];
+  };
+};
 
 function shortDay(day: string) {
   return new Date(`${day}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
@@ -84,9 +116,17 @@ function AdminPageContent() {
   const [notifRecipients, setNotifRecipients] = useState<string[]>([]);
   const [notifDropdownOpen, setNotifDropdownOpen] = useState(false);
   const [sendingNotif, setSendingNotif] = useState(false);
+  const [managebac, setManagebac] = useState<ManagebacAdminConfig | null>(null);
+  const [managebacBaseUrl, setManagebacBaseUrl] = useState("");
+  const [managebacToken, setManagebacToken] = useState("");
+  const [managebacProbeStudentId, setManagebacProbeStudentId] = useState("");
+  const [managebacMappings, setManagebacMappings] = useState<Record<string, string>>({});
+  const [managebacDiscovering, setManagebacDiscovering] = useState(false);
+  const [managebacSaving, setManagebacSaving] = useState(false);
+  const [managebacSyncing, setManagebacSyncing] = useState(false);
 
   async function refresh() {
-    const [bootstrap, schoolDashboard, membersPayload, usagePayload, schoolAnalytics, modelPayload, agentsPayload] = await Promise.all([
+    const [bootstrap, schoolDashboard, membersPayload, usagePayload, schoolAnalytics, modelPayload, agentsPayload, managebacPayload] = await Promise.all([
       loadJson<{ actor: { onboardingComplete?: boolean }; orgSettings: OrgSettingsEnvelope }>("/api/bootstrap"),
       loadJson<SchoolDashboard>("/api/school-admin/dashboard"),
       loadJson<{ members: { members: Member[] }; invitations: Invitation[]; accessRequests?: AccessRequest[] }>("/api/school-admin/members"),
@@ -94,6 +134,7 @@ function AdminPageContent() {
       loadJson<SchoolAnalytics>("/api/school-admin/analytics?days=30"),
       loadJson<{ models: LeaderboardEntry[] }>("/api/analytics/model-leaderboard"),
       loadJson<{ agents: SchoolAgent[] }>("/api/agents").catch(() => ({ agents: [] })),
+      loadJson<ManagebacAdminConfig>("/api/admin/managebac").catch(() => null),
     ]);
     setOnboardingComplete(Boolean(bootstrap.actor.onboardingComplete));
     setOrg(bootstrap.orgSettings?.org ?? null);
@@ -106,6 +147,7 @@ function AdminPageContent() {
     setAnalytics(schoolAnalytics);
     setLeaderboard(modelPayload.models ?? []);
     setSchoolAgents((agentsPayload.agents ?? []).filter((a) => a.visibility !== "private"));
+    setManagebac(managebacPayload);
   }
 
   useEffect(() => {
@@ -124,6 +166,13 @@ function AdminPageContent() {
   }, [memberSearch, members]);
   const seatUsed = members.length;
   const pendingInvites = invitations.filter((item) => item.status === "pending").length;
+
+  useEffect(() => {
+    setManagebacBaseUrl(managebac?.baseUrl ?? "");
+    setManagebacMappings(
+      Object.fromEntries((managebac?.studentMappings ?? []).map((mapping) => [mapping.clerkId, mapping.managebacStudentId])),
+    );
+  }, [managebac]);
 
   async function completeOnboarding() {
     const response = await fetch("/api/personal-soul", { method: "PATCH" });
@@ -249,6 +298,92 @@ function AdminPageContent() {
     }
   }
 
+  async function discoverManagebac() {
+    if (!managebacBaseUrl.trim() || !managebacToken.trim()) {
+      toast.error("Base URL and token are required for discovery.");
+      return;
+    }
+    setManagebacDiscovering(true);
+    try {
+      const result = await loadJson<{ endpoints: ManagebacEndpoint[] }>("/api/admin/managebac", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "discover",
+          baseUrl: managebacBaseUrl.trim(),
+          token: managebacToken.trim(),
+          studentId: managebacProbeStudentId.trim() || undefined,
+        }),
+      });
+      setManagebac((prev) => ({
+        configured: prev?.configured ?? false,
+        baseUrl: managebacBaseUrl.trim(),
+        tokenLastFour: prev?.tokenLastFour,
+        studentMappings: prev?.studentMappings ?? [],
+        syncEnabled: prev?.syncEnabled ?? false,
+        syncFrequencyHours: prev?.syncFrequencyHours ?? 24,
+        availableEndpoints: result.endpoints,
+        lastSyncAt: prev?.lastSyncAt,
+        lastSyncStatus: prev?.lastSyncStatus,
+        lastSyncError: prev?.lastSyncError,
+        lastSyncDetails: prev?.lastSyncDetails,
+      }));
+      toast.success("ManageBac endpoints discovered.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "ManageBac discovery failed.");
+    } finally {
+      setManagebacDiscovering(false);
+    }
+  }
+
+  async function saveManagebac() {
+    setManagebacSaving(true);
+    try {
+      await loadJson("/api/admin/managebac", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          baseUrl: managebacBaseUrl.trim(),
+          token: managebacToken.trim() || undefined,
+          studentMappings: members
+            .map((member) => ({
+              clerkId: member._id,
+              email: member.email,
+              managebacStudentId: managebacMappings[member._id]?.trim(),
+            }))
+            .filter((mapping) => mapping.managebacStudentId),
+          syncEnabled: managebac?.syncEnabled ?? false,
+          syncFrequencyHours: managebac?.syncFrequencyHours ?? 24,
+          availableEndpoints: managebac?.availableEndpoints ?? [],
+        }),
+      });
+      setManagebacToken("");
+      toast.success("ManageBac configuration saved.");
+      await refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save ManageBac configuration.");
+    } finally {
+      setManagebacSaving(false);
+    }
+  }
+
+  async function runManagebacSync() {
+    setManagebacSyncing(true);
+    try {
+      await loadJson("/api/admin/managebac", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "sync" }),
+      });
+      toast.success("ManageBac sync completed.");
+      await refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "ManageBac sync failed.");
+    } finally {
+      setManagebacSyncing(false);
+    }
+  }
+
   if (sidebarLoading || !hasAdminAccess || loading) return <AppShell><div className="flex items-center justify-center p-8"><div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--border-default)] border-t-[var(--accent-cyan)]" /></div></AppShell>;
   if (!onboardingComplete) return <AppShell><AdminOnboarding orgName={org?.name ?? "Spectra"} onComplete={completeOnboarding} onSkip={completeOnboarding} /></AppShell>;
 
@@ -273,6 +408,7 @@ function AdminPageContent() {
           <span className="font-medium text-[var(--text-primary)]">Jump to</span>
           {[
             ["admin-section-soul", "Soul"],
+            ["admin-section-integrations", "Integrations"],
             ["admin-section-members", "Members"],
             ["admin-section-usage", "Usage"],
             ["admin-section-settings", "Settings"],
@@ -326,6 +462,133 @@ function AdminPageContent() {
               <Link href="/admin/school/branding">Open Branding Settings</Link>
             </Button>
           </div>
+        </section>
+
+        <section id="admin-section-integrations" className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6">
+          <div className="mb-1 flex items-center gap-2">
+            <Cpu className="h-4 w-4 text-[var(--accent-cyan)]" />
+            <h2 className="font-display text-xl">Integrations</h2>
+          </div>
+          <p className="mb-5 mt-1 text-sm text-[var(--text-secondary)]">Configure ManageBac discovery, student mapping, and sync.</p>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="space-y-1.5 sm:col-span-2">
+              <span className="text-xs text-[var(--text-secondary)]">ManageBac base URL</span>
+              <Input value={managebacBaseUrl} onChange={(event) => setManagebacBaseUrl(event.target.value)} placeholder="https://api.managebac.com" />
+            </label>
+            <label className="space-y-1.5">
+              <span className="text-xs text-[var(--text-secondary)]">API token</span>
+              <Input value={managebacToken} onChange={(event) => setManagebacToken(event.target.value)} placeholder={managebac?.tokenLastFour ? `Stored token ••••${managebac.tokenLastFour}` : "Paste token"} type="password" />
+            </label>
+            <label className="space-y-1.5">
+              <span className="text-xs text-[var(--text-secondary)]">Probe student ID</span>
+              <Input value={managebacProbeStudentId} onChange={(event) => setManagebacProbeStudentId(event.target.value)} placeholder="Used for timetable / assignments discovery" />
+            </label>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={() => void discoverManagebac()} disabled={managebacDiscovering}>
+              {managebacDiscovering ? "Discovering…" : "Discover endpoints"}
+            </Button>
+            <Button onClick={() => void saveManagebac()} disabled={managebacSaving}>
+              {managebacSaving ? "Saving…" : "Save configuration"}
+            </Button>
+            <Button variant="outline" onClick={() => void runManagebacSync()} disabled={managebacSyncing || !managebac?.configured}>
+              {managebacSyncing ? "Syncing…" : "Run sync now"}
+            </Button>
+          </div>
+
+          <div className="mt-5 flex flex-wrap items-stretch divide-x divide-[var(--border-default)] rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] text-sm">
+            <div className="px-4 py-2.5">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Configured</p>
+              <p className="mt-0.5 font-medium">{managebac?.configured ? "Yes" : "No"}</p>
+            </div>
+            <div className="px-4 py-2.5">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Sync</p>
+              <p className="mt-0.5 font-medium">{managebac?.syncEnabled ? `Every ${managebac.syncFrequencyHours}h` : "Disabled"}</p>
+            </div>
+            <div className="px-4 py-2.5">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Last run</p>
+              <p className="mt-0.5 font-medium">
+                {managebac?.lastSyncAt ? new Date(managebac.lastSyncAt).toLocaleString() : "Never"}
+              </p>
+            </div>
+          </div>
+
+          {managebac?.availableEndpoints?.length ? (
+            <div className="mt-5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+              <p className="mb-3 text-sm font-medium">Discovered endpoints</p>
+              <div className="flex flex-wrap gap-2">
+                {managebac.availableEndpoints.map((endpoint) => (
+                  <span
+                    key={endpoint.key}
+                    className={cn(
+                      "rounded-full border px-2.5 py-1 text-xs",
+                      endpoint.status === "available"
+                        ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                        : "border-amber-300 bg-amber-50 text-amber-700",
+                    )}
+                  >
+                    {endpoint.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="mt-5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <p className="text-sm font-medium">Student mapping</p>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-[var(--text-secondary)]">Daily sync</span>
+                <Switch
+                  checked={managebac?.syncEnabled ?? false}
+                  onCheckedChange={(checked) => setManagebac((prev) => prev ? { ...prev, syncEnabled: checked } : prev)}
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              {members.filter((member) => member.role !== "admin").map((member) => (
+                <div key={member._id} className="grid gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-[var(--text-primary)]">{member.name}</p>
+                    <p className="text-xs text-[var(--text-secondary)]">{member.email}</p>
+                  </div>
+                  <Input
+                    value={managebacMappings[member._id] ?? ""}
+                    onChange={(event) => setManagebacMappings((prev) => ({ ...prev, [member._id]: event.target.value }))}
+                    placeholder="ManageBac student ID"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {managebac?.lastSyncDetails ? (
+            <div className="mt-5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+              <p className="mb-3 text-sm font-medium">Last sync summary</p>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Workstreams</p>
+                  <p className="mt-0.5 text-sm font-medium">{managebac.lastSyncDetails.workstreamsCreated ?? 0} created / {managebac.lastSyncDetails.workstreamsUpdated ?? 0} updated</p>
+                </div>
+                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Planner</p>
+                  <p className="mt-0.5 text-sm font-medium">{managebac.lastSyncDetails.plannerCreated ?? 0} created / {managebac.lastSyncDetails.plannerUpdated ?? 0} updated</p>
+                </div>
+                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Notes</p>
+                  <p className="mt-0.5 text-sm font-medium">{managebac.lastSyncDetails.notesCreated ?? 0} created / {managebac.lastSyncDetails.notesUpdated ?? 0} updated</p>
+                </div>
+              </div>
+              {managebac.lastSyncDetails.warnings?.length ? (
+                <p className="mt-3 text-xs text-[var(--text-secondary)]">{managebac.lastSyncDetails.warnings.join(" • ")}</p>
+              ) : null}
+              {managebac.lastSyncError ? (
+                <p className="mt-2 text-xs text-[var(--warning)]">{managebac.lastSyncError}</p>
+              ) : null}
+            </div>
+          ) : null}
         </section>
 
         {/* Section 2: Members */}

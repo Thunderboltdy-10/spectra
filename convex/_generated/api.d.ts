@@ -29,6 +29,7 @@ import type * as gamification from "../gamification.js";
 import type * as helpers from "../helpers.js";
 import type * as images from "../images.js";
 import type * as ingestQueue from "../ingestQueue.js";
+import type * as managebacSync from "../managebacSync.js";
 import type * as memory from "../memory.js";
 import type * as models from "../models.js";
 import type * as notes from "../notes.js";
@@ -49,6 +50,7 @@ import type * as usage from "../usage.js";
 import type * as userLifecycle from "../userLifecycle.js";
 import type * as userPreferences from "../userPreferences.js";
 import type * as users from "../users.js";
+import type * as workstreamMemory from "../workstreamMemory.js";
 import type * as workstreams from "../workstreams.js";
 
 import type {
@@ -79,6 +81,7 @@ declare const fullApi: ApiFromModules<{
   helpers: typeof helpers;
   images: typeof images;
   ingestQueue: typeof ingestQueue;
+  managebacSync: typeof managebacSync;
   memory: typeof memory;
   models: typeof models;
   notes: typeof notes;
@@ -99,6 +102,7 @@ declare const fullApi: ApiFromModules<{
   userLifecycle: typeof userLifecycle;
   userPreferences: typeof userPreferences;
   users: typeof users;
+  workstreamMemory: typeof workstreamMemory;
   workstreams: typeof workstreams;
 }>;
 

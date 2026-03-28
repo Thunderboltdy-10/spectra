@@ -45,6 +45,7 @@ export default defineSchema({
     createdBy: v.optional(v.string()),
     managebacConfig: v.optional(
       v.object({
+        baseUrl: v.optional(v.string()),
         encryptedToken: v.string(),
         tokenLastFour: v.optional(v.string()),
         studentMappings: v.optional(
@@ -61,6 +62,9 @@ export default defineSchema({
         lastSyncAt: v.optional(v.number()),
         lastSyncStatus: v.optional(v.union(v.literal("idle"), v.literal("success"), v.literal("error"))),
         lastSyncError: v.optional(v.string()),
+        availableEndpoints: v.optional(v.any()),
+        announcementsCache: v.optional(v.any()),
+        lastSyncDetails: v.optional(v.any()),
         updatedAt: v.optional(v.number()),
       }),
     ),
@@ -241,6 +245,8 @@ export default defineSchema({
     canvasHeight: v.optional(v.number()),
     subjectCode: v.optional(v.string()),
     managebacClassId: v.optional(v.string()),
+    managebacContext: v.optional(v.any()),
+    managebacInactiveSince: v.optional(v.number()),
     linkedAgentId: v.optional(v.id("agents")),
     linkedPackId: v.optional(v.id("packs")),
     defaultMode: v.optional(vStudyMode),
@@ -266,6 +272,7 @@ export default defineSchema({
     orgId: v.id("orgs"),
     key: v.string(),
     text: v.string(),
+    textHash: v.optional(v.string()),
     embedding: v.array(v.float64()),
     category: v.union(
       v.literal("concept"),
@@ -290,6 +297,7 @@ export default defineSchema({
     status: v.union(v.literal("active"), v.literal("superseded"), v.literal("dismissed")),
     supersededBy: v.optional(v.id("workstreamMemory")),
     archivedAt: v.optional(v.number()),
+    lastDecayedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -318,6 +326,9 @@ export default defineSchema({
     sourceArtifactId: v.optional(v.id("artifacts")),
     sourceChatId: v.optional(v.id("chats")),
     managebacItemId: v.optional(v.string()),
+    sourceDeleted: v.optional(v.boolean()),
+    sourceUpdatedAt: v.optional(v.number()),
+    syncConflictSummary: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -335,6 +346,11 @@ export default defineSchema({
     content: v.any(),
     contentPlaintext: v.optional(v.string()),
     editorMode: v.union(v.literal("agentic"), v.literal("notion"), v.literal("simple")),
+    sourceType: v.optional(v.union(v.literal("user_manual"), v.literal("ai_generated"), v.literal("managebac_sync"))),
+    managebacItemId: v.optional(v.string()),
+    sourceDeleted: v.optional(v.boolean()),
+    sourceUpdatedAt: v.optional(v.number()),
+    syncConflictSummary: v.optional(v.string()),
     lastAiEditId: v.optional(v.string()),
     pendingDiffs: v.optional(v.any()),
     createdAt: v.number(),
@@ -433,12 +449,16 @@ export default defineSchema({
     userId: v.id("users"),
     chatId: v.optional(v.id("chats")),
     messageId: v.optional(v.id("messages")),
+    eventType: v.optional(v.union(v.literal("model"), v.literal("search"))),
+    provider: v.optional(v.string()),
     model: v.string(),
     inputTokens: v.number(),
     outputTokens: v.number(),
     totalTokens: v.number(),
     costCents: v.optional(v.number()),
     cacheSavingsCents: v.optional(v.number()),
+    searchOperation: v.optional(v.string()),
+    searchUnits: v.optional(v.number()),
     pricingNote: v.optional(v.string()),
     finishReason: v.optional(v.string()),
     truncatedByLength: v.optional(v.boolean()),
@@ -536,6 +556,7 @@ export default defineSchema({
     freshness: v.optional(v.number()),
     scope: v.optional(v.union(v.literal("global"), v.literal("workstream"))),
     archivedAt: v.optional(v.number()),
+    lastDecayedAt: v.optional(v.number()),
     relatedArtifacts: v.optional(v.array(v.string())),
     negativeTopicLinks: v.optional(v.array(v.string())),
     createdAt: v.number(),
@@ -548,7 +569,7 @@ export default defineSchema({
     .vectorIndex("by_embedding", {
       vectorField: "embedding",
       dimensions: EMBEDDING_DIMENSIONS,
-      filterFields: ["userId", "orgId"],
+      filterFields: ["userId", "orgId", "scope", "status"],
     }),
 
   studentAnalytics: defineTable({

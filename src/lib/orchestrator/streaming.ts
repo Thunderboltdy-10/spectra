@@ -3,8 +3,10 @@ import {
   openRouterStreamChat,
   type OpenRouterMessage,
   type OpenRouterReasoningEffort,
+  type OpenRouterToolDefinition,
   type OpenRouterUsage,
 } from "@/lib/openrouter";
+import type { ExecutedToolResult } from "@/lib/orchestrator/tool-executor";
 import { executeGraph, synthesize, type TaskNode } from "@/lib/orchestrator/task-graph";
 import { getSpecialist } from "@/lib/orchestrator/specialists";
 import { runMarkerVerificationPipeline, type VerificationSubcall } from "@/lib/orchestrator/verification";
@@ -26,6 +28,39 @@ function reasoningEffortForThinkingLevel(
   return "low";
 }
 
+function shouldRunToolLoop(params: {
+  tools?: OpenRouterToolDefinition[];
+  messages: OpenRouterMessage[];
+}) {
+  if (!params.tools?.length) return false;
+  const lastUserMessage = [...params.messages].reverse().find((message) => message.role === "user");
+  const content = typeof lastUserMessage?.content === "string"
+    ? lastUserMessage.content.toLowerCase()
+    : "";
+  if (!content) return false;
+
+  const toolNames = new Set(params.tools.map((tool) => tool.function.name));
+  if (toolNames.has("search_web") && /\b(latest|recent|today|current|news|look up|search|find online)\b/.test(content)) {
+    return true;
+  }
+  if (toolNames.has("recall_memory") && /\b(remember|previous|before|last time|my preference|my usual|you said)\b/.test(content)) {
+    return true;
+  }
+  if ((toolNames.has("create_note") || toolNames.has("update_planner")) && /\b(note|summary|save this|task|deadline|todo|planner|milestone|remind)\b/.test(content)) {
+    return true;
+  }
+  if (toolNames.has("fork_thread") && /\b(new thread|separate thread|continue elsewhere|research this separately)\b/.test(content)) {
+    return true;
+  }
+  if (toolNames.has("get_workstream_context") && /\b(workstream|subject|project context|what have we done)\b/.test(content)) {
+    return true;
+  }
+  if (toolNames.has("switch_mode") && /\b(quiz me|test me|switch to|research mode|tutor mode)\b/.test(content)) {
+    return true;
+  }
+  return false;
+}
+
 export async function runAssistantStreaming(params: {
   actorClerkId?: string;
   chatId?: string;
@@ -40,6 +75,9 @@ export async function runAssistantStreaming(params: {
   onUsageTokens?: (tokens: number) => void;
   onFallback?: (event: RouteTraceFallback) => void;
   maxContinuations?: number;
+  tools?: OpenRouterToolDefinition[];
+  executeTool?: (params: { name: string; rawArguments: string }) => Promise<ExecutedToolResult>;
+  maxToolRounds?: number;
   logger?: {
     info: (message: string, context?: Record<string, unknown>) => void;
   };
@@ -77,6 +115,134 @@ export async function runAssistantStreaming(params: {
   };
 
   if (!params.shouldVerify) {
+    const shouldRunTools = shouldRunToolLoop({
+      tools: params.tools,
+      messages: params.messages,
+    });
+
+    if (shouldRunTools && params.tools?.length && params.executeTool) {
+      const workingMessages = [...params.messages];
+      const maxToolRounds = Math.max(1, Math.min(6, params.maxToolRounds ?? 4));
+      const allowedToolNames = new Set(params.tools.map((tool) => tool.function.name));
+
+      for (let toolRound = 0; toolRound < maxToolRounds; toolRound += 1) {
+        const completion = await openRouterChatCompletion({
+          model: params.primaryModel,
+          fallbackModels: params.fallbackModels,
+          messages: workingMessages,
+          maxTokens: params.maxTokens,
+          reasoningEffort: reasoningEffortForThinkingLevel(params.thinkingLevel),
+          tools: params.tools,
+          toolChoice: "auto",
+          onFallback: params.onFallback,
+        });
+
+        modelUsed = completion.model ?? modelUsed;
+        const roundUsageIn = Math.max(0, completion.usage?.prompt_tokens ?? 0);
+        const roundUsageOut = Math.max(0, completion.usage?.completion_tokens ?? 0);
+        usageIn += roundUsageIn;
+        usageOut += roundUsageOut;
+        if (roundUsageIn + roundUsageOut > 0) {
+          params.onUsageTokens?.(roundUsageIn + roundUsageOut);
+        }
+        usage = mergeUsage(usage, completion.usage);
+        finishReason = completion.choices?.[0]?.message?.tool_calls?.length ? "tool_calls" : finishReason;
+        if (params.actorClerkId) {
+          await recordOpenRouterUsage({
+            actorClerkId: params.actorClerkId,
+            chatId: params.chatId,
+            model: completion.model ?? params.primaryModel,
+            usage: completion.usage,
+          }).catch(() => {});
+        }
+
+        const assistantMessage = completion.choices?.[0]?.message;
+        const toolCalls = (assistantMessage?.tool_calls ?? []).filter((toolCall) => {
+          const name = toolCall.function?.name?.trim();
+          return Boolean(name && allowedToolNames.has(name));
+        });
+
+        if (toolCalls.length === 0) {
+          const finalContent = assistantMessage?.content?.trim() ?? "";
+          responseText = finalContent;
+          for (const chunk of chunkString(finalContent, 28)) {
+            await params.send({ type: "delta", content: chunk });
+          }
+          break;
+        }
+
+        workingMessages.push({
+          role: "assistant",
+          content: assistantMessage?.content ?? "",
+          tool_calls: toolCalls,
+        });
+
+        for (const toolCall of toolCalls) {
+          const toolName = toolCall.function?.name?.trim();
+          if (!toolName) continue;
+          const callId = toolCall.id ?? `${toolName}-${toolRound}`;
+          await params.send({
+            type: "tool_call",
+            toolName,
+            toolCallId: callId,
+            arguments: toolCall.function?.arguments ?? "{}",
+          });
+          const executed = await params.executeTool({
+            name: toolName,
+            rawArguments: toolCall.function?.arguments ?? "{}",
+          });
+          if (executed.modeSwitch) {
+            await params.send({
+              type: "mode_switch",
+              mode: executed.modeSwitch,
+              reason: executed.eventPayload.reason,
+            });
+            workingMessages.push({
+              role: "system",
+              content: String(executed.modelPayload.systemInstruction ?? `Switch to ${executed.modeSwitch} mode.`),
+            });
+          }
+          if (executed.threadFork) {
+            await params.send({
+              type: "thread_fork",
+              ...executed.eventPayload,
+            });
+          }
+          await params.send({
+            type: "tool_result",
+            toolName,
+            toolCallId: callId,
+            summary: executed.summary,
+            result: executed.eventPayload,
+          });
+          workingMessages.push({
+            role: "tool",
+            name: toolName,
+            tool_call_id: callId,
+            content: JSON.stringify(executed.modelPayload),
+          });
+        }
+      }
+
+      return {
+        responseText,
+        modelUsed,
+        usageIn,
+        usageOut,
+        usage,
+        finishReason,
+        truncatedByLength,
+        continuationCount,
+        verificationPassed,
+        thinkingContent,
+        sourceHints: [] as SearchSourceHint[],
+        collaborators: undefined as
+          | Array<{ role: string; model: string; tokensUsed: number; durationMs: number }>
+          | undefined,
+        verificationSubcalls,
+      };
+    }
+
     const maxContinuations = Math.max(0, Math.min(4, params.maxContinuations ?? 2));
     let continuationMessages = params.messages;
 

@@ -204,7 +204,7 @@ export function ChatLayout() {
       toast.info("This mode is coming soon.");
       return;
     }
-    if (!chat.confirmModeSwitch(nextMode)) {
+    if (!chat.confirmModeSwitch()) {
       return;
     }
     chat.setMode(nextMode);

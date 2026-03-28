@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
   Plus,
@@ -12,11 +12,10 @@ import {
   Filter,
   X,
   RefreshCw,
-  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/layout/app-shell";
-import { ARTIFACT_TYPES, ARTIFACT_TYPE_META, getArtifactMeta, type ArtifactType } from "@/lib/artifact-types";
+import { ARTIFACT_TYPES, ARTIFACT_TYPE_META, type ArtifactType } from "@/lib/artifact-types";
 import { SectionsView } from "@/components/artifacts/sections-view";
 import { TimelineView } from "@/components/artifacts/timeline-view";
 import { CanvasView } from "@/components/artifacts/canvas-view";

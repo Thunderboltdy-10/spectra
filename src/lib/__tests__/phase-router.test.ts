@@ -191,6 +191,48 @@ describe("phase-router", () => {
     expect(alpha?.scoreBreakdown?.join(" ")).toContain("recent_failure_circuit");
   });
 
+  it("filters out stale and :online models from automatic routing", () => {
+    const veryOld = new Date();
+    veryOld.setDate(veryOld.getDate() - 220);
+    const recent = new Date();
+    recent.setDate(recent.getDate() - 20);
+    const decision = selectModelForPhase({
+      phaseId: "analysis",
+      phaseLabel: "Primary response",
+      mode: "general",
+      routerMode: "auto",
+      spendingTier: "normal",
+      thinkingLevel: "medium",
+      stakes: "medium",
+      messageLength: 140,
+      modelCatalog: [
+        ...baseCatalog().filter((model) => model.modelId !== "delta/expensive"),
+        {
+          modelId: "omega/search-model:online",
+          provider: "omega",
+          name: "Search Model Online",
+          inputCostPerM: 1,
+          outputCostPerM: 1,
+          releaseDate: recent.toISOString(),
+          capabilities: { reasoning: 8, creative: 5, code: 4, vision: 0, speed: 6 },
+        },
+        {
+          modelId: "zeta/old-model",
+          provider: "zeta",
+          name: "Old Model",
+          inputCostPerM: 1,
+          outputCostPerM: 1,
+          releaseDate: veryOld.toISOString(),
+          capabilities: { reasoning: 10, creative: 7, code: 7, vision: 0, speed: 7 },
+        },
+      ],
+      seedKey: "freshness-filter",
+    });
+
+    expect(decision.selectedModel).not.toContain(":online");
+    expect(decision.candidates.some((candidate) => candidate.modelId === "zeta/old-model")).toBe(false);
+  });
+
   it("honors persisted challenger state from runtime evaluation", () => {
     const decision = selectModelForPhase({
       phaseId: "analysis",

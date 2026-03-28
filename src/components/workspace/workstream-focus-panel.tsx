@@ -12,7 +12,6 @@ import {
   Columns3,
   FileText,
   GitBranch,
-  GripVertical,
   Layers,
   MessageSquare,
   Notebook,
@@ -258,6 +257,11 @@ export function WorkstreamFocusPanel({
     }
   }, [activeNote?.editorMode, setEditorMode]);
 
+  const handleCloseWithAnimation = useCallback(() => {
+    setIsExiting(true);
+    setTimeout(() => onClose(), 380);
+  }, [onClose]);
+
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -271,7 +275,7 @@ export function WorkstreamFocusPanel({
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onClose, onRouteChange, resolvedPanel]);
+  }, [handleCloseWithAnimation, onRouteChange, resolvedPanel]);
 
   const stageItem = useMemo(() => {
     const upcoming = plannerItems.find((item) => item.status !== "completed");
@@ -327,11 +331,6 @@ export function WorkstreamFocusPanel({
     const query = new URLSearchParams({ note: noteId, from: "workspace", ws: workstream._id });
     router.push(`/notes?${query.toString()}`);
   }, [router, workstream._id]);
-
-  const handleCloseWithAnimation = useCallback(() => {
-    setIsExiting(true);
-    setTimeout(() => onClose(), 380);
-  }, [onClose]);
 
   const activeModules = useMemo(
     () => getActiveModules(workstream, chats, notes, plannerItems),
@@ -440,7 +439,6 @@ export function WorkstreamFocusPanel({
                 />
               ) : focusView === "columns" ? (
                 <ColumnView
-                  workstream={workstream}
                   chats={chats}
                   notes={notes}
                   plannerItems={plannerItems}
@@ -744,7 +742,7 @@ function StructuredView({
                 />
               )}
               {mod.type === "agents" && (
-                <AgentModule workstream={workstream} />
+                <AgentModule />
               )}
             </motion.div>
           ))}
@@ -988,7 +986,7 @@ function ArtifactsModule({
 
 /* ─── Module: Agent ──────────────────────────────────────── */
 
-function AgentModule({ workstream }: { workstream: Workstream }) {
+function AgentModule() {
   return (
     <ModuleSection title="Linked Agent" icon={Zap}>
       <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-[var(--text-secondary)]">
@@ -1049,7 +1047,6 @@ function ModuleSection({
 /* ─── COLUMNS VIEW ───────────────────────────────────────── */
 
 function ColumnView({
-  workstream,
   chats,
   notes,
   plannerItems,
@@ -1057,7 +1054,6 @@ function ColumnView({
   onOpenNote,
   onCreateNote,
 }: {
-  workstream: Workstream;
   chats: WorkstreamChatSummary[];
   notes: WorkspaceNote[];
   plannerItems: PlannerItem[];

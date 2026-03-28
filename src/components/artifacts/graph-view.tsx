@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { getArtifactMeta } from "@/lib/artifact-types";
 import type { ArtifactItem } from "./artifact-card";
 

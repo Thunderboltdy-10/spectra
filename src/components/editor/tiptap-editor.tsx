@@ -1,22 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
-import { useEditor, EditorContent, type Editor } from "@tiptap/react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useEditor, EditorContent } from "@tiptap/react";
+import type { JSONContent } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/editor-store";
+import { ImportDialog } from "@/components/editor/import-dialog";
+import { importClipboardData } from "@/lib/editor/clipboard-paste";
+import type { ImportedDocument } from "@/lib/editor/tiptap-import";
 import { AiBar } from "./ai-bar";
 import { EditorToolbar } from "./editor-toolbar";
 
-type EditorMode = "simple" | "notion" | "agentic";
-
 interface TiptapEditorProps {
-  content?: object | null;
+  content?: JSONContent | null;
   placeholder?: string;
   editable?: boolean;
-  onSave?: (json: object, text: string) => void;
-  onChange?: (json: object, text: string) => void;
+  onSave?: (json: JSONContent, text: string) => void;
+  onChange?: (json: JSONContent, text: string) => void;
   className?: string;
   noteId?: string;
   artifactId?: string;
@@ -34,6 +36,7 @@ export function TiptapEditor({
 }: TiptapEditorProps) {
   const { editorMode, setActiveNoteId, setActiveArtifactId } = useEditorStore();
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   useEffect(() => {
     if (noteId) setActiveNoteId(noteId);
@@ -83,7 +86,7 @@ export function TiptapEditor({
   useEffect(() => {
     if (editor && content && !editor.isFocused) {
       // Update content without emitting update event to avoid save loop
-      editor.commands.setContent(content as any);
+      editor.commands.setContent(content);
     }
   }, [editor, content]);
 
@@ -142,13 +145,27 @@ export function TiptapEditor({
     [editor, charOffsetToPos],
   );
 
+  const applyImportedDocument = useCallback((document: ImportedDocument, replaceDocument: boolean) => {
+    if (!editor) return;
+    if (replaceDocument) {
+      editor.commands.setContent(document.content as never);
+    } else {
+      const insertable = Array.isArray(document.content.content)
+        ? document.content.content
+        : document.content;
+      editor.commands.insertContent(insertable as never);
+    }
+    onChange?.(document.content, document.contentPlaintext);
+    onSave?.(document.content, document.contentPlaintext);
+  }, [editor, onChange, onSave]);
+
   if (!editor) return null;
 
   return (
     <div className={cn("flex flex-col h-full", className)}>
       {/* Mode toolbar (notion + agentic) */}
       {editorMode !== "simple" && (
-        <EditorToolbar editor={editor} />
+        <EditorToolbar editor={editor} onOpenImport={() => setImportOpen(true)} />
       )}
 
       {/* AI bar (agentic mode only) */}
@@ -165,6 +182,12 @@ export function TiptapEditor({
       <div
         className="flex-1 overflow-y-auto px-8 py-6"
         onClick={() => editor.commands.focus()}
+        onPaste={(event) => {
+          const imported = importClipboardData(event.clipboardData);
+          if (!imported) return;
+          event.preventDefault();
+          applyImportedDocument(imported, false);
+        }}
       >
         <EditorContent
           editor={editor}
@@ -174,6 +197,12 @@ export function TiptapEditor({
           )}
         />
       </div>
+
+      <ImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        onImport={(document) => applyImportedDocument(document, true)}
+      />
     </div>
   );
 }

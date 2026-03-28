@@ -63,7 +63,7 @@ function JoinPageContent() {
            try {
              const json = JSON.parse(text);
              errorMessage = json.error?.message || json.message || errorMessage;
-           } catch (e) {
+           } catch {
              // Keep original text if not JSON
            }
            setState({ status: "error", message: errorMessage });

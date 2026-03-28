@@ -1,4 +1,4 @@
-export const MAX_MODEL_COST_PER_MILLION = 30;
+export const MAX_MODEL_COST_PER_MILLION = 5;
 export const CHEAP_MODEL_COST_PER_MILLION = 3;
 
 export type CostModel = {

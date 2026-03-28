@@ -1,7 +1,12 @@
 import { NextRequest } from "next/server";
 import { requireActor } from "@/lib/auth-server";
+import { convexQuery } from "@/lib/convex-server";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 import { ok, badRequest } from "@/lib/http";
+import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
+import { pickModelAndFallbacks } from "@/lib/model-selection";
+import { openRouterChatCompletion } from "@/lib/openrouter";
+import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 
 export const runtime = "nodejs";
 
@@ -13,12 +18,9 @@ type DiffOp = {
   reason: string;
 };
 
-const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
-const EDIT_MODEL = "anthropic/claude-haiku-4-5";
-
 export async function POST(request: NextRequest) {
   return withRouteErrorHandling(async () => {
-    await requireActor();
+    const actor = await requireActor();
 
     const body = (await request.json()) as {
       instruction: string;
@@ -55,40 +57,84 @@ Document:
 ${body.documentText.slice(0, 8000)}
 """`;
 
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) {
-      return badRequest("OPENROUTER_API_KEY not configured");
-    }
-
-    const res = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL ?? "https://spectra.ai",
-        "X-Title": "Spectra AI Editor",
-      },
-      body: JSON.stringify({
-        model: EDIT_MODEL,
-        max_tokens: 2000,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        response_format: { type: "json_object" },
-      }),
+    const [budget, dbCatalog] = await Promise.all([
+      (convexQuery("usage:checkUserBudget", { actorClerkId: actor.clerkId }) as Promise<{
+        tier: "normal" | "expensive_blocked" | "cheap_only" | "free_only";
+      }>).catch(() => ({ tier: "normal" as const })),
+      convexQuery("models:listModels", { actorClerkId: actor.clerkId }).catch(() => [] as Array<Record<string, unknown>>),
+    ]);
+    const liveCatalog = await getLiveCatalogSnapshot({
+      fallbackCatalog: dbCatalog as Array<{
+        modelId: string;
+        name?: string;
+        provider?: string;
+        description?: string;
+        contextLength?: number;
+        inputCostPerM?: number;
+        outputCostPerM?: number;
+        tags?: string[];
+        isFree?: boolean;
+        costRating?: "low" | "medium" | "high";
+        speedRating?: "low" | "medium" | "high";
+        reasoningRating?: "low" | "medium" | "high";
+        multimodalRating?: "none" | "basic" | "strong";
+        capabilities?: {
+          reasoning?: number;
+          creative?: number;
+          code?: number;
+          vision?: number;
+          speed?: number;
+        };
+      }>,
     });
+    const catalog = liveCatalog.models.length > 0 ? liveCatalog.models : dbCatalog as Array<{
+      modelId: string;
+      name?: string;
+      provider?: string;
+      description?: string;
+      contextLength?: number;
+      inputCostPerM?: number;
+      outputCostPerM?: number;
+      tags?: string[];
+      isFree?: boolean;
+      costRating?: "low" | "medium" | "high";
+      speedRating?: "low" | "medium" | "high";
+      reasoningRating?: "low" | "medium" | "high";
+      multimodalRating?: "none" | "basic" | "strong";
+      capabilities?: {
+        reasoning?: number;
+        creative?: number;
+        code?: number;
+        vision?: number;
+        speed?: number;
+      };
+    }>;
+    const selection = pickModelAndFallbacks({
+      catalog: catalog.filter((model) => model.modelId !== "openrouter/auto" && !model.modelId.includes(":online")),
+      tier: budget.tier,
+      requiredCapabilities: ["reasoning"],
+      preferredCapabilities: ["reasoning"],
+      preferCheap: true,
+      preferFast: true,
+      maxFallbacks: 3,
+    });
+    const model = selection.selected?.modelId ?? "openai/gpt-5-nano";
+    const completion = await openRouterChatCompletion({
+      model,
+      fallbackModels: selection.fallbacks.filter((candidate) => candidate !== model),
+      maxTokens: 2000,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+    });
+    await recordOpenRouterUsage({
+      actorClerkId: actor.clerkId,
+      model: completion.model ?? model,
+      usage: completion.usage,
+    }).catch(() => {});
 
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`AI request failed: ${errText}`);
-    }
-
-    const data = (await res.json()) as {
-      choices: Array<{ message: { content: string } }>;
-    };
-
-    const rawText = data.choices[0]?.message?.content ?? "{}";
+    const rawText = completion.choices?.[0]?.message?.content ?? "{}";
 
     let parsed: { ops: DiffOp[]; summary: string };
     try {

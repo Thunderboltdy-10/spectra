@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { useSidebar } from "@/context/sidebar-context";
+import { buildManagebacMappingState, buildManagebacStudentMappings } from "@/lib/managebac/admin-config";
 import { cn } from "@/lib/utils";
 
 type OrgSettings = { name?: string; description?: string; schoolType?: string; timezone?: string; maxStudents?: number; maxResourceFileSizeBytes?: number; monthlyBudgetCentsPerUser?: number; budgetMarginPercent?: number; soulEnabled?: boolean; orchestratorV2Enabled?: boolean; adaptiveQuizEnabled?: boolean; spacedRepetitionEnabled?: boolean; agentModelBoostEnabled?: boolean };
@@ -22,7 +23,7 @@ type OrgSettingsEnvelope = {
   openRouterConfigured?: boolean;
   openRouterWarnings?: string[];
 };
-type Member = { _id: string; name: string; email: string; role: "student" | "teacher" | "admin"; createdAt: number };
+type Member = { _id: string; clerkId: string; name: string; email: string; role: "student" | "teacher" | "admin"; createdAt: number };
 type Invitation = { _id: string; email: string; role: "student" | "teacher" | "admin"; status: "pending" | "accepted" | "expired" | "cancelled"; expiresAt: number };
 type AccessRequest = { _id: string; email: string; name: string; message?: string; createdAt: number };
 type SchoolDashboard = { memberCount: number; studentCount: number; teacherCount: number; adminCount: number; messagesToday: number; pendingInvitations: number; orgName?: string };
@@ -169,9 +170,7 @@ function AdminPageContent() {
 
   useEffect(() => {
     setManagebacBaseUrl(managebac?.baseUrl ?? "");
-    setManagebacMappings(
-      Object.fromEntries((managebac?.studentMappings ?? []).map((mapping) => [mapping.clerkId, mapping.managebacStudentId])),
-    );
+    setManagebacMappings(buildManagebacMappingState(managebac?.studentMappings ?? []));
   }, [managebac]);
 
   async function completeOnboarding() {
@@ -345,13 +344,7 @@ function AdminPageContent() {
         body: JSON.stringify({
           baseUrl: managebacBaseUrl.trim(),
           token: managebacToken.trim() || undefined,
-          studentMappings: members
-            .map((member) => ({
-              clerkId: member._id,
-              email: member.email,
-              managebacStudentId: managebacMappings[member._id]?.trim(),
-            }))
-            .filter((mapping) => mapping.managebacStudentId),
+          studentMappings: buildManagebacStudentMappings(members, managebacMappings),
           syncEnabled: managebac?.syncEnabled ?? false,
           syncFrequencyHours: managebac?.syncFrequencyHours ?? 24,
           availableEndpoints: managebac?.availableEndpoints ?? [],
@@ -548,15 +541,15 @@ function AdminPageContent() {
               </div>
             </div>
             <div className="space-y-2">
-              {members.filter((member) => member.role !== "admin").map((member) => (
+              {members.filter((member) => member.role === "student").map((member) => (
                 <div key={member._id} className="grid gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 sm:grid-cols-[minmax(0,1fr)_220px]">
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-[var(--text-primary)]">{member.name}</p>
                     <p className="text-xs text-[var(--text-secondary)]">{member.email}</p>
                   </div>
                   <Input
-                    value={managebacMappings[member._id] ?? ""}
-                    onChange={(event) => setManagebacMappings((prev) => ({ ...prev, [member._id]: event.target.value }))}
+                    value={managebacMappings[member.clerkId] ?? ""}
+                    onChange={(event) => setManagebacMappings((prev) => ({ ...prev, [member.clerkId]: event.target.value }))}
                     placeholder="ManageBac student ID"
                   />
                 </div>

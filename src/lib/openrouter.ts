@@ -1,4 +1,3 @@
-import { getEnv } from "@/lib/env";
 import type { RouteTraceFallback } from "@/types";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
@@ -91,17 +90,19 @@ export type OpenRouterImageResult = {
 };
 
 function openRouterHeaders() {
-  const env = getEnv();
-  if (!env.OPENROUTER_API_KEY) {
+  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+  if (!apiKey) {
     throw new Error("OPENROUTER_API_KEY is missing.");
   }
 
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+    Authorization: `Bearer ${apiKey}`,
     "Content-Type": "application/json",
   };
-  if (env.OPENROUTER_APP_NAME) headers["X-Title"] = env.OPENROUTER_APP_NAME;
-  if (env.OPENROUTER_SITE_URL) headers["HTTP-Referer"] = env.OPENROUTER_SITE_URL;
+  const appName = process.env.OPENROUTER_APP_NAME?.trim();
+  const siteUrl = process.env.OPENROUTER_SITE_URL?.trim();
+  if (appName) headers["X-Title"] = appName;
+  if (siteUrl) headers["HTTP-Referer"] = siteUrl;
   return headers;
 }
 

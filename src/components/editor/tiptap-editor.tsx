@@ -85,7 +85,6 @@ export function TiptapEditor({
   // Update content when it changes externally
   useEffect(() => {
     if (editor && content && !editor.isFocused) {
-      // Update content without emitting update event to avoid save loop
       editor.commands.setContent(content);
     }
   }, [editor, content]);
@@ -94,11 +93,10 @@ export function TiptapEditor({
     (charOffset: number): number => {
       if (!editor) return 1;
       const docSize = editor.state.doc.content.size;
-      // Walk through the document text to map character offset to ProseMirror position
       let charCount = 0;
       let pos = 0;
       editor.state.doc.descendants((node, nodePos) => {
-        if (pos > 0) return false; // already found
+        if (pos > 0) return false;
         if (node.isText && node.text) {
           const textLen = node.text.length;
           if (charCount + textLen >= charOffset) {
@@ -111,7 +109,6 @@ export function TiptapEditor({
         }
         return undefined;
       });
-      // If we never found it, clamp to document bounds
       if (pos === 0 && charOffset > 0) pos = Math.min(charOffset + 1, docSize);
       return Math.max(1, Math.min(pos || 1, docSize));
     },
@@ -122,7 +119,6 @@ export function TiptapEditor({
     (ops: Array<{ type: string; from: number; to: number; content?: string }>) => {
       if (!editor) return;
       editor.chain().focus().run();
-      // Apply ops in reverse order to preserve positions
       const sorted = [...ops].sort((a, b) => b.from - a.from);
       for (const op of sorted) {
         const from = charOffsetToPos(op.from);
@@ -163,13 +159,11 @@ export function TiptapEditor({
 
   return (
     <div className={cn("flex flex-col h-full", className)}>
-      {/* Mode toolbar (notion + agentic) */}
-      {editorMode !== "simple" && (
-        <EditorToolbar editor={editor} onOpenImport={() => setImportOpen(true)} />
-      )}
+      {/* Formatting toolbar — ALWAYS visible in both modes */}
+      <EditorToolbar editor={editor} onOpenImport={() => setImportOpen(true)} />
 
-      {/* AI bar (agentic mode only) */}
-      {editorMode === "agentic" && (
+      {/* AI bar — only in AI-Enhanced mode */}
+      {editorMode === "ai_enhanced" && (
         <AiBar
           editor={editor}
           onApplyEdits={applyAiEdits}
@@ -178,7 +172,7 @@ export function TiptapEditor({
         />
       )}
 
-      {/* Editor content */}
+      {/* Editor content — no border, no max-height constraint */}
       <div
         className="flex-1 overflow-y-auto px-8 py-6"
         onClick={() => editor.commands.focus()}
@@ -191,10 +185,7 @@ export function TiptapEditor({
       >
         <EditorContent
           editor={editor}
-          className={cn(
-            "tiptap-root",
-            editorMode === "simple" && "tiptap-simple",
-          )}
+          className="tiptap-root"
         />
       </div>
 

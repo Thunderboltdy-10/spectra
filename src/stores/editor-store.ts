@@ -2,7 +2,20 @@
 
 import { create } from "zustand";
 
-export type EditorMode = "agentic" | "notion" | "simple";
+/**
+ * v3 editor modes:
+ * - "standard": Full formatting toolbar (bold, italic, headings, lists, etc.)
+ * - "ai_enhanced": Everything from Standard PLUS the AI bar
+ *
+ * Migration: "simple" and "notion" → "standard", "agentic" → "ai_enhanced"
+ */
+export type EditorMode = "standard" | "ai_enhanced";
+
+/** Normalize legacy modes to v3 modes */
+export function normalizeEditorMode(mode: string | undefined): EditorMode {
+  if (mode === "ai_enhanced" || mode === "agentic") return "ai_enhanced";
+  return "standard"; // "simple", "notion", undefined, etc.
+}
 
 type DiffOperation = {
   type: "replace" | "insert" | "delete";
@@ -38,7 +51,7 @@ type EditorStoreState = {
 export const useEditorStore = create<EditorStoreState>((set) => ({
   activeArtifactId: undefined,
   activeNoteId: undefined,
-  editorMode: "notion",
+  editorMode: "standard",
   pendingDiffs: [],
   aiBarPrompt: "",
   aiBarAutoAccept: true,
@@ -59,7 +72,7 @@ export const useEditorStore = create<EditorStoreState>((set) => ({
     set({
       activeArtifactId: undefined,
       activeNoteId: undefined,
-      editorMode: "notion",
+      editorMode: "standard",
       pendingDiffs: [],
       aiBarPrompt: "",
       aiBarAutoAccept: true,

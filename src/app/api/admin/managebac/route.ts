@@ -6,12 +6,6 @@ import { withRouteErrorHandling } from "@/lib/route-handler";
 import { discoverManagebacEndpoints } from "@/lib/managebac/client";
 import { encryptManagebacToken } from "../../../../../shared/managebac-crypto";
 
-const MANAGEBAC_SECRET =
-  process.env.MANAGEBAC_CONFIG_SECRET
-  || process.env.CLERK_SECRET_KEY
-  || process.env.OPENROUTER_API_KEY
-  || "managebac-dev-secret";
-
 export async function GET() {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();
@@ -66,7 +60,7 @@ export async function PATCH(request: NextRequest) {
       actorClerkId: actor.clerkId,
       baseUrl: body.baseUrl.trim(),
       encryptedToken: body.token?.trim()
-        ? await encryptManagebacToken(body.token.trim(), MANAGEBAC_SECRET)
+        ? await encryptManagebacToken(body.token.trim())
         : undefined,
       tokenLastFour: body.token?.trim() ? body.token.trim().slice(-4) : undefined,
       studentMappings: Array.isArray(body.studentMappings)

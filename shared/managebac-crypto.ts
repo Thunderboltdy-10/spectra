@@ -1,4 +1,4 @@
-const DEFAULT_SECRET = "managebac-dev-secret";
+const MANAGEBAC_SECRET_ENV = "MANAGEBAC_CONFIG_SECRET";
 
 function base64Encode(bytes: Uint8Array) {
   if (typeof btoa === "function") {
@@ -22,13 +22,25 @@ function base64Decode(value: string) {
 }
 
 async function deriveKey(secret: string) {
-  const secretBytes = new TextEncoder().encode(secret || DEFAULT_SECRET);
+  const secretBytes = new TextEncoder().encode(secret);
   const digest = await crypto.subtle.digest("SHA-256", secretBytes);
   return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt", "decrypt"]);
 }
 
+function resolveManagebacConfigSecret(secret?: string) {
+  const resolved = secret?.trim()
+    || (typeof process !== "undefined" ? process.env.MANAGEBAC_CONFIG_SECRET?.trim() : undefined);
+  if (!resolved) {
+    throw new Error(`${MANAGEBAC_SECRET_ENV} is required for ManageBac token encryption and sync.`);
+  }
+  if (resolved.length < 16) {
+    throw new Error(`${MANAGEBAC_SECRET_ENV} must be at least 16 characters long.`);
+  }
+  return resolved;
+}
+
 export async function encryptManagebacToken(token: string, secret?: string) {
-  const key = await deriveKey(secret ?? DEFAULT_SECRET);
+  const key = await deriveKey(resolveManagebacConfigSecret(secret));
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const encrypted = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv },
@@ -43,7 +55,7 @@ export async function decryptManagebacToken(payload: string, secret?: string) {
   if (!ivPart || !encryptedPart) {
     throw new Error("Invalid ManageBac token payload");
   }
-  const key = await deriveKey(secret ?? DEFAULT_SECRET);
+  const key = await deriveKey(resolveManagebacConfigSecret(secret));
   const decrypted = await crypto.subtle.decrypt(
     { name: "AES-GCM", iv: base64Decode(ivPart) },
     key,

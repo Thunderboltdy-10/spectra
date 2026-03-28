@@ -18,11 +18,21 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Crosshair, ZoomIn } from "lucide-react";
-import { useWorkspaceStore, type WorkspaceBackgroundMode } from "@/stores/workspace-store";
+import { ChevronLeft, Crosshair, ZoomIn } from "lucide-react";
+import { useWorkspaceStore, type WorkspaceBackgroundMode, type ZoomBand } from "@/stores/workspace-store";
 import type { Workstream } from "@/hooks/use-workspace-data";
 import { cn } from "@/lib/utils";
 import { getWorkstreamColor } from "@/lib/workspace/zoom-helpers";
+import {
+  computeCanonicalLayout,
+  applyOverrides,
+  getLifecycleVisuals,
+} from "@/lib/workspace/auto-layout";
+import {
+  saveLocalOverride,
+  loadLocalOverrides,
+  initPersistenceListeners,
+} from "@/lib/workspace/position-persistence";
 
 /* ─── Types ──────────────────────────────────────────────── */
 
@@ -35,15 +45,19 @@ type WorkspaceCanvasProps = {
   searchQuery?: string;
   onOpenWorkstream?: (workstreamId: string) => void;
   onOpenHub?: () => void;
+  /** Called when zoom-based commit happens */
+  onCommitWorkstream?: (workstreamId: string | null) => void;
+  /** Canvas width adjustment when push-panel is open */
+  panelWidth?: number;
 };
-
-type RepresentationBand = "overview" | "summary" | "detail";
 
 type WorkstreamNodeData = {
   workstream: Workstream;
-  band: RepresentationBand;
+  band: ZoomBand;
   isFocused: boolean;
   isDimmed: boolean;
+  isCommitted: boolean;
+  lifecycle: { opacity: number; scale: number; dashed: boolean };
   onOpen: (workstreamId: string, target: HTMLElement) => void;
 };
 
@@ -51,7 +65,8 @@ type HubNodeData = {
   userName: string;
   userAvatar: string;
   totalWorkstreams: number;
-  band: RepresentationBand;
+  band: ZoomBand;
+  isDimmed: boolean;
   onOpen: (target: HTMLElement) => void;
 };
 
@@ -59,17 +74,25 @@ const HUB_NODE_ID = "hub-node";
 
 /* ─── Zoom helpers ───────────────────────────────────────── */
 
-function getRepresentationBand(zoom: number): RepresentationBand {
-  if (zoom < 0.62) return "overview";
-  if (zoom < 1.05) return "summary";
-  return "detail";
+function getRepresentationBand(zoom: number): ZoomBand {
+  if (zoom < 0.5) return "overview";
+  if (zoom < 0.7) return "summary";
+  if (zoom < 0.9) return "detail";
+  return "internal";
+}
+
+/** Calculate opacity for non-focused workstreams during deep zoom */
+function getNeighborOpacity(zoom: number): number {
+  if (zoom < 0.7) return 1;
+  if (zoom > 1.2) return 0;
+  // Linear fade from 1.0 → 0 between zoom 0.7 and 1.2
+  return Math.max(0, 1 - (zoom - 0.7) / 0.5);
 }
 
 function restoreViewport(): Viewport {
   if (typeof window === "undefined") {
     return { x: 0, y: 0, zoom: 0.78 };
   }
-
   try {
     const saved = window.localStorage.getItem("workspace:viewport");
     if (!saved) return { x: 0, y: 0, zoom: 0.78 };
@@ -82,58 +105,47 @@ function restoreViewport(): Viewport {
       return parsed;
     }
   } catch {
-    // Ignore invalid persisted viewport data.
+    // Ignore
   }
-
   return { x: 0, y: 0, zoom: 0.78 };
 }
 
 /* ─── Edge builders ──────────────────────────────────────── */
 
 function buildPeerLinks(workstreams: Workstream[]) {
-  const active = workstreams.filter((workstream) => workstream.status === "active");
+  const active = workstreams.filter((ws) => ws.status === "active");
   const edges: Edge[] = [];
 
-  const tokenize = (value: string) =>
-    value
-      .toLowerCase()
-      .split(/[^a-z0-9]+/i)
-      .filter((token) => token.length >= 4);
+  const tokenize = (v: string) =>
+    v.toLowerCase().split(/[^a-z0-9]+/i).filter((t) => t.length >= 4);
 
-  const sharedTokenCount = (left: Workstream, right: Workstream) => {
-    const leftTokens = new Set([
-      ...tokenize(left.title),
-      ...tokenize(left.description ?? ""),
-      ...(left.subjectCode ? tokenize(left.subjectCode) : []),
+  const sharedTokenCount = (a: Workstream, b: Workstream) => {
+    const aTokens = new Set([
+      ...tokenize(a.title), ...tokenize(a.description ?? ""),
+      ...(a.subjectCode ? tokenize(a.subjectCode) : []),
     ]);
-    const rightTokens = new Set([
-      ...tokenize(right.title),
-      ...tokenize(right.description ?? ""),
-      ...(right.subjectCode ? tokenize(right.subjectCode) : []),
+    const bTokens = new Set([
+      ...tokenize(b.title), ...tokenize(b.description ?? ""),
+      ...(b.subjectCode ? tokenize(b.subjectCode) : []),
     ]);
-
     let count = 0;
-    for (const token of leftTokens) {
-      if (rightTokens.has(token)) count += 1;
-    }
+    for (const t of aTokens) if (bTokens.has(t)) count++;
     return count;
   };
 
-  for (let index = 0; index < active.length; index += 1) {
-    for (let peerIndex = index + 1; peerIndex < active.length; peerIndex += 1) {
-      const left = active[index]!;
-      const right = active[peerIndex]!;
+  for (let i = 0; i < active.length; i++) {
+    for (let j = i + 1; j < active.length; j++) {
+      const a = active[i]!;
+      const b = active[j]!;
       const related =
-        left.type === right.type
-        || (left.subjectCode && right.subjectCode && left.subjectCode === right.subjectCode)
-        || sharedTokenCount(left, right) > 0;
-
+        a.type === b.type
+        || (a.subjectCode && b.subjectCode && a.subjectCode === b.subjectCode)
+        || sharedTokenCount(a, b) > 0;
       if (!related) continue;
-
       edges.push({
-        id: `peer-${left._id}-${right._id}`,
-        source: `ws-${left._id}`,
-        target: `ws-${right._id}`,
+        id: `peer-${a._id}-${b._id}`,
+        source: `ws-${a._id}`,
+        target: `ws-${b._id}`,
         animated: false,
         selectable: false,
         deletable: false,
@@ -146,35 +158,31 @@ function buildPeerLinks(workstreams: Workstream[]) {
       });
     }
   }
-
   return edges.slice(0, 18);
 }
 
-function buildEdges(workstreams: Workstream[], showConnections: boolean): Edge[] {
+function buildEdges(workstreams: Workstream[], showConnections: boolean, committedId?: string): Edge[] {
   if (!showConnections) return [];
+  // Hide edges when inside a committed workstream
+  if (committedId) return [];
 
-  const hubEdges: Edge[] = workstreams.map((workstream) => {
-    const color = getWorkstreamColor(workstream.color).value;
-    const lastActivityAge = workstream.lastActivityAt ? Date.now() - workstream.lastActivityAt : Number.MAX_SAFE_INTEGER;
-    const recentOpacity =
-      lastActivityAge < 2 * 24 * 60 * 60 * 1000
-        ? 0.7
-        : lastActivityAge < 7 * 24 * 60 * 60 * 1000
-          ? 0.45
-          : 0.22;
+  const hubEdges: Edge[] = workstreams.map((ws) => {
+    const color = getWorkstreamColor(ws.color).value;
+    const age = ws.lastActivityAt ? Date.now() - ws.lastActivityAt : Number.MAX_SAFE_INTEGER;
+    const opacity = age < 2 * 86400000 ? 0.7 : age < 7 * 86400000 ? 0.45 : 0.22;
 
     return {
-      id: `hub-${workstream._id}`,
+      id: `hub-${ws._id}`,
       source: HUB_NODE_ID,
-      target: `ws-${workstream._id}`,
+      target: `ws-${ws._id}`,
       animated: false,
       selectable: false,
       deletable: false,
       style: {
         stroke: color,
-        strokeWidth: workstream.status === "completed" ? 0.8 : 1.2,
-        strokeDasharray: workstream.status === "completed" ? "4 6" : undefined,
-        opacity: workstream.status === "archived" ? 0.1 : recentOpacity,
+        strokeWidth: ws.status === "completed" ? 0.8 : 1.2,
+        strokeDasharray: ws.status === "completed" ? "4 6" : undefined,
+        opacity: ws.status === "archived" ? 0.1 : opacity,
       },
       markerEnd: {
         type: MarkerType.ArrowClosed,
@@ -188,29 +196,22 @@ function buildEdges(workstreams: Workstream[], showConnections: boolean): Edge[]
   return [...hubEdges, ...buildPeerLinks(workstreams)];
 }
 
-/* ─── Helper: relative bounds for morph ──────────────────── */
-
-function relativeBounds(target: HTMLElement) {
-  const cardRect = target.getBoundingClientRect();
-  const root = target.closest("[data-workspace-flow-root]");
-  const rootRect = root?.getBoundingClientRect() ?? cardRect;
-
-  return {
-    x: cardRect.left - rootRect.left,
-    y: cardRect.top - rootRect.top,
-    w: cardRect.width,
-    h: cardRect.height,
-  };
-}
-
 /* ─── Workstream Node ────────────────────────────────────── */
 
 const WorkstreamNode = memo(function WorkstreamNode({
   data,
 }: NodeProps<Node<WorkstreamNodeData>>) {
-  const { workstream, band, isFocused, isDimmed, onOpen } = data;
+  const { workstream, band, isFocused, isDimmed, isCommitted, lifecycle, onOpen } = data;
   const color = getWorkstreamColor(workstream.color);
   const [hovered, setHovered] = useState(false);
+
+  // Node width by band
+  const width = band === "overview" ? 220 : band === "summary" ? 280 : band === "detail" ? 320 : 360;
+
+  // When this node is committed (internal zoom), it expands and border dissolves
+  if (isCommitted && band === "internal") {
+    return null; // Internal view is rendered separately, not as a node
+  }
 
   return (
     <div className="relative">
@@ -219,26 +220,26 @@ const WorkstreamNode = memo(function WorkstreamNode({
 
       <motion.button
         type="button"
-        onClick={(event) => onOpen(workstream._id, event.currentTarget)}
+        onClick={(e) => onOpen(workstream._id, e.currentTarget)}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
-        initial={{ opacity: 0, scale: 0.9 }}
         animate={{
-          opacity: isDimmed ? 0.3 : 1,
-          scale: hovered ? 1.02 : 1,
+          opacity: isDimmed ? lifecycle.opacity * getNeighborOpacity(1) : lifecycle.opacity,
+          scale: (hovered ? 1.02 : 1) * lifecycle.scale,
           y: hovered ? -2 : 0,
         }}
         transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
         className={cn(
           "group relative text-left transition-[box-shadow] duration-300",
-          band === "overview" && "w-[260px] rounded-2xl",
-          band === "summary" && "w-[300px] rounded-[22px]",
-          band === "detail" && "w-[320px] rounded-[24px]",
+          "rounded-2xl",
           isFocused && "ring-2 ring-[color:var(--accent-cyan)] ring-offset-2 ring-offset-[var(--bg-primary)]",
         )}
         style={{
+          width,
           background: "var(--bg-elevated)",
-          border: `1px solid ${hovered ? color.value + "60" : "var(--border-default)"}`,
+          border: `1px solid ${hovered ? color.value + "60" : lifecycle.dashed ? "transparent" : "var(--border-default)"}`,
+          borderStyle: lifecycle.dashed ? "dashed" : "solid",
+          borderColor: lifecycle.dashed ? "var(--border-default)" : undefined,
           boxShadow: hovered
             ? `0 20px 50px -16px ${color.value}35, 0 8px 16px -8px rgba(0,0,0,0.08)`
             : "0 2px 8px -4px rgba(0,0,0,0.06)",
@@ -254,7 +255,7 @@ const WorkstreamNode = memo(function WorkstreamNode({
         />
 
         <div className="relative flex flex-col px-4 py-3.5">
-          {/* Top row: emoji + type + status */}
+          {/* Top row: emoji + title + type */}
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2.5">
               <span className={cn("text-lg", band === "overview" && "text-base")}>
@@ -266,7 +267,7 @@ const WorkstreamNode = memo(function WorkstreamNode({
                     "font-display leading-snug text-[var(--text-primary)]",
                     band === "overview" && "text-sm",
                     band === "summary" && "text-[0.95rem]",
-                    band === "detail" && "text-base",
+                    (band === "detail" || band === "internal") && "text-base",
                   )}
                 >
                   {workstream.title}
@@ -281,7 +282,7 @@ const WorkstreamNode = memo(function WorkstreamNode({
             </span>
           </div>
 
-          {/* Description (summary + detail) */}
+          {/* Description (summary+) */}
           <AnimatePresence>
             {band !== "overview" && (
               <motion.p
@@ -291,12 +292,12 @@ const WorkstreamNode = memo(function WorkstreamNode({
                 transition={{ duration: 0.2 }}
                 className="mt-2 line-clamp-2 text-xs leading-relaxed text-[var(--text-secondary)]"
               >
-                {workstream.description || "A space for threads, notes, and the next concrete step."}
+                {workstream.description || "A space for threads, notes, and tasks."}
               </motion.p>
             )}
           </AnimatePresence>
 
-          {/* Metrics (summary + detail) */}
+          {/* Metrics (summary+) */}
           <AnimatePresence>
             {band !== "overview" && (
               <motion.div
@@ -315,9 +316,9 @@ const WorkstreamNode = memo(function WorkstreamNode({
             )}
           </AnimatePresence>
 
-          {/* Detail band: enter affordance */}
+          {/* Detail band: thread/note previews + enter affordance */}
           <AnimatePresence>
-            {band === "detail" && (
+            {(band === "detail" || (band === "internal" && !isCommitted)) && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
@@ -326,7 +327,7 @@ const WorkstreamNode = memo(function WorkstreamNode({
                 className="mt-3 flex items-center justify-between border-t border-[var(--border-default)] pt-3"
               >
                 <span className="text-[10px] text-[var(--text-tertiary)]">
-                  Click to focus
+                  Click to enter
                 </span>
                 <motion.span
                   className="text-xs font-medium text-[var(--accent-cyan)]"
@@ -360,7 +361,7 @@ const HubNode = memo(function HubNode({
   const [hovered, setHovered] = useState(false);
   const initials = (data.userName || "Y")
     .split(" ")
-    .map((part: string) => part[0] ?? "")
+    .map((p: string) => p[0] ?? "")
     .join("")
     .slice(0, 2)
     .toUpperCase();
@@ -371,12 +372,11 @@ const HubNode = memo(function HubNode({
 
       <motion.button
         type="button"
-        onClick={(event) => data.onOpen(event.currentTarget)}
+        onClick={(e) => data.onOpen(e.currentTarget)}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
-        initial={{ opacity: 0, scale: 0.85 }}
         animate={{
-          opacity: 1,
+          opacity: data.isDimmed ? 0.3 : 1,
           scale: hovered ? 1.03 : 1,
           y: hovered ? -3 : 0,
         }}
@@ -385,7 +385,7 @@ const HubNode = memo(function HubNode({
           "group relative flex items-center justify-center overflow-hidden transition-[box-shadow] duration-300",
           data.band === "overview" && "h-[140px] w-[140px] rounded-[28px]",
           data.band === "summary" && "h-[180px] w-[180px] rounded-[32px]",
-          data.band === "detail" && "h-[220px] w-[220px] rounded-[36px]",
+          (data.band === "detail" || data.band === "internal") && "h-[220px] w-[220px] rounded-[36px]",
         )}
         style={{
           background: "var(--bg-elevated)",
@@ -395,14 +395,11 @@ const HubNode = memo(function HubNode({
             : "0 2px 8px -4px rgba(0,0,0,0.06)",
         }}
       >
-        {/* Subtle gradient ring */}
-        <div
-          className="pointer-events-none absolute inset-0 rounded-[inherit] opacity-30"
+        <div className="pointer-events-none absolute inset-0 rounded-[inherit] opacity-30"
           style={{
             background: "radial-gradient(circle at 30% 25%, var(--accent-cyan), transparent 60%)",
           }}
         />
-
         <div className="relative flex flex-col items-center gap-2 px-4 text-center">
           {data.userAvatar ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -413,7 +410,7 @@ const HubNode = memo(function HubNode({
                 "rounded-full object-cover ring-2 ring-[var(--accent-cyan)]/20",
                 data.band === "overview" && "h-10 w-10",
                 data.band === "summary" && "h-12 w-12",
-                data.band === "detail" && "h-14 w-14",
+                (data.band === "detail" || data.band === "internal") && "h-14 w-14",
               )}
             />
           ) : (
@@ -422,13 +419,12 @@ const HubNode = memo(function HubNode({
                 "flex items-center justify-center rounded-full bg-[linear-gradient(135deg,var(--accent-cyan),var(--accent-mint))] font-semibold text-white",
                 data.band === "overview" && "h-10 w-10 text-sm",
                 data.band === "summary" && "h-12 w-12 text-base",
-                data.band === "detail" && "h-14 w-14 text-lg",
+                (data.band === "detail" || data.band === "internal") && "h-14 w-14 text-lg",
               )}
             >
               {initials}
             </div>
           )}
-
           <div>
             <div className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">
               Hub
@@ -441,9 +437,8 @@ const HubNode = memo(function HubNode({
               {data.userName}
             </h3>
           </div>
-
           <AnimatePresence>
-            {data.band === "detail" && (
+            {(data.band === "detail" || data.band === "internal") && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
@@ -468,7 +463,6 @@ const HubNode = memo(function HubNode({
 
 function FlowBackground({ mode }: { mode: WorkspaceBackgroundMode }) {
   if (mode === "blank") return null;
-
   return (
     <Background
       gap={mode === "dots" ? 28 : 56}
@@ -476,6 +470,39 @@ function FlowBackground({ mode }: { mode: WorkspaceBackgroundMode }) {
       variant={mode === "dots" ? BackgroundVariant.Dots : BackgroundVariant.Lines}
       color="color-mix(in oklab, var(--border-default) 50%, transparent)"
     />
+  );
+}
+
+/* ─── Breadcrumb ─────────────────────────────────────────── */
+
+function WorkspaceBreadcrumb({
+  workstream,
+  onBack,
+}: {
+  workstream: Workstream;
+  onBack: () => void;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8 }}
+      transition={{ duration: 0.2 }}
+      className="absolute top-3 left-4 z-30 flex items-center gap-1.5"
+    >
+      <button
+        type="button"
+        onClick={onBack}
+        className="inline-flex items-center gap-1 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+      >
+        <ChevronLeft className="w-4 h-4" />
+        <span>Workspace</span>
+      </button>
+      <span className="text-[var(--text-tertiary)]">/</span>
+      <span className="text-sm font-medium text-[var(--text-primary)]">
+        {workstream.emoji} {workstream.title}
+      </span>
+    </motion.div>
   );
 }
 
@@ -490,106 +517,214 @@ function WorkspaceCanvasInner({
   searchQuery = "",
   onOpenWorkstream,
   onOpenHub,
+  onCommitWorkstream,
+  panelWidth = 0,
 }: WorkspaceCanvasProps) {
-  const reactFlowRef = useRef<ReactFlowInstance<Node, Edge> | null>(null);
+  const reactFlowRef = useRef<ReactFlowInstance | null>(null);
   const initializedRef = useRef(false);
+  const commitDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastViewportRef = useRef<{ x: number; y: number; zoom: number }>({ x: 0, y: 0, zoom: 0.78 });
   const {
     showArchived,
     showConnections,
     backgroundMode,
+    committedWorkstreamId,
     setCamera,
-    focusWorkstream,
+    setZoomBand,
+    commitWorkstream,
+    exitWorkstream,
     focusHub,
+    setPreviousViewport,
   } = useWorkspaceStore();
   const [zoom, setZoom] = useState(restoreViewport().zoom);
+  const [localOverrides] = useState(() => loadLocalOverrides());
+
+  // Initialize persistence listeners
+  useEffect(() => {
+    const cleanup = initPersistenceListeners();
+    return cleanup;
+  }, []);
 
   const visibleWorkstreams = useMemo(() => {
     const trimmed = searchQuery.trim().toLowerCase();
     return (showArchived
       ? workstreams
-      : workstreams.filter((workstream) => workstream.status !== "archived"))
-      .filter((workstream) => {
+      : workstreams.filter((ws) => ws.status !== "archived"))
+      .filter((ws) => {
         if (!trimmed) return true;
-        return [
-          workstream.title,
-          workstream.description ?? "",
-          workstream.subjectCode ?? "",
-        ].some((value) => value.toLowerCase().includes(trimmed));
+        return [ws.title, ws.description ?? "", ws.subjectCode ?? ""]
+          .some((v) => v.toLowerCase().includes(trimmed));
       });
   }, [searchQuery, showArchived, workstreams]);
 
   const band = getRepresentationBand(zoom);
+  const neighborOpacity = getNeighborOpacity(zoom);
+
+  // Compute positions using auto-layout + overrides
+  const positions = useMemo(() => {
+    const canonical = computeCanonicalLayout(workstreams);
+    return applyOverrides(canonical, workstreams, localOverrides);
+  }, [workstreams, localOverrides]);
+
+  // Update zoom band in store
+  useEffect(() => {
+    setZoomBand(band);
+  }, [band, setZoomBand]);
 
   const handleOpenWorkstream = useCallback(
-    (workstreamId: string, target: HTMLElement) => {
-      focusWorkstream(workstreamId, relativeBounds(target));
-      onOpenWorkstream?.(workstreamId);
+    (workstreamId: string) => {
+      // Animated zoom into the workstream
+      const instance = reactFlowRef.current;
+      if (instance) {
+        // Save current viewport for zoom-out restoration
+        setPreviousViewport({ ...lastViewportRef.current });
+
+        // Get node position and zoom to it
+        const node = instance.getNode(`ws-${workstreamId}`);
+        if (node) {
+          instance.setCenter(
+            node.position.x + 150,
+            node.position.y + 100,
+            { zoom: 1.1, duration: 500 },
+          );
+        }
+      }
+
+      // Commit after animation
+      setTimeout(() => {
+        commitWorkstream(workstreamId);
+        onOpenWorkstream?.(workstreamId);
+      }, 500);
     },
-    [focusWorkstream, onOpenWorkstream],
+    [commitWorkstream, onOpenWorkstream, setPreviousViewport],
   );
+
+  const handleExitWorkstream = useCallback(() => {
+    const { previousViewport } = useWorkspaceStore.getState();
+    exitWorkstream();
+    onCommitWorkstream?.(null);
+
+    // Restore previous viewport
+    const instance = reactFlowRef.current;
+    if (instance && previousViewport) {
+      instance.setViewport(previousViewport, { duration: 400 });
+    } else if (instance) {
+      instance.setCenter(0, 0, { zoom: 0.78, duration: 400 });
+    }
+  }, [exitWorkstream, onCommitWorkstream]);
 
   const handleOpenHub = useCallback(
     (target: HTMLElement) => {
-      focusHub(relativeBounds(target));
+      const cardRect = target.getBoundingClientRect();
+      const root = target.closest("[data-workspace-flow-root]");
+      const rootRect = root?.getBoundingClientRect() ?? cardRect;
+      focusHub({
+        x: cardRect.left - rootRect.left,
+        y: cardRect.top - rootRect.top,
+        w: cardRect.width,
+        h: cardRect.height,
+      });
       onOpenHub?.();
     },
     [focusHub, onOpenHub],
+  );
+
+  // Debounced zoom-based commit
+  const handleZoomCommit = useCallback(
+    (currentZoom: number) => {
+      if (commitDebounceRef.current) {
+        clearTimeout(commitDebounceRef.current);
+      }
+
+      commitDebounceRef.current = setTimeout(() => {
+        const currentBand = getRepresentationBand(currentZoom);
+
+        if (currentBand === "internal" && !committedWorkstreamId) {
+          // Find the nearest workstream to viewport center
+          const vp = lastViewportRef.current;
+          const centerX = (-vp.x + window.innerWidth / 2) / vp.zoom;
+          const centerY = (-vp.y + window.innerHeight / 2) / vp.zoom;
+
+          let nearestId: string | null = null;
+          let nearestDist = Infinity;
+
+          for (const ws of visibleWorkstreams) {
+            const pos = positions.get(ws._id);
+            if (!pos) continue;
+            const dx = pos.x - centerX;
+            const dy = pos.y - centerY;
+            const dist = dx * dx + dy * dy;
+            if (dist < nearestDist) {
+              nearestDist = dist;
+              nearestId = ws._id;
+            }
+          }
+
+          if (nearestId) {
+            commitWorkstream(nearestId);
+            onCommitWorkstream?.(nearestId);
+          }
+        }
+      }, 200); // 200ms debounce as per plan
+    },
+    [committedWorkstreamId, commitWorkstream, onCommitWorkstream, positions, visibleWorkstreams],
   );
 
   const nodes = useMemo<Node[]>(() => {
     const hubNode: Node<HubNodeData> = {
       id: HUB_NODE_ID,
       type: "hub",
-      position: { x: -80, y: -80 },
+      position: { x: -110, y: -110 },
       draggable: false,
       selectable: false,
+      hidden: !!committedWorkstreamId,
       data: {
         userName,
         userAvatar,
-        totalWorkstreams: workstreams.filter((workstream) => workstream.status === "active").length,
+        totalWorkstreams: workstreams.filter((ws) => ws.status === "active").length,
         band,
+        isDimmed: !!committedWorkstreamId,
         onOpen: handleOpenHub,
       },
     };
 
-    const workstreamNodes: Node<WorkstreamNodeData>[] = visibleWorkstreams.map((workstream, index) => {
-      const defaultAngle = (Math.PI * 2 * index) / Math.max(visibleWorkstreams.length, 1);
-      const radius = 420 + (index % 3) * 60;
-      const position = {
-        x: workstream.canvasX ?? Math.cos(defaultAngle - Math.PI / 2) * radius,
-        y: workstream.canvasY ?? Math.sin(defaultAngle - Math.PI / 2) * radius,
-      };
+    const workstreamNodes: Node<WorkstreamNodeData>[] = visibleWorkstreams.map((ws) => {
+      const pos = positions.get(ws._id) ?? { x: 0, y: 0 };
+      const isCommitted = committedWorkstreamId === ws._id;
+      const isDimmed = !!committedWorkstreamId && !isCommitted;
+      const lifecycle = getLifecycleVisuals(ws);
 
       return {
-        id: `ws-${workstream._id}`,
+        id: `ws-${ws._id}`,
         type: "workstream",
-        position,
-        draggable: true,
+        position: pos,
+        draggable: !committedWorkstreamId,
         selectable: false,
+        hidden: isDimmed && neighborOpacity <= 0,
         data: {
-          workstream,
+          workstream: ws,
           band,
-          isFocused: focusWorkstreamId === workstream._id,
-          isDimmed: Boolean(focusWorkstreamId) && focusWorkstreamId !== workstream._id,
+          isFocused: focusWorkstreamId === ws._id,
+          isDimmed,
+          isCommitted,
+          lifecycle,
           onOpen: handleOpenWorkstream,
         },
       };
     });
 
     return [hubNode, ...workstreamNodes];
-  }, [band, focusWorkstreamId, handleOpenHub, handleOpenWorkstream, userAvatar, userName, visibleWorkstreams, workstreams]);
+  }, [band, committedWorkstreamId, focusWorkstreamId, handleOpenHub, handleOpenWorkstream, neighborOpacity, positions, userAvatar, userName, visibleWorkstreams, workstreams]);
 
   const edges = useMemo(
-    () => buildEdges(visibleWorkstreams, showConnections),
-    [showConnections, visibleWorkstreams],
+    () => buildEdges(visibleWorkstreams, showConnections, committedWorkstreamId),
+    [showConnections, visibleWorkstreams, committedWorkstreamId],
   );
 
-  const handleInit = useCallback((instance: ReactFlowInstance<Node, Edge>) => {
+  const handleInit = useCallback((instance: ReactFlowInstance) => {
     reactFlowRef.current = instance;
-
     if (initializedRef.current) return;
     initializedRef.current = true;
-
     const saved = restoreViewport();
     instance.setViewport(saved, { duration: 0 });
     setCamera({ x: saved.x, y: saved.y, z: saved.zoom });
@@ -600,61 +735,86 @@ function WorkspaceCanvasInner({
     (_: unknown, viewport: Viewport) => {
       setZoom(viewport.zoom);
       setCamera({ x: viewport.x, y: viewport.y, z: viewport.zoom });
+      lastViewportRef.current = { x: viewport.x, y: viewport.y, zoom: viewport.zoom };
+      handleZoomCommit(viewport.zoom);
       try {
         window.localStorage.setItem("workspace:viewport", JSON.stringify(viewport));
       } catch {
-        // Ignore storage failures.
+        // Ignore
       }
     },
-    [setCamera],
+    [setCamera, handleZoomCommit],
   );
 
   const handleNodeDragStop = useCallback(
     (_: unknown, node: Node) => {
       if (!node.id.startsWith("ws-")) return;
       const workstreamId = node.id.slice(3);
-      void onWorkstreamUpdate?.(workstreamId, {
-        canvasX: Math.round(node.position.x),
-        canvasY: Math.round(node.position.y),
-      });
+      const x = Math.round(node.position.x);
+      const y = Math.round(node.position.y);
+
+      // Save to localStorage immediately
+      saveLocalOverride(workstreamId, x, y);
+
+      // Also save to Convex
+      void onWorkstreamUpdate?.(workstreamId, { canvasX: x, canvasY: y });
     },
     [onWorkstreamUpdate],
   );
 
-  // Center on focused workstream
+  // Escape key handler
   useEffect(() => {
-    const instance = reactFlowRef.current;
-    if (!instance) return;
-
-    const targetId = focusWorkstreamId ? `ws-${focusWorkstreamId}` : HUB_NODE_ID;
-    const target = instance.getNode(targetId);
-    if (!target) return;
-
-    const zoomLevel = focusWorkstreamId ? 1.1 : 0.82;
-    const centerX = target.position.x + (focusWorkstreamId ? 150 : 80);
-    const centerY = target.position.y + (focusWorkstreamId ? 100 : 80);
-    instance.setCenter(centerX, centerY, { zoom: zoomLevel, duration: 600 });
-  }, [focusWorkstreamId]);
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && committedWorkstreamId) {
+        handleExitWorkstream();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [committedWorkstreamId, handleExitWorkstream]);
 
   // Center hub event listener
   useEffect(() => {
     const handler = () => {
       const instance = reactFlowRef.current;
       if (!instance) return;
-      // Center on hub node position (which is at -80, -80, so center at 0,0)
-      instance.setCenter(0, 0, { zoom: 0.82, duration: 600 });
+      if (committedWorkstreamId) {
+        handleExitWorkstream();
+      }
+      instance.setCenter(0, 0, { zoom: 0.78, duration: 500 });
     };
-
     window.addEventListener("workspace:center-hub", handler);
     return () => window.removeEventListener("workspace:center-hub", handler);
-  }, []);
+  }, [committedWorkstreamId, handleExitWorkstream]);
+
+  // Center on focused workstream from URL
+  useEffect(() => {
+    const instance = reactFlowRef.current;
+    if (!instance || !focusWorkstreamId) return;
+    const target = instance.getNode(`ws-${focusWorkstreamId}`);
+    if (!target) return;
+    instance.setCenter(
+      target.position.x + 150,
+      target.position.y + 100,
+      { zoom: 1.1, duration: 600 },
+    );
+  }, [focusWorkstreamId]);
+
+  const committedWorkstream = committedWorkstreamId
+    ? workstreams.find((ws) => ws._id === committedWorkstreamId)
+    : undefined;
 
   return (
     <div
       className="relative h-full w-full overflow-hidden bg-[var(--bg-primary)]"
       data-workspace-flow-root
+      style={{
+        // Adjust canvas width when push-panel is open
+        width: panelWidth > 0 ? `calc(100% - ${panelWidth}px)` : "100%",
+        transition: "width 300ms ease-out",
+      }}
     >
-      {/* Ambient gradient overlay */}
+      {/* Subtle ambient gradient */}
       <div
         className="pointer-events-none absolute inset-0 opacity-60"
         style={{
@@ -662,6 +822,16 @@ function WorkspaceCanvasInner({
             "radial-gradient(ellipse 50% 40% at 15% 10%, rgba(14, 142, 232, 0.06), transparent), radial-gradient(ellipse 40% 30% at 85% 15%, rgba(32, 184, 178, 0.05), transparent)",
         }}
       />
+
+      {/* Breadcrumb — only when committed */}
+      <AnimatePresence>
+        {committedWorkstream && (
+          <WorkspaceBreadcrumb
+            workstream={committedWorkstream}
+            onBack={handleExitWorkstream}
+          />
+        )}
+      </AnimatePresence>
 
       <ReactFlow
         nodes={nodes}
@@ -678,7 +848,7 @@ function WorkspaceCanvasInner({
         onMoveEnd={handleMoveEnd}
         onNodeDragStop={handleNodeDragStop}
         nodesConnectable={false}
-        nodesDraggable
+        nodesDraggable={!committedWorkstreamId}
         elementsSelectable={false}
         selectionOnDrag={false}
         panOnDrag
@@ -690,10 +860,21 @@ function WorkspaceCanvasInner({
       >
         <FlowBackground mode={backgroundMode} />
         <Controls position="bottom-left" showInteractive={false}>
-          <ControlButton onClick={() => reactFlowRef.current?.zoomTo(1.12, { duration: 350 })} title="Focus detail band">
+          <ControlButton
+            onClick={() => reactFlowRef.current?.zoomTo(1.12, { duration: 350 })}
+            title="Focus detail band"
+          >
             <ZoomIn className="h-4 w-4" />
           </ControlButton>
-          <ControlButton onClick={() => reactFlowRef.current?.setCenter(0, 0, { zoom: 0.82, duration: 500 })} title="Return to hub">
+          <ControlButton
+            onClick={() => {
+              if (committedWorkstreamId) {
+                handleExitWorkstream();
+              }
+              reactFlowRef.current?.setCenter(0, 0, { zoom: 0.78, duration: 500 });
+            }}
+            title="Return to hub"
+          >
             <Crosshair className="h-4 w-4" />
           </ControlButton>
         </Controls>

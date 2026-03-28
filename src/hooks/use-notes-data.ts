@@ -9,7 +9,7 @@ export type WorkspaceNote = {
   title: string;
   content: object | null;
   contentPlaintext?: string;
-  editorMode: "agentic" | "notion" | "simple";
+  editorMode: string; // v3: "standard" | "ai_enhanced", legacy: "simple" | "notion" | "agentic"
   lastAiEditId?: string;
   pendingDiffs?: unknown;
   createdAt: number;

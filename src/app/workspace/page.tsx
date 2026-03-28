@@ -5,11 +5,14 @@ import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
 import { toast } from "sonner";
+import { AnimatePresence } from "framer-motion";
 import { AppShell } from "@/components/layout/app-shell";
 import { WorkspaceToolbar } from "@/components/workspace/workspace-toolbar";
 import { WorkstreamCreateDialog } from "@/components/workspace/workstream-create-dialog";
-import { QuickChatBar } from "@/components/workspace/chat-side-panel";
-import { WorkstreamFocusPanel, HubFocusPanel } from "@/components/workspace/workstream-focus-panel";
+import { WorkspaceCommandBar } from "@/components/workspace/workspace-command-bar";
+import { HubFocusPanel } from "@/components/workspace/workstream-focus-panel";
+import { RightPushPanel } from "@/components/workspace/right-push-panel";
+import { WorkstreamInternalView } from "@/components/workspace/views/workstream-internal-view";
 import { useWorkspaceData } from "@/hooks/use-workspace-data";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
@@ -40,12 +43,11 @@ function CanvasLoader() {
 function WorkspaceContent() {
   const router = useRouter();
   const params = useSearchParams();
-  const focusId = params.get("focus") ?? undefined;
-  const focusView = params.get("view") ?? "structured";
-  const focusPanel = params.get("panel") ?? undefined;
-  const focusNoteId = params.get("note") ?? undefined;
-  const focusPrompt = params.get("prompt") ?? undefined;
   const hubOpen = params.get("hub") === "1";
+  const wsParam = params.get("ws") ?? undefined;
+  const panelType = params.get("panel") ?? undefined;
+  const panelId = params.get("thread") ?? params.get("note") ?? params.get("artifact") ?? undefined;
+
   const { user } = useUser();
   const {
     workstreams,
@@ -58,30 +60,36 @@ function WorkspaceContent() {
     isCreateDialogOpen,
     openCreateDialog,
     closeCreateDialog,
-    focusedWorkstreamId,
-    focusCardBounds,
+    committedWorkstreamId,
     exitWorkstream,
     hubFocusOpen,
     hubCardBounds,
     exitHub,
-    openChatQuery,
+    panel,
+    openPanel,
+    closePanel,
   } = useWorkspaceStore();
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const [containerBounds, setContainerBounds] = useState({ w: 1024, h: 768 });
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Track container size for animation origin
+  // Sync URL with store state
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const update = () =>
-      setContainerBounds({ w: el.offsetWidth, h: el.offsetHeight });
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+    if (wsParam && wsParam !== committedWorkstreamId) {
+      useWorkspaceStore.getState().commitWorkstream(wsParam);
+    }
+  }, [wsParam, committedWorkstreamId]);
+
+  // Sync panel from URL
+  useEffect(() => {
+    if (panelType && panelId) {
+      const validTypes = ["chat", "note", "artifact", "route-trace"] as const;
+      const type = validTypes.find((t) => t === panelType);
+      if (type) {
+        openPanel(type, panelId);
+      }
+    }
+  }, [panelType, panelId, openPanel]);
 
   const handleNewWorkstream = useCallback(() => openCreateDialog(), [openCreateDialog]);
 
@@ -128,56 +136,78 @@ function WorkspaceContent() {
   );
 
   const activeCount = workstreams.filter((ws) => ws.status === "active").length;
-  const activeFocusId = focusId ?? focusedWorkstreamId;
 
-  const focusedWorkstream = activeFocusId
-    ? workstreams.find((ws) => ws._id === activeFocusId)
-    : undefined;
+  const handleCommitWorkstream = useCallback(
+    (workstreamId: string | null) => {
+      if (workstreamId) {
+        updateWorkspaceRoute({ ws: workstreamId, hub: undefined }, "push");
+      } else {
+        updateWorkspaceRoute({
+          ws: undefined,
+          panel: undefined,
+          thread: undefined,
+          note: undefined,
+          artifact: undefined,
+        });
+      }
+    },
+    [updateWorkspaceRoute],
+  );
 
   const handleOpenWorkstream = useCallback(
-    (workstreamId: string, extras?: { prompt?: string; panel?: string }) => {
-      const nextView = params.get("view") ?? "structured";
-      updateWorkspaceRoute(
-        {
-          focus: workstreamId,
-          view: nextView,
-          panel: extras?.panel,
-          prompt: extras?.prompt,
-          note: undefined,
-          hub: undefined,
-        },
-        "push",
-      );
+    (workstreamId: string) => {
+      updateWorkspaceRoute({ ws: workstreamId, hub: undefined }, "push");
     },
-    [params, updateWorkspaceRoute],
+    [updateWorkspaceRoute],
   );
 
   const handleCloseWorkstream = useCallback(() => {
     exitWorkstream();
     updateWorkspaceRoute({
-      focus: undefined,
-      view: undefined,
+      ws: undefined,
       panel: undefined,
-      prompt: undefined,
+      thread: undefined,
       note: undefined,
+      artifact: undefined,
     });
   }, [exitWorkstream, updateWorkspaceRoute]);
 
   const handleOpenHub = useCallback(() => {
-    updateWorkspaceRoute({
-      hub: "1",
-      focus: undefined,
-      view: undefined,
-      panel: undefined,
-      prompt: undefined,
-      note: undefined,
-    }, "push");
+    updateWorkspaceRoute({ hub: "1", ws: undefined }, "push");
   }, [updateWorkspaceRoute]);
 
   const handleCloseHub = useCallback(() => {
     exitHub();
     updateWorkspaceRoute({ hub: undefined });
   }, [exitHub, updateWorkspaceRoute]);
+
+  // Panel handlers
+  const handleOpenPanel = useCallback(
+    (type: "chat" | "note" | "artifact" | "route-trace", id: string) => {
+      openPanel(type, id);
+      const key = type === "chat" ? "thread" : type;
+      updateWorkspaceRoute({ panel: type, [key]: id }, "push");
+    },
+    [openPanel, updateWorkspaceRoute],
+  );
+
+  const handleClosePanel = useCallback(() => {
+    closePanel();
+    updateWorkspaceRoute({
+      panel: undefined,
+      thread: undefined,
+      note: undefined,
+      artifact: undefined,
+    });
+  }, [closePanel, updateWorkspaceRoute]);
+
+  const panelWidth = panel ? getPanelWidth(panel.type) : 0;
+
+  const committedWorkstream = committedWorkstreamId
+    ? workstreams.find((ws) => ws._id === committedWorkstreamId)
+    : undefined;
+
+  const userName = user?.fullName || user?.firstName || "Student";
 
   return (
     <AppShell fullBleed noScroll contentClassName="!p-0">
@@ -188,56 +218,82 @@ function WorkspaceContent() {
           workstreamCount={activeCount}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
+          userName={userName}
         />
 
-        {/* Canvas container */}
-        <div className="flex-1 relative overflow-hidden" ref={containerRef}>
+        {/* Canvas + panel container */}
+        <div className="flex-1 relative overflow-hidden flex" ref={containerRef}>
           {loading ? (
             <CanvasLoader />
           ) : (
-            <WorkspaceCanvas
-              workstreams={workstreams}
-              userName={user?.fullName || user?.firstName || "Student"}
-              userAvatar={user?.imageUrl || ""}
-              onWorkstreamUpdate={updateWorkstream}
-              focusWorkstreamId={focusId}
-              searchQuery={searchQuery}
-              onOpenWorkstream={handleOpenWorkstream}
-              onOpenHub={handleOpenHub}
-            />
-          )}
+            <>
+              {/* Main canvas area */}
+              <div
+                className="relative overflow-hidden transition-all duration-300 ease-out"
+                style={{ flex: `1 1 ${panelWidth > 0 ? `calc(100% - ${panelWidth}px)` : "100%"}` }}
+              >
+                <WorkspaceCanvas
+                  workstreams={workstreams}
+                  userName={userName}
+                  userAvatar={user?.imageUrl || ""}
+                  onWorkstreamUpdate={updateWorkstream}
+                  focusWorkstreamId={wsParam}
+                  searchQuery={searchQuery}
+                  onOpenWorkstream={handleOpenWorkstream}
+                  onOpenHub={handleOpenHub}
+                  onCommitWorkstream={handleCommitWorkstream}
+                />
 
-          {/* Quick Chat bar — only shown when no workstream is focused */}
-          <QuickChatBar
-            hidden={Boolean(activeFocusId)}
-            workstreams={workstreams}
-            onOpenWorkstreamChat={(workstreamId, query) =>
-              handleOpenWorkstream(workstreamId, { panel: "chat", prompt: query })
-            }
-          />
+                {/* Internal workstream view overlay — appears when committed */}
+                <AnimatePresence>
+                  {committedWorkstream && (
+                    <WorkstreamInternalView
+                      workstream={committedWorkstream}
+                      onOpenPanel={handleOpenPanel}
+                      onBack={handleCloseWorkstream}
+                    />
+                  )}
+                </AnimatePresence>
 
-          {/* Workstream focus overlay */}
-          {activeFocusId && focusedWorkstream && (
-            <WorkstreamFocusPanel
-              key={`${activeFocusId}:${focusView}:${focusPanel ?? "none"}:${focusNoteId ?? "none"}`}
-              workstream={focusedWorkstream}
-              cardBounds={focusCardBounds}
-              onClose={handleCloseWorkstream}
-              containerBounds={containerBounds}
-              focusView={focusView === "columns" || focusView === "graph" ? focusView : "structured"}
-              activePanel={focusPanel}
-              activeNoteId={focusNoteId}
-              initialChatOpen={focusPanel === "chat" || !!openChatQuery}
-              initialQuery={focusPrompt ?? openChatQuery}
-              onRouteChange={(updates, history) => updateWorkspaceRoute(updates, history)}
-            />
+                {/* Quick Chat Command Bar — hidden when panel is open or inside committed workstream */}
+                <WorkspaceCommandBar
+                  hidden={!!panel || !!committedWorkstreamId}
+                  workstreams={workstreams}
+                  committedWorkstreamId={committedWorkstreamId}
+                  onOpenWorkstreamChat={(workstreamId) =>
+                    handleOpenWorkstream(workstreamId)
+                  }
+                  onOpenPanel={handleOpenPanel}
+                />
+              </div>
+
+              {/* Right push-panel */}
+              <AnimatePresence>
+                {panel && (
+                  <RightPushPanel
+                    type={panel.type}
+                    id={panel.id}
+                    workstreamId={committedWorkstreamId}
+                    onClose={handleClosePanel}
+                    onExpand={(type, id) => {
+                      // Navigate to full-page view
+                      if (type === "chat") {
+                        router.push(`/chat?chatId=${id}&from=workspace&ws=${committedWorkstreamId ?? ""}`);
+                      } else if (type === "note") {
+                        // Notes don't have a standalone page yet, just expand
+                      }
+                    }}
+                  />
+                )}
+              </AnimatePresence>
+            </>
           )}
 
           {/* Hub focus overlay */}
           {(hubOpen || hubFocusOpen) && (
             <HubFocusPanel
               cardBounds={hubCardBounds}
-              userName={user?.fullName || user?.firstName || "Student"}
+              userName={userName}
               userAvatar={user?.imageUrl || ""}
               totalWorkstreams={activeCount}
               onClose={handleCloseHub}
@@ -245,7 +301,7 @@ function WorkspaceContent() {
           )}
 
           {/* Empty state */}
-          {!loading && workstreams.length === 0 && !activeFocusId && (
+          {!loading && workstreams.length === 0 && !committedWorkstreamId && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
               <div className="flex flex-col items-center gap-4 pointer-events-auto">
                 <div className="text-5xl">🌱</div>
@@ -275,6 +331,16 @@ function WorkspaceContent() {
       </div>
     </AppShell>
   );
+}
+
+function getPanelWidth(type: string): number {
+  switch (type) {
+    case "chat": return 380;
+    case "note": return 520;
+    case "artifact": return 480;
+    case "route-trace": return 400;
+    default: return 380;
+  }
 }
 
 export default function WorkspacePage() {

@@ -6,7 +6,7 @@ import { ArrowLeft, Plus, StickyNote } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
 import { TiptapEditor } from "@/components/editor/tiptap-editor";
 import { useNotesData } from "@/hooks/use-notes-data";
-import { useEditorStore } from "@/stores/editor-store";
+import { useEditorStore, normalizeEditorMode } from "@/stores/editor-store";
 import { cn } from "@/lib/utils";
 
 const EMPTY_DOC = {
@@ -32,7 +32,7 @@ export function NotesWorkspace() {
 
   useEffect(() => {
     if (activeNote?.editorMode) {
-      setEditorMode(activeNote.editorMode);
+      setEditorMode(normalizeEditorMode(activeNote.editorMode));
     }
   }, [activeNote?.editorMode, setEditorMode]);
 
@@ -56,7 +56,7 @@ export function NotesWorkspace() {
       title: "Untitled note",
       content: EMPTY_DOC,
       contentPlaintext: "",
-      editorMode: "notion",
+      editorMode: "standard",
       workstreamId: returnWs,
     });
     const next = new URLSearchParams(params.toString());
@@ -156,7 +156,7 @@ export function NotesWorkspace() {
                 </h2>
               </div>
               <div className="flex gap-2">
-                {(["simple", "notion", "agentic"] as const).map((mode) => (
+                {(["standard", "ai_enhanced"] as const).map((mode) => (
                   <button
                     key={mode}
                     type="button"
@@ -168,7 +168,7 @@ export function NotesWorkspace() {
                         : "border border-[var(--border-default)] text-[var(--text-secondary)]",
                     )}
                   >
-                    {mode}
+                    {mode === "ai_enhanced" ? "AI-Enhanced" : "Standard"}
                   </button>
                 ))}
               </div>

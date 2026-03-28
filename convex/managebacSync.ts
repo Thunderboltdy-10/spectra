@@ -11,14 +11,9 @@ import {
   mapManagebacCasToNote,
   mapManagebacCasToPlanner,
   mapManagebacClassToWorkstream,
+  matchManagebacTimetableForClass,
   shouldCreateCasReflectionNote,
 } from "../src/lib/managebac/mapper";
-
-const MANAGEBAC_SECRET =
-  process.env.MANAGEBAC_CONFIG_SECRET
-  || process.env.CLERK_SECRET_KEY
-  || process.env.OPENROUTER_API_KEY
-  || "managebac-dev-secret";
 
 function requireAdmin(actor: Doc<"users"> | null) {
   if (!actor || actor.role !== "admin") {
@@ -50,8 +45,61 @@ type SyncSummary = {
   warnings: string[];
 };
 
+type ManagebacStudentMapping = {
+  clerkId: string;
+  managebacStudentId: string;
+  email?: string;
+};
+
 async function getActor(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string) {
   return getUserByClerkId(ctx, actorClerkId);
+}
+
+async function resolveMappedUserFromOrg(
+  ctx: { db: Parameters<typeof getUserByClerkId>[0]["db"] },
+  orgId: Id<"orgs">,
+  mappingClerkId: string,
+) {
+  const directMatch = await ctx.db
+    .query("users")
+    .withIndex("by_clerk_id", (q) => q.eq("clerkId", mappingClerkId))
+    .unique();
+  if (directMatch?.orgId === orgId) {
+    return directMatch;
+  }
+
+  const legacyUserId = ctx.db.normalizeId("users", mappingClerkId);
+  if (!legacyUserId) {
+    return null;
+  }
+  const legacyUser = await ctx.db.get(legacyUserId);
+  if (legacyUser?.orgId !== orgId) {
+    return null;
+  }
+  return legacyUser;
+}
+
+async function normalizeStudentMappingsForOrg(
+  ctx: { db: Parameters<typeof getUserByClerkId>[0]["db"] },
+  orgId: Id<"orgs">,
+  mappings: ManagebacStudentMapping[] | undefined,
+) {
+  const normalizedByClerkId = new Map<string, ManagebacStudentMapping>();
+  for (const mapping of mappings ?? []) {
+    const managebacStudentId = mapping.managebacStudentId.trim();
+    if (!managebacStudentId) continue;
+
+    const resolvedUser = await resolveMappedUserFromOrg(ctx, orgId, mapping.clerkId);
+    const clerkId = resolvedUser?.clerkId ?? mapping.clerkId.trim();
+    if (!clerkId) continue;
+
+    normalizedByClerkId.set(clerkId, {
+      clerkId,
+      managebacStudentId,
+      email: mapping.email?.trim() || resolvedUser?.email || undefined,
+    });
+  }
+  return Array.from(normalizedByClerkId.values());
 }
 
 export const getAdminConfig = query({
@@ -60,11 +108,12 @@ export const getAdminConfig = query({
     const actor = requireAdmin(await getActor(ctx, args.actorClerkId));
     const org = await ctx.db.get(actor.orgId);
     const config = org?.managebacConfig;
+    const studentMappings = await normalizeStudentMappingsForOrg(ctx, actor.orgId, config?.studentMappings);
     return {
       configured: Boolean(config?.encryptedToken),
       baseUrl: config?.baseUrl,
       tokenLastFour: config?.tokenLastFour,
-      studentMappings: config?.studentMappings ?? [],
+      studentMappings,
       syncEnabled: config?.syncEnabled ?? false,
       syncFrequencyHours: config?.syncFrequencyHours ?? 24,
       availableEndpoints: config?.availableEndpoints ?? [],
@@ -97,12 +146,17 @@ export const saveAdminConfig = mutation({
     const org = await ctx.db.get(actor.orgId);
     if (!org) throw new Error("Org not found");
     const existing = org.managebacConfig;
+    const studentMappings = await normalizeStudentMappingsForOrg(
+      ctx,
+      actor.orgId,
+      args.studentMappings ?? existing?.studentMappings,
+    );
     await ctx.db.patch(actor.orgId, {
       managebacConfig: {
         baseUrl: args.baseUrl,
         encryptedToken: args.encryptedToken ?? existing?.encryptedToken ?? "",
         tokenLastFour: args.tokenLastFour ?? existing?.tokenLastFour,
-        studentMappings: args.studentMappings ?? existing?.studentMappings ?? [],
+        studentMappings,
         syncEnabled: args.syncEnabled ?? existing?.syncEnabled ?? false,
         syncFrequencyHours: args.syncFrequencyHours ?? existing?.syncFrequencyHours ?? 24,
         availableEndpoints: args.availableEndpoints ?? existing?.availableEndpoints ?? [],
@@ -126,7 +180,8 @@ export const getUserSnapshot = query({
     if (!actor) throw new Error("Unauthorized");
     const org = await ctx.db.get(actor.orgId);
     const config = org?.managebacConfig;
-    const mapping = config?.studentMappings?.find((item) => item.clerkId === actor.clerkId);
+    const studentMappings = await normalizeStudentMappingsForOrg(ctx, actor.orgId, config?.studentMappings);
+    const mapping = studentMappings.find((item) => item.clerkId === actor.clerkId);
     const announcements = config?.announcementsCache ?? [];
     const workstreams = await ctx.db
       .query("workstreams")
@@ -242,11 +297,10 @@ export const applyPreparedSync = internalMutation({
 
     for (const klass of payload.classes) {
       classesSeen.add(klass.id);
-      const matchedTimetable = payload.timetable.filter((entry) =>
-        [entry.subjectTitle?.toLowerCase(), klass.title.toLowerCase(), klass.subjectCode?.toLowerCase()].filter(Boolean).some((candidate) =>
-          entry.subjectTitle?.toLowerCase().includes(candidate as string),
-        ),
-      );
+      const matchedTimetable = matchManagebacTimetableForClass({
+        klass,
+        timetable: payload.timetable,
+      });
       const mapped = mapManagebacClassToWorkstream({
         klass,
         timetable: matchedTimetable,
@@ -485,7 +539,7 @@ export const runOrgSyncInternal = internalAction({
       return { ok: false, reason: "ManageBac not configured" } as const;
     }
 
-    const token = await decryptManagebacToken(org.managebacConfig.encryptedToken, MANAGEBAC_SECRET);
+    const token = await decryptManagebacToken(org.managebacConfig.encryptedToken);
     const mappings = org.managebacConfig.studentMappings ?? [];
     const warnings: string[] = [];
     const aggregate: SyncSummary = {
@@ -503,7 +557,10 @@ export const runOrgSyncInternal = internalAction({
 
     try {
       for (const mapping of mappings) {
-        const user = await ctx.runQuery(internal.managebacSync.getUserByClerkIdInternal, { clerkId: mapping.clerkId });
+        const user = await ctx.runQuery(internal.managebacSync.resolveMappedUserInternal, {
+          orgId: args.orgId,
+          mappingClerkId: mapping.clerkId,
+        });
         if (!user) {
           warnings.push(`Missing user for mapping ${mapping.clerkId}`);
           continue;
@@ -567,6 +624,14 @@ export const getUserByClerkIdInternal = internalQuery({
       .collect();
     return users[0] ?? null;
   },
+});
+
+export const resolveMappedUserInternal = internalQuery({
+  args: {
+    orgId: v.id("orgs"),
+    mappingClerkId: v.string(),
+  },
+  handler: async (ctx, args) => resolveMappedUserFromOrg(ctx, args.orgId, args.mappingClerkId),
 });
 
 export const runScheduledSync: ReturnType<typeof internalAction> = internalAction({

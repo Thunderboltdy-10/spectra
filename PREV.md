@@ -2,34 +2,13 @@
 
 ## Context
 
-Spectra is an AI-powered learning platform for EU schools. After completing Phases 1-5 of the original plan in [Previous Plan](PREV.md) (infrastructure, chat UX, routing, agents, artifacts) and partially implementing Phase 6 (search/Tavily), the product thesis is shifting fundamentally.
+Spectra is an AI-powered learning platform for EU schools.
 
 **The old thesis**: Artifacts Workspace as the differentiator — a version-tracked, multi-view artifact system replacing images/flashcards/bookmarks.
 
 **The new thesis**: **Workstream-first workspace** — Spectra becomes a genuine AI-native school productivity + management platform. `/workspace` is the new primary surface. Workstreams are the main primitive. Artifacts become the durable object/provenance/versioning layer underneath, not the visible product surface.
 
 **What this changes**: Chat stays but shares the stage. The product moves from "school ChatGPT replacement" to structured AI workspace where students organize their entire academic life.
-
----
-
-## What Survives, What Transforms, What Dies compared to PREV.md
-
-| Layer | Action | Detail |
-|-------|--------|--------|
-| Phases 1-4 (infra, chat, routing, agents) | **KEEP** | Backbone is solid |
-| Phase 5 backend (artifact schema, versioning, CRUD) | **KEEP** | Powers the workspace layer underneath |
-| Phase 5 frontend (`/artifacts` route, views) | **REMOVE/TRANSFORM** | Route removed. Canvas/graph views inform workspace design |
-| Phase 6 (Tavily search, sources) | **COMPLETE** | Partially done, finish as-is |
-| Phase 7 (tldraw, diagrams) | **MIGRATE** | tldraw assumptions are replaced by a React Flow workspace graph foundation |
-| Phase 8 (Mem0 migration) | **REPLACE** | Enhanced custom memory with provenance, no Mem0 |
-| Phase 9 (UI polish, dropdowns) | **ADAPT** | Still relevant, applied to workspace context |
-| Phase 10 (analytics hub) | **KEEP** | Analytics stays as separate route |
-| Routing engine (phase-router, scoring) | **KEEP + EXTEND** | Gains workstream routing layer |
-| Agent system (wizard, auto-routing) | **KEEP + EXTEND** | Agents attach to workstreams |
-| ManageBac (`src/lib/managebac.ts`) | **RESTART** | Wrong architecture, rebuild with school admin token |
-| Sidebar nav | **ADAPT** | "Artifacts" → "Workspace", context-aware sidebar |
-| `/flashcards`, `/images`, `/bookmarks` | **REMOVE** | Absorbed into workspace/artifacts |
-| `/achievements` | **TRANSFORM** | Merge into analytics |
 
 ---
 

@@ -10,7 +10,7 @@ Spectra is an AI-powered learning platform for EU schools (IB curriculum focus).
 
 **What prompted v3**: Multiple UX and logic issues discovered during v2 execution, plus a fundamental rethinking of how the AI should operate (tool-based agency rather than pipeline side-effects). The workspace needs to feel like a true home, not an experiment.
 
-**Relationship to earlier plans**: The original plan (PREV.md) and v2 (PLAN.md) provided useful foundations — particularly the infrastructure, chat pipeline, routing engine, and agent system from PREV.md, and the workstream concept from v2. However, PREV.md is now stale in product philosophy. Its artifact-centric worldview, its pricing/deployment assumptions, and its frontend architecture no longer match where Spectra is going. v2 was closer but still thought in terms of overlays, card dashboards, and pipeline-only AI. **This v3 plan is the sole source of truth.** Any inherited concepts (ManageBac, testing strategy, search completion) have been reframed to fit the v3 worldview rather than kept as legacy appendices.
+**Relationship to earlier plans**: The previous, v2 plan (PREV.md) provided useful foundations — particularly the infrastructure, chat pipeline, routing engine, and agent system. However, PREV.md is now stale in product philosophy. Its artifact-centric worldview, its pricing/deployment assumptions, and its frontend architecture no longer match where Spectra is going. v2 was closer but still thought in terms of overlays, card dashboards, and pipeline-only AI. **This v3 plan is the sole source of truth.** Any inherited concepts (ManageBac, testing strategy, search completion) have been reframed to fit the v3 worldview rather than kept as legacy appendices.
 
 ---
 

@@ -1,4 +1,4 @@
-import { action, internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { action, internalAction, internalMutation, internalQuery, mutation, query, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { getUserByClerkId } from "./helpers";
@@ -14,6 +14,21 @@ import {
   matchManagebacTimetableForClass,
   shouldCreateCasReflectionNote,
 } from "../src/lib/managebac/mapper";
+
+async function ensureWorkstreamArtifactCount(
+  ctx: Pick<MutationCtx, "db">,
+  workstreamId: Id<"workstreams"> | undefined,
+) {
+  if (!workstreamId) return;
+  const artifacts = await ctx.db
+    .query("artifacts")
+    .withIndex("by_workstream", (q) => q.eq("workstreamId", workstreamId))
+    .collect();
+  await ctx.db.patch(workstreamId, {
+    artifactCount: artifacts.filter((artifact: Doc<"artifacts">) => artifact.status === "active").length,
+    updatedAt: Date.now(),
+  });
+}
 
 function requireAdmin(actor: Doc<"users"> | null) {
   if (!actor || actor.role !== "admin") {
@@ -39,6 +54,8 @@ type SyncSummary = {
   workstreamsUpdated: number;
   plannerCreated: number;
   plannerUpdated: number;
+  artifactsCreated: number;
+  artifactsUpdated: number;
   notesCreated: number;
   notesUpdated: number;
   conflicts: number;
@@ -191,12 +208,17 @@ export const getUserSnapshot = query({
       .query("plannerItems")
       .withIndex("by_owner", (q) => q.eq("ownerUserId", actor._id))
       .collect();
+    const artifacts = await ctx.db
+      .query("artifacts")
+      .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id))
+      .collect();
     return {
       configured: Boolean(config?.encryptedToken),
       mapped: Boolean(mapping),
       announcements,
       workstreams: workstreams.filter((item) => Boolean(item.managebacClassId || item.managebacContext)).slice(0, 20),
       plannerItems: plannerItems.filter((item) => item.sourceType === "managebac_sync").slice(0, 50),
+      artifacts: artifacts.filter((item) => item.sourceType === "managebac_sync").slice(0, 50),
       lastSyncAt: config?.lastSyncAt,
       lastSyncStatus: config?.lastSyncStatus ?? "idle",
       lastSyncError: config?.lastSyncError,
@@ -273,6 +295,8 @@ export const applyPreparedSync = internalMutation({
       workstreamsUpdated: 0,
       plannerCreated: 0,
       plannerUpdated: 0,
+      artifactsCreated: 0,
+      artifactsUpdated: 0,
       notesCreated: 0,
       notesUpdated: 0,
       conflicts: 0,
@@ -287,8 +311,8 @@ export const applyPreparedSync = internalMutation({
       .query("plannerItems")
       .withIndex("by_owner", (q) => q.eq("ownerUserId", args.userId))
       .collect();
-    const notes = await ctx.db
-      .query("notes")
+    const artifacts = await ctx.db
+      .query("artifacts")
       .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", args.userId))
       .collect();
 
@@ -347,6 +371,67 @@ export const applyPreparedSync = internalMutation({
           updatedAt: Date.now(),
         });
       }
+    }
+
+    const timetableManagebacItemId = `managebac:timetable:${payload.studentId}`;
+    const timetableArtifactTitle = "ManageBac timetable";
+    const existingTimetableArtifact = artifacts.find((row) => row.managebacItemId === timetableManagebacItemId);
+    if (payload.timetable.length > 0) {
+      if (existingTimetableArtifact) {
+        await ctx.db.patch(existingTimetableArtifact._id, {
+          title: timetableArtifactTitle,
+          type: "timetable",
+          workstreamId: undefined,
+          content: payload.timetable,
+          sourceType: "managebac_sync",
+          sourceDeleted: false,
+          sourceUpdatedAt: Date.now(),
+          syncConflictSummary: undefined,
+          updatedAt: Date.now(),
+        });
+        await ctx.db.insert("artifactVersions", {
+          artifactId: existingTimetableArtifact._id,
+          diff: { op: "update", previous: existingTimetableArtifact.content },
+          snapshot: payload.timetable,
+          authorType: "system",
+          description: "Updated ManageBac timetable",
+          status: "confirmed",
+          createdAt: Date.now(),
+        });
+        summary.artifactsUpdated += 1;
+      } else {
+        const artifactId = await ctx.db.insert("artifacts", {
+          ownerUserId: args.userId,
+          orgId: args.orgId,
+          workstreamId: undefined,
+          type: "timetable",
+          title: timetableArtifactTitle,
+          content: payload.timetable,
+          sourceType: "managebac_sync",
+          managebacItemId: timetableManagebacItemId,
+          sourceDeleted: false,
+          sourceUpdatedAt: Date.now(),
+          status: "active",
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+        await ctx.db.insert("artifactVersions", {
+          artifactId,
+          diff: { op: "create" },
+          snapshot: payload.timetable,
+          authorType: "system",
+          description: "Created ManageBac timetable",
+          status: "confirmed",
+          createdAt: Date.now(),
+        });
+        summary.artifactsCreated += 1;
+      }
+    } else if (existingTimetableArtifact && !existingTimetableArtifact.sourceDeleted) {
+      await ctx.db.patch(existingTimetableArtifact._id, {
+        sourceDeleted: true,
+        syncConflictSummary: "Removed from ManageBac",
+        updatedAt: Date.now(),
+      });
     }
 
     const assignmentIds = new Set<string>();
@@ -454,49 +539,74 @@ export const applyPreparedSync = internalMutation({
 
       if (shouldCreateCasReflectionNote(activity)) {
         const mappedNote = mapManagebacCasToNote(activity);
-        const existingNote = notes.find((row) => row.managebacItemId === activity.id);
-        if (existingNote) {
+        const existingDocument = artifacts.find((row) => row.managebacItemId === activity.id && row.type === "document");
+        if (existingDocument) {
           const incomingPlaintext = mappedNote.plaintext;
           const localEditedAfterSource =
-            typeof existingNote.sourceUpdatedAt === "number"
-            && existingNote.updatedAt > existingNote.sourceUpdatedAt
-            && (existingNote.contentPlaintext ?? "").trim() !== incomingPlaintext.trim();
+            typeof existingDocument.sourceUpdatedAt === "number"
+            && existingDocument.updatedAt > existingDocument.sourceUpdatedAt
+            && (existingDocument.contentPlaintext ?? "").trim() !== incomingPlaintext.trim();
           if (localEditedAfterSource) {
-            await ctx.db.patch(existingNote._id, {
+            await ctx.db.patch(existingDocument._id, {
               syncConflictSummary: "ManageBac source updated. Review changes before replacing local edits.",
               sourceUpdatedAt: mappedNote.sourceUpdatedAt,
               updatedAt: Date.now(),
             });
             summary.conflicts += 1;
           } else {
-            await ctx.db.patch(existingNote._id, {
+            await ctx.db.patch(existingDocument._id, {
               title: mappedNote.title,
+              type: "document",
               content: plainTextDoc(mappedNote.plaintext),
               contentPlaintext: mappedNote.plaintext,
+              editorMode: "standard",
               sourceType: "managebac_sync",
               sourceDeleted: false,
               sourceUpdatedAt: mappedNote.sourceUpdatedAt,
               syncConflictSummary: undefined,
               updatedAt: Date.now(),
             });
+            await ctx.db.insert("artifactVersions", {
+              artifactId: existingDocument._id,
+              diff: { op: "update", previous: existingDocument.content },
+              snapshot: plainTextDoc(mappedNote.plaintext),
+              authorType: "system",
+              description: "Updated ManageBac CAS reflection",
+              status: "confirmed",
+              createdAt: Date.now(),
+            });
+            summary.artifactsUpdated += 1;
             summary.notesUpdated += 1;
           }
         } else {
-          await ctx.db.insert("notes", {
+          const artifactId = await ctx.db.insert("artifacts", {
             ownerUserId: args.userId,
             orgId: args.orgId,
             workstreamId: casWorkstream?._id,
+            type: "document",
             title: mappedNote.title,
             content: plainTextDoc(mappedNote.plaintext),
             contentPlaintext: mappedNote.plaintext,
-            editorMode: "notion",
+            editorMode: "standard",
             sourceType: "managebac_sync",
             managebacItemId: mappedNote.managebacItemId,
             sourceDeleted: false,
             sourceUpdatedAt: mappedNote.sourceUpdatedAt,
+            status: "active",
             createdAt: Date.now(),
             updatedAt: Date.now(),
           });
+          await ctx.db.insert("artifactVersions", {
+            artifactId,
+            diff: { op: "create" },
+            snapshot: plainTextDoc(mappedNote.plaintext),
+            authorType: "system",
+            description: "Created ManageBac CAS reflection",
+            status: "confirmed",
+            createdAt: Date.now(),
+          });
+          await ensureWorkstreamArtifactCount(ctx, casWorkstream?._id);
+          summary.artifactsCreated += 1;
           summary.notesCreated += 1;
         }
       }
@@ -514,9 +624,10 @@ export const applyPreparedSync = internalMutation({
       }
     }
 
-    for (const note of notes.filter((row) => row.sourceType === "managebac_sync" && row.managebacItemId)) {
-      if (!casIds.has(note.managebacItemId!)) {
-        await ctx.db.patch(note._id, {
+    for (const artifact of artifacts.filter((row) => row.sourceType === "managebac_sync" && row.managebacItemId)) {
+      if (artifact.managebacItemId === timetableManagebacItemId) continue;
+      if (artifact.type === "document" && !casIds.has(artifact.managebacItemId!)) {
+        await ctx.db.patch(artifact._id, {
           sourceDeleted: true,
           syncConflictSummary: "Removed from ManageBac",
           updatedAt: Date.now(),
@@ -548,6 +659,8 @@ export const runOrgSyncInternal = internalAction({
       workstreamsUpdated: 0,
       plannerCreated: 0,
       plannerUpdated: 0,
+      artifactsCreated: 0,
+      artifactsUpdated: 0,
       notesCreated: 0,
       notesUpdated: 0,
       conflicts: 0,
@@ -583,6 +696,8 @@ export const runOrgSyncInternal = internalAction({
         aggregate.workstreamsUpdated += summary.workstreamsUpdated;
         aggregate.plannerCreated += summary.plannerCreated;
         aggregate.plannerUpdated += summary.plannerUpdated;
+        aggregate.artifactsCreated += summary.artifactsCreated;
+        aggregate.artifactsUpdated += summary.artifactsUpdated;
         aggregate.notesCreated += summary.notesCreated;
         aggregate.notesUpdated += summary.notesUpdated;
         aggregate.conflicts += summary.conflicts;

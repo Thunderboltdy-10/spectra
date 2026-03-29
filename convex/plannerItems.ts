@@ -130,6 +130,47 @@ export const get = query({
   },
 });
 
+export const listHubItems = query({
+  args: {
+    actorClerkId: v.string(),
+    limit: v.optional(v.number()),
+    daysAhead: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    const limit = Math.max(1, Math.min(args.limit ?? 100, 300));
+    const daysAhead = Math.max(1, Math.min(args.daysAhead ?? 14, 30));
+    const now = Date.now();
+    const windowEnd = now + daysAhead * 24 * 60 * 60 * 1000;
+
+    const rows = await ctx.db
+      .query("plannerItems")
+      .withIndex("by_owner", (q) => q.eq("ownerUserId", actor._id))
+      .collect();
+
+    const hubItems = rows
+      .filter((row) => row.workstreamId === undefined)
+      .sort((a, b) => {
+        const dueA = a.dueAt ?? Number.MAX_SAFE_INTEGER;
+        const dueB = b.dueAt ?? Number.MAX_SAFE_INTEGER;
+        if (dueA !== dueB) return dueA - dueB;
+        return b.updatedAt - a.updatedAt;
+      })
+      .slice(0, limit);
+
+    const aggregatedDeadlines = rows
+      .filter((row) => row.status !== "completed" && row.status !== "cancelled")
+      .filter((row) => typeof row.dueAt === "number" && row.dueAt >= now && row.dueAt <= windowEnd)
+      .sort((a, b) => (a.dueAt ?? Number.MAX_SAFE_INTEGER) - (b.dueAt ?? Number.MAX_SAFE_INTEGER))
+      .slice(0, limit);
+
+    return {
+      hubItems,
+      aggregatedDeadlines,
+    };
+  },
+});
+
 export const create = mutation({
   args: {
     actorClerkId: v.string(),

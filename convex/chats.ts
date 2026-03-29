@@ -1,11 +1,24 @@
 import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
 import { getUserByClerkId } from "./helpers";
 import { vStudyMode, vThinkingLevel, vRouterMode, vCitation, vRouteTrace } from "./shared";
 import { computeCompactionWindow } from "./compaction";
 import { MODEL_DEFAULTS } from "./constants";
 import { internal } from "./_generated/api";
 import { getOpenRouterApiKey, warnOpenRouterMissing } from "./env";
+
+async function validateArtifact(
+  ctx: Parameters<typeof getUserByClerkId>[0],
+  actor: NonNullable<Awaited<ReturnType<typeof getUserByClerkId>>>,
+  artifactId: Id<"artifacts"> | undefined,
+) {
+  if (!artifactId) return;
+  const artifact = await ctx.db.get(artifactId);
+  if (!artifact || artifact.ownerUserId !== actor._id || artifact.orgId !== actor.orgId) {
+    throw new Error("Artifact not found");
+  }
+}
 
 function compactMessageText(value: string) {
   return value.replace(/\s+/g, " ").trim();
@@ -198,6 +211,8 @@ export const listChats = query({
         packId: chat.packId,
         agentId: chat.agentId,
         workstreamId: chat.workstreamId,
+        artifactId: chat.artifactId,
+        threadType: chat.threadType ?? "conversation",
         pinned: chat.pinned,
         updatedAt: chat.updatedAt,
       }));
@@ -233,12 +248,75 @@ export const listRecentAssistantModels = query({
   },
 });
 
+export const listByArtifact = query({
+  args: {
+    actorClerkId: v.string(),
+    artifactId: v.id("artifacts"),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    await validateArtifact(ctx, actor, args.artifactId);
+    const limit = Math.max(1, Math.min(args.limit ?? 20, 60));
+    const rows = await ctx.db
+      .query("chats")
+      .withIndex("by_artifact", (q) => q.eq("artifactId", args.artifactId))
+      .collect();
+
+    return rows
+      .filter((row) => row.ownerUserId === actor._id && row.orgId === actor.orgId && !row.deletedAt)
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, limit);
+  },
+});
+
+export const listByWorkstreamSummary = query({
+  args: {
+    actorClerkId: v.string(),
+    workstreamId: v.optional(v.id("workstreams")),
+    recentLimit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    const recentLimit = Math.max(5, Math.min(args.recentLimit ?? 6, 8));
+    const rows = args.workstreamId
+      ? await ctx.db
+          .query("chats")
+          .withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId))
+          .collect()
+      : await ctx.db
+          .query("chats")
+          .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id))
+          .collect();
+
+    const filtered = rows
+      .filter((row) => row.ownerUserId === actor._id && row.orgId === actor.orgId && !row.deletedAt)
+      .filter((row) => (args.workstreamId === undefined ? row.workstreamId === undefined : row.workstreamId === args.workstreamId))
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+
+    return {
+      recent: filtered.slice(0, recentLimit),
+      overflowCount: Math.max(0, filtered.length - recentLimit),
+    };
+  },
+});
+
 export const createChat = mutation({
   args: {
     actorClerkId: v.string(),
     packId: v.optional(v.id("packs")),
     agentId: v.optional(v.id("agents")),
     workstreamId: v.optional(v.id("workstreams")),
+    artifactId: v.optional(v.id("artifacts")),
+    threadType: v.optional(v.union(v.literal("conversation"), v.literal("artifact_edit"))),
     mode: vStudyMode,
     thinkingLevel: vThinkingLevel,
     routerMode: vRouterMode,
@@ -277,12 +355,17 @@ export const createChat = mutation({
       }
     }
 
+    await validateArtifact(ctx, actor, args.artifactId);
+    const threadType = args.threadType ?? (args.artifactId ? "artifact_edit" : "conversation");
+
     const now = Date.now();
     const chatId = await ctx.db.insert("chats", {
       orgId: actor.orgId,
       packId: args.packId,
       agentId,
       workstreamId: args.workstreamId,
+      artifactId: args.artifactId,
+      threadType,
       ownerUserId: actor._id,
       title: args.title ?? "New chat",
       latestUserPrompt: undefined,
@@ -326,6 +409,72 @@ export const getChat = query({
       chat,
       messages: messages.sort((a, b) => a.createdAt - b.createdAt),
     };
+  },
+});
+
+export const getOrCreateArtifactThread = mutation({
+  args: {
+    actorClerkId: v.string(),
+    artifactId: v.id("artifacts"),
+    workstreamId: v.optional(v.id("workstreams")),
+    mode: vStudyMode,
+    thinkingLevel: vThinkingLevel,
+    routerMode: vRouterMode,
+    manualModel: v.optional(v.string()),
+    usePersonalResources: v.boolean(),
+    title: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    if (!actor) {
+      throw new Error("Unauthorized");
+    }
+
+    await validateArtifact(ctx, actor, args.artifactId);
+    if (args.workstreamId) {
+      const workstream = await ctx.db.get(args.workstreamId);
+      if (!workstream || workstream.ownerUserId !== actor._id || workstream.orgId !== actor.orgId) {
+        throw new Error("Workstream not found");
+      }
+    }
+
+    const existing = await ctx.db
+      .query("chats")
+      .withIndex("by_artifact", (q) => q.eq("artifactId", args.artifactId))
+      .collect()
+      .then((rows) =>
+        rows
+          .filter((row) => row.ownerUserId === actor._id && row.orgId === actor.orgId && !row.deletedAt)
+          .sort((a, b) => b.updatedAt - a.updatedAt)[0],
+      );
+
+    if (existing) {
+      return { chatId: existing._id, created: false };
+    }
+
+    const now = Date.now();
+    const chatId = await ctx.db.insert("chats", {
+      orgId: actor.orgId,
+      packId: undefined,
+      agentId: undefined,
+      workstreamId: args.workstreamId,
+      artifactId: args.artifactId,
+      threadType: "artifact_edit",
+      ownerUserId: actor._id,
+      title: args.title ?? "Artifact thread",
+      latestUserPrompt: undefined,
+      mode: args.mode,
+      thinkingLevel: args.thinkingLevel,
+      routerMode: args.routerMode,
+      manualModel: args.manualModel,
+      usePersonalResources: args.usePersonalResources,
+      contextSummary: undefined,
+      learningContext: undefined,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return { chatId, created: true };
   },
 });
 
@@ -595,6 +744,9 @@ export const branchFromMessage = mutation({
       orgId: sourceChat.orgId,
       packId: sourceChat.packId,
       agentId: sourceChat.agentId,
+      workstreamId: sourceChat.workstreamId,
+      artifactId: sourceChat.artifactId,
+      threadType: sourceChat.threadType,
       ownerUserId: sourceChat.ownerUserId,
       title: branchedTitle,
       latestUserPrompt: sourceChat.latestUserPrompt,

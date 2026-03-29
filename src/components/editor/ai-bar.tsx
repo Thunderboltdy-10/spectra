@@ -1,43 +1,138 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
-import type { Editor } from "@tiptap/react";
-import { Check, Loader2, Sparkles, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { Editor, JSONContent } from "@tiptap/react";
+import { Loader2, RotateCcw, Sparkles, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/editor-store";
 
 interface DiffPreview {
   ops: Array<{ type: "replace" | "insert" | "delete"; from: number; to: number; content?: string; reason?: string }>;
   summary: string;
+  threadChatId?: string;
+  assistantMessageId?: string;
 }
+
+type EditorSnapshot = {
+  json: JSONContent;
+  text: string;
+};
+
+type PendingAiLifecycle = {
+  artifactId: string;
+  versionId: string;
+  threadChatId?: string;
+  assistantMessageId?: string;
+  summary: string;
+  status: "applied" | "discarded";
+  remainingMs: number;
+};
 
 interface AiBarProps {
   editor: Editor;
-  onApplyEdits: (ops: DiffPreview["ops"]) => void;
+  onApplyEdits: (ops: DiffPreview["ops"]) => EditorSnapshot | null;
+  onReplaceDocument: (content: JSONContent) => EditorSnapshot | null;
   noteId?: string;
   artifactId?: string;
 }
 
-export function AiBar({ editor, onApplyEdits, noteId, artifactId }: AiBarProps) {
-  const { aiBarPrompt, setAiBarPrompt, aiBarAutoAccept, setAiBarAutoAccept, aiBarBusy, setAiBarBusy } = useEditorStore();
-  const [diff, setDiff] = useState<DiffPreview | null>(null);
+export function AiBar({ editor, onApplyEdits, onReplaceDocument, noteId, artifactId }: AiBarProps) {
+  const { aiBarPrompt, setAiBarPrompt, aiBarBusy, setAiBarBusy } = useEditorStore();
+  const [pendingEdit, setPendingEdit] = useState<PendingAiLifecycle | null>(null);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const ignoreNextEditorUpdateRef = useRef(0);
+  const versionRef = useRef<PendingAiLifecycle | null>(null);
+
+  useEffect(() => {
+    versionRef.current = pendingEdit;
+  }, [pendingEdit]);
+
+  const confirmPendingEdit = useCallback(async () => {
+    const current = versionRef.current;
+    if (!current || current.status !== "applied") return true;
+    const response = await fetch("/api/artifacts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "confirmAiEdit",
+        artifactId: current.artifactId,
+        versionId: current.versionId,
+      }),
+    }).catch(() => null);
+    if (!response?.ok) {
+      setError("Failed to confirm AI edit. Retry or keep editing to try again.");
+      setPendingEdit((pending) => (
+        pending && pending.versionId === current.versionId && pending.status === "applied"
+          ? { ...pending, remainingMs: 0 }
+          : pending
+      ));
+      return false;
+    }
+    versionRef.current = null;
+    setPendingEdit(null);
+    setError(null);
+    return true;
+  }, []);
+
+  useEffect(() => {
+    if (!pendingEdit || pendingEdit.status !== "applied") return;
+    const timeout = setTimeout(() => {
+      if (pendingEdit.remainingMs <= 1000) {
+        void confirmPendingEdit();
+        return;
+      }
+      setPendingEdit((current) => {
+        if (!current || current.status !== "applied") return current;
+        return {
+          ...current,
+          remainingMs: Math.max(0, current.remainingMs - 1000),
+        };
+      });
+    }, Math.min(1000, pendingEdit.remainingMs));
+    return () => clearTimeout(timeout);
+  }, [confirmPendingEdit, pendingEdit]);
+
+  useEffect(() => {
+    const onUpdate = () => {
+      if (ignoreNextEditorUpdateRef.current > 0) {
+        ignoreNextEditorUpdateRef.current -= 1;
+        return;
+      }
+      const current = versionRef.current;
+      if (current?.status === "applied") {
+        void confirmPendingEdit();
+      }
+    };
+    editor.on("update", onUpdate);
+    return () => {
+      editor.off("update", onUpdate);
+    };
+  }, [confirmPendingEdit, editor]);
 
   const handleSubmit = useCallback(async () => {
     if (!aiBarPrompt.trim() || aiBarBusy) return;
 
+    if (versionRef.current?.status === "applied") {
+      const confirmed = await confirmPendingEdit();
+      if (!confirmed) return;
+    }
+
     setAiBarBusy(true);
     setError(null);
-    setDiff(null);
 
     abortRef.current?.abort();
     abortRef.current = new AbortController();
+    const previousSnapshot: EditorSnapshot = {
+      json: editor.getJSON(),
+      text: editor.getText(),
+    };
+    let editAppliedLocally = false;
 
     try {
-      const document = editor.getJSON();
-      const text = editor.getText();
+      const document = previousSnapshot.json;
+      const text = previousSnapshot.text;
 
       const res = await fetch("/api/editor/ai-edit", {
         method: "POST",
@@ -48,7 +143,6 @@ export function AiBar({ editor, onApplyEdits, noteId, artifactId }: AiBarProps) 
           documentText: text,
           noteId,
           artifactId,
-          autoAccept: aiBarAutoAccept,
         }),
         signal: abortRef.current.signal,
       });
@@ -59,33 +153,116 @@ export function AiBar({ editor, onApplyEdits, noteId, artifactId }: AiBarProps) 
       }
 
       const result = (await res.json()) as DiffPreview;
-
-      if (aiBarAutoAccept) {
-        // Apply immediately
-        onApplyEdits(result.ops);
-        setAiBarPrompt("");
-      } else {
-        // Show diff preview for user to accept/reject
-        setDiff(result);
+      ignoreNextEditorUpdateRef.current += 1;
+      const snapshot = onApplyEdits(result.ops);
+      if (!snapshot) {
+        throw new Error("Failed to apply AI edit");
       }
+      editAppliedLocally = true;
+      const targetArtifactId = artifactId ?? noteId;
+      if (targetArtifactId) {
+        const persistRes = await fetch("/api/artifacts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "applyAiEdit",
+            artifactId: targetArtifactId,
+            content: snapshot.json,
+            contentPlaintext: snapshot.text,
+            instruction: aiBarPrompt.trim(),
+            operations: result.ops,
+            summary: result.summary,
+            sourceChatId: result.threadChatId,
+            sourceMessageId: result.assistantMessageId,
+            lastAiEditId: result.assistantMessageId,
+            pendingDiffs: result.ops,
+          }),
+        });
+        if (!persistRes.ok) {
+          throw new Error(await persistRes.text() || "Failed to persist AI edit");
+        }
+        const persisted = (await persistRes.json()) as { versionId?: string };
+        if (persisted.versionId) {
+          setPendingEdit({
+            artifactId: targetArtifactId,
+            versionId: persisted.versionId,
+            threadChatId: result.threadChatId,
+            assistantMessageId: result.assistantMessageId,
+            summary: result.summary,
+            status: "applied",
+            remainingMs: 30_000,
+          });
+        }
+      }
+      setAiBarPrompt("");
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
         setError((err as Error).message || "Something went wrong");
+        if (editAppliedLocally) {
+          ignoreNextEditorUpdateRef.current += 1;
+          onReplaceDocument(previousSnapshot.json);
+        }
       }
     } finally {
       setAiBarBusy(false);
     }
-  }, [aiBarPrompt, aiBarBusy, aiBarAutoAccept, editor, noteId, artifactId, onApplyEdits, setAiBarBusy, setAiBarPrompt]);
+  }, [aiBarPrompt, aiBarBusy, artifactId, confirmPendingEdit, editor, noteId, onApplyEdits, onReplaceDocument, setAiBarBusy, setAiBarPrompt]);
 
-  const handleAccept = useCallback(() => {
-    if (!diff) return;
-    onApplyEdits(diff.ops);
-    setDiff(null);
-    setAiBarPrompt("");
-  }, [diff, onApplyEdits, setAiBarPrompt]);
+  const handleDiscard = useCallback(async () => {
+    if (!pendingEdit || pendingEdit.status !== "applied") return;
+    const response = await fetch("/api/artifacts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "discardAiEdit",
+        artifactId: pendingEdit.artifactId,
+        versionId: pendingEdit.versionId,
+      }),
+    });
+    if (!response.ok) {
+      setError(await response.text() || "Failed to discard AI edit");
+      return;
+    }
+    const data = (await response.json()) as { content?: JSONContent };
+    if (data.content) {
+      ignoreNextEditorUpdateRef.current += 1;
+      onReplaceDocument(data.content);
+    }
+    setPendingEdit({
+      ...pendingEdit,
+      status: "discarded",
+      remainingMs: 0,
+    });
+  }, [onReplaceDocument, pendingEdit]);
 
-  const handleReject = useCallback(() => {
-    setDiff(null);
+  const handleReapply = useCallback(async () => {
+    if (!pendingEdit) return;
+    const response = await fetch("/api/artifacts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "reapplyAiEdit",
+        artifactId: pendingEdit.artifactId,
+        versionId: pendingEdit.versionId,
+      }),
+    });
+    if (!response.ok) {
+      setError(await response.text() || "Failed to re-apply AI edit");
+      return;
+    }
+    const data = (await response.json()) as { content?: JSONContent };
+    if (data.content) {
+      ignoreNextEditorUpdateRef.current += 1;
+      onReplaceDocument(data.content);
+    }
+    setPendingEdit({
+      ...pendingEdit,
+      status: "applied",
+      remainingMs: 30_000,
+    });
+  }, [onReplaceDocument, pendingEdit]);
+
+  const dismissError = useCallback(() => {
     setError(null);
   }, []);
 
@@ -108,29 +285,6 @@ export function AiBar({ editor, onApplyEdits, noteId, artifactId }: AiBarProps) 
           disabled={aiBarBusy}
           className="flex-1 bg-transparent border-none outline-none text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] disabled:opacity-50"
         />
-
-        {/* Auto-accept toggle */}
-        <label className="flex items-center gap-1.5 text-xs text-[var(--text-tertiary)] cursor-pointer shrink-0">
-          <span>Auto-accept</span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={aiBarAutoAccept}
-            onClick={() => setAiBarAutoAccept(!aiBarAutoAccept)}
-            className={cn(
-              "relative inline-flex h-4 w-7 rounded-full transition-colors focus:outline-none",
-              aiBarAutoAccept ? "bg-[var(--accent-cyan)]" : "bg-[var(--bg-secondary)]",
-            )}
-          >
-            <span
-              className={cn(
-                "inline-block h-3 w-3 transform rounded-full bg-white shadow-sm transition-transform",
-                "absolute top-0.5",
-                aiBarAutoAccept ? "translate-x-3.5" : "translate-x-0.5",
-              )}
-            />
-          </button>
-        </label>
 
         {aiBarBusy ? (
           <button
@@ -165,7 +319,7 @@ export function AiBar({ editor, onApplyEdits, noteId, artifactId }: AiBarProps) 
           <span className="text-xs text-[var(--error)]">{error}</span>
           <button
             type="button"
-            onClick={() => setError(null)}
+            onClick={dismissError}
             className="text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
           >
             <X className="w-3.5 h-3.5" />
@@ -173,30 +327,46 @@ export function AiBar({ editor, onApplyEdits, noteId, artifactId }: AiBarProps) 
         </div>
       )}
 
-      {/* Diff preview */}
-      {diff && !aiBarAutoAccept && (
+      {pendingEdit && (
         <div className="px-3 pb-2 flex items-center justify-between gap-2">
           <p className="text-xs text-[var(--text-secondary)] flex-1">
-            <span className="text-[var(--accent-cyan)] font-medium">AI suggests:</span>{" "}
-            {diff.summary}
+            <span className="text-[var(--accent-cyan)] font-medium">AI edit:</span>{" "}
+            {pendingEdit.summary || "Document updated."}
+            {pendingEdit.status === "applied"
+              ? pendingEdit.remainingMs > 0
+                ? ` Auto-confirming in ${Math.max(0, Math.ceil(pendingEdit.remainingMs / 1000))}s`
+                : " Ready to confirm."
+              : " Discarded."}
           </p>
           <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              type="button"
-              onClick={handleReject}
-              className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
-            >
-              <X className="w-3 h-3" />
-              Reject
-            </button>
-            <button
-              type="button"
-              onClick={handleAccept}
-              className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold bg-[var(--accent-mint)] text-white hover:brightness-110 transition-all"
-            >
-              <Check className="w-3 h-3" />
-              Accept
-            </button>
+            {pendingEdit.status === "applied" ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void confirmPendingEdit()}
+                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
+                >
+                  Keep
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleDiscard()}
+                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
+                >
+                  <X className="w-3 h-3" />
+                  Discard
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void handleReapply()}
+                className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold bg-[var(--accent-mint)] text-white hover:brightness-110 transition-all"
+              >
+                <RotateCcw className="w-3 h-3" />
+                Re-apply
+              </button>
+            )}
           </div>
         </div>
       )}

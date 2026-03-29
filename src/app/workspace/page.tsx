@@ -10,11 +10,11 @@ import { AppShell } from "@/components/layout/app-shell";
 import { WorkspaceToolbar } from "@/components/workspace/workspace-toolbar";
 import { WorkstreamCreateDialog } from "@/components/workspace/workstream-create-dialog";
 import { WorkspaceCommandBar } from "@/components/workspace/workspace-command-bar";
-import { HubFocusPanel } from "@/components/workspace/workstream-focus-panel";
 import { RightPushPanel } from "@/components/workspace/right-push-panel";
 // Internal view is now canvas-native (rendered as React Flow nodes inside workspace-canvas)
 import { useWorkspaceData } from "@/hooks/use-workspace-data";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { registerSyncCallback } from "@/lib/workspace/position-persistence";
 
 const WorkspaceCanvas = dynamic(
   () =>
@@ -46,7 +46,7 @@ function WorkspaceContent() {
   const hubOpen = params.get("hub") === "1";
   const wsParam = params.get("ws") ?? undefined;
   const panelType = params.get("panel") ?? undefined;
-  const panelId = params.get("thread") ?? params.get("note") ?? params.get("artifact") ?? undefined;
+  const panelId = params.get("thread") ?? params.get("note") ?? params.get("artifact") ?? params.get("planner") ?? undefined;
 
   const { user } = useUser();
   const {
@@ -62,12 +62,10 @@ function WorkspaceContent() {
     closeCreateDialog,
     committedWorkstreamId,
     exitWorkstream,
-    hubFocusOpen,
-    hubCardBounds,
-    exitHub,
     panel,
     openPanel,
     closePanel,
+    commitWorkstream,
   } = useWorkspaceStore();
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -75,21 +73,33 @@ function WorkspaceContent() {
 
   // Sync URL with store state
   useEffect(() => {
-    if (wsParam && wsParam !== committedWorkstreamId) {
-      useWorkspaceStore.getState().commitWorkstream(wsParam);
+    if (hubOpen && committedWorkstreamId !== "__hub__") {
+      commitWorkstream("__hub__");
+      return;
     }
-  }, [wsParam, committedWorkstreamId]);
+    if (wsParam && wsParam !== committedWorkstreamId) {
+      commitWorkstream(wsParam);
+      return;
+    }
+    if (!hubOpen && !wsParam && committedWorkstreamId) {
+      exitWorkstream();
+    }
+  }, [commitWorkstream, committedWorkstreamId, exitWorkstream, hubOpen, wsParam]);
 
   // Sync panel from URL
   useEffect(() => {
     if (panelType && panelId) {
-      const validTypes = ["chat", "note", "artifact", "route-trace"] as const;
+      const validTypes = ["chat", "note", "artifact", "planner", "route-trace"] as const;
       const type = validTypes.find((t) => t === panelType);
-      if (type) {
+      if (type && (panel?.type !== type || panel?.id !== panelId)) {
         openPanel(type, panelId);
+        return;
       }
     }
-  }, [panelType, panelId, openPanel]);
+    if ((!panelType || !panelId) && panel) {
+      closePanel();
+    }
+  }, [closePanel, openPanel, panel, panelId, panelType]);
 
   const handleNewWorkstream = useCallback(() => openCreateDialog(), [openCreateDialog]);
 
@@ -139,19 +149,25 @@ function WorkspaceContent() {
 
   const handleCommitWorkstream = useCallback(
     (workstreamId: string | null) => {
-      if (workstreamId) {
+      if (workstreamId === "__hub__") {
+        commitWorkstream("__hub__");
+        updateWorkspaceRoute({ hub: "1", ws: undefined }, "push");
+      } else if (workstreamId) {
         updateWorkspaceRoute({ ws: workstreamId, hub: undefined }, "push");
       } else {
+        exitWorkstream();
         updateWorkspaceRoute({
           ws: undefined,
+          hub: undefined,
           panel: undefined,
           thread: undefined,
           note: undefined,
           artifact: undefined,
+          planner: undefined,
         });
       }
     },
-    [updateWorkspaceRoute],
+    [commitWorkstream, exitWorkstream, updateWorkspaceRoute],
   );
 
   const handleOpenWorkstream = useCallback(
@@ -161,29 +177,13 @@ function WorkspaceContent() {
     [updateWorkspaceRoute],
   );
 
-  const handleCloseWorkstream = useCallback(() => {
-    exitWorkstream();
-    updateWorkspaceRoute({
-      ws: undefined,
-      panel: undefined,
-      thread: undefined,
-      note: undefined,
-      artifact: undefined,
-    });
-  }, [exitWorkstream, updateWorkspaceRoute]);
-
   const handleOpenHub = useCallback(() => {
     updateWorkspaceRoute({ hub: "1", ws: undefined }, "push");
   }, [updateWorkspaceRoute]);
 
-  const handleCloseHub = useCallback(() => {
-    exitHub();
-    updateWorkspaceRoute({ hub: undefined });
-  }, [exitHub, updateWorkspaceRoute]);
-
   // Panel handlers
   const handleOpenPanel = useCallback(
-    (type: "chat" | "note" | "artifact" | "route-trace", id: string) => {
+    (type: "chat" | "note" | "artifact" | "planner" | "route-trace", id: string) => {
       openPanel(type, id);
       const key = type === "chat" ? "thread" : type;
       updateWorkspaceRoute({ panel: type, [key]: id }, "push");
@@ -198,22 +198,36 @@ function WorkspaceContent() {
       thread: undefined,
       note: undefined,
       artifact: undefined,
+      planner: undefined,
     });
   }, [closePanel, updateWorkspaceRoute]);
 
   const panelWidth = panel ? getPanelWidth(panel.type) : 0;
 
-  const committedWorkstream = committedWorkstreamId
-    ? workstreams.find((ws) => ws._id === committedWorkstreamId)
-    : undefined;
-
   const userName = user?.fullName || user?.firstName || "Student";
+
+  useEffect(() => {
+    registerSyncCallback(async (overrides) => {
+      const positions = Object.entries(overrides).map(([workstreamId, pos]) => ({
+        workstreamId,
+        x: pos.x,
+        y: pos.y,
+      }));
+      if (positions.length === 0) return;
+      await fetch("/api/workstreams", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "batchUpdatePositions", positions }),
+      });
+    });
+  }, []);
 
   return (
     <AppShell fullBleed noScroll contentClassName="!p-0">
       <div className="flex flex-col h-full">
         <WorkspaceToolbar
-          onCenterHub={() => window.dispatchEvent(new CustomEvent("workspace:center-hub"))}
+          onCenterHome={() => window.dispatchEvent(new CustomEvent("workspace:center-home"))}
+          onCommitHub={handleOpenHub}
           onNewWorkstream={handleNewWorkstream}
           workstreamCount={activeCount}
           searchQuery={searchQuery}
@@ -236,12 +250,15 @@ function WorkspaceContent() {
                   workstreams={workstreams}
                   userName={userName}
                   userAvatar={user?.imageUrl || ""}
+                  onNewWorkstream={handleNewWorkstream}
                   onWorkstreamUpdate={updateWorkstream}
                   focusWorkstreamId={wsParam}
                   searchQuery={searchQuery}
                   onOpenWorkstream={handleOpenWorkstream}
                   onOpenHub={handleOpenHub}
                   onCommitWorkstream={handleCommitWorkstream}
+                  onOpenPanel={handleOpenPanel}
+                  panelWidth={panelWidth}
                 />
 
                 {/* Quick Chat Command Bar — hidden when panel is open */}
@@ -249,9 +266,11 @@ function WorkspaceContent() {
                   hidden={!!panel}
                   workstreams={workstreams}
                   committedWorkstreamId={committedWorkstreamId}
-                  onOpenWorkstreamChat={(workstreamId) =>
-                    handleOpenWorkstream(workstreamId)
-                  }
+                  onOpenWorkstreamChat={(workstreamId, query) => {
+                    useWorkspaceStore.getState().setOpenChatQuery(query);
+                    handleCommitWorkstream(workstreamId);
+                    setTimeout(() => handleOpenPanel("chat", "new"), 500);
+                  }}
                   onOpenPanel={handleOpenPanel}
                 />
               </div>
@@ -262,31 +281,28 @@ function WorkspaceContent() {
                   <RightPushPanel
                     type={panel.type}
                     id={panel.id}
-                    workstreamId={committedWorkstreamId}
+                    workstreamId={
+                      committedWorkstreamId && committedWorkstreamId !== "__hub__"
+                        ? committedWorkstreamId
+                        : undefined
+                    }
                     onClose={handleClosePanel}
                     onExpand={(type, id) => {
                       // Navigate to full-page view
                       if (type === "chat") {
                         router.push(`/chat?chatId=${id}&from=workspace&ws=${committedWorkstreamId ?? ""}`);
                       } else if (type === "note") {
-                        // Notes don't have a standalone page yet, just expand
+                        router.push(`/artifacts?id=${id}&from=workspace&ws=${committedWorkstreamId ?? ""}`);
+                      } else if (type === "artifact") {
+                        router.push(`/artifacts?id=${id}`);
+                      } else if (type === "planner") {
+                        router.push(`/planner?item=${id}&from=workspace&ws=${committedWorkstreamId ?? ""}`);
                       }
                     }}
                   />
                 )}
               </AnimatePresence>
             </>
-          )}
-
-          {/* Hub focus overlay */}
-          {(hubOpen || hubFocusOpen) && (
-            <HubFocusPanel
-              cardBounds={hubCardBounds}
-              userName={userName}
-              userAvatar={user?.imageUrl || ""}
-              totalWorkstreams={activeCount}
-              onClose={handleCloseHub}
-            />
           )}
 
           {/* Empty state */}
@@ -327,6 +343,7 @@ function getPanelWidth(type: string): number {
     case "chat": return 380;
     case "note": return 520;
     case "artifact": return 480;
+    case "planner": return 420;
     case "route-trace": return 400;
     default: return 380;
   }

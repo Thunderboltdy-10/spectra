@@ -73,7 +73,21 @@ export async function POST(request: NextRequest) {
     if (!body.instruction?.trim()) return badRequest("instruction is required");
     if (typeof body.documentText !== "string") return badRequest("documentText is required");
 
-    const targetArtifactId = (body.artifactId ?? body.noteId)?.trim() || undefined;
+    const targetArtifactId = body.artifactId?.trim()
+      || (
+        body.noteId?.trim()
+          ? (
+              (await convexQuery("artifacts:get", {
+                actorClerkId: actor.clerkId,
+                artifactId: body.noteId.trim(),
+              }).catch(() => null) as ArtifactContext | null)?._id
+              ?? (await convexMutation("artifacts:getOrMigrateFromNote", {
+                actorClerkId: actor.clerkId,
+                noteId: body.noteId.trim(),
+              }).catch(() => null) as { artifactId?: string } | null)?.artifactId
+            )
+          : undefined
+      );
     const artifactContext = targetArtifactId
       ? await convexQuery("artifacts:get", {
           actorClerkId: actor.clerkId,

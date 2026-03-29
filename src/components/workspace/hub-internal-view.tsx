@@ -7,7 +7,7 @@
  * this provides buildHubNodes() to render hub-level content as React Flow nodes.
  *
  * Hub content includes:
- * - Quick Notes: unscoped document artifacts (workstreamId: null)
+ * - Quick Artifacts: unscoped document artifacts (workstreamId: null)
  * - Upcoming Deadlines: cross-workstream planner aggregation (next 14 days)
  * - Recent Activity: latest actions across all workstreams
  * - Quick Actions: new workstream, new document, new chat
@@ -67,14 +67,14 @@ export function buildHubNodes(
       data: {
         emoji: "🏠",
         title: "Hub",
-        description: "Your hub is empty. Create notes, set deadlines, or connect ManageBac.",
+        description: "Your hub is empty. Create artifacts, set deadlines, or connect ManageBac.",
         onNew: data.onNewWorkstream,
       } satisfies EmptyStateNodeData,
     });
     return nodes;
   }
 
-  // Quick Notes
+  // Quick artifacts
   if (data.quickNotes.length > 0) {
     nodes.push({
       id: "hub-notes",
@@ -83,11 +83,11 @@ export function buildHubNodes(
       draggable: true,
       selectable: false,
       data: {
-        label: "Quick Notes",
+        label: "Quick Artifacts",
         icon: "note",
-        panelType: "note",
+        panelType: "artifact",
         onOpenPanel: data.onOpenPanel,
-        onNew: () => data.onOpenPanel("note", "new"),
+        onNew: () => data.onOpenPanel("artifact", "new"),
         items: data.quickNotes.map((n) => ({
           id: n.id,
           title: n.title,
@@ -109,6 +109,7 @@ export function buildHubNodes(
       data: {
         label: "Upcoming Deadlines",
         icon: "planner",
+        panelType: "planner",
         onOpenPanel: data.onOpenPanel,
         items: data.deadlines.map((d) => ({
           id: d.id,

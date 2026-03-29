@@ -10,6 +10,24 @@ function parseLimit(input: string | null) {
   return Math.max(1, Math.min(parsed, 300));
 }
 
+function pickResolvedArtifactId(value: { _id: string } | { artifactId: string } | null) {
+  if (!value) {
+    throw new Error("Artifact not found");
+  }
+  return "artifactId" in value ? value.artifactId : value._id;
+}
+
+async function findExistingArtifact(actorClerkId: string, artifactId: string) {
+  try {
+    return await convexQuery("artifacts:get", {
+      actorClerkId,
+      artifactId,
+    }) as { _id: string } | null;
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();
@@ -19,16 +37,20 @@ export async function GET(request: NextRequest) {
     if (action === "get") {
       const noteId = params.get("id");
       if (!noteId) return badRequest("id is required");
-
-      const note = await convexQuery("notes:get", {
+      const existingArtifact = await findExistingArtifact(actor.clerkId, noteId);
+      const artifact = existingArtifact ?? await convexMutation("artifacts:getOrMigrateFromNote", {
         actorClerkId: actor.clerkId,
         noteId,
       });
-
+      const artifactId = pickResolvedArtifactId(artifact);
+      const note = await convexQuery("artifacts:get", {
+        actorClerkId: actor.clerkId,
+        artifactId,
+      });
       return ok({ note });
     }
 
-    const notes = await convexQuery("notes:list", {
+    const notes = await convexQuery("artifacts:listDocumentCompat", {
       actorClerkId: actor.clerkId,
       workstreamId: params.get("workstreamId") ?? undefined,
       search: params.get("search") ?? undefined,
@@ -49,8 +71,9 @@ export async function POST(request: NextRequest) {
       const { title } = body as { title?: string };
       if (!title) return badRequest("title is required");
 
-      const result = await convexMutation("notes:create", {
+      const artifactId = await convexMutation("artifacts:create", {
         actorClerkId: actor.clerkId,
+        type: "document",
         title,
         content: body.content ?? {},
         contentPlaintext: body.contentPlaintext as string | undefined,
@@ -61,21 +84,26 @@ export async function POST(request: NextRequest) {
         sourceUpdatedAt: body.sourceUpdatedAt as number | undefined,
         syncConflictSummary: body.syncConflictSummary as string | undefined,
         workstreamId: body.workstreamId as string | undefined,
-        artifactId: body.artifactId as string | undefined,
+        linkedChatId: body.artifactId as string | undefined,
         lastAiEditId: body.lastAiEditId as string | undefined,
         pendingDiffs: body.pendingDiffs,
       });
-
-      return ok(result);
+      return ok({ noteId: artifactId, artifactId });
     }
 
     if (action === "update") {
       const { noteId } = body as { noteId?: string };
       if (!noteId) return badRequest("noteId is required");
 
-      const result = await convexMutation("notes:update", {
+      const existingArtifact = await findExistingArtifact(actor.clerkId, noteId);
+      const resolved = existingArtifact ?? await convexMutation("artifacts:getOrMigrateFromNote", {
         actorClerkId: actor.clerkId,
         noteId,
+      });
+      const artifactId = pickResolvedArtifactId(resolved);
+      const result = await convexMutation("artifacts:update", {
+        actorClerkId: actor.clerkId,
+        artifactId,
         title: body.title as string | undefined,
         content: body.content,
         contentPlaintext: body.contentPlaintext as string | null | undefined,
@@ -86,21 +114,37 @@ export async function POST(request: NextRequest) {
         sourceUpdatedAt: body.sourceUpdatedAt as number | null | undefined,
         syncConflictSummary: body.syncConflictSummary as string | null | undefined,
         workstreamId: body.workstreamId as string | null | undefined,
-        artifactId: body.artifactId as string | null | undefined,
+        linkedChatId: body.artifactId as string | null | undefined,
         lastAiEditId: body.lastAiEditId as string | null | undefined,
         pendingDiffs: body.pendingDiffs as unknown,
       });
 
-      return ok(result);
+      const responsePayload =
+        typeof result === "object" && result !== null
+          ? result as Record<string, unknown>
+          : {};
+
+      return ok({
+        ...responsePayload,
+        noteId: artifactId,
+        artifactId,
+        migratedFromLegacy: artifactId !== noteId,
+      });
     }
 
     if (action === "delete") {
       const { noteId } = body as { noteId?: string };
       if (!noteId) return badRequest("noteId is required");
 
-      const result = await convexMutation("notes:remove", {
+      const existingArtifact = await findExistingArtifact(actor.clerkId, noteId);
+      const resolved = existingArtifact ?? await convexMutation("artifacts:getOrMigrateFromNote", {
         actorClerkId: actor.clerkId,
         noteId,
+      });
+      const artifactId = pickResolvedArtifactId(resolved);
+      const result = await convexMutation("artifacts:remove", {
+        actorClerkId: actor.clerkId,
+        artifactId,
       });
 
       return ok(result);

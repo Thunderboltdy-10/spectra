@@ -23,7 +23,7 @@ export type WorkspaceViewMode = "structured" | "columns" | "graph";
 export type ZoomBand = "overview" | "summary" | "detail" | "internal";
 
 /** Panel types for the right push-panel */
-export type PanelType = "chat" | "note" | "artifact" | "route-trace";
+export type PanelType = "chat" | "note" | "artifact" | "planner" | "route-trace";
 
 type PanelState = {
   type: PanelType;
@@ -80,6 +80,8 @@ type WorkspaceStoreState = {
   // Push panel
   openPanel: (type: PanelType, id: string) => void;
   closePanel: () => void;
+  setOpenChatQuery: (query?: string) => void;
+  clearOpenChatQuery: () => void;
 
   // Hub
   focusHub: (bounds: CardBounds) => void;
@@ -142,6 +144,8 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set) => ({
 
   openPanel: (type, id) => set({ panel: { type, id } }),
   closePanel: () => set({ panel: undefined }),
+  setOpenChatQuery: (query) => set({ openChatQuery: query }),
+  clearOpenChatQuery: () => set({ openChatQuery: undefined }),
 
   focusHub: (hubCardBounds) => set({ hubFocusOpen: true, hubCardBounds }),
   exitHub: () => set({ hubFocusOpen: false, hubCardBounds: undefined }),

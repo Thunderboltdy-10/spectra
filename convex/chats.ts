@@ -1,4 +1,4 @@
-import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { action, internalMutation, internalQuery, mutation, query, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { getUserByClerkId } from "./helpers";
@@ -18,6 +18,20 @@ async function validateArtifact(
   if (!artifact || artifact.ownerUserId !== actor._id || artifact.orgId !== actor.orgId) {
     throw new Error("Artifact not found");
   }
+}
+
+async function adjustWorkstreamThreadCount(
+  ctx: Pick<MutationCtx, "db">,
+  workstreamId: Id<"workstreams"> | undefined,
+  delta: number,
+) {
+  if (!workstreamId || delta === 0) return;
+  const workstream = await ctx.db.get(workstreamId);
+  if (!workstream) return;
+  await ctx.db.patch(workstreamId, {
+    threadCount: Math.max(0, (workstream.threadCount ?? 0) + delta),
+    updatedAt: Date.now(),
+  });
 }
 
 function compactMessageText(value: string) {
@@ -213,6 +227,7 @@ export const listChats = query({
         workstreamId: chat.workstreamId,
         artifactId: chat.artifactId,
         threadType: chat.threadType ?? "conversation",
+        messageCount: chat.messageCount ?? 0,
         pinned: chat.pinned,
         updatedAt: chat.updatedAt,
       }));
@@ -369,6 +384,7 @@ export const createChat = mutation({
       ownerUserId: actor._id,
       title: args.title ?? "New chat",
       latestUserPrompt: undefined,
+      messageCount: 0,
       mode: args.mode,
       thinkingLevel: args.thinkingLevel,
       routerMode: args.routerMode,
@@ -379,6 +395,8 @@ export const createChat = mutation({
       createdAt: now,
       updatedAt: now,
     });
+
+    await adjustWorkstreamThreadCount(ctx, args.workstreamId, 1);
 
     return { chatId };
   },
@@ -463,6 +481,7 @@ export const getOrCreateArtifactThread = mutation({
       ownerUserId: actor._id,
       title: args.title ?? "Artifact thread",
       latestUserPrompt: undefined,
+      messageCount: 0,
       mode: args.mode,
       thinkingLevel: args.thinkingLevel,
       routerMode: args.routerMode,
@@ -473,6 +492,8 @@ export const getOrCreateArtifactThread = mutation({
       createdAt: now,
       updatedAt: now,
     });
+
+    await adjustWorkstreamThreadCount(ctx, args.workstreamId, 1);
 
     return { chatId, created: true };
   },
@@ -600,6 +621,7 @@ export const appendMessage = mutation({
 
     await ctx.db.patch(chat._id, {
       updatedAt: now,
+      messageCount: (chat.messageCount ?? 0) + 1,
       title:
         chat.title === "New chat" && args.role === "user"
           ? summarizeChatTitle(args.content)
@@ -750,6 +772,7 @@ export const branchFromMessage = mutation({
       ownerUserId: sourceChat.ownerUserId,
       title: branchedTitle,
       latestUserPrompt: sourceChat.latestUserPrompt,
+      messageCount: 0,
       mode: sourceChat.mode,
       thinkingLevel: sourceChat.thinkingLevel,
       routerMode: sourceChat.routerMode,
@@ -797,9 +820,12 @@ export const branchFromMessage = mutation({
     if (latestUserPrompt) {
       await ctx.db.patch(chatId, {
         latestUserPrompt,
+        messageCount: pivotIndex + 1,
         updatedAt: now + pivotIndex + 1,
       });
     }
+
+    await adjustWorkstreamThreadCount(ctx, sourceChat.workstreamId, 1);
 
     return { chatId };
   },
@@ -918,6 +944,11 @@ export const updateChatSettings = mutation({
       title: args.title ?? chat.title,
       updatedAt: Date.now(),
     });
+
+    if (nextWorkstreamId !== chat.workstreamId) {
+      await adjustWorkstreamThreadCount(ctx, chat.workstreamId, -1);
+      await adjustWorkstreamThreadCount(ctx, nextWorkstreamId, 1);
+    }
 
     return { ok: true };
   },
@@ -1240,6 +1271,7 @@ export const deleteChat = mutation({
     }
 
     await ctx.db.patch(args.chatId, { deletedAt: Date.now(), updatedAt: Date.now() });
+    await adjustWorkstreamThreadCount(ctx, chat.workstreamId, -1);
     return { ok: true };
   },
 });
@@ -1275,7 +1307,10 @@ export const deleteLastAssistantMessage = mutation({
     }
 
     await ctx.db.delete(lastAssistant._id);
-    await ctx.db.patch(chat._id, { updatedAt: Date.now() });
+    await ctx.db.patch(chat._id, {
+      updatedAt: Date.now(),
+      messageCount: Math.max(0, (chat.messageCount ?? 0) - 1),
+    });
     return { deleted: true };
   },
 });
@@ -1314,7 +1349,10 @@ export const deleteLastUserMessage = mutation({
         .unique();
       if (existing && existing.userId === actor._id && existing.role === "user") {
         await ctx.db.delete(existing._id);
-        await ctx.db.patch(chat._id, { updatedAt: Date.now() });
+        await ctx.db.patch(chat._id, {
+          updatedAt: Date.now(),
+          messageCount: Math.max(0, (chat.messageCount ?? 0) - 1),
+        });
         return { deleted: true };
       }
     }
@@ -1335,7 +1373,10 @@ export const deleteLastUserMessage = mutation({
     }
 
     await ctx.db.delete(last._id);
-    await ctx.db.patch(chat._id, { updatedAt: Date.now() });
+    await ctx.db.patch(chat._id, {
+      updatedAt: Date.now(),
+      messageCount: Math.max(0, (chat.messageCount ?? 0) - 1),
+    });
     return { deleted: true };
   },
 });

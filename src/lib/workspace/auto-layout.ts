@@ -29,10 +29,10 @@ export type LayoutResult = {
 
 // Radial distances from hub center by lifecycle state
 const RADIAL_DISTANCE = {
-  active: 360,
-  quiet: 520,
-  completed: 680,
-  archived: 800,
+  active: 500,
+  quiet: 690,
+  completed: 900,
+  archived: 1080,
 } as const;
 
 // Angular sectors by type (radians from 0)
@@ -85,7 +85,7 @@ export function computeCanonicalLayout(workstreams: Workstream[]): LayoutResult 
     for (let i = 0; i < group.length; i++) {
       const ws = group[i]!;
       const angle = getTargetAngle(type, i, group.length);
-      const radius = getTargetRadius(ws.status) + (i % 3) * 45;
+      const radius = getTargetRadius(ws.status) + (i % 3) * 72;
       nodes.push({
         id: ws._id,
         x: Math.cos(angle) * radius,
@@ -110,7 +110,7 @@ export function computeCanonicalLayout(workstreams: Workstream[]): LayoutResult 
         const dx = b.x - a.x;
         const dy = b.y - a.y;
         const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
-        const minDist = 200; // minimum distance between nodes
+        const minDist = 280; // minimum distance between nodes
         if (dist < minDist) {
           const force = (minDist - dist) / dist * 0.3;
           const fx = dx * force;

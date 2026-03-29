@@ -82,6 +82,8 @@ async function ensureWorkstreamArtifactCount(
   workstreamId: Id<"workstreams"> | undefined,
 ) {
   if (!workstreamId) return;
+  const workstream = await ctx.db.get(workstreamId);
+  if (!workstream) return;
   const rows = await ctx.db
     .query("artifacts")
     .withIndex("by_workstream", (q) => q.eq("workstreamId", workstreamId))
@@ -269,6 +271,91 @@ export const get = query({
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
     return assertArtifactOwnership(ctx, actor, args.artifactId);
+  },
+});
+
+export const getOrMigrateFromNote = mutation({
+  args: {
+    actorClerkId: v.string(),
+    noteId: v.id("notes"),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+
+    const existingArtifact = await ctx.db
+      .query("artifacts")
+      .withIndex("by_legacy_note", (q) => q.eq("legacyNoteId", args.noteId))
+      .first();
+    if (existingArtifact) {
+      if (existingArtifact.ownerUserId !== actor._id || existingArtifact.orgId !== actor.orgId) {
+        throw new Error("Artifact not found");
+      }
+      return { artifactId: existingArtifact._id };
+    }
+
+    const note = await ctx.db.get(args.noteId);
+    if (!note || note.ownerUserId !== actor._id || note.orgId !== actor.orgId) {
+      throw new Error("Legacy note not found");
+    }
+
+    const duplicate = await ctx.db
+      .query("artifacts")
+      .withIndex("by_owner_type", (q) => q.eq("ownerUserId", actor._id).eq("type", "document"))
+      .collect()
+      .then((artifacts) => artifacts.find((artifact) =>
+        artifact.workstreamId === note.workstreamId
+        && artifact.title === note.title
+        && artifact.managebacItemId === note.managebacItemId
+        && artifact.createdAt === note.createdAt,
+      ));
+
+    if (duplicate) {
+      await ctx.db.patch(duplicate._id, {
+        legacyNoteId: duplicate.legacyNoteId ?? note._id,
+        updatedAt: Date.now(),
+      });
+      return { artifactId: duplicate._id };
+    }
+
+    const artifactId = await ctx.db.insert("artifacts", {
+      ownerUserId: note.ownerUserId,
+      orgId: note.orgId,
+      workstreamId: note.workstreamId,
+      type: "document",
+      title: note.title,
+      content: note.content,
+      contentPlaintext: note.contentPlaintext,
+      editorMode: normalizeEditorMode(note.editorMode),
+      sourceType: note.sourceType ?? "user_manual",
+      managebacItemId: note.managebacItemId,
+      sourceDeleted: note.sourceDeleted,
+      sourceUpdatedAt: note.sourceUpdatedAt,
+      syncConflictSummary: note.syncConflictSummary,
+      lastAiEditId: note.lastAiEditId,
+      pendingDiffs: note.pendingDiffs,
+      legacyNoteId: note._id,
+      layout: undefined,
+      tags: undefined,
+      linkedAgentId: undefined,
+      linkedChatId: undefined,
+      status: "active",
+      pinnedAt: undefined,
+      createdAt: note.createdAt,
+      updatedAt: note.updatedAt,
+    });
+
+    await createArtifactVersion(ctx, {
+      artifactId,
+      diff: { op: "create" },
+      snapshot: note.content,
+      authorType: "user",
+      description: "Migrated from legacy note",
+      status: "confirmed",
+      createdAt: note.createdAt,
+    });
+    await ensureWorkstreamArtifactCount(ctx, note.workstreamId);
+
+    return { artifactId };
   },
 });
 
@@ -709,6 +796,29 @@ export const remove = mutation({
     for (const version of versions) {
       await ctx.db.delete(version._id);
     }
+    const linkedChats = await ctx.db
+      .query("chats")
+      .withIndex("by_artifact", (q) => q.eq("artifactId", args.artifactId))
+      .collect();
+    for (const chat of linkedChats) {
+      await ctx.db.patch(chat._id, {
+        artifactId: undefined,
+        threadType: chat.threadType === "artifact_edit" ? "conversation" : chat.threadType,
+        updatedAt: Date.now(),
+      });
+    }
+    const plannerItems = await ctx.db
+      .query("plannerItems")
+      .withIndex("by_owner", (q) => q.eq("ownerUserId", actor._id))
+      .collect();
+    for (const item of plannerItems) {
+      if (item.sourceArtifactId === args.artifactId) {
+        await ctx.db.patch(item._id, {
+          sourceArtifactId: undefined,
+          updatedAt: Date.now(),
+        });
+      }
+    }
     await ctx.db.delete(args.artifactId);
     await ensureWorkstreamArtifactCount(ctx, artifact.workstreamId);
     return { success: true };
@@ -803,6 +913,12 @@ export const migrateLegacyNotes = mutation({
         && artifact.createdAt === note.createdAt,
       );
       if (duplicate) {
+        if (!duplicate.legacyNoteId) {
+          await ctx.db.patch(duplicate._id, {
+            legacyNoteId: note._id,
+            updatedAt: Date.now(),
+          });
+        }
         skipped += 1;
         continue;
       }
@@ -823,6 +939,7 @@ export const migrateLegacyNotes = mutation({
         syncConflictSummary: note.syncConflictSummary,
         lastAiEditId: note.lastAiEditId,
         pendingDiffs: note.pendingDiffs,
+        legacyNoteId: note._id,
         layout: undefined,
         tags: undefined,
         linkedAgentId: undefined,
@@ -892,7 +1009,15 @@ export const migrateLegacyNotesBatch = internalMutation({
         && artifact.managebacItemId === note.managebacItemId
         && artifact.createdAt === note.createdAt,
       );
-      if (duplicate) continue;
+      if (duplicate) {
+        if (!duplicate.legacyNoteId) {
+          await ctx.db.patch(duplicate._id, {
+            legacyNoteId: note._id,
+            updatedAt: Date.now(),
+          });
+        }
+        continue;
+      }
 
       const artifactId = await ctx.db.insert("artifacts", {
         ownerUserId: note.ownerUserId,
@@ -910,6 +1035,7 @@ export const migrateLegacyNotesBatch = internalMutation({
         syncConflictSummary: note.syncConflictSummary,
         lastAiEditId: note.lastAiEditId,
         pendingDiffs: note.pendingDiffs,
+        legacyNoteId: note._id,
         layout: undefined,
         tags: undefined,
         linkedAgentId: undefined,

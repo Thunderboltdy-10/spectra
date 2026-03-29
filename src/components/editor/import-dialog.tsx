@@ -141,7 +141,7 @@ export function ImportDialog(props: {
                     setPreview(null);
                   }}
                 >
-                  Import into note
+                  Import into artifact
                 </Button>
               </div>
             </div>

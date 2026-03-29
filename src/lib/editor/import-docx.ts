@@ -4,7 +4,7 @@ import { htmlToTiptapJson, textFromTiptapJson, titleFromFilename } from "@/lib/e
 
 export async function importDocxFile(file: File): Promise<ImportedDocument> {
   const bytes = await file.arrayBuffer();
-  const result = await mammoth.convertToHtml({ buffer: Buffer.from(bytes) });
+  const result = await mammoth.convertToHtml({ arrayBuffer: bytes });
   const content = htmlToTiptapJson(result.value);
   return {
     title: titleFromFilename(file.name),

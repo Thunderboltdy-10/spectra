@@ -252,6 +252,7 @@ export default defineSchema({
     defaultMode: v.optional(vStudyMode),
     defaultThinking: v.optional(vThinkingLevel),
     artifactCount: v.optional(v.number()),
+    threadCount: v.optional(v.number()),
     lastActivityAt: v.optional(v.number()),
     completedAt: v.optional(v.number()),
     createdAt: v.number(),
@@ -374,6 +375,7 @@ export default defineSchema({
     ownerUserId: v.id("users"),
     title: v.string(),
     latestUserPrompt: v.optional(v.string()),
+    messageCount: v.optional(v.number()),
     pinned: v.optional(v.boolean()),
     mode: vStudyMode,
     thinkingLevel: vThinkingLevel,
@@ -494,6 +496,7 @@ export default defineSchema({
     syncConflictSummary: v.optional(v.string()),
     lastAiEditId: v.optional(v.string()),
     pendingDiffs: v.optional(v.any()),
+    legacyNoteId: v.optional(v.id("notes")),
     layout: v.optional(v.any()),
     tags: v.optional(v.array(v.string())),
     linkedAgentId: v.optional(v.id("agents")),
@@ -508,6 +511,7 @@ export default defineSchema({
     .index("by_type", ["type"])
     .index("by_workstream", ["workstreamId"])
     .index("by_owner_type", ["ownerUserId", "type"])
+    .index("by_legacy_note", ["legacyNoteId"])
     .searchIndex("search_content", {
       searchField: "contentPlaintext",
       filterFields: ["ownerUserId", "orgId", "type", "status", "workstreamId"],

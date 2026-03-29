@@ -27,7 +27,9 @@ import {
   Code,
   Highlighter,
   LinkIcon,
+  RotateCcw,
   UnderlineIcon,
+  History,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/editor-store";
@@ -35,10 +37,12 @@ import { ImportDialog } from "@/components/editor/import-dialog";
 import { importClipboardData } from "@/lib/editor/clipboard-paste";
 import type { ImportedDocument } from "@/lib/editor/tiptap-import";
 import { Callout } from "./extensions/callout-node";
+import { DragHandle } from "./extensions/drag-handle";
 import { SlashCommand } from "./slash-command-extension";
 import { createSlashCommandRenderer } from "./slash-command-renderer";
 import { AiBar } from "./ai-bar";
 import { EditorToolbar } from "./editor-toolbar";
+import { RightSidePanel } from "@/components/shared/right-side-panel";
 
 interface TiptapEditorProps {
   content?: JSONContent | null;
@@ -50,6 +54,11 @@ interface TiptapEditorProps {
   noteId?: string;
   artifactId?: string;
   compact?: boolean;
+  showAiBar?: boolean;
+  showDocumentMeta?: boolean;
+  documentTitle?: string;
+  createdAt?: number;
+  updatedAt?: number;
 }
 
 type EditorSnapshot = {
@@ -67,11 +76,26 @@ export function TiptapEditor({
   noteId,
   artifactId,
   compact,
+  showAiBar = false,
+  showDocumentMeta = false,
+  documentTitle,
+  createdAt,
+  updatedAt,
 }: TiptapEditorProps) {
-  const { editorMode, setActiveNoteId, setActiveArtifactId } = useEditorStore();
+  const {
+    editorMode,
+    setActiveNoteId,
+    setActiveArtifactId,
+    openVersionHistory,
+    closeVersionHistory,
+    isVersionHistoryOpen,
+  } = useEditorStore();
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressNextAutosaveRef = useRef(false);
+  const lastExternalContentRef = useRef<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [versions, setVersions] = useState<Array<{ _id: string; createdAt: number; authorType?: string; description?: string }>>([]);
+  const [loadingVersions, setLoadingVersions] = useState(false);
 
   useEffect(() => {
     if (noteId) setActiveNoteId(noteId);
@@ -82,6 +106,65 @@ export function TiptapEditor({
     };
   }, [noteId, artifactId, setActiveNoteId, setActiveArtifactId]);
 
+  const ensureDocumentTitle = useCallback((value?: JSONContent | null) => {
+    if (!value || value.type !== "doc") return value ?? undefined;
+    const nodes = Array.isArray(value.content) ? value.content : [];
+    const firstNode = nodes[0];
+    if (firstNode?.type === "heading" && firstNode.attrs?.level === 1) {
+      return value;
+    }
+    const isEssentiallyEmpty = nodes.length === 0 || nodes.every((node) => {
+      if (node.type !== "paragraph") return false;
+      const text = Array.isArray(node.content)
+        ? node.content.map((child) => ("text" in child && typeof child.text === "string" ? child.text : "")).join("").trim()
+        : "";
+      return text.length === 0;
+    });
+    if (!isEssentiallyEmpty) {
+      return value;
+    }
+    return {
+      ...value,
+      content: [
+        {
+          type: "heading",
+          attrs: { level: 1 },
+          content: documentTitle
+            ? [{ type: "text", text: documentTitle }]
+            : [{ type: "text", text: "Untitled" }],
+        },
+        ...nodes,
+      ],
+    } satisfies JSONContent;
+  }, [documentTitle]);
+
+  const stripDocumentMarkers = useCallback((value: string) => value
+    .replace(/<<\s*(?:DOC|DOCUMENT)[_\s]?START\s*>>/gi, "")
+    .replace(/<<\s*(?:DOC|DOCUMENT)[_\s]?END\s*>>/gi, "")
+    .trim(), []);
+
+  const sanitizeContent = useCallback(function sanitizeContentNode(value?: JSONContent | null): JSONContent | null | undefined {
+    if (!value) return value;
+
+    const nextNode: JSONContent = { ...value };
+    if (typeof nextNode.text === "string") {
+      nextNode.text = stripDocumentMarkers(nextNode.text);
+    }
+    if (Array.isArray(nextNode.content)) {
+      nextNode.content = nextNode.content
+        .map((child) => sanitizeContentNode(child))
+        .filter((child): child is JSONContent => Boolean(child))
+        .filter((child) => {
+          if (!child.content || child.content.length > 0) return true;
+          if (child.type === "paragraph" || child.type === "heading") {
+            return typeof child.text === "string" && child.text.trim().length > 0;
+          }
+          return true;
+        });
+    }
+    return nextNode;
+  }, [stripDocumentMarkers]);
+
   const extensions = useMemo(
     () => [
       StarterKit.configure({
@@ -91,6 +174,8 @@ export function TiptapEditor({
       Placeholder.configure({
         placeholder,
         emptyEditorClass: "is-editor-empty",
+        showOnlyWhenEditable: true,
+        showOnlyCurrent: true,
       }),
       // Tables
       Table.configure({ resizable: true, lastColumnResizable: true }),
@@ -113,6 +198,7 @@ export function TiptapEditor({
       CharacterCount,
       // Custom blocks
       Callout,
+      DragHandle,
       // Slash commands
       SlashCommand.configure({
         suggestion: {
@@ -140,7 +226,7 @@ export function TiptapEditor({
   const editor = useEditor({
     immediatelyRender: false,
     extensions,
-    content: content ?? undefined,
+    content: ensureDocumentTitle(sanitizeContent(content)),
     editable,
     editorProps: {
       attributes: {
@@ -167,10 +253,22 @@ export function TiptapEditor({
 
   // Update content when it changes externally
   useEffect(() => {
-    if (editor && content && !editor.isFocused) {
-      editor.commands.setContent(content);
+    if (!editor || !content || editor.isFocused) return;
+    const nextContent = ensureDocumentTitle(sanitizeContent(content));
+    if (!nextContent) return;
+
+    const nextSerialized = JSON.stringify(nextContent);
+    if (lastExternalContentRef.current === nextSerialized) return;
+
+    const currentSerialized = JSON.stringify(editor.getJSON());
+    if (currentSerialized === nextSerialized) {
+      lastExternalContentRef.current = nextSerialized;
+      return;
     }
-  }, [editor, content]);
+
+    editor.commands.setContent(nextContent, { emitUpdate: false });
+    lastExternalContentRef.current = nextSerialized;
+  }, [content, editor, ensureDocumentTitle, sanitizeContent]);
 
   const charOffsetToPos = useCallback(
     (charOffset: number): number => {
@@ -233,20 +331,24 @@ export function TiptapEditor({
     (nextContent: JSONContent): EditorSnapshot | null => {
       if (!editor) return null;
       suppressNextAutosaveRef.current = true;
-      editor.commands.setContent(nextContent);
+      const ensured = ensureDocumentTitle(sanitizeContent(nextContent)) ?? nextContent;
+      lastExternalContentRef.current = JSON.stringify(ensured);
+      editor.commands.setContent(ensured, { emitUpdate: false });
       return {
         json: editor.getJSON(),
         text: editor.getText(),
       };
     },
-    [editor],
+    [editor, ensureDocumentTitle, sanitizeContent],
   );
 
   const applyImportedDocument = useCallback(
     (document: ImportedDocument, replaceDoc: boolean) => {
       if (!editor) return;
       if (replaceDoc) {
-        editor.commands.setContent(document.content as never);
+        const ensured = ensureDocumentTitle(sanitizeContent(document.content)) ?? document.content;
+        lastExternalContentRef.current = JSON.stringify(ensured);
+        editor.commands.setContent(ensured as never, { emitUpdate: false });
       } else {
         const insertable = Array.isArray(document.content.content)
           ? document.content.content
@@ -256,23 +358,50 @@ export function TiptapEditor({
       onChange?.(document.content, document.contentPlaintext);
       onSave?.(document.content, document.contentPlaintext);
     },
-    [editor, onChange, onSave],
+    [editor, ensureDocumentTitle, onChange, onSave, sanitizeContent],
   );
+
+  useEffect(() => {
+    if (!isVersionHistoryOpen || !artifactId) return;
+    let cancelled = false;
+    setLoadingVersions(true);
+    void fetch(`/api/artifacts?action=versions&id=${encodeURIComponent(artifactId)}`)
+      .then((response) => (response.ok ? response.json() : Promise.resolve({ versions: [] })))
+      .then((data: { versions?: Array<{ _id: string; createdAt: number; authorType?: string; description?: string }> }) => {
+        if (!cancelled) {
+          setVersions(data.versions ?? []);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingVersions(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [artifactId, isVersionHistoryOpen]);
 
   if (!editor) return null;
 
   const chars = editor.storage.characterCount?.characters() ?? 0;
   const words = editor.storage.characterCount?.words() ?? 0;
+  const headingOne = editor.state.doc.firstChild;
+  const titleText = stripDocumentMarkers(
+    headingOne?.type.name === "heading"
+      ? headingOne.textContent || documentTitle || "Untitled"
+      : documentTitle || "Untitled",
+  ) || "Untitled";
 
   return (
-    <div className={cn("flex flex-col h-full", className)}>
+    <div className={cn("relative flex flex-col h-full", className)}>
       {/* Formatting toolbar */}
       {!compact && (
         <EditorToolbar editor={editor} onOpenImport={() => setImportOpen(true)} />
       )}
 
       {/* AI bar — only in AI-Enhanced mode */}
-      {editorMode === "ai_enhanced" && !compact && (
+      {(editorMode === "ai_enhanced" || showAiBar) && (!compact || showAiBar) && (
         <AiBar
           editor={editor}
           onApplyEdits={applyAiEdits}
@@ -282,12 +411,40 @@ export function TiptapEditor({
         />
       )}
 
+      {showDocumentMeta && (
+        <div className={cn("shrink-0 px-5", compact ? "pt-4" : "pt-10 md:pt-14")}>
+          <div className={cn("mx-auto w-full", compact ? "max-w-[42rem]" : "max-w-[52rem]")}>
+            <div className={cn("flex flex-wrap items-center gap-x-3 gap-y-2 text-[11px] text-[var(--text-secondary)]", compact ? "pb-3" : "pb-4")}>
+              <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--text-tertiary)]">
+                Document Artifact
+              </div>
+              <span className="h-3 w-px bg-[var(--border-default)]/80" />
+              <span>Created {createdAt ? new Date(createdAt).toLocaleDateString() : "recently"}</span>
+              <span className="h-3 w-px bg-[var(--border-default)]/80" />
+              <span>Modified {updatedAt ? new Date(updatedAt).toLocaleDateString() : "recently"}</span>
+              <span className="h-3 w-px bg-[var(--border-default)]/80" />
+              <button
+                type="button"
+                onClick={() => openVersionHistory()}
+                className="rounded-full px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+              >
+                Version history
+              </button>
+            </div>
+            {!compact && <div className="h-px w-full bg-[var(--border-default)]/65" />}
+          </div>
+        </div>
+      )}
+
       {/* Selection toolbar — rendered inline, uses Tiptap BubbleMenu extension */}
       <SelectionToolbar editor={editor} />
 
       {/* Editor content */}
       <div
-        className="flex-1 overflow-y-auto px-8 py-6"
+        className={cn(
+          "flex-1 overflow-y-auto",
+          compact ? "px-4 py-4" : "px-6 pb-8 pt-0 md:px-10",
+        )}
         onClick={() => editor.commands.focus()}
         onPaste={(event) => {
           const imported = importClipboardData(event.clipboardData);
@@ -296,12 +453,23 @@ export function TiptapEditor({
           applyImportedDocument(imported, false);
         }}
       >
-        <EditorContent editor={editor} className="tiptap-root" />
+        <div className={cn("mx-auto w-full", compact ? "max-w-[42rem]" : "max-w-[52rem]")}>
+          <EditorContent
+            editor={editor}
+            className={cn(
+              "tiptap-root",
+              compact ? "tiptap-compact" : "tiptap-full",
+              showDocumentMeta && !compact && "tiptap-with-document-meta",
+            )}
+          />
+        </div>
       </div>
 
       {/* Character / Word counter */}
-      <div className="shrink-0 flex items-center justify-end px-4 py-1.5 text-[10px] text-[var(--text-tertiary)] select-none border-t border-[var(--border-default)]/40">
-        {chars.toLocaleString()} characters &middot; {words.toLocaleString()} words
+      <div className="shrink-0 border-t border-[var(--border-default)]/40 px-4 py-1.5 text-[10px] text-[var(--text-tertiary)] select-none">
+        <div className={cn("mx-auto flex items-center justify-end", compact ? "max-w-[42rem]" : "max-w-[52rem]")}>
+          {chars.toLocaleString()} characters &middot; {words.toLocaleString()} words
+        </div>
       </div>
 
       <ImportDialog
@@ -309,6 +477,71 @@ export function TiptapEditor({
         onOpenChange={setImportOpen}
         onImport={(document) => applyImportedDocument(document, true)}
       />
+
+      {isVersionHistoryOpen && artifactId && (
+        <div className="absolute inset-y-0 right-0 z-50">
+          <RightSidePanel
+            width={320}
+            title="Version History"
+            icon={<History className="h-4 w-4" />}
+            onClose={() => closeVersionHistory()}
+          >
+            <div className="flex h-full flex-col">
+              <div className="border-b border-[var(--border-default)] px-4 py-3">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+                  {titleText}
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto px-4 py-3">
+            {loadingVersions ? (
+              <div className="text-sm text-[var(--text-secondary)]">Loading versions...</div>
+            ) : versions.length === 0 ? (
+              <div className="text-sm text-[var(--text-secondary)]">No version history yet.</div>
+            ) : (
+              <div className="space-y-3">
+                {versions.map((version) => (
+                  <div key={version._id} className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-[11px] font-medium text-[var(--text-primary)]">
+                        {version.authorType === "agent" ? "Agent" : version.authorType === "system" ? "System" : "You"}
+                      </div>
+                      <div className="text-[10px] text-[var(--text-tertiary)]">
+                        {new Date(version.createdAt).toLocaleString()}
+                      </div>
+                    </div>
+                    {version.description && (
+                      <p className="mt-1 text-[11px] leading-5 text-[var(--text-secondary)]">
+                        {version.description}
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await fetch("/api/artifacts", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            action: "restoreVersion",
+                            artifactId,
+                            versionId: version._id,
+                          }),
+                        });
+                        window.location.reload();
+                      }}
+                      className="mt-2 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium text-[var(--accent-cyan)] transition-colors hover:bg-[var(--accent-cyan)]/8"
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                      Restore this version
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+              </div>
+            </div>
+          </RightSidePanel>
+          </div>
+      )}
     </div>
   );
 }
@@ -334,8 +567,12 @@ function SelectionToolbar({ editor }: { editor: import("@tiptap/core").Editor })
       const editorEl = view.dom.closest(".tiptap-root");
       if (!editorEl) return;
       const editorRect = editorEl.getBoundingClientRect();
+      const rawTop = start.top - editorRect.top - 44;
+      const top = rawTop < 8
+        ? end.bottom - editorRect.top + 12
+        : rawTop;
       setPosition({
-        top: start.top - editorRect.top - 44,
+        top,
         left: (start.left + end.left) / 2 - editorRect.left,
       });
       setVisible(true);

@@ -169,6 +169,7 @@ export const create = mutation({
       defaultMode: args.defaultMode,
       defaultThinking: args.defaultThinking,
       artifactCount: args.artifactCount ?? 0,
+      threadCount: 0,
       lastActivityAt: args.lastActivityAt,
       completedAt: status === "completed" ? now : undefined,
       createdAt: now,
@@ -264,6 +265,32 @@ export const update = mutation({
 
     await ctx.db.patch(args.workstreamId, updates);
     return { success: true };
+  },
+});
+
+export const batchUpdatePositions = mutation({
+  args: {
+    actorClerkId: v.string(),
+    positions: v.array(v.object({
+      workstreamId: v.id("workstreams"),
+      x: v.number(),
+      y: v.number(),
+    })),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    const now = Date.now();
+
+    for (const item of args.positions) {
+      const workstream = await assertWorkstreamOwnership(ctx, actor, item.workstreamId);
+      await ctx.db.patch(workstream._id, {
+        canvasX: Math.round(item.x),
+        canvasY: Math.round(item.y),
+        updatedAt: now,
+      });
+    }
+
+    return { success: true, count: args.positions.length };
   },
 });
 

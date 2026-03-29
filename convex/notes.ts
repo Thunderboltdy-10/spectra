@@ -152,6 +152,12 @@ async function migrateLegacyNoteToDocumentArtifact(
   );
 
   if (duplicate) {
+    if (!duplicate.legacyNoteId) {
+      await ctx.db.patch(duplicate._id, {
+        legacyNoteId: note._id,
+        updatedAt: Date.now(),
+      });
+    }
     await ctx.db.delete(note._id);
     return duplicate;
   }
@@ -172,6 +178,7 @@ async function migrateLegacyNoteToDocumentArtifact(
     syncConflictSummary: note.syncConflictSummary,
     lastAiEditId: note.lastAiEditId,
     pendingDiffs: note.pendingDiffs,
+    legacyNoteId: note._id,
     layout: undefined,
     tags: undefined,
     linkedAgentId: undefined,

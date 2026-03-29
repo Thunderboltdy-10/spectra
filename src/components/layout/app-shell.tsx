@@ -101,7 +101,7 @@ const PAGE_TOUR_STEPS: Record<string, GuidedTourStep[]> = {
     {
       selector: '[data-tour="artifacts-header"]',
       title: "Artifacts workspace",
-      description: "Your living workspace for study plans, flashcards, notes, documents, and more.",
+      description: "Your living workspace for study plans, flashcards, artifacts, documents, and more.",
       position: "bottom",
     },
   ],

@@ -106,7 +106,7 @@ function getActiveModules(
     },
     {
       type: "notes",
-      label: "Notes",
+      label: "Artifacts",
       icon: StickyNote,
       visible: true,
       priority: notes.length > 0 ? 15 : 45,
@@ -330,8 +330,8 @@ export function WorkstreamFocusPanel({
   }, [router, workstream._id]);
 
   const handleOpenFullNote = useCallback((noteId: string) => {
-    const query = new URLSearchParams({ note: noteId, from: "workspace", ws: workstream._id });
-    router.push(`/notes?${query.toString()}`);
+    const query = new URLSearchParams({ id: noteId, from: "workspace", ws: workstream._id });
+    router.push(`/artifacts?${query.toString()}`);
   }, [router, workstream._id]);
 
   const activeModules = useMemo(
@@ -476,7 +476,7 @@ export function WorkstreamFocusPanel({
                   title={activeNote?.title || "Note"}
                   onClose={closeDetailPanel}
                   onMaximize={activeNote ? () => handleOpenFullNote(activeNote._id) : undefined}
-                  maximizeLabel="Open in /notes"
+                  maximizeLabel="Open in artifacts"
                 >
                   <WorkspaceNotePanel
                     note={activeNote}
@@ -837,7 +837,7 @@ function ThreadsModule({
   );
 }
 
-/* ─── Module: Notes ──────────────────────────────────────── */
+/* ─── Module: Documents ──────────────────────────────────── */
 
 function NotesModule({
   notes,
@@ -852,10 +852,10 @@ function NotesModule({
 }) {
   return (
     <ModuleSection
-      title="Notes"
+      title="Documents"
       icon={StickyNote}
       count={notes.length}
-      actionLabel="New note"
+      actionLabel="New artifact"
       onAction={onCreateNote}
     >
       {loading ? (
@@ -888,7 +888,7 @@ function NotesModule({
           ))}
         </div>
       ) : (
-        <EmptyHint icon={StickyNote} text="Create a note to begin drafting." action="New note" onAction={onCreateNote} />
+        <EmptyHint icon={StickyNote} text="Create a document artifact to begin drafting." action="New artifact" onAction={onCreateNote} />
       )}
     </ModuleSection>
   );
@@ -1069,7 +1069,7 @@ function ColumnView({
   return (
     <div className="h-full overflow-x-auto">
       <div className="grid h-full min-w-[960px] grid-cols-3 divide-x divide-[var(--border-default)]">
-        {/* Column: Threads & Notes */}
+        {/* Column: Threads & Documents */}
         <div className="flex flex-col">
           <ColumnHeader title="Threads" count={chats.length} icon={MessageSquare} actionLabel="Chat" onAction={onOpenChat} />
           <div className="flex-1 overflow-y-auto px-4 pb-4">
@@ -1097,9 +1097,9 @@ function ColumnView({
           </div>
         </div>
 
-        {/* Column: Notes */}
+        {/* Column: Documents */}
         <div className="flex flex-col">
-          <ColumnHeader title="Notes" count={notes.length} icon={StickyNote} actionLabel="New" onAction={onCreateNote} />
+          <ColumnHeader title="Documents" count={notes.length} icon={StickyNote} actionLabel="New" onAction={onCreateNote} />
           <div className="flex-1 overflow-y-auto px-4 pb-4">
             <div className="space-y-1.5">
               {notes.map((note, idx) => (
@@ -1122,7 +1122,7 @@ function ColumnView({
                 </motion.button>
               ))}
               {notes.length === 0 && (
-                <EmptyHint icon={StickyNote} text="No notes yet." action="New note" onAction={onCreateNote} />
+                <EmptyHint icon={StickyNote} text="No documents yet." action="New artifact" onAction={onCreateNote} />
               )}
             </div>
           </div>
@@ -1752,7 +1752,7 @@ export function HubFocusPanel({
   }, [handleClose]);
 
   const tabs = [
-    { id: "notes" as const, label: "Notes", icon: StickyNote },
+    { id: "notes" as const, label: "Artifacts", icon: StickyNote },
     { id: "planner" as const, label: "Planner", icon: CalendarClock },
     { id: "memory" as const, label: "Memory", icon: Sparkles },
     { id: "recent" as const, label: "Recent", icon: Clock },
@@ -1875,13 +1875,13 @@ export function HubFocusPanel({
               >
                 {activeTab === "notes" && (
                   <HubSection
-                    title="Quick Notes"
-                    description="Unattached notes and inbox items across all workstreams."
+                    title="Quick Artifacts"
+                    description="Unattached artifacts and inbox items across all workstreams."
                     icon={StickyNote}
-                    actionLabel="Open /notes"
-                    onAction={() => router.push("/notes")}
+                    actionLabel="Open artifacts"
+                    onAction={() => router.push("/artifacts")}
                   >
-                    <EmptyHint icon={Notebook} text="Quick notes you create here will appear across workstreams." action="Open notes" onAction={() => router.push("/notes")} />
+                    <EmptyHint icon={Notebook} text="Quick artifacts you create here will appear across workstreams." action="Open artifacts" onAction={() => router.push("/artifacts")} />
                   </HubSection>
                 )}
                 {activeTab === "planner" && (

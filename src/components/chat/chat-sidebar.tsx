@@ -58,7 +58,7 @@ const EMPTY_PINNED_IDS = new Set<string>();
 const BASE_PRIMARY_NAV_ITEMS = [
   { href: "/chat", label: "Chat", icon: Sparkles },
   { href: "/workspace", label: "Workspace", icon: Layers },
-  { href: "/notes", label: "Notes", icon: StickyNote },
+  { href: "/artifacts", label: "Artifacts", icon: StickyNote },
   { href: "/agents", label: "Agents", icon: Bot },
 ];
 

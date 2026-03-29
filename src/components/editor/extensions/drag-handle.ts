@@ -1,116 +1,188 @@
 /**
- * Drag Handle ProseMirror Plugin for Tiptap
- * Shows a grip icon on hover near top-level block nodes for drag-to-reorder.
+ * Drag Handle + Gutter Controls for Tiptap
+ * Shows a left gutter on hover for top-level block nodes.
  */
 
 import { Extension } from "@tiptap/core";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { NodeSelection, Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 
 const dragHandleKey = new PluginKey("dragHandle");
 
-function createDragHandleElement(): HTMLDivElement {
-  const el = document.createElement("div");
-  el.className = "editor-drag-handle";
-  el.setAttribute("draggable", "true");
-  el.setAttribute("data-drag-handle", "");
-  el.contentEditable = "false";
-  // 6-dot grip icon via SVG
-  el.innerHTML = `<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-    <circle cx="4.5" cy="3" r="1.2"/><circle cx="9.5" cy="3" r="1.2"/>
-    <circle cx="4.5" cy="7" r="1.2"/><circle cx="9.5" cy="7" r="1.2"/>
-    <circle cx="4.5" cy="11" r="1.2"/><circle cx="9.5" cy="11" r="1.2"/>
-  </svg>`;
-  return el;
+type TopLevelBlock = {
+  pos: number;
+  node: unknown & { nodeSize: number };
+  dom: HTMLElement;
+  index: number;
+};
+
+function createButton(label: string, icon: string, className: string) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className;
+  button.setAttribute("aria-label", label);
+  button.innerHTML = icon;
+  return button;
 }
 
-function findTopLevelBlockAt(view: EditorView, y: number): { pos: number; node: Node; dom: HTMLElement } | null {
-  const doc = view.state.doc;
-  let result: { pos: number; node: Node; dom: HTMLElement } | null = null;
+function createControlsElement() {
+  const container = document.createElement("div");
+  container.className = "editor-gutter-controls";
+  container.contentEditable = "false";
 
-  doc.forEach((node, offset) => {
+  const plusButton = createButton(
+    "Add block below",
+    `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7" xmlns="http://www.w3.org/2000/svg">
+      <path d="M7 2.5V11.5"/><path d="M2.5 7H11.5"/>
+    </svg>`,
+    "editor-gutter-button",
+  );
+  const grip = createButton(
+    "Drag block",
+    `<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="4.5" cy="3" r="1.1"/><circle cx="9.5" cy="3" r="1.1"/>
+      <circle cx="4.5" cy="7" r="1.1"/><circle cx="9.5" cy="7" r="1.1"/>
+      <circle cx="4.5" cy="11" r="1.1"/><circle cx="9.5" cy="11" r="1.1"/>
+    </svg>`,
+    "editor-gutter-button editor-gutter-grip",
+  );
+
+  grip.setAttribute("draggable", "true");
+  grip.setAttribute("data-drag-handle", "");
+
+  container.append(plusButton, grip);
+  return { container, plusButton, grip };
+}
+
+function getTopLevelBlocks(view: EditorView): TopLevelBlock[] {
+  const blocks: TopLevelBlock[] = [];
+  view.state.doc.forEach((node, offset, index) => {
     const dom = view.nodeDOM(offset) as HTMLElement | null;
     if (!dom || !dom.getBoundingClientRect) return;
-    const rect = dom.getBoundingClientRect();
-    if (y >= rect.top - 4 && y <= rect.bottom + 4) {
-      result = { pos: offset, node: node as unknown as Node, dom };
-    }
+    blocks.push({
+      pos: offset,
+      node: node as TopLevelBlock["node"],
+      dom,
+      index,
+    });
   });
+  return blocks;
+}
 
-  return result;
+function findTopLevelBlockAt(view: EditorView, y: number): TopLevelBlock | null {
+  const blocks = getTopLevelBlocks(view);
+  return blocks.find((block) => {
+    const rect = block.dom.getBoundingClientRect();
+    return y >= rect.top - 4 && y <= rect.bottom + 4;
+  }) ?? null;
+}
+
+function insertSlashBelow(view: EditorView, currentPos: number) {
+  const blocks = getTopLevelBlocks(view);
+  const current = blocks.find((block) => block.pos === currentPos);
+  const paragraph = view.state.schema.nodes.paragraph?.create(
+    null,
+    view.state.schema.text("/"),
+  );
+  if (!current || !paragraph) return;
+
+  const insertPos = current.pos + current.node.nodeSize;
+  const tr = view.state.tr
+    .insert(insertPos, paragraph)
+    .setSelection(TextSelection.create(view.state.tr.doc, insertPos + 2))
+    .scrollIntoView();
+  view.dispatch(tr);
+  view.focus();
 }
 
 export const DragHandle = Extension.create({
   name: "dragHandle",
 
   addProseMirrorPlugins() {
-    const handle = createDragHandleElement();
-    let currentPos: number | null = null;
-    let visible = false;
+    const { container, plusButton, grip } = createControlsElement();
+    let currentBlock: TopLevelBlock | null = null;
+    let hideTimer: ReturnType<typeof setTimeout> | null = null;
 
-    const showHandle = (view: EditorView, dom: HTMLElement) => {
-      const editorRect = view.dom.getBoundingClientRect();
-      const blockRect = dom.getBoundingClientRect();
-      handle.style.top = `${blockRect.top - editorRect.top + view.dom.scrollTop + 2}px`;
-      handle.style.left = "-28px";
-      handle.style.opacity = "1";
-      visible = true;
+    const clearHideTimer = () => {
+      if (hideTimer) {
+        clearTimeout(hideTimer);
+        hideTimer = null;
+      }
     };
 
-    const hideHandle = () => {
-      handle.style.opacity = "0";
-      visible = false;
-      currentPos = null;
+    const showControls = (view: EditorView, block: TopLevelBlock) => {
+      const editorRect = view.dom.getBoundingClientRect();
+      const blockRect = block.dom.getBoundingClientRect();
+      const wrapper = view.dom.parentElement;
+      const isCompact = wrapper?.classList.contains("tiptap-compact");
+      currentBlock = block;
+      container.style.top = `${blockRect.top - editorRect.top + view.dom.scrollTop + 1}px`;
+      container.style.left = isCompact ? "-32px" : "-42px";
+      container.style.opacity = "1";
+      container.dataset.visible = "true";
+    };
+
+    const hideControls = () => {
+      currentBlock = null;
+      container.style.opacity = "0";
+      container.dataset.visible = "false";
     };
 
     return [
       new Plugin({
         key: dragHandleKey,
         view(editorView) {
-          handle.style.opacity = "0";
-          // Attach to the editor's parent wrapper (for relative positioning)
+          container.style.opacity = "0";
+          container.dataset.visible = "false";
           const wrapper = editorView.dom.parentElement;
           if (wrapper) {
             wrapper.style.position = "relative";
-            wrapper.appendChild(handle);
+            wrapper.appendChild(container);
           }
 
-          handle.addEventListener("dragstart", (e) => {
-            if (currentPos === null) return;
-            const { state } = editorView;
-            const resolved = state.doc.resolve(currentPos);
-            const selection = state.tr.setSelection(
-              // Use NodeSelection for dragging
-              new (require("@tiptap/pm/state").NodeSelection)(resolved),
-            );
+          plusButton.addEventListener("click", (event) => {
+            event.preventDefault();
+            if (currentBlock) insertSlashBelow(editorView, currentBlock.pos);
+          });
+
+          grip.addEventListener("dragstart", (event) => {
+            if (!currentBlock) return;
+            const resolved = editorView.state.doc.resolve(currentBlock.pos);
+            const selection = editorView.state.tr.setSelection(new NodeSelection(resolved));
             editorView.dispatch(selection);
-            // Set drag data
-            e.dataTransfer?.setDragImage(handle, 0, 0);
+            event.dataTransfer?.setDragImage(container, 0, 0);
+          });
+
+          container.addEventListener("mouseenter", clearHideTimer);
+          container.addEventListener("mouseleave", () => {
+            hideTimer = setTimeout(() => {
+              if (!container.matches(":hover")) hideControls();
+            }, 120);
           });
 
           return {
             destroy() {
-              handle.remove();
+              container.remove();
             },
           };
         },
         props: {
           handleDOMEvents: {
             mousemove(view, event) {
+              clearHideTimer();
               const block = findTopLevelBlockAt(view, event.clientY);
               if (block) {
-                currentPos = block.pos;
-                showHandle(view, block.dom);
-              } else {
-                hideHandle();
+                showControls(view, block);
+              } else if (!container.matches(":hover")) {
+                hideControls();
               }
               return false;
             },
             mouseleave() {
-              // Delay hide so user can reach the handle
-              setTimeout(() => {
-                if (!handle.matches(":hover")) hideHandle();
-              }, 200);
+              clearHideTimer();
+              hideTimer = setTimeout(() => {
+                if (!container.matches(":hover")) hideControls();
+              }, 120);
               return false;
             },
           },

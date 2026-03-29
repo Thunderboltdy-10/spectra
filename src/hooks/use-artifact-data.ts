@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { stripGeneratedDocumentMarkers } from "@/lib/document-generator";
 
 export type WorkspaceDocument = {
   _id: string;
   workstreamId?: string;
   artifactId?: string;
+  type?: string;
   title: string;
   content: object | null;
   contentPlaintext?: string;
@@ -27,6 +29,18 @@ type UseArtifactDataParams = {
   limit?: number;
 };
 
+function sanitizeDocumentRecord(document: WorkspaceDocument): WorkspaceDocument {
+  const title = stripGeneratedDocumentMarkers(document.title || "").trim() || "Untitled";
+  const contentPlaintext = document.contentPlaintext
+    ? stripGeneratedDocumentMarkers(document.contentPlaintext)
+    : document.contentPlaintext;
+  return {
+    ...document,
+    title,
+    contentPlaintext,
+  };
+}
+
 export function useArtifactData(params: UseArtifactDataParams = {}) {
   const { workstreamId, artifactId, limit = 100 } = params;
   const [documents, setDocuments] = useState<WorkspaceDocument[]>([]);
@@ -44,14 +58,15 @@ export function useArtifactData(params: UseArtifactDataParams = {}) {
     try {
       const qs = new URLSearchParams();
       if (workstreamId) qs.set("workstreamId", workstreamId);
+      qs.set("type", "document");
       qs.set("limit", String(limit));
 
-      const response = await fetch(`/api/notes?${qs.toString()}`, {
+      const response = await fetch(`/api/artifacts?${qs.toString()}`, {
         signal: ac.signal,
       });
       if (!response.ok) throw new Error("Failed to load documents");
-      const data = (await response.json()) as { notes: WorkspaceDocument[] };
-      setDocuments(data.notes ?? []);
+      const data = (await response.json()) as { artifacts: WorkspaceDocument[] };
+      setDocuments((data.artifacts ?? []).map(sanitizeDocumentRecord));
       setError(null);
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
@@ -65,12 +80,22 @@ export function useArtifactData(params: UseArtifactDataParams = {}) {
   const fetchDocument = useCallback(async (nextArtifactId: string) => {
     setLoadingDocument(true);
     try {
-      const response = await fetch(`/api/notes?action=get&id=${encodeURIComponent(nextArtifactId)}`);
+      const response = await fetch(`/api/artifacts?action=get&id=${encodeURIComponent(nextArtifactId)}`);
       if (!response.ok) throw new Error("Failed to load document");
-      const data = (await response.json()) as { note: WorkspaceDocument };
-      setActiveDocument(data.note);
+      const data = (await response.json()) as { artifact: WorkspaceDocument };
+      const sanitizedArtifact = sanitizeDocumentRecord(data.artifact);
+      setActiveDocument(sanitizedArtifact);
+      setDocuments((current) => {
+        const existingIndex = current.findIndex((document) => document._id === sanitizedArtifact._id);
+        if (existingIndex === -1) {
+          return [sanitizedArtifact, ...current];
+        }
+        const next = current.slice();
+        next[existingIndex] = { ...next[existingIndex], ...sanitizedArtifact };
+        return next;
+      });
       setError(null);
-      return data.note;
+      return sanitizedArtifact;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load document");
       return null;
@@ -112,21 +137,23 @@ export function useArtifactData(params: UseArtifactDataParams = {}) {
       sourceUpdatedAt?: number;
       syncConflictSummary?: string;
     }) => {
-      const response = await fetch("/api/notes", {
+      const artifactPayload = {
+        action: "create",
+        type: "document",
+        ...input,
+      };
+      const response = await fetch("/api/artifacts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "create",
-          ...input,
-        }),
+        body: JSON.stringify(artifactPayload),
       });
       if (!response.ok) throw new Error("Failed to create document");
-      const data = (await response.json()) as { noteId: string };
+      const data = (await response.json()) as { artifactId: string };
       await listDocuments();
-      if (data.noteId) {
-        await fetchDocument(data.noteId);
+      if (data.artifactId) {
+        await fetchDocument(data.artifactId);
       }
-      return data.noteId;
+      return data.artifactId;
     },
     [fetchDocument, listDocuments],
   );
@@ -153,21 +180,45 @@ export function useArtifactData(params: UseArtifactDataParams = {}) {
         >
       >,
     ) => {
-      const response = await fetch("/api/notes", {
+      const artifactPayload = {
+        action: "update",
+        artifactId: nextArtifactId,
+        ...input,
+      };
+      const response = await fetch("/api/artifacts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "update",
-          noteId: nextArtifactId,
-          ...input,
-        }),
+        body: JSON.stringify(artifactPayload),
       });
       if (!response.ok) throw new Error("Failed to update document");
-      const data = (await response.json()) as { noteId?: string };
-      await listDocuments();
-      return fetchDocument(data.noteId ?? nextArtifactId);
+      const updatedAt = Date.now();
+      setDocuments((current) => current.map((document) => (
+        document._id === nextArtifactId
+          ? sanitizeDocumentRecord({
+              ...document,
+              ...input,
+              _id: document._id,
+              updatedAt,
+            } as WorkspaceDocument)
+          : document
+      )));
+      setActiveDocument((current) => {
+        if (!current || current._id !== nextArtifactId) return current;
+        return sanitizeDocumentRecord({
+          ...current,
+          ...input,
+          _id: current._id,
+          updatedAt,
+        } as WorkspaceDocument);
+      });
+      return sanitizeDocumentRecord({
+        ...(activeDocument?._id === nextArtifactId ? activeDocument : null),
+        ...input,
+        _id: nextArtifactId,
+        updatedAt,
+      } as WorkspaceDocument);
     },
-    [fetchDocument, listDocuments],
+    [activeDocument],
   );
 
   return {

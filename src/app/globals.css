@@ -496,6 +496,8 @@ button:disabled {
 .workspace-react-flow {
   /* Prevent page scroll — workspace is a spatial surface */
   touch-action: none;
+  background-image: radial-gradient(circle, color-mix(in oklab, var(--border-default) 72%, transparent) 1.1px, transparent 1.1px);
+  background-size: 28px 28px;
 }
 
 .workspace-react-flow .react-flow__renderer,
@@ -542,7 +544,8 @@ button:disabled {
 
 /* Node entrance animations */
 .workspace-react-flow .react-flow__node {
-  transition: filter 300ms ease;
+  transition: filter 220ms ease, box-shadow 220ms ease;
+  will-change: transform;
 }
 
 .workspace-react-flow .react-flow__node:hover {
@@ -1257,20 +1260,55 @@ button:disabled {
   min-height: 200px;
   color: var(--text-primary);
   font-size: 15px;
-  line-height: 1.7;
+  line-height: 1.78;
+}
+
+.tiptap-root.tiptap-full .ProseMirror {
+  font-size: 16px;
+  line-height: 1.86;
+  padding: 0 0 5rem 0.75rem;
+}
+
+.tiptap-root.tiptap-compact .ProseMirror {
+  font-size: 14px;
+  line-height: 1.72;
+  padding: 0 0 2rem;
+}
+
+.tiptap-root .ProseMirror:focus,
+.tiptap-root .ProseMirror:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 .tiptap-root .ProseMirror p {
-  margin: 0 0 0.75em;
+  margin: 0 0 0.9em;
 }
 
 .tiptap-root .ProseMirror h1 {
   font-size: 1.75em;
-  font-weight: 800;
-  margin: 1.5em 0 0.5em;
+  font-weight: 700;
+  margin: 0 0 0.55em;
   color: var(--text-primary);
-  font-family: var(--font-display, inherit);
-  line-height: 1.25;
+  font-family: var(--font-manrope), sans-serif;
+  line-height: 1.08;
+  letter-spacing: -0.045em;
+}
+
+.tiptap-root .ProseMirror > h1:first-child {
+  margin-top: 0;
+}
+
+.tiptap-root.tiptap-full .ProseMirror > h1:first-child {
+  font-size: clamp(2.5rem, 4vw, 3.35rem);
+  margin-bottom: 0.42em;
+  padding-bottom: 0.28em;
+  border-bottom: 1px solid color-mix(in oklab, var(--border-default) 80%, transparent);
+}
+
+.tiptap-root.tiptap-compact .ProseMirror > h1:first-child {
+  font-size: 2rem;
+  margin-bottom: 0.45em;
 }
 
 .tiptap-root .ProseMirror h2 {
@@ -1293,8 +1331,21 @@ button:disabled {
   margin: 0 0 0.75em;
 }
 
+.tiptap-root .ProseMirror ul:not([data-type]) {
+  list-style-type: disc;
+}
+
+.tiptap-root .ProseMirror ol {
+  list-style-type: decimal;
+}
+
 .tiptap-root .ProseMirror li {
   margin: 0.25em 0;
+}
+
+.tiptap-root .ProseMirror ul:not([data-type]) li,
+.tiptap-root .ProseMirror ol li {
+  display: list-item;
 }
 
 .tiptap-root .ProseMirror code {
@@ -1355,6 +1406,22 @@ button:disabled {
 .tiptap-root .ProseMirror.is-editor-empty::before {
   content: attr(data-placeholder);
   color: var(--text-tertiary);
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+
+.tiptap-root .ProseMirror > .is-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--text-tertiary);
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+
+.tiptap-root .ProseMirror p.is-empty::before {
+  content: "Type '/' for blocks";
+  color: color-mix(in oklab, var(--text-tertiary) 84%, transparent);
   pointer-events: none;
   float: left;
   height: 0;
@@ -1526,29 +1593,55 @@ button:disabled {
 
 /* ── Drag Handle ────────────────────────────────────────────────────── */
 
-.editor-drag-handle {
+.editor-gutter-controls {
   position: absolute;
-  width: 20px;
-  height: 20px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 150ms ease, transform 150ms ease;
+  z-index: 12;
+}
+
+.editor-gutter-controls[data-visible="true"] {
+  opacity: 1;
+}
+
+.editor-gutter-button {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: grab;
+  background: color-mix(in oklab, var(--bg-elevated) 95%, white);
   color: var(--text-tertiary);
-  opacity: 0;
-  transition: opacity 150ms ease;
-  border-radius: 4px;
-  z-index: 10;
+  box-shadow: 0 12px 24px -18px rgba(15, 23, 42, 0.34);
+  transition: all 150ms ease;
 }
 
-.editor-drag-handle:hover {
-  opacity: 1 !important;
-  color: var(--text-secondary);
-  background: var(--bg-hover);
+.editor-gutter-button:hover {
+  color: var(--text-primary);
+  border-color: color-mix(in oklab, var(--accent-cyan) 40%, var(--border-default));
+  background: var(--bg-primary);
+  transform: translateY(-1px);
 }
 
-.editor-drag-handle:active {
+.editor-gutter-button:disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.editor-gutter-grip {
   cursor: grabbing;
+}
+
+@media (max-width: 768px) {
+  .editor-gutter-controls {
+    display: none;
+  }
 }
 
 /* ── Bubble Menu ────────────────────────────────────────────────────── */
@@ -1563,6 +1656,24 @@ button:disabled {
   border-radius: 10px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
   backdrop-filter: blur(12px);
+}
+
+.internal-group-node,
+.internal-column-node {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.internal-group-node {
+  padding-right: 0.5rem;
+}
+
+.workspace-react-flow .react-flow__node-contentGroup,
+.workspace-react-flow .react-flow__node-contentColumn {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
 }
 
 /* ── Floating Menu ──────────────────────────────────────────────────── */

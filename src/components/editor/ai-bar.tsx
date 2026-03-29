@@ -40,6 +40,7 @@ export function AiBar({ editor, onApplyEdits, onReplaceDocument, noteId, artifac
   const { aiBarPrompt, setAiBarPrompt, aiBarBusy, setAiBarBusy } = useEditorStore();
   const [pendingEdit, setPendingEdit] = useState<PendingAiLifecycle | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmRetryCount, setConfirmRetryCount] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const ignoreNextEditorUpdateRef = useRef(0);
@@ -62,16 +63,30 @@ export function AiBar({ editor, onApplyEdits, onReplaceDocument, noteId, artifac
       }),
     }).catch(() => null);
     if (!response?.ok) {
-      setError("Failed to confirm AI edit. Retry or keep editing to try again.");
+      setConfirmRetryCount((count) => {
+        const next = count + 1;
+        if (next >= 3) {
+          setError("Confirmation failed. Changes are still applied locally. Retry manually if needed.");
+          setPendingEdit((pending) => (
+            pending && pending.versionId === current.versionId && pending.status === "applied"
+              ? { ...pending, remainingMs: -1 }
+              : pending
+          ));
+          return next;
+        }
+        setError("Failed to confirm AI edit. Retrying shortly.");
+        return next;
+      });
       setPendingEdit((pending) => (
-        pending && pending.versionId === current.versionId && pending.status === "applied"
-          ? { ...pending, remainingMs: 0 }
+        pending && pending.versionId === current.versionId && pending.status === "applied" && pending.remainingMs >= 0
+          ? { ...pending, remainingMs: 1000 }
           : pending
       ));
       return false;
     }
     versionRef.current = null;
     setPendingEdit(null);
+    setConfirmRetryCount(0);
     setError(null);
     return true;
   }, []);
@@ -79,6 +94,9 @@ export function AiBar({ editor, onApplyEdits, onReplaceDocument, noteId, artifac
   useEffect(() => {
     if (!pendingEdit || pendingEdit.status !== "applied") return;
     const timeout = setTimeout(() => {
+      if (pendingEdit.remainingMs < 0) {
+        return;
+      }
       if (pendingEdit.remainingMs <= 1000) {
         void confirmPendingEdit();
         return;
@@ -159,7 +177,22 @@ export function AiBar({ editor, onApplyEdits, onReplaceDocument, noteId, artifac
         throw new Error("Failed to apply AI edit");
       }
       editAppliedLocally = true;
-      const targetArtifactId = artifactId ?? noteId;
+      let targetArtifactId = artifactId;
+      if (!targetArtifactId && noteId) {
+        const migrateRes = await fetch("/api/artifacts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "getOrMigrateFromNote",
+            noteId,
+          }),
+        });
+        if (!migrateRes.ok) {
+          throw new Error(await migrateRes.text() || "Failed to prepare artifact for AI edit");
+        }
+        const migrated = (await migrateRes.json()) as { artifactId?: string };
+        targetArtifactId = migrated.artifactId;
+      }
       if (targetArtifactId) {
         const persistRes = await fetch("/api/artifacts", {
           method: "POST",
@@ -183,7 +216,7 @@ export function AiBar({ editor, onApplyEdits, onReplaceDocument, noteId, artifac
         }
         const persisted = (await persistRes.json()) as { versionId?: string };
         if (persisted.versionId) {
-          setPendingEdit({
+      setPendingEdit({
             artifactId: targetArtifactId,
             versionId: persisted.versionId,
             threadChatId: result.threadChatId,
@@ -192,6 +225,7 @@ export function AiBar({ editor, onApplyEdits, onReplaceDocument, noteId, artifac
             status: "applied",
             remainingMs: 30_000,
           });
+          setConfirmRetryCount(0);
         }
       }
       setAiBarPrompt("");
@@ -346,7 +380,7 @@ export function AiBar({ editor, onApplyEdits, onReplaceDocument, noteId, artifac
                   onClick={() => void confirmPendingEdit()}
                   className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
                 >
-                  Keep
+                  {pendingEdit.remainingMs < 0 ? "Retry" : "Keep"}
                 </button>
                 <button
                   type="button"

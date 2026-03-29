@@ -12,7 +12,7 @@ import { WorkstreamCreateDialog } from "@/components/workspace/workstream-create
 import { WorkspaceCommandBar } from "@/components/workspace/workspace-command-bar";
 import { HubFocusPanel } from "@/components/workspace/workstream-focus-panel";
 import { RightPushPanel } from "@/components/workspace/right-push-panel";
-import { WorkstreamInternalView } from "@/components/workspace/views/workstream-internal-view";
+// Internal view is now canvas-native (rendered as React Flow nodes inside workspace-canvas)
 import { useWorkspaceData } from "@/hooks/use-workspace-data";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
@@ -244,20 +244,9 @@ function WorkspaceContent() {
                   onCommitWorkstream={handleCommitWorkstream}
                 />
 
-                {/* Internal workstream view overlay — appears when committed */}
-                <AnimatePresence>
-                  {committedWorkstream && (
-                    <WorkstreamInternalView
-                      workstream={committedWorkstream}
-                      onOpenPanel={handleOpenPanel}
-                      onBack={handleCloseWorkstream}
-                    />
-                  )}
-                </AnimatePresence>
-
-                {/* Quick Chat Command Bar — hidden when panel is open or inside committed workstream */}
+                {/* Quick Chat Command Bar — hidden when panel is open */}
                 <WorkspaceCommandBar
-                  hidden={!!panel || !!committedWorkstreamId}
+                  hidden={!!panel}
                   workstreams={workstreams}
                   committedWorkstreamId={committedWorkstreamId}
                   onOpenWorkstreamChat={(workstreamId) =>

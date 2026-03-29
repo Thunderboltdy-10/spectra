@@ -54,6 +54,10 @@ type WorkspaceStoreState = {
   // Previous viewport for zoom-out restoration
   previousViewport?: { x: number; y: number; zoom: number };
 
+  // Hub
+  hubFocusOpen: boolean;
+  hubCardBounds?: CardBounds;
+
   // Actions
   setCamera: (camera: WorkspaceCameraState) => void;
   setZoomBand: (band: ZoomBand) => void;
@@ -77,15 +81,10 @@ type WorkspaceStoreState = {
   openPanel: (type: PanelType, id: string) => void;
   closePanel: () => void;
 
-  // Legacy compatibility
-  focusedWorkstreamId?: string;
-  focusCardBounds?: CardBounds;
-  hubFocusOpen: boolean;
-  hubCardBounds?: CardBounds;
-  focusWorkstream: (workstreamId: string, bounds: CardBounds) => void;
-  focusWorkstreamWithChat: (workstreamId: string, bounds: CardBounds, query?: string) => void;
+  // Hub
   focusHub: (bounds: CardBounds) => void;
   exitHub: () => void;
+
   reset: () => void;
 };
 
@@ -108,10 +107,6 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set) => ({
   panel: undefined,
   openChatQuery: undefined,
   previousViewport: undefined,
-
-  // Legacy
-  focusedWorkstreamId: undefined,
-  focusCardBounds: undefined,
   hubFocusOpen: false,
   hubCardBounds: undefined,
 
@@ -124,25 +119,20 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set) => ({
   openCreateDialog: () => set({ isCreateDialogOpen: true }),
   closeCreateDialog: () => set({ isCreateDialogOpen: false }),
 
-  // Semantic zoom commit (replaces focusWorkstream)
   commitWorkstream: (workstreamId) =>
     set({
       committedWorkstreamId: workstreamId,
-      focusedWorkstreamId: workstreamId,
       openChatQuery: undefined,
     }),
   commitWorkstreamWithChat: (workstreamId, query) =>
     set({
       committedWorkstreamId: workstreamId,
-      focusedWorkstreamId: workstreamId,
       openChatQuery: query,
       panel: query ? { type: "chat", id: "new" } : undefined,
     }),
   exitWorkstream: () =>
     set({
       committedWorkstreamId: undefined,
-      focusedWorkstreamId: undefined,
-      focusCardBounds: undefined,
       openChatQuery: undefined,
       panel: undefined,
     }),
@@ -152,23 +142,6 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set) => ({
 
   openPanel: (type, id) => set({ panel: { type, id } }),
   closePanel: () => set({ panel: undefined }),
-
-  // Legacy compat — bridges old focus model to new semantic zoom
-  focusWorkstream: (workstreamId, bounds) =>
-    set({
-      focusedWorkstreamId: workstreamId,
-      committedWorkstreamId: workstreamId,
-      focusCardBounds: bounds,
-      openChatQuery: undefined,
-    }),
-  focusWorkstreamWithChat: (workstreamId, bounds, query) =>
-    set({
-      focusedWorkstreamId: workstreamId,
-      committedWorkstreamId: workstreamId,
-      focusCardBounds: bounds,
-      openChatQuery: query,
-      panel: query ? { type: "chat", id: "new" } : undefined,
-    }),
 
   focusHub: (hubCardBounds) => set({ hubFocusOpen: true, hubCardBounds }),
   exitHub: () => set({ hubFocusOpen: false, hubCardBounds: undefined }),
@@ -182,8 +155,6 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set) => ({
       backgroundMode: "dots",
       isCreateDialogOpen: false,
       committedWorkstreamId: undefined,
-      focusedWorkstreamId: undefined,
-      focusCardBounds: undefined,
       hubFocusOpen: false,
       hubCardBounds: undefined,
       openChatQuery: undefined,

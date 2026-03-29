@@ -83,12 +83,12 @@ export function NotesWorkspace() {
             )}
             <div className="mt-3 flex items-center justify-between">
               <div>
-                <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
-                  Notes area
-                </div>
-                <h1 className="mt-2 font-display text-2xl text-[var(--text-primary)]">
+                <h1 className="font-display text-2xl text-[var(--text-primary)]">
                   Notes
                 </h1>
+                <p className="text-sm text-[var(--text-secondary)]">
+                  {noteList.length} {noteList.length === 1 ? "document" : "documents"}
+                </p>
               </div>
               <button
                 type="button"
@@ -112,7 +112,7 @@ export function NotesWorkspace() {
                     type="button"
                     onClick={() => handleSelectNote(note._id)}
                     className={cn(
-                      "w-full rounded-[22px] border px-4 py-3 text-left transition-colors",
+                      "w-full rounded-xl border px-4 py-3 text-left transition-colors",
                       activeNote?._id === note._id
                         ? "border-[var(--accent-cyan)] bg-[var(--accent-cyan)]/8"
                         : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:bg-[var(--bg-hover)]",
@@ -146,33 +146,9 @@ export function NotesWorkspace() {
 
         <main className="flex min-h-0 flex-1 flex-col bg-[var(--bg-primary)]">
           <div className="border-b border-[var(--border-default)] bg-[var(--bg-elevated)] px-5 py-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
-                  Full editor
-                </div>
-                <h2 className="truncate font-display text-2xl text-[var(--text-primary)]">
-                  {activeNote?.title || "Choose a note"}
-                </h2>
-              </div>
-              <div className="flex gap-2">
-                {(["standard", "ai_enhanced"] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setEditorMode(mode)}
-                    className={cn(
-                      "rounded-full px-3 py-1.5 text-xs font-semibold transition-colors",
-                      editorMode === mode
-                        ? "bg-[var(--accent-cyan)] text-white"
-                        : "border border-[var(--border-default)] text-[var(--text-secondary)]",
-                    )}
-                  >
-                    {mode === "ai_enhanced" ? "AI-Enhanced" : "Standard"}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <h2 className="truncate font-display text-lg text-[var(--text-primary)]">
+              {activeNote?.title || "Choose a note"}
+            </h2>
           </div>
 
           <div className="min-h-0 flex-1">

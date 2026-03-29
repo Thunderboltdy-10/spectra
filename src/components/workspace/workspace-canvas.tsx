@@ -33,6 +33,20 @@ import {
   loadLocalOverrides,
   initPersistenceListeners,
 } from "@/lib/workspace/position-persistence";
+import {
+  GroupNode,
+  ColumnNode,
+  GraphItemNode,
+  GraphOverflowNode,
+  EmptyStateNode,
+  buildStructuredNodes,
+  buildColumnNodes,
+  buildGraphNodes,
+  type ThreadSummary,
+  type NoteSummary,
+  type PlannerItemSummary,
+  type ArtifactSummary,
+} from "@/components/workspace/views/internal-content-nodes";
 
 /* ─── Types ──────────────────────────────────────────────── */
 
@@ -57,6 +71,7 @@ type WorkstreamNodeData = {
   isFocused: boolean;
   isDimmed: boolean;
   isCommitted: boolean;
+  neighborOpacity: number;
   lifecycle: { opacity: number; scale: number; dashed: boolean };
   onOpen: (workstreamId: string, target: HTMLElement) => void;
 };
@@ -77,7 +92,7 @@ const HUB_NODE_ID = "hub-node";
 function getRepresentationBand(zoom: number): ZoomBand {
   if (zoom < 0.5) return "overview";
   if (zoom < 0.7) return "summary";
-  if (zoom < 0.9) return "detail";
+  if (zoom < 0.95) return "detail";
   return "internal";
 }
 
@@ -201,17 +216,16 @@ function buildEdges(workstreams: Workstream[], showConnections: boolean, committ
 const WorkstreamNode = memo(function WorkstreamNode({
   data,
 }: NodeProps<Node<WorkstreamNodeData>>) {
-  const { workstream, band, isFocused, isDimmed, isCommitted, lifecycle, onOpen } = data;
+  const { workstream, band, isFocused, isDimmed, isCommitted, neighborOpacity, lifecycle, onOpen } = data;
   const color = getWorkstreamColor(workstream.color);
   const [hovered, setHovered] = useState(false);
 
   // Node width by band
   const width = band === "overview" ? 220 : band === "summary" ? 280 : band === "detail" ? 320 : 360;
 
-  // When this node is committed (internal zoom), it expands and border dissolves
-  if (isCommitted && band === "internal") {
-    return null; // Internal view is rendered separately, not as a node
-  }
+  // When committed: dissolve border (opacity + blur), don't hide entirely
+  // so internal canvas-native nodes can coexist
+  const dissolving = isCommitted && band === "internal";
 
   return (
     <div className="relative">
@@ -220,27 +234,29 @@ const WorkstreamNode = memo(function WorkstreamNode({
 
       <motion.button
         type="button"
-        onClick={(e) => onOpen(workstream._id, e.currentTarget)}
+        onClick={(e) => !dissolving && onOpen(workstream._id, e.currentTarget)}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         animate={{
-          opacity: isDimmed ? lifecycle.opacity * getNeighborOpacity(1) : lifecycle.opacity,
-          scale: (hovered ? 1.02 : 1) * lifecycle.scale,
-          y: hovered ? -2 : 0,
+          opacity: dissolving ? 0 : isDimmed ? lifecycle.opacity * neighborOpacity : lifecycle.opacity,
+          scale: dissolving ? 1.15 : (hovered ? 1.02 : 1) * lifecycle.scale,
+          y: hovered && !dissolving ? -2 : 0,
+          filter: dissolving ? "blur(4px)" : "blur(0px)",
         }}
-        transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ duration: dissolving ? 0.4 : 0.25, ease: [0.22, 1, 0.36, 1] }}
         className={cn(
           "group relative text-left transition-[box-shadow] duration-300",
           "rounded-2xl",
-          isFocused && "ring-2 ring-[color:var(--accent-cyan)] ring-offset-2 ring-offset-[var(--bg-primary)]",
+          dissolving && "pointer-events-none",
+          isFocused && !dissolving && "ring-2 ring-[color:var(--accent-cyan)] ring-offset-2 ring-offset-[var(--bg-primary)]",
         )}
         style={{
           width,
           background: "var(--bg-elevated)",
-          border: `1px solid ${hovered ? color.value + "60" : lifecycle.dashed ? "transparent" : "var(--border-default)"}`,
+          borderWidth: 1,
           borderStyle: lifecycle.dashed ? "dashed" : "solid",
-          borderColor: lifecycle.dashed ? "var(--border-default)" : undefined,
-          boxShadow: hovered
+          borderColor: hovered ? color.value + "60" : "var(--border-default)",
+          boxShadow: hovered && !dissolving
             ? `0 20px 50px -16px ${color.value}35, 0 8px 16px -8px rgba(0,0,0,0.08)`
             : "0 2px 8px -4px rgba(0,0,0,0.06)",
         }}
@@ -529,15 +545,77 @@ function WorkspaceCanvasInner({
     showConnections,
     backgroundMode,
     committedWorkstreamId,
+    viewMode,
     setCamera,
     setZoomBand,
     commitWorkstream,
     exitWorkstream,
     focusHub,
+    openPanel,
     setPreviousViewport,
   } = useWorkspaceStore();
   const [zoom, setZoom] = useState(restoreViewport().zoom);
   const [localOverrides] = useState(() => loadLocalOverrides());
+
+  // Internal view content state
+  const [internalThreads, setInternalThreads] = useState<ThreadSummary[]>([]);
+  const [internalNotes, setInternalNotes] = useState<NoteSummary[]>([]);
+  const [internalPlannerItems] = useState<PlannerItemSummary[]>([]);
+  const [internalArtifacts] = useState<ArtifactSummary[]>([]);
+  const [internalLoading, setInternalLoading] = useState(false);
+
+  // Fetch internal content when committed to a workstream
+  useEffect(() => {
+    if (!committedWorkstreamId) {
+      setInternalThreads([]);
+      setInternalNotes([]);
+      setInternalLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setInternalLoading(true);
+
+    async function fetchContent() {
+      try {
+        const [chatsRes, notesRes] = await Promise.all([
+          fetch(`/api/chats?workstreamId=${committedWorkstreamId}&limit=20`),
+          fetch(`/api/notes?workstreamId=${committedWorkstreamId}`),
+        ]);
+
+        if (!cancelled && chatsRes.ok) {
+          const data = await chatsRes.json();
+          setInternalThreads(
+            (data.chats ?? []).map((c: Record<string, unknown>) => ({
+              id: c._id as string,
+              title: (c.title as string) || (c.latestUserPrompt as string) || "Untitled",
+              messageCount: (c.messageCount as number) ?? 0,
+              lastActivityAt: (c.updatedAt as number) ?? Date.now(),
+            })),
+          );
+        }
+
+        if (!cancelled && notesRes.ok) {
+          const data = await notesRes.json();
+          setInternalNotes(
+            (data.notes ?? []).map((n: Record<string, unknown>) => ({
+              id: n._id as string,
+              title: (n.title as string) || "Untitled",
+              updatedAt: (n.updatedAt as number) ?? Date.now(),
+              editorMode: (n.editorMode as string) ?? "standard",
+            })),
+          );
+        }
+      } catch {
+        // Ignore fetch errors
+      } finally {
+        if (!cancelled) setInternalLoading(false);
+      }
+    }
+
+    void fetchContent();
+    return () => { cancelled = true; };
+  }, [committedWorkstreamId]);
 
   // Initialize persistence listeners
   useEffect(() => {
@@ -629,13 +707,14 @@ function WorkspaceCanvasInner({
     [focusHub, onOpenHub],
   );
 
-  // Debounced zoom-based commit
+  // Debounced zoom-based commit with proximity gate + stability debounce
   const handleZoomCommit = useCallback(
     (currentZoom: number) => {
       if (commitDebounceRef.current) {
         clearTimeout(commitDebounceRef.current);
       }
 
+      // 400ms stability debounce — only commit after zoom stays in internal band
       commitDebounceRef.current = setTimeout(() => {
         const currentBand = getRepresentationBand(currentZoom);
 
@@ -653,19 +732,21 @@ function WorkspaceCanvasInner({
             if (!pos) continue;
             const dx = pos.x - centerX;
             const dy = pos.y - centerY;
-            const dist = dx * dx + dy * dy;
+            const dist = Math.sqrt(dx * dx + dy * dy);
             if (dist < nearestDist) {
               nearestDist = dist;
               nearestId = ws._id;
             }
           }
 
-          if (nearestId) {
+          // Proximity gate: only auto-commit if nearest workstream center
+          // is within 500 canvas units of viewport center
+          if (nearestId && nearestDist < 500) {
             commitWorkstream(nearestId);
             onCommitWorkstream?.(nearestId);
           }
         }
-      }, 200); // 200ms debounce as per plan
+      }, 400);
     },
     [committedWorkstreamId, commitWorkstream, onCommitWorkstream, positions, visibleWorkstreams],
   );
@@ -707,19 +788,63 @@ function WorkspaceCanvasInner({
           isFocused: focusWorkstreamId === ws._id,
           isDimmed,
           isCommitted,
+          neighborOpacity,
           lifecycle,
           onOpen: handleOpenWorkstream,
         },
       };
     });
 
-    return [hubNode, ...workstreamNodes];
-  }, [band, committedWorkstreamId, focusWorkstreamId, handleOpenHub, handleOpenWorkstream, neighborOpacity, positions, userAvatar, userName, visibleWorkstreams, workstreams]);
+    // Inject internal content nodes when committed
+    let internalNodes: Node[] = [];
+    if (committedWorkstreamId && band === "internal") {
+      const committedPos = positions.get(committedWorkstreamId) ?? { x: 0, y: 0 };
+      const basePos = { x: committedPos.x - 40, y: committedPos.y + 120 };
+      const contentData = {
+        threads: internalThreads,
+        notes: internalNotes,
+        plannerItems: internalPlannerItems,
+        artifacts: internalArtifacts,
+        loading: internalLoading,
+        workstreamEmoji: workstreams.find((w) => w._id === committedWorkstreamId)?.emoji,
+        workstreamTitle: workstreams.find((w) => w._id === committedWorkstreamId)?.title,
+        onOpenPanel: openPanel,
+      };
 
-  const edges = useMemo(
-    () => buildEdges(visibleWorkstreams, showConnections, committedWorkstreamId),
-    [showConnections, visibleWorkstreams, committedWorkstreamId],
-  );
+      if (viewMode === "structured") {
+        internalNodes = buildStructuredNodes(contentData, basePos);
+      } else if (viewMode === "columns") {
+        internalNodes = buildColumnNodes(contentData, basePos);
+      } else if (viewMode === "graph") {
+        const graphResult = buildGraphNodes(contentData, basePos);
+        internalNodes = graphResult.nodes;
+        // Graph edges get merged below
+      }
+    }
+
+    return [hubNode, ...workstreamNodes, ...internalNodes];
+  }, [band, committedWorkstreamId, focusWorkstreamId, handleOpenHub, handleOpenWorkstream, internalArtifacts, internalLoading, internalNotes, internalPlannerItems, internalThreads, neighborOpacity, openPanel, positions, userAvatar, userName, viewMode, visibleWorkstreams, workstreams]);
+
+  const edges = useMemo(() => {
+    const baseEdges = buildEdges(visibleWorkstreams, showConnections, committedWorkstreamId);
+
+    // Add graph view edges if applicable
+    if (committedWorkstreamId && viewMode === "graph" && band === "internal") {
+      const committedPos = positions.get(committedWorkstreamId) ?? { x: 0, y: 0 };
+      const basePos = { x: committedPos.x - 40, y: committedPos.y + 120 };
+      const graphResult = buildGraphNodes({
+        threads: internalThreads,
+        notes: internalNotes,
+        plannerItems: internalPlannerItems,
+        artifacts: internalArtifacts,
+        loading: internalLoading,
+        onOpenPanel: openPanel,
+      }, basePos);
+      return [...baseEdges, ...graphResult.edges];
+    }
+
+    return baseEdges;
+  }, [band, committedWorkstreamId, internalArtifacts, internalLoading, internalNotes, internalPlannerItems, internalThreads, openPanel, positions, showConnections, viewMode, visibleWorkstreams]);
 
   const handleInit = useCallback((instance: ReactFlowInstance) => {
     reactFlowRef.current = instance;
@@ -843,6 +968,11 @@ function WorkspaceCanvasInner({
         nodeTypes={{
           workstream: WorkstreamNode,
           hub: HubNode,
+          group: GroupNode,
+          column: ColumnNode,
+          graphItem: GraphItemNode,
+          graphOverflow: GraphOverflowNode,
+          emptyState: EmptyStateNode,
         }}
         onInit={handleInit}
         onMoveEnd={handleMoveEnd}

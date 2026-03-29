@@ -8,53 +8,26 @@ import {
   Heading1,
   Heading2,
   Heading3,
+  Highlighter,
+  ImageIcon,
   Italic,
   List,
+  ListChecks,
   ListOrdered,
   Minus,
   Quote,
   Redo,
-  Sparkles,
   Strikethrough,
-  Type,
+  Table,
+  UnderlineIcon,
   Undo,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useEditorStore, type EditorMode } from "@/stores/editor-store";
-
-const MODES: { id: EditorMode; label: string; icon: React.ReactNode }[] = [
-  { id: "standard", label: "Standard", icon: <Type className="w-3.5 h-3.5" /> },
-  { id: "ai_enhanced", label: "AI-Enhanced", icon: <Sparkles className="w-3.5 h-3.5" /> },
-];
 
 export function EditorToolbar({ editor, onOpenImport }: { editor: Editor; onOpenImport?: () => void }) {
-  const { editorMode, setEditorMode } = useEditorStore();
-
   return (
-    <div className="flex items-center gap-1 px-3 py-1.5 shadow-[0_1px_0_var(--border-default)] bg-[var(--bg-elevated)] shrink-0 flex-wrap">
-      {/* Mode toggle — 2 modes */}
-      <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-[var(--bg-secondary)] mr-2">
-        {MODES.map((m) => (
-          <button
-            key={m.id}
-            type="button"
-            onClick={() => setEditorMode(m.id)}
-            className={cn(
-              "flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all",
-              editorMode === m.id
-                ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-sm"
-                : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]",
-            )}
-          >
-            {m.icon}
-            {m.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="w-px h-4 bg-[var(--border-default)] mx-1" />
-
-      {/* Text formatting — always visible in both modes */}
+    <div className="flex items-center gap-0.5 px-3 py-1.5 shadow-[0_1px_0_var(--border-default)] bg-[var(--bg-elevated)] shrink-0 flex-wrap">
+      {/* Text formatting */}
       <FormatBtn
         onClick={() => editor.chain().focus().toggleBold().run()}
         active={editor.isActive("bold")}
@@ -70,11 +43,25 @@ export function EditorToolbar({ editor, onOpenImport }: { editor: Editor; onOpen
         <Italic className="w-3.5 h-3.5" />
       </FormatBtn>
       <FormatBtn
+        onClick={() => editor.chain().focus().toggleUnderline().run()}
+        active={editor.isActive("underline")}
+        title="Underline"
+      >
+        <UnderlineIcon className="w-3.5 h-3.5" />
+      </FormatBtn>
+      <FormatBtn
         onClick={() => editor.chain().focus().toggleStrike().run()}
         active={editor.isActive("strike")}
         title="Strikethrough"
       >
         <Strikethrough className="w-3.5 h-3.5" />
+      </FormatBtn>
+      <FormatBtn
+        onClick={() => editor.chain().focus().toggleHighlight().run()}
+        active={editor.isActive("highlight")}
+        title="Highlight"
+      >
+        <Highlighter className="w-3.5 h-3.5" />
       </FormatBtn>
       <FormatBtn
         onClick={() => editor.chain().focus().toggleCode().run()}
@@ -127,6 +114,13 @@ export function EditorToolbar({ editor, onOpenImport }: { editor: Editor; onOpen
         <ListOrdered className="w-3.5 h-3.5" />
       </FormatBtn>
       <FormatBtn
+        onClick={() => editor.chain().focus().toggleTaskList().run()}
+        active={editor.isActive("taskList")}
+        title="Task list"
+      >
+        <ListChecks className="w-3.5 h-3.5" />
+      </FormatBtn>
+      <FormatBtn
         onClick={() => editor.chain().focus().toggleBlockquote().run()}
         active={editor.isActive("blockquote")}
         title="Blockquote"
@@ -146,6 +140,29 @@ export function EditorToolbar({ editor, onOpenImport }: { editor: Editor; onOpen
         title="Divider"
       >
         <Minus className="w-3.5 h-3.5" />
+      </FormatBtn>
+
+      <div className="w-px h-4 bg-[var(--border-default)] mx-1" />
+
+      {/* Table & Image */}
+      <FormatBtn
+        onClick={() =>
+          editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+        }
+        active={editor.isActive("table")}
+        title="Insert table"
+      >
+        <Table className="w-3.5 h-3.5" />
+      </FormatBtn>
+      <FormatBtn
+        onClick={() => {
+          const url = window.prompt("Image URL:");
+          if (url) editor.chain().focus().setImage({ src: url }).run();
+        }}
+        active={false}
+        title="Insert image"
+      >
+        <ImageIcon className="w-3.5 h-3.5" />
       </FormatBtn>
 
       <div className="w-px h-4 bg-[var(--border-default)] mx-1" />

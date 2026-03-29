@@ -555,6 +555,11 @@ button:disabled {
   opacity: 0.6;
 }
 
+/* Ensure background dots persist at all zoom levels, including committed state */
+.workspace-react-flow .react-flow__background pattern {
+  opacity: 1;
+}
+
 .right-panel-content {
 }
 
@@ -1358,6 +1363,286 @@ button:disabled {
 /* Selection highlight */
 .tiptap-root .ProseMirror ::selection {
   background: var(--accent-cyan)25;
+}
+
+/* ── Tables ─────────────────────────────────────────────────────────── */
+
+.tiptap-root .ProseMirror table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.75em 0;
+  overflow: hidden;
+  border-radius: 6px;
+  border: 1px solid var(--border-default);
+}
+
+.tiptap-root .ProseMirror th,
+.tiptap-root .ProseMirror td {
+  border: 1px solid var(--border-default);
+  padding: 0.5em 0.75em;
+  vertical-align: top;
+  position: relative;
+  min-width: 80px;
+}
+
+.tiptap-root .ProseMirror th {
+  background: var(--bg-secondary);
+  font-weight: 600;
+  font-size: 0.875em;
+  text-align: left;
+  color: var(--text-primary);
+}
+
+.tiptap-root .ProseMirror td {
+  font-size: 0.9em;
+}
+
+.tiptap-root .ProseMirror .selectedCell {
+  background: var(--accent-cyan)12;
+}
+
+.tiptap-root .ProseMirror .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--accent-cyan);
+  cursor: col-resize;
+  opacity: 0;
+  transition: opacity 150ms;
+}
+
+.tiptap-root .ProseMirror .column-resize-handle:hover,
+.tiptap-root .ProseMirror.resize-cursor .column-resize-handle {
+  opacity: 1;
+}
+
+.tiptap-root .ProseMirror.resize-cursor {
+  cursor: col-resize;
+}
+
+/* ── Task Lists ─────────────────────────────────────────────────────── */
+
+.tiptap-root .ProseMirror ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.5em 0;
+}
+
+.tiptap-root .ProseMirror ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+  margin: 0.25em 0;
+}
+
+.tiptap-root .ProseMirror ul[data-type="taskList"] li > label {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  margin-top: 0.15em;
+}
+
+.tiptap-root .ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"] {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border-default);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 200ms;
+  position: relative;
+  background: transparent;
+}
+
+.tiptap-root .ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"]:checked {
+  background: var(--accent-cyan);
+  border-color: var(--accent-cyan);
+}
+
+.tiptap-root .ProseMirror ul[data-type="taskList"] li > label input[type="checkbox"]:checked::after {
+  content: "✓";
+  position: absolute;
+  top: -1px;
+  left: 2px;
+  font-size: 11px;
+  color: white;
+  font-weight: 700;
+}
+
+.tiptap-root .ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div > p {
+  text-decoration: line-through;
+  color: var(--text-tertiary);
+}
+
+/* Nested task lists */
+.tiptap-root .ProseMirror ul[data-type="taskList"] ul[data-type="taskList"] {
+  padding-left: 1.5em;
+}
+
+/* ── Images ─────────────────────────────────────────────────────────── */
+
+.tiptap-root .ProseMirror img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  margin: 0.75em 0;
+}
+
+.tiptap-root .ProseMirror img.ProseMirror-selectednode {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+/* ── Callouts ───────────────────────────────────────────────────────── */
+
+.tiptap-root .ProseMirror .callout {
+  border-left: 4px solid var(--accent-cyan);
+  border-radius: 0 8px 8px 0;
+  padding: 0.75em 1em;
+  margin: 0.75em 0;
+  background: var(--accent-cyan)08;
+}
+
+.tiptap-root .ProseMirror .callout-info {
+  border-left-color: var(--accent-cyan);
+  background: var(--accent-cyan)08;
+}
+
+.tiptap-root .ProseMirror .callout-warning {
+  border-left-color: #f59e0b;
+  background: #f59e0b0a;
+}
+
+.tiptap-root .ProseMirror .callout-tip {
+  border-left-color: var(--accent-mint);
+  background: var(--accent-mint)08;
+}
+
+.tiptap-root .ProseMirror .callout p:last-child {
+  margin-bottom: 0;
+}
+
+/* ── Drag Handle ────────────────────────────────────────────────────── */
+
+.editor-drag-handle {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  color: var(--text-tertiary);
+  opacity: 0;
+  transition: opacity 150ms ease;
+  border-radius: 4px;
+  z-index: 10;
+}
+
+.editor-drag-handle:hover {
+  opacity: 1 !important;
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+.editor-drag-handle:active {
+  cursor: grabbing;
+}
+
+/* ── Bubble Menu ────────────────────────────────────────────────────── */
+
+.bubble-menu {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(12px);
+}
+
+/* ── Floating Menu ──────────────────────────────────────────────────── */
+
+.floating-menu {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+/* ── Slash Command Dropdown ─────────────────────────────────────────── */
+
+.slash-command-dropdown {
+  min-width: 240px;
+  max-width: 320px;
+  max-height: 360px;
+  overflow-y: auto;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  padding: 4px;
+  backdrop-filter: blur(16px);
+}
+
+.slash-command-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: background 120ms ease;
+}
+
+.slash-command-item:hover,
+.slash-command-item.is-selected {
+  background: var(--bg-hover);
+}
+
+.slash-command-icon {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+}
+
+/* ── AI Edit Highlight Animations ───────────────────────────────────── */
+
+@keyframes ai-insert-highlight {
+  0% { background: var(--accent-mint)30; }
+  100% { background: transparent; }
+}
+
+@keyframes ai-delete-highlight {
+  0% { background: var(--accent-coral)30; }
+  100% { background: transparent; }
+}
+
+.ai-edit-insert {
+  animation: ai-insert-highlight 400ms ease-out forwards;
+}
+
+.ai-edit-delete {
+  animation: ai-delete-highlight 250ms ease-out forwards;
 }
 
 /* ── Workspace canvas overlay animations ────────────────────────────────── */

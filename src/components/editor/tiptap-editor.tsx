@@ -24,6 +24,11 @@ interface TiptapEditorProps {
   artifactId?: string;
 }
 
+type EditorSnapshot = {
+  json: JSONContent;
+  text: string;
+};
+
 export function TiptapEditor({
   content,
   placeholder = "Start writing...",
@@ -36,6 +41,7 @@ export function TiptapEditor({
 }: TiptapEditorProps) {
   const { editorMode, setActiveNoteId, setActiveArtifactId } = useEditorStore();
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressNextAutosaveRef = useRef(false);
   const [importOpen, setImportOpen] = useState(false);
 
   useEffect(() => {
@@ -73,6 +79,11 @@ export function TiptapEditor({
       const json = e.getJSON();
       const text = e.getText();
       onChange?.(json, text);
+
+      if (suppressNextAutosaveRef.current) {
+        suppressNextAutosaveRef.current = false;
+        return;
+      }
 
       // Debounced auto-save
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
@@ -116,8 +127,9 @@ export function TiptapEditor({
   );
 
   const applyAiEdits = useCallback(
-    (ops: Array<{ type: string; from: number; to: number; content?: string }>) => {
-      if (!editor) return;
+    (ops: Array<{ type: string; from: number; to: number; content?: string }>): EditorSnapshot | null => {
+      if (!editor) return null;
+      suppressNextAutosaveRef.current = true;
       editor.chain().focus().run();
       const sorted = [...ops].sort((a, b) => b.from - a.from);
       for (const op of sorted) {
@@ -137,9 +149,23 @@ export function TiptapEditor({
             .run();
         }
       }
+      return {
+        json: editor.getJSON(),
+        text: editor.getText(),
+      };
     },
     [editor, charOffsetToPos],
   );
+
+  const replaceDocument = useCallback((nextContent: JSONContent): EditorSnapshot | null => {
+    if (!editor) return null;
+    suppressNextAutosaveRef.current = true;
+    editor.commands.setContent(nextContent);
+    return {
+      json: editor.getJSON(),
+      text: editor.getText(),
+    };
+  }, [editor]);
 
   const applyImportedDocument = useCallback((document: ImportedDocument, replaceDocument: boolean) => {
     if (!editor) return;
@@ -167,6 +193,7 @@ export function TiptapEditor({
         <AiBar
           editor={editor}
           onApplyEdits={applyAiEdits}
+          onReplaceDocument={replaceDocument}
           noteId={noteId}
           artifactId={artifactId}
         />

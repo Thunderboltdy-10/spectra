@@ -1040,7 +1040,11 @@ export async function runChatPipeline(request: NextRequest) {
   let activeWorkstream = initialActiveWorkstream as Record<string, unknown> | null;
   let activeWorkstreamPlannerItems = initialActiveWorkstreamPlannerItems as Array<Record<string, unknown>>;
   let activeWorkstreamNotes = initialActiveWorkstreamNotes as Array<Record<string, unknown>>;
-  let activeWorkstreamArtifacts = initialActiveWorkstreamArtifacts as Array<Record<string, unknown>>;
+  let activeWorkstreamArtifacts = Array.isArray(initialActiveWorkstreamArtifacts)
+    ? (initialActiveWorkstreamArtifacts as Array<Record<string, unknown>>).filter(
+        (artifact) => String((artifact as { type?: unknown }).type ?? "") !== "document",
+      )
+    : [];
 
   if (!selectedAgent && activeWorkstream && typeof (activeWorkstream as { linkedAgentId?: unknown }).linkedAgentId === "string") {
     const linkedWorkstreamAgent = (await convexQuery("agents:getAgent", {
@@ -1588,7 +1592,11 @@ export async function runChatPipeline(request: NextRequest) {
     activeWorkstream = (hydratedWorkstream as Record<string, unknown> | null) ?? activeWorkstream;
     activeWorkstreamPlannerItems = Array.isArray(hydratedPlannerItems) ? hydratedPlannerItems as Array<Record<string, unknown>> : [];
     activeWorkstreamNotes = Array.isArray(hydratedNotes) ? hydratedNotes as Array<Record<string, unknown>> : [];
-    activeWorkstreamArtifacts = Array.isArray(hydratedArtifacts) ? hydratedArtifacts as Array<Record<string, unknown>> : [];
+    activeWorkstreamArtifacts = Array.isArray(hydratedArtifacts)
+      ? (hydratedArtifacts as Array<Record<string, unknown>>).filter(
+          (artifact) => String((artifact as { type?: unknown }).type ?? "") !== "document",
+        )
+      : [];
     syncWorkstreamDefaults();
     if (!selectedAgent && activeWorkstream && typeof (activeWorkstream as { linkedAgentId?: unknown }).linkedAgentId === "string") {
       const linkedWorkstreamAgent = (await convexQuery("agents:getAgent", {

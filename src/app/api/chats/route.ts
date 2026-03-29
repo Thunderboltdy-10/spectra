@@ -10,8 +10,17 @@ export async function GET(request: NextRequest) {
     const actor = await requireActor();
     const packId = request.nextUrl.searchParams.get("packId") ?? undefined;
     const workstreamId = request.nextUrl.searchParams.get("workstreamId") ?? undefined;
+    const artifactId = request.nextUrl.searchParams.get("artifactId") ?? undefined;
     const limitRaw = Number.parseInt(request.nextUrl.searchParams.get("limit") ?? "", 10);
     const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(limitRaw, 300)) : 120;
+    if (artifactId) {
+      const chats = await convexQuery("chats:listByArtifact", {
+        actorClerkId: actor.clerkId,
+        artifactId,
+        limit,
+      });
+      return ok({ chats });
+    }
     const chats = await convexQuery("chats:listChats", {
       actorClerkId: actor.clerkId,
       packId,
@@ -28,6 +37,8 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as {
       packId?: string;
       workstreamId?: string;
+      artifactId?: string;
+      threadType?: "conversation" | "artifact_edit";
       mode?: StudyMode;
       agentId?: string;
       thinkingLevel?: "low" | "medium" | "high";
@@ -48,6 +59,8 @@ export async function POST(request: NextRequest) {
       packId: body.packId,
       agentId: body.agentId,
       workstreamId: body.workstreamId,
+      artifactId: body.artifactId,
+      threadType: body.threadType,
       mode: validMode,
       thinkingLevel: body.thinkingLevel,
       routerMode: body.routerMode,

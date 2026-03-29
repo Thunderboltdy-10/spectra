@@ -369,6 +369,8 @@ export default defineSchema({
     packId: v.optional(v.id("packs")),
     agentId: v.optional(v.id("agents")),
     workstreamId: v.optional(v.id("workstreams")),
+    artifactId: v.optional(v.id("artifacts")),
+    threadType: v.optional(v.union(v.literal("conversation"), v.literal("artifact_edit"))),
     ownerUserId: v.id("users"),
     title: v.string(),
     latestUserPrompt: v.optional(v.string()),
@@ -394,6 +396,7 @@ export default defineSchema({
     .index("by_owner_updated", ["ownerUserId", "updatedAt"])
     .index("by_owner_pack_updated", ["ownerUserId", "packId", "updatedAt"])
     .index("by_workstream", ["workstreamId"])
+    .index("by_artifact", ["artifactId"])
     .index("by_org", ["orgId"]),
 
   messages: defineTable({
@@ -476,6 +479,21 @@ export default defineSchema({
     type: v.string(),
     title: v.string(),
     content: v.any(),
+    editorMode: v.optional(v.union(
+      v.literal("standard"),
+      v.literal("ai_enhanced"),
+      v.literal("simple"),
+      v.literal("notion"),
+      v.literal("agentic"),
+    )),
+    contentPlaintext: v.optional(v.string()),
+    sourceType: v.optional(v.union(v.literal("user_manual"), v.literal("ai_generated"), v.literal("managebac_sync"))),
+    managebacItemId: v.optional(v.string()),
+    sourceDeleted: v.optional(v.boolean()),
+    sourceUpdatedAt: v.optional(v.number()),
+    syncConflictSummary: v.optional(v.string()),
+    lastAiEditId: v.optional(v.string()),
+    pendingDiffs: v.optional(v.any()),
     layout: v.optional(v.any()),
     tags: v.optional(v.array(v.string())),
     linkedAgentId: v.optional(v.id("agents")),
@@ -489,7 +507,11 @@ export default defineSchema({
     .index("by_org", ["orgId"])
     .index("by_type", ["type"])
     .index("by_workstream", ["workstreamId"])
-    .index("by_owner_type", ["ownerUserId", "type"]),
+    .index("by_owner_type", ["ownerUserId", "type"])
+    .searchIndex("search_content", {
+      searchField: "contentPlaintext",
+      filterFields: ["ownerUserId", "orgId", "type", "status", "workstreamId"],
+    }),
 
   artifactVersions: defineTable({
     artifactId: v.id("artifacts"),
@@ -500,6 +522,7 @@ export default defineSchema({
     sourceChatId: v.optional(v.id("chats")),
     sourceMessageId: v.optional(v.id("messages")),
     description: v.optional(v.string()),
+    status: v.optional(v.union(v.literal("applied"), v.literal("confirmed"), v.literal("discarded"))),
     createdAt: v.number(),
   })
     .index("by_artifact", ["artifactId"])

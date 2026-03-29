@@ -26,6 +26,7 @@ const TEXT_HASH_LENGTH = 8;
 
 type WorkstreamMemoryCacheRow = Pick<
   Doc<"workstreamMemory">,
+  | "_creationTime"
   | "_id"
   | "workstreamId"
   | "ownerUserId"
@@ -324,6 +325,7 @@ export const upsertEntries = mutation({
       .withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId))
       .collect();
     const cachedRows: WorkstreamMemoryCacheRow[] = existingRows.map((row) => ({
+      _creationTime: row._creationTime,
       _id: row._id,
       workstreamId: row.workstreamId,
       ownerUserId: row.ownerUserId,
@@ -493,6 +495,7 @@ export const upsertEntries = mutation({
       }
 
       cachedRows.push({
+        _creationTime: now,
         _id: insertedId,
         workstreamId: args.workstreamId,
         ownerUserId: actor._id,

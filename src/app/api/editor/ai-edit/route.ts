@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { requireActor } from "@/lib/auth-server";
-import { convexQuery } from "@/lib/convex-server";
+import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 import { ok, badRequest } from "@/lib/http";
 import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
@@ -18,6 +18,45 @@ type DiffOp = {
   reason: string;
 };
 
+type ArtifactContext = {
+  _id: string;
+  workstreamId?: string;
+  title?: string;
+};
+
+type ArtifactThreadResult = {
+  chatId: string;
+  created: boolean;
+};
+
+type AppendedMessageResult = {
+  messageId: string;
+};
+
+function normalizeDiffOps(input: unknown, documentLength: number): DiffOp[] {
+  if (!Array.isArray(input)) return [];
+
+  return input.flatMap((value) => {
+    if (!value || typeof value !== "object") return [];
+    const op = value as Partial<DiffOp>;
+    if (op.type !== "replace" && op.type !== "insert" && op.type !== "delete") return [];
+    if (!Number.isFinite(op.from) || !Number.isFinite(op.to)) return [];
+    const rawFrom = op.from as number;
+    const rawTo = op.to as number;
+
+    const from = Math.max(0, Math.min(documentLength, Math.trunc(rawFrom)));
+    const to = Math.max(from, Math.min(documentLength, Math.trunc(rawTo)));
+
+    return [{
+      type: op.type,
+      from,
+      to,
+      content: typeof op.content === "string" ? op.content : undefined,
+      reason: typeof op.reason === "string" && op.reason.trim().length > 0 ? op.reason.trim() : "AI edit",
+    }];
+  });
+}
+
 export async function POST(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();
@@ -32,7 +71,15 @@ export async function POST(request: NextRequest) {
     };
 
     if (!body.instruction?.trim()) return badRequest("instruction is required");
-    if (!body.documentText) return badRequest("documentText is required");
+    if (typeof body.documentText !== "string") return badRequest("documentText is required");
+
+    const targetArtifactId = (body.artifactId ?? body.noteId)?.trim() || undefined;
+    const artifactContext = targetArtifactId
+      ? await convexQuery("artifacts:get", {
+          actorClerkId: actor.clerkId,
+          artifactId: targetArtifactId,
+        }).catch(() => null) as ArtifactContext | null
+      : null;
 
     const systemPrompt = `You are an AI document editor. Return ONLY a JSON object — no prose, no markdown.
 
@@ -143,15 +190,61 @@ ${body.documentText.slice(0, 8000)}
       parsed = { ops: [], summary: "Edit applied" };
     }
 
-    if (!Array.isArray(parsed.ops)) parsed.ops = [];
-    parsed.ops = parsed.ops.filter(
-      (op) =>
-        op &&
-        typeof op.type === "string" &&
-        typeof op.from === "number" &&
-        typeof op.to === "number",
-    );
+    parsed.ops = normalizeDiffOps(parsed.ops, body.documentText.length);
+    parsed.summary = typeof parsed.summary === "string" && parsed.summary.trim().length > 0
+      ? parsed.summary.trim()
+      : (parsed.ops.length > 0 ? "Applied AI edit suggestions." : "No document changes suggested.");
 
-    return ok(parsed);
+    let threadChatId: string | undefined;
+    let assistantMessageId: string | undefined;
+
+    if (targetArtifactId && artifactContext?._id) {
+      const thread = await convexMutation("chats:getOrCreateArtifactThread", {
+        actorClerkId: actor.clerkId,
+        artifactId: targetArtifactId,
+        workstreamId: typeof artifactContext.workstreamId === "string" ? artifactContext.workstreamId : undefined,
+        mode: "document",
+        thinkingLevel: "low",
+        routerMode: "auto",
+        usePersonalResources: true,
+        title: typeof artifactContext.title === "string" ? `${artifactContext.title} edits` : "Artifact edits",
+      }).catch(() => null) as ArtifactThreadResult | null;
+
+      if (thread?.chatId) {
+        threadChatId = thread.chatId;
+        const userMessage = await convexMutation("chats:appendMessage", {
+          actorClerkId: actor.clerkId,
+          chatId: thread.chatId,
+          role: "user",
+          content: body.instruction.trim(),
+          mode: "document",
+          citations: [],
+          routeTrace: {},
+        }).catch(() => null) as AppendedMessageResult | null;
+
+        const assistantMessage = await convexMutation("chats:appendMessage", {
+          actorClerkId: actor.clerkId,
+          chatId: thread.chatId,
+          role: "assistant",
+          content: parsed.summary || "Applied artifact edit suggestions.",
+          mode: "document",
+          citations: [],
+          modelRequested: model,
+          modelUsed: completion.model ?? model,
+          whyThisResponse: "Artifact edit assistant",
+          parentMessageId: userMessage?.messageId,
+          routeTrace: {
+            toolchain: ["artifact_edit"],
+          },
+        }).catch(() => null) as AppendedMessageResult | null;
+        assistantMessageId = assistantMessage?.messageId;
+      }
+    }
+
+    return ok({
+      ...parsed,
+      threadChatId,
+      assistantMessageId,
+    });
   });
 }

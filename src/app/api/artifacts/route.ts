@@ -37,6 +37,27 @@ export async function GET(request: NextRequest) {
       return ok({ versions });
     }
 
+    if (action === "search_content") {
+      const query = params.get("query");
+      if (!query) return badRequest("query is required");
+      const artifacts = await convexQuery("artifacts:searchByContent", {
+        actorClerkId: actor.clerkId,
+        query,
+        workstreamId: params.get("workstreamId") ?? undefined,
+        limit: params.has("limit") ? Number(params.get("limit")) : undefined,
+      });
+      return ok({ artifacts });
+    }
+
+    if (action === "hub") {
+      const artifacts = await convexQuery("artifacts:listHubArtifacts", {
+        actorClerkId: actor.clerkId,
+        type: params.get("type") ?? undefined,
+        limit: params.has("limit") ? Number(params.get("limit")) : undefined,
+      });
+      return ok({ artifacts });
+    }
+
     // Default: list
     const artifacts = await convexQuery("artifacts:list", {
       actorClerkId: actor.clerkId,
@@ -62,10 +83,20 @@ export async function POST(request: NextRequest) {
         type?: string;
         title?: string;
         content?: unknown;
+        contentPlaintext?: string;
+        workstreamId?: string;
+        editorMode?: "standard" | "ai_enhanced" | "agentic" | "notion" | "simple";
+        sourceType?: "user_manual" | "ai_generated" | "managebac_sync";
+        managebacItemId?: string;
+        sourceDeleted?: boolean;
+        sourceUpdatedAt?: number;
+        syncConflictSummary?: string;
         tags?: string[];
         linkedAgentId?: string;
         linkedChatId?: string;
         sourceMessageId?: string;
+        lastAiEditId?: string;
+        pendingDiffs?: unknown;
       };
       if (!type || !title) return badRequest("type and title are required");
 
@@ -74,10 +105,20 @@ export async function POST(request: NextRequest) {
         type,
         title,
         content: content ?? {},
+        contentPlaintext: body.contentPlaintext as string | undefined,
+        workstreamId: body.workstreamId as string | undefined,
+        editorMode: body.editorMode as "standard" | "ai_enhanced" | "agentic" | "notion" | "simple" | undefined,
+        sourceType: body.sourceType as "user_manual" | "ai_generated" | "managebac_sync" | undefined,
+        managebacItemId: body.managebacItemId as string | undefined,
+        sourceDeleted: body.sourceDeleted as boolean | undefined,
+        sourceUpdatedAt: body.sourceUpdatedAt as number | undefined,
+        syncConflictSummary: body.syncConflictSummary as string | undefined,
         tags,
         linkedAgentId,
         linkedChatId,
         sourceMessageId,
+        lastAiEditId: body.lastAiEditId as string | undefined,
+        pendingDiffs: body.pendingDiffs,
       });
       return ok({ artifactId });
     }
@@ -87,11 +128,22 @@ export async function POST(request: NextRequest) {
         artifactId?: string;
         title?: string;
         content?: unknown;
+        contentPlaintext?: string | null;
+        workstreamId?: string | null;
+        editorMode?: "standard" | "ai_enhanced" | "agentic" | "notion" | "simple";
+        sourceType?: "user_manual" | "ai_generated" | "managebac_sync" | null;
+        managebacItemId?: string | null;
+        sourceDeleted?: boolean | null;
+        sourceUpdatedAt?: number | null;
+        syncConflictSummary?: string | null;
         tags?: string[];
         description?: string;
         authorType?: string;
         sourceChatId?: string;
         sourceMessageId?: string;
+        linkedChatId?: string | null;
+        lastAiEditId?: string | null;
+        pendingDiffs?: unknown;
       };
       if (!artifactId) return badRequest("artifactId is required");
 
@@ -100,11 +152,22 @@ export async function POST(request: NextRequest) {
         artifactId,
         title,
         content,
+        contentPlaintext: body.contentPlaintext as string | null | undefined,
+        workstreamId: body.workstreamId as string | null | undefined,
+        editorMode: body.editorMode as "standard" | "ai_enhanced" | "agentic" | "notion" | "simple" | undefined,
+        sourceType: body.sourceType as "user_manual" | "ai_generated" | "managebac_sync" | null | undefined,
+        managebacItemId: body.managebacItemId as string | null | undefined,
+        sourceDeleted: body.sourceDeleted as boolean | null | undefined,
+        sourceUpdatedAt: body.sourceUpdatedAt as number | null | undefined,
+        syncConflictSummary: body.syncConflictSummary as string | null | undefined,
         tags,
         description,
         authorType,
         sourceChatId,
         sourceMessageId,
+        linkedChatId: body.linkedChatId as string | null | undefined,
+        lastAiEditId: body.lastAiEditId as string | null | undefined,
+        pendingDiffs: body.pendingDiffs,
       });
       return ok(result);
     }
@@ -156,6 +219,87 @@ export async function POST(request: NextRequest) {
         actorClerkId: actor.clerkId,
         artifactId,
         versionId,
+      });
+      return ok(result);
+    }
+
+    if (action === "applyAiEdit") {
+      const {
+        artifactId,
+        content,
+        contentPlaintext,
+        instruction,
+        operations,
+        summary,
+        sourceChatId,
+        sourceMessageId,
+        lastAiEditId,
+        pendingDiffs,
+      } = body as {
+        artifactId?: string;
+        content?: unknown;
+        contentPlaintext?: string;
+        instruction?: string;
+        operations?: unknown;
+        summary?: string;
+        sourceChatId?: string;
+        sourceMessageId?: string;
+        lastAiEditId?: string;
+        pendingDiffs?: unknown;
+      };
+      if (!artifactId || content === undefined || !instruction) {
+        return badRequest("artifactId, content, and instruction are required");
+      }
+      const result = await convexMutation("artifacts:applyAiEdit", {
+        actorClerkId: actor.clerkId,
+        artifactId,
+        content,
+        contentPlaintext,
+        instruction,
+        operations,
+        summary,
+        sourceChatId,
+        sourceMessageId,
+        lastAiEditId,
+        pendingDiffs,
+      });
+      return ok(result);
+    }
+
+    if (action === "confirmAiEdit") {
+      const { artifactId, versionId } = body as { artifactId?: string; versionId?: string };
+      if (!artifactId || !versionId) return badRequest("artifactId and versionId are required");
+      const result = await convexMutation("artifacts:confirmAiEdit", {
+        actorClerkId: actor.clerkId,
+        artifactId,
+        versionId,
+      });
+      return ok(result);
+    }
+
+    if (action === "discardAiEdit") {
+      const { artifactId, versionId } = body as { artifactId?: string; versionId?: string };
+      if (!artifactId || !versionId) return badRequest("artifactId and versionId are required");
+      const result = await convexMutation("artifacts:discardAiEdit", {
+        actorClerkId: actor.clerkId,
+        artifactId,
+        versionId,
+      });
+      return ok(result);
+    }
+
+    if (action === "reapplyAiEdit") {
+      const { artifactId, versionId, contentPlaintext } = body as {
+        artifactId?: string;
+        versionId?: string;
+        contentPlaintext?: string;
+      };
+      if (!artifactId || !versionId) return badRequest("artifactId and versionId are required");
+      const result = await convexMutation("artifacts:reapplyAiEdit", {
+        actorClerkId: actor.clerkId,
+        artifactId,
+        versionId,
+        contentPlaintext,
       });
       return ok(result);
     }

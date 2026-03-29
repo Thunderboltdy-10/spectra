@@ -488,30 +488,34 @@ export async function executeOrchestratorTool(params: {
     const title = compactText(args.title, 120) || "Untitled note";
     const content = compactText(args.content, 8_000);
     const workstreamId = compactText(args.workstreamId, 128) || context.activeWorkstreamId;
-    const result = await convexMutation<
+    const artifactId = await convexMutation<
       {
         actorClerkId: string;
+        type: string;
         title: string;
         content: Record<string, unknown>;
         contentPlaintext: string;
         editorMode: string;
         workstreamId?: string;
+        sourceType?: string;
       },
-      { noteId: string }
-    >("notes:create", {
+      string
+    >("artifacts:create", {
       actorClerkId: context.actorClerkId,
+      type: "document",
       title,
       content: noteDocFromText(content),
       contentPlaintext: content,
       editorMode: noteEditorModeForTool(args.editorMode),
       workstreamId,
+      sourceType: "ai_generated",
     });
 
     return {
       name: params.name,
       summary: `Created note: ${title}.`,
-      modelPayload: { noteId: result.noteId, title, workstreamId },
-      eventPayload: { noteId: result.noteId, title, workstreamId },
+      modelPayload: { noteId: artifactId, artifactId, title, workstreamId },
+      eventPayload: { noteId: artifactId, artifactId, title, workstreamId },
     };
   }
 

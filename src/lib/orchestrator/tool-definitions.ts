@@ -102,7 +102,7 @@ const TOOL_DEFINITIONS: Record<AiToolName, OpenRouterToolDefinition> = {
     type: "function",
     function: {
       name: "get_workstream_context",
-      description: "Fetch a concise summary of a workstream: recent threads, notes, planner items, and linked tools.",
+      description: "Fetch a concise summary of a workstream: recent threads, document artifacts, planner items, and linked tools.",
       parameters: {
         type: "object",
         properties: {
@@ -116,7 +116,7 @@ const TOOL_DEFINITIONS: Record<AiToolName, OpenRouterToolDefinition> = {
     type: "function",
     function: {
       name: "create_note",
-      description: "Create a note when the conversation produces something worth persisting as a document.",
+      description: "Create a note when the conversation produces something worth persisting as a document artifact.",
       parameters: {
         type: "object",
         properties: {

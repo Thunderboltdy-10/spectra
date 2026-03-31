@@ -160,6 +160,25 @@ describe("buildRoutePlan", () => {
     expect(plan.shouldUseMultiStep).toBe(true);
   });
 
+  it("does not mark generic with-clauses as model intent", () => {
+    const plan = buildRoutePlan({
+      message: "Create exactly 3 quiz questions with answers and explanations.",
+      mode: "quiz",
+      selectedMode: "quiz",
+      hasAttachments: false,
+      hasAgent: false,
+      hasPack: false,
+      hasPersonalResources: false,
+      hasAgentResources: false,
+      autoSearchEnabled: false,
+      thinkingLevel: "medium",
+      complexity: "simple",
+      schoolSoulVersion: "school-soul-v7",
+    });
+
+    expect(plan.intentSignals?.requestedModelPhrase).toBeUndefined();
+  });
+
   it("promotes workspace-deep prompts to L4 with workstream memory scopes", () => {
     const plan = buildRoutePlan({
       message: "Continue this Biology HL workstream, check the planner, and synthesize my notes and artifacts.",

@@ -2,6 +2,7 @@ import { internalMutation, mutation, query, type MutationCtx } from "./_generate
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { adjustWorkstreamArtifactCount, getUserByClerkId } from "./helpers";
+import { resolveWorkstreamTransfer } from "./workstream-assignment";
 
 const vArtifactSourceType = v.union(
   v.literal("user_manual"),
@@ -117,11 +118,16 @@ async function createArtifactVersion(
   });
 }
 
-function matchesArtifactSearch(row: Doc<"artifacts">, search: string) {
+function matchesArtifactSearch(
+  row:
+    Pick<Doc<"artifacts">, "title" | "contentPlaintext" | "tags">
+    | Pick<Doc<"notes">, "title" | "contentPlaintext">,
+  search: string,
+) {
   const q = search.toLowerCase();
   return row.title.toLowerCase().includes(q)
     || (row.contentPlaintext?.toLowerCase().includes(q) ?? false)
-    || (row.tags?.some((tag) => tag.toLowerCase().includes(q)) ?? false);
+    || ("tags" in row && (row.tags?.some((tag) => tag.toLowerCase().includes(q)) ?? false));
 }
 
 function toLegacyDocumentShape(artifact: Doc<"artifacts">) {
@@ -143,6 +149,48 @@ function toLegacyDocumentShape(artifact: Doc<"artifacts">) {
     createdAt: artifact.createdAt,
     updatedAt: artifact.updatedAt,
   };
+}
+
+function toLegacyDocumentShapeFromNote(note: Doc<"notes">) {
+  return {
+    _id: note._id,
+    workstreamId: note.workstreamId,
+    artifactId: note.artifactId,
+    title: note.title,
+    content: note.content,
+    contentPlaintext: note.contentPlaintext,
+    editorMode: normalizeEditorMode(note.editorMode),
+    sourceType: note.sourceType,
+    managebacItemId: note.managebacItemId,
+    sourceDeleted: note.sourceDeleted,
+    sourceUpdatedAt: note.sourceUpdatedAt,
+    syncConflictSummary: note.syncConflictSummary,
+    lastAiEditId: note.lastAiEditId,
+    pendingDiffs: note.pendingDiffs,
+    createdAt: note.createdAt,
+    updatedAt: note.updatedAt,
+  };
+}
+
+function isLegacyDuplicate(note: Doc<"notes">, artifacts: Doc<"artifacts">[]) {
+  return artifacts.some((artifact) =>
+    artifact.type === "document"
+    && artifact.title === note.title
+    && artifact.workstreamId === note.workstreamId
+    && artifact.managebacItemId === note.managebacItemId
+    && artifact.createdAt === note.createdAt,
+  );
+}
+
+async function deleteLegacyNote(
+  ctx: Pick<MutationCtx, "db">,
+  note: Doc<"notes">,
+  options?: { decrementCount?: boolean },
+) {
+  await ctx.db.delete(note._id);
+  if (options?.decrementCount) {
+    await adjustWorkstreamArtifactCount(ctx, note.workstreamId, -1);
+  }
 }
 
 function getVersionPlaintext(
@@ -187,6 +235,28 @@ export const list = query({
     const search = normalizeString(args.search);
     if (search) {
       rows = rows.filter((row) => matchesArtifactSearch(row, search));
+    }
+
+    if (args.type === "document") {
+      let legacyNotes = await ctx.db
+        .query("notes")
+        .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id))
+        .collect();
+
+      legacyNotes = legacyNotes.filter((note) => !isLegacyDuplicate(note, rows));
+      if (args.workstreamId !== undefined) {
+        legacyNotes = legacyNotes.filter((note) => note.workstreamId === args.workstreamId);
+      }
+      if (search) {
+        legacyNotes = legacyNotes.filter((note) => matchesArtifactSearch(note, search));
+      }
+
+      return [
+        ...rows.map(toLegacyDocumentShape),
+        ...legacyNotes.map(toLegacyDocumentShapeFromNote),
+      ]
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, limit);
     }
 
     return rows.slice(0, limit);
@@ -263,6 +333,10 @@ export const getOrMigrateFromNote = mutation({
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
+    const note = await ctx.db.get(args.noteId);
+    if (note && (note.ownerUserId !== actor._id || note.orgId !== actor.orgId)) {
+      throw new Error("Legacy note not found");
+    }
 
     const existingArtifact = await ctx.db
       .query("artifacts")
@@ -272,10 +346,12 @@ export const getOrMigrateFromNote = mutation({
       if (existingArtifact.ownerUserId !== actor._id || existingArtifact.orgId !== actor.orgId) {
         throw new Error("Artifact not found");
       }
+      if (note) {
+        await deleteLegacyNote(ctx, note, { decrementCount: true });
+      }
       return { artifactId: existingArtifact._id };
     }
 
-    const note = await ctx.db.get(args.noteId);
     if (!note || note.ownerUserId !== actor._id || note.orgId !== actor.orgId) {
       throw new Error("Legacy note not found");
     }
@@ -296,6 +372,7 @@ export const getOrMigrateFromNote = mutation({
         legacyNoteId: duplicate.legacyNoteId ?? note._id,
         updatedAt: Date.now(),
       });
+      await deleteLegacyNote(ctx, note, { decrementCount: true });
       return { artifactId: duplicate._id };
     }
 
@@ -335,7 +412,7 @@ export const getOrMigrateFromNote = mutation({
       status: "confirmed",
       createdAt: note.createdAt,
     });
-    await adjustWorkstreamArtifactCount(ctx, note.workstreamId, 1);
+    await deleteLegacyNote(ctx, note);
 
     return { artifactId };
   },
@@ -543,9 +620,15 @@ export const update = mutation({
       });
     }
 
-    if (artifact.workstreamId !== args.workstreamId && artifact.status === "active") {
-      await adjustWorkstreamArtifactCount(ctx, artifact.workstreamId, -1);
-      await adjustWorkstreamArtifactCount(ctx, args.workstreamId ?? undefined, 1);
+    const workstreamTransfer = resolveWorkstreamTransfer({
+      currentWorkstreamId: artifact.workstreamId,
+      requestedWorkstreamId: args.workstreamId,
+      requestIncludesWorkstreamId: args.workstreamId !== undefined,
+      isActive: artifact.status === "active",
+    });
+    if (workstreamTransfer) {
+      await adjustWorkstreamArtifactCount(ctx, workstreamTransfer.from, -1);
+      await adjustWorkstreamArtifactCount(ctx, workstreamTransfer.to, 1);
     }
 
     return { success: true };
@@ -917,6 +1000,7 @@ export const migrateLegacyNotes = mutation({
             updatedAt: Date.now(),
           });
         }
+        await deleteLegacyNote(ctx, note, { decrementCount: true });
         skipped += 1;
         continue;
       }
@@ -957,6 +1041,7 @@ export const migrateLegacyNotes = mutation({
         status: "confirmed",
         createdAt: note.createdAt,
       });
+      await deleteLegacyNote(ctx, note);
 
       migrated += 1;
       existingArtifacts.push({
@@ -972,7 +1057,6 @@ export const migrateLegacyNotes = mutation({
         pinnedAt: undefined,
         editorMode: normalizeEditorMode(note.editorMode),
       } as Doc<"artifacts">);
-      await adjustWorkstreamArtifactCount(ctx, note.workstreamId, 1);
     }
 
     return { migrated, skipped, total: notes.length };
@@ -1014,6 +1098,7 @@ export const migrateLegacyNotesBatch = internalMutation({
             updatedAt: Date.now(),
           });
         }
+        await deleteLegacyNote(ctx, note, { decrementCount: true });
         continue;
       }
 
@@ -1053,7 +1138,7 @@ export const migrateLegacyNotesBatch = internalMutation({
         status: "confirmed",
         createdAt: note.createdAt,
       });
-      await adjustWorkstreamArtifactCount(ctx, note.workstreamId, 1);
+      await deleteLegacyNote(ctx, note);
       migrated += 1;
     }
 
@@ -1077,17 +1162,26 @@ export const listDocumentCompat = query({
       .collect();
 
     rows = rows.filter((row) => row.status === "active");
+    let legacyNotes = await ctx.db
+      .query("notes")
+      .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id))
+      .collect();
+    legacyNotes = legacyNotes.filter((note) => !isLegacyDuplicate(note, rows));
     if (args.workstreamId !== undefined) {
       rows = rows.filter((row) => row.workstreamId === args.workstreamId);
+      legacyNotes = legacyNotes.filter((note) => note.workstreamId === args.workstreamId);
     }
     const search = normalizeString(args.search);
     if (search) {
       rows = rows.filter((row) => matchesArtifactSearch(row, search));
+      legacyNotes = legacyNotes.filter((note) => matchesArtifactSearch(note, search));
     }
-    return rows
+    return [
+      ...rows.map(toLegacyDocumentShape),
+      ...legacyNotes.map(toLegacyDocumentShapeFromNote),
+    ]
       .sort((a, b) => b.updatedAt - a.updatedAt)
-      .slice(0, limit)
-      .map(toLegacyDocumentShape);
+      .slice(0, limit);
   },
 });
 

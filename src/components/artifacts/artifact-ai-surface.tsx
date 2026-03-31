@@ -54,8 +54,6 @@ export function ArtifactAiSurface({
     streamPhase,
     sendMessage,
     stopGeneration,
-    hydrateChat,
-    chatId,
   } = useChatPanel({
     workstreamId,
     artifactId,

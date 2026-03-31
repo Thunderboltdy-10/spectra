@@ -241,7 +241,8 @@ function evaluateQuality(params: {
 }
 
 function stripLargeModelFields<T extends { strengthEmbedding?: number[] }>(row: T) {
-  const { strengthEmbedding: _strengthEmbedding, ...rest } = row;
+  const { strengthEmbedding, ...rest } = row;
+  void strengthEmbedding;
   return rest;
 }
 

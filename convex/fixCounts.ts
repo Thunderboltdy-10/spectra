@@ -1,5 +1,4 @@
 import { mutation } from "./_generated/server";
-import { internal } from "./_generated/api";
 
 export const fixCounts = mutation({
   handler: async (ctx) => {

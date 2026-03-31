@@ -2,6 +2,7 @@ import { mutation, query, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { adjustWorkstreamArtifactCount, getUserByClerkId } from "./helpers";
+import { resolveWorkstreamTransfer } from "./workstream-assignment";
 
 const vEditorMode = v.union(
   v.literal("standard"),
@@ -144,6 +145,7 @@ async function migrateLegacyNoteToDocumentArtifact(
       });
     }
     await ctx.db.delete(note._id);
+    await adjustWorkstreamArtifactCount(ctx, note.workstreamId, -1);
     return duplicate;
   }
 
@@ -184,7 +186,6 @@ async function migrateLegacyNoteToDocumentArtifact(
     createdAt: note.createdAt,
   });
   await ctx.db.delete(note._id);
-  await adjustWorkstreamArtifactCount(ctx, note.workstreamId, 1);
 
   const artifact = await ctx.db.get(artifactId);
   if (!artifact) {
@@ -436,9 +437,15 @@ export const update = mutation({
       });
     }
 
-    if (artifact.workstreamId !== args.workstreamId) {
-      await adjustWorkstreamArtifactCount(ctx, artifact.workstreamId, -1);
-      await adjustWorkstreamArtifactCount(ctx, args.workstreamId ?? undefined, 1);
+    const workstreamTransfer = resolveWorkstreamTransfer({
+      currentWorkstreamId: artifact.workstreamId,
+      requestedWorkstreamId: args.workstreamId,
+      requestIncludesWorkstreamId: args.workstreamId !== undefined,
+      isActive: true,
+    });
+    if (workstreamTransfer) {
+      await adjustWorkstreamArtifactCount(ctx, workstreamTransfer.from, -1);
+      await adjustWorkstreamArtifactCount(ctx, workstreamTransfer.to, 1);
     }
     return { success: true, noteId: artifact._id, migratedFromLegacy };
   },
@@ -458,6 +465,7 @@ export const remove = mutation({
         throw new Error("Note not found");
       }
       await ctx.db.delete(legacyNote._id);
+      await adjustWorkstreamArtifactCount(ctx, legacyNote.workstreamId, -1);
       return { success: true };
     }
 

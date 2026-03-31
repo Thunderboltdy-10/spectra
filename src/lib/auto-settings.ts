@@ -1,4 +1,9 @@
 import { MODEL_CONFIG } from "@/lib/model-config";
+import {
+  extractRequestedModelPhrase,
+  MODEL_ALIAS_QUERIES,
+  normalizeModelPhrase,
+} from "@/lib/model-request-intent";
 import { isModeAvailable } from "@/lib/modes";
 import { openRouterChatCompletion } from "@/lib/openrouter";
 import { recordOpenRouterUsage } from "@/lib/usage-tracking";
@@ -103,25 +108,6 @@ export type RequestClassification = {
   reason: string;
 };
 
-const MODEL_ALIAS_QUERIES: Record<string, string> = {
-  "claude": "anthropic claude sonnet",
-  "claude sonnet": "anthropic claude sonnet",
-  "claude opus": "anthropic claude opus",
-  "claude haiku": "anthropic claude haiku",
-  "gpt-4": "openai gpt-4o",
-  "gpt4": "openai gpt-4o",
-  "gpt 4": "openai gpt-4o",
-  "gpt-4o": "openai gpt-4o",
-  "gemini": "google gemini",
-  "gemini pro": "google gemini pro",
-  "gemini flash": "google gemini flash",
-  "o3": "openai o3",
-  "o4-mini": "openai o4 mini",
-  "deepseek": "deepseek",
-  "llama": "meta llama",
-  "perplexity": "perplexity sonar",
-};
-
 type ParseUserDirectivesOptions = {
   modelCatalog?: Array<{
     modelId: string;
@@ -131,14 +117,6 @@ type ParseUserDirectivesOptions = {
   }>;
   minModelMatchScore?: number;
 };
-
-function normalizeModelPhrase(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .replace(/[“”"']/g, "")
-    .trim();
-}
 
 function resolveRequestedModel(params: {
   phrase: string;
@@ -199,11 +177,8 @@ export function parseUserDirectives(message: string, options?: ParseUserDirectiv
   const minModelMatchScore = options?.minModelMatchScore ?? 0.36;
 
   // Detect model requests like "use Claude", "with GPT-4", "use Gemini"
-  const modelMatch = lower.match(
-    /\b(?:use|with|via|switch to|try|run with|select)\s+([\w\s./:-]+(?:\s+[\w\s./:-]+){0,5}?)(?:\s+(?:model|for|to)\b|[.,!?]|$)/i,
-  );
-  if (modelMatch) {
-    const requested = modelMatch[1]!.trim();
+  const requested = extractRequestedModelPhrase(message);
+  if (requested) {
     const resolved = resolveRequestedModel({
       phrase: requested,
       modelCatalog: options?.modelCatalog,

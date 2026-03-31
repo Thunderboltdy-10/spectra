@@ -276,16 +276,6 @@ function estimateTokens(message: string): number {
   return Math.ceil(message.length / 4);
 }
 
-function formatRelativeTimestamp(timestamp?: number) {
-  if (!timestamp || !Number.isFinite(timestamp)) return "Updated recently";
-  const elapsed = Date.now() - timestamp;
-  if (elapsed < 60_000) return "Updated just now";
-  if (elapsed < 3_600_000) return `Updated ${Math.max(1, Math.floor(elapsed / 60_000))}m ago`;
-  if (elapsed < 86_400_000) return `Updated ${Math.max(1, Math.floor(elapsed / 3_600_000))}h ago`;
-  if (elapsed < 7 * 86_400_000) return `Updated ${Math.max(1, Math.floor(elapsed / 86_400_000))}d ago`;
-  return `Updated ${new Date(timestamp).toLocaleDateString()}`;
-}
-
 function SettingPill({
   label,
   value,

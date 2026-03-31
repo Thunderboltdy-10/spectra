@@ -20,34 +20,12 @@ function modelLeaf(value: string) {
   return leaf ?? normalized;
 }
 
-function dayBelongsToMonth(day: string, key: string) {
-  return day.startsWith(`${key}-`);
-}
-
 function daysInMonthFromKey(key: string) {
   const [yearRaw, monthRaw] = key.split("-");
   const year = Number.parseInt(yearRaw ?? "", 10);
   const month = Number.parseInt(monthRaw ?? "", 10);
   if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return 30;
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
-}
-
-function monthRangeFromKey(key: string) {
-  const [yearRaw, monthRaw] = key.split("-");
-  const year = Number.parseInt(yearRaw ?? "", 10);
-  const month = Number.parseInt(monthRaw ?? "", 10);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
-    return {
-      startDay: `${key}-01`,
-      endDayExclusive: `${key}-32`,
-    };
-  }
-  const start = new Date(Date.UTC(year, month - 1, 1));
-  const next = new Date(Date.UTC(year, month, 1));
-  return {
-    startDay: start.toISOString().slice(0, 10),
-    endDayExclusive: next.toISOString().slice(0, 10),
-  };
 }
 
 function buildPricingLookup(

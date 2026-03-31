@@ -7,6 +7,11 @@ import { computeCompactionWindow } from "./compaction";
 import { MODEL_DEFAULTS } from "./constants";
 import { internal } from "./_generated/api";
 import { getOpenRouterApiKey, warnOpenRouterMissing } from "./env";
+import {
+  resolveBranchedParentMessageId,
+  selectMessagesForBranch,
+  summarizeBranchedMessages,
+} from "./chat-branching";
 
 async function validateArtifact(
   ctx: Parameters<typeof getUserByClerkId>[0],
@@ -723,6 +728,7 @@ export const editMessageAsSibling = mutation({
       updatedAt: now,
       title: summarizeChatTitle(clean) || chat.title,
       latestUserPrompt: compactMessageText(clean).slice(0, 120),
+      messageCount: (chat.messageCount ?? 0) + 1,
     });
 
     return {
@@ -758,15 +764,12 @@ export const branchFromMessage = mutation({
       .withIndex("by_chat", (q) => q.eq("chatId", sourceChat._id))
       .collect();
     const sorted = allMessages.sort((a, b) => a.createdAt - b.createdAt);
-    const pivotIndex = sorted.findIndex((message) => message._id === pivot._id);
-    if (pivotIndex < 0) {
-      throw new Error("Message not found");
-    }
+    const messagesToClone = selectMessagesForBranch(sorted, pivot._id);
+    const { latestUserPrompt, messageCount } = summarizeBranchedMessages(messagesToClone);
 
     const now = Date.now();
     const branchedTitleBase = pivot.content.trim().slice(0, 56) || sourceChat.title;
     const branchedTitle = `${branchedTitleBase} (branch)`.slice(0, 80);
-    let latestUserPrompt: string | undefined;
     const chatId = await ctx.db.insert("chats", {
       orgId: sourceChat.orgId,
       packId: sourceChat.packId,
@@ -789,18 +792,17 @@ export const branchFromMessage = mutation({
       updatedAt: now,
     });
 
-    for (let i = 0; i <= pivotIndex; i += 1) {
-      const row = sorted[i]!;
-      if (row.role === "user") {
-        latestUserPrompt = compactMessageText(row.content).slice(0, 120);
-      }
-      await ctx.db.insert("messages", {
+    const sourceToBranchedId = new Map<string, Id<"messages">>();
+
+    for (let i = 0; i < messagesToClone.length; i += 1) {
+      const row = messagesToClone[i]!;
+      const messageId = await ctx.db.insert("messages", {
         orgId: row.orgId,
         packId: row.packId,
         chatId,
         userId: row.userId,
         role: row.role,
-        parentMessageId: row.parentMessageId,
+        parentMessageId: resolveBranchedParentMessageId(row.parentMessageId, sourceToBranchedId),
         siblingIndex: row.siblingIndex,
         siblingCount: row.siblingCount,
         mode: row.mode,
@@ -820,15 +822,14 @@ export const branchFromMessage = mutation({
         cancelled: row.cancelled,
         createdAt: now + i,
       });
+      sourceToBranchedId.set(row._id, messageId);
     }
 
-    if (latestUserPrompt) {
-      await ctx.db.patch(chatId, {
-        latestUserPrompt,
-        messageCount: pivotIndex + 1,
-        updatedAt: now + pivotIndex + 1,
-      });
-    }
+    await ctx.db.patch(chatId, {
+      latestUserPrompt,
+      messageCount,
+      updatedAt: now + messageCount,
+    });
 
     await adjustWorkstreamThreadCount(ctx, sourceChat.workstreamId, 1);
 

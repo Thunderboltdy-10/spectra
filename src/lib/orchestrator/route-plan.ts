@@ -1,3 +1,4 @@
+import { extractRequestedModelPhrase } from "@/lib/model-request-intent";
 import type {
   AgentContract,
   AiToolName,
@@ -371,10 +372,7 @@ function decideThreadStrategy(params: {
 }
 
 function detectRequestedModelPhrase(message: string) {
-  const match = message.match(
-    /\b(?:use|switch to|try|run with|with)\s+(?:the\s+)?([a-z0-9][a-z0-9\s._:/-]{1,64}?)(?:\s+(?:model|for this|for now|please)\b|[.!?,]|$)/i,
-  );
-  return match?.[1]?.trim();
+  return extractRequestedModelPhrase(message);
 }
 
 function detectOrchestrationIntent(message: string) {

@@ -32,6 +32,7 @@ import { normalizeAttachments } from "@/lib/attachments/normalizer";
 import { gateCapabilities } from "@/lib/attachments/capability-gate";
 import { runVisionPrepass } from "@/lib/attachments/vision-prepass";
 import { generateArtifactResources } from "@/lib/artifacts";
+import { isGeneratedDocumentContent, parseGeneratedDocument } from "@/lib/document-generator";
 import {
   extractAttemptStats,
   maybeCompactHistory,
@@ -4645,7 +4646,8 @@ BACK: [answer or definition]`,
       let finalizedResponse = stripOrphanCitations(withInlineMarkers, citations);
       let generatedArtifactAttachments: string[] | undefined;
       let generatedArtifactResourceIds: string[] | undefined;
-      if (effectiveMode === "document" || /<<DOCUMENT_START>>/i.test(finalizedResponse)) {
+      if (effectiveMode === "document" || isGeneratedDocumentContent(finalizedResponse)) {
+        const parsedDocument = parseGeneratedDocument(finalizedResponse);
         const artifactResult = await generateArtifactResources({
           actorClerkId: actor.clerkId,
           content: finalizedResponse,
@@ -4660,9 +4662,12 @@ BACK: [answer or definition]`,
         if (artifactResult && artifactResult.attachmentResourceIds.length > 0) {
           generatedArtifactAttachments = artifactResult.attachments;
           generatedArtifactResourceIds = artifactResult.attachmentResourceIds;
-          finalizedResponse = artifactResult.markdownBlock
-            ? `${finalizedResponse}\n\n${artifactResult.markdownBlock}`
+          const userFacingDocumentResponse = parsedDocument.document
+            ? parsedDocument.preamble || `Created ${parsedDocument.document.title}.`
             : finalizedResponse;
+          finalizedResponse = artifactResult.markdownBlock
+            ? `${userFacingDocumentResponse}\n\n${artifactResult.markdownBlock}`
+            : userFacingDocumentResponse;
           route.trace.toolchain.push("artifact_generation");
         }
       }

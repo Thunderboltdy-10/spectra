@@ -72,7 +72,8 @@ export type ParsedGeneratedDocument = {
   rawJson: string;
 };
 
-const DOCUMENT_BLOCK_RE = /<<\s*DOCUMENT[_\s]?START\s*>>\s*([\s\S]*?)\s*<<\s*DOCUMENT[_\s]?END\s*>>/i;
+const DOCUMENT_BLOCK_RE = /<<\s*(?:DOC|DOCUMENT)[_\s]?START\s*>>\s*([\s\S]*?)\s*<<\s*(?:DOC|DOCUMENT)[_\s]?END\s*>>/i;
+const DOCUMENT_MARKER_RE = /<<\s*(?:DOC|DOCUMENT)[_\s]?(?:START|END)\s*>>/gi;
 
 function asString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -252,4 +253,55 @@ export function parseGeneratedDocument(content: string): ParsedGeneratedDocument
 
 export function isGeneratedDocumentContent(content: string) {
   return DOCUMENT_BLOCK_RE.test(content);
+}
+
+export function stripGeneratedDocumentMarkers(content: string) {
+  return content.replace(DOCUMENT_MARKER_RE, "").trim();
+}
+
+export function generatedDocumentToPlainText(document: GeneratedDocument) {
+  if (document.type === "presentation") {
+    return [
+      document.title,
+      ...document.slides.flatMap((slide, index) => [
+        `Slide ${index + 1}: ${slide.title || document.title}`,
+        slide.body || "",
+        ...(slide.bullets ?? []),
+      ]),
+    ].filter(Boolean).join("\n\n");
+  }
+
+  if (document.type === "word") {
+    return [
+      document.title,
+      ...document.sections.flatMap((section) => [section.heading, section.content]),
+    ].filter(Boolean).join("\n\n");
+  }
+
+  if (document.type === "study_guide") {
+    return [
+      document.title,
+      document.summary || "",
+      ...(document.highlights ?? []),
+      ...(document.terms ?? []).map((term) => `${term.term}: ${term.definition}`),
+      ...document.sections.flatMap((section) => [section.heading, section.content]),
+    ].filter(Boolean).join("\n\n");
+  }
+
+  if (document.type === "timeline") {
+    return [
+      document.title,
+      ...document.events.map((event) => `${event.date} - ${event.title}\n${event.detail}`),
+    ].filter(Boolean).join("\n\n");
+  }
+
+  if (document.type === "comparison_table") {
+    return [
+      document.title,
+      document.columns.join(" | "),
+      ...document.rows.map((row) => row.join(" | ")),
+    ].filter(Boolean).join("\n");
+  }
+
+  return [document.title, document.summary || ""].filter(Boolean).join("\n\n");
 }

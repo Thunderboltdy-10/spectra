@@ -184,6 +184,8 @@ function getInitialTimerState(): PersistedTimerState {
   };
 }
 
+import { useWorkspaceStore } from "@/stores/workspace-store";
+
 export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTimerProps) {
   const initialState = useMemo(getInitialTimerState, []);
   const [phase, setPhase] = useState<TimerPhase>(initialState.phase);
@@ -204,6 +206,36 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
   const display = formatRemaining(remainingSeconds);
   const duration = phaseDurationMs(phase, workMinutes, breakMinutes);
   const progress = Math.min(1, Math.max(0, 1 - (remainingMs / duration)));
+
+  useEffect(() => {
+    useWorkspaceStore.setState((state) => ({
+      timerState: {
+        ...state.timerState,
+        active: isRunning,
+        sessionMinutes: phase === "work" ? workMinutes : breakMinutes,
+        elapsed: Math.max(0, Math.floor((duration - remainingMs) / 1000)),
+        sessionsCompleted: completedSessions,
+      },
+    }));
+  }, [isRunning, workMinutes, breakMinutes, phase, duration, remainingMs, completedSessions]);
+
+  useEffect(() => {
+    const handleStart = () => setIsRunning(true);
+    const handlePause = () => setIsRunning(false);
+    const handleReset = () => {
+      setIsRunning(false);
+      setRemainingMs(phaseDurationMs(phase, workMinutes, breakMinutes));
+    };
+    window.addEventListener("ai-school:timer-start", handleStart);
+    window.addEventListener("ai-school:timer-pause", handlePause);
+    window.addEventListener("ai-school:timer-reset", handleReset);
+    return () => {
+      window.removeEventListener("ai-school:timer-start", handleStart);
+      window.removeEventListener("ai-school:timer-pause", handlePause);
+      window.removeEventListener("ai-school:timer-reset", handleReset);
+    };
+  }, [phase, workMinutes, breakMinutes]);
+
   const phaseLabel = useMemo(
     () => (phase === "work" ? "Focus session" : "Break session"),
     [phase],

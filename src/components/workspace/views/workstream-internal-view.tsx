@@ -210,7 +210,7 @@ function StructuredView({
             {workstream.title}
           </h3>
           <p className="text-sm text-[var(--text-secondary)] max-w-xs mx-auto">
-            Start a conversation or create a note to get going.
+            Start a conversation or create a document artifact to get going.
           </p>
         </motion.div>
       )}
@@ -240,18 +240,18 @@ function StructuredView({
         </ContentGroup>
       )}
 
-      {/* Notes group */}
+      {/* Artifacts group */}
       {hasNotes && (
         <ContentGroup
-          label="Notes"
+          label="Artifacts"
           icon={<StickyNote className="w-4 h-4" />}
           count={notes.length}
-          onNew={() => onOpenPanel("note", "new")}
+          onNew={() => onOpenPanel("artifact", "new")}
         >
           {notes.map((note) => (
             <ContentRow
               key={note.id}
-              onClick={() => onOpenPanel("note", note.id)}
+              onClick={() => onOpenPanel("artifact", note.id)}
             >
               <span className="text-sm text-[var(--text-primary)] truncate">
                 {note.title}
@@ -364,7 +364,7 @@ function ColumnView({
   // Only show columns that have content (scale-adaptive)
   const columns = [
     { label: "Threads", items: threads, type: "chat" as const, icon: <MessageSquare className="w-4 h-4" /> },
-    { label: "Notes", items: notes, type: "note" as const, icon: <StickyNote className="w-4 h-4" /> },
+    { label: "Artifacts", items: notes, type: "artifact" as const, icon: <StickyNote className="w-4 h-4" /> },
     { label: "Tasks", items: plannerItems, type: null, icon: <CalendarClock className="w-4 h-4" /> },
     { label: "Artifacts", items: artifacts, type: "artifact" as const, icon: <FileText className="w-4 h-4" /> },
   ].filter((col) => col.items.length > 0);

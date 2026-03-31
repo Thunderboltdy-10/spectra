@@ -88,6 +88,7 @@ export default defineSchema({
   })
     .index("by_clerk_id", ["clerkId"])
     .index("by_org", ["orgId"])
+    .index("by_org_email", ["orgId", "email"])
     .index("by_org_role", ["orgId", "role"]),
 
   userPreferences: defineTable({
@@ -252,6 +253,7 @@ export default defineSchema({
     defaultMode: v.optional(vStudyMode),
     defaultThinking: v.optional(vThinkingLevel),
     artifactCount: v.optional(v.number()),
+    threadCount: v.optional(v.number()),
     lastActivityAt: v.optional(v.number()),
     completedAt: v.optional(v.number()),
     createdAt: v.number(),
@@ -374,6 +376,7 @@ export default defineSchema({
     ownerUserId: v.id("users"),
     title: v.string(),
     latestUserPrompt: v.optional(v.string()),
+    messageCount: v.optional(v.number()),
     pinned: v.optional(v.boolean()),
     mode: vStudyMode,
     thinkingLevel: vThinkingLevel,
@@ -494,6 +497,7 @@ export default defineSchema({
     syncConflictSummary: v.optional(v.string()),
     lastAiEditId: v.optional(v.string()),
     pendingDiffs: v.optional(v.any()),
+    legacyNoteId: v.optional(v.id("notes")),
     layout: v.optional(v.any()),
     tags: v.optional(v.array(v.string())),
     linkedAgentId: v.optional(v.id("agents")),
@@ -508,6 +512,7 @@ export default defineSchema({
     .index("by_type", ["type"])
     .index("by_workstream", ["workstreamId"])
     .index("by_owner_type", ["ownerUserId", "type"])
+    .index("by_legacy_note", ["legacyNoteId"])
     .searchIndex("search_content", {
       searchField: "contentPlaintext",
       filterFields: ["ownerUserId", "orgId", "type", "status", "workstreamId"],
@@ -533,6 +538,14 @@ export default defineSchema({
     orgId: v.id("orgs"),
     monthKey: v.string(),
     totalCostCents: v.number(),
+    knownCostCents: v.optional(v.number()),
+    estimatedUnpricedCostCents: v.optional(v.number()),
+    totalTokens: v.optional(v.number()),
+    totalEvents: v.optional(v.number()),
+    modelEvents: v.optional(v.number()),
+    searchEvents: v.optional(v.number()),
+    modelCostCents: v.optional(v.number()),
+    searchCostCents: v.optional(v.number()),
     lastUpdatedAt: v.number(),
   })
     .index("by_user_month", ["userId", "monthKey"])
@@ -907,6 +920,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_org", ["orgId"])
+    .index("by_org_featured", ["orgId", "isFeatured"])
     .index("by_org_model", ["orgId", "modelId"]),
 
   modelRuntimeStats: defineTable({
@@ -943,8 +957,20 @@ export default defineSchema({
     expiresAt: v.number(),
   })
     .index("by_org", ["orgId"])
+    .index("by_org_status", ["orgId", "status"])
     .index("by_email", ["email"])
+    .index("by_invited_by_created", ["invitedBy", "createdAt"])
     .index("by_token", ["token"]),
+
+  platformStats: defineTable({
+    singletonKey: v.string(),
+    totalOrgs: v.number(),
+    totalUsers: v.number(),
+    totalMessages: v.number(),
+    totalAdmins: v.number(),
+    lastComputedAt: v.number(),
+  })
+    .index("by_singleton", ["singletonKey"]),
 
   accessRequests: defineTable({
     orgId: v.id("orgs"),

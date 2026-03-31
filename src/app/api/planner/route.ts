@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();
     const params = request.nextUrl.searchParams;
-    const action = params.get("action") ?? "list";
+    const action = params.get("action") ?? (params.get("hub") === "1" ? "hub" : "list");
 
     if (action === "get") {
       const plannerItemId = params.get("id");
@@ -26,6 +26,21 @@ export async function GET(request: NextRequest) {
       });
 
       return ok({ plannerItem });
+    }
+
+    if (action === "hub") {
+      const daysAheadRaw = Number.parseInt(params.get("days") ?? "", 10);
+      const daysAhead = Number.isFinite(daysAheadRaw)
+        ? Math.max(1, Math.min(daysAheadRaw, 30))
+        : undefined;
+
+      const data = await convexQuery("plannerItems:listHubItems", {
+        actorClerkId: actor.clerkId,
+        limit: parseLimit(params.get("limit")),
+        daysAhead,
+      });
+
+      return ok(data);
     }
 
     const plannerItems = await convexQuery("plannerItems:list", {

@@ -27,6 +27,8 @@ import { useCanvasState } from "@/hooks/use-canvas-state";
 import { FILE_LIMITS } from "@/lib/file-limits";
 import { isModeAvailable } from "@/lib/modes";
 import { GlobalUtilityDock } from "@/components/global-utility-dock";
+import { generatedDocumentToPlainText, parseGeneratedDocument, stripGeneratedDocumentMarkers } from "@/lib/document-generator";
+import { plainTextToTiptapJson } from "@/lib/editor/tiptap-import";
 
 const GuidedTour = dynamic(
   () => import("@/components/ui/guided-tour").then((module) => module.GuidedTour),
@@ -220,11 +222,18 @@ export function ChatLayout() {
       handleModeChange(detail.mode as StudyMode);
     };
     const onOpenOrchestration = () => openPanel("orchestration");
+    const onResumeChat = (event: Event) => {
+      const detail = (event as CustomEvent<{ chatId?: string }>).detail;
+      if (!detail?.chatId) return;
+      chat.setSelectedChatId(detail.chatId);
+    };
     window.addEventListener("ai-school:switch-mode", onSwitchMode);
     window.addEventListener("ai-school:open-orchestration", onOpenOrchestration);
+    window.addEventListener("ai-school:resume-chat", onResumeChat);
     return () => {
       window.removeEventListener("ai-school:switch-mode", onSwitchMode);
       window.removeEventListener("ai-school:open-orchestration", onOpenOrchestration);
+      window.removeEventListener("ai-school:resume-chat", onResumeChat);
     };
   }, [handleModeChange, openPanel]);
 
@@ -679,24 +688,31 @@ export function ChatLayout() {
               });
               return;
             }
-            let type = "note";
+            let type = "document";
             let title = "Saved from chat";
-            const artifactContent: Record<string, unknown> = { text: content };
+            let contentPlaintext = content;
+            let artifactContent: Record<string, unknown> = plainTextToTiptapJson(content) as Record<string, unknown>;
+            const parsedDocument = parseGeneratedDocument(content);
             const lower = content.toLowerCase();
             if (lower.includes("<<flashcards_start>>") || lower.includes("<<flashcard_start>>")) {
               type = "flashcard_deck";
               title = "Flashcards from chat";
-            } else if (lower.includes("<<document_start>>") || lower.includes("<<doc_start>>")) {
+              artifactContent = { text: content };
+            } else if (parsedDocument.document || lower.includes("<<document_start>>") || lower.includes("<<doc_start>>")) {
               type = "document";
-              title = "Document from chat";
-              artifactContent.body = content;
+              title = parsedDocument.document?.title || "Document from chat";
+              contentPlaintext = parsedDocument.document
+                ? generatedDocumentToPlainText(parsedDocument.document)
+                : stripGeneratedDocumentMarkers(content);
+              artifactContent = plainTextToTiptapJson(contentPlaintext) as Record<string, unknown>;
             } else if (lower.includes("```")) {
               type = "code_project";
               title = "Code from chat";
+              artifactContent = {};
               artifactContent.code = content;
               artifactContent.language = "javascript";
             }
-            const firstLine = content.split("\n")[0]?.replace(/^#+\s*/, "").trim();
+            const firstLine = contentPlaintext.split("\n")[0]?.replace(/^#+\s*/, "").trim();
             if (firstLine && firstLine.length > 3 && firstLine.length < 80) title = firstLine;
             void fetch("/api/artifacts", {
               method: "POST",
@@ -704,6 +720,7 @@ export function ChatLayout() {
               body: JSON.stringify({
                 action: "create", type, title,
                 content: artifactContent,
+                contentPlaintext,
                 linkedChatId: chat.selectedChatId || undefined,
                 sourceMessageId: messageId,
               }),
@@ -801,6 +818,8 @@ export function ChatLayout() {
           onMessageChange={chat.setMessage}
           fileList={chat.fileList}
           fileUploadState={chat.fileUploadState}
+          streakAtRisk={chat.streakAtRisk}
+          continuationChat={chat.continuationChat}
           onFilesAdd={(files) =>
             chat.setFileList((prev) => {
               const seen = new Set(prev.map((file) => `${file.name}:${file.size}:${file.lastModified}`));

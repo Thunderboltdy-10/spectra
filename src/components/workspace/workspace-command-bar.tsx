@@ -9,7 +9,7 @@
  * Cmd/Ctrl+K to focus.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown, Search, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -20,7 +20,7 @@ import type { PanelType } from "@/stores/workspace-store";
 type WorkspaceCommandBarProps = {
   hidden?: boolean;
   workstreams: Workstream[];
-  committedWorkstreamId?: string;
+  primaryWorkstreamId?: string;
   onOpenWorkstreamChat: (workstreamId: string, query: string) => void;
   onOpenPanel?: (type: PanelType, id: string) => void;
 };
@@ -28,39 +28,46 @@ type WorkspaceCommandBarProps = {
 export function WorkspaceCommandBar({
   hidden = false,
   workstreams,
-  committedWorkstreamId,
+  primaryWorkstreamId,
   onOpenWorkstreamChat,
 }: WorkspaceCommandBarProps) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
-  const [selectedWs, setSelectedWs] = useState<Workstream | null>(null);
+  const [selectedWsId, setSelectedWsId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const selectorRef = useRef<HTMLButtonElement>(null);
 
-  const activeWorkstreams = workstreams.filter((ws) => ws.status === "active");
+  const activeWorkstreams = useMemo(
+    () => workstreams.filter((ws) => ws.status === "active"),
+    [workstreams],
+  );
+  const selectedWs = useMemo(
+    () => activeWorkstreams.find((ws) => ws._id === selectedWsId) ?? null,
+    [activeWorkstreams, selectedWsId],
+  );
 
   // Auto-select workstream
   useEffect(() => {
-    // If committed to a workstream, scope to it
-    if (committedWorkstreamId) {
-      const ws = activeWorkstreams.find((w) => w._id === committedWorkstreamId);
-      if (ws) {
-        setSelectedWs(ws);
-        return;
+    if (primaryWorkstreamId) {
+      if (selectedWsId !== primaryWorkstreamId) {
+        setSelectedWsId(primaryWorkstreamId);
       }
-    }
-    // If only one workstream, auto-select
-    if (activeWorkstreams.length === 1 && !selectedWs) {
-      setSelectedWs(activeWorkstreams[0] ?? null);
       return;
     }
-    // If selected ws was deleted/archived, clear
-    if (selectedWs && !activeWorkstreams.some((ws) => ws._id === selectedWs._id)) {
-      setSelectedWs(null);
+
+    if (selectedWsId && !activeWorkstreams.some((ws) => ws._id === selectedWsId)) {
+      setSelectedWsId(null);
+      return;
     }
-  }, [activeWorkstreams, committedWorkstreamId, selectedWs]);
+
+    if (!focused && selectedWsId) {
+      setSelectedWsId(null);
+      return;
+    }
+  }, [activeWorkstreams, focused, primaryWorkstreamId, selectedWsId]);
 
   // Cmd/Ctrl+K shortcut
   useEffect(() => {
@@ -76,28 +83,35 @@ export function WorkspaceCommandBar({
 
   // Close picker on outside click
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
+    if (!focused && !showPicker) return;
+    const handler = (e: PointerEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setShowPicker(false);
-        if (!query) setFocused(false);
+        setFocused(false);
       }
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [query]);
+    window.addEventListener("pointerdown", handler, true);
+    return () => window.removeEventListener("pointerdown", handler, true);
+  }, [focused, showPicker]);
 
   const handleSubmit = useCallback(() => {
     if (!query.trim()) return;
     const trimmed = query.trim();
+    const inferredWorkstream = !selectedWs
+      ? activeWorkstreams.find((ws) => {
+          const haystack = `${ws.title} ${ws.description ?? ""} ${ws.subjectCode ?? ""}`.toLowerCase();
+          return haystack.includes(trimmed.toLowerCase());
+        }) ?? null
+      : selectedWs;
 
-    if (selectedWs) {
-      onOpenWorkstreamChat(selectedWs._id, trimmed);
+    if (inferredWorkstream) {
+      onOpenWorkstreamChat(inferredWorkstream._id, trimmed);
     } else {
       router.push(`/chat?prompt=${encodeURIComponent(trimmed)}`);
     }
     setQuery("");
     setFocused(false);
-  }, [onOpenWorkstreamChat, query, router, selectedWs]);
+  }, [activeWorkstreams, onOpenWorkstreamChat, query, router, selectedWs]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
@@ -114,7 +128,7 @@ export function WorkspaceCommandBar({
 
   if (hidden) return null;
 
-  const isScoped = !!committedWorkstreamId && selectedWs;
+  const isScoped = !!primaryWorkstreamId && selectedWs;
   const placeholder = isScoped
     ? `Ask ${selectedWs?.title}...`
     : "Ask anything...";
@@ -130,13 +144,13 @@ export function WorkspaceCommandBar({
     >
       {/* Workstream picker dropdown (above bar) */}
       <AnimatePresence>
-        {showPicker && !committedWorkstreamId && (
+        {showPicker && !primaryWorkstreamId && (
           <motion.div
             initial={{ opacity: 0, y: 4, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 4, scale: 0.97 }}
             transition={{ duration: 0.15 }}
-            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-60 py-1.5 rounded-xl border border-[var(--border-default)] shadow-[0_16px_48px_-12px_rgba(0,0,0,0.4)] overflow-hidden"
+            className="absolute bottom-full right-3 mb-2 w-60 py-1.5 rounded-xl border border-[var(--border-default)] shadow-[0_16px_48px_-12px_rgba(0,0,0,0.4)] overflow-hidden"
             style={{ background: "var(--bg-elevated)" }}
           >
             <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wide">
@@ -144,24 +158,24 @@ export function WorkspaceCommandBar({
             </div>
             <button
               type="button"
-              onClick={() => { setSelectedWs(null); setShowPicker(false); }}
+              onClick={() => { setSelectedWsId(null); setShowPicker(false); }}
               className={cn(
                 "w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors text-left",
-                !selectedWs
+                !selectedWsId
                   ? "text-[var(--accent-cyan)] bg-[var(--accent-cyan)]/6"
                   : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]",
               )}
             >
-              <span className="text-xs">✨</span> General chat
+              <span className="text-xs">✨</span> Auto (detect)
             </button>
             {activeWorkstreams.map((ws) => (
               <button
                 key={ws._id}
                 type="button"
-                onClick={() => { setSelectedWs(ws); setShowPicker(false); }}
+                onClick={() => { setSelectedWsId(ws._id); setShowPicker(false); }}
                 className={cn(
                   "w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors text-left",
-                  selectedWs?._id === ws._id
+                  selectedWsId === ws._id
                     ? "text-[var(--accent-cyan)] bg-[var(--accent-cyan)]/6"
                     : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]",
                 )}
@@ -199,8 +213,9 @@ export function WorkspaceCommandBar({
         />
 
         {/* Workstream selector (when focused, not scoped) */}
-        {focused && activeWorkstreams.length > 1 && !committedWorkstreamId && (
+        {focused && activeWorkstreams.length > 0 && !primaryWorkstreamId && (
           <button
+            ref={selectorRef}
             type="button"
             onClick={() => setShowPicker((v) => !v)}
             className={cn(
@@ -211,7 +226,7 @@ export function WorkspaceCommandBar({
             )}
           >
             <span className="max-w-[80px] truncate">
-              {selectedWs ? `${selectedWs.emoji} ${selectedWs.title}` : "Choose..."}
+              {selectedWs ? `${selectedWs.emoji} ${selectedWs.title}` : "Auto"}
             </span>
             <ChevronDown className="w-3 h-3 shrink-0" />
           </button>

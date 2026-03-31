@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { getUserByClerkId } from "./helpers";
 import { estimateUsageCostCents } from "../shared/spending";
@@ -17,6 +17,7 @@ const SUPER_ADMIN_EMAILS = new Set(
 const DEFAULT_MAX_RESOURCE_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const MIN_RESOURCE_FILE_SIZE_BYTES = 1 * 1024 * 1024;
 const MAX_RESOURCE_FILE_SIZE_BYTES = 100 * 1024 * 1024;
+const PLATFORM_STATS_SINGLETON = "global";
 
 function normalizeMaxResourceFileSizeBytes(value: number | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -46,6 +47,22 @@ async function getOrgMemberCapacity(
   return {
     maxMembers,
     memberCount: members.length,
+  };
+}
+
+async function computePlatformStats(ctx: QueryCtx | MutationCtx) {
+  const [orgs, users, messages] = await Promise.all([
+    ctx.db.query("orgs").collect(),
+    ctx.db.query("users").collect(),
+    ctx.db.query("messages").collect(),
+  ]);
+  const totalAdmins = users.filter((user) => user.role === "admin").length;
+
+  return {
+    totalOrgs: orgs.length,
+    totalUsers: users.length,
+    totalMessages: messages.length,
+    totalAdmins,
   };
 }
 
@@ -262,19 +279,53 @@ export const getGlobalStats = query({
   handler: async (ctx, args) => {
     await requireSuperAdmin(ctx, args.actorClerkId);
 
-    const [orgs, users, messages] = await Promise.all([
-      ctx.db.query("orgs").collect(),
-      ctx.db.query("users").collect(),
-      ctx.db.query("messages").collect(),
-    ]);
-    const totalAdmins = users.filter((user) => user.role === "admin").length;
+    const cached = await ctx.db
+      .query("platformStats")
+      .withIndex("by_singleton", (q) => q.eq("singletonKey", PLATFORM_STATS_SINGLETON))
+      .unique();
+    if (cached) {
+      return {
+        totalOrgs: cached.totalOrgs,
+        totalUsers: cached.totalUsers,
+        totalMessages: cached.totalMessages,
+        totalAdmins: cached.totalAdmins,
+        lastComputedAt: cached.lastComputedAt,
+      };
+    }
+
+    const live = await computePlatformStats(ctx);
 
     return {
-      totalOrgs: orgs.length,
-      totalUsers: users.length,
-      totalMessages: messages.length,
-      totalAdmins,
+      ...live,
+      lastComputedAt: null,
     };
+  },
+});
+
+export const refreshPlatformStats = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    const next = await computePlatformStats(ctx);
+    const existing = await ctx.db
+      .query("platformStats")
+      .withIndex("by_singleton", (q) => q.eq("singletonKey", PLATFORM_STATS_SINGLETON))
+      .unique();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        ...next,
+        lastComputedAt: now,
+      });
+    } else {
+      await ctx.db.insert("platformStats", {
+        singletonKey: PLATFORM_STATS_SINGLETON,
+        ...next,
+        lastComputedAt: now,
+      });
+    }
+
+    return { ok: true, ...next, lastComputedAt: now };
   },
 });
 

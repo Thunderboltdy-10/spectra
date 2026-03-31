@@ -22,6 +22,8 @@ import {
   Sparkles,
   Square,
   X,
+  Globe,
+  Star,
 } from "lucide-react";
 import { ProviderLogo } from "@/components/provider-logo";
 import { Button } from "@/components/ui/button";
@@ -44,6 +46,8 @@ type ChatComposerProps = {
   onMessageChange: (value: string) => void;
   fileList: File[];
   fileUploadState: Record<string, { status: FileStatus; thumbnailUrl?: string; error?: string }>;
+  streakAtRisk?: boolean;
+  continuationChat?: { id: string; title: string } | null;
   onFilesAdd: (files: File[]) => void;
   onRemoveFile: (file: File) => void;
   onSend: () => void;
@@ -326,6 +330,8 @@ export function ChatComposer(props: ChatComposerProps) {
     onMessageChange,
     fileList,
     fileUploadState,
+    streakAtRisk,
+    continuationChat,
     onFilesAdd,
     onRemoveFile,
     onSend,
@@ -374,6 +380,28 @@ export function ChatComposer(props: ChatComposerProps) {
   const [agentSubjectFilter, setAgentSubjectFilter] = useState("all");
   const [providerFilter, setProviderFilter] = useState("all");
   const [modelSelectorPosition, setModelSelectorPosition] = useState<{ bottom: number; left: number } | null>(null);
+  const [starredModels, setStarredModels] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("ai-school:starred-models");
+      if (saved) setStarredModels(new Set(JSON.parse(saved)));
+    } catch {}
+  }, []);
+
+  const toggleStarModel = (e: React.MouseEvent, modelId: string) => {
+    e.stopPropagation();
+    setStarredModels((prev) => {
+      const next = new Set(prev);
+      if (next.has(modelId)) next.delete(modelId);
+      else next.add(modelId);
+      try {
+        window.localStorage.setItem("ai-school:starred-models", JSON.stringify(Array.from(next)));
+      } catch {}
+      return next;
+    });
+  };
+
   const [attachmentsExpanded, setAttachmentsExpanded] = useState(true);
   const [showVoiceStub, setShowVoiceStub] = useState(false);
   const [modeTransitioning, setModeTransitioning] = useState(false);
@@ -526,8 +554,9 @@ export function ChatComposer(props: ChatComposerProps) {
 
   const filteredModelRows = useMemo(() => {
     if (providerFilter === "all") return modelRows;
+    if (providerFilter === "starred") return modelRows.filter((row) => starredModels.has(row.model.modelId));
     return modelRows.filter((row) => row.model.provider === providerFilter);
-  }, [modelRows, providerFilter]);
+  }, [modelRows, providerFilter, starredModels]);
 
   const hasBudgetSafeModel = useMemo(
     () => models.some((model) => restrictionReasonForTier(model, "free_only", isSuperAdmin) === null),
@@ -926,6 +955,8 @@ export function ChatComposer(props: ChatComposerProps) {
             sending={sending}
             streamPhase={sending ? "generating" : "idle"}
             hasResources={fileList.length > 0}
+            streakAtRisk={streakAtRisk}
+            continuationChat={continuationChat}
             onAction={handleTipAction}
           />
         ) : null}
@@ -1116,168 +1147,187 @@ export function ChatComposer(props: ChatComposerProps) {
                 {showModelSelector && createPortal(
                   <div
                     ref={modelPortalRef}
-                    className="fixed z-[9999] max-h-[480px] w-[min(92vw,32rem)] overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-soft)]"
-                    style={modelSelectorPosition ?? { top: 0, left: 0 }}
+                    className="fixed z-[9999] max-h-[480px] w-[min(92vw,32rem)] overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-soft)]"
+                    style={modelSelectorPosition ? { bottom: modelSelectorPosition.bottom, left: modelSelectorPosition.left, opacity: 1 } : { top: 0, left: 0, opacity: 0, pointerEvents: "none" }}
                   >
-                    <div className="mb-2 flex items-center justify-between">
-                      <p className="text-xs font-medium text-[var(--text-primary)]">Choose model</p>
-                      <button
-                        type="button"
-                        onClick={() => setShowModelSelector(false)}
-                        className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border border-[var(--border-default)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
-                        aria-label="Close model selector"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-
-                    <div className="mb-2">
-                      <div className="relative">
-                        <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-[var(--text-secondary)]" />
-                        <input
-                          ref={modelSearchRef}
-                          value={modelSearch}
-                          onChange={(event) => setModelSearch(event.target.value)}
-                          placeholder="Search models..."
-                          className="h-9 w-full appearance-none rounded-md border-0 bg-[var(--bg-secondary)] pl-10 pr-2 text-sm outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none"
-                        />
+                    <div className="flex h-full max-h-[480px]">
+                      <div className="flex w-12 shrink-0 flex-col items-center gap-2 border-r border-[var(--border-default)] bg-[var(--bg-secondary)] py-2 overflow-y-auto">
+                        <button
+                          type="button"
+                          onClick={() => setProviderFilter("all")}
+                          className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${providerFilter === "all" ? "bg-[var(--bg-elevated)] shadow-sm border border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] text-[var(--accent-cyan)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
+                          title="All models"
+                        >
+                          <Globe className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setProviderFilter("starred")}
+                          className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${providerFilter === "starred" ? "bg-[var(--bg-elevated)] shadow-sm border border-[color-mix(in_oklab,var(--warning)_45%,var(--border-default))] text-[var(--warning)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
+                          title="Starred models"
+                        >
+                          <Star className="h-4 w-4" />
+                        </button>
+                        <div className="my-1 w-6 border-b border-[var(--border-default)] shrink-0" />
+                        {providerOptions.map((provider) => (
+                          <button
+                            key={provider}
+                            type="button"
+                            onClick={() => setProviderFilter(provider)}
+                            className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${providerFilter === provider ? "bg-[var(--bg-elevated)] shadow-sm border border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))]" : "hover:bg-[var(--bg-hover)]"}`}
+                            title={provider}
+                          >
+                            <ProviderLogo provider={provider} size={20} className="rounded-md" />
+                          </button>
+                        ))}
                       </div>
-                    </div>
 
-                    <div className="max-h-[360px] overflow-y-auto pr-1">
-                      <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
-                        Auto
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (autoRoutingRestriction) return;
-                          onSelectAuto();
-                          setShowModelSelector(false);
-                        }}
-                        disabled={Boolean(autoRoutingRestriction)}
-                        title={autoRoutingRestriction ?? "Use adaptive routing for this conversation."}
-                        className={`mb-2 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${
-                          autoRoutingRestriction
-                            ? "cursor-not-allowed opacity-55"
-                            : "cursor-pointer hover:bg-[var(--bg-hover)]"
-                        } ${
-                          routerMode !== "manual"
-                            ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
-                            : ""
-                        }`}
-                      >
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--bg-secondary))]">
-                          <Sparkles className="h-4 w-4 text-[var(--accent-cyan)]" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-[var(--text-primary)]">Auto</p>
-                          <p className="truncate text-[10px] text-[var(--text-secondary)]">
-                            Adaptive routing (only while Auto is selected)
-                          </p>
-                          {autoRoutingRestriction ? (
-                            <p className="truncate text-[10px] text-[var(--warning)]">{autoRoutingRestriction}</p>
-                          ) : null}
-                        </div>
-                        {routerMode !== "manual" ? (
-                          <span className="shrink-0 rounded-full bg-[var(--accent-cyan)] px-1.5 py-0.5 text-[10px] font-medium text-white">
-                            Active
-                          </span>
-                        ) : null}
-                      </button>
-
-                      {modelSearch.trim().length > 0 && providerOptions.length > 1 ? (
-                        <div className="mb-2 flex flex-wrap gap-1.5 px-1">
+                      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+                        <div className="flex items-center justify-between border-b border-[var(--border-default)] px-3 py-2">
+                          <p className="text-xs font-medium text-[var(--text-primary)]">Choose model</p>
                           <button
                             type="button"
-                            onClick={() => setProviderFilter("all")}
-                            className={`rounded-full border px-2 py-0.5 text-[10px] transition ${
-                              providerFilter === "all"
-                                ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_14%,transparent)] text-[var(--text-primary)]"
-                                : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                            }`}
+                            onClick={() => setShowModelSelector(false)}
+                            className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border border-[var(--border-default)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+                            aria-label="Close model selector"
                           >
-                            All providers
+                            <X className="h-3.5 w-3.5" />
                           </button>
-                          {providerOptions.map((provider) => (
-                            <button
-                              key={provider}
-                              type="button"
-                              onClick={() => setProviderFilter(provider)}
-                              className={`rounded-full border px-2 py-0.5 text-[10px] transition ${
-                                providerFilter === provider
-                                  ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_14%,transparent)] text-[var(--text-primary)]"
-                                  : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                              }`}
-                            >
-                              {provider}
-                            </button>
-                          ))}
                         </div>
-                      ) : null}
 
-                      {filteredModelRows.length === 0 ? (
-                        <p className="px-3 py-4 text-center text-sm text-[var(--text-secondary)]">No models found</p>
-                      ) : (
-                        <div className="space-y-1 px-1">
-                          {filteredModelRows.map((row, index) => {
-                            const model = row.model;
-                            const isSelected = routerMode === "manual" && manualModel === model.modelId;
-                            const displayName = cleanModelDisplayText(model.name) || formatModelLabel(model.modelId);
-                            const disabled = Boolean(row.restrictionReason);
+                        <div className="border-b border-[var(--border-default)] p-2">
+                          <div className="relative">
+                            <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-[var(--text-secondary)]" />
+                            <input
+                              ref={modelSearchRef}
+                              value={modelSearch}
+                              onChange={(event) => setModelSearch(event.target.value)}
+                              placeholder="Search models..."
+                              className="h-9 w-full appearance-none rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] pl-10 pr-2 text-sm outline-none transition focus:border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))]"
+                            />
+                          </div>
+                        </div>
 
-                            return (
+                        <div className="flex-1 overflow-y-auto p-2">
+                          {providerFilter === "all" || providerFilter === "starred" ? (
+                            <div className="mb-2">
+                              <p className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+                                Auto
+                              </p>
                               <button
-                                key={model.modelId}
                                 type="button"
                                 onClick={() => {
-                                  if (disabled) return;
-                                  onSelectModel(model.modelId);
+                                  if (autoRoutingRestriction) return;
+                                  onSelectAuto();
                                   setShowModelSelector(false);
                                 }}
-                                title={row.restrictionReason ?? undefined}
-                                className={`w-full rounded-lg border px-2.5 py-2 text-left transition ${
-                                  disabled
+                                disabled={Boolean(autoRoutingRestriction)}
+                                title={autoRoutingRestriction ?? "Use adaptive routing for this conversation."}
+                                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${
+                                  autoRoutingRestriction
                                     ? "cursor-not-allowed opacity-55"
                                     : "cursor-pointer hover:bg-[var(--bg-hover)]"
                                 } ${
-                                  isSelected
-                                    ? "border-[color-mix(in_oklab,var(--accent-cyan)_42%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
-                                    : "border-transparent"
+                                  routerMode !== "manual"
+                                    ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
+                                    : ""
                                 }`}
                               >
-                                <div className="flex items-start gap-2">
-                                  <ProviderLogo provider={model.provider} modelId={model.modelId} size={14} className="mt-0.5 h-6 w-6 rounded-md" />
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex items-center gap-1.5">
-                                      {index < 5 && !modelSearch.trim() ? (
-                                        <span className="rounded-full border border-[var(--border-default)] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
-                                          Popular
-                                        </span>
-                                      ) : null}
-                                      {row.recommended ? (
-                                        <span className="rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em] text-[var(--accent-cyan)]">
-                                          Recommended
-                                        </span>
-                                      ) : null}
-                                    </div>
-                                    <p className="truncate text-sm font-medium text-[var(--text-primary)]">{displayName}</p>
-                                    <p className="truncate text-[10px] text-[var(--text-secondary)]">
-                                      {model.provider} · {model.contextLength ? `${Math.round((model.contextLength ?? 0) / 1000)}k ctx` : "Context unknown"}
-                                    </p>
-                                    {row.cautionReason ? (
-                                      <p className="truncate text-[10px] text-[var(--warning)]">{row.cautionReason}</p>
-                                    ) : null}
-                                    {row.restrictionReason ? (
-                                      <p className="truncate text-[10px] text-[var(--warning)]">{row.restrictionReason}</p>
-                                    ) : null}
-                                  </div>
+                                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--bg-secondary))]">
+                                  <Sparkles className="h-4 w-4 text-[var(--accent-cyan)]" />
                                 </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-sm font-medium text-[var(--text-primary)]">Auto</p>
+                                  <p className="truncate text-[10px] text-[var(--text-secondary)]">
+                                    Adaptive routing (only while Auto is selected)
+                                  </p>
+                                  {autoRoutingRestriction ? (
+                                    <p className="truncate text-[10px] text-[var(--warning)]">{autoRoutingRestriction}</p>
+                                  ) : null}
+                                </div>
+                                {routerMode !== "manual" ? (
+                                  <span className="shrink-0 rounded-full bg-[var(--accent-cyan)] px-1.5 py-0.5 text-[10px] font-medium text-white">
+                                    Active
+                                  </span>
+                                ) : null}
                               </button>
-                            );
-                          })}
+                            </div>
+                          ) : null}
+
+                          {filteredModelRows.length === 0 ? (
+                            <p className="px-3 py-4 text-center text-sm text-[var(--text-secondary)]">No models found</p>
+                          ) : (
+                            <div className="space-y-1">
+                              {filteredModelRows.map((row, index) => {
+                                const model = row.model;
+                                const isSelected = routerMode === "manual" && manualModel === model.modelId;
+                                const displayName = cleanModelDisplayText(model.name) || formatModelLabel(model.modelId);
+                                const disabled = Boolean(row.restrictionReason);
+                                const isStarred = starredModels.has(model.modelId);
+
+                                return (
+                                  <div key={model.modelId} className="group relative">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (disabled) return;
+                                        onSelectModel(model.modelId);
+                                        setShowModelSelector(false);
+                                      }}
+                                      title={row.restrictionReason ?? undefined}
+                                      className={`w-full rounded-lg border px-2.5 py-2 text-left transition pr-10 ${
+                                        disabled
+                                          ? "cursor-not-allowed opacity-55"
+                                          : "cursor-pointer hover:bg-[var(--bg-hover)]"
+                                      } ${
+                                        isSelected
+                                          ? "border-[color-mix(in_oklab,var(--accent-cyan)_42%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
+                                          : "border-transparent"
+                                      }`}
+                                    >
+                                      <div className="flex items-start gap-2">
+                                        <ProviderLogo provider={model.provider} modelId={model.modelId} size={14} className="mt-0.5 h-6 w-6 rounded-md" />
+                                        <div className="min-w-0 flex-1">
+                                          <div className="flex items-center gap-1.5">
+                                            {index < 5 && !modelSearch.trim() && providerFilter === "all" ? (
+                                              <span className="rounded-full border border-[var(--border-default)] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                                                Popular
+                                              </span>
+                                            ) : null}
+                                            {row.recommended ? (
+                                              <span className="rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em] text-[var(--accent-cyan)]">
+                                                Recommended
+                                              </span>
+                                            ) : null}
+                                          </div>
+                                          <p className="truncate text-sm font-medium text-[var(--text-primary)]">{displayName}</p>
+                                          <p className="truncate text-[10px] text-[var(--text-secondary)]">
+                                            {model.provider} · {model.contextLength ? `${Math.round((model.contextLength ?? 0) / 1000)}k ctx` : "Context unknown"}
+                                          </p>
+                                          {row.cautionReason ? (
+                                            <p className="truncate text-[10px] text-[var(--warning)]">{row.cautionReason}</p>
+                                          ) : null}
+                                          {row.restrictionReason ? (
+                                            <p className="truncate text-[10px] text-[var(--warning)]">{row.restrictionReason}</p>
+                                          ) : null}
+                                        </div>
+                                      </div>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => toggleStarModel(e, model.modelId)}
+                                      className={`absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 transition ${isStarred ? 'text-[var(--warning)] opacity-100' : 'text-[var(--text-tertiary)] opacity-0 group-hover:opacity-100 hover:text-[var(--text-primary)]'}`}
+                                      title={isStarred ? "Unstar model" : "Star model"}
+                                    >
+                                      <Star className="h-4 w-4" fill={isStarred ? "currentColor" : "none"} />
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
-                      )}
+                      </div>
                     </div>
                   </div>,
                   document.body,
@@ -1298,11 +1348,11 @@ export function ChatComposer(props: ChatComposerProps) {
                 </button>
 
                 {showAgentSelector && (
-                  <div className="absolute bottom-full left-0 z-[340] mb-2 w-[min(95vw,38rem)] overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-soft)]">
+                  <div className="absolute bottom-full left-0 z-[340] mb-2 w-[min(95vw,22rem)] overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-soft)]">
                     <div className="border-b border-[var(--border-default)] px-3 py-2">
                       <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">Agent Workspace</p>
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <div className="relative min-w-[180px] flex-1">
+                      <div className="mt-2 flex flex-col gap-2">
+                        <div className="relative w-full">
                           <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-[var(--text-secondary)]" />
                           <input
                             value={agentSearch}
@@ -1314,7 +1364,7 @@ export function ChatComposer(props: ChatComposerProps) {
                         <select
                           value={agentSubjectFilter}
                           onChange={(event) => setAgentSubjectFilter(event.target.value)}
-                          className="h-8 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 text-xs text-[var(--text-primary)] outline-none"
+                          className="h-8 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 text-xs text-[var(--text-primary)] outline-none"
                         >
                           <option value="all">All subjects</option>
                           {agentSubjectOptions.map((subject) => (
@@ -1325,7 +1375,7 @@ export function ChatComposer(props: ChatComposerProps) {
                         </select>
                       </div>
                     </div>
-                    <div className="max-h-[420px] overflow-y-auto p-2">
+                    <div className="max-h-[380px] overflow-y-auto p-2">
                       <button
                         type="button"
                         onClick={() => {
@@ -1348,7 +1398,7 @@ export function ChatComposer(props: ChatComposerProps) {
                       {recommendedAgents.length > 0 ? (
                         <div className="mb-3">
                           <p className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">Recommended</p>
-                          <div className="grid gap-2 sm:grid-cols-2">
+                          <div className="flex flex-col gap-1.5">
                             {recommendedAgents.map((agent) => (
                               <button
                                 key={`recommended-${agent._id}`}
@@ -1357,26 +1407,29 @@ export function ChatComposer(props: ChatComposerProps) {
                                   onSelectAgent(agent._id);
                                   setShowAgentSelector(false);
                                 }}
-                                className={`rounded-lg border p-2.5 text-left transition ${
+                                className={`rounded-lg border p-2 text-left transition ${
                                   selectedAgentId === agent._id
                                     ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)]"
                                     : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
                                 }`}
                               >
                                 <div className="flex items-start justify-between gap-2">
-                                  <p className="text-base">{agent.avatarEmoji ?? "🧠"}</p>
-                                  <span className="rounded-full border border-[var(--border-default)] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em] text-[var(--accent-cyan)]">
+                                  <div className="flex items-center gap-2 overflow-hidden">
+                                    <span className="text-base leading-none">{agent.avatarEmoji ?? "🧠"}</span>
+                                    <div className="min-w-0 flex-1">
+                                      <p className="truncate text-xs font-medium text-[var(--text-primary)]">{agent.name}</p>
+                                      <p className="truncate text-[10px] text-[var(--text-secondary)]">
+                                        {(agent.subjectArea || agent.category || "General").slice(0, 32)}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <span className="shrink-0 rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em] text-[var(--accent-cyan)]">
                                     Match
                                   </span>
                                 </div>
-                                <p className="mt-1 truncate text-sm font-medium text-[var(--text-primary)]">{agent.name}</p>
-                                <p className="mt-0.5 text-[10px] text-[var(--text-secondary)]">
-                                  {(agent.subjectArea || agent.category || "General").slice(0, 28)}
-                                </p>
                                 <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
                                   {agent.resourceCount ?? 0} resources · {agent.usageCount} uses
                                 </p>
-                                <p className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">{formatRelativeTimestamp(agent.updatedAt)}</p>
                               </button>
                             ))}
                           </div>
@@ -1386,7 +1439,7 @@ export function ChatComposer(props: ChatComposerProps) {
                       {schoolAgents.length > 0 ? (
                         <div className="mb-3">
                           <p className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">School Agents</p>
-                          <div className="grid gap-2 sm:grid-cols-2">
+                          <div className="flex flex-col gap-1.5">
                             {schoolAgents.slice(0, 8).map((agent) => (
                               <button
                                 key={`school-${agent._id}`}
@@ -1395,17 +1448,24 @@ export function ChatComposer(props: ChatComposerProps) {
                                   onSelectAgent(agent._id);
                                   setShowAgentSelector(false);
                                 }}
-                                className={`rounded-lg border p-2 text-left transition ${
+                                className={`rounded-lg border p-2 text-left transition flex flex-col justify-center min-h-[50px] ${
                                   selectedAgentId === agent._id
                                     ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)]"
                                     : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
                                 }`}
                               >
-                                <p className="truncate text-xs font-medium text-[var(--text-primary)]">{agent.avatarEmoji ?? "🧠"} {agent.name}</p>
-                                <p className="mt-0.5 text-[10px] text-[var(--text-secondary)]">
-                                  {(agent.subjectArea || agent.category || "General").slice(0, 24)}
+                                <div className="flex items-center gap-2 overflow-hidden">
+                                  <span className="text-base leading-none">{agent.avatarEmoji ?? "🧠"}</span>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-xs font-medium text-[var(--text-primary)]">{agent.name}</p>
+                                    <p className="truncate text-[10px] text-[var(--text-secondary)]">
+                                      {(agent.subjectArea || agent.category || "General").slice(0, 32)}
+                                    </p>
+                                  </div>
+                                </div>
+                                <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
+                                  {agent.resourceCount ?? 0} resources · {agent.usageCount} uses
                                 </p>
-                                <p className="mt-1 text-[10px] text-[var(--text-tertiary)]">{formatRelativeTimestamp(agent.updatedAt)}</p>
                               </button>
                             ))}
                           </div>
@@ -1415,7 +1475,7 @@ export function ChatComposer(props: ChatComposerProps) {
                       {myAgents.length > 0 ? (
                         <div className="mb-3">
                           <p className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">My Agents</p>
-                          <div className="grid gap-2 sm:grid-cols-2">
+                          <div className="flex flex-col gap-1.5">
                             {myAgents.slice(0, 8).map((agent) => (
                               <button
                                 key={`mine-${agent._id}`}
@@ -1424,17 +1484,24 @@ export function ChatComposer(props: ChatComposerProps) {
                                   onSelectAgent(agent._id);
                                   setShowAgentSelector(false);
                                 }}
-                                className={`rounded-lg border p-2 text-left transition ${
+                                className={`rounded-lg border p-2 text-left transition flex flex-col justify-center min-h-[50px] ${
                                   selectedAgentId === agent._id
                                     ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)]"
                                     : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
                                 }`}
                               >
-                                <p className="truncate text-xs font-medium text-[var(--text-primary)]">{agent.avatarEmoji ?? "🧠"} {agent.name}</p>
-                                <p className="mt-0.5 text-[10px] text-[var(--text-secondary)]">
-                                  {(agent.subjectArea || agent.category || "General").slice(0, 24)}
+                                <div className="flex items-center gap-2 overflow-hidden">
+                                  <span className="text-base leading-none">{agent.avatarEmoji ?? "🧠"}</span>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-xs font-medium text-[var(--text-primary)]">{agent.name}</p>
+                                    <p className="truncate text-[10px] text-[var(--text-secondary)]">
+                                      {(agent.subjectArea || agent.category || "General").slice(0, 32)}
+                                    </p>
+                                  </div>
+                                </div>
+                                <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
+                                  {agent.resourceCount ?? 0} resources · {agent.usageCount} uses
                                 </p>
-                                <p className="mt-1 text-[10px] text-[var(--text-tertiary)]">{formatRelativeTimestamp(agent.updatedAt)}</p>
                               </button>
                             ))}
                           </div>
@@ -1444,7 +1511,7 @@ export function ChatComposer(props: ChatComposerProps) {
                       {allAgentsSection.length > 0 ? (
                         <div className="mb-2">
                           <p className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">All Agents</p>
-                          <div className="grid gap-2 sm:grid-cols-2">
+                          <div className="flex flex-col gap-1.5">
                             {allAgentsSection.slice(0, 10).map((agent) => (
                               <button
                                 key={`all-${agent._id}`}
@@ -1453,15 +1520,23 @@ export function ChatComposer(props: ChatComposerProps) {
                                   onSelectAgent(agent._id);
                                   setShowAgentSelector(false);
                                 }}
-                                className={`rounded-lg border p-2 text-left transition ${
+                                className={`rounded-lg border p-2 text-left transition flex flex-col justify-center min-h-[50px] ${
                                   selectedAgentId === agent._id
                                     ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)]"
                                     : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
                                 }`}
                               >
-                                <p className="truncate text-xs font-medium text-[var(--text-primary)]">{agent.avatarEmoji ?? "🧠"} {agent.name}</p>
-                                <p className="mt-0.5 text-[10px] text-[var(--text-secondary)]">
-                                  {(agent.subjectArea || agent.category || "General").slice(0, 24)}
+                                <div className="flex items-center gap-2 overflow-hidden">
+                                  <span className="text-base leading-none">{agent.avatarEmoji ?? "🧠"}</span>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-xs font-medium text-[var(--text-primary)]">{agent.name}</p>
+                                    <p className="truncate text-[10px] text-[var(--text-secondary)]">
+                                      {(agent.subjectArea || agent.category || "General").slice(0, 32)}
+                                    </p>
+                                  </div>
+                                </div>
+                                <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
+                                  {agent.resourceCount ?? 0} resources · {agent.usageCount} uses
                                 </p>
                               </button>
                             ))}

@@ -599,6 +599,8 @@ export function useChatState() {
   const [streamModelUsed, setStreamModelUsed] = useState<string | null>(null);
   const [liveRouteTrace, setLiveRouteTrace] = useState<RouteTrace | null>(null);
   const [proactiveBanner, setProactiveBanner] = useState<ProactiveBanner | null>(null);
+  const [streakAtRisk, setStreakAtRisk] = useState(false);
+  const [continuationChat, setContinuationChat] = useState<{ id: string; title: string } | null>(null);
   const [collaboratorPhase, setCollaboratorPhase] = useState<"idle" | "running" | "synthesizing">("idle");
   const [fileList, setFileList] = useState<File[]>([]);
   const [fileUploadState, setFileUploadState] = useState<
@@ -1425,15 +1427,7 @@ export function useChatState() {
           continue;
         }
         if (notification.type === "reminder_streak_risk") {
-          candidates.push({
-            id: `notif:${notification._id}`,
-            kind: "reminder_streak_risk",
-            title: notification.title,
-            body: notification.body,
-            actionLabel: "Protect streak",
-            mode: "tutor",
-            followUpMessage: "Give me a focused 10-minute study drill I can do right now to keep my streak alive today.",
-          });
+          setStreakAtRisk(true);
           continue;
         }
         if (notification.type === "reminder_study_plan") {
@@ -1453,15 +1447,12 @@ export function useChatState() {
         const recencyWindowMs = 14 * 24 * 60 * 60 * 1000;
         const recentChat = chats.find((chat) => Date.now() - chat.updatedAt <= recencyWindowMs);
         if (recentChat) {
-          candidates.push({
-            id: `continue:${recentChat._id}`,
-            kind: "continuation_chat",
-            title: "Continue previous thread",
-            body: `Jump back into \"${recentChat.title}\" to keep momentum.`,
-            actionLabel: "Resume",
-            chatId: recentChat._id,
-          });
+          setContinuationChat({ id: recentChat._id, title: recentChat.title });
+        } else {
+          setContinuationChat(null);
         }
+      } else {
+        setContinuationChat(null);
       }
 
       const next = candidates.find((candidate) => !dismissedProactiveIdsRef.current.has(candidate.id)) ?? null;
@@ -3659,6 +3650,8 @@ export function useChatState() {
     streamModelUsed,
     liveRouteTrace,
     proactiveBanner,
+    streakAtRisk,
+    continuationChat,
     activeCollaborators,
     collaboratorPhase,
     activeStreamIds,

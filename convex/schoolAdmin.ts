@@ -15,6 +15,9 @@ function randomToken(): string {
   return token;
 }
 
+const INVITATION_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
+const INVITATION_RATE_LIMIT_MAX = 50;
+
 async function requireAdmin(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string) {
   const actor = await getUserByClerkId(ctx, actorClerkId);
   if (!actor) throw new Error("Unauthorized");
@@ -35,21 +38,21 @@ async function getMemberSeatSnapshotWithExclusions(
     excludeInvitationIds?: Id<"schoolInvitations">[];
   },
 ) {
+  const now = Date.now();
   const [org, members, pendingInvitations] = await Promise.all([
     ctx.db.get(args.orgId),
     ctx.db
       .query("users")
       .withIndex("by_org", (q) => q.eq("orgId", args.orgId))
-      .collect(),
+      .take(2_000),
     ctx.db
       .query("schoolInvitations")
-      .withIndex("by_org", (q) => q.eq("orgId", args.orgId))
-      .collect()
+      .withIndex("by_org_status", (q) => q.eq("orgId", args.orgId).eq("status", "pending"))
+      .take(2_000)
       .then((invitations) =>
         invitations.filter(
           (invitation) =>
-            invitation.status === "pending"
-            && invitation.expiresAt > Date.now()
+            invitation.expiresAt > now
             && !(args.excludeInvitationIds ?? []).includes(invitation._id),
         ),
       ),
@@ -67,6 +70,40 @@ async function getMemberSeatSnapshotWithExclusions(
   };
 }
 
+async function findExistingMemberByEmail(
+  ctx: Parameters<typeof getUserByClerkId>[0],
+  orgId: Id<"orgs">,
+  email: string,
+) {
+  const indexed = await ctx.db
+    .query("users")
+    .withIndex("by_org_email", (q) => q.eq("orgId", orgId).eq("email", email))
+    .unique();
+  if (indexed) {
+    return indexed;
+  }
+
+  const fallback = await ctx.db
+    .query("users")
+    .withIndex("by_org", (q) => q.eq("orgId", orgId))
+    .take(500);
+  return fallback.find((member) => member.email.toLowerCase() === email) ?? null;
+}
+
+async function enforceInvitationRateLimit(
+  ctx: MutationCtx,
+  invitedBy: Id<"users">,
+) {
+  const since = Date.now() - INVITATION_RATE_LIMIT_WINDOW_MS;
+  const recent = await ctx.db
+    .query("schoolInvitations")
+    .withIndex("by_invited_by_created", (q) => q.eq("invitedBy", invitedBy).gte("createdAt", since))
+    .take(INVITATION_RATE_LIMIT_MAX + 1);
+  if (recent.length >= INVITATION_RATE_LIMIT_MAX) {
+    throw new Error("INVITATION_RATE_LIMIT: You have reached the limit of 50 invitations in the last hour.");
+  }
+}
+
 async function expirePendingInvitationsForEmail(
   ctx: MutationCtx,
   args: {
@@ -78,7 +115,7 @@ async function expirePendingInvitationsForEmail(
   const invitations = await ctx.db
     .query("schoolInvitations")
     .withIndex("by_email", (q) => q.eq("email", args.email))
-    .collect();
+    .take(200);
 
   const expiredIds: Id<"schoolInvitations">[] = [];
   for (const invitation of invitations) {
@@ -305,13 +342,12 @@ export const inviteMember = mutation({
     if (!email.includes("@")) throw new Error("Invalid email address");
 
     // Check if already a member
-    const members = await ctx.db
-      .query("users")
-      .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
-      .collect();
-    if (members.some((m) => m.email.toLowerCase() === email)) {
+    const existingMember = await findExistingMemberByEmail(ctx, actor.orgId, email);
+    if (existingMember) {
       throw new Error("User is already a member of this school");
     }
+
+    await enforceInvitationRateLimit(ctx, actor._id);
 
     await expirePendingInvitationsForEmail(ctx, {
       orgId: actor.orgId,
@@ -363,7 +399,7 @@ export const cancelInvitation = mutation({
     const invitation = await ctx.db.get(args.invitationId);
     if (!invitation) throw new Error("Invitation not found");
     if (invitation.orgId !== actor.orgId) throw new Error("Not authorized");
-    if (invitation.status !== "pending") throw new Error("Invitation is not pending");
+    if (invitation.status !== "pending") throw new Error("This invitation has already been used or cancelled.");
 
     await ctx.db.patch(args.invitationId, { status: "expired" });
     return { ok: true };
@@ -566,15 +602,19 @@ export const acceptInvitation = mutation({
     orgId: v.id("orgs"),
   },
   handler: async (ctx, args) => {
+    const normalizedEmail = args.email.trim().toLowerCase();
     const invitation = await ctx.db.get(args.invitationId);
     if (!invitation) throw new Error("Invitation not found");
-    if (invitation.status !== "pending") throw new Error("Invitation is not pending");
+    if (invitation.orgId !== args.orgId) {
+      throw new Error("This invitation belongs to a different school. Please use the original invitation link.");
+    }
+    if (invitation.status !== "pending") throw new Error("This invitation has already been used or cancelled.");
     if (invitation.expiresAt <= Date.now()) {
       await ctx.db.patch(args.invitationId, { status: "expired" });
-      throw new Error("Invitation has expired");
+      throw new Error("This invitation has expired. Please ask your administrator to send a new one.");
     }
-    if (invitation.email.toLowerCase() !== args.email.toLowerCase()) {
-      throw new Error("Email mismatch");
+    if (invitation.email.toLowerCase() !== normalizedEmail) {
+      throw new Error(`This invitation was sent to ${invitation.email}. Please sign in with that email address to accept it.`);
     }
 
     const existingUser = await ctx.db
@@ -599,14 +639,14 @@ export const acceptInvitation = mutation({
       await ctx.db.patch(existingUser._id, {
         orgId: invitation.orgId,
         role: invitation.role,
-        email: args.email,
+        email: normalizedEmail,
         name: args.name,
         updatedAt: now,
       });
     } else {
       await ctx.db.insert("users", {
         clerkId: args.clerkId,
-        email: args.email,
+        email: normalizedEmail,
         name: args.name,
         role: invitation.role,
         orgId: invitation.orgId,

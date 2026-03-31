@@ -23,7 +23,7 @@ export type WorkspaceViewMode = "structured" | "columns" | "graph";
 export type ZoomBand = "overview" | "summary" | "detail" | "internal";
 
 /** Panel types for the right push-panel */
-export type PanelType = "chat" | "note" | "artifact" | "route-trace";
+export type PanelType = "chat" | "note" | "artifact" | "planner" | "route-trace";
 
 type PanelState = {
   type: PanelType;
@@ -38,8 +38,9 @@ type WorkspaceStoreState = {
   backgroundMode: WorkspaceBackgroundMode;
   isCreateDialogOpen: boolean;
 
-  // Semantic zoom — committed workstream via zoom or click
-  committedWorkstreamId?: string;
+  // Semantic zoom — primary focus plus any visible internal workstreams
+  primaryWorkstreamId?: string;
+  visibleWorkstreamIds: string[];
   zoomBand: ZoomBand;
 
   // View mode per committed workstream
@@ -58,6 +59,16 @@ type WorkspaceStoreState = {
   hubFocusOpen: boolean;
   hubCardBounds?: CardBounds;
 
+  // Focus timer
+  timerState: {
+    active: boolean;
+    sessionMinutes: number;
+    elapsed: number; // seconds elapsed in current session
+    sessionsCompleted: number;
+    workstreamId?: string;
+    workstreamTitle?: string;
+  };
+
   // Actions
   setCamera: (camera: WorkspaceCameraState) => void;
   setZoomBand: (band: ZoomBand) => void;
@@ -71,6 +82,8 @@ type WorkspaceStoreState = {
   // Semantic zoom commitment
   commitWorkstream: (workstreamId: string) => void;
   commitWorkstreamWithChat: (workstreamId: string, query?: string) => void;
+  setPrimaryWorkstreamId: (workstreamId?: string) => void;
+  setVisibleWorkstreamIds: (workstreamIds: string[]) => void;
   exitWorkstream: () => void;
   setPreviousViewport: (viewport: { x: number; y: number; zoom: number }) => void;
 
@@ -80,10 +93,20 @@ type WorkspaceStoreState = {
   // Push panel
   openPanel: (type: PanelType, id: string) => void;
   closePanel: () => void;
+  setOpenChatQuery: (query?: string) => void;
+  clearOpenChatQuery: () => void;
 
   // Hub
   focusHub: (bounds: CardBounds) => void;
   exitHub: () => void;
+
+  // Timer
+  setTimerMinutes: (minutes: number) => void;
+  startTimer: (sessionMinutes?: number, workstreamId?: string, workstreamTitle?: string) => void;
+  pauseTimer: () => void;
+  resetTimer: () => void;
+  tickTimer: () => void;
+  completeTimerSession: () => void;
 
   reset: () => void;
 };
@@ -101,7 +124,8 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set) => ({
   showConnections: true,
   backgroundMode: "dots",
   isCreateDialogOpen: false,
-  committedWorkstreamId: undefined,
+  primaryWorkstreamId: undefined,
+  visibleWorkstreamIds: [],
   zoomBand: "summary",
   viewMode: "structured",
   panel: undefined,
@@ -109,6 +133,12 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set) => ({
   previousViewport: undefined,
   hubFocusOpen: false,
   hubCardBounds: undefined,
+  timerState: {
+    active: false,
+    sessionMinutes: 25,
+    elapsed: 0,
+    sessionsCompleted: 0,
+  },
 
   setCamera: (camera) => set({ camera }),
   setZoomBand: (zoomBand) => set({ zoomBand }),
@@ -121,18 +151,23 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set) => ({
 
   commitWorkstream: (workstreamId) =>
     set({
-      committedWorkstreamId: workstreamId,
+      primaryWorkstreamId: workstreamId,
+      visibleWorkstreamIds: [workstreamId],
       openChatQuery: undefined,
     }),
   commitWorkstreamWithChat: (workstreamId, query) =>
     set({
-      committedWorkstreamId: workstreamId,
+      primaryWorkstreamId: workstreamId,
+      visibleWorkstreamIds: [workstreamId],
       openChatQuery: query,
       panel: query ? { type: "chat", id: "new" } : undefined,
     }),
+  setPrimaryWorkstreamId: (primaryWorkstreamId) => set({ primaryWorkstreamId }),
+  setVisibleWorkstreamIds: (visibleWorkstreamIds) => set({ visibleWorkstreamIds }),
   exitWorkstream: () =>
     set({
-      committedWorkstreamId: undefined,
+      primaryWorkstreamId: undefined,
+      visibleWorkstreamIds: [],
       openChatQuery: undefined,
       panel: undefined,
     }),
@@ -142,9 +177,53 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set) => ({
 
   openPanel: (type, id) => set({ panel: { type, id } }),
   closePanel: () => set({ panel: undefined }),
+  setOpenChatQuery: (query) => set({ openChatQuery: query }),
+  clearOpenChatQuery: () => set({ openChatQuery: undefined }),
 
   focusHub: (hubCardBounds) => set({ hubFocusOpen: true, hubCardBounds }),
   exitHub: () => set({ hubFocusOpen: false, hubCardBounds: undefined }),
+
+  setTimerMinutes: (minutes) =>
+    set((state) => ({
+      timerState: { ...state.timerState, sessionMinutes: minutes, elapsed: 0 },
+    })),
+  startTimer: (sessionMinutes, workstreamId, workstreamTitle) => {
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("ai-school:timer-start"));
+    set((state) => ({
+      timerState: {
+        ...state.timerState,
+        active: true,
+        sessionMinutes: sessionMinutes ?? state.timerState.sessionMinutes,
+        workstreamId: workstreamId ?? state.timerState.workstreamId,
+        workstreamTitle: workstreamTitle ?? state.timerState.workstreamTitle,
+      },
+    }));
+  },
+  pauseTimer: () => {
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("ai-school:timer-pause"));
+    set((state) => ({
+      timerState: { ...state.timerState, active: false },
+    }));
+  },
+  resetTimer: () => {
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("ai-school:timer-reset"));
+    set((state) => ({
+      timerState: { ...state.timerState, active: false, elapsed: 0 },
+    }));
+  },
+  tickTimer: () =>
+    set((state) => ({
+      timerState: { ...state.timerState, elapsed: state.timerState.elapsed + 1 },
+    })),
+  completeTimerSession: () =>
+    set((state) => ({
+      timerState: {
+        ...state.timerState,
+        active: false,
+        elapsed: 0,
+        sessionsCompleted: state.timerState.sessionsCompleted + 1,
+      },
+    })),
 
   reset: () =>
     set({
@@ -154,7 +233,8 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set) => ({
       showConnections: true,
       backgroundMode: "dots",
       isCreateDialogOpen: false,
-      committedWorkstreamId: undefined,
+      primaryWorkstreamId: undefined,
+      visibleWorkstreamIds: [],
       hubFocusOpen: false,
       hubCardBounds: undefined,
       openChatQuery: undefined,
@@ -162,5 +242,11 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set) => ({
       viewMode: "structured",
       panel: undefined,
       previousViewport: undefined,
+      timerState: {
+        active: false,
+        sessionMinutes: 25,
+        elapsed: 0,
+        sessionsCompleted: 0,
+      },
     }),
 }));

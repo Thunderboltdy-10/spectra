@@ -88,6 +88,11 @@ export const SlashCommandList = forwardRef<
         selectItem(selectedIndex);
         return true;
       }
+      if (event.key === "Tab") {
+        event.preventDefault();
+        selectItem(selectedIndex);
+        return true;
+      }
       return false;
     },
   }));
@@ -110,25 +115,30 @@ export const SlashCommandList = forwardRef<
     sections.get(section)!.push(item);
   }
 
-  let globalIndex = 0;
+  const indexedSections = Array.from(sections.entries()).map(([section, sectionItems]) => ({
+    section,
+    items: sectionItems.map((item) => ({
+      item,
+      index: items.findIndex((candidate) => candidate.id === item.id),
+    })),
+  }));
 
   return (
     <div className="slash-command-dropdown">
-      {Array.from(sections.entries()).map(([section, sectionItems]) => (
+      {indexedSections.map(({ section, items: indexedItems }) => (
         <div key={section}>
           <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
             {section}
           </div>
-          {sectionItems.map((item) => {
-            const idx = globalIndex++;
+          {indexedItems.map(({ item, index }) => {
             const Icon = ICON_MAP[item.icon];
             return (
               <button
                 key={item.id}
                 type="button"
-                className={`slash-command-item ${idx === selectedIndex ? "is-selected" : ""}`}
-                onClick={() => selectItem(items.indexOf(item))}
-                onMouseEnter={() => setSelectedIndex(items.indexOf(item))}
+                className={`slash-command-item ${index === selectedIndex ? "is-selected" : ""}`}
+                onClick={() => selectItem(index)}
+                onMouseEnter={() => setSelectedIndex(index)}
               >
                 <span className="slash-command-icon">
                   {Icon ? <Icon className="w-4 h-4" /> : <span className="text-xs font-mono">{item.icon}</span>}

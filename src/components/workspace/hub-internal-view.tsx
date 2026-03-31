@@ -7,7 +7,7 @@
  * this provides buildHubNodes() to render hub-level content as React Flow nodes.
  *
  * Hub content includes:
- * - Quick Notes: unscoped document artifacts (workstreamId: null)
+ * - Quick Artifacts: unscoped document artifacts (workstreamId: null)
  * - Upcoming Deadlines: cross-workstream planner aggregation (next 14 days)
  * - Recent Activity: latest actions across all workstreams
  * - Quick Actions: new workstream, new document, new chat
@@ -15,7 +15,7 @@
 
 import type { Node } from "@xyflow/react";
 import type { PanelType } from "@/stores/workspace-store";
-import type { GroupNodeData, EmptyStateNodeData } from "./views/internal-content-nodes";
+import type { GroupNodeData, EmptyStateNodeData, FocusTimerNodeData } from "./views/internal-content-nodes";
 
 type HubContentData = {
   quickNotes: Array<{ id: string; title: string; updatedAt: number }>;
@@ -24,6 +24,16 @@ type HubContentData = {
   loading: boolean;
   onOpenPanel: (type: PanelType, id: string) => void;
   onNewWorkstream?: () => void;
+  timerState?: {
+    active: boolean;
+    sessionMinutes: number;
+    elapsed: number;
+    sessionsCompleted: number;
+    workstreamTitle?: string;
+  };
+  onTimerStart?: () => void;
+  onTimerPause?: () => void;
+  onTimerReset?: () => void;
 };
 
 function formatTimeAgo(timestamp: number) {
@@ -67,27 +77,27 @@ export function buildHubNodes(
       data: {
         emoji: "🏠",
         title: "Hub",
-        description: "Your hub is empty. Create notes, set deadlines, or connect ManageBac.",
+        description: "Your hub is empty. Create artifacts, set deadlines, or connect ManageBac.",
         onNew: data.onNewWorkstream,
       } satisfies EmptyStateNodeData,
     });
     return nodes;
   }
 
-  // Quick Notes
+  // Quick artifacts
   if (data.quickNotes.length > 0) {
     nodes.push({
       id: "hub-notes",
-      type: "group",
+      type: "contentGroup",
       position: { x: basePosition.x, y: basePosition.y + yOffset },
       draggable: true,
       selectable: false,
       data: {
-        label: "Quick Notes",
+        label: "Quick Artifacts",
         icon: "note",
-        panelType: "note",
+        panelType: "artifact",
         onOpenPanel: data.onOpenPanel,
-        onNew: () => data.onOpenPanel("note", "new"),
+        onNew: () => data.onOpenPanel("artifact", "new"),
         items: data.quickNotes.map((n) => ({
           id: n.id,
           title: n.title,
@@ -102,13 +112,14 @@ export function buildHubNodes(
   if (data.deadlines.length > 0) {
     nodes.push({
       id: "hub-deadlines",
-      type: "group",
+      type: "contentGroup",
       position: { x: basePosition.x, y: basePosition.y + yOffset },
       draggable: true,
       selectable: false,
       data: {
         label: "Upcoming Deadlines",
         icon: "planner",
+        panelType: "planner",
         onOpenPanel: data.onOpenPanel,
         items: data.deadlines.map((d) => ({
           id: d.id,
@@ -125,7 +136,7 @@ export function buildHubNodes(
   if (data.recentActivity.length > 0) {
     nodes.push({
       id: "hub-activity",
-      type: "group",
+      type: "contentGroup",
       position: { x: basePosition.x + 340, y: basePosition.y },
       draggable: true,
       selectable: false,
@@ -142,11 +153,35 @@ export function buildHubNodes(
     });
   }
 
+  // Focus Timer (positioned to the right of activity)
+  if (data.timerState && data.onTimerStart && data.onTimerPause && data.onTimerReset) {
+    nodes.push({
+      id: "hub-timer",
+      type: "focusTimer",
+      position: { x: basePosition.x + 340, y: basePosition.y + (data.recentActivity.length > 0 ? Math.min(data.recentActivity.length, 6) * 32 + 80 : 0) },
+      draggable: true,
+      selectable: false,
+      data: {
+        active: data.timerState.active,
+        sessionMinutes: data.timerState.sessionMinutes,
+        elapsed: data.timerState.elapsed,
+        sessionsCompleted: data.timerState.sessionsCompleted,
+        workstreamTitle: data.timerState.workstreamTitle,
+        onStart: data.onTimerStart,
+        onPause: data.onTimerPause,
+        onReset: data.onTimerReset,
+      } satisfies FocusTimerNodeData,
+    });
+  }
+
   // Quick Actions
+  const actionsY = data.timerState
+    ? basePosition.y + (data.recentActivity.length > 0 ? Math.min(data.recentActivity.length, 6) * 32 + 80 : 0) + 220
+    : basePosition.y + 200;
   nodes.push({
     id: "hub-actions",
     type: "emptyState",
-    position: { x: basePosition.x + 340, y: basePosition.y + 200 },
+    position: { x: basePosition.x + 340, y: actionsY },
     draggable: true,
     selectable: false,
     data: {

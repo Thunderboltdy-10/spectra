@@ -119,6 +119,22 @@ export async function POST(request: NextRequest) {
       return ok(result);
     }
 
+    if (action === "batchUpdatePositions") {
+      const positions = Array.isArray(body.positions) ? body.positions : null;
+      if (!positions) return badRequest("positions array is required");
+
+      const result = await convexMutation("workstreams:batchUpdatePositions", {
+        actorClerkId: actor.clerkId,
+        positions: positions.map((item) => ({
+          workstreamId: String((item as Record<string, unknown>).workstreamId),
+          x: Number((item as Record<string, unknown>).x),
+          y: Number((item as Record<string, unknown>).y),
+        })),
+      });
+
+      return ok(result);
+    }
+
     if (action === "delete") {
       const { workstreamId } = body as { workstreamId?: string };
       if (!workstreamId) return badRequest("workstreamId is required");

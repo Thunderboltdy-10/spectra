@@ -20,7 +20,7 @@ describe("notes route compatibility", () => {
 
     expect(response.status).toBe(200);
     expect(payload.notes).toEqual([{ _id: "artifact_1", title: "Biology notes" }]);
-    expect(convexQuery).toHaveBeenCalledWith("notes:list", {
+    expect(convexQuery).toHaveBeenCalledWith("artifacts:listDocumentCompat", {
       actorClerkId: "user_notes",
       workstreamId: "ws_1",
       search: undefined,
@@ -30,7 +30,7 @@ describe("notes route compatibility", () => {
 
   it("creates a document artifact through notes compatibility with provenance fields", async () => {
     const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_notes" });
-    const convexMutation = vi.fn().mockResolvedValue({ noteId: "artifact_2" });
+    const convexMutation = vi.fn().mockResolvedValue("artifact_2");
 
     vi.doMock("@/lib/auth-server", () => ({ requireActor }));
     vi.doMock("@/lib/convex-server", () => ({ convexQuery: vi.fn(), convexMutation }));
@@ -53,8 +53,9 @@ describe("notes route compatibility", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(convexMutation).toHaveBeenCalledWith("notes:create", {
+    expect(convexMutation).toHaveBeenCalledWith("artifacts:create", {
       actorClerkId: "user_notes",
+      type: "document",
       title: "CAS reflection",
       content: { type: "doc", content: [] },
       contentPlaintext: "Reflection text",
@@ -65,7 +66,7 @@ describe("notes route compatibility", () => {
       sourceUpdatedAt: 123,
       syncConflictSummary: undefined,
       workstreamId: undefined,
-      artifactId: undefined,
+      linkedChatId: undefined,
       lastAiEditId: undefined,
       pendingDiffs: undefined,
     });
@@ -73,14 +74,17 @@ describe("notes route compatibility", () => {
 
   it("returns the migrated document id when a legacy note update is proxied", async () => {
     const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_notes" });
-    const convexMutation = vi.fn().mockResolvedValue({
-      success: true,
-      noteId: "artifact_migrated_1",
-      migratedFromLegacy: true,
-    });
+    const convexQuery = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("legacy note"))
+      .mockResolvedValueOnce(null);
+    const convexMutation = vi
+      .fn()
+      .mockResolvedValueOnce({ artifactId: "artifact_migrated_1" })
+      .mockResolvedValueOnce({ success: true });
 
     vi.doMock("@/lib/auth-server", () => ({ requireActor }));
-    vi.doMock("@/lib/convex-server", () => ({ convexQuery: vi.fn(), convexMutation }));
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
 
     const route = await import("@/app/api/notes/route");
     const response = await route.POST(
@@ -100,11 +104,16 @@ describe("notes route compatibility", () => {
     expect(payload).toEqual({
       success: true,
       noteId: "artifact_migrated_1",
+      artifactId: "artifact_migrated_1",
       migratedFromLegacy: true,
     });
-    expect(convexMutation).toHaveBeenCalledWith("notes:update", {
+    expect(convexMutation).toHaveBeenNthCalledWith(1, "artifacts:getOrMigrateFromNote", {
       actorClerkId: "user_notes",
       noteId: "legacy_note_1",
+    });
+    expect(convexMutation).toHaveBeenNthCalledWith(2, "artifacts:update", {
+      actorClerkId: "user_notes",
+      artifactId: "artifact_migrated_1",
       title: "Migrated title",
       content: undefined,
       contentPlaintext: undefined,
@@ -115,7 +124,7 @@ describe("notes route compatibility", () => {
       sourceUpdatedAt: undefined,
       syncConflictSummary: undefined,
       workstreamId: undefined,
-      artifactId: undefined,
+      linkedChatId: undefined,
       lastAiEditId: undefined,
       pendingDiffs: undefined,
     });

@@ -1,8 +1,19 @@
 import { NextRequest } from "next/server";
 import { requireActor } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
+import { stripGeneratedDocumentMarkers } from "@/lib/document-generator";
 import { badRequest, ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
+
+function sanitizeArtifactTitle(value: unknown, fallback = "Untitled artifact") {
+  const sanitized = typeof value === "string" ? stripGeneratedDocumentMarkers(value).trim() : "";
+  return sanitized || fallback;
+}
+
+function sanitizeArtifactPlaintext(value: unknown) {
+  if (typeof value !== "string") return value as string | undefined;
+  return stripGeneratedDocumentMarkers(value);
+}
 
 export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
@@ -58,6 +69,23 @@ export async function GET(request: NextRequest) {
       return ok({ artifacts });
     }
 
+    if (action === "getOrMigrateFromNote") {
+      const noteId = params.get("noteId");
+      if (!noteId) return badRequest("noteId is required");
+      const existingArtifact = await convexQuery("artifacts:get", {
+        actorClerkId: actor.clerkId,
+        artifactId: noteId,
+      }).catch(() => null) as { _id: string } | null;
+      if (existingArtifact) {
+        return ok({ artifactId: existingArtifact._id });
+      }
+      const result = await convexMutation("artifacts:getOrMigrateFromNote", {
+        actorClerkId: actor.clerkId,
+        noteId,
+      });
+      return ok(result);
+    }
+
     // Default: list
     const artifacts = await convexQuery("artifacts:list", {
       actorClerkId: actor.clerkId,
@@ -103,9 +131,9 @@ export async function POST(request: NextRequest) {
       const artifactId = await convexMutation("artifacts:create", {
         actorClerkId: actor.clerkId,
         type,
-        title,
+        title: sanitizeArtifactTitle(title, type === "document" ? "Untitled document" : "Untitled artifact"),
         content: content ?? {},
-        contentPlaintext: body.contentPlaintext as string | undefined,
+        contentPlaintext: sanitizeArtifactPlaintext(body.contentPlaintext),
         workstreamId: body.workstreamId as string | undefined,
         editorMode: body.editorMode as "standard" | "ai_enhanced" | "agentic" | "notion" | "simple" | undefined,
         sourceType: body.sourceType as "user_manual" | "ai_generated" | "managebac_sync" | undefined,
@@ -150,9 +178,9 @@ export async function POST(request: NextRequest) {
       const result = await convexMutation("artifacts:update", {
         actorClerkId: actor.clerkId,
         artifactId,
-        title,
+        title: title == null ? undefined : sanitizeArtifactTitle(title),
         content,
-        contentPlaintext: body.contentPlaintext as string | null | undefined,
+        contentPlaintext: sanitizeArtifactPlaintext(body.contentPlaintext) as string | null | undefined,
         workstreamId: body.workstreamId as string | null | undefined,
         editorMode: body.editorMode as "standard" | "ai_enhanced" | "agentic" | "notion" | "simple" | undefined,
         sourceType: body.sourceType as "user_manual" | "ai_generated" | "managebac_sync" | null | undefined,
@@ -300,6 +328,23 @@ export async function POST(request: NextRequest) {
         artifactId,
         versionId,
         contentPlaintext,
+      });
+      return ok(result);
+    }
+
+    if (action === "getOrMigrateFromNote") {
+      const { noteId } = body as { noteId?: string };
+      if (!noteId) return badRequest("noteId is required");
+      const existingArtifact = await convexQuery("artifacts:get", {
+        actorClerkId: actor.clerkId,
+        artifactId: noteId,
+      }).catch(() => null) as { _id: string } | null;
+      if (existingArtifact) {
+        return ok({ artifactId: existingArtifact._id });
+      }
+      const result = await convexMutation("artifacts:getOrMigrateFromNote", {
+        actorClerkId: actor.clerkId,
+        noteId,
       });
       return ok(result);
     }

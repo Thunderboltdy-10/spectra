@@ -35,6 +35,8 @@ interface ArtifactAiSurfaceProps {
 export function ArtifactAiSurface({
   artifactId,
   context,
+  onApplyEdits,
+  onDiscard,
   workstreamId,
 }: ArtifactAiSurfaceProps) {
   const [input, setInput] = useState("");
@@ -75,9 +77,14 @@ export function ArtifactAiSurface({
     setInput("");
     await sendMessage(trimmed);
 
-    // After AI responds, start discard timer
-    setEditCount((c) => c + 1);
-    setDiscardTimer(30);
+    if (onApplyEdits) {
+      setEditCount((c) => c + 1);
+      setDiscardTimer(30);
+    }
+  }, [input, onApplyEdits, streaming, sendMessage]);
+
+  useEffect(() => {
+    if (discardTimer === null) return undefined;
     if (discardTimerRef.current) clearInterval(discardTimerRef.current);
     discardTimerRef.current = setInterval(() => {
       setDiscardTimer((prev) => {
@@ -88,7 +95,11 @@ export function ArtifactAiSurface({
         return prev - 1;
       });
     }, 1000);
-  }, [input, streaming, sendMessage]);
+
+    return () => {
+      if (discardTimerRef.current) clearInterval(discardTimerRef.current);
+    };
+  }, [discardTimer]);
 
   // Cleanup timer
   useEffect(() => {
@@ -100,8 +111,8 @@ export function ArtifactAiSurface({
   const handleDiscard = useCallback(() => {
     setDiscardTimer(null);
     if (discardTimerRef.current) clearInterval(discardTimerRef.current);
-    // TODO: trigger revert via version history
-  }, []);
+    onDiscard?.();
+  }, [onDiscard]);
 
   const handleConfirm = useCallback(() => {
     setDiscardTimer(null);
@@ -140,7 +151,7 @@ export function ArtifactAiSurface({
 
         {/* Discard bar */}
         <AnimatePresence>
-          {discardTimer !== null && (
+          {discardTimer !== null && onApplyEdits && (
             <motion.div
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: "auto", opacity: 1 }}
@@ -266,7 +277,7 @@ export function ArtifactAiSurface({
 
       {/* Discard bar */}
       <AnimatePresence>
-        {discardTimer !== null && (
+        {discardTimer !== null && onApplyEdits && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}

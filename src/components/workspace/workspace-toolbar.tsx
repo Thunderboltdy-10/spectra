@@ -17,7 +17,8 @@ import { cn } from "@/lib/utils";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
 type WorkspaceToolbarProps = {
-  onCenterHub: () => void;
+  onCenterHome: () => void;
+  onCommitHub: () => void;
   onNewWorkstream: () => void;
   workstreamCount: number;
   searchQuery: string;
@@ -26,7 +27,8 @@ type WorkspaceToolbarProps = {
 };
 
 export function WorkspaceToolbar({
-  onCenterHub,
+  onCenterHome,
+  onCommitHub,
   onNewWorkstream,
   workstreamCount,
   searchQuery,
@@ -40,13 +42,14 @@ export function WorkspaceToolbar({
     setShowConnections,
     backgroundMode,
     setBackgroundMode,
-    committedWorkstreamId,
+    primaryWorkstreamId,
     viewMode,
     setViewMode,
   } = useWorkspaceStore();
   const [searchOpen, setSearchOpen] = useState(false);
 
-  const isInsideWorkstream = !!committedWorkstreamId;
+  const isInsideWorkstream = !!primaryWorkstreamId;
+  const isHubCommitted = primaryWorkstreamId === "__hub__";
 
   const backgroundLabel =
     backgroundMode === "dots"
@@ -132,7 +135,7 @@ export function WorkspaceToolbar({
       {/* Right: actions + view toggle when inside workstream */}
       <div className="flex items-center gap-1 flex-1 justify-end">
         {/* View toggle — only when inside a committed workstream */}
-        {isInsideWorkstream && (
+        {isInsideWorkstream && !isHubCommitted && (
           <>
             <ViewToggleBtn
               icon={<LayoutGrid className="w-3.5 h-3.5" />}
@@ -158,11 +161,19 @@ export function WorkspaceToolbar({
 
         <ToolbarBtn
           icon={<Home className="w-3.5 h-3.5" />}
+          label="Home"
+          onClick={onCenterHome}
+          active={!primaryWorkstreamId}
+        />
+        <ToolbarBtn
+          icon={<Grid3X3 className="w-3.5 h-3.5" />}
           label="Hub"
-          onClick={onCenterHub}
+          onClick={onCommitHub}
+          active={isHubCommitted}
+          glow
         />
 
-        {!isInsideWorkstream && (
+        {!isInsideWorkstream && !isHubCommitted && (
           <>
             <ToolbarBtn
               icon={<GitBranch className={cn("w-3.5 h-3.5", !showConnections && "opacity-40")} />}
@@ -180,13 +191,13 @@ export function WorkspaceToolbar({
         )}
 
         <ToolbarBtn
-          icon={<Grid3X3 className="w-3.5 h-3.5" />}
+          icon={<LayoutGrid className="w-3.5 h-3.5" />}
           label={backgroundLabel}
           onClick={cycleBackground}
           active={backgroundMode !== "blank"}
         />
 
-        {!isInsideWorkstream && (
+        {!isInsideWorkstream && !isHubCommitted && (
           <>
             <div className="w-px h-5 bg-[var(--border-default)] mx-1" />
             <button
@@ -216,11 +227,13 @@ function ToolbarBtn({
   label,
   onClick,
   active,
+  glow,
 }: {
   icon: React.ReactNode;
   label: string;
   onClick: () => void;
   active?: boolean;
+  glow?: boolean;
 }) {
   return (
     <button
@@ -232,7 +245,8 @@ function ToolbarBtn({
         "text-xs transition-colors duration-150",
         active
           ? "text-[var(--accent-cyan)] bg-[var(--accent-cyan)]/8"
-          : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]",
+          : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+        glow && !active && "hover:shadow-[0_0_0_1px_color-mix(in_oklab,var(--accent-cyan)_14%,transparent),0_10px_22px_-18px_rgba(14,142,232,0.45)]",
       )}
     >
       {icon}

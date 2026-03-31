@@ -8,22 +8,26 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import {
   ArrowUpRight,
+  CalendarClock,
   FileText,
   MessageSquare,
   Route,
   Send,
   Square,
   StickyNote,
-  X,
 } from "lucide-react";
 import type { PanelType } from "@/stores/workspace-store";
 import { useChatPanel } from "@/hooks/use-chat-panel";
 import { useArtifactData } from "@/hooks/use-artifact-data";
 import { cn } from "@/lib/utils";
+import { useWorkspaceStore } from "@/stores/workspace-store";
+import { ArtifactAiSurface } from "@/components/artifacts/artifact-ai-surface";
+import { stripGeneratedDocumentMarkers } from "@/lib/document-generator";
+import { RightSidePanel } from "@/components/shared/right-side-panel";
 
 // Dynamic import TiptapEditor (SSR-safe)
 const TiptapEditor = dynamic(
@@ -51,6 +55,7 @@ const PANEL_WIDTHS: Record<PanelType, number> = {
   chat: 380,
   note: 520,
   artifact: 480,
+  planner: 420,
   "route-trace": 400,
 };
 
@@ -58,13 +63,15 @@ const PANEL_ICONS: Record<PanelType, React.ReactNode> = {
   chat: <MessageSquare className="w-4 h-4" />,
   note: <StickyNote className="w-4 h-4" />,
   artifact: <FileText className="w-4 h-4" />,
+  planner: <CalendarClock className="w-4 h-4" />,
   "route-trace": <Route className="w-4 h-4" />,
 };
 
 const PANEL_LABELS: Record<PanelType, string> = {
   chat: "Thread",
-  note: "Document",
+  note: "Artifact",
   artifact: "Artifact",
+  planner: "Planner Item",
   "route-trace": "Route Trace",
 };
 
@@ -88,56 +95,28 @@ export function RightPushPanel({
   }, [onClose]);
 
   return (
-    <motion.div
-      ref={panelRef}
-      initial={{ width: 0, opacity: 0 }}
-      animate={{ width, opacity: 1 }}
-      exit={{ width: 0, opacity: 0 }}
-      transition={{
-        width: { duration: 0.3, ease: [0.22, 1, 0.36, 1] },
-        opacity: { duration: 0.2 },
-      }}
-      className="relative h-full overflow-hidden border-l border-[var(--border-default)] bg-[var(--bg-primary)] shrink-0"
-    >
-      <div className="flex flex-col h-full" style={{ width }}>
-        {/* Panel header */}
-        <div className="flex items-center justify-between px-4 h-12 shrink-0 shadow-[0_1px_0_var(--border-default)]">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-[var(--text-tertiary)]">
-              {PANEL_ICONS[type]}
-            </span>
-            <span className="text-sm font-medium text-[var(--text-primary)] truncate">
-              {PANEL_LABELS[type]}
-            </span>
-          </div>
-          <div className="flex items-center gap-1">
-            {onExpand && type !== "route-trace" && (
-              <button
-                type="button"
-                onClick={() => onExpand(type, id)}
-                title="Open full view"
-                className="p-1.5 rounded-md text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-              >
-                <ArrowUpRight className="w-4 h-4" />
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={onClose}
-              title="Close panel"
-              className="p-1.5 rounded-md text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Panel content — fills remaining space */}
-        <div className="flex-1 min-h-0 overflow-hidden">
-          <PanelContent type={type} id={id} workstreamId={workstreamId} />
-        </div>
-      </div>
-    </motion.div>
+    <div ref={panelRef}>
+      <RightSidePanel
+        width={width}
+        title={PANEL_LABELS[type]}
+        icon={PANEL_ICONS[type]}
+        onClose={onClose}
+        panelType={type}
+        contentKey={`${type}-${id}`}
+        actions={onExpand && type !== "route-trace" ? (
+          <button
+            type="button"
+            onClick={() => onExpand(type, id)}
+            title="Open full view"
+            className="rounded-md p-1.5 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+          >
+            <ArrowUpRight className="h-4 w-4" />
+          </button>
+        ) : null}
+      >
+        <PanelContent key={`${type}-${id}`} type={type} id={id} workstreamId={workstreamId} />
+      </RightSidePanel>
+    </div>
   );
 }
 
@@ -156,7 +135,9 @@ function PanelContent({
     case "note":
       return <NotePanelContent noteId={id} workstreamId={workstreamId} />;
     case "artifact":
-      return <ArtifactPanelContent artifactId={id} />;
+      return <ArtifactPanelContent artifactId={id} workstreamId={workstreamId} />;
+    case "planner":
+      return <PlannerPanelContent plannerItemId={id} />;
     case "route-trace":
       return <RouteTracePanelContent />;
     default:
@@ -192,6 +173,7 @@ function ChatPanelContent({
     thinkingLevel: "low",
     routerMode: "auto",
   });
+  const { openChatQuery, clearOpenChatQuery } = useWorkspaceStore();
 
   // Hydrate existing thread
   useEffect(() => {
@@ -205,6 +187,12 @@ function ChatPanelContent({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streaming]);
 
+  useEffect(() => {
+    if (threadId !== "new" || !openChatQuery || streaming || messages.length > 0) return;
+    clearOpenChatQuery();
+    void sendMessage(openChatQuery);
+  }, [clearOpenChatQuery, messages.length, openChatQuery, sendMessage, streaming, threadId]);
+
   const handleSend = useCallback(async () => {
     const trimmed = input.trim();
     if (!trimmed || streaming) return;
@@ -216,7 +204,7 @@ function ChatPanelContent({
   return (
     <div className="flex flex-col h-full">
       {/* Messages area with bottom gradient mask */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 [mask-image:linear-gradient(to_bottom,black_90%,transparent)]">
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {messages.length === 0 && !streaming && (
           <div className="flex flex-col items-center justify-center h-full text-center py-12">
             <MessageSquare className="w-8 h-8 text-[var(--text-tertiary)] mb-3" />
@@ -345,6 +333,7 @@ function NotePanelContent({
   noteId: string;
   workstreamId?: string;
 }) {
+  const router = useRouter();
   const {
     activeDocument,
     loading,
@@ -385,29 +374,27 @@ function NotePanelContent({
   return (
     <div className="flex flex-col h-full">
       {/* Title */}
-      <div className="px-6 pt-4 pb-2 shrink-0">
-        <input
-          type="text"
-          value={activeDocument.title}
-          onChange={(e) => {
-            void updateDocument(activeDocument._id, { title: e.target.value });
-          }}
-          className="w-full bg-transparent text-lg font-display font-semibold text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
-          placeholder="Untitled"
-        />
-      </div>
-
-      {/* Editor */}
       <div className="flex-1 min-h-0">
         <TiptapEditor
-          noteId={activeDocument._id}
+          artifactId={activeDocument._id}
           content={activeDocument.content as import("@tiptap/core").JSONContent | null}
           compact
+          showAiBar
+          showDocumentMeta
+          documentTitle={stripGeneratedDocumentMarkers(activeDocument.title || "").trim() || "Untitled"}
+          createdAt={activeDocument.createdAt}
+          updatedAt={activeDocument.updatedAt}
+          onVersionHistoryOpen={() => {
+            router.push(`/notes?id=${encodeURIComponent(activeDocument._id)}&versionHistory=1`);
+          }}
+          onVersionRestore={() => {
+            void fetchDocument(activeDocument._id);
+          }}
           onSave={(content, text) =>
             void updateDocument(activeDocument._id, {
-              title: text.trim().split("\n")[0] || activeDocument.title || "Untitled",
+              title: stripGeneratedDocumentMarkers(text.trim().split("\n")[0] || "Untitled").trim() || "Untitled",
               content,
-              contentPlaintext: text,
+              contentPlaintext: stripGeneratedDocumentMarkers(text),
             })
           }
           className="h-full"
@@ -419,36 +406,254 @@ function NotePanelContent({
 
 /* ─── Artifact Panel Content ─────────────────────────────────── */
 
-function ArtifactPanelContent({ artifactId }: { artifactId: string }) {
+function ArtifactPanelContent({
+  artifactId,
+  workstreamId,
+}: {
+  artifactId: string;
+  workstreamId?: string;
+}) {
+  const router = useRouter();
+  const [artifact, setArtifact] = useState<Record<string, unknown> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [createdId, setCreatedId] = useState<string | null>(null);
+
+  const loadArtifact = useCallback(async () => {
+    const effectiveId = artifactId === "new" ? createdId : artifactId;
+    if (!effectiveId) return;
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/artifacts?action=get&id=${encodeURIComponent(effectiveId)}`);
+      if (!response.ok) throw new Error("Failed to load artifact");
+      const data = (await response.json()) as { artifact: Record<string, unknown> };
+      setArtifact(data.artifact ?? null);
+    } finally {
+      setLoading(false);
+    }
+  }, [artifactId, createdId]);
+
+  useEffect(() => {
+    if (artifactId !== "new" || createdId) return;
+    setLoading(true);
+    void (async () => {
+      try {
+        const response = await fetch("/api/artifacts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "create",
+            type: "document",
+            title: "Untitled",
+            content: { type: "doc", content: [{ type: "paragraph" }] },
+            contentPlaintext: "",
+            editorMode: "standard",
+            workstreamId,
+          }),
+        });
+        if (!response.ok) throw new Error("Failed to create artifact");
+        const data = (await response.json()) as { artifactId?: string };
+        if (data.artifactId) {
+          setCreatedId(data.artifactId);
+        }
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [artifactId, createdId, workstreamId]);
+
+  useEffect(() => {
+    void loadArtifact();
+  }, [loadArtifact]);
+
+  if (loading) {
+    return <EditorLoader />;
+  }
+
+  if (!artifact) {
+    return (
+      <div className="flex items-center justify-center h-full text-sm text-[var(--text-secondary)]">
+        Artifact not found
+      </div>
+    );
+  }
+
+  const artifactType = String(artifact.type ?? "artifact");
+  const isDocument = artifactType === "document";
+
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 flex items-center justify-center p-6">
-        <div className="text-center">
-          <FileText className="w-8 h-8 text-[var(--text-tertiary)] mx-auto mb-3" />
-          <p className="text-sm text-[var(--text-secondary)]">
-            Artifact viewer
-          </p>
-          <p className="text-xs text-[var(--text-tertiary)] mt-1">
-            {artifactId}
-          </p>
-        </div>
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {isDocument ? (
+          <TiptapEditor
+            artifactId={artifactId === "new" ? (createdId ?? artifactId) : artifactId}
+            content={(artifact.content as import("@tiptap/core").JSONContent | null) ?? null}
+            compact
+            showAiBar
+            showDocumentMeta
+            documentTitle={stripGeneratedDocumentMarkers(String(artifact.title ?? "Untitled")).trim() || "Untitled"}
+            createdAt={Number(artifact.createdAt ?? Date.now())}
+            updatedAt={Number(artifact.updatedAt ?? Date.now())}
+            onVersionHistoryOpen={() => {
+              const effectiveId = artifactId === "new" ? createdId : artifactId;
+              if (!effectiveId) return;
+              router.push(`/notes?id=${encodeURIComponent(effectiveId)}&versionHistory=1`);
+            }}
+            onVersionRestore={({ artifact: restoredArtifact }) => {
+              if (!restoredArtifact) return;
+              setArtifact((current) => {
+                if (!current) return current;
+                return {
+                  ...current,
+                  title: restoredArtifact.title ?? current.title,
+                  content: restoredArtifact.content ?? current.content,
+                  contentPlaintext: restoredArtifact.contentPlaintext ?? current.contentPlaintext,
+                  updatedAt: restoredArtifact.updatedAt ?? current.updatedAt,
+                };
+              });
+            }}
+            onSave={(content, text) =>
+              void fetch("/api/artifacts", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  action: "update",
+                  artifactId: artifactId === "new" ? createdId : artifactId,
+                  title: stripGeneratedDocumentMarkers(text.trim().split("\n")[0] || "Untitled").trim() || "Untitled",
+                  content,
+                  contentPlaintext: stripGeneratedDocumentMarkers(text),
+                }),
+              }).then((response) => {
+                if (!response.ok) {
+                  throw new Error("Failed to update artifact");
+                }
+                setArtifact((current) => {
+                  if (!current) return current;
+                  const sanitizedTitle = stripGeneratedDocumentMarkers(text.trim().split("\n")[0] || "Untitled").trim() || "Untitled";
+                  return {
+                    ...current,
+                    title: sanitizedTitle,
+                    content,
+                    contentPlaintext: stripGeneratedDocumentMarkers(text),
+                    updatedAt: Date.now(),
+                  };
+                });
+              })
+            }
+            className="h-full"
+          />
+        ) : (
+          <div className="px-5 py-5 space-y-4">
+            <div className="space-y-1">
+              <p className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+                {artifactType}
+              </p>
+              <h2 className="font-display text-xl text-[var(--text-primary)]">
+                {String(artifact.title ?? "Untitled")}
+              </h2>
+              <p className="text-xs text-[var(--text-secondary)]">
+                Updated {new Date(Number(artifact.updatedAt ?? Date.now())).toLocaleString()}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+              <pre className="whitespace-pre-wrap break-words text-xs leading-6 text-[var(--text-secondary)]">
+                {JSON.stringify(artifact.content ?? {}, null, 2)}
+              </pre>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* AI interaction input bar */}
-      <div className="shrink-0 p-3 border-t border-[var(--border-default)]">
-        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-default)]">
-          <input
-            type="text"
-            placeholder="Ask AI about this artifact..."
-            className="flex-1 bg-transparent border-none outline-none text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
-          />
-          <button
-            type="button"
-            className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center bg-[var(--bg-tertiary)] text-[var(--text-tertiary)]"
-          >
-            <Send className="w-3.5 h-3.5" />
-          </button>
+      {!isDocument && (
+        <ArtifactAiSurface
+          artifactId={artifactId}
+          context="workspace-panel"
+          workstreamId={typeof artifact.workstreamId === "string" ? artifact.workstreamId : undefined}
+        />
+      )}
+    </div>
+  );
+}
+
+function PlannerPanelContent({ plannerItemId }: { plannerItemId: string }) {
+  const [plannerItem, setPlannerItem] = useState<Record<string, unknown> | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+
+    void (async () => {
+      try {
+        const response = await fetch(`/api/planner?action=get&id=${encodeURIComponent(plannerItemId)}`);
+        if (!response.ok) throw new Error("Failed to load planner item");
+        const data = (await response.json()) as { plannerItem?: Record<string, unknown> };
+        if (!cancelled) {
+          setPlannerItem(data.plannerItem ?? null);
+        }
+      } catch {
+        if (!cancelled) {
+          setPlannerItem(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [plannerItemId]);
+
+  if (loading) return <EditorLoader />;
+
+  if (!plannerItem) {
+    return (
+      <div className="flex items-center justify-center h-full text-sm text-[var(--text-secondary)]">
+        Planner item not found
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full px-5 py-5">
+      <div className="space-y-1">
+        <p className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+          {String(plannerItem.type ?? "planner")}
+        </p>
+        <h2 className="font-display text-xl text-[var(--text-primary)]">
+          {String(plannerItem.title ?? "Untitled")}
+        </h2>
+        <p className="text-xs text-[var(--text-secondary)]">
+          {typeof plannerItem.dueAt === "number"
+            ? `Due ${new Date(plannerItem.dueAt).toLocaleString()}`
+            : "No due date"}
+        </p>
+      </div>
+
+      <div className="mt-5 grid gap-3">
+        <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+          <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Status</div>
+          <div className="mt-1 text-sm text-[var(--text-primary)]">
+            {String(plannerItem.status ?? "pending")}
+          </div>
         </div>
+        <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+          <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Priority</div>
+          <div className="mt-1 text-sm text-[var(--text-primary)]">
+            {String(plannerItem.priority ?? "medium")}
+          </div>
+        </div>
+        {typeof plannerItem.description === "string" && plannerItem.description.length > 0 && (
+          <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+            <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Description</div>
+            <div className="mt-1 whitespace-pre-wrap text-sm leading-6 text-[var(--text-secondary)]">
+              {String(plannerItem.description)}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

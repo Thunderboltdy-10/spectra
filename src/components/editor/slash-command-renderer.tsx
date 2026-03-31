@@ -64,8 +64,10 @@ export function createSlashCommandRenderer() {
       if (props.event.key === "Escape") {
         popup?.remove();
         popup = null;
-        root?.unmount();
+        const currentRoot = root;
         root = null;
+        componentRef = null;
+        queueMicrotask(() => currentRoot?.unmount());
         return true;
       }
       return componentRef?.onKeyDown(props) ?? false;
@@ -74,9 +76,10 @@ export function createSlashCommandRenderer() {
     onExit() {
       popup?.remove();
       popup = null;
-      root?.unmount();
+      const currentRoot = root;
       root = null;
       componentRef = null;
+      queueMicrotask(() => currentRoot?.unmount());
     },
   };
 }

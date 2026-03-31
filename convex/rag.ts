@@ -28,21 +28,10 @@ export const getChunksByIds = internalQuery({
     ids: v.array(v.id("chunks")),
   },
   handler: async (ctx, args) => {
-    const docs: Array<{
-      _id: string;
-      scope?: unknown;
-      ownerUserId?: unknown;
-      packId?: unknown;
-      agentId?: unknown;
-      resourceId?: unknown;
-      filename?: unknown;
-      page?: unknown;
-      text?: unknown;
-    }> = [];
-    for (const id of args.ids) {
-      const doc = await ctx.db.get(id);
-      if (!doc) continue;
-      docs.push({
+    const docs = await Promise.all(args.ids.map((id) => ctx.db.get(id)));
+    return docs
+      .filter((doc): doc is NonNullable<typeof doc> => Boolean(doc))
+      .map((doc) => ({
         _id: String(doc._id),
         scope: doc.scope,
         ownerUserId: doc.ownerUserId,
@@ -52,9 +41,7 @@ export const getChunksByIds = internalQuery({
         filename: doc.filename,
         page: doc.page,
         text: doc.text,
-      });
-    }
-    return docs;
+      }));
   },
 });
 

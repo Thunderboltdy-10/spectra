@@ -222,11 +222,18 @@ export function ChatLayout() {
       handleModeChange(detail.mode as StudyMode);
     };
     const onOpenOrchestration = () => openPanel("orchestration");
+    const onResumeChat = (event: Event) => {
+      const detail = (event as CustomEvent<{ chatId?: string }>).detail;
+      if (!detail?.chatId) return;
+      chat.setSelectedChatId(detail.chatId);
+    };
     window.addEventListener("ai-school:switch-mode", onSwitchMode);
     window.addEventListener("ai-school:open-orchestration", onOpenOrchestration);
+    window.addEventListener("ai-school:resume-chat", onResumeChat);
     return () => {
       window.removeEventListener("ai-school:switch-mode", onSwitchMode);
       window.removeEventListener("ai-school:open-orchestration", onOpenOrchestration);
+      window.removeEventListener("ai-school:resume-chat", onResumeChat);
     };
   }, [handleModeChange, openPanel]);
 
@@ -811,6 +818,8 @@ export function ChatLayout() {
           onMessageChange={chat.setMessage}
           fileList={chat.fileList}
           fileUploadState={chat.fileUploadState}
+          streakAtRisk={chat.streakAtRisk}
+          continuationChat={chat.continuationChat}
           onFilesAdd={(files) =>
             chat.setFileList((prev) => {
               const seen = new Set(prev.map((file) => `${file.name}:${file.size}:${file.lastModified}`));

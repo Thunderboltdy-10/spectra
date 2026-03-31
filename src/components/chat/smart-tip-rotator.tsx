@@ -19,6 +19,8 @@ type SmartTipRotatorProps = {
   sending: boolean;
   streamPhase?: "idle" | "compacting" | "routing" | "searching" | "thinking" | "generating" | "synthesizing";
   hasResources: boolean;
+  streakAtRisk?: boolean;
+  continuationChat?: { id: string; title: string } | null;
   onAction: (actionId: TipActionId) => void;
 };
 
@@ -27,6 +29,8 @@ type TipCandidate = {
   message: string;
   actionLabel?: string;
   actionId?: TipActionId;
+  actionUrl?: string;
+  onClick?: () => void;
 };
 
 const ROTATE_MS = 9000;
@@ -37,10 +41,31 @@ export function SmartTipRotator({
   sending,
   streamPhase = "idle",
   hasResources,
+  streakAtRisk,
+  continuationChat,
   onAction,
 }: SmartTipRotatorProps) {
   const candidates = useMemo(() => {
     const tips: TipCandidate[] = [];
+
+    if (continuationChat) {
+      tips.push({
+        id: `continue-${continuationChat.id}`,
+        message: `Resume thread: Jump back into "${continuationChat.title}" to keep momentum.`,
+        actionLabel: "Resume",
+        onClick: () => {
+          // Send custom event to chat layout to select the chat
+          window.dispatchEvent(new CustomEvent("ai-school:resume-chat", { detail: { chatId: continuationChat.id } }));
+        },
+      });
+    }
+
+    if (streakAtRisk) {
+      tips.push({
+        id: "streak-risk",
+        message: "Protect streak: Give me a focused 10-minute study drill I can do right now to keep my streak alive today.",
+      });
+    }
 
     if (messageCount === 0) {
       tips.push(
@@ -130,7 +155,7 @@ export function SmartTipRotator({
     }
 
     return tips;
-  }, [hasResources, messageCount, mode, sending, streamPhase]);
+  }, [hasResources, messageCount, mode, sending, streamPhase, streakAtRisk, continuationChat]);
 
   const [index, setIndex] = useState(0);
 
@@ -154,7 +179,7 @@ export function SmartTipRotator({
       tipId={tip.id}
       message={tip.message}
       actionLabel={tip.actionLabel}
-      onAction={tip.actionId ? () => onAction(tip.actionId!) : undefined}
+      onAction={tip.onClick ? tip.onClick : (tip.actionId ? () => onAction(tip.actionId!) : undefined)}
       className="-mb-px"
     />
   );

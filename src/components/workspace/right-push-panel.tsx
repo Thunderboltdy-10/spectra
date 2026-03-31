@@ -101,6 +101,7 @@ export function RightPushPanel({
         title={PANEL_LABELS[type]}
         icon={PANEL_ICONS[type]}
         onClose={onClose}
+        panelType={type}
         actions={onExpand && type !== "route-trace" ? (
           <button
             type="button"
@@ -112,7 +113,7 @@ export function RightPushPanel({
           </button>
         ) : null}
       >
-        <PanelContent type={type} id={id} workstreamId={workstreamId} />
+        <PanelContent key={`${type}-${id}`} type={type} id={id} workstreamId={workstreamId} />
       </RightSidePanel>
     </div>
   );

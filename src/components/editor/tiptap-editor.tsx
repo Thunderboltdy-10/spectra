@@ -44,6 +44,21 @@ import { AiBar } from "./ai-bar";
 import { EditorToolbar } from "./editor-toolbar";
 import { RightSidePanel } from "@/components/shared/right-side-panel";
 
+function formatDateShort(ts: number): string {
+  const d = new Date(ts);
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${months[d.getMonth()]} ${d.getDate()}`;
+}
+
+function formatRelativeTime(ts: number): string {
+  const delta = Date.now() - ts;
+  if (delta < 60_000) return "just now";
+  if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}m ago`;
+  if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}h ago`;
+  if (delta < 604_800_000) return `${Math.floor(delta / 86_400_000)}d ago`;
+  return formatDateShort(ts);
+}
+
 interface TiptapEditorProps {
   content?: JSONContent | null;
   placeholder?: string;
@@ -394,17 +409,6 @@ export function TiptapEditor({
     };
   }, [artifactId, isVersionHistoryOpen]);
 
-  if (!editor) return null;
-
-  const chars = editor.storage.characterCount?.characters() ?? 0;
-  const words = editor.storage.characterCount?.words() ?? 0;
-  const headingOne = editor.state.doc.firstChild;
-  const titleText = stripDocumentMarkers(
-    headingOne?.type.name === "heading"
-      ? headingOne.textContent || documentTitle || "Untitled"
-      : documentTitle || "Untitled",
-  ) || "Untitled";
-
   const handleRestoreVersion = useCallback(async (versionId: string) => {
     if (!artifactId) return;
     const response = await fetch("/api/artifacts", {
@@ -434,6 +438,17 @@ export function TiptapEditor({
     onVersionRestore?.(data);
   }, [artifactId, onVersionRestore, replaceDocument]);
 
+  if (!editor) return null;
+
+  const chars = editor.storage.characterCount?.characters() ?? 0;
+  const words = editor.storage.characterCount?.words() ?? 0;
+  const headingOne = editor.state.doc.firstChild;
+  const titleText = stripDocumentMarkers(
+    headingOne?.type.name === "heading"
+      ? headingOne.textContent || documentTitle || "Untitled"
+      : documentTitle || "Untitled",
+  ) || "Untitled";
+
   return (
     <div className={cn("relative flex flex-col h-full", className)}>
       {/* Formatting toolbar */}
@@ -453,17 +468,13 @@ export function TiptapEditor({
       )}
 
       {showDocumentMeta && (
-        <div className={cn("shrink-0 px-5", compact ? "pt-4" : "pt-10 md:pt-14")}>
+        <div className={cn("shrink-0 px-5", compact ? "pt-4" : "pt-6")}>
           <div className={cn("mx-auto w-full", compact ? "max-w-[42rem]" : "max-w-[52rem]")}>
-            <div className={cn("flex flex-wrap items-center gap-x-3 gap-y-2 text-[11px] text-[var(--text-secondary)]", compact ? "pb-3" : "pb-4")}>
-              <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--text-tertiary)]">
-                Document Artifact
-              </div>
-              <span className="h-3 w-px bg-[var(--border-default)]/80" />
-              <span>Created {createdAt ? new Date(createdAt).toLocaleDateString() : "recently"}</span>
-              <span className="h-3 w-px bg-[var(--border-default)]/80" />
-              <span>Modified {updatedAt ? new Date(updatedAt).toLocaleDateString() : "recently"}</span>
-              <span className="h-3 w-px bg-[var(--border-default)]/80" />
+            <p className={cn("text-[11px] text-[var(--text-tertiary)]", compact ? "pb-2" : "pb-3")}>
+              {createdAt ? `Created ${formatDateShort(createdAt)}` : "Created recently"}
+              {" \u00b7 "}
+              {updatedAt ? `Modified ${formatRelativeTime(updatedAt)}` : "Modified recently"}
+              {" \u00b7 "}
               <button
                 type="button"
                 onClick={() => {
@@ -473,12 +484,11 @@ export function TiptapEditor({
                   }
                   openVersionHistory();
                 }}
-                className="rounded-full px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+                className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
               >
                 Version history
               </button>
-            </div>
-            {!compact && <div className="h-px w-full bg-[var(--border-default)]/65" />}
+            </p>
           </div>
         </div>
       )}

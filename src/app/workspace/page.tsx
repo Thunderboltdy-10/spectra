@@ -181,14 +181,25 @@ function WorkspaceContent() {
     updateWorkspaceRoute({ hub: "1", ws: undefined }, "push");
   }, [updateWorkspaceRoute]);
 
-  // Panel handlers
+  // Panel handlers — toggle if same type+id, otherwise switch
   const handleOpenPanel = useCallback(
     (type: "chat" | "note" | "artifact" | "planner" | "route-trace", id: string) => {
+      if (panel?.type === type && panel?.id === id) {
+        closePanel();
+        updateWorkspaceRoute({
+          panel: undefined,
+          thread: undefined,
+          note: undefined,
+          artifact: undefined,
+          planner: undefined,
+        });
+        return;
+      }
       openPanel(type, id);
       const key = type === "chat" ? "thread" : type;
       updateWorkspaceRoute({ panel: type, [key]: id }, "push");
     },
-    [openPanel, updateWorkspaceRoute],
+    [closePanel, openPanel, panel, updateWorkspaceRoute],
   );
 
   const handleClosePanel = useCallback(() => {
@@ -205,6 +216,21 @@ function WorkspaceContent() {
   const panelWidth = panel ? getPanelWidth(panel.type) : 0;
 
   const userName = user?.fullName || user?.firstName || "Student";
+
+  // Focus timer tick
+  const { timerState, tickTimer, completeTimerSession } = useWorkspaceStore();
+  useEffect(() => {
+    if (!timerState.active) return;
+    const interval = setInterval(() => {
+      const { timerState: ts } = useWorkspaceStore.getState();
+      if (ts.elapsed + 1 >= ts.sessionMinutes * 60) {
+        completeTimerSession();
+      } else {
+        tickTimer();
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [timerState.active, tickTimer, completeTimerSession]);
 
   useEffect(() => {
     registerSyncCallback(async (overrides) => {

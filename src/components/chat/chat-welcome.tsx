@@ -4,16 +4,19 @@ import { useEffect, useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import {
   CircleHelp,
+  ClipboardCheck,
+  FileText,
   Flame,
   GraduationCap,
   ImagePlus,
   Layers,
   Lightbulb,
   MessageCircle,
+  PenLine,
   Search,
   Sparkles,
   Star,
-  Trophy,
+  Timer,
   Users,
 } from "lucide-react";
 import { ALL_MODES, COMING_SOON_MODES, getModeConfig, isModeAvailable } from "@/lib/modes";
@@ -30,10 +33,14 @@ const STARTER_TEMPLATES = [
 
 const MODE_ICONS: Record<string, React.ReactNode> = {
   GraduationCap: <GraduationCap className="h-5 w-5" />,
+  ClipboardCheck: <ClipboardCheck className="h-5 w-5" />,
+  Timer: <Timer className="h-5 w-5" />,
+  PenLine: <PenLine className="h-5 w-5" />,
   CircleHelp: <CircleHelp className="h-5 w-5" />,
   Layers: <Layers className="h-5 w-5" />,
   Search: <Search className="h-5 w-5" />,
   Lightbulb: <Lightbulb className="h-5 w-5" />,
+  FileText: <FileText className="h-5 w-5" />,
   MessageCircle: <MessageCircle className="h-5 w-5" />,
   ImagePlus: <ImagePlus className="h-5 w-5" />,
   Sparkles: <Sparkles className="h-5 w-5" />,
@@ -85,14 +92,6 @@ const SEASONAL_ADDONS = {
   summer: ["Summer sprint, steady gains"],
   autumn: ["Autumn focus season"],
 } as const;
-
-const DAILY_TIPS = [
-  "Tip: Start with Quiz to diagnose gaps, then switch to Learn for targeted fixes.",
-  "Tip: Use Flashcards after each topic block to improve long-term retention.",
-  "Tip: Research mode works best when you ask for sources and confidence levels.",
-  "Tip: Alternate Learn and Quiz sessions to improve transfer and recall speed.",
-  "Tip: Keep prompts specific: include topic, level, and goal in one sentence.",
-];
 
 function hashString(value: string) {
   let hash = 5381;
@@ -150,7 +149,6 @@ export function ChatWelcome({
     totalXp: number;
     achievements: Array<{ type: string }>;
   } | null>(null);
-  const [tipSeed, setTipSeed] = useState(0);
 
   useEffect(() => {
     if (!activeMode) return;
@@ -180,27 +178,10 @@ export function ChatWelcome({
     void loadGamification();
   }, []);
 
-  useEffect(() => {
-    try {
-      const key = "ai-school-welcome-tip-seed";
-      const previous = Number.parseInt(window.sessionStorage.getItem(key) ?? "0", 10);
-      const next = Number.isFinite(previous) ? previous + 1 : 1;
-      window.sessionStorage.setItem(key, String(next));
-      setTipSeed(next);
-    } catch {
-      setTipSeed(1);
-    }
-  }, []);
-
   const firstName = user?.firstName?.trim() || user?.fullName?.split(" ")[0] || "there";
   const now = new Date();
   const dayKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
   const greeting = getGreeting(now.getHours(), now.getMonth(), firstName, dayKey);
-
-  const dailyTip = (() => {
-    const index = hashString(`${dayKey}:${firstName.toLowerCase()}:tip:${tipSeed}`) % DAILY_TIPS.length;
-    return DAILY_TIPS[index] ?? DAILY_TIPS[0];
-  })();
 
   const availableModes = ALL_MODES.filter((mode) => isModeAvailable(mode.key));
   const comingSoonModes = ALL_MODES.filter((mode) => COMING_SOON_MODES.has(mode.key));
@@ -234,8 +215,8 @@ export function ChatWelcome({
             </div>
 
             {gamification ? (
-              <div className="grid min-w-[220px] gap-2">
-                <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-secondary)]">
+              <div className="flex flex-row gap-2">
+                <div className="flex-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-secondary)]">
                   <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-[0.12em]">
                     <Flame className="h-3.5 w-3.5 text-[var(--accent-coral)]" />
                     Streak
@@ -244,7 +225,7 @@ export function ChatWelcome({
                     {gamification.currentStreak} day{gamification.currentStreak === 1 ? "" : "s"}
                   </p>
                 </div>
-                <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-secondary)]">
+                <div className="flex-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-secondary)]">
                   <p className="inline-flex items-center gap-1 text-[11px] uppercase tracking-[0.12em]">
                     <Star className="h-3.5 w-3.5 text-[var(--warning)]" />
                     XP + Badges
@@ -359,13 +340,6 @@ export function ChatWelcome({
             ))}
           </div>
         </section>
-
-        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-xs text-[var(--text-secondary)]">
-          <p className="inline-flex items-center gap-1">
-            <Trophy className="h-3.5 w-3.5" />
-            {dailyTip}
-          </p>
-        </div>
       </div>
     </div>
   );

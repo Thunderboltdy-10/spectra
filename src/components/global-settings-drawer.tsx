@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useClerk } from "@clerk/nextjs";
-import { usePathname } from "next/navigation";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { rightPanelSurfaceClassName } from "@/components/ui/right-panel-surface";
@@ -10,14 +9,13 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { hasClerkPublishableKey } from "@/lib/clerk-config";
 
 type DrawerBodyProps = {
-  pathname: string;
   open: boolean;
   onClose: () => void;
   onManageAccount?: () => void;
   onSignOut?: () => void;
 };
 
-function DrawerBody({ pathname, open, onClose, onManageAccount, onSignOut }: DrawerBodyProps) {
+function DrawerBody({ open, onClose, onManageAccount, onSignOut }: DrawerBodyProps) {
   if (!open) return null;
 
   return (
@@ -60,13 +58,6 @@ function DrawerBody({ pathname, open, onClose, onManageAccount, onSignOut }: Dra
             </div>
           )}
 
-          {pathname !== "/" && (
-            <div className="border-t border-[var(--border-default)] pt-3">
-              <Button type="button" size="sm" variant="secondary" onClick={() => (window.location.href = "/")}>
-                Open chat controls
-              </Button>
-            </div>
-          )}
         </div>
       </aside>
     </div>
@@ -74,14 +65,12 @@ function DrawerBody({ pathname, open, onClose, onManageAccount, onSignOut }: Dra
 }
 
 function GlobalSettingsDrawerWithClerk(props: {
-  pathname: string;
   open: boolean;
   onClose: () => void;
 }) {
   const { openUserProfile, signOut } = useClerk();
   return (
     <DrawerBody
-      pathname={props.pathname}
       open={props.open}
       onClose={props.onClose}
       onManageAccount={() => openUserProfile()}
@@ -91,7 +80,6 @@ function GlobalSettingsDrawerWithClerk(props: {
 }
 
 export function GlobalSettingsDrawer() {
-  const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -101,8 +89,8 @@ export function GlobalSettingsDrawer() {
   }, []);
 
   if (hasClerkPublishableKey()) {
-    return <GlobalSettingsDrawerWithClerk pathname={pathname} open={open} onClose={() => setOpen(false)} />;
+    return <GlobalSettingsDrawerWithClerk open={open} onClose={() => setOpen(false)} />;
   }
 
-  return <DrawerBody pathname={pathname} open={open} onClose={() => setOpen(false)} />;
+  return <DrawerBody open={open} onClose={() => setOpen(false)} />;
 }

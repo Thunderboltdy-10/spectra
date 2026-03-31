@@ -436,6 +436,7 @@ export function ChatSidebar({
           >
             <Settings2 className="h-4 w-4" />
           </Button>
+          <ThemeToggle className="h-9.5 w-9.5 rounded-xl bg-transparent hover:bg-[var(--bg-hover)]" />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button type="button" className="cursor-pointer rounded-full">
@@ -456,7 +457,6 @@ export function ChatSidebar({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <ThemeToggle className="h-9.5 w-9.5 rounded-xl bg-transparent hover:bg-[var(--bg-hover)]" />
         </div>
       </div>
     );

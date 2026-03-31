@@ -1,12 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Plus, StickyNote } from "lucide-react";
+import { ArrowLeft, Plus, Search, StickyNote } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
 import { TiptapEditor } from "@/components/editor/tiptap-editor";
+import { CreateArtifactDialog, type ArtifactTemplate } from "@/components/artifacts/create-artifact-dialog";
 import { useNotesData } from "@/hooks/use-notes-data";
 import { useEditorStore, normalizeEditorMode } from "@/stores/editor-store";
+import { getArtifactMeta, type ArtifactType } from "@/lib/artifact-types";
 import { cn } from "@/lib/utils";
 import { stripGeneratedDocumentMarkers } from "@/lib/document-generator";
 
@@ -22,6 +24,8 @@ export function NotesWorkspace() {
   const versionHistoryOpen = params.get("versionHistory") === "1" || params.get("versionHistory") === "true";
   const returnWs = params.get("ws") ?? undefined;
   const fromWorkspace = params.get("from") === "workspace";
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const { editorMode, setEditorMode, openVersionHistory } = useEditorStore();
   const {
     notes,
@@ -64,13 +68,17 @@ export function NotesWorkspace() {
     router.replace(`/artifacts?${next.toString()}`, { scroll: false });
   }, [params, router]);
 
-  const handleCreateNote = useCallback(async () => {
+  const handleCreateFromDialog = useCallback(async (type: ArtifactType, title: string, tags: string[], template?: ArtifactTemplate) => {
+    const isDocType = type === "document" || type === "note";
+    const content = template?.content ?? EMPTY_DOC;
     const createdId = await createNote({
-      title: "Untitled artifact",
-      content: EMPTY_DOC,
-      contentPlaintext: "",
-      editorMode: "standard",
+      title,
+      content,
+      contentPlaintext: template?.contentPlaintext ?? "",
+      editorMode: isDocType ? "standard" : undefined,
       workstreamId: returnWs,
+      type,
+      tags,
     });
     const next = new URLSearchParams(params.toString());
     next.delete("note");
@@ -78,12 +86,22 @@ export function NotesWorkspace() {
     router.replace(`/artifacts?${next.toString()}`, { scroll: false });
   }, [createNote, params, returnWs, router]);
 
-  const noteList = useMemo(() => notes.slice().sort((left, right) => right.updatedAt - left.updatedAt), [notes]);
+  const noteList = useMemo(() => {
+    let filtered = notes.slice();
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      filtered = filtered.filter((n) =>
+        (n.title || "").toLowerCase().includes(q) ||
+        (n.contentPlaintext || "").toLowerCase().includes(q),
+      );
+    }
+    return filtered.sort((left, right) => right.updatedAt - left.updatedAt);
+  }, [notes, searchQuery]);
 
   return (
     <AppShell fullBleed noScroll contentClassName="!p-0">
       <div className="flex h-full min-h-0">
-        <aside className="flex w-[300px] shrink-0 flex-col border-r border-[var(--border-default)] bg-[var(--bg-elevated)]">
+        <aside className="flex w-[360px] shrink-0 flex-col border-r border-[var(--border-default)] bg-[var(--bg-elevated)]">
           <div className="border-b border-[var(--border-default)] px-5 py-5">
             {fromWorkspace && (
               <button
@@ -97,9 +115,6 @@ export function NotesWorkspace() {
             )}
             <div className="mt-3 flex items-center justify-between">
               <div>
-                <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-                  Personal Library
-                </div>
                 <h1 className="font-display text-2xl text-[var(--text-primary)]">
                   Artifacts
                 </h1>
@@ -109,12 +124,24 @@ export function NotesWorkspace() {
               </div>
               <button
                 type="button"
-                onClick={() => void handleCreateNote()}
-                className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-cyan)] px-3 py-2 text-sm font-semibold text-white"
+                onClick={() => setCreateDialogOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-cyan)] px-3 py-2 text-sm font-semibold text-white hover:brightness-110 transition-all shadow-[0_2px_8px_-2px_rgba(14,142,232,0.25)]"
               >
                 <Plus className="h-4 w-4" />
                 New
               </button>
+            </div>
+
+            {/* Search bar */}
+            <div className="mt-3 relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--text-tertiary)]" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search artifacts..."
+                className="w-full rounded-[var(--radius-input)] border border-[var(--border-default)] bg-[var(--bg-primary)] pl-9 pr-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:border-[var(--accent-cyan)]/40 focus:outline-none transition-colors"
+              />
             </div>
           </div>
 
@@ -144,9 +171,23 @@ export function NotesWorkspace() {
                       )}
                     />
                     <div className="flex items-start gap-2.5 pl-2">
-                      <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[var(--text-tertiary)] transition-colors group-hover:text-[var(--accent-cyan)]">
-                        <StickyNote className="h-3.5 w-3.5" strokeWidth={1.75} />
-                      </div>
+                      {(() => {
+                        const meta = getArtifactMeta(note.type || "document");
+                        const Icon = meta.icon;
+                        return (
+                          <div
+                            className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors"
+                            style={{
+                              background: activeNote?._id === note._id
+                                ? `color-mix(in oklab, ${meta.color} 16%, var(--bg-primary))`
+                                : `color-mix(in oklab, ${meta.color} 8%, var(--bg-primary))`,
+                              color: meta.color,
+                            }}
+                          >
+                            <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
+                          </div>
+                        );
+                      })()}
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-[12.5px] font-semibold text-[var(--text-primary)]">
                           {stripGeneratedDocumentMarkers(note.title || "").trim() || "Untitled"}
@@ -177,6 +218,7 @@ export function NotesWorkspace() {
           <div className="min-h-0 flex-1">
             {activeNote ? (
               <TiptapEditor
+                key={activeNote._id}
                 artifactId={activeNote._id}
                 content={activeNote.content}
                 showDocumentMeta
@@ -204,6 +246,13 @@ export function NotesWorkspace() {
           </div>
         </main>
       </div>
+
+      <CreateArtifactDialog
+        open={createDialogOpen}
+        onClose={() => setCreateDialogOpen(false)}
+        onCreate={(type, title, tags, template) => void handleCreateFromDialog(type, title, tags, template)}
+        defaultWorkstreamId={returnWs}
+      />
     </AppShell>
   );
 }

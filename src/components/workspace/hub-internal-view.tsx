@@ -15,7 +15,7 @@
 
 import type { Node } from "@xyflow/react";
 import type { PanelType } from "@/stores/workspace-store";
-import type { GroupNodeData, EmptyStateNodeData } from "./views/internal-content-nodes";
+import type { GroupNodeData, EmptyStateNodeData, FocusTimerNodeData } from "./views/internal-content-nodes";
 
 type HubContentData = {
   quickNotes: Array<{ id: string; title: string; updatedAt: number }>;
@@ -24,6 +24,16 @@ type HubContentData = {
   loading: boolean;
   onOpenPanel: (type: PanelType, id: string) => void;
   onNewWorkstream?: () => void;
+  timerState?: {
+    active: boolean;
+    sessionMinutes: number;
+    elapsed: number;
+    sessionsCompleted: number;
+    workstreamTitle?: string;
+  };
+  onTimerStart?: () => void;
+  onTimerPause?: () => void;
+  onTimerReset?: () => void;
 };
 
 function formatTimeAgo(timestamp: number) {
@@ -143,11 +153,35 @@ export function buildHubNodes(
     });
   }
 
+  // Focus Timer (positioned to the right of activity)
+  if (data.timerState && data.onTimerStart && data.onTimerPause && data.onTimerReset) {
+    nodes.push({
+      id: "hub-timer",
+      type: "focusTimer",
+      position: { x: basePosition.x + 340, y: basePosition.y + (data.recentActivity.length > 0 ? Math.min(data.recentActivity.length, 6) * 32 + 80 : 0) },
+      draggable: true,
+      selectable: false,
+      data: {
+        active: data.timerState.active,
+        sessionMinutes: data.timerState.sessionMinutes,
+        elapsed: data.timerState.elapsed,
+        sessionsCompleted: data.timerState.sessionsCompleted,
+        workstreamTitle: data.timerState.workstreamTitle,
+        onStart: data.onTimerStart,
+        onPause: data.onTimerPause,
+        onReset: data.onTimerReset,
+      } satisfies FocusTimerNodeData,
+    });
+  }
+
   // Quick Actions
+  const actionsY = data.timerState
+    ? basePosition.y + (data.recentActivity.length > 0 ? Math.min(data.recentActivity.length, 6) * 32 + 80 : 0) + 220
+    : basePosition.y + 200;
   nodes.push({
     id: "hub-actions",
     type: "emptyState",
-    position: { x: basePosition.x + 340, y: basePosition.y + 200 },
+    position: { x: basePosition.x + 340, y: actionsY },
     draggable: true,
     selectable: false,
     data: {

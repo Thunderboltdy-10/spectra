@@ -24,6 +24,7 @@ import type * as curatedModelRegistry from "../curatedModelRegistry.js";
 import type * as env from "../env.js";
 import type * as errorEvents from "../errorEvents.js";
 import type * as feedback from "../feedback.js";
+import type * as fixCounts from "../fixCounts.js";
 import type * as flashcards from "../flashcards.js";
 import type * as gamification from "../gamification.js";
 import type * as helpers from "../helpers.js";
@@ -76,6 +77,7 @@ declare const fullApi: ApiFromModules<{
   env: typeof env;
   errorEvents: typeof errorEvents;
   feedback: typeof feedback;
+  fixCounts: typeof fixCounts;
   flashcards: typeof flashcards;
   gamification: typeof gamification;
   helpers: typeof helpers;

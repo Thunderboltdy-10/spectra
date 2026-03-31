@@ -64,12 +64,15 @@ export function ContextualTip({
       role="status"
       aria-live="polite"
     >
-      <p className="flex-1 truncate text-xs leading-relaxed text-[var(--text-secondary)]">{message}</p>
+      <div className="flex-1 overflow-hidden">
+        <p key={message} className="animate-in fade-in slide-in-from-bottom-1 duration-300 truncate text-xs leading-relaxed text-[var(--text-secondary)]">{message}</p>
+      </div>
       {actionLabel && onAction ? (
         <button
+          key={actionLabel}
           type="button"
           onClick={onAction}
-          className="cursor-pointer whitespace-nowrap rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1 text-[11px] font-medium text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]"
+          className="animate-in fade-in slide-in-from-bottom-1 duration-300 cursor-pointer whitespace-nowrap rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1 text-[11px] font-medium text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]"
         >
           {actionLabel}
         </button>

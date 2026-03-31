@@ -136,11 +136,14 @@ export function useArtifactData(params: UseArtifactDataParams = {}) {
       sourceDeleted?: boolean;
       sourceUpdatedAt?: number;
       syncConflictSummary?: string;
+      type?: string;
+      tags?: string[];
     }) => {
+      const { type: artifactType, ...rest } = input;
       const artifactPayload = {
         action: "create",
-        type: "document",
-        ...input,
+        type: artifactType || "document",
+        ...rest,
       };
       const response = await fetch("/api/artifacts", {
         method: "POST",

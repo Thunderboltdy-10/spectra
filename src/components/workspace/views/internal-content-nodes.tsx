@@ -122,9 +122,9 @@ export const GroupNode = memo(function GroupNode({
               type="button"
               onClick={() => data.panelType && data.onOpenPanel(data.panelType, item.id)}
               className={cn(
-                "flex w-full items-start justify-between gap-5 rounded-xl px-3 py-2 text-left transition-all duration-150",
+                "workspace-content-item flex w-full items-start justify-between gap-5 rounded-xl px-3 py-2 text-left",
                 data.panelType
-                  ? "cursor-pointer hover:bg-[var(--bg-elevated)]/36"
+                  ? "cursor-pointer hover:bg-[var(--bg-elevated)]/50"
                   : "cursor-default",
               )}
             >
@@ -368,6 +368,126 @@ export const EmptyStateNode = memo(function EmptyStateNode({
           <Plus className="w-4 h-4" />
           Get started
         </button>
+      )}
+    </div>
+  );
+});
+
+/* ─── Focus Timer Node ─────────────────────────────────────── */
+
+export type FocusTimerNodeData = {
+  active: boolean;
+  sessionMinutes: number;
+  elapsed: number;
+  sessionsCompleted: number;
+  workstreamTitle?: string;
+  onStart: () => void;
+  onPause: () => void;
+  onReset: () => void;
+};
+
+export const FocusTimerNode = memo(function FocusTimerNode({
+  data,
+}: NodeProps<Node<FocusTimerNodeData>>) {
+  const totalSeconds = data.sessionMinutes * 60;
+  const remaining = Math.max(0, totalSeconds - data.elapsed);
+  const minutes = Math.floor(remaining / 60);
+  const seconds = remaining % 60;
+  const progress = totalSeconds > 0 ? data.elapsed / totalSeconds : 0;
+  const circumference = 2 * Math.PI * 38;
+  const strokeDashoffset = circumference * (1 - progress);
+
+  return (
+    <div
+      className="rounded-2xl border px-5 py-4 text-center"
+      style={{
+        width: 200,
+        background: "color-mix(in oklab, var(--bg-elevated) 92%, transparent)",
+        borderColor: data.active
+          ? "color-mix(in oklab, var(--accent-cyan) 40%, var(--border-default))"
+          : "var(--border-default)",
+        boxShadow: data.active ? "0 0 20px -8px var(--accent-cyan)" : "none",
+        transition: "border-color 300ms, box-shadow 300ms",
+      }}
+    >
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)] mb-3">
+        Focus Timer
+      </div>
+
+      {/* Timer ring */}
+      <div className="relative mx-auto mb-3" style={{ width: 84, height: 84 }}>
+        <svg width="84" height="84" viewBox="0 0 84 84">
+          <circle
+            cx="42"
+            cy="42"
+            r="38"
+            fill="none"
+            stroke="var(--border-default)"
+            strokeWidth="3"
+            opacity={0.4}
+          />
+          <circle
+            cx="42"
+            cy="42"
+            r="38"
+            fill="none"
+            stroke="var(--accent-cyan)"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={strokeDashoffset}
+            transform="rotate(-90 42 42)"
+            style={{ transition: "stroke-dashoffset 1s linear" }}
+          />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="font-display text-lg font-bold text-[var(--text-primary)] tabular-nums">
+            {String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}
+          </span>
+        </div>
+      </div>
+
+      {/* Controls */}
+      <div className="flex items-center justify-center gap-2">
+        {data.active ? (
+          <button
+            type="button"
+            onClick={data.onPause}
+            className="rounded-lg px-3 py-1.5 text-xs font-medium bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
+          >
+            Pause
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={data.onStart}
+            className="rounded-lg px-3 py-1.5 text-xs font-medium bg-[var(--accent-cyan)] text-white hover:brightness-110 transition-all"
+          >
+            {data.elapsed > 0 ? "Resume" : "Start"}
+          </button>
+        )}
+        {data.elapsed > 0 && (
+          <button
+            type="button"
+            onClick={data.onReset}
+            className="rounded-lg px-3 py-1.5 text-xs font-medium bg-[var(--bg-secondary)] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
+          >
+            Reset
+          </button>
+        )}
+      </div>
+
+      {/* Session count */}
+      {data.sessionsCompleted > 0 && (
+        <div className="mt-2 text-[10px] text-[var(--text-tertiary)]">
+          {data.sessionsCompleted} session{data.sessionsCompleted !== 1 ? "s" : ""} today
+        </div>
+      )}
+
+      {data.workstreamTitle && (
+        <div className="mt-1.5 text-[10px] text-[var(--accent-cyan)] truncate">
+          {data.workstreamTitle}
+        </div>
       )}
     </div>
   );

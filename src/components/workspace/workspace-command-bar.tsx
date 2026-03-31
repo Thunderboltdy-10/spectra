@@ -84,17 +84,15 @@ export function WorkspaceCommandBar({
   // Close picker on outside click
   useEffect(() => {
     if (!focused && !showPicker) return;
-    const handler = (e: MouseEvent) => {
+    const handler = (e: PointerEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setShowPicker((current) => (current ? false : current));
-        if (!query) {
-          setFocused((current) => (current ? false : current));
-        }
+        setShowPicker(false);
+        setFocused(false);
       }
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [focused, query, showPicker]);
+    window.addEventListener("pointerdown", handler, true);
+    return () => window.removeEventListener("pointerdown", handler, true);
+  }, [focused, showPicker]);
 
   const handleSubmit = useCallback(() => {
     if (!query.trim()) return;

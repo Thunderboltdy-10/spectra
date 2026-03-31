@@ -1,7 +1,7 @@
 import { internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { getUserByClerkId } from "./helpers";
+import { adjustWorkstreamArtifactCount, getUserByClerkId } from "./helpers";
 
 const vArtifactSourceType = v.union(
   v.literal("user_manual"),
@@ -75,24 +75,6 @@ async function assertArtifactOwnership(
     throw new Error("Artifact not found");
   }
   return artifact;
-}
-
-async function ensureWorkstreamArtifactCount(
-  ctx: Pick<MutationCtx, "db">,
-  workstreamId: Id<"workstreams"> | undefined,
-) {
-  if (!workstreamId) return;
-  const workstream = await ctx.db.get(workstreamId);
-  if (!workstream) return;
-  const rows = await ctx.db
-    .query("artifacts")
-    .withIndex("by_workstream", (q) => q.eq("workstreamId", workstreamId))
-    .collect();
-  const activeCount = rows.filter((row: Doc<"artifacts">) => row.status === "active").length;
-  await ctx.db.patch(workstreamId, {
-    artifactCount: activeCount,
-    updatedAt: Date.now(),
-  });
 }
 
 async function countArtifactVersions(
@@ -353,7 +335,7 @@ export const getOrMigrateFromNote = mutation({
       status: "confirmed",
       createdAt: note.createdAt,
     });
-    await ensureWorkstreamArtifactCount(ctx, note.workstreamId);
+    await adjustWorkstreamArtifactCount(ctx, note.workstreamId, 1);
 
     return { artifactId };
   },
@@ -473,7 +455,7 @@ export const create = mutation({
       createdAt: now,
     });
 
-    await ensureWorkstreamArtifactCount(ctx, args.workstreamId);
+    await adjustWorkstreamArtifactCount(ctx, args.workstreamId, 1);
     return artifactId;
   },
 });
@@ -561,11 +543,9 @@ export const update = mutation({
       });
     }
 
-    if (artifact.workstreamId !== args.workstreamId) {
-      await ensureWorkstreamArtifactCount(ctx, artifact.workstreamId);
-      await ensureWorkstreamArtifactCount(ctx, args.workstreamId ?? undefined);
-    } else {
-      await ensureWorkstreamArtifactCount(ctx, artifact.workstreamId);
+    if (artifact.workstreamId !== args.workstreamId && artifact.status === "active") {
+      await adjustWorkstreamArtifactCount(ctx, artifact.workstreamId, -1);
+      await adjustWorkstreamArtifactCount(ctx, args.workstreamId ?? undefined, 1);
     }
 
     return { success: true };
@@ -759,7 +739,9 @@ export const archive = mutation({
       status: "archived",
       updatedAt: Date.now(),
     });
-    await ensureWorkstreamArtifactCount(ctx, artifact.workstreamId);
+    if (artifact.status === "active") {
+      await adjustWorkstreamArtifactCount(ctx, artifact.workstreamId, -1);
+    }
     return { success: true };
   },
 });
@@ -776,7 +758,9 @@ export const restore = mutation({
       status: "active",
       updatedAt: Date.now(),
     });
-    await ensureWorkstreamArtifactCount(ctx, artifact.workstreamId);
+    if (artifact.status !== "active") {
+      await adjustWorkstreamArtifactCount(ctx, artifact.workstreamId, 1);
+    }
     return { success: true };
   },
 });
@@ -820,7 +804,9 @@ export const remove = mutation({
       }
     }
     await ctx.db.delete(args.artifactId);
-    await ensureWorkstreamArtifactCount(ctx, artifact.workstreamId);
+    if (artifact.status === "active") {
+      await adjustWorkstreamArtifactCount(ctx, artifact.workstreamId, -1);
+    }
     return { success: true };
   },
 });
@@ -880,7 +866,19 @@ export const restoreVersion = mutation({
       status: "confirmed",
       createdAt: now,
     });
-    return { success: true };
+    const refreshed = await ctx.db.get(args.artifactId);
+    return {
+      success: true,
+      artifact: refreshed
+        ? {
+            _id: refreshed._id,
+            title: refreshed.title,
+            content: refreshed.content,
+            contentPlaintext: refreshed.contentPlaintext,
+            updatedAt: refreshed.updatedAt,
+          }
+        : undefined,
+    };
   },
 });
 
@@ -974,7 +972,7 @@ export const migrateLegacyNotes = mutation({
         pinnedAt: undefined,
         editorMode: normalizeEditorMode(note.editorMode),
       } as Doc<"artifacts">);
-      await ensureWorkstreamArtifactCount(ctx, note.workstreamId);
+      await adjustWorkstreamArtifactCount(ctx, note.workstreamId, 1);
     }
 
     return { migrated, skipped, total: notes.length };
@@ -1055,7 +1053,7 @@ export const migrateLegacyNotesBatch = internalMutation({
         status: "confirmed",
         createdAt: note.createdAt,
       });
-      await ensureWorkstreamArtifactCount(ctx, note.workstreamId);
+      await adjustWorkstreamArtifactCount(ctx, note.workstreamId, 1);
       migrated += 1;
     }
 

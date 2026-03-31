@@ -197,23 +197,28 @@ export const listChats = query({
       ? await ctx.db
           .query("chats")
           .withIndex("by_owner_pack_updated", (q) => q.eq("ownerUserId", actor._id).eq("packId", args.packId))
+          .filter((q) => q.eq(q.field("deletedAt"), undefined))
           .order("desc")
           .take(max)
       : args.workstreamId
         ? await ctx.db
             .query("chats")
             .withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId))
+            .filter((q) => q.and(
+              q.eq(q.field("ownerUserId"), actor._id),
+              q.eq(q.field("orgId"), actor.orgId),
+              q.eq(q.field("deletedAt"), undefined),
+            ))
             .order("desc")
             .take(max)
-            .then((rows) => rows.filter((c) => c.ownerUserId === actor._id && c.orgId === actor.orgId))
         : await ctx.db
             .query("chats")
             .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id))
+            .filter((q) => q.eq(q.field("deletedAt"), undefined))
             .order("desc")
             .take(max);
 
     return chats
-      .filter((chat) => !chat.deletedAt)
       .filter((chat) => (args.packId ? chat.packId === args.packId : true))
       .filter((chat) => (args.workstreamId ? chat.workstreamId === args.workstreamId : true))
       .slice(0, max)

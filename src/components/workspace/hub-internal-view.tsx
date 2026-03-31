@@ -78,7 +78,7 @@ export function buildHubNodes(
   if (data.quickNotes.length > 0) {
     nodes.push({
       id: "hub-notes",
-      type: "group",
+      type: "contentGroup",
       position: { x: basePosition.x, y: basePosition.y + yOffset },
       draggable: true,
       selectable: false,
@@ -102,7 +102,7 @@ export function buildHubNodes(
   if (data.deadlines.length > 0) {
     nodes.push({
       id: "hub-deadlines",
-      type: "group",
+      type: "contentGroup",
       position: { x: basePosition.x, y: basePosition.y + yOffset },
       draggable: true,
       selectable: false,
@@ -126,7 +126,7 @@ export function buildHubNodes(
   if (data.recentActivity.length > 0) {
     nodes.push({
       id: "hub-activity",
-      type: "group",
+      type: "contentGroup",
       position: { x: basePosition.x + 340, y: basePosition.y },
       draggable: true,
       selectable: false,

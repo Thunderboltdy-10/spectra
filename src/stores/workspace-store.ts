@@ -38,8 +38,9 @@ type WorkspaceStoreState = {
   backgroundMode: WorkspaceBackgroundMode;
   isCreateDialogOpen: boolean;
 
-  // Semantic zoom — committed workstream via zoom or click
-  committedWorkstreamId?: string;
+  // Semantic zoom — primary focus plus any visible internal workstreams
+  primaryWorkstreamId?: string;
+  visibleWorkstreamIds: string[];
   zoomBand: ZoomBand;
 
   // View mode per committed workstream
@@ -71,6 +72,8 @@ type WorkspaceStoreState = {
   // Semantic zoom commitment
   commitWorkstream: (workstreamId: string) => void;
   commitWorkstreamWithChat: (workstreamId: string, query?: string) => void;
+  setPrimaryWorkstreamId: (workstreamId?: string) => void;
+  setVisibleWorkstreamIds: (workstreamIds: string[]) => void;
   exitWorkstream: () => void;
   setPreviousViewport: (viewport: { x: number; y: number; zoom: number }) => void;
 
@@ -103,7 +106,8 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set) => ({
   showConnections: true,
   backgroundMode: "dots",
   isCreateDialogOpen: false,
-  committedWorkstreamId: undefined,
+  primaryWorkstreamId: undefined,
+  visibleWorkstreamIds: [],
   zoomBand: "summary",
   viewMode: "structured",
   panel: undefined,
@@ -123,18 +127,23 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set) => ({
 
   commitWorkstream: (workstreamId) =>
     set({
-      committedWorkstreamId: workstreamId,
+      primaryWorkstreamId: workstreamId,
+      visibleWorkstreamIds: [workstreamId],
       openChatQuery: undefined,
     }),
   commitWorkstreamWithChat: (workstreamId, query) =>
     set({
-      committedWorkstreamId: workstreamId,
+      primaryWorkstreamId: workstreamId,
+      visibleWorkstreamIds: [workstreamId],
       openChatQuery: query,
       panel: query ? { type: "chat", id: "new" } : undefined,
     }),
+  setPrimaryWorkstreamId: (primaryWorkstreamId) => set({ primaryWorkstreamId }),
+  setVisibleWorkstreamIds: (visibleWorkstreamIds) => set({ visibleWorkstreamIds }),
   exitWorkstream: () =>
     set({
-      committedWorkstreamId: undefined,
+      primaryWorkstreamId: undefined,
+      visibleWorkstreamIds: [],
       openChatQuery: undefined,
       panel: undefined,
     }),
@@ -158,7 +167,8 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set) => ({
       showConnections: true,
       backgroundMode: "dots",
       isCreateDialogOpen: false,
-      committedWorkstreamId: undefined,
+      primaryWorkstreamId: undefined,
+      visibleWorkstreamIds: [],
       hubFocusOpen: false,
       hubCardBounds: undefined,
       openChatQuery: undefined,

@@ -29,10 +29,10 @@ export type LayoutResult = {
 
 // Radial distances from hub center by lifecycle state
 const RADIAL_DISTANCE = {
-  active: 500,
-  quiet: 690,
-  completed: 900,
-  archived: 1080,
+  active: 750,
+  quiet: 1035,
+  completed: 1350,
+  archived: 1620,
 } as const;
 
 // Angular sectors by type (radians from 0)
@@ -42,9 +42,15 @@ const TYPE_SECTORS: Record<string, number> = {
   general: Math.PI / 6,       // right area
 };
 
-function getTargetRadius(status: string): number {
-  if (status === "completed") return RADIAL_DISTANCE.completed;
-  if (status === "archived") return RADIAL_DISTANCE.archived;
+function getTargetRadius(workstream: Pick<Workstream, "status" | "lastActivityAt">): number {
+  if (workstream.status === "completed") return RADIAL_DISTANCE.completed;
+  if (workstream.status === "archived") return RADIAL_DISTANCE.archived;
+  if (workstream.lastActivityAt) {
+    const daysSinceActivity = (Date.now() - workstream.lastActivityAt) / (1000 * 60 * 60 * 24);
+    if (daysSinceActivity >= 14) {
+      return RADIAL_DISTANCE.quiet;
+    }
+  }
   return RADIAL_DISTANCE.active;
 }
 
@@ -85,7 +91,7 @@ export function computeCanonicalLayout(workstreams: Workstream[]): LayoutResult 
     for (let i = 0; i < group.length; i++) {
       const ws = group[i]!;
       const angle = getTargetAngle(type, i, group.length);
-      const radius = getTargetRadius(ws.status) + (i % 3) * 72;
+      const radius = getTargetRadius(ws) + (i % 3) * 72;
       nodes.push({
         id: ws._id,
         x: Math.cos(angle) * radius,
@@ -110,7 +116,7 @@ export function computeCanonicalLayout(workstreams: Workstream[]): LayoutResult 
         const dx = b.x - a.x;
         const dy = b.y - a.y;
         const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
-        const minDist = 280; // minimum distance between nodes
+        const minDist = 420; // minimum distance between nodes
         if (dist < minDist) {
           const force = (minDist - dist) / dist * 0.3;
           const fx = dx * force;

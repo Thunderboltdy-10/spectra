@@ -20,7 +20,7 @@ import type { PanelType } from "@/stores/workspace-store";
 type WorkspaceCommandBarProps = {
   hidden?: boolean;
   workstreams: Workstream[];
-  committedWorkstreamId?: string;
+  primaryWorkstreamId?: string;
   onOpenWorkstreamChat: (workstreamId: string, query: string) => void;
   onOpenPanel?: (type: PanelType, id: string) => void;
 };
@@ -28,7 +28,7 @@ type WorkspaceCommandBarProps = {
 export function WorkspaceCommandBar({
   hidden = false,
   workstreams,
-  committedWorkstreamId,
+  primaryWorkstreamId,
   onOpenWorkstreamChat,
 }: WorkspaceCommandBarProps) {
   const router = useRouter();
@@ -51,9 +51,9 @@ export function WorkspaceCommandBar({
 
   // Auto-select workstream
   useEffect(() => {
-    if (committedWorkstreamId) {
-      if (selectedWsId !== committedWorkstreamId) {
-        setSelectedWsId(committedWorkstreamId);
+    if (primaryWorkstreamId) {
+      if (selectedWsId !== primaryWorkstreamId) {
+        setSelectedWsId(primaryWorkstreamId);
       }
       return;
     }
@@ -67,7 +67,7 @@ export function WorkspaceCommandBar({
       setSelectedWsId(null);
       return;
     }
-  }, [activeWorkstreams, committedWorkstreamId, focused, selectedWsId]);
+  }, [activeWorkstreams, focused, primaryWorkstreamId, selectedWsId]);
 
   // Cmd/Ctrl+K shortcut
   useEffect(() => {
@@ -130,7 +130,7 @@ export function WorkspaceCommandBar({
 
   if (hidden) return null;
 
-  const isScoped = !!committedWorkstreamId && selectedWs;
+  const isScoped = !!primaryWorkstreamId && selectedWs;
   const placeholder = isScoped
     ? `Ask ${selectedWs?.title}...`
     : "Ask anything...";
@@ -146,7 +146,7 @@ export function WorkspaceCommandBar({
     >
       {/* Workstream picker dropdown (above bar) */}
       <AnimatePresence>
-        {showPicker && !committedWorkstreamId && (
+        {showPicker && !primaryWorkstreamId && (
           <motion.div
             initial={{ opacity: 0, y: 4, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -215,7 +215,7 @@ export function WorkspaceCommandBar({
         />
 
         {/* Workstream selector (when focused, not scoped) */}
-        {focused && activeWorkstreams.length > 0 && !committedWorkstreamId && (
+        {focused && activeWorkstreams.length > 0 && !primaryWorkstreamId && (
           <button
             ref={selectorRef}
             type="button"

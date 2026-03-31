@@ -16,6 +16,7 @@ export type SlashCommandItem = {
   description: string;
   icon: string;
   section?: string;
+  aliases?: string[];
   action: (editor: Editor) => void;
 };
 
@@ -27,6 +28,7 @@ export const SLASH_COMMANDS: SlashCommandItem[] = [
     description: "Large section heading",
     icon: "H1",
     section: "Text",
+    aliases: ["h1", "heading 1", "title"],
     action: (editor) => editor.chain().focus().toggleHeading({ level: 1 }).run(),
   },
   {
@@ -35,6 +37,7 @@ export const SLASH_COMMANDS: SlashCommandItem[] = [
     description: "Medium section heading",
     icon: "H2",
     section: "Text",
+    aliases: ["h2", "heading 2", "subtitle"],
     action: (editor) => editor.chain().focus().toggleHeading({ level: 2 }).run(),
   },
   {
@@ -43,6 +46,7 @@ export const SLASH_COMMANDS: SlashCommandItem[] = [
     description: "Small section heading",
     icon: "H3",
     section: "Text",
+    aliases: ["h3", "heading 3"],
     action: (editor) => editor.chain().focus().toggleHeading({ level: 3 }).run(),
   },
   // Lists
@@ -52,6 +56,7 @@ export const SLASH_COMMANDS: SlashCommandItem[] = [
     description: "Unordered list with bullets",
     icon: "list",
     section: "Lists",
+    aliases: ["ul", "unordered", "bullets"],
     action: (editor) => editor.chain().focus().toggleBulletList().run(),
   },
   {
@@ -60,6 +65,7 @@ export const SLASH_COMMANDS: SlashCommandItem[] = [
     description: "Ordered list with numbers",
     icon: "list-ordered",
     section: "Lists",
+    aliases: ["ol", "ordered", "numbers"],
     action: (editor) => editor.chain().focus().toggleOrderedList().run(),
   },
   {
@@ -68,6 +74,7 @@ export const SLASH_COMMANDS: SlashCommandItem[] = [
     description: "Checkboxes for tasks",
     icon: "check-square",
     section: "Lists",
+    aliases: ["checkbox", "task", "tasks", "checklist"],
     action: (editor) => editor.chain().focus().toggleTaskList().run(),
   },
   // Blocks
@@ -77,6 +84,7 @@ export const SLASH_COMMANDS: SlashCommandItem[] = [
     description: "Indented quote block",
     icon: "quote",
     section: "Blocks",
+    aliases: ["blockquote", "bq"],
     action: (editor) => editor.chain().focus().toggleBlockquote().run(),
   },
   {
@@ -85,6 +93,7 @@ export const SLASH_COMMANDS: SlashCommandItem[] = [
     description: "Code with syntax highlighting",
     icon: "code",
     section: "Blocks",
+    aliases: ["codeblock", "cb", "pre"],
     action: (editor) => editor.chain().focus().toggleCodeBlock().run(),
   },
   {
@@ -93,6 +102,7 @@ export const SLASH_COMMANDS: SlashCommandItem[] = [
     description: "Horizontal separator line",
     icon: "minus",
     section: "Blocks",
+    aliases: ["hr", "line", "separator"],
     action: (editor) => editor.chain().focus().setHorizontalRule().run(),
   },
   // Media & Layout
@@ -102,6 +112,7 @@ export const SLASH_COMMANDS: SlashCommandItem[] = [
     description: "Insert a 3×3 table",
     icon: "table",
     section: "Media",
+    aliases: ["grid"],
     action: (editor) => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
   },
   {
@@ -110,6 +121,7 @@ export const SLASH_COMMANDS: SlashCommandItem[] = [
     description: "Embed an image from URL",
     icon: "image",
     section: "Media",
+    aliases: ["img", "picture"],
     action: (editor) => {
       const url = window.prompt("Image URL:");
       if (url) editor.chain().focus().setImage({ src: url }).run();
@@ -142,15 +154,40 @@ export const SLASH_COMMANDS: SlashCommandItem[] = [
   },
 ];
 
+function fuzzyMatches(target: string, query: string) {
+  let queryIndex = 0;
+  for (const character of target) {
+    if (character === query[queryIndex]) {
+      queryIndex += 1;
+      if (queryIndex >= query.length) {
+        return true;
+      }
+    }
+  }
+  return queryIndex >= query.length;
+}
+
 export function getFilteredCommands(query: string): SlashCommandItem[] {
   if (!query) return SLASH_COMMANDS;
   const lower = query.toLowerCase();
-  return SLASH_COMMANDS.filter(
-    (cmd) =>
-      cmd.label.toLowerCase().includes(lower) ||
-      cmd.id.toLowerCase().includes(lower) ||
-      cmd.description.toLowerCase().includes(lower),
-  );
+  const scored = SLASH_COMMANDS.flatMap((cmd) => {
+    const aliases = cmd.aliases?.map((alias) => alias.toLowerCase()) ?? [];
+    const haystacks = [cmd.label.toLowerCase(), cmd.id.toLowerCase(), cmd.description.toLowerCase(), ...aliases];
+    const exactAlias = aliases.some((alias) => alias === lower);
+    const substring = haystacks.some((value) => value.includes(lower));
+    const fuzzy = haystacks.some((value) => fuzzyMatches(value, lower));
+
+    if (!exactAlias && !substring && !fuzzy) {
+      return [];
+    }
+
+    const score = exactAlias ? 3 : substring ? 2 : 1;
+    return [{ cmd, score }];
+  });
+
+  return scored
+    .sort((left, right) => right.score - left.score || left.cmd.label.localeCompare(right.cmd.label))
+    .map((entry) => entry.cmd);
 }
 
 export const SlashCommand = Extension.create({

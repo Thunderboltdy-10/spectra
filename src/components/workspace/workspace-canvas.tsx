@@ -95,17 +95,21 @@ const HUB_NODE_ID = "hub-node";
 /* ─── Zoom helpers ───────────────────────────────────────── */
 
 function getRepresentationBand(zoom: number): ZoomBand {
-  if (zoom < 0.58) return "overview";
-  if (zoom < 0.9) return "summary";
-  if (zoom < 1.48) return "detail";
+  if (zoom < 0.45) return "overview";
+  if (zoom < 0.75) return "summary";
+  if (zoom < 1.3) return "detail";
   return "internal";
 }
 
 /** Calculate opacity for non-focused workstreams during deep zoom */
 function getNeighborOpacity(zoom: number): number {
-  if (zoom < 1.12) return 1;
-  if (zoom > 1.56) return 0;
-  return Math.max(0, 1 - (zoom - 1.12) / 0.44);
+  if (zoom <= 1) return 1;
+  if (zoom >= 1.4) return 0;
+  return Math.max(0, 1 - (zoom - 1) / 0.4);
+}
+
+function distanceFromHub(x: number, y: number) {
+  return Math.sqrt(x * x + y * y);
 }
 
 function restoreViewport(): Viewport {
@@ -262,6 +266,48 @@ function buildEdges(
   });
 
   return [...hubEdges, ...buildPeerLinks(workstreams, positions)];
+}
+
+type CachedWorkspaceContent = {
+  threads: ThreadSummary[];
+  notes: NoteSummary[];
+  plannerItems: PlannerItemSummary[];
+  artifacts: ArtifactSummary[];
+  hubQuickNotes: Array<{ id: string; title: string; updatedAt: number }>;
+  hubDeadlines: Array<{ id: string; title: string; dueAt: number; workstreamTitle?: string }>;
+  hubActivity: Array<{ id: string; title: string; type: string; timestamp: number }>;
+};
+
+function emptyWorkspaceContent(): CachedWorkspaceContent {
+  return {
+    threads: [],
+    notes: [],
+    plannerItems: [],
+    artifacts: [],
+    hubQuickNotes: [],
+    hubDeadlines: [],
+    hubActivity: [],
+  };
+}
+
+function sameIds(left: string[], right: string[]) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function namespaceFlowNodes(prefix: string, nodes: Node[]) {
+  return nodes.map((node) => ({
+    ...node,
+    id: `${prefix}:${node.id}`,
+  }));
+}
+
+function namespaceFlowEdges(prefix: string, edges: Edge[]) {
+  return edges.map((edge) => ({
+    ...edge,
+    id: `${prefix}:${edge.id}`,
+    source: `${prefix}:${edge.source}`,
+    target: `${prefix}:${edge.target}`,
+  }));
 }
 
 /* ─── Workstream Node ────────────────────────────────────── */
@@ -623,25 +669,24 @@ function WorkspaceCanvasInner({
   const commitDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const commitAnimationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const animatedCommitRef = useRef<string | null>(null);
+  const prefetchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const workstreamDragThrottleRef = useRef(new Map<string, number>());
   const lastViewportRef = useRef<{ x: number; y: number; zoom: number }>({ x: 0, y: 0, zoom: 0.78 });
-  const contentCacheRef = useRef(new Map<string, {
-    threads: ThreadSummary[];
-    notes: NoteSummary[];
-    plannerItems: PlannerItemSummary[];
-    artifacts: ArtifactSummary[];
-    hubQuickNotes: Array<{ id: string; title: string; updatedAt: number }>;
-    hubDeadlines: Array<{ id: string; title: string; dueAt: number; workstreamTitle?: string }>;
-    hubActivity: Array<{ id: string; title: string; type: string; timestamp: number }>;
-  }>());
+  const contentCacheRef = useRef(new Map<string, CachedWorkspaceContent>());
+  const inFlightContentRef = useRef(new Map<string, Promise<void>>());
+  const internalNodeOverridesRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const {
     showArchived,
     showConnections,
     backgroundMode,
-    committedWorkstreamId,
+    primaryWorkstreamId,
+    visibleWorkstreamIds,
     viewMode,
     setCamera,
     setZoomBand,
     commitWorkstream,
+    setPrimaryWorkstreamId,
+    setVisibleWorkstreamIds,
     exitWorkstream,
     setPreviousViewport,
   } = useWorkspaceStore();
@@ -650,16 +695,8 @@ function WorkspaceCanvasInner({
   const [localOverrides, setLocalOverrides] = useState(() => loadLocalOverrides());
   const [internalNodeOverrides, setInternalNodeOverrides] = useState<Map<string, { x: number; y: number }>>(new Map());
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
-
-  // Internal view content state
-  const [internalThreads, setInternalThreads] = useState<ThreadSummary[]>([]);
-  const [internalNotes, setInternalNotes] = useState<NoteSummary[]>([]);
-  const [internalPlannerItems, setInternalPlannerItems] = useState<PlannerItemSummary[]>([]);
-  const [internalArtifacts, setInternalArtifacts] = useState<ArtifactSummary[]>([]);
-  const [hubQuickNotes, setHubQuickNotes] = useState<Array<{ id: string; title: string; updatedAt: number }>>([]);
-  const [hubDeadlines, setHubDeadlines] = useState<Array<{ id: string; title: string; dueAt: number; workstreamTitle?: string }>>([]);
-  const [hubActivity, setHubActivity] = useState<Array<{ id: string; title: string; type: string; timestamp: number }>>([]);
-  const [internalLoading, setInternalLoading] = useState(false);
+  const [contentById, setContentById] = useState<Record<string, CachedWorkspaceContent>>({});
+  const [loadingContentIds, setLoadingContentIds] = useState<string[]>([]);
   const sanitizeTitle = useCallback((value: unknown) => {
     const text = typeof value === "string" ? stripGeneratedDocumentMarkers(value).trim() : "";
     return text || "Untitled";
@@ -673,170 +710,9 @@ function WorkspaceCanvasInner({
   }, [zoom]);
 
   useEffect(() => {
+    internalNodeOverridesRef.current = new Map();
     setInternalNodeOverrides(new Map());
-  }, [committedWorkstreamId, viewMode]);
-
-  // Fetch internal content when committed to a workstream
-  useEffect(() => {
-    if (!committedWorkstreamId) {
-      setInternalThreads([]);
-      setInternalNotes([]);
-      setInternalPlannerItems([]);
-      setInternalArtifacts([]);
-      setHubQuickNotes([]);
-      setHubDeadlines([]);
-      setHubActivity([]);
-      setInternalLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    const cached = contentCacheRef.current.get(committedWorkstreamId);
-    if (cached) {
-      setInternalThreads(cached.threads);
-      setInternalNotes(cached.notes);
-      setInternalPlannerItems(cached.plannerItems);
-      setInternalArtifacts(cached.artifacts);
-      setHubQuickNotes(cached.hubQuickNotes);
-      setHubDeadlines(cached.hubDeadlines);
-      setHubActivity(cached.hubActivity);
-      setInternalLoading(false);
-    } else {
-      setInternalLoading(true);
-    }
-
-    async function fetchContent() {
-      try {
-        if (committedWorkstreamId === "__hub__") {
-          let nextHubQuickNotes: Array<{ id: string; title: string; updatedAt: number }> = [];
-          let nextHubDeadlines: Array<{ id: string; title: string; dueAt: number; workstreamTitle?: string }> = [];
-          let nextHubActivity: Array<{ id: string; title: string; type: string; timestamp: number }> = [];
-          const [docsRes, plannerRes, activityRes] = await Promise.all([
-            fetch("/api/artifacts?action=hub&type=document&limit=12"),
-            fetch("/api/planner?action=hub&limit=12&days=14"),
-            fetch("/api/chats?limit=10"),
-          ]);
-
-          if (!cancelled && docsRes.ok) {
-            const data = await docsRes.json();
-            nextHubQuickNotes = (data.artifacts ?? []).map((artifact: Record<string, unknown>) => ({
-                id: String(artifact._id),
-                title: sanitizeTitle(artifact.title),
-                updatedAt: Number(artifact.updatedAt ?? Date.now()),
-              }));
-            setHubQuickNotes(nextHubQuickNotes);
-          }
-
-          if (!cancelled && plannerRes.ok) {
-            const data = await plannerRes.json();
-            nextHubDeadlines = (data.aggregatedDeadlines ?? []).map((item: Record<string, unknown>) => ({
-                id: String(item._id),
-                title: sanitizeTitle(item.title),
-                dueAt: Number(item.dueAt ?? Date.now()),
-                workstreamTitle: typeof item.workstreamId === "string"
-                  ? workstreams.find((ws) => ws._id === item.workstreamId)?.title
-                  : undefined,
-              }));
-            setHubDeadlines(nextHubDeadlines);
-          }
-
-          if (!cancelled && activityRes.ok) {
-            const data = await activityRes.json();
-            nextHubActivity = (data.chats ?? []).map((chat: Record<string, unknown>) => ({
-                id: String(chat._id),
-                title: sanitizeTitle(chat.title ?? chat.latestUserPrompt ?? "Conversation"),
-                type: String(chat.threadType ?? "chat"),
-                timestamp: Number(chat.updatedAt ?? Date.now()),
-              }));
-            setHubActivity(nextHubActivity);
-          }
-          contentCacheRef.current.set(committedWorkstreamId, {
-            threads: [],
-            notes: [],
-            plannerItems: [],
-            artifacts: [],
-            hubQuickNotes: nextHubQuickNotes,
-            hubDeadlines: nextHubDeadlines,
-            hubActivity: nextHubActivity,
-          });
-          return;
-        }
-
-        let nextThreads: ThreadSummary[] = [];
-        let nextNotes: NoteSummary[] = [];
-        let nextArtifacts: ArtifactSummary[] = [];
-        let nextPlannerItems: PlannerItemSummary[] = [];
-        const [chatsRes, docsRes, artifactsRes, plannerRes] = await Promise.all([
-          fetch(`/api/chats?workstreamId=${committedWorkstreamId}&limit=20`),
-          fetch(`/api/artifacts?workstreamId=${committedWorkstreamId}&type=document&limit=20`),
-          fetch(`/api/artifacts?workstreamId=${committedWorkstreamId}&limit=20`),
-          fetch(`/api/planner?workstreamId=${committedWorkstreamId}&limit=20`),
-        ]);
-
-        if (!cancelled && chatsRes.ok) {
-          const data = await chatsRes.json();
-          nextThreads = (data.chats ?? []).map((chat: Record<string, unknown>) => ({
-              id: String(chat._id),
-              title: sanitizeTitle(chat.title ?? chat.latestUserPrompt ?? "Untitled"),
-              messageCount: Number(chat.messageCount ?? 0),
-              lastActivityAt: Number(chat.updatedAt ?? Date.now()),
-            }));
-          setInternalThreads(nextThreads);
-        }
-
-        if (!cancelled && docsRes.ok) {
-          const data = await docsRes.json();
-          nextNotes = (data.artifacts ?? []).map((artifact: Record<string, unknown>) => ({
-              id: String(artifact._id),
-              title: sanitizeTitle(artifact.title),
-              updatedAt: Number(artifact.updatedAt ?? Date.now()),
-              editorMode: String(artifact.editorMode ?? "standard"),
-            }));
-          setInternalNotes(nextNotes);
-        }
-
-        if (!cancelled && artifactsRes.ok) {
-          const data = await artifactsRes.json();
-          nextArtifacts = (data.artifacts ?? [])
-            .filter((artifact: Record<string, unknown>) => artifact.type !== "document")
-            .map((artifact: Record<string, unknown>) => ({
-              id: String(artifact._id),
-              title: sanitizeTitle(artifact.title),
-              type: String(artifact.type ?? "artifact"),
-              createdAt: Number(artifact.createdAt ?? Date.now()),
-            }));
-          setInternalArtifacts(nextArtifacts);
-        }
-
-        if (!cancelled && plannerRes.ok) {
-          const data = await plannerRes.json();
-          nextPlannerItems = (data.plannerItems ?? []).map((item: Record<string, unknown>) => ({
-              id: String(item._id),
-              title: sanitizeTitle(item.title),
-              dueAt: typeof item.dueAt === "number" ? item.dueAt : undefined,
-              status: (item.status as PlannerItemSummary["status"]) ?? "pending",
-            }));
-          setInternalPlannerItems(nextPlannerItems);
-        }
-        contentCacheRef.current.set(committedWorkstreamId!, {
-          threads: nextThreads,
-          notes: nextNotes,
-          plannerItems: nextPlannerItems,
-          artifacts: nextArtifacts,
-          hubQuickNotes: [],
-          hubDeadlines: [],
-          hubActivity: [],
-        });
-      } catch {
-        // Ignore fetch errors
-      } finally {
-        if (!cancelled) setInternalLoading(false);
-      }
-    }
-
-    void fetchContent();
-    return () => { cancelled = true; };
-  }, [committedWorkstreamId, sanitizeTitle, workstreams]);
+  }, [viewMode]);
 
   // Initialize persistence listeners
   useEffect(() => {
@@ -871,9 +747,213 @@ function WorkspaceCanvasInner({
     setZoomBand(band);
   }, [band, setZoomBand]);
 
+  const getCachedContent = useCallback((workstreamId: string) => {
+    return contentById[workstreamId] ?? contentCacheRef.current.get(workstreamId) ?? emptyWorkspaceContent();
+  }, [contentById]);
+
+  const fetchContentForWorkstream = useCallback(async (workstreamId: string) => {
+    if (contentCacheRef.current.has(workstreamId)) {
+      return;
+    }
+    const existingPromise = inFlightContentRef.current.get(workstreamId);
+    if (existingPromise) {
+      await existingPromise;
+      return;
+    }
+
+    const promise = (async () => {
+      setLoadingContentIds((current) => (current.includes(workstreamId) ? current : [...current, workstreamId]));
+      try {
+        if (workstreamId === "__hub__") {
+          const [docsRes, plannerRes, activityRes] = await Promise.all([
+            fetch("/api/artifacts?action=hub&type=document&limit=12"),
+            fetch("/api/planner?action=hub&limit=12&days=14"),
+            fetch("/api/chats?limit=10"),
+          ]);
+
+          const next: CachedWorkspaceContent = emptyWorkspaceContent();
+          if (docsRes.ok) {
+            const data = await docsRes.json();
+            next.hubQuickNotes = (data.artifacts ?? []).map((artifact: Record<string, unknown>) => ({
+              id: String(artifact._id),
+              title: sanitizeTitle(artifact.title),
+              updatedAt: Number(artifact.updatedAt ?? Date.now()),
+            }));
+          }
+          if (plannerRes.ok) {
+            const data = await plannerRes.json();
+            next.hubDeadlines = (data.aggregatedDeadlines ?? []).map((item: Record<string, unknown>) => ({
+              id: String(item._id),
+              title: sanitizeTitle(item.title),
+              dueAt: Number(item.dueAt ?? Date.now()),
+              workstreamTitle: typeof item.workstreamId === "string"
+                ? workstreams.find((ws) => ws._id === item.workstreamId)?.title
+                : undefined,
+            }));
+          }
+          if (activityRes.ok) {
+            const data = await activityRes.json();
+            next.hubActivity = (data.chats ?? []).map((chat: Record<string, unknown>) => ({
+              id: String(chat._id),
+              title: sanitizeTitle(chat.title ?? chat.latestUserPrompt ?? "Conversation"),
+              type: String(chat.threadType ?? "chat"),
+              timestamp: Number(chat.updatedAt ?? Date.now()),
+            }));
+          }
+          contentCacheRef.current.set(workstreamId, next);
+          setContentById((current) => ({ ...current, [workstreamId]: next }));
+          return;
+        }
+
+        const [chatsRes, docsRes, artifactsRes, plannerRes] = await Promise.all([
+          fetch(`/api/chats?workstreamId=${workstreamId}&limit=20`),
+          fetch(`/api/artifacts?workstreamId=${workstreamId}&type=document&limit=20`),
+          fetch(`/api/artifacts?workstreamId=${workstreamId}&limit=20`),
+          fetch(`/api/planner?workstreamId=${workstreamId}&limit=20`),
+        ]);
+
+        const next: CachedWorkspaceContent = emptyWorkspaceContent();
+        if (chatsRes.ok) {
+          const data = await chatsRes.json();
+          next.threads = (data.chats ?? []).map((chat: Record<string, unknown>) => ({
+            id: String(chat._id),
+            title: sanitizeTitle(chat.title ?? chat.latestUserPrompt ?? "Untitled"),
+            messageCount: Number(chat.messageCount ?? 0),
+            lastActivityAt: Number(chat.updatedAt ?? Date.now()),
+          }));
+        }
+        if (docsRes.ok) {
+          const data = await docsRes.json();
+          next.notes = (data.artifacts ?? []).map((artifact: Record<string, unknown>) => ({
+            id: String(artifact._id),
+            title: sanitizeTitle(artifact.title),
+            updatedAt: Number(artifact.updatedAt ?? Date.now()),
+            editorMode: String(artifact.editorMode ?? "standard"),
+          }));
+        }
+        if (artifactsRes.ok) {
+          const data = await artifactsRes.json();
+          next.artifacts = (data.artifacts ?? [])
+            .filter((artifact: Record<string, unknown>) => artifact.type !== "document")
+            .map((artifact: Record<string, unknown>) => ({
+              id: String(artifact._id),
+              title: sanitizeTitle(artifact.title),
+              type: String(artifact.type ?? "artifact"),
+              createdAt: Number(artifact.createdAt ?? Date.now()),
+            }));
+        }
+        if (plannerRes.ok) {
+          const data = await plannerRes.json();
+          next.plannerItems = (data.plannerItems ?? []).map((item: Record<string, unknown>) => ({
+            id: String(item._id),
+            title: sanitizeTitle(item.title),
+            dueAt: typeof item.dueAt === "number" ? item.dueAt : undefined,
+            status: (item.status as PlannerItemSummary["status"]) ?? "pending",
+          }));
+        }
+        contentCacheRef.current.set(workstreamId, next);
+        setContentById((current) => ({ ...current, [workstreamId]: next }));
+      } finally {
+        setLoadingContentIds((current) => current.filter((id) => id !== workstreamId));
+        inFlightContentRef.current.delete(workstreamId);
+      }
+    })();
+
+    inFlightContentRef.current.set(workstreamId, promise);
+    await promise;
+  }, [sanitizeTitle, workstreams]);
+
+  useEffect(() => {
+    if (band !== "internal" || visibleWorkstreamIds.length === 0) {
+      return;
+    }
+    void Promise.all(visibleWorkstreamIds.map((workstreamId) => fetchContentForWorkstream(workstreamId)));
+  }, [band, fetchContentForWorkstream, visibleWorkstreamIds]);
+
+  const updateVisibilityModel = useCallback((currentZoom: number) => {
+    if (commitDebounceRef.current) {
+      clearTimeout(commitDebounceRef.current);
+    }
+
+    commitDebounceRef.current = setTimeout(() => {
+      const currentBand = getRepresentationBand(currentZoom);
+      const vp = lastViewportRef.current;
+      const centerX = (-vp.x + window.innerWidth / 2) / vp.zoom;
+      const centerY = (-vp.y + window.innerHeight / 2) / vp.zoom;
+
+      const nearby = visibleWorkstreams
+        .map((ws) => {
+          const pos = positions.get(ws._id);
+          if (!pos) return null;
+          const dx = pos.x - centerX;
+          const dy = pos.y - centerY;
+          return {
+            id: ws._id,
+            distance: Math.sqrt(dx * dx + dy * dy),
+          };
+        })
+        .filter((row): row is { id: string; distance: number } => Boolean(row))
+        .sort((left, right) => left.distance - right.distance);
+
+      if (currentBand === "internal") {
+        let nextVisible = nearby.filter((row) => row.distance <= 600).map((row) => row.id);
+        let nextPrimary = nextVisible[0];
+
+        const hubDistance = distanceFromHub(centerX, centerY);
+        if (nextVisible.length === 0 && hubDistance <= 320) {
+          nextVisible = ["__hub__"];
+          nextPrimary = "__hub__";
+        } else if (nextVisible.length === 0 && primaryWorkstreamId) {
+          nextVisible = visibleWorkstreamIds;
+          nextPrimary = primaryWorkstreamId;
+        }
+
+        if (!sameIds(visibleWorkstreamIds, nextVisible)) {
+          setVisibleWorkstreamIds(nextVisible);
+        }
+        if (nextPrimary !== primaryWorkstreamId) {
+          setPrimaryWorkstreamId(nextPrimary);
+          onCommitWorkstream?.(nextPrimary ?? null);
+        }
+        return;
+      }
+
+      if (currentBand === "detail") {
+        if (prefetchDebounceRef.current) {
+          clearTimeout(prefetchDebounceRef.current);
+        }
+        prefetchDebounceRef.current = setTimeout(() => {
+          const targets = nearby
+            .filter((row) => row.distance <= 600)
+            .map((row) => row.id);
+          if (distanceFromHub(centerX, centerY) <= 320) {
+            targets.unshift("__hub__");
+          }
+          void Promise.all(Array.from(new Set(targets)).map((workstreamId) => fetchContentForWorkstream(workstreamId)));
+        }, 300);
+        return;
+      }
+
+      if (visibleWorkstreamIds.length > 0 || primaryWorkstreamId) {
+        setVisibleWorkstreamIds([]);
+        setPrimaryWorkstreamId(undefined);
+        onCommitWorkstream?.(null);
+      }
+    }, 400);
+  }, [
+    fetchContentForWorkstream,
+    onCommitWorkstream,
+    positions,
+    primaryWorkstreamId,
+    setPrimaryWorkstreamId,
+    setVisibleWorkstreamIds,
+    visibleWorkstreamIds,
+    visibleWorkstreams,
+  ]);
+
   const handleOpenWorkstream = useCallback(
     (workstreamId: string) => {
-      if (committedWorkstreamId === workstreamId) return;
+      if (primaryWorkstreamId === workstreamId) return;
       if (commitAnimationTimeoutRef.current) {
         clearTimeout(commitAnimationTimeoutRef.current);
       }
@@ -890,7 +970,7 @@ function WorkspaceCanvasInner({
           instance.setCenter(
             node.position.x + 150,
             node.position.y + 100,
-            { zoom: 1.58, duration: 620 },
+            { zoom: 1.7, duration: 450 },
           );
         }
       }
@@ -899,9 +979,9 @@ function WorkspaceCanvasInner({
       commitAnimationTimeoutRef.current = setTimeout(() => {
         commitWorkstream(workstreamId);
         onOpenWorkstream?.(workstreamId);
-      }, 620);
+      }, 450);
     },
-    [commitWorkstream, committedWorkstreamId, onOpenWorkstream, setPreviousViewport],
+    [commitWorkstream, onOpenWorkstream, primaryWorkstreamId, setPreviousViewport],
   );
 
   const handleExitWorkstream = useCallback(() => {
@@ -924,7 +1004,7 @@ function WorkspaceCanvasInner({
 
   const handleOpenHub = useCallback(
     () => {
-      if (committedWorkstreamId === "__hub__") return;
+      if (primaryWorkstreamId === "__hub__") return;
       if (commitAnimationTimeoutRef.current) {
         clearTimeout(commitAnimationTimeoutRef.current);
       }
@@ -932,99 +1012,50 @@ function WorkspaceCanvasInner({
       if (instance) {
         animatedCommitRef.current = "__hub__";
         setPreviousViewport({ ...lastViewportRef.current });
-        instance.setCenter(0, 0, { zoom: 1.52, duration: 620 });
+        instance.setCenter(0, 0, { zoom: 1.7, duration: 450 });
       }
       commitAnimationTimeoutRef.current = setTimeout(() => {
         commitWorkstream("__hub__");
         onOpenHub?.();
-      }, 620);
+      }, 450);
     },
-    [commitWorkstream, committedWorkstreamId, onOpenHub, setPreviousViewport],
+    [commitWorkstream, onOpenHub, primaryWorkstreamId, setPreviousViewport],
   );
 
   useEffect(() => {
     const instance = reactFlowRef.current;
     if (!instance || !initializedRef.current) return;
 
-    if (!committedWorkstreamId) {
+    if (!primaryWorkstreamId) {
       animatedCommitRef.current = null;
       return;
     }
 
-    if (animatedCommitRef.current === committedWorkstreamId) return;
+    if (animatedCommitRef.current === primaryWorkstreamId) return;
 
-    if (committedWorkstreamId === "__hub__") {
+    if (primaryWorkstreamId === "__hub__") {
       animatedCommitRef.current = "__hub__";
       setPreviousViewport({ ...lastViewportRef.current });
-      instance.setCenter(0, 0, { zoom: 1.52, duration: 620 });
+      instance.setCenter(0, 0, { zoom: 1.7, duration: 450 });
       return;
     }
 
-    const node = instance.getNode(`ws-${committedWorkstreamId}`);
+    const node = instance.getNode(`ws-${primaryWorkstreamId}`);
     if (!node) return;
-    animatedCommitRef.current = committedWorkstreamId;
+    animatedCommitRef.current = primaryWorkstreamId;
     setPreviousViewport({ ...lastViewportRef.current });
     instance.setCenter(
       node.position.x + 150,
       node.position.y + 100,
-      { zoom: 1.58, duration: 620 },
+      { zoom: 1.7, duration: 450 },
     );
-  }, [committedWorkstreamId, positions, setPreviousViewport]);
+  }, [positions, primaryWorkstreamId, setPreviousViewport]);
 
   useEffect(() => () => {
     if (commitDebounceRef.current) clearTimeout(commitDebounceRef.current);
     if (commitAnimationTimeoutRef.current) clearTimeout(commitAnimationTimeoutRef.current);
+    if (prefetchDebounceRef.current) clearTimeout(prefetchDebounceRef.current);
   }, []);
-
-  // Debounced zoom-based commit with proximity gate + stability debounce
-  const handleZoomCommit = useCallback(
-    (currentZoom: number) => {
-      if (commitDebounceRef.current) {
-        clearTimeout(commitDebounceRef.current);
-      }
-
-      commitDebounceRef.current = setTimeout(() => {
-        const currentBand = getRepresentationBand(currentZoom);
-        const vp = lastViewportRef.current;
-        const centerX = (-vp.x + window.innerWidth / 2) / vp.zoom;
-        const centerY = (-vp.y + window.innerHeight / 2) / vp.zoom;
-
-        let nearestId: string | null = null;
-        let nearestDist = Infinity;
-
-        for (const ws of visibleWorkstreams) {
-          const pos = positions.get(ws._id);
-          if (!pos) continue;
-          const dx = pos.x - centerX;
-          const dy = pos.y - centerY;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < nearestDist) {
-            nearestDist = dist;
-            nearestId = ws._id;
-          }
-        }
-
-        if (committedWorkstreamId && committedWorkstreamId !== "__hub__") {
-          if (currentBand !== "internal" || nearestDist > 520) {
-            onCommitWorkstream?.(null);
-            return;
-          }
-
-          if (nearestId && nearestId !== committedWorkstreamId && nearestDist < 360) {
-            commitWorkstream(nearestId);
-            onCommitWorkstream?.(nearestId);
-          }
-          return;
-        }
-
-        if (currentBand === "internal" && !committedWorkstreamId && nearestId && nearestDist < 380) {
-          commitWorkstream(nearestId);
-          onCommitWorkstream?.(nearestId);
-        }
-      }, 380);
-    },
-    [committedWorkstreamId, commitWorkstream, onCommitWorkstream, positions, visibleWorkstreams],
-  );
 
   const nodes = useMemo<Node[]>(() => {
     const hubNode: Node<HubNodeData> = {
@@ -1038,23 +1069,24 @@ function WorkspaceCanvasInner({
         userAvatar,
         totalWorkstreams: workstreams.filter((ws) => ws.status === "active").length,
         band,
-        isDimmed: !!committedWorkstreamId && committedWorkstreamId !== "__hub__",
-        isCommitted: committedWorkstreamId === "__hub__",
+        isDimmed: !!primaryWorkstreamId && primaryWorkstreamId !== "__hub__",
+        isCommitted: primaryWorkstreamId === "__hub__",
         onOpen: handleOpenHub,
       },
     };
 
     const workstreamNodes: Node<WorkstreamNodeData>[] = visibleWorkstreams.map((ws) => {
       const pos = positions.get(ws._id) ?? { x: 0, y: 0 };
-      const isCommitted = committedWorkstreamId === ws._id;
-      const isDimmed = !!committedWorkstreamId && !isCommitted;
+      const isCommitted = primaryWorkstreamId === ws._id;
+      const isSecondaryVisible = visibleWorkstreamIds.includes(ws._id) && !isCommitted;
+      const isDimmed = !!primaryWorkstreamId && !isCommitted && !isSecondaryVisible;
       const lifecycle = getLifecycleVisuals(ws);
 
       return {
         id: `ws-${ws._id}`,
         type: "workstream",
         position: pos,
-        draggable: !committedWorkstreamId,
+        draggable: !primaryWorkstreamId,
         selectable: false,
         hidden: isDimmed && neighborOpacity <= 0,
         data: {
@@ -1070,76 +1102,122 @@ function WorkspaceCanvasInner({
       };
     });
 
-    // Inject internal content nodes when committed
     let internalNodes: Node[] = [];
-    if (committedWorkstreamId && band === "internal") {
-      if (committedWorkstreamId === "__hub__") {
-        internalNodes = buildHubNodes(
-          {
-            quickNotes: hubQuickNotes,
-            deadlines: hubDeadlines,
-            recentActivity: hubActivity,
-            loading: internalLoading,
-            onOpenPanel: panelOpener,
-            onNewWorkstream,
+    if (visibleWorkstreamIds.length > 0 && band === "internal") {
+      for (const workstreamId of visibleWorkstreamIds) {
+        const isPrimary = primaryWorkstreamId === workstreamId;
+        const loading = loadingContentIds.includes(workstreamId) && !contentCacheRef.current.has(workstreamId);
+        const cached = getCachedContent(workstreamId);
+
+        if (workstreamId === "__hub__") {
+          const namespacedHubNodes = namespaceFlowNodes(`internal:${workstreamId}`, buildHubNodes(
+            {
+              quickNotes: cached.hubQuickNotes,
+              deadlines: cached.hubDeadlines,
+              recentActivity: cached.hubActivity,
+              loading,
+              onOpenPanel: panelOpener,
+              onNewWorkstream,
+            },
+            { x: 80, y: 120 },
+          ));
+          internalNodes.push(...namespacedHubNodes.map((node) => ({
+            ...node,
+            position: internalNodeOverrides.get(node.id) ?? node.position,
+            style: {
+              ...node.style,
+              opacity: isPrimary ? 1 : 0.6,
+            },
+          })));
+          continue;
+        }
+
+        const focusWorkstream = workstreams.find((workstream) => workstream._id === workstreamId);
+        const workstreamPos = positions.get(workstreamId) ?? { x: 0, y: 0 };
+        const basePos = { x: workstreamPos.x - 40, y: workstreamPos.y + 120 };
+        const contentData = {
+          threads: cached.threads,
+          notes: cached.notes,
+          plannerItems: cached.plannerItems,
+          artifacts: cached.artifacts,
+          loading,
+          workstreamEmoji: focusWorkstream?.emoji,
+          workstreamTitle: focusWorkstream?.title,
+          onOpenPanel: panelOpener,
+        };
+
+        let builtNodes: Node[] = [];
+        if (viewMode === "structured") {
+          builtNodes = buildStructuredNodes(contentData, basePos);
+        } else if (viewMode === "columns") {
+          builtNodes = buildColumnNodes(contentData, basePos);
+        } else {
+          builtNodes = buildGraphNodes(contentData, basePos).nodes;
+        }
+
+        const namespacedNodes = namespaceFlowNodes(`internal:${workstreamId}`, builtNodes);
+        internalNodes.push(...namespacedNodes.map((node) => ({
+          ...node,
+          position: internalNodeOverrides.get(node.id) ?? node.position,
+          style: {
+            ...node.style,
+            opacity: isPrimary ? 1 : 0.6,
           },
-          { x: 80, y: 120 },
-        );
-        return [hubNode, ...workstreamNodes, ...internalNodes];
+        })));
       }
-
-      const committedPos = positions.get(committedWorkstreamId) ?? { x: 0, y: 0 };
-      const basePos = { x: committedPos.x - 40, y: committedPos.y + 120 };
-      const contentData = {
-        threads: internalThreads,
-        notes: internalNotes,
-        plannerItems: internalPlannerItems,
-        artifacts: internalArtifacts,
-        loading: internalLoading,
-        workstreamEmoji: workstreams.find((w) => w._id === committedWorkstreamId)?.emoji,
-        workstreamTitle: workstreams.find((w) => w._id === committedWorkstreamId)?.title,
-        onOpenPanel: panelOpener,
-      };
-
-      if (viewMode === "structured") {
-        internalNodes = buildStructuredNodes(contentData, basePos);
-      } else if (viewMode === "columns") {
-        internalNodes = buildColumnNodes(contentData, basePos);
-      } else if (viewMode === "graph") {
-        const graphResult = buildGraphNodes(contentData, basePos);
-        internalNodes = graphResult.nodes;
-        // Graph edges get merged below
-      }
-
-      internalNodes = internalNodes.map((node) => ({
-        ...node,
-        position: internalNodeOverrides.get(node.id) ?? node.position,
-      }));
     }
 
     return [hubNode, ...workstreamNodes, ...internalNodes];
-  }, [band, committedWorkstreamId, focusWorkstreamId, handleOpenHub, handleOpenWorkstream, hubActivity, hubDeadlines, hubQuickNotes, internalArtifacts, internalLoading, internalNodeOverrides, internalNotes, internalPlannerItems, internalThreads, neighborOpacity, onNewWorkstream, panelOpener, positions, userAvatar, userName, viewMode, visibleWorkstreams, workstreams]);
+  }, [
+    band,
+    focusWorkstreamId,
+    getCachedContent,
+    handleOpenHub,
+    handleOpenWorkstream,
+    internalNodeOverrides,
+    loadingContentIds,
+    neighborOpacity,
+    onNewWorkstream,
+    panelOpener,
+    positions,
+    primaryWorkstreamId,
+    userAvatar,
+    userName,
+    viewMode,
+    visibleWorkstreamIds,
+    visibleWorkstreams,
+    workstreams,
+  ]);
 
   const edges = useMemo(() => {
-    const baseEdges = buildEdges(visibleWorkstreams, positions, showConnections, committedWorkstreamId);
+    const baseEdges = buildEdges(visibleWorkstreams, positions, showConnections, primaryWorkstreamId);
 
-    // Add graph view edges if applicable
-    if (committedWorkstreamId && committedWorkstreamId !== "__hub__" && viewMode === "graph" && band === "internal") {
-      const committedPos = positions.get(committedWorkstreamId) ?? { x: 0, y: 0 };
-      const basePos = { x: committedPos.x - 40, y: committedPos.y + 120 };
-      const graphResult = buildGraphNodes({
-        threads: internalThreads,
-        notes: internalNotes,
-        plannerItems: internalPlannerItems,
-        artifacts: internalArtifacts,
-        loading: internalLoading,
-        onOpenPanel: panelOpener,
-      }, basePos);
-      return [...baseEdges, ...graphResult.edges];
+    if (viewMode !== "graph" || band !== "internal") {
+      return baseEdges;
     }
 
-    return baseEdges;
-  }, [band, committedWorkstreamId, internalArtifacts, internalLoading, internalNotes, internalPlannerItems, internalThreads, panelOpener, positions, showConnections, viewMode, visibleWorkstreams]);
+    const graphEdges = visibleWorkstreamIds
+      .filter((workstreamId) => workstreamId !== "__hub__")
+      .flatMap((workstreamId) => {
+        const focusWorkstream = workstreams.find((workstream) => workstream._id === workstreamId);
+        const workstreamPos = positions.get(workstreamId) ?? { x: 0, y: 0 };
+        const basePos = { x: workstreamPos.x - 40, y: workstreamPos.y + 120 };
+        const cached = getCachedContent(workstreamId);
+        const graphResult = buildGraphNodes({
+          threads: cached.threads,
+          notes: cached.notes,
+          plannerItems: cached.plannerItems,
+          artifacts: cached.artifacts,
+          loading: loadingContentIds.includes(workstreamId) && !contentCacheRef.current.has(workstreamId),
+          workstreamEmoji: focusWorkstream?.emoji,
+          workstreamTitle: focusWorkstream?.title,
+          onOpenPanel: panelOpener,
+        }, basePos);
+        return namespaceFlowEdges(`internal:${workstreamId}`, graphResult.edges);
+      });
+
+    return [...baseEdges, ...graphEdges];
+  }, [band, getCachedContent, loadingContentIds, panelOpener, positions, primaryWorkstreamId, showConnections, viewMode, visibleWorkstreamIds, visibleWorkstreams, workstreams]);
 
   const handleInit = useCallback((instance: ReactFlowInstance) => {
     reactFlowRef.current = instance;
@@ -1151,19 +1229,25 @@ function WorkspaceCanvasInner({
     setZoom(saved.zoom);
   }, [setCamera]);
 
+  const handleMove = useCallback((_: unknown, viewport: Viewport) => {
+    setZoom(viewport.zoom);
+    lastViewportRef.current = { x: viewport.x, y: viewport.y, zoom: viewport.zoom };
+    updateVisibilityModel(viewport.zoom);
+  }, [updateVisibilityModel]);
+
   const handleMoveEnd = useCallback(
     (_: unknown, viewport: Viewport) => {
       setZoom(viewport.zoom);
       setCamera({ x: viewport.x, y: viewport.y, z: viewport.zoom });
       lastViewportRef.current = { x: viewport.x, y: viewport.y, zoom: viewport.zoom };
-      handleZoomCommit(viewport.zoom);
+      updateVisibilityModel(viewport.zoom);
       try {
         window.localStorage.setItem("workspace:viewport", JSON.stringify(viewport));
       } catch {
         // Ignore
       }
     },
-    [setCamera, handleZoomCommit],
+    [setCamera, updateVisibilityModel],
   );
 
   const handleNodeDragStop = useCallback(
@@ -1182,6 +1266,7 @@ function WorkspaceCanvasInner({
         return;
       }
 
+      internalNodeOverridesRef.current.set(node.id, { x, y });
       setInternalNodeOverrides((current) => {
         const next = new Map(current);
         next.set(node.id, { x, y });
@@ -1192,41 +1277,52 @@ function WorkspaceCanvasInner({
   );
 
   const handleNodeDrag = useCallback((_: unknown, node: Node) => {
-    if (node.id.startsWith("ws-")) return;
-    setInternalNodeOverrides((current) => {
-      const next = new Map(current);
-      next.set(node.id, {
-        x: Math.round(node.position.x),
-        y: Math.round(node.position.y),
+    const x = Math.round(node.position.x);
+    const y = Math.round(node.position.y);
+
+    if (node.id.startsWith("ws-")) {
+      const lastUpdate = workstreamDragThrottleRef.current.get(node.id) ?? 0;
+      const now = Date.now();
+      if (now - lastUpdate < 50) {
+        return;
+      }
+      workstreamDragThrottleRef.current.set(node.id, now);
+      const workstreamId = node.id.slice(3);
+      setLocalOverrides((current) => {
+        const next = new Map(current);
+        next.set(workstreamId, { x, y });
+        return next;
       });
-      return next;
-    });
+      return;
+    }
+
+    internalNodeOverridesRef.current.set(node.id, { x, y });
   }, []);
 
   // Escape key handler
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && committedWorkstreamId) {
+      if (e.key === "Escape" && primaryWorkstreamId) {
         handleExitWorkstream();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [committedWorkstreamId, handleExitWorkstream]);
+  }, [handleExitWorkstream, primaryWorkstreamId]);
 
   // Center home event listener
   useEffect(() => {
     const handler = () => {
       const instance = reactFlowRef.current;
       if (!instance) return;
-      if (committedWorkstreamId) {
+      if (primaryWorkstreamId) {
         handleExitWorkstream();
       }
       instance.setCenter(0, 0, { zoom: 0.9, duration: 500 });
     };
     window.addEventListener("workspace:center-home", handler);
     return () => window.removeEventListener("workspace:center-home", handler);
-  }, [committedWorkstreamId, handleExitWorkstream]);
+  }, [handleExitWorkstream, primaryWorkstreamId]);
 
   // Center on focused workstream from URL
   useEffect(() => {
@@ -1247,8 +1343,8 @@ function WorkspaceCanvasInner({
     return () => window.removeEventListener("mousedown", handler);
   }, []);
 
-  const committedWorkstream = committedWorkstreamId
-    ? workstreams.find((ws) => ws._id === committedWorkstreamId)
+  const committedWorkstream = primaryWorkstreamId
+    ? workstreams.find((ws) => ws._id === primaryWorkstreamId)
     : undefined;
 
   return (
@@ -1281,7 +1377,7 @@ function WorkspaceCanvasInner({
             onBack={handleExitWorkstream}
           />
         )}
-        {!committedWorkstream && committedWorkstreamId === "__hub__" && (
+        {!committedWorkstream && primaryWorkstreamId === "__hub__" && (
           <motion.div
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1312,6 +1408,7 @@ function WorkspaceCanvasInner({
         defaultViewport={restoreViewport()}
         nodeTypes={FLOW_NODE_TYPES}
         onInit={handleInit}
+        onMove={handleMove}
         onMoveEnd={handleMoveEnd}
         onNodeDrag={handleNodeDrag}
         onNodeDragStop={handleNodeDragStop}
@@ -1336,7 +1433,7 @@ function WorkspaceCanvasInner({
           </ControlButton>
           <ControlButton
             onClick={() => {
-              if (committedWorkstreamId) {
+              if (primaryWorkstreamId) {
                 handleExitWorkstream();
               }
               reactFlowRef.current?.setCenter(0, 0, { zoom: 0.9, duration: 500 });
@@ -1375,7 +1472,7 @@ function WorkspaceCanvasInner({
             <span>New document</span>
             <span className="text-[10px] text-[var(--text-tertiary)]">Artifact</span>
           </button>
-          {committedWorkstreamId && committedWorkstreamId !== "__hub__" && (
+          {primaryWorkstreamId && primaryWorkstreamId !== "__hub__" && (
             <button
               type="button"
               onClick={() => {
@@ -1388,7 +1485,7 @@ function WorkspaceCanvasInner({
               <span className="text-[10px] text-[var(--text-tertiary)]">Workstream</span>
             </button>
           )}
-          {!committedWorkstreamId && (
+          {!primaryWorkstreamId && (
             <button
               type="button"
               onClick={() => {

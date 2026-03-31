@@ -59,6 +59,16 @@ interface TiptapEditorProps {
   documentTitle?: string;
   createdAt?: number;
   updatedAt?: number;
+  onVersionHistoryOpen?: () => void;
+  onVersionRestore?: (payload: {
+    artifact?: {
+      _id: string;
+      title?: string;
+      content?: JSONContent | null;
+      contentPlaintext?: string;
+      updatedAt?: number;
+    };
+  }) => void;
 }
 
 type EditorSnapshot = {
@@ -81,6 +91,8 @@ export function TiptapEditor({
   documentTitle,
   createdAt,
   updatedAt,
+  onVersionHistoryOpen,
+  onVersionRestore,
 }: TiptapEditorProps) {
   const {
     editorMode,
@@ -393,6 +405,35 @@ export function TiptapEditor({
       : documentTitle || "Untitled",
   ) || "Untitled";
 
+  const handleRestoreVersion = useCallback(async (versionId: string) => {
+    if (!artifactId) return;
+    const response = await fetch("/api/artifacts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "restoreVersion",
+        artifactId,
+        versionId,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error("Failed to restore version");
+    }
+    const data = (await response.json()) as {
+      artifact?: {
+        _id: string;
+        title?: string;
+        content?: JSONContent | null;
+        contentPlaintext?: string;
+        updatedAt?: number;
+      };
+    };
+    if (data.artifact?.content) {
+      replaceDocument(data.artifact.content);
+    }
+    onVersionRestore?.(data);
+  }, [artifactId, onVersionRestore, replaceDocument]);
+
   return (
     <div className={cn("relative flex flex-col h-full", className)}>
       {/* Formatting toolbar */}
@@ -425,7 +466,13 @@ export function TiptapEditor({
               <span className="h-3 w-px bg-[var(--border-default)]/80" />
               <button
                 type="button"
-                onClick={() => openVersionHistory()}
+                onClick={() => {
+                  if (compact && onVersionHistoryOpen) {
+                    onVersionHistoryOpen();
+                    return;
+                  }
+                  openVersionHistory();
+                }}
                 className="rounded-full px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
               >
                 Version history
@@ -516,18 +563,7 @@ export function TiptapEditor({
                     )}
                     <button
                       type="button"
-                      onClick={async () => {
-                        await fetch("/api/artifacts", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({
-                            action: "restoreVersion",
-                            artifactId,
-                            versionId: version._id,
-                          }),
-                        });
-                        window.location.reload();
-                      }}
+                      onClick={() => void handleRestoreVersion(version._id)}
                       className="mt-2 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium text-[var(--accent-cyan)] transition-colors hover:bg-[var(--accent-cyan)]/8"
                     >
                       <RotateCcw className="h-3 w-3" />

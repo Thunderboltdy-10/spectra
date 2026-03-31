@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import {
   ArrowUpRight,
   CalendarClock,
@@ -330,6 +331,7 @@ function NotePanelContent({
   noteId: string;
   workstreamId?: string;
 }) {
+  const router = useRouter();
   const {
     activeDocument,
     loading,
@@ -380,6 +382,12 @@ function NotePanelContent({
           documentTitle={stripGeneratedDocumentMarkers(activeDocument.title || "").trim() || "Untitled"}
           createdAt={activeDocument.createdAt}
           updatedAt={activeDocument.updatedAt}
+          onVersionHistoryOpen={() => {
+            router.push(`/notes?id=${encodeURIComponent(activeDocument._id)}&versionHistory=1`);
+          }}
+          onVersionRestore={() => {
+            void fetchDocument(activeDocument._id);
+          }}
           onSave={(content, text) =>
             void updateDocument(activeDocument._id, {
               title: stripGeneratedDocumentMarkers(text.trim().split("\n")[0] || "Untitled").trim() || "Untitled",
@@ -403,6 +411,7 @@ function ArtifactPanelContent({
   artifactId: string;
   workstreamId?: string;
 }) {
+  const router = useRouter();
   const [artifact, setArtifact] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
   const [createdId, setCreatedId] = useState<string | null>(null);
@@ -482,6 +491,24 @@ function ArtifactPanelContent({
             documentTitle={stripGeneratedDocumentMarkers(String(artifact.title ?? "Untitled")).trim() || "Untitled"}
             createdAt={Number(artifact.createdAt ?? Date.now())}
             updatedAt={Number(artifact.updatedAt ?? Date.now())}
+            onVersionHistoryOpen={() => {
+              const effectiveId = artifactId === "new" ? createdId : artifactId;
+              if (!effectiveId) return;
+              router.push(`/notes?id=${encodeURIComponent(effectiveId)}&versionHistory=1`);
+            }}
+            onVersionRestore={({ artifact: restoredArtifact }) => {
+              if (!restoredArtifact) return;
+              setArtifact((current) => {
+                if (!current) return current;
+                return {
+                  ...current,
+                  title: restoredArtifact.title ?? current.title,
+                  content: restoredArtifact.content ?? current.content,
+                  contentPlaintext: restoredArtifact.contentPlaintext ?? current.contentPlaintext,
+                  updatedAt: restoredArtifact.updatedAt ?? current.updatedAt,
+                };
+              });
+            }}
             onSave={(content, text) =>
               void fetch("/api/artifacts", {
                 method: "POST",

@@ -36,6 +36,12 @@ crons.interval(
   {},
 );
 crons.interval(
+  "refresh-platform-stats",
+  { minutes: 5 },
+  internal.superAdmin.refreshPlatformStats,
+  {},
+);
+crons.interval(
   "retry-stale-resource-ingestion",
   { minutes: 3 },
   internal.resources.retryStaleResourcesInternal,

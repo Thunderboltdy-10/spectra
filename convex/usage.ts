@@ -1,4 +1,5 @@
-import { internalMutation, mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { dayKey, getUserByClerkId } from "./helpers";
 import { estimateUsageCostCents, summarizeEffectiveUsageCost, type UsagePricing } from "../shared/spending";
@@ -128,11 +129,110 @@ function summarizeUsageWithPricing(
       .toFixed(6),
   );
 
-    return {
-      ...base,
-      estimatedUnpricedCostCents,
-      effectiveCostCents: base.knownCostCents + estimatedUnpricedCostCents,
+  return {
+    ...base,
+    estimatedUnpricedCostCents,
+    effectiveCostCents: base.knownCostCents + estimatedUnpricedCostCents,
   };
+}
+
+type MonthlyUsageDelta = {
+  totalCostCents: number;
+  knownCostCents: number;
+  estimatedUnpricedCostCents: number;
+  totalTokens: number;
+  totalEvents: number;
+  modelEvents: number;
+  searchEvents: number;
+  modelCostCents: number;
+  searchCostCents: number;
+};
+
+async function upsertDailyUsage(
+  ctx: Pick<MutationCtx, "db">,
+  params: {
+    orgId: Id<"orgs">;
+    day: string;
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    now: number;
+  },
+) {
+  const existingDaily = await ctx.db
+    .query("usageDaily")
+    .withIndex("by_org_day", (q) => q.eq("orgId", params.orgId).eq("day", params.day))
+    .unique();
+
+  if (existingDaily) {
+    await ctx.db.patch(existingDaily._id, {
+      inputTokens: existingDaily.inputTokens + params.inputTokens,
+      outputTokens: existingDaily.outputTokens + params.outputTokens,
+      totalTokens: existingDaily.totalTokens + params.totalTokens,
+      updatedAt: params.now,
+    });
+    return;
+  }
+
+  await ctx.db.insert("usageDaily", {
+    orgId: params.orgId,
+    day: params.day,
+    inputTokens: params.inputTokens,
+    outputTokens: params.outputTokens,
+    totalTokens: params.totalTokens,
+    updatedAt: params.now,
+  });
+}
+
+async function upsertUserMonthlyUsage(
+  ctx: Pick<MutationCtx, "db">,
+  params: {
+    userId: Id<"users">;
+    orgId: Id<"orgs">;
+    monthKey: string;
+    now: number;
+    delta: MonthlyUsageDelta;
+  },
+) {
+  const existingMonth = await ctx.db
+    .query("userSpending")
+    .withIndex("by_user_month", (q) => q.eq("userId", params.userId).eq("monthKey", params.monthKey))
+    .unique();
+
+  if (existingMonth) {
+    await ctx.db.patch(existingMonth._id, {
+      totalCostCents: Math.max(0, Number(((existingMonth.totalCostCents ?? 0) + params.delta.totalCostCents).toFixed(6))),
+      knownCostCents: Math.max(0, Number((((existingMonth.knownCostCents ?? existingMonth.totalCostCents ?? 0) + params.delta.knownCostCents)).toFixed(6))),
+      estimatedUnpricedCostCents: Math.max(
+        0,
+        Number((((existingMonth.estimatedUnpricedCostCents ?? 0) + params.delta.estimatedUnpricedCostCents)).toFixed(6)),
+      ),
+      totalTokens: Math.max(0, (existingMonth.totalTokens ?? 0) + params.delta.totalTokens),
+      totalEvents: Math.max(0, (existingMonth.totalEvents ?? 0) + params.delta.totalEvents),
+      modelEvents: Math.max(0, (existingMonth.modelEvents ?? 0) + params.delta.modelEvents),
+      searchEvents: Math.max(0, (existingMonth.searchEvents ?? 0) + params.delta.searchEvents),
+      modelCostCents: Math.max(0, Number((((existingMonth.modelCostCents ?? 0) + params.delta.modelCostCents)).toFixed(6))),
+      searchCostCents: Math.max(0, Number((((existingMonth.searchCostCents ?? 0) + params.delta.searchCostCents)).toFixed(6))),
+      lastUpdatedAt: params.now,
+    });
+    return;
+  }
+
+  await ctx.db.insert("userSpending", {
+    userId: params.userId,
+    orgId: params.orgId,
+    monthKey: params.monthKey,
+    totalCostCents: Math.max(0, Number(params.delta.totalCostCents.toFixed(6))),
+    knownCostCents: Math.max(0, Number(params.delta.knownCostCents.toFixed(6))),
+    estimatedUnpricedCostCents: Math.max(0, Number(params.delta.estimatedUnpricedCostCents.toFixed(6))),
+    totalTokens: Math.max(0, params.delta.totalTokens),
+    totalEvents: Math.max(0, params.delta.totalEvents),
+    modelEvents: Math.max(0, params.delta.modelEvents),
+    searchEvents: Math.max(0, params.delta.searchEvents),
+    modelCostCents: Math.max(0, Number(params.delta.modelCostCents.toFixed(6))),
+    searchCostCents: Math.max(0, Number(params.delta.searchCostCents.toFixed(6))),
+    lastUpdatedAt: params.now,
+  });
 }
 
 export const recordUsage = mutation({
@@ -153,30 +253,17 @@ export const recordUsage = mutation({
     }
 
     const day = dayKey();
+    const now = Date.now();
     const totalTokens = Math.max(0, args.inputTokens + args.outputTokens);
 
-    const existingDaily = await ctx.db
-      .query("usageDaily")
-      .withIndex("by_org_day", (q) => q.eq("orgId", actor.orgId).eq("day", day))
-      .unique();
-
-    if (existingDaily) {
-      await ctx.db.patch(existingDaily._id, {
-        inputTokens: existingDaily.inputTokens + args.inputTokens,
-        outputTokens: existingDaily.outputTokens + args.outputTokens,
-        totalTokens: existingDaily.totalTokens + totalTokens,
-        updatedAt: Date.now(),
-      });
-    } else {
-      await ctx.db.insert("usageDaily", {
-        orgId: actor.orgId,
-        day,
-        inputTokens: args.inputTokens,
-        outputTokens: args.outputTokens,
-        totalTokens,
-        updatedAt: Date.now(),
-      });
-    }
+    await upsertDailyUsage(ctx, {
+      orgId: actor.orgId,
+      day,
+      inputTokens: args.inputTokens,
+      outputTokens: args.outputTokens,
+      totalTokens,
+      now,
+    });
 
     await ctx.db.insert("usageEvents", {
       orgId: actor.orgId,
@@ -192,7 +279,25 @@ export const recordUsage = mutation({
       finishReason: args.finishReason,
       truncatedByLength: args.truncatedByLength,
       day,
-      createdAt: Date.now(),
+      createdAt: now,
+    });
+
+    await upsertUserMonthlyUsage(ctx, {
+      userId: actor._id,
+      orgId: actor.orgId,
+      monthKey: monthKey(now),
+      now,
+      delta: {
+        totalCostCents: 0,
+        knownCostCents: 0,
+        estimatedUnpricedCostCents: 0,
+        totalTokens,
+        totalEvents: 1,
+        modelEvents: 1,
+        searchEvents: 0,
+        modelCostCents: 0,
+        searchCostCents: 0,
+      },
     });
 
     return { ok: true };
@@ -280,28 +385,14 @@ export const recordUsageWithCost = mutation({
         ? Math.max(0, Number(args.cacheSavingsCents.toFixed(6)))
         : undefined;
 
-    const existingDaily = await ctx.db
-      .query("usageDaily")
-      .withIndex("by_org_day", (q) => q.eq("orgId", actor.orgId).eq("day", day))
-      .unique();
-
-    if (existingDaily) {
-      await ctx.db.patch(existingDaily._id, {
-        inputTokens: existingDaily.inputTokens + args.inputTokens,
-        outputTokens: existingDaily.outputTokens + args.outputTokens,
-        totalTokens: existingDaily.totalTokens + totalTokens,
-        updatedAt: now,
-      });
-    } else {
-      await ctx.db.insert("usageDaily", {
-        orgId: actor.orgId,
-        day,
-        inputTokens: args.inputTokens,
-        outputTokens: args.outputTokens,
-        totalTokens,
-        updatedAt: now,
-      });
-    }
+    await upsertDailyUsage(ctx, {
+      orgId: actor.orgId,
+      day,
+      inputTokens: args.inputTokens,
+      outputTokens: args.outputTokens,
+      totalTokens,
+      now,
+    });
 
     await ctx.db.insert("usageEvents", {
       orgId: actor.orgId,
@@ -328,26 +419,23 @@ export const recordUsageWithCost = mutation({
       createdAt: now,
     });
 
-    const key = monthKey(now);
-    const existingMonth = await ctx.db
-      .query("userSpending")
-      .withIndex("by_user_month", (q) => q.eq("userId", actor._id).eq("monthKey", key))
-      .unique();
-
-    if (existingMonth) {
-      await ctx.db.patch(existingMonth._id, {
-        totalCostCents: Math.max(0, existingMonth.totalCostCents + costCents),
-        lastUpdatedAt: now,
-      });
-    } else {
-      await ctx.db.insert("userSpending", {
-        userId: actor._id,
-        orgId: actor.orgId,
-        monthKey: key,
+    await upsertUserMonthlyUsage(ctx, {
+      userId: actor._id,
+      orgId: actor.orgId,
+      monthKey: monthKey(now),
+      now,
+      delta: {
         totalCostCents: costCents,
-        lastUpdatedAt: now,
-      });
-    }
+        knownCostCents: costCents,
+        estimatedUnpricedCostCents: 0,
+        totalTokens,
+        totalEvents: 1,
+        modelEvents: 1,
+        searchEvents: 0,
+        modelCostCents: costCents,
+        searchCostCents: 0,
+      },
+    });
 
     return { ok: true, costCents };
   },
@@ -435,28 +523,14 @@ export const recordUsageWithCostInternal = internalMutation({
         ? Math.max(0, Number(args.cacheSavingsCents.toFixed(6)))
         : undefined;
 
-    const existingDaily = await ctx.db
-      .query("usageDaily")
-      .withIndex("by_org_day", (q) => q.eq("orgId", args.orgId).eq("day", day))
-      .unique();
-
-    if (existingDaily) {
-      await ctx.db.patch(existingDaily._id, {
-        inputTokens: existingDaily.inputTokens + args.inputTokens,
-        outputTokens: existingDaily.outputTokens + args.outputTokens,
-        totalTokens: existingDaily.totalTokens + totalTokens,
-        updatedAt: now,
-      });
-    } else {
-      await ctx.db.insert("usageDaily", {
-        orgId: args.orgId,
-        day,
-        inputTokens: args.inputTokens,
-        outputTokens: args.outputTokens,
-        totalTokens,
-        updatedAt: now,
-      });
-    }
+    await upsertDailyUsage(ctx, {
+      orgId: args.orgId,
+      day,
+      inputTokens: args.inputTokens,
+      outputTokens: args.outputTokens,
+      totalTokens,
+      now,
+    });
 
     await ctx.db.insert("usageEvents", {
       orgId: args.orgId,
@@ -483,26 +557,23 @@ export const recordUsageWithCostInternal = internalMutation({
       createdAt: now,
     });
 
-    const key = monthKey(now);
-    const existingMonth = await ctx.db
-      .query("userSpending")
-      .withIndex("by_user_month", (q) => q.eq("userId", args.userId).eq("monthKey", key))
-      .unique();
-
-    if (existingMonth) {
-      await ctx.db.patch(existingMonth._id, {
-        totalCostCents: Math.max(0, existingMonth.totalCostCents + costCents),
-        lastUpdatedAt: now,
-      });
-    } else {
-      await ctx.db.insert("userSpending", {
-        userId: args.userId,
-        orgId: args.orgId,
-        monthKey: key,
+    await upsertUserMonthlyUsage(ctx, {
+      userId: args.userId,
+      orgId: args.orgId,
+      monthKey: monthKey(now),
+      now,
+      delta: {
         totalCostCents: costCents,
-        lastUpdatedAt: now,
-      });
-    }
+        knownCostCents: costCents,
+        estimatedUnpricedCostCents: 0,
+        totalTokens,
+        totalEvents: 1,
+        modelEvents: 1,
+        searchEvents: 0,
+        modelCostCents: costCents,
+        searchCostCents: 0,
+      },
+    });
 
     return { ok: true, costCents };
   },
@@ -553,26 +624,23 @@ export const recordSearchUsage = mutation({
       createdAt: now,
     });
 
-    const key = monthKey(now);
-    const existingMonth = await ctx.db
-      .query("userSpending")
-      .withIndex("by_user_month", (q) => q.eq("userId", actor._id).eq("monthKey", key))
-      .unique();
-
-    if (existingMonth) {
-      await ctx.db.patch(existingMonth._id, {
-        totalCostCents: Math.max(0, existingMonth.totalCostCents + costCents),
-        lastUpdatedAt: now,
-      });
-    } else {
-      await ctx.db.insert("userSpending", {
-        userId: actor._id,
-        orgId: actor.orgId,
-        monthKey: key,
+    await upsertUserMonthlyUsage(ctx, {
+      userId: actor._id,
+      orgId: actor.orgId,
+      monthKey: monthKey(now),
+      now,
+      delta: {
         totalCostCents: costCents,
-        lastUpdatedAt: now,
-      });
-    }
+        knownCostCents: costCents,
+        estimatedUnpricedCostCents: 0,
+        totalTokens: 0,
+        totalEvents: 1,
+        modelEvents: 0,
+        searchEvents: 1,
+        modelCostCents: 0,
+        searchCostCents: costCents,
+      },
+    });
 
     return { ok: true, costCents };
   },
@@ -647,46 +715,24 @@ export const checkUserBudget = query({
     const softLimitCents = Math.max(0, Math.floor(hardLimitCents * (1 - marginPercent / 100)));
     const cheapOnlyLimitCents = Math.max(0, Math.floor(hardLimitCents * 0.9));
 
-    const { startDay, endDayExclusive } = monthRangeFromKey(key);
-    const usageRows = await ctx.db
-      .query("usageEvents")
-      .withIndex("by_user_day", (q) =>
-        q
-          .eq("userId", actor._id)
-          .gte("day", startDay)
-          .lt("day", endDayExclusive),
-      )
-      .collect();
-    const modelRows = await ctx.db
-      .query("modelCatalog")
-      .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
-      .collect();
-    const monthlyUsage = usageRows.filter((row) => dayBelongsToMonth(row.day, key));
-    const pricingLookup = buildPricingLookup(modelRows);
-    const monthlyTokens = monthlyUsage.reduce((sum, row) => sum + Math.max(0, row.totalTokens ?? 0), 0);
-    const monthlyEvents = monthlyUsage.length;
-    const monthlySearchEvents = monthlyUsage.filter((row) => row.eventType === "search").length;
-    const monthlyModelEvents = monthlyEvents - monthlySearchEvents;
-    const monthlySearchCostCents = Number(
-      monthlyUsage
-        .filter((row) => row.eventType === "search")
-        .reduce((sum, row) => sum + Math.max(0, row.costCents ?? 0), 0)
-        .toFixed(6),
+    const monthlyTokens = Math.max(0, month?.totalTokens ?? 0);
+    const monthlyEvents = Math.max(0, month?.totalEvents ?? 0);
+    const monthlyModelEvents = Math.max(0, month?.modelEvents ?? Math.max(0, monthlyEvents - (month?.searchEvents ?? 0)));
+    const monthlySearchEvents = Math.max(0, month?.searchEvents ?? 0);
+    const monthlySearchCostCents = Math.max(0, month?.searchCostCents ?? 0);
+    const monthlyModelCostCents = Math.max(0, month?.modelCostCents ?? 0);
+    const monthlyCostCentsFromEvents = Math.max(0, month?.totalCostCents ?? 0);
+    const knownCostCents = Math.max(
+      storedTotalCostCents,
+      month?.knownCostCents ?? 0,
+      monthlyModelCostCents + monthlySearchCostCents,
     );
-    const monthlyModelCostCents = Number(
-      monthlyUsage
-        .filter((row) => (row.eventType ?? "model") === "model")
-        .reduce((sum, row) => sum + Math.max(0, row.costCents ?? 0), 0)
-        .toFixed(6),
+    const estimatedUnpricedCostCents = Math.max(0, month?.estimatedUnpricedCostCents ?? 0);
+    const effectiveCostCents = Math.max(
+      storedTotalCostCents,
+      knownCostCents + estimatedUnpricedCostCents,
+      monthlyCostCentsFromEvents,
     );
-    const monthlyCostCentsFromEvents = Number(
-      monthlyUsage
-        .reduce((sum, row) => sum + Math.max(0, row.costCents ?? 0), 0)
-        .toFixed(6),
-    );
-    const usageCost = summarizeUsageWithPricing(monthlyUsage, pricingLookup);
-    const knownCostCents = Math.max(storedTotalCostCents, usageCost.knownCostCents, monthlyCostCentsFromEvents);
-    const effectiveCostCents = Math.max(knownCostCents, usageCost.effectiveCostCents);
     const totalSpentEur = effectiveCostCents / 100;
     const monthlyTokenBudget = Math.max(1, org.tokenBudgetDaily * daysInMonthFromKey(key));
     const tokenUsagePercent = (monthlyTokens / monthlyTokenBudget) * 100;
@@ -715,7 +761,7 @@ export const checkUserBudget = query({
       totalSpentEur,
       totalCostCents: effectiveCostCents,
       knownCostCents,
-      estimatedUnpricedCostCents: usageCost.estimatedUnpricedCostCents,
+      estimatedUnpricedCostCents,
       tier,
       softLimitReached: effectiveCostCents >= softLimitCents,
       hardLimitReached: effectiveCostCents >= hardLimitCents,
@@ -729,7 +775,7 @@ export const checkUserBudget = query({
       monthlyEvents,
       monthlyModelEvents,
       monthlySearchEvents,
-      monthlyUnpricedEvents: usageCost.monthlyUnpricedEvents,
+      monthlyUnpricedEvents: 0,
       monthlyTokenBudget,
       monthlyCostCentsFromEvents,
       monthlyModelCostCents,

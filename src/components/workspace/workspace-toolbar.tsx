@@ -42,14 +42,14 @@ export function WorkspaceToolbar({
     setShowConnections,
     backgroundMode,
     setBackgroundMode,
-    committedWorkstreamId,
+    primaryWorkstreamId,
     viewMode,
     setViewMode,
   } = useWorkspaceStore();
   const [searchOpen, setSearchOpen] = useState(false);
 
-  const isInsideWorkstream = !!committedWorkstreamId;
-  const isHubCommitted = committedWorkstreamId === "__hub__";
+  const isInsideWorkstream = !!primaryWorkstreamId;
+  const isHubCommitted = primaryWorkstreamId === "__hub__";
 
   const backgroundLabel =
     backgroundMode === "dots"
@@ -163,7 +163,7 @@ export function WorkspaceToolbar({
           icon={<Home className="w-3.5 h-3.5" />}
           label="Home"
           onClick={onCenterHome}
-          active={!committedWorkstreamId}
+          active={!primaryWorkstreamId}
         />
         <ToolbarBtn
           icon={<Grid3X3 className="w-3.5 h-3.5" />}

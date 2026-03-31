@@ -36,6 +36,20 @@ export async function getUserByClerkId(ctx: QueryCtx | MutationCtx, clerkId: str
     .unique();
 }
 
+export async function adjustWorkstreamArtifactCount(
+  ctx: Pick<MutationCtx, "db">,
+  workstreamId: Id<"workstreams"> | undefined,
+  delta: number,
+) {
+  if (!workstreamId || delta === 0) return;
+  const workstream = await ctx.db.get(workstreamId);
+  if (!workstream) return;
+  await ctx.db.patch(workstreamId, {
+    artifactCount: Math.max(0, (workstream.artifactCount ?? 0) + delta),
+    updatedAt: Date.now(),
+  });
+}
+
 export function assertRole(actorRole: Role, allowed: Role[]) {
   if (!allowed.includes(actorRole)) {
     throw new Error("Not authorized for this action");

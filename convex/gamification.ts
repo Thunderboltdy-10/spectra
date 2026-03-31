@@ -451,14 +451,6 @@ async function ensureUserStreakDoc(ctx: MutationCtx, actor: Doc<"users">) {
   if (actorStreakId) {
     const linked = await ctx.db.get(actorStreakId);
     if (linked && linked.userId === actor._id && linked.orgId === actor.orgId) {
-      const rows = await ctx.db
-        .query("userStreaks")
-        .withIndex("by_user", (q) => q.eq("userId", actor._id))
-        .collect();
-      if (rows.length > 1) {
-        const reconciled = await reconcileDuplicateStreakDocs(ctx, actor, rows);
-        if (reconciled) return reconciled;
-      }
       return linked;
     }
   }
@@ -1087,8 +1079,10 @@ export const awardXp = mutation({
     const actor = await requireActor(ctx, args.actorClerkId);
     const streakDoc = await ensureUserStreakDoc(ctx, actor);
     if (!streakDoc) throw new Error("Unable to initialize streak");
-
-    const baseCounters = await ensureActivityCounters(ctx, actor, streakDoc);
+    const [baseCounters, existingAchievements] = await Promise.all([
+      ensureActivityCounters(ctx, actor, streakDoc),
+      listUserAchievements(ctx, actor._id),
+    ]);
     const counters: ActivityCounters = { ...baseCounters };
     if (args.activityType === "chat") {
       counters.chatTurns += 1;
@@ -1106,7 +1100,6 @@ export const awardXp = mutation({
       counters.imageResponses += 1;
     }
 
-    const existingAchievements = await listUserAchievements(ctx, actor._id);
     const existingTypes = new Set(existingAchievements.map((item) => item.type));
     const xpAwarded = Math.max(0, args.xp ?? XP_BY_ACTIVITY[args.activityType] ?? 0);
     const unlockedAchievements = await evaluateActivityAchievements(ctx, {

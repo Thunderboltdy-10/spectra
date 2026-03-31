@@ -1,7 +1,7 @@
 import { action, internalAction, internalMutation, internalQuery, mutation, query, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { getUserByClerkId } from "./helpers";
+import { adjustWorkstreamArtifactCount, getUserByClerkId } from "./helpers";
 import { internal } from "./_generated/api";
 import { decryptManagebacToken } from "../shared/managebac-crypto";
 import { prepareManagebacSyncPayload } from "../src/lib/managebac/sync";
@@ -14,21 +14,6 @@ import {
   matchManagebacTimetableForClass,
   shouldCreateCasReflectionNote,
 } from "../src/lib/managebac/mapper";
-
-async function ensureWorkstreamArtifactCount(
-  ctx: Pick<MutationCtx, "db">,
-  workstreamId: Id<"workstreams"> | undefined,
-) {
-  if (!workstreamId) return;
-  const artifacts = await ctx.db
-    .query("artifacts")
-    .withIndex("by_workstream", (q) => q.eq("workstreamId", workstreamId))
-    .collect();
-  await ctx.db.patch(workstreamId, {
-    artifactCount: artifacts.filter((artifact: Doc<"artifacts">) => artifact.status === "active").length,
-    updatedAt: Date.now(),
-  });
-}
 
 function requireAdmin(actor: Doc<"users"> | null) {
   if (!actor || actor.role !== "admin") {
@@ -605,7 +590,7 @@ export const applyPreparedSync = internalMutation({
             status: "confirmed",
             createdAt: Date.now(),
           });
-          await ensureWorkstreamArtifactCount(ctx, casWorkstream?._id);
+          await adjustWorkstreamArtifactCount(ctx, casWorkstream?._id, 1);
           summary.artifactsCreated += 1;
           summary.notesCreated += 1;
         }

@@ -88,6 +88,7 @@ export default defineSchema({
   })
     .index("by_clerk_id", ["clerkId"])
     .index("by_org", ["orgId"])
+    .index("by_org_email", ["orgId", "email"])
     .index("by_org_role", ["orgId", "role"]),
 
   userPreferences: defineTable({
@@ -537,6 +538,14 @@ export default defineSchema({
     orgId: v.id("orgs"),
     monthKey: v.string(),
     totalCostCents: v.number(),
+    knownCostCents: v.optional(v.number()),
+    estimatedUnpricedCostCents: v.optional(v.number()),
+    totalTokens: v.optional(v.number()),
+    totalEvents: v.optional(v.number()),
+    modelEvents: v.optional(v.number()),
+    searchEvents: v.optional(v.number()),
+    modelCostCents: v.optional(v.number()),
+    searchCostCents: v.optional(v.number()),
     lastUpdatedAt: v.number(),
   })
     .index("by_user_month", ["userId", "monthKey"])
@@ -911,6 +920,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_org", ["orgId"])
+    .index("by_org_featured", ["orgId", "isFeatured"])
     .index("by_org_model", ["orgId", "modelId"]),
 
   modelRuntimeStats: defineTable({
@@ -947,8 +957,20 @@ export default defineSchema({
     expiresAt: v.number(),
   })
     .index("by_org", ["orgId"])
+    .index("by_org_status", ["orgId", "status"])
     .index("by_email", ["email"])
+    .index("by_invited_by_created", ["invitedBy", "createdAt"])
     .index("by_token", ["token"]),
+
+  platformStats: defineTable({
+    singletonKey: v.string(),
+    totalOrgs: v.number(),
+    totalUsers: v.number(),
+    totalMessages: v.number(),
+    totalAdmins: v.number(),
+    lastComputedAt: v.number(),
+  })
+    .index("by_singleton", ["singletonKey"]),
 
   accessRequests: defineTable({
     orgId: v.id("orgs"),

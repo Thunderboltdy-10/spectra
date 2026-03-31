@@ -1,11 +1,54 @@
-import { internalMutation, mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
 import { getUserByClerkId } from "./helpers";
 import { MODEL_DEFAULTS } from "./constants";
 
 type Rating = "low" | "medium" | "high";
 type MultiRating = "none" | "basic" | "strong";
 type ChallengerState = "challenger" | "normal" | "deprioritized";
+type ModelInput = {
+  modelId: string;
+  name: string;
+  provider: string;
+  description: string;
+  contextLength?: number;
+  inputCostPerM?: number;
+  outputCostPerM?: number;
+  supportedParameters?: string[];
+  promptCachingSupported?: boolean;
+  cachePricingReadPerM?: number;
+  cachePricingWritePerM?: number;
+  endpointLatencyP50Ms?: number;
+  endpointUptimePercent?: number;
+  inputModalities?: string[];
+  outputModalities?: string[];
+  tags: string[];
+  costRating?: string;
+  speedRating?: string;
+  reasoningRating?: string;
+  multimodalRating?: string;
+  recommendedForPhysics: boolean;
+  isFree?: boolean;
+  isFeatured?: boolean;
+  featuredOrder?: number;
+  capabilities?: {
+    reasoning: number;
+    creative: number;
+    code: number;
+    vision: number;
+    speed: number;
+  };
+  strengthText?: string;
+  strengthEmbedding?: number[];
+  releaseDate?: string;
+  knowledgeCutoff?: string;
+  curatedNotes?: string;
+  benchmarkMMLU?: number;
+  benchmarkHumanEval?: number;
+  arenaElo?: number;
+};
 
 const FEATURED_LABELS: Record<string, string> = {
   "stepfun/step-3.5-flash:free": "Fast Included",
@@ -197,6 +240,72 @@ function evaluateQuality(params: {
   };
 }
 
+function stripLargeModelFields<T extends { strengthEmbedding?: number[] }>(row: T) {
+  const { strengthEmbedding: _strengthEmbedding, ...rest } = row;
+  return rest;
+}
+
+async function upsertModelCatalogBatch(
+  ctx: Pick<MutationCtx, "db">,
+  orgId: Id<"orgs">,
+  models: ModelInput[],
+  now: number,
+) {
+  for (const model of models) {
+    const existing = await ctx.db
+      .query("modelCatalog")
+      .withIndex("by_org_model", (q) => q.eq("orgId", orgId).eq("modelId", model.modelId))
+      .unique();
+
+    const payload = {
+      orgId,
+      modelId: model.modelId,
+      name: model.name,
+      provider: model.provider,
+      description: model.description,
+      contextLength: model.contextLength,
+      inputCostPerM: model.inputCostPerM,
+      outputCostPerM: model.outputCostPerM,
+      supportedParameters: model.supportedParameters,
+      promptCachingSupported: model.promptCachingSupported,
+      cachePricingReadPerM: model.cachePricingReadPerM,
+      cachePricingWritePerM: model.cachePricingWritePerM,
+      endpointLatencyP50Ms: model.endpointLatencyP50Ms,
+      endpointUptimePercent: model.endpointUptimePercent,
+      inputModalities: model.inputModalities,
+      outputModalities: model.outputModalities,
+      tags: model.tags,
+      costRating: asRating(model.costRating),
+      speedRating: asRating(model.speedRating),
+      reasoningRating: asRating(model.reasoningRating),
+      multimodalRating: asMulti(model.multimodalRating),
+      recommendedForPhysics: model.recommendedForPhysics,
+      isFree: model.isFree,
+      isFeatured: model.isFeatured,
+      featuredOrder: model.featuredOrder,
+      capabilities: model.capabilities,
+      strengthText: model.strengthText,
+      releaseDate: model.releaseDate,
+      knowledgeCutoff: model.knowledgeCutoff,
+      curatedNotes: model.curatedNotes,
+      benchmarkMMLU: model.benchmarkMMLU,
+      benchmarkHumanEval: model.benchmarkHumanEval,
+      arenaElo: model.arenaElo,
+      updatedAt: now,
+      ...(model.strengthEmbedding !== undefined ? { strengthEmbedding: model.strengthEmbedding } : {}),
+    };
+
+    if (existing) {
+      await ctx.db.patch(existing._id, payload);
+    } else {
+      await ctx.db.insert("modelCatalog", {
+        ...payload,
+        createdAt: now,
+      });
+    }
+  }
+}
+
 const vModelInput = v.object({
   modelId: v.string(),
   name: v.string(),
@@ -293,14 +402,16 @@ export const listModels = query({
     const rows = await ctx.db
       .query("modelCatalog")
       .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
-      .collect();
+      .take(200);
 
-    return rows.sort((a, b) => {
+    return rows
+      .map((row) => stripLargeModelFields(row))
+      .sort((a, b) => {
       const aOrder = typeof a.featuredOrder === "number" ? a.featuredOrder : Number.MAX_SAFE_INTEGER;
       const bOrder = typeof b.featuredOrder === "number" ? b.featuredOrder : Number.MAX_SAFE_INTEGER;
       if (aOrder !== bOrder) return aOrder - bOrder;
       return a.name.localeCompare(b.name);
-    });
+      });
   },
 });
 
@@ -314,14 +425,13 @@ export const listFeaturedModels = query({
 
     const models = await ctx.db
       .query("modelCatalog")
-      .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
-      .collect();
+      .withIndex("by_org_featured", (q) => q.eq("orgId", actor.orgId).eq("isFeatured", true))
+      .take(40);
 
     const featured = models
-      .filter((model) => model.isFeatured)
       .sort((a, b) => (a.featuredOrder ?? 999) - (b.featuredOrder ?? 999))
       .map((model) => ({
-        ...model,
+        ...stripLargeModelFields(model),
         label: FEATURED_LABELS[model.modelId] ?? "Featured",
       }));
 
@@ -918,61 +1028,44 @@ export const upsertModelCatalogForOrg = internalMutation({
     models: v.array(vModelInput),
   },
   handler: async (ctx, args) => {
+    const batchSize = 20;
     const now = Date.now();
-    for (const model of args.models) {
-      const existing = await ctx.db
-        .query("modelCatalog")
-        .withIndex("by_org_model", (q) => q.eq("orgId", args.orgId).eq("modelId", model.modelId))
-        .unique();
+    const initialBatch = args.models.slice(0, batchSize);
+    const remaining = args.models.slice(batchSize);
 
-      const payload = {
+    await upsertModelCatalogBatch(ctx, args.orgId, initialBatch, now);
+
+    if (remaining.length > 0) {
+      await ctx.scheduler.runAfter(0, internal.models.upsertModelCatalogChunk, {
         orgId: args.orgId,
-        modelId: model.modelId,
-        name: model.name,
-        provider: model.provider,
-        description: model.description,
-        contextLength: model.contextLength,
-        inputCostPerM: model.inputCostPerM,
-        outputCostPerM: model.outputCostPerM,
-        supportedParameters: model.supportedParameters,
-        promptCachingSupported: model.promptCachingSupported,
-        cachePricingReadPerM: model.cachePricingReadPerM,
-        cachePricingWritePerM: model.cachePricingWritePerM,
-        endpointLatencyP50Ms: model.endpointLatencyP50Ms,
-        endpointUptimePercent: model.endpointUptimePercent,
-        inputModalities: model.inputModalities,
-        outputModalities: model.outputModalities,
-        tags: model.tags,
-        costRating: asRating(model.costRating),
-        speedRating: asRating(model.speedRating),
-        reasoningRating: asRating(model.reasoningRating),
-        multimodalRating: asMulti(model.multimodalRating),
-        recommendedForPhysics: model.recommendedForPhysics,
-        isFree: model.isFree,
-        isFeatured: model.isFeatured,
-        featuredOrder: model.featuredOrder,
-        capabilities: model.capabilities,
-        strengthText: model.strengthText,
-        releaseDate: model.releaseDate,
-        knowledgeCutoff: model.knowledgeCutoff,
-        curatedNotes: model.curatedNotes,
-        benchmarkMMLU: model.benchmarkMMLU,
-        benchmarkHumanEval: model.benchmarkHumanEval,
-        arenaElo: model.arenaElo,
-        updatedAt: now,
-        ...(model.strengthEmbedding !== undefined ? { strengthEmbedding: model.strengthEmbedding } : {}),
-      };
-
-      if (existing) {
-        await ctx.db.patch(existing._id, payload);
-      } else {
-        await ctx.db.insert("modelCatalog", {
-          ...payload,
-          createdAt: now,
-        });
-      }
+        models: remaining,
+      });
     }
 
     return { ok: true, count: args.models.length };
+  },
+});
+
+export const upsertModelCatalogChunk = internalMutation({
+  args: {
+    orgId: v.id("orgs"),
+    models: v.array(vModelInput),
+  },
+  handler: async (ctx, args) => {
+    const batchSize = 20;
+    const now = Date.now();
+    const batch = args.models.slice(0, batchSize);
+    const remaining = args.models.slice(batchSize);
+
+    await upsertModelCatalogBatch(ctx, args.orgId, batch, now);
+
+    if (remaining.length > 0) {
+      await ctx.scheduler.runAfter(0, internal.models.upsertModelCatalogChunk, {
+        orgId: args.orgId,
+        models: remaining,
+      });
+    }
+
+    return { ok: true, processed: batch.length, remaining: remaining.length };
   },
 });

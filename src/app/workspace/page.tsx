@@ -60,7 +60,7 @@ function WorkspaceContent() {
     isCreateDialogOpen,
     openCreateDialog,
     closeCreateDialog,
-    committedWorkstreamId,
+    primaryWorkstreamId,
     exitWorkstream,
     panel,
     openPanel,
@@ -73,18 +73,18 @@ function WorkspaceContent() {
 
   // Sync URL with store state
   useEffect(() => {
-    if (hubOpen && committedWorkstreamId !== "__hub__") {
+    if (hubOpen && primaryWorkstreamId !== "__hub__") {
       commitWorkstream("__hub__");
       return;
     }
-    if (wsParam && wsParam !== committedWorkstreamId) {
+    if (wsParam && wsParam !== primaryWorkstreamId) {
       commitWorkstream(wsParam);
       return;
     }
-    if (!hubOpen && !wsParam && committedWorkstreamId) {
+    if (!hubOpen && !wsParam && primaryWorkstreamId) {
       exitWorkstream();
     }
-  }, [commitWorkstream, committedWorkstreamId, exitWorkstream, hubOpen, wsParam]);
+  }, [commitWorkstream, exitWorkstream, hubOpen, primaryWorkstreamId, wsParam]);
 
   // Sync panel from URL
   useEffect(() => {
@@ -151,9 +151,9 @@ function WorkspaceContent() {
     (workstreamId: string | null) => {
       if (workstreamId === "__hub__") {
         commitWorkstream("__hub__");
-        updateWorkspaceRoute({ hub: "1", ws: undefined }, "push");
+        updateWorkspaceRoute({ hub: "1", ws: undefined }, "replace");
       } else if (workstreamId) {
-        updateWorkspaceRoute({ ws: workstreamId, hub: undefined }, "push");
+        updateWorkspaceRoute({ ws: workstreamId, hub: undefined }, "replace");
       } else {
         exitWorkstream();
         updateWorkspaceRoute({
@@ -265,7 +265,7 @@ function WorkspaceContent() {
                 <WorkspaceCommandBar
                   hidden={!!panel}
                   workstreams={workstreams}
-                  committedWorkstreamId={committedWorkstreamId}
+                  primaryWorkstreamId={primaryWorkstreamId}
                   onOpenWorkstreamChat={(workstreamId, query) => {
                     useWorkspaceStore.getState().setOpenChatQuery(query);
                     handleCommitWorkstream(workstreamId);
@@ -282,21 +282,21 @@ function WorkspaceContent() {
                     type={panel.type}
                     id={panel.id}
                     workstreamId={
-                      committedWorkstreamId && committedWorkstreamId !== "__hub__"
-                        ? committedWorkstreamId
+                      primaryWorkstreamId && primaryWorkstreamId !== "__hub__"
+                        ? primaryWorkstreamId
                         : undefined
                     }
                     onClose={handleClosePanel}
                     onExpand={(type, id) => {
                       // Navigate to full-page view
                       if (type === "chat") {
-                        router.push(`/chat?chatId=${id}&from=workspace&ws=${committedWorkstreamId ?? ""}`);
+                        router.push(`/chat?chatId=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
                       } else if (type === "note") {
-                        router.push(`/artifacts?id=${id}&from=workspace&ws=${committedWorkstreamId ?? ""}`);
+                        router.push(`/artifacts?id=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
                       } else if (type === "artifact") {
                         router.push(`/artifacts?id=${id}`);
                       } else if (type === "planner") {
-                        router.push(`/planner?item=${id}&from=workspace&ws=${committedWorkstreamId ?? ""}`);
+                        router.push(`/planner?item=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
                       }
                     }}
                   />
@@ -306,7 +306,7 @@ function WorkspaceContent() {
           )}
 
           {/* Empty state */}
-          {!loading && workstreams.length === 0 && !committedWorkstreamId && (
+          {!loading && workstreams.length === 0 && !primaryWorkstreamId && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
               <div className="flex flex-col items-center gap-4 pointer-events-auto">
                 <div className="text-5xl">🌱</div>

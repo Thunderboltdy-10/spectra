@@ -19,14 +19,16 @@ export function NotesWorkspace() {
   const router = useRouter();
   const params = useSearchParams();
   const noteId = params.get("id") ?? params.get("note") ?? undefined;
+  const versionHistoryOpen = params.get("versionHistory") === "1" || params.get("versionHistory") === "true";
   const returnWs = params.get("ws") ?? undefined;
   const fromWorkspace = params.get("from") === "workspace";
-  const { editorMode, setEditorMode } = useEditorStore();
+  const { editorMode, setEditorMode, openVersionHistory } = useEditorStore();
   const {
     notes,
     activeNote,
     loading,
     createNote,
+    fetchNote,
     updateNote,
   } = useNotesData({ noteId });
 
@@ -38,6 +40,12 @@ export function NotesWorkspace() {
       }
     }
   }, [activeNote?.editorMode, editorMode, setEditorMode]);
+
+  useEffect(() => {
+    if (versionHistoryOpen && activeNote?._id) {
+      openVersionHistory();
+    }
+  }, [activeNote?._id, openVersionHistory, versionHistoryOpen]);
 
   useEffect(() => {
     if (noteId) return;
@@ -175,6 +183,9 @@ export function NotesWorkspace() {
                 documentTitle={activeNote.title}
                 createdAt={activeNote.createdAt}
                 updatedAt={activeNote.updatedAt}
+                onVersionRestore={() => {
+                  void fetchNote(activeNote._id);
+                }}
                 onSave={(content, text) =>
                   void updateNote(activeNote._id, {
                     title: stripGeneratedDocumentMarkers(text.trim().split("\n")[0] || "Untitled artifact").trim() || "Untitled artifact",

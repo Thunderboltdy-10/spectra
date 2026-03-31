@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -17,6 +17,54 @@ type RightSidePanelProps = {
   children: React.ReactNode;
   className?: string;
   panelType?: string;
+  contentKey?: string;
+};
+
+/**
+ * Panel slide-in animation:
+ * - The panel slides in from the right edge with a smooth spring easing
+ * - Content inside fades in with a slight upward shift after the panel lands
+ * - On exit, content fades out first, then the panel slides away
+ */
+const panelVariants: import("framer-motion").Variants = {
+  hidden: {
+    width: 0,
+    opacity: 0,
+  },
+  visible: (width: number) => ({
+    width,
+    opacity: 1,
+    transition: {
+      width: { duration: 0.3, ease: [0.22, 1, 0.36, 1] as const },
+      opacity: { duration: 0.2, delay: 0.05 },
+    },
+  }),
+  exit: {
+    width: 0,
+    opacity: 0,
+    transition: {
+      opacity: { duration: 0.15 },
+      width: { duration: 0.25, ease: "easeIn", delay: 0.05 },
+    },
+  },
+};
+
+const contentVariants: import("framer-motion").Variants = {
+  hidden: { opacity: 0, y: 8 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: {
+      duration: 0.25,
+      delay: 0.15,
+      ease: [0.22, 1, 0.36, 1] as const,
+    },
+  },
+  exit: {
+    opacity: 0,
+    y: -6,
+    transition: { duration: 0.15, ease: "easeIn" },
+  },
 };
 
 export function RightSidePanel({
@@ -28,6 +76,7 @@ export function RightSidePanel({
   children,
   className,
   panelType,
+  contentKey,
 }: RightSidePanelProps) {
   const storageKey = panelType ? `workspace:panel-width:${panelType}` : undefined;
 
@@ -89,15 +138,15 @@ export function RightSidePanel({
 
   return (
     <motion.div
-      initial={{ width: 0, opacity: 0 }}
-      animate={{ width, opacity: 1 }}
-      exit={{ width: 0, opacity: 0 }}
-      transition={{
-        width: { duration: 0.3, ease: [0.22, 1, 0.36, 1] },
-        opacity: { duration: 0.2 },
-      }}
+      variants={panelVariants}
+      initial="hidden"
+      animate="visible"
+      exit="exit"
+      custom={width}
       className={cn(
-        "relative h-full shrink-0 overflow-hidden bg-[color-mix(in_oklab,var(--bg-primary)_94%,var(--bg-elevated))] shadow-[-20px_0_44px_-34px_rgba(15,23,42,0.45)]",
+        "relative h-full shrink-0 overflow-hidden",
+        "bg-[color-mix(in_oklab,var(--bg-primary)_94%,var(--bg-elevated))]",
+        "shadow-[-20px_0_44px_-34px_rgba(15,23,42,0.45)]",
         className,
       )}
     >
@@ -108,7 +157,13 @@ export function RightSidePanel({
       />
 
       <div className="flex h-full flex-col" style={{ width }}>
-        <div className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--border-default)]/60 px-4 backdrop-blur-md">
+        {/* Header with fly-in animation */}
+        <motion.div
+          initial={{ opacity: 0, x: 12 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.2, delay: 0.12 }}
+          className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--border-default)]/60 px-4 backdrop-blur-md"
+        >
           <div className="flex min-w-0 items-center gap-2">
             {icon ? <span className="text-[var(--text-tertiary)]">{icon}</span> : null}
             <span className="truncate text-sm font-medium text-[var(--text-primary)]">
@@ -126,10 +181,21 @@ export function RightSidePanel({
               <X className="h-4 w-4" />
             </button>
           </div>
-        </div>
-        <div className="min-h-0 flex-1 overflow-hidden">
-          {children}
-        </div>
+        </motion.div>
+
+        {/* Content with staggered fade-in and cross-fade on change */}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={contentKey ?? "static-content"}
+            variants={contentVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            className="min-h-0 flex-1 overflow-hidden"
+          >
+            {children}
+          </motion.div>
+        </AnimatePresence>
       </div>
     </motion.div>
   );

@@ -101,6 +101,7 @@ type WorkspaceStoreState = {
   exitHub: () => void;
 
   // Timer
+  setTimerMinutes: (minutes: number) => void;
   startTimer: (sessionMinutes?: number, workstreamId?: string, workstreamTitle?: string) => void;
   pauseTimer: () => void;
   resetTimer: () => void;
@@ -182,6 +183,10 @@ export const useWorkspaceStore = create<WorkspaceStoreState>((set) => ({
   focusHub: (hubCardBounds) => set({ hubFocusOpen: true, hubCardBounds }),
   exitHub: () => set({ hubFocusOpen: false, hubCardBounds: undefined }),
 
+  setTimerMinutes: (minutes) =>
+    set((state) => ({
+      timerState: { ...state.timerState, sessionMinutes: minutes, elapsed: 0 },
+    })),
   startTimer: (sessionMinutes, workstreamId, workstreamTitle) => {
     if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("ai-school:timer-start"));
     set((state) => ({

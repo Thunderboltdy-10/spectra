@@ -598,9 +598,9 @@ export function buildStructuredNodes(
   }
 
   const colHeights = [0, 0];
-  const laneWidth = 500;
-  const colGap = 54;
-  const rowGap = 64;
+  const laneWidth = 520;
+  const colGap = 72;
+  const rowGap = 96;
 
   return groups.map((group) => {
     const colIndex = colHeights[0] <= colHeights[1] ? 0 : 1;

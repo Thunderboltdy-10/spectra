@@ -7,7 +7,6 @@ import {
   ControlButton,
   Controls,
   Handle,
-  MarkerType,
   Position,
   ReactFlow,
   ReactFlowProvider,
@@ -66,6 +65,8 @@ type WorkspaceCanvasProps = {
   /** Called when zoom-based commit happens */
   onCommitWorkstream?: (workstreamId: string | null) => void;
   onOpenPanel?: (type: import("@/stores/workspace-store").PanelType, id: string) => void;
+  /** Open artifact creation dialog */
+  onCreateArtifact?: () => void;
   /** Canvas width adjustment when push-panel is open */
   panelWidth?: number;
 };
@@ -135,30 +136,28 @@ function getTimeGreeting(): string {
 /* ─── Zoom helpers ───────────────────────────────────────── */
 
 function getRepresentationBand(zoom: number): ZoomBand {
-  if (zoom < 0.45) return "overview";
-  if (zoom < 0.9) return "summary";
-  if (zoom < 1.7) return "detail";
+  if (zoom < 0.25) return "overview";
+  if (zoom < 0.5) return "summary";
+  if (zoom < 0.9) return "detail";
   return "internal";
 }
 
 /** Calculate opacity for non-focused workstreams during deep zoom */
 function getNeighborOpacity(zoom: number): number {
-  if (zoom <= 1.3) return 1;
-  if (zoom >= 1.7) return 0;
-  return Math.max(0, 1 - (zoom - 1.3) / 0.4);
-}
-
-function distanceFromHub(x: number, y: number) {
-  return Math.sqrt(x * x + y * y);
+  if (zoom <= 0.7) return 1;
+  if (zoom >= 1.0) return 0;
+  return Math.max(0, 1 - (zoom - 0.7) / 0.3);
 }
 
 function restoreViewport(): Viewport {
+  // Default zoom is low enough to see the full 2.5x-scaled layout
+  const defaultVp: Viewport = { x: 0, y: 0, zoom: 0.35 };
   if (typeof window === "undefined") {
-    return { x: 0, y: 0, zoom: 0.9 };
+    return defaultVp;
   }
   try {
     const saved = window.localStorage.getItem("workspace:viewport");
-    if (!saved) return { x: 0, y: 0, zoom: 0.9 };
+    if (!saved) return defaultVp;
     const parsed = JSON.parse(saved) as Viewport;
     if (
       typeof parsed.x === "number"
@@ -170,7 +169,7 @@ function restoreViewport(): Viewport {
   } catch {
     // Ignore
   }
-  return { x: 0, y: 0, zoom: 0.9 };
+  return defaultVp;
 }
 
 /* ─── Edge builders ──────────────────────────────────────── */
@@ -235,8 +234,8 @@ function buildPeerLinks(workstreams: Workstream[], positions: Map<string, { x: n
       const sourcePos = positions.get(a._id) ?? { x: 0, y: 0 };
       const targetPos = positions.get(b._id) ?? { x: 0, y: 0 };
       const { sourceHandle, targetHandle } = pickDirectionalHandles(
-        { x: sourcePos.x + 160, y: sourcePos.y + 110 },
-        { x: targetPos.x + 160, y: targetPos.y + 110 },
+        { x: sourcePos.x + 260, y: sourcePos.y + 140 },
+        { x: targetPos.x + 260, y: targetPos.y + 140 },
       );
       edges.push({
         id: `peer-${a._id}-${b._id}`,
@@ -270,42 +269,8 @@ function buildEdges(
   // Hide edges when inside a committed workstream
   if (committedId) return [];
 
-  const hubEdges: Edge[] = workstreams.map((ws) => {
-    const color = getWorkstreamColor(ws.color).value;
-    const age = ws.lastActivityAt ? Date.now() - ws.lastActivityAt : Number.MAX_SAFE_INTEGER;
-    const opacity = age < 2 * 86400000 ? 0.7 : age < 7 * 86400000 ? 0.45 : 0.22;
-    const targetPos = positions.get(ws._id) ?? { x: 0, y: 0 };
-    const { sourceHandle, targetHandle } = pickDirectionalHandles(
-      { x: 0, y: 0 },
-      { x: targetPos.x + 160, y: targetPos.y + 110 },
-    );
-
-    return {
-      id: `hub-${ws._id}`,
-      source: HUB_NODE_ID,
-      target: `ws-${ws._id}`,
-      sourceHandle,
-      targetHandle,
-      type: "smoothstep",
-      animated: false,
-      selectable: false,
-      deletable: false,
-      style: {
-        stroke: color,
-        strokeWidth: ws.status === "completed" ? 0.8 : 1.2,
-        strokeDasharray: ws.status === "completed" ? "4 6" : undefined,
-        opacity: ws.status === "archived" ? 0.1 : opacity,
-      },
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        color,
-        width: 14,
-        height: 14,
-      },
-    };
-  });
-
-  return [...hubEdges, ...buildPeerLinks(workstreams, positions)];
+  // Hub is now a persistent bar — only peer links remain on canvas
+  return buildPeerLinks(workstreams, positions);
 }
 
 type CachedWorkspaceContent = {
@@ -328,10 +293,6 @@ function emptyWorkspaceContent(): CachedWorkspaceContent {
     hubDeadlines: [],
     hubActivity: [],
   };
-}
-
-function sameIds(left: string[], right: string[]) {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function namespaceFlowNodes(prefix: string, nodes: Node[]) {
@@ -358,12 +319,12 @@ const WorkstreamNode = memo(function WorkstreamNode({
   const { workstream, band, isFocused, isDimmed, isCommitted, neighborOpacity, lifecycle, onOpen } = data;
   const color = getWorkstreamColor(workstream.color);
 
-  // Node width by band
-  const width = band === "overview" ? 250 : band === "summary" ? 320 : band === "detail" ? 390 : 440;
+  // Node width by band (scaled up for 2.5x layout)
+  const width = band === "overview" ? 420 : band === "summary" ? 520 : band === "detail" ? 620 : 700;
 
   // When committed: dissolve border (opacity + blur), don't hide entirely
   // so internal canvas-native nodes can coexist
-  const dissolving = isCommitted && band === "internal";
+  const dissolving = isCommitted;
 
   return (
     <div className="relative">
@@ -415,10 +376,14 @@ const WorkstreamNode = memo(function WorkstreamNode({
               : "0 2px 8px -4px rgba(0,0,0,0.06)",
         }}
       >
-        {/* Ambient color stripe at top of card */}
+        {/* Ambient color stripe — warm accent at top and bottom */}
         <div
-          className="absolute inset-x-0 top-0 h-[2px] rounded-t-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-          style={{ background: `linear-gradient(90deg, ${color.value}60, ${color.value}20)` }}
+          className="absolute inset-x-0 top-0 h-[3px] rounded-t-2xl opacity-0 group-hover:opacity-60 transition-opacity duration-300"
+          style={{ background: color.value }}
+        />
+        <div
+          className="absolute inset-x-0 bottom-0 h-[3px] rounded-b-2xl opacity-0 group-hover:opacity-30 transition-opacity duration-300"
+          style={{ background: color.value }}
         />
 
         <div className={cn("relative flex flex-col", dissolving ? "px-3 py-2" : "px-4 py-3.5")}>
@@ -565,9 +530,9 @@ const HubNode = memo(function HubNode({
         transition={{ duration: data.isCommitted ? 0.5 : 0.3, ease: [0.22, 1, 0.36, 1] }}
         className={cn(
           "group relative flex items-center justify-center overflow-hidden transition-[box-shadow,border-color] duration-300",
-          data.band === "overview" && "h-[164px] w-[164px] rounded-[30px]",
-          data.band === "summary" && "h-[214px] w-[214px] rounded-[34px]",
-          (data.band === "detail" || data.band === "internal") && "h-[268px] w-[268px] rounded-[40px]",
+          data.band === "overview" && "h-[280px] w-[280px] rounded-[36px]",
+          data.band === "summary" && "h-[360px] w-[360px] rounded-[40px]",
+          (data.band === "detail" || data.band === "internal") && "h-[440px] w-[440px] rounded-[48px]",
         )}
         style={{
           background: "var(--bg-elevated)",
@@ -588,18 +553,18 @@ const HubNode = memo(function HubNode({
               alt=""
               className={cn(
                 "rounded-full object-cover ring-2 ring-[var(--accent-cyan)]/20",
-                data.band === "overview" && "h-11 w-11",
-                data.band === "summary" && "h-14 w-14",
-                (data.band === "detail" || data.band === "internal") && "h-16 w-16",
+                data.band === "overview" && "h-14 w-14",
+                data.band === "summary" && "h-20 w-20",
+                (data.band === "detail" || data.band === "internal") && "h-24 w-24",
               )}
             />
           ) : (
             <div
               className={cn(
                 "flex items-center justify-center rounded-full bg-[linear-gradient(135deg,var(--accent-cyan),var(--accent-mint))] font-semibold text-white",
-                data.band === "overview" && "h-11 w-11 text-sm",
-                data.band === "summary" && "h-14 w-14 text-base",
-                (data.band === "detail" || data.band === "internal") && "h-16 w-16 text-lg",
+                data.band === "overview" && "h-14 w-14 text-base",
+                data.band === "summary" && "h-20 w-20 text-xl",
+                (data.band === "detail" || data.band === "internal") && "h-24 w-24 text-2xl",
               )}
             >
               {initials}
@@ -611,8 +576,9 @@ const HubNode = memo(function HubNode({
             </div>
             <h3 className={cn(
               "font-display text-[var(--text-primary)]",
-              data.band === "overview" && "text-xs",
-              data.band !== "overview" && "text-sm",
+              data.band === "overview" && "text-sm",
+              data.band === "summary" && "text-base",
+              (data.band === "detail" || data.band === "internal") && "text-lg",
             )}>
               {data.userName}
             </h3>
@@ -694,7 +660,6 @@ function WorkspaceBreadcrumb({
 
 const FLOW_NODE_TYPES = {
   workstream: WorkstreamNode,
-  hub: HubNode,
   contentGroup: GroupNode,
   contentColumn: ColumnNode,
   graphItem: GraphItemNode,
@@ -716,6 +681,7 @@ function WorkspaceCanvasInner({
   onOpenHub,
   onCommitWorkstream,
   onOpenPanel,
+  onCreateArtifact,
 }: WorkspaceCanvasProps) {
   const reactFlowRef = useRef<ReactFlowInstance | null>(null);
   const initializedRef = useRef(false);
@@ -724,7 +690,7 @@ function WorkspaceCanvasInner({
   const animatedCommitRef = useRef<string | null>(null);
   const prefetchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const workstreamDragThrottleRef = useRef(new Map<string, number>());
-  const lastViewportRef = useRef<{ x: number; y: number; zoom: number }>({ x: 0, y: 0, zoom: 0.78 });
+  const lastViewportRef = useRef<{ x: number; y: number; zoom: number }>({ x: 0, y: 0, zoom: 0.35 });
   const contentCacheRef = useRef(new Map<string, CachedWorkspaceContent>());
   const inFlightContentRef = useRef(new Map<string, Promise<void>>());
   const internalNodeOverridesRef = useRef<Map<string, { x: number; y: number }>>(new Map());
@@ -738,7 +704,6 @@ function WorkspaceCanvasInner({
     setCamera,
     setZoomBand,
     commitWorkstream,
-    setPrimaryWorkstreamId,
     setVisibleWorkstreamIds,
     exitWorkstream,
     setPreviousViewport,
@@ -921,91 +886,11 @@ function WorkspaceCanvasInner({
   }, [sanitizeTitle, workstreams]);
 
   useEffect(() => {
-    if (band !== "internal" || visibleWorkstreamIds.length === 0) {
+    if (!primaryWorkstreamId || visibleWorkstreamIds.length === 0) {
       return;
     }
     void Promise.all(visibleWorkstreamIds.map((workstreamId) => fetchContentForWorkstream(workstreamId)));
-  }, [band, fetchContentForWorkstream, visibleWorkstreamIds]);
-
-  const updateVisibilityModel = useCallback((currentZoom: number) => {
-    if (commitDebounceRef.current) {
-      clearTimeout(commitDebounceRef.current);
-    }
-
-    commitDebounceRef.current = setTimeout(() => {
-      const currentBand = getRepresentationBand(currentZoom);
-      const vp = lastViewportRef.current;
-      const centerX = (-vp.x + window.innerWidth / 2) / vp.zoom;
-      const centerY = (-vp.y + window.innerHeight / 2) / vp.zoom;
-
-      const nearby = visibleWorkstreams
-        .map((ws) => {
-          const pos = positions.get(ws._id);
-          if (!pos) return null;
-          const dx = pos.x - centerX;
-          const dy = pos.y - centerY;
-          return {
-            id: ws._id,
-            distance: Math.sqrt(dx * dx + dy * dy),
-          };
-        })
-        .filter((row): row is { id: string; distance: number } => Boolean(row))
-        .sort((left, right) => left.distance - right.distance);
-
-      if (currentBand === "internal") {
-        let nextVisible = nearby.filter((row) => row.distance <= 600).map((row) => row.id);
-        const hubDistance = distanceFromHub(centerX, centerY);
-        if (hubDistance <= 400) {
-          nextVisible.push("__hub__");
-        }
-        
-        let nextPrimary = nextVisible[0];
-        if (hubDistance <= 320 && (!nextPrimary || nextPrimary === "__hub__" || hubDistance < nearby[0]?.distance)) {
-          nextPrimary = "__hub__";
-        }
-
-        if (!sameIds(visibleWorkstreamIds, nextVisible)) {
-          setVisibleWorkstreamIds(nextVisible);
-        }
-        if (nextPrimary !== primaryWorkstreamId) {
-          setPrimaryWorkstreamId(nextPrimary);
-          onCommitWorkstream?.(nextPrimary ?? null);
-        }
-        return;
-      }
-
-      if (currentBand === "detail") {
-        if (prefetchDebounceRef.current) {
-          clearTimeout(prefetchDebounceRef.current);
-        }
-        prefetchDebounceRef.current = setTimeout(() => {
-          const targets = nearby
-            .filter((row) => row.distance <= 600)
-            .map((row) => row.id);
-          if (distanceFromHub(centerX, centerY) <= 320) {
-            targets.unshift("__hub__");
-          }
-          void Promise.all(Array.from(new Set(targets)).map((workstreamId) => fetchContentForWorkstream(workstreamId)));
-        }, 300);
-        return;
-      }
-
-      if (visibleWorkstreamIds.length > 0 || primaryWorkstreamId) {
-        setVisibleWorkstreamIds([]);
-        setPrimaryWorkstreamId(undefined);
-        onCommitWorkstream?.(null);
-      }
-    }, 400);
-  }, [
-    fetchContentForWorkstream,
-    onCommitWorkstream,
-    positions,
-    primaryWorkstreamId,
-    setPrimaryWorkstreamId,
-    setVisibleWorkstreamIds,
-    visibleWorkstreamIds,
-    visibleWorkstreams,
-  ]);
+  }, [primaryWorkstreamId, fetchContentForWorkstream, visibleWorkstreamIds]);
 
   const handleOpenWorkstream = useCallback(
     (workstreamId: string) => {
@@ -1020,28 +905,29 @@ function WorkspaceCanvasInner({
         // Save current viewport for zoom-out restoration
         setPreviousViewport({ ...lastViewportRef.current });
 
-        // Get node position and zoom to it
+        // Get node position and zoom to it — centered on the card
         const node = instance.getNode(`ws-${workstreamId}`);
         if (node) {
           instance.setCenter(
-            node.position.x + 150,
-            node.position.y + 100,
-            { zoom: 1.7, duration: 450 },
+            node.position.x + 260,
+            node.position.y + 120,
+            { zoom: 1.0, duration: 450 },
           );
         }
       }
 
-      // Commit after animation
+      // Commit after animation — set visibility for this workstream
       commitAnimationTimeoutRef.current = setTimeout(() => {
+        setVisibleWorkstreamIds([workstreamId]);
         commitWorkstream(workstreamId);
+        void fetchContentForWorkstream(workstreamId);
         onOpenWorkstream?.(workstreamId);
       }, 450);
     },
-    [commitWorkstream, onOpenWorkstream, primaryWorkstreamId, setPreviousViewport],
+    [commitWorkstream, fetchContentForWorkstream, onOpenWorkstream, primaryWorkstreamId, setPreviousViewport, setVisibleWorkstreamIds],
   );
 
   const handleExitWorkstream = useCallback(() => {
-    const { previousViewport } = useWorkspaceStore.getState();
     if (commitAnimationTimeoutRef.current) {
       clearTimeout(commitAnimationTimeoutRef.current);
     }
@@ -1049,12 +935,13 @@ function WorkspaceCanvasInner({
     exitWorkstream();
     onCommitWorkstream?.(null);
 
-    // Restore previous viewport
+    // Zoom out to fit all workstreams — always centered
     const instance = reactFlowRef.current;
-    if (instance && previousViewport) {
-      instance.setViewport(previousViewport, { duration: 400 });
-    } else if (instance) {
-      instance.setCenter(0, 0, { zoom: 0.9, duration: 400 });
+    if (instance) {
+      // Small delay to let nodes reappear before fitting
+      setTimeout(() => {
+        instance.fitView({ padding: 0.15, duration: 400, nodes: undefined });
+      }, 50);
     }
   }, [exitWorkstream, onCommitWorkstream]);
 
@@ -1068,14 +955,16 @@ function WorkspaceCanvasInner({
       if (instance) {
         animatedCommitRef.current = "__hub__";
         setPreviousViewport({ ...lastViewportRef.current });
-        instance.setCenter(0, 0, { zoom: 1.7, duration: 450 });
+        instance.setCenter(0, 0, { zoom: 1.0, duration: 450 });
       }
       commitAnimationTimeoutRef.current = setTimeout(() => {
+        setVisibleWorkstreamIds(["__hub__"]);
         commitWorkstream("__hub__");
+        void fetchContentForWorkstream("__hub__");
         onOpenHub?.();
       }, 450);
     },
-    [commitWorkstream, onOpenHub, primaryWorkstreamId, setPreviousViewport],
+    [commitWorkstream, fetchContentForWorkstream, onOpenHub, primaryWorkstreamId, setPreviousViewport, setVisibleWorkstreamIds],
   );
 
   useEffect(() => {
@@ -1092,7 +981,9 @@ function WorkspaceCanvasInner({
     if (primaryWorkstreamId === "__hub__") {
       animatedCommitRef.current = "__hub__";
       setPreviousViewport({ ...lastViewportRef.current });
-      instance.setCenter(0, 0, { zoom: 1.7, duration: 450 });
+      setVisibleWorkstreamIds(["__hub__"]);
+      void fetchContentForWorkstream("__hub__");
+      instance.setCenter(0, 0, { zoom: 1.0, duration: 450 });
       return;
     }
 
@@ -1100,12 +991,14 @@ function WorkspaceCanvasInner({
     if (!node) return;
     animatedCommitRef.current = primaryWorkstreamId;
     setPreviousViewport({ ...lastViewportRef.current });
+    setVisibleWorkstreamIds([primaryWorkstreamId]);
+    void fetchContentForWorkstream(primaryWorkstreamId);
     instance.setCenter(
-      node.position.x + 150,
-      node.position.y + 100,
-      { zoom: 1.7, duration: 450 },
+      node.position.x + 260,
+      node.position.y + 120,
+      { zoom: 1.0, duration: 450 },
     );
-  }, [positions, primaryWorkstreamId, setPreviousViewport]);
+  }, [fetchContentForWorkstream, positions, primaryWorkstreamId, setPreviousViewport, setVisibleWorkstreamIds]);
 
   useEffect(() => () => {
     if (commitDebounceRef.current) clearTimeout(commitDebounceRef.current);
@@ -1114,22 +1007,7 @@ function WorkspaceCanvasInner({
   }, []);
 
   const nodes = useMemo<Node[]>(() => {
-    const hubNode: Node<HubNodeData> = {
-      id: HUB_NODE_ID,
-      type: "hub",
-      position: { x: -110, y: -110 },
-      draggable: false,
-      selectable: false,
-      data: {
-        userName,
-        userAvatar,
-        totalWorkstreams: workstreams.filter((ws) => ws.status === "active").length,
-        band,
-        isDimmed: !!primaryWorkstreamId && primaryWorkstreamId !== "__hub__",
-        isCommitted: primaryWorkstreamId === "__hub__",
-        onOpen: handleOpenHub,
-      },
-    };
+    // Hub is now a persistent bar — no hub node on canvas
 
     const workstreamNodes: Node<WorkstreamNodeData>[] = visibleWorkstreams.map((ws) => {
       const pos = positions.get(ws._id) ?? { x: 0, y: 0 };
@@ -1159,7 +1037,7 @@ function WorkspaceCanvasInner({
     });
 
     let internalNodes: Node[] = [];
-    if (visibleWorkstreamIds.length > 0 && band === "internal") {
+    if (visibleWorkstreamIds.length > 0 && primaryWorkstreamId) {
       for (const workstreamId of visibleWorkstreamIds) {
         const isPrimary = primaryWorkstreamId === workstreamId;
         const loading = loadingContentIds.includes(workstreamId) && !contentCacheRef.current.has(workstreamId);
@@ -1249,7 +1127,7 @@ function WorkspaceCanvasInner({
       }
     }
 
-    return [hubNode, ...workstreamNodes, ...internalNodes];
+    return [...workstreamNodes, ...internalNodes];
   }, [
     band,
     focusWorkstreamId,
@@ -1278,7 +1156,7 @@ function WorkspaceCanvasInner({
   const edges = useMemo(() => {
     const baseEdges = buildEdges(visibleWorkstreams, positions, showConnections, primaryWorkstreamId);
 
-    if (viewMode !== "graph" || band !== "internal") {
+    if (viewMode !== "graph" || !primaryWorkstreamId) {
       return baseEdges;
     }
 
@@ -1309,31 +1187,42 @@ function WorkspaceCanvasInner({
     reactFlowRef.current = instance;
     if (initializedRef.current) return;
     initializedRef.current = true;
-    const saved = restoreViewport();
-    instance.setViewport(saved, { duration: 0 });
-    setCamera({ x: saved.x, y: saved.y, z: saved.zoom });
-    setZoom(saved.zoom);
-  }, [setCamera]);
+    // If a workstream is already committed (URL param), don't fitView
+    if (primaryWorkstreamId) {
+      const saved = restoreViewport();
+      instance.setViewport(saved, { duration: 0 });
+      setCamera({ x: saved.x, y: saved.y, z: saved.zoom });
+      setZoom(saved.zoom);
+    } else {
+      // FitView to center all workstreams on load
+      setTimeout(() => {
+        instance.fitView({ padding: 0.15, duration: 400 });
+        const vp = instance.getViewport();
+        setCamera({ x: vp.x, y: vp.y, z: vp.zoom });
+        setZoom(vp.zoom);
+      }, 50);
+    }
+  }, [primaryWorkstreamId, setCamera]);
 
   const handleMove = useCallback((_: unknown, viewport: Viewport) => {
     setZoom(viewport.zoom);
     lastViewportRef.current = { x: viewport.x, y: viewport.y, zoom: viewport.zoom };
-    updateVisibilityModel(viewport.zoom);
-  }, [updateVisibilityModel]);
+    // No auto-commit on zoom/pan — commitment only via explicit click
+  }, []);
 
   const handleMoveEnd = useCallback(
     (_: unknown, viewport: Viewport) => {
       setZoom(viewport.zoom);
       setCamera({ x: viewport.x, y: viewport.y, z: viewport.zoom });
       lastViewportRef.current = { x: viewport.x, y: viewport.y, zoom: viewport.zoom };
-      updateVisibilityModel(viewport.zoom);
+      // No auto-commit on zoom/pan — commitment only via explicit click
       try {
         window.localStorage.setItem("workspace:viewport", JSON.stringify(viewport));
       } catch {
         // Ignore
       }
     },
-    [setCamera, updateVisibilityModel],
+    [setCamera],
   );
 
   const handleNodeDragStop = useCallback(
@@ -1409,23 +1298,24 @@ function WorkspaceCanvasInner({
       if (!instance) return;
       if (primaryWorkstreamId) {
         handleExitWorkstream();
+      } else {
+        instance.fitView({ padding: 0.15, duration: 500 });
       }
-      instance.setCenter(0, 0, { zoom: 0.9, duration: 500 });
     };
     window.addEventListener("workspace:center-home", handler);
     return () => window.removeEventListener("workspace:center-home", handler);
   }, [handleExitWorkstream, primaryWorkstreamId]);
 
-  // Center on focused workstream from URL
+  // Center on focused workstream from URL (just center, don't enter)
   useEffect(() => {
     const instance = reactFlowRef.current;
     if (!instance || !focusWorkstreamId) return;
     const target = instance.getNode(`ws-${focusWorkstreamId}`);
     if (!target) return;
     instance.setCenter(
-      target.position.x + 150,
-      target.position.y + 100,
-      { zoom: 1.1, duration: 600 },
+      target.position.x + 260,
+      target.position.y + 120,
+      { zoom: 0.6, duration: 600 },
     );
   }, [focusWorkstreamId]);
 
@@ -1461,7 +1351,7 @@ function WorkspaceCanvasInner({
         }}
       />
 
-      {/* Breadcrumb — only when committed */}
+      {/* Breadcrumb — only when committed to a workstream */}
       <AnimatePresence>
         {committedWorkstream && (
           <WorkspaceBreadcrumb
@@ -1469,33 +1359,13 @@ function WorkspaceCanvasInner({
             onBack={handleExitWorkstream}
           />
         )}
-        {!committedWorkstream && primaryWorkstreamId === "__hub__" && (
-          <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2 }}
-            className="absolute top-3 left-4 z-30 flex items-center gap-1.5"
-          >
-            <button
-              type="button"
-              onClick={handleExitWorkstream}
-              className="inline-flex items-center gap-1 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-            >
-              <ChevronLeft className="w-4 h-4" />
-              <span>Workspace</span>
-            </button>
-            <span className="text-[var(--text-tertiary)]">/</span>
-            <span className="text-sm font-medium text-[var(--text-primary)]">Hub</span>
-          </motion.div>
-        )}
       </AnimatePresence>
 
       <ReactFlow
         nodes={nodes}
         edges={edges}
         fitView={false}
-        minZoom={0.24}
+        minZoom={0.08}
         maxZoom={2.5}
         defaultViewport={restoreViewport()}
         nodeTypes={FLOW_NODE_TYPES}
@@ -1518,7 +1388,7 @@ function WorkspaceCanvasInner({
         <FlowBackground mode={backgroundMode} zoom={zoom} />
         <Controls position="bottom-left" showInteractive={false}>
           <ControlButton
-            onClick={() => reactFlowRef.current?.zoomTo(1.42, { duration: 350 })}
+            onClick={() => reactFlowRef.current?.zoomTo(0.7, { duration: 350 })}
             title="Focus detail band"
           >
             <ZoomIn className="h-4 w-4" />
@@ -1527,10 +1397,11 @@ function WorkspaceCanvasInner({
             onClick={() => {
               if (primaryWorkstreamId) {
                 handleExitWorkstream();
+              } else {
+                reactFlowRef.current?.fitView({ padding: 0.15, duration: 500 });
               }
-              reactFlowRef.current?.setCenter(0, 0, { zoom: 0.9, duration: 500 });
             }}
-            title="Return to hub"
+            title="Fit all workstreams"
           >
             <Crosshair className="h-4 w-4" />
           </ControlButton>
@@ -1553,7 +1424,7 @@ function WorkspaceCanvasInner({
             icon={<FileText className="h-3.5 w-3.5" />}
             label="New document"
             hint="D"
-            onClick={() => { setContextMenu(null); panelOpener("artifact", "new"); }}
+            onClick={() => { setContextMenu(null); onCreateArtifact ? onCreateArtifact() : panelOpener("artifact", "new"); }}
           />
 
           {/* In workstream: scoped actions */}

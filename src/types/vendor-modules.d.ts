@@ -35,6 +35,8 @@ declare module "@xyflow/react" {
 
   export type ReactFlowInstance<N extends Node = Node, E extends Edge = Edge> = {
     setViewport: (viewport: Viewport, options?: { duration?: number }) => void;
+    getViewport: () => Viewport;
+    fitView: (options?: { padding?: number; duration?: number; nodes?: N[] | undefined }) => void;
     zoomTo: (zoom: number, options?: { duration?: number }) => void;
     setCenter: (x: number, y: number, options?: { zoom?: number; duration?: number }) => void;
     getNode: (id: string) => N | undefined;

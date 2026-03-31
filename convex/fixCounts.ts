@@ -9,7 +9,7 @@ export const fixCounts = mutation({
       const artifacts = await ctx.db.query("artifacts").withIndex("by_workstream", q => q.eq("workstreamId", ws._id)).collect();
       
       const threadCount = threads.filter(t => !t.deletedAt).length;
-      const artifactCount = artifacts.filter(a => !a.deletedAt).length;
+      const artifactCount = artifacts.filter(a => a.status !== "archived").length;
       
       if (ws.threadCount !== threadCount || ws.artifactCount !== artifactCount) {
         await ctx.db.patch(ws._id, { threadCount, artifactCount });

@@ -9,7 +9,8 @@ import { AnimatePresence } from "framer-motion";
 import { AppShell } from "@/components/layout/app-shell";
 import { WorkspaceToolbar } from "@/components/workspace/workspace-toolbar";
 import { WorkstreamCreateDialog } from "@/components/workspace/workstream-create-dialog";
-import { WorkspaceCommandBar } from "@/components/workspace/workspace-command-bar";
+import { CreateArtifactDialog } from "@/components/artifacts/create-artifact-dialog";
+import { HubBar } from "@/components/workspace/hub-bar";
 import { RightPushPanel } from "@/components/workspace/right-push-panel";
 // Internal view is now canvas-native (rendered as React Flow nodes inside workspace-canvas)
 import { useWorkspaceData } from "@/hooks/use-workspace-data";
@@ -70,6 +71,7 @@ function WorkspaceContent() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [artifactDialogOpen, setArtifactDialogOpen] = useState(false);
 
   // Sync URL with store state
   useEffect(() => {
@@ -145,6 +147,7 @@ function WorkspaceContent() {
     [createWorkstream],
   );
 
+
   const activeCount = workstreams.filter((ws) => ws.status === "active").length;
 
   const handleCommitWorkstream = useCallback(
@@ -213,6 +216,38 @@ function WorkspaceContent() {
     });
   }, [closePanel, updateWorkspaceRoute]);
 
+  const handleCreateArtifact = useCallback(
+    async (type: string, title: string, tags: string[], template?: { id: string; content: unknown; contentPlaintext?: string }) => {
+      try {
+        const wsId = primaryWorkstreamId && primaryWorkstreamId !== "__hub__" ? primaryWorkstreamId : undefined;
+        const response = await fetch("/api/artifacts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "create",
+            type,
+            title,
+            tags,
+            content: template?.content ?? { type: "doc", content: [{ type: "paragraph" }] },
+            contentPlaintext: template?.contentPlaintext ?? "",
+            editorMode: type === "document" || type === "note" ? "standard" : undefined,
+            workstreamId: wsId,
+          }),
+        });
+        if (!response.ok) throw new Error("Failed to create artifact");
+        const data = (await response.json()) as { artifactId?: string };
+        if (data.artifactId) {
+          const panelType = type === "document" || type === "note" ? "artifact" : "artifact";
+          handleOpenPanel(panelType, data.artifactId);
+        }
+        toast.success(`${title || "Artifact"} created`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to create artifact");
+      }
+    },
+    [handleOpenPanel, primaryWorkstreamId],
+  );
+
   const panelWidth = panel ? getPanelWidth(panel.type) : 0;
 
   const userName = user?.fullName || user?.firstName || "Student";
@@ -262,95 +297,104 @@ function WorkspaceContent() {
         />
 
         {/* Canvas + panel container */}
-        <div className="flex-1 relative overflow-hidden flex" ref={containerRef}>
+        <div className="flex-1 relative overflow-hidden flex flex-col" ref={containerRef}>
           {loading ? (
             <CanvasLoader />
           ) : (
             <>
-              {/* Main canvas area */}
-              <div
-                className="relative overflow-hidden transition-all duration-300 ease-out"
-                style={{ flex: `1 1 ${panelWidth > 0 ? `calc(100% - ${panelWidth}px)` : "100%"}` }}
-              >
-                <WorkspaceCanvas
-                  workstreams={workstreams}
-                  userName={userName}
-                  userAvatar={user?.imageUrl || ""}
-                  onNewWorkstream={handleNewWorkstream}
-                  onWorkstreamUpdate={updateWorkstream}
-                  focusWorkstreamId={wsParam}
-                  searchQuery={searchQuery}
-                  onOpenWorkstream={handleOpenWorkstream}
-                  onOpenHub={handleOpenHub}
-                  onCommitWorkstream={handleCommitWorkstream}
-                  onOpenPanel={handleOpenPanel}
-                  panelWidth={panelWidth}
-                />
-
-                {/* Quick Chat Command Bar — hidden when panel is open */}
-                <WorkspaceCommandBar
-                  hidden={!!panel}
-                  workstreams={workstreams}
-                  primaryWorkstreamId={primaryWorkstreamId}
-                  onOpenWorkstreamChat={(workstreamId, query) => {
-                    useWorkspaceStore.getState().setOpenChatQuery(query);
-                    handleCommitWorkstream(workstreamId);
-                    setTimeout(() => handleOpenPanel("chat", "new"), 500);
-                  }}
-                  onOpenPanel={handleOpenPanel}
-                />
-              </div>
-
-              {/* Right push-panel */}
-              <AnimatePresence>
-                {panel && (
-                  <RightPushPanel
-                    type={panel.type}
-                    id={panel.id}
-                    workstreamId={
-                      primaryWorkstreamId && primaryWorkstreamId !== "__hub__"
-                        ? primaryWorkstreamId
-                        : undefined
-                    }
-                    onClose={handleClosePanel}
-                    onExpand={(type, id) => {
-                      // Navigate to full-page view
-                      if (type === "chat") {
-                        router.push(`/chat?chatId=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
-                      } else if (type === "note") {
-                        router.push(`/artifacts?id=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
-                      } else if (type === "artifact") {
-                        router.push(`/artifacts?id=${id}`);
-                      } else if (type === "planner") {
-                        router.push(`/planner?item=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
-                      }
-                    }}
-                  />
-                )}
-              </AnimatePresence>
-            </>
-          )}
-
-          {/* Empty state */}
-          {!loading && workstreams.length === 0 && !primaryWorkstreamId && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-              <div className="flex flex-col items-center gap-4 pointer-events-auto">
-                <div className="text-5xl">🌱</div>
-                <h2 className="font-display text-xl font-bold text-[var(--text-primary)]">
-                  Your workspace is empty
-                </h2>
-                <p className="text-sm text-[var(--text-secondary)] text-center max-w-xs">
-                  Create your first workstream to start organizing your academic work
-                </p>
-                <button
-                  type="button"
-                  onClick={handleNewWorkstream}
-                  className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-[var(--accent-cyan)] text-white hover:brightness-110 shadow-[0_4px_12px_-2px_rgba(14,142,232,0.3)] transition-all"
+              {/* Canvas zone + right panel */}
+              <div className="flex-1 relative overflow-hidden flex">
+                {/* Main canvas area */}
+                <div
+                  className="relative overflow-hidden transition-all duration-300 ease-out"
+                  style={{ flex: `1 1 ${panelWidth > 0 ? `calc(100% - ${panelWidth}px)` : "100%"}` }}
                 >
-                  Create First Workstream
-                </button>
+                  <WorkspaceCanvas
+                    workstreams={workstreams}
+                    userName={userName}
+                    userAvatar={user?.imageUrl || ""}
+                    onNewWorkstream={handleNewWorkstream}
+                    onWorkstreamUpdate={updateWorkstream}
+                    focusWorkstreamId={wsParam}
+                    searchQuery={searchQuery}
+                    onOpenWorkstream={handleOpenWorkstream}
+                    onOpenHub={handleOpenHub}
+                    onCommitWorkstream={handleCommitWorkstream}
+                    onOpenPanel={handleOpenPanel}
+                    onCreateArtifact={() => setArtifactDialogOpen(true)}
+                    panelWidth={panelWidth}
+                  />
+
+                  {/* Empty state */}
+                  {workstreams.length === 0 && !primaryWorkstreamId && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+                      <div className="flex flex-col items-center gap-4 pointer-events-auto">
+                        <div className="text-5xl">🌱</div>
+                        <h2 className="font-display text-xl font-bold text-[var(--text-primary)]">
+                          Your workspace is empty
+                        </h2>
+                        <p className="text-sm text-[var(--text-secondary)] text-center max-w-xs">
+                          Create your first workstream to start organizing your academic work
+                        </p>
+                        <button
+                          type="button"
+                          onClick={handleNewWorkstream}
+                          className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-[var(--accent-cyan)] text-white hover:brightness-110 shadow-[0_4px_12px_-2px_rgba(14,142,232,0.3)] transition-all"
+                        >
+                          Create First Workstream
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Right push-panel */}
+                <AnimatePresence>
+                  {panel && (
+                    <RightPushPanel
+                      type={panel.type}
+                      id={panel.id}
+                      workstreamId={
+                        primaryWorkstreamId && primaryWorkstreamId !== "__hub__"
+                          ? primaryWorkstreamId
+                          : undefined
+                      }
+                      onClose={handleClosePanel}
+                      onExpand={(type, id) => {
+                        if (type === "chat") {
+                          router.push(`/chat?chatId=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
+                        } else if (type === "note") {
+                          router.push(`/artifacts?id=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
+                        } else if (type === "artifact") {
+                          router.push(`/artifacts?id=${id}`);
+                        } else if (type === "planner") {
+                          router.push(`/planner?item=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
+                        }
+                      }}
+                    />
+                  )}
+                </AnimatePresence>
               </div>
-            </div>
+
+              {/* Persistent Hub Bar — always at bottom */}
+              <HubBar
+                workstreams={workstreams}
+                primaryWorkstreamId={primaryWorkstreamId}
+                onOpenWorkstream={(wsId) => {
+                  handleCommitWorkstream(wsId);
+                }}
+                onExitWorkstream={() => handleCommitWorkstream(null)}
+                onOpenHub={handleOpenHub}
+                onNewWorkstream={handleNewWorkstream}
+                onOpenWorkstreamChat={(workstreamId, query) => {
+                  useWorkspaceStore.getState().setOpenChatQuery(query);
+                  handleCommitWorkstream(workstreamId);
+                  setTimeout(() => handleOpenPanel("chat", "new"), 500);
+                }}
+                onOpenPanel={handleOpenPanel}
+                panelOpen={!!panel}
+              />
+            </>
           )}
         </div>
 
@@ -358,6 +402,17 @@ function WorkspaceContent() {
           open={isCreateDialogOpen}
           onClose={closeCreateDialog}
           onCreate={handleCreate}
+        />
+
+        <CreateArtifactDialog
+          open={artifactDialogOpen}
+          onClose={() => setArtifactDialogOpen(false)}
+          onCreate={handleCreateArtifact}
+          defaultWorkstreamId={
+            primaryWorkstreamId && primaryWorkstreamId !== "__hub__"
+              ? primaryWorkstreamId
+              : undefined
+          }
         />
       </div>
     </AppShell>

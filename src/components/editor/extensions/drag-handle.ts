@@ -111,12 +111,14 @@ export const DragHandle = Extension.create({
     };
 
     const showControls = (view: EditorView, block: TopLevelBlock) => {
-      const editorRect = view.dom.getBoundingClientRect();
-      const blockRect = block.dom.getBoundingClientRect();
       const wrapper = view.dom.parentElement;
-      const isCompact = wrapper?.classList.contains("tiptap-compact");
+      if (!wrapper) return;
+      const wrapperRect = wrapper.getBoundingClientRect();
+      const blockRect = block.dom.getBoundingClientRect();
+      const isCompact = wrapper.classList.contains("tiptap-compact");
       currentBlock = block;
-      container.style.top = `${blockRect.top - editorRect.top + view.dom.scrollTop + 1}px`;
+      // Position relative to the wrapper, accounting for wrapper scroll
+      container.style.top = `${blockRect.top - wrapperRect.top + wrapper.scrollTop + 1}px`;
       container.style.left = isCompact ? "-32px" : "-42px";
       container.style.opacity = "1";
       container.dataset.visible = "true";

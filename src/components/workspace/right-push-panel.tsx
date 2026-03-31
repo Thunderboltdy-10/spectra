@@ -102,6 +102,7 @@ export function RightPushPanel({
         icon={PANEL_ICONS[type]}
         onClose={onClose}
         panelType={type}
+        contentKey={`${type}-${id}`}
         actions={onExpand && type !== "route-trace" ? (
           <button
             type="button"

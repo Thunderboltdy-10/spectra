@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
+import { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 const { createChatStream } = vi.hoisted(() => ({
@@ -32,14 +32,17 @@ describe("useChatPanel", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root: Root = createRoot(container);
-    let latest: ReturnType<typeof useChatPanel> | null = null;
+    const latestRef: { current: ReturnType<typeof useChatPanel> | null } = { current: null };
 
     function Harness() {
-      latest = useChatPanel({
+      const panel = useChatPanel({
         mode: "tutor",
         thinkingLevel: "low",
         routerMode: "auto",
       });
+      useEffect(() => {
+        latestRef.current = panel;
+      }, [panel]);
       return null;
     }
 
@@ -47,15 +50,15 @@ describe("useChatPanel", () => {
       root.render(<Harness />);
     });
 
-    expect(latest).not.toBeNull();
+    expect(latestRef.current).not.toBeNull();
 
     await act(async () => {
-      await latest?.sendMessage("Hello from the panel");
+      await latestRef.current?.sendMessage("Hello from the panel");
     });
 
-    expect(latest?.streaming).toBe(false);
-    expect(latest?.messages).toEqual([]);
-    expect(latest?.error).toBe("Failed to create chat");
+    expect(latestRef.current?.streaming).toBe(false);
+    expect(latestRef.current?.messages).toEqual([]);
+    expect(latestRef.current?.error).toBe("Failed to create chat");
     expect(createChatStream).not.toHaveBeenCalled();
 
     await act(async () => {

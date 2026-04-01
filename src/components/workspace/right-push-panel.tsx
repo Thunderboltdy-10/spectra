@@ -379,7 +379,6 @@ function NotePanelContent({
           artifactId={activeDocument._id}
           content={activeDocument.content as import("@tiptap/core").JSONContent | null}
           compact
-          showAiBar
           showDocumentMeta
           documentTitle={stripGeneratedDocumentMarkers(activeDocument.title || "").trim() || "Untitled"}
           createdAt={activeDocument.createdAt}
@@ -400,6 +399,11 @@ function NotePanelContent({
           className="h-full"
         />
       </div>
+      <ArtifactAiSurface
+        artifactId={activeDocument._id}
+        context="workspace-panel"
+        workstreamId={workstreamId}
+      />
     </div>
   );
 }
@@ -488,7 +492,6 @@ function ArtifactPanelContent({
             artifactId={artifactId === "new" ? (createdId ?? artifactId) : artifactId}
             content={(artifact.content as import("@tiptap/core").JSONContent | null) ?? null}
             compact
-            showAiBar
             showDocumentMeta
             documentTitle={stripGeneratedDocumentMarkers(String(artifact.title ?? "Untitled")).trim() || "Untitled"}
             createdAt={Number(artifact.createdAt ?? Date.now())}
@@ -564,13 +567,11 @@ function ArtifactPanelContent({
         )}
       </div>
 
-      {!isDocument && (
-        <ArtifactAiSurface
-          artifactId={artifactId}
-          context="workspace-panel"
-          workstreamId={typeof artifact.workstreamId === "string" ? artifact.workstreamId : undefined}
-        />
-      )}
+      <ArtifactAiSurface
+        artifactId={artifactId === "new" ? (createdId ?? artifactId) : artifactId}
+        context="workspace-panel"
+        workstreamId={typeof artifact.workstreamId === "string" ? artifact.workstreamId : workstreamId}
+      />
     </div>
   );
 }

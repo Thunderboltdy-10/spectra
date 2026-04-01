@@ -16,6 +16,10 @@ import { RightPushPanel } from "@/components/workspace/right-push-panel";
 import { useWorkspaceData } from "@/hooks/use-workspace-data";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { registerSyncCallback } from "@/lib/workspace/position-persistence";
+import {
+  WORKSPACE_SHELLS,
+  type WorkspaceShellMode,
+} from "@/lib/workspace/shell-mode";
 
 const WorkspaceCanvas = dynamic(
   () =>
@@ -67,11 +71,45 @@ function WorkspaceContent() {
     openPanel,
     closePanel,
     commitWorkstream,
+    setViewMode,
   } = useWorkspaceStore();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [artifactDialogOpen, setArtifactDialogOpen] = useState(false);
+  const [shellMode, setShellMode] = useState<WorkspaceShellMode>("magnetic");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const saved = window.localStorage.getItem("workspace:shell-mode");
+    if (saved && WORKSPACE_SHELLS.includes(saved as WorkspaceShellMode)) {
+      const mode = saved as WorkspaceShellMode;
+      setShellMode(mode);
+      setViewMode(
+        mode === "constellations"
+          ? "graph"
+          : mode === "lenses"
+            ? "columns"
+            : "structured",
+      );
+    }
+  }, [setViewMode]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("workspace:shell-mode", shellMode);
+  }, [shellMode]);
+
+  const handleShellModeChange = useCallback((mode: WorkspaceShellMode) => {
+    setShellMode(mode);
+    setViewMode(
+      mode === "constellations"
+        ? "graph"
+        : mode === "lenses"
+          ? "columns"
+          : "structured",
+    );
+  }, [setViewMode]);
 
   // Sync URL with store state
   useEffect(() => {
@@ -294,6 +332,8 @@ function WorkspaceContent() {
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           userName={userName}
+          shellMode={shellMode}
+          onShellModeChange={handleShellModeChange}
         />
 
         {/* Canvas + panel container */}
@@ -311,8 +351,6 @@ function WorkspaceContent() {
                 >
                   <WorkspaceCanvas
                     workstreams={workstreams}
-                    userName={userName}
-                    userAvatar={user?.imageUrl || ""}
                     onNewWorkstream={handleNewWorkstream}
                     onWorkstreamUpdate={updateWorkstream}
                     focusWorkstreamId={wsParam}
@@ -323,6 +361,7 @@ function WorkspaceContent() {
                     onOpenPanel={handleOpenPanel}
                     onCreateArtifact={() => setArtifactDialogOpen(true)}
                     panelWidth={panelWidth}
+                    shellMode={shellMode}
                   />
 
                   {/* Empty state */}
@@ -389,9 +428,9 @@ function WorkspaceContent() {
                 onOpenWorkstreamChat={(workstreamId, query) => {
                   useWorkspaceStore.getState().setOpenChatQuery(query);
                   handleCommitWorkstream(workstreamId);
-                  setTimeout(() => handleOpenPanel("chat", "new"), 500);
+                  setTimeout(() => handleOpenPanel("chat", "new"), 320);
                 }}
-                onOpenPanel={handleOpenPanel}
+                shellMode={shellMode}
                 panelOpen={!!panel}
               />
             </>

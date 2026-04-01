@@ -8,13 +8,16 @@ import {
   Grid3X3,
   Home,
   LayoutGrid,
-  Columns3,
-  Network,
   Plus,
   Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import {
+  WORKSPACE_SHELLS,
+  WORKSPACE_SHELL_META,
+  type WorkspaceShellMode,
+} from "@/lib/workspace/shell-mode";
 
 type WorkspaceToolbarProps = {
   onCenterHome: () => void;
@@ -24,6 +27,8 @@ type WorkspaceToolbarProps = {
   searchQuery: string;
   onSearchChange: (value: string) => void;
   userName?: string;
+  shellMode: WorkspaceShellMode;
+  onShellModeChange: (mode: WorkspaceShellMode) => void;
 };
 
 export function WorkspaceToolbar({
@@ -34,6 +39,8 @@ export function WorkspaceToolbar({
   searchQuery,
   onSearchChange,
   userName,
+  shellMode,
+  onShellModeChange,
 }: WorkspaceToolbarProps) {
   const {
     showArchived,
@@ -43,8 +50,6 @@ export function WorkspaceToolbar({
     backgroundMode,
     setBackgroundMode,
     primaryWorkstreamId,
-    viewMode,
-    setViewMode,
   } = useWorkspaceStore();
   const [searchOpen, setSearchOpen] = useState(false);
 
@@ -121,7 +126,7 @@ export function WorkspaceToolbar({
       </div>
 
       {/* Center: workspace title with user name */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3 min-w-0">
         <span className="font-display text-sm font-semibold text-[var(--text-primary)] tracking-tight">
           {userName ? `${userName.split(" ")[0]}'s Workspace` : "Workspace"}
         </span>
@@ -130,35 +135,35 @@ export function WorkspaceToolbar({
             {workstreamCount}
           </span>
         )}
+        <div className="flex items-center gap-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]/80 p-1">
+          {WORKSPACE_SHELLS.map((mode) => {
+            const meta = WORKSPACE_SHELL_META[mode];
+            const active = shellMode === mode;
+            return (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => onShellModeChange(mode)}
+                title={meta.description}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-medium transition-all duration-150 sm:px-2.5",
+                  active
+                    ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_8px_18px_-14px_rgba(15,23,42,0.45)]"
+                    : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]",
+                )}
+              >
+                <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[var(--bg-hover)] text-[9px]">
+                  {meta.shortLabel}
+                </span>
+                <span className="hidden lg:inline">{meta.label}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Right: actions + view toggle when inside workstream */}
       <div className="flex items-center gap-1 flex-1 justify-end">
-        {/* View toggle — only when inside a committed workstream */}
-        {isInsideWorkstream && !isHubCommitted && (
-          <>
-            <ViewToggleBtn
-              icon={<LayoutGrid className="w-3.5 h-3.5" />}
-              label="Structured"
-              active={viewMode === "structured"}
-              onClick={() => setViewMode("structured")}
-            />
-            <ViewToggleBtn
-              icon={<Columns3 className="w-3.5 h-3.5" />}
-              label="Columns"
-              active={viewMode === "columns"}
-              onClick={() => setViewMode("columns")}
-            />
-            <ViewToggleBtn
-              icon={<Network className="w-3.5 h-3.5" />}
-              label="Graph"
-              active={viewMode === "graph"}
-              onClick={() => setViewMode("graph")}
-            />
-            <div className="w-px h-5 bg-[var(--border-default)] mx-1" />
-          </>
-        )}
-
         <ToolbarBtn
           icon={<Home className="w-3.5 h-3.5" />}
           label="Home"
@@ -251,36 +256,6 @@ function ToolbarBtn({
     >
       {icon}
       <span className="hidden lg:inline">{label}</span>
-    </button>
-  );
-}
-
-function ViewToggleBtn({
-  icon,
-  label,
-  active,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={label}
-      className={cn(
-        "flex items-center gap-1 px-2 py-1 rounded-md",
-        "text-[11px] transition-colors duration-150",
-        active
-          ? "text-[var(--text-primary)] bg-[var(--bg-hover)] font-medium"
-          : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]/50",
-      )}
-    >
-      {icon}
-      <span className="hidden md:inline">{label}</span>
     </button>
   );
 }

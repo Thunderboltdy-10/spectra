@@ -16,6 +16,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import type { Workstream } from "@/hooks/use-workspace-data";
 import type { PanelType } from "@/stores/workspace-store";
+import type { WorkspaceShellMode } from "@/lib/workspace/shell-mode";
 
 type WorkspaceCommandBarProps = {
   hidden?: boolean;
@@ -23,6 +24,7 @@ type WorkspaceCommandBarProps = {
   primaryWorkstreamId?: string;
   onOpenWorkstreamChat: (workstreamId: string, query: string) => void;
   onOpenPanel?: (type: PanelType, id: string) => void;
+  shellMode?: WorkspaceShellMode;
 };
 
 export function WorkspaceCommandBar({
@@ -30,6 +32,7 @@ export function WorkspaceCommandBar({
   workstreams,
   primaryWorkstreamId,
   onOpenWorkstreamChat,
+  shellMode = "magnetic",
 }: WorkspaceCommandBarProps) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -133,6 +136,27 @@ export function WorkspaceCommandBar({
     ? `Ask ${selectedWs?.title}...`
     : "Ask anything...";
 
+  const shellStyles = {
+    constellations: {
+      container: focused ? "w-[590px]" : "w-[510px]",
+      bar: "border-[color:color-mix(in_oklab,var(--accent-cyan)_18%,var(--border-default))] bg-[color:color-mix(in_oklab,var(--bg-elevated)_82%,transparent)] shadow-[0_24px_60px_-26px_rgba(14,142,232,0.3)]",
+      orb: "before:absolute before:-inset-x-12 before:-bottom-6 before:h-14 before:rounded-full before:bg-[radial-gradient(circle_at_center,rgba(14,142,232,0.16),transparent_70%)] before:blur-2xl before:content-['']",
+      dock: "bottom-9",
+    },
+    magnetic: {
+      container: focused ? "w-[560px]" : "w-[480px]",
+      bar: "border-[var(--border-default)] bg-[var(--bg-elevated)]/95 shadow-[0_20px_52px_-18px_rgba(15,23,42,0.55)]",
+      orb: "",
+      dock: "bottom-8",
+    },
+    lenses: {
+      container: focused ? "w-[580px]" : "w-[510px]",
+      bar: "border-[color:rgba(255,255,255,0.14)] bg-[color:rgba(19,17,26,0.72)] shadow-[0_28px_68px_-28px_rgba(15,23,42,0.75)] backdrop-blur-2xl",
+      orb: "before:absolute before:-inset-x-10 before:-bottom-8 before:h-16 before:rounded-full before:bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.12),transparent_72%)] before:blur-3xl before:content-['']",
+      dock: "bottom-11",
+    },
+  }[shellMode];
+
   return (
     <motion.div
       ref={containerRef}
@@ -140,7 +164,7 @@ export function WorkspaceCommandBar({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 12 }}
       transition={{ duration: 0.2 }}
-      className="absolute bottom-8 left-1/2 -translate-x-1/2 z-30"
+      className={cn("absolute left-1/2 -translate-x-1/2 z-30", shellStyles.dock, shellStyles.orb)}
     >
       {/* Workstream picker dropdown (above bar) */}
       <AnimatePresence>
@@ -150,7 +174,10 @@ export function WorkspaceCommandBar({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 4, scale: 0.97 }}
             transition={{ duration: 0.15 }}
-            className="absolute bottom-full right-3 mb-2 w-60 py-1.5 rounded-xl border border-[var(--border-default)] shadow-[0_16px_48px_-12px_rgba(0,0,0,0.4)] overflow-hidden"
+            className={cn(
+              "absolute bottom-full mb-2 w-60 overflow-hidden rounded-xl border border-[var(--border-default)] py-1.5 shadow-[0_16px_48px_-12px_rgba(0,0,0,0.4)]",
+              shellMode === "magnetic" ? "left-1/2 -translate-x-1/2" : "right-3",
+            )}
             style={{ background: "var(--bg-elevated)" }}
           >
             <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wide">
@@ -191,12 +218,13 @@ export function WorkspaceCommandBar({
       {/* Main bar */}
       <div
         className={cn(
-          "flex items-center gap-3 px-4 py-3 rounded-2xl",
-          "bg-[var(--bg-elevated)]/95 backdrop-blur-xl",
-          "border border-[var(--border-default)]",
-          "shadow-[0_8px_40px_-8px_rgba(0,0,0,0.35)]",
+          "relative flex items-center gap-3 px-4 py-3 rounded-[22px]",
+          "backdrop-blur-xl",
+          "border",
           "transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
-          focused ? "w-[560px]" : "w-[480px]",
+          shellStyles.bar,
+          shellStyles.container,
+          shellMode === "magnetic" && "rounded-2xl",
         )}
       >
         <Search className="w-4 h-4 text-[var(--text-tertiary)] shrink-0" />

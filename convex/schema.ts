@@ -263,7 +263,10 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_workstream", ["workstreamId"])
-    .index("by_owner", ["ownerUserId"]),
+    .index("by_owner", ["ownerUserId"])
+    .index("by_source_artifact", ["sourceArtifactId"])
+    .index("by_source_chat", ["sourceChatId"])
+    .index("by_source_planner", ["sourcePlannerItemId"]),
 
   workstreams: defineTable({
     ownerUserId: v.id("users"),

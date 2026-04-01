@@ -17,6 +17,10 @@ import { useWorkspaceData } from "@/hooks/use-workspace-data";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { registerSyncCallback } from "@/lib/workspace/position-persistence";
 import {
+  notifyWorkspaceContentMutated,
+  subscribeWorkspaceContentMutated,
+} from "@/lib/workspace/events";
+import {
   WORKSPACE_SHELLS,
   type WorkspaceShellMode,
 } from "@/lib/workspace/shell-mode";
@@ -61,6 +65,7 @@ function WorkspaceContent({ userName }: WorkspaceContentProps) {
   const {
     workstreams,
     loading,
+    refresh,
     createWorkstream,
     updateWorkstream,
   } = useWorkspaceData();
@@ -282,6 +287,11 @@ function WorkspaceContent({ userName }: WorkspaceContentProps) {
           const panelType = type === "document" || type === "note" ? "artifact" : "artifact";
           handleOpenPanel(panelType, data.artifactId);
         }
+        notifyWorkspaceContentMutated({
+          workstreamId: wsId,
+          refreshHub: true,
+          refreshWorkstreams: true,
+        });
         toast.success(`${title || "Artifact"} created`);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Failed to create artifact");
@@ -322,6 +332,14 @@ function WorkspaceContent({ userName }: WorkspaceContentProps) {
       });
     });
   }, []);
+
+  useEffect(() => {
+    return subscribeWorkspaceContentMutated((detail) => {
+      if (detail.refreshWorkstreams) {
+        void refresh();
+      }
+    });
+  }, [refresh]);
 
   return (
     <AppShell fullBleed noScroll contentClassName="!p-0">

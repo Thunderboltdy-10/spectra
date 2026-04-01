@@ -15,6 +15,11 @@ function sanitizeArtifactPlaintext(value: unknown) {
   return stripGeneratedDocumentMarkers(value);
 }
 
+function isArtifactNotFoundError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  return error.message.toLowerCase().includes("artifact not found");
+}
+
 export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();
@@ -37,7 +42,10 @@ export async function GET(request: NextRequest) {
           actorClerkId: actor.clerkId,
           artifactId,
         });
-      } catch {
+      } catch (error) {
+        if (!isArtifactNotFoundError(error)) {
+          throw error;
+        }
         const migrated = await convexMutation<
           { actorClerkId: string; noteId: string },
           { artifactId: string }
@@ -90,7 +98,12 @@ export async function GET(request: NextRequest) {
       const existingArtifact = await convexQuery("artifacts:get", {
         actorClerkId: actor.clerkId,
         artifactId: noteId,
-      }).catch(() => null) as { _id: string } | null;
+      }).catch((error) => {
+        if (isArtifactNotFoundError(error)) {
+          return null;
+        }
+        throw error;
+      }) as { _id: string } | null;
       if (existingArtifact) {
         return ok({ artifactId: existingArtifact._id });
       }

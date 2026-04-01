@@ -45,11 +45,26 @@ export type ArtifactSummary = {
   createdAt: number;
 };
 
+export type WorkspaceWidgetSummary = {
+  id: string;
+  title: string;
+  itemType: string;
+  renderMode?: string;
+  contentSummary?: string;
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+  panelType: PanelType;
+  panelId: string;
+};
+
 export type InternalContentData = {
   threads: ThreadSummary[];
   notes: NoteSummary[];
   plannerItems: PlannerItemSummary[];
   artifacts: ArtifactSummary[];
+  widgets: WorkspaceWidgetSummary[];
   loading: boolean;
   workstreamEmoji?: string;
   workstreamTitle?: string;
@@ -72,6 +87,54 @@ type BaseGroupData = {
   items: Array<{ id: string; title: string; meta?: string; statusColor?: string; panelType: PanelType }>;
   onOpenPanel: (type: PanelType, id: string) => void;
 };
+
+type WorkspaceWidgetNodeData = WorkspaceWidgetSummary & {
+  onOpenPanel: (type: PanelType, id: string) => void;
+};
+
+const WIDGET_ICON_BY_TYPE = {
+  thread: MessageSquare,
+  planner: CalendarClock,
+  visualization: Workflow,
+  document: FileText,
+} as const;
+
+export const WorkspaceWidgetNode = memo(function WorkspaceWidgetNode({
+  data,
+}: NodeProps<Node<WorkspaceWidgetNodeData>>) {
+  const IconComponent =
+    WIDGET_ICON_BY_TYPE[data.itemType as keyof typeof WIDGET_ICON_BY_TYPE]
+    ?? Sparkles;
+  return (
+    <button
+      type="button"
+      onClick={() => data.onOpenPanel(data.panelType, data.panelId)}
+      className="group flex h-full w-full flex-col rounded-[22px] border border-[var(--border-default)] bg-[var(--bg-elevated)]/92 px-4 py-4 text-left shadow-[0_18px_42px_-28px_rgba(15,23,42,0.45)] backdrop-blur-2xl transition-transform duration-200 hover:-translate-y-0.5 hover:border-[var(--accent-cyan)]/35"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2 text-[var(--text-secondary)]">
+            <IconComponent className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <div className="truncate text-[13px] font-semibold text-[var(--text-primary)]">
+              {data.title}
+            </div>
+            <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+              {data.renderMode?.replace(/^artifact:/, "") ?? data.itemType}
+            </div>
+          </div>
+        </div>
+        <span className="text-[10px] text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)]">
+          Open
+        </span>
+      </div>
+      <div className="mt-3 line-clamp-5 text-[12px] leading-5 text-[var(--text-secondary)]">
+        {data.contentSummary || "Open this widget to continue working with it."}
+      </div>
+    </button>
+  );
+});
 
 /* ============================================================================
    APPROACH A: SEMANTIC CONSTELLATIONS
@@ -285,6 +348,30 @@ export function buildMagneticNodes(
   addPanel("artifacts", "Artifacts", data.artifacts.map(a => ({ id: a.id, title: a.title, meta: a.type, panelType: "artifact" })), 420, 200, false, "artifact");
 
   return { nodes, edges: [] };
+}
+
+export function buildWorkspaceWidgetNodes(
+  data: InternalContentData,
+  basePosition: { x: number; y: number },
+): Node[] {
+  if (data.loading || data.widgets.length === 0) return [];
+
+  return data.widgets.map((widget) => ({
+    id: `widget-${widget.id}`,
+    type: "workspaceWidget",
+    position: {
+      x: basePosition.x + widget.x,
+      y: basePosition.y + widget.y,
+    },
+    draggable: true,
+    selectable: false,
+    width: widget.width ?? 280,
+    height: widget.height ?? 180,
+    data: {
+      ...widget,
+      onOpenPanel: data.onOpenPanel,
+    } satisfies WorkspaceWidgetNodeData,
+  }));
 }
 
 /* ============================================================================

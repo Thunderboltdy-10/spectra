@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { adjustWorkstreamArtifactCount, getUserByClerkId } from "./helpers";
 import { resolveWorkstreamTransfer } from "./workstream-assignment";
+import { removeWorkspaceItemForArtifact, syncWorkspaceItemForArtifact } from "./workspace-item-sync";
 
 const vArtifactSourceType = v.union(
   v.literal("user_manual"),
@@ -349,6 +350,16 @@ export const getOrMigrateFromNote = mutation({
       if (note) {
         await deleteLegacyNote(ctx, note, { decrementCount: true });
       }
+      await syncWorkspaceItemForArtifact(ctx, {
+        artifactId: existingArtifact._id,
+        ownerUserId: actor._id,
+        orgId: actor.orgId,
+        workstreamId: existingArtifact.workstreamId,
+        status: existingArtifact.status,
+        title: existingArtifact.title,
+        artifactType: existingArtifact.type,
+        contentPlaintext: existingArtifact.contentPlaintext,
+      });
       return { artifactId: existingArtifact._id };
     }
 
@@ -373,6 +384,16 @@ export const getOrMigrateFromNote = mutation({
         updatedAt: Date.now(),
       });
       await deleteLegacyNote(ctx, note, { decrementCount: true });
+      await syncWorkspaceItemForArtifact(ctx, {
+        artifactId: duplicate._id,
+        ownerUserId: actor._id,
+        orgId: actor.orgId,
+        workstreamId: duplicate.workstreamId,
+        status: duplicate.status,
+        title: duplicate.title,
+        artifactType: duplicate.type,
+        contentPlaintext: duplicate.contentPlaintext,
+      });
       return { artifactId: duplicate._id };
     }
 
@@ -411,6 +432,16 @@ export const getOrMigrateFromNote = mutation({
       description: "Migrated from legacy note",
       status: "confirmed",
       createdAt: note.createdAt,
+    });
+    await syncWorkspaceItemForArtifact(ctx, {
+      artifactId,
+      ownerUserId: actor._id,
+      orgId: actor.orgId,
+      workstreamId: note.workstreamId,
+      status: "active",
+      title: note.title,
+      artifactType: "document",
+      contentPlaintext: note.contentPlaintext,
     });
     await deleteLegacyNote(ctx, note);
 
@@ -533,6 +564,16 @@ export const create = mutation({
     });
 
     await adjustWorkstreamArtifactCount(ctx, args.workstreamId, 1);
+    await syncWorkspaceItemForArtifact(ctx, {
+      artifactId,
+      ownerUserId: actor._id,
+      orgId: actor.orgId,
+      workstreamId: args.workstreamId,
+      status: "active",
+      title,
+      artifactType: args.type,
+      contentPlaintext: normalizeString(args.contentPlaintext),
+    });
     return artifactId;
   },
 });
@@ -631,6 +672,23 @@ export const update = mutation({
       await adjustWorkstreamArtifactCount(ctx, workstreamTransfer.to, 1);
     }
 
+    await syncWorkspaceItemForArtifact(ctx, {
+      artifactId: args.artifactId,
+      ownerUserId: actor._id,
+      orgId: actor.orgId,
+      workstreamId:
+        args.workstreamId === undefined
+          ? artifact.workstreamId
+          : (args.workstreamId ?? undefined),
+      status: artifact.status,
+      title: args.title === undefined ? artifact.title : normalizeString(args.title),
+      artifactType: artifact.type,
+      contentPlaintext:
+        args.contentPlaintext === undefined
+          ? artifact.contentPlaintext
+          : normalizeString(toOptionalPatchValue(args.contentPlaintext)),
+    });
+
     return { success: true };
   },
 });
@@ -705,6 +763,17 @@ export const applyAiEdit = mutation({
       createdAt: now,
     });
 
+    await syncWorkspaceItemForArtifact(ctx, {
+      artifactId: args.artifactId,
+      ownerUserId: actor._id,
+      orgId: actor.orgId,
+      workstreamId: artifact.workstreamId,
+      status: artifact.status,
+      title: artifact.title,
+      artifactType: artifact.type,
+      contentPlaintext: normalizeString(args.contentPlaintext),
+    });
+
     return { success: true, versionId };
   },
 });
@@ -748,7 +817,7 @@ export const discardAiEdit = mutation({
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
-    await assertArtifactOwnership(ctx, actor, args.artifactId);
+    const artifact = await assertArtifactOwnership(ctx, actor, args.artifactId);
     const version = await ctx.db.get(args.versionId);
     if (!version || version.artifactId !== args.artifactId) {
       throw new Error("Version not found");
@@ -772,6 +841,17 @@ export const discardAiEdit = mutation({
       status: "discarded",
     });
 
+    await syncWorkspaceItemForArtifact(ctx, {
+      artifactId: args.artifactId,
+      ownerUserId: actor._id,
+      orgId: actor.orgId,
+      workstreamId: artifact.workstreamId,
+      status: artifact.status,
+      title: artifact.title,
+      artifactType: artifact.type,
+      contentPlaintext: version.diff?.previousPlaintext,
+    });
+
     return { success: true, content: restoredContent };
   },
 });
@@ -785,7 +865,7 @@ export const reapplyAiEdit = mutation({
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
-    await assertArtifactOwnership(ctx, actor, args.artifactId);
+    const artifact = await assertArtifactOwnership(ctx, actor, args.artifactId);
     const version = await ctx.db.get(args.versionId);
     if (!version || version.artifactId !== args.artifactId) {
       throw new Error("Version not found");
@@ -806,6 +886,16 @@ export const reapplyAiEdit = mutation({
     await ctx.db.patch(args.versionId, {
       status: "applied",
     });
+    await syncWorkspaceItemForArtifact(ctx, {
+      artifactId: args.artifactId,
+      ownerUserId: actor._id,
+      orgId: actor.orgId,
+      workstreamId: artifact.workstreamId,
+      status: artifact.status,
+      title: artifact.title,
+      artifactType: artifact.type,
+      contentPlaintext: normalizeString(args.contentPlaintext) ?? version.diff?.nextPlaintext,
+    });
     return { success: true, content: version.snapshot };
   },
 });
@@ -825,6 +915,16 @@ export const archive = mutation({
     if (artifact.status === "active") {
       await adjustWorkstreamArtifactCount(ctx, artifact.workstreamId, -1);
     }
+    await syncWorkspaceItemForArtifact(ctx, {
+      artifactId: args.artifactId,
+      ownerUserId: actor._id,
+      orgId: actor.orgId,
+      workstreamId: artifact.workstreamId,
+      status: "archived",
+      title: artifact.title,
+      artifactType: artifact.type,
+      contentPlaintext: artifact.contentPlaintext,
+    });
     return { success: true };
   },
 });
@@ -844,6 +944,16 @@ export const restore = mutation({
     if (artifact.status !== "active") {
       await adjustWorkstreamArtifactCount(ctx, artifact.workstreamId, 1);
     }
+    await syncWorkspaceItemForArtifact(ctx, {
+      artifactId: args.artifactId,
+      ownerUserId: actor._id,
+      orgId: actor.orgId,
+      workstreamId: artifact.workstreamId,
+      status: "active",
+      title: artifact.title,
+      artifactType: artifact.type,
+      contentPlaintext: artifact.contentPlaintext,
+    });
     return { success: true };
   },
 });
@@ -886,6 +996,11 @@ export const remove = mutation({
         });
       }
     }
+    await removeWorkspaceItemForArtifact(ctx, {
+      artifactId: args.artifactId,
+      ownerUserId: actor._id,
+      orgId: actor.orgId,
+    });
     await ctx.db.delete(args.artifactId);
     if (artifact.status === "active") {
       await adjustWorkstreamArtifactCount(ctx, artifact.workstreamId, -1);
@@ -950,6 +1065,16 @@ export const restoreVersion = mutation({
       createdAt: now,
     });
     const refreshed = await ctx.db.get(args.artifactId);
+    await syncWorkspaceItemForArtifact(ctx, {
+      artifactId: args.artifactId,
+      ownerUserId: actor._id,
+      orgId: actor.orgId,
+      workstreamId: artifact.workstreamId,
+      status: artifact.status,
+      title: refreshed?.title ?? artifact.title,
+      artifactType: artifact.type,
+      contentPlaintext: refreshed?.contentPlaintext ?? getVersionPlaintext(version, artifact.contentPlaintext),
+    });
     return {
       success: true,
       artifact: refreshed
@@ -1001,6 +1126,16 @@ export const migrateLegacyNotes = mutation({
           });
         }
         await deleteLegacyNote(ctx, note, { decrementCount: true });
+        await syncWorkspaceItemForArtifact(ctx, {
+          artifactId: duplicate._id,
+          ownerUserId: actor._id,
+          orgId: actor.orgId,
+          workstreamId: duplicate.workstreamId,
+          status: duplicate.status,
+          title: duplicate.title,
+          artifactType: duplicate.type,
+          contentPlaintext: duplicate.contentPlaintext,
+        });
         skipped += 1;
         continue;
       }
@@ -1040,6 +1175,16 @@ export const migrateLegacyNotes = mutation({
         description: "Migrated from legacy note",
         status: "confirmed",
         createdAt: note.createdAt,
+      });
+      await syncWorkspaceItemForArtifact(ctx, {
+        artifactId,
+        ownerUserId: actor._id,
+        orgId: actor.orgId,
+        workstreamId: note.workstreamId,
+        status: "active",
+        title: note.title,
+        artifactType: "document",
+        contentPlaintext: note.contentPlaintext,
       });
       await deleteLegacyNote(ctx, note);
 
@@ -1098,6 +1243,16 @@ export const migrateLegacyNotesBatch = internalMutation({
             updatedAt: Date.now(),
           });
         }
+        await syncWorkspaceItemForArtifact(ctx, {
+          artifactId: duplicate._id,
+          ownerUserId: note.ownerUserId,
+          orgId: note.orgId,
+          workstreamId: duplicate.workstreamId,
+          status: duplicate.status,
+          title: duplicate.title,
+          artifactType: duplicate.type,
+          contentPlaintext: duplicate.contentPlaintext,
+        });
         await deleteLegacyNote(ctx, note, { decrementCount: true });
         continue;
       }
@@ -1137,6 +1292,16 @@ export const migrateLegacyNotesBatch = internalMutation({
         description: "Migrated from legacy note",
         status: "confirmed",
         createdAt: note.createdAt,
+      });
+      await syncWorkspaceItemForArtifact(ctx, {
+        artifactId,
+        ownerUserId: note.ownerUserId,
+        orgId: note.orgId,
+        workstreamId: note.workstreamId,
+        status: "active",
+        title: note.title,
+        artifactType: "document",
+        contentPlaintext: note.contentPlaintext,
       });
       await deleteLegacyNote(ctx, note);
       migrated += 1;

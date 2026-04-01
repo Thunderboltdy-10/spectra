@@ -28,6 +28,7 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { ArtifactAiSurface } from "@/components/artifacts/artifact-ai-surface";
 import { stripGeneratedDocumentMarkers } from "@/lib/document-generator";
 import { RightSidePanel } from "@/components/shared/right-side-panel";
+import { notifyWorkspaceContentMutated } from "@/lib/workspace/events";
 
 // Dynamic import TiptapEditor (SSR-safe)
 const TiptapEditor = dynamic(
@@ -356,6 +357,11 @@ function NotePanelContent({
     }).then((id: string) => {
       setCreatedId(id);
       void fetchDocument(id);
+      notifyWorkspaceContentMutated({
+        workstreamId,
+        refreshHub: true,
+        refreshWorkstreams: true,
+      });
     });
   }, [noteId, createdId, createDocument, workstreamId, fetchDocument]);
 
@@ -377,8 +383,10 @@ function NotePanelContent({
       <div className="flex-1 min-h-0">
         <TiptapEditor
           artifactId={activeDocument._id}
+          workstreamId={activeDocument.workstreamId ?? workstreamId}
           content={activeDocument.content as import("@tiptap/core").JSONContent | null}
           compact
+          showAiBar
           showDocumentMeta
           documentTitle={stripGeneratedDocumentMarkers(activeDocument.title || "").trim() || "Untitled"}
           createdAt={activeDocument.createdAt}
@@ -388,22 +396,26 @@ function NotePanelContent({
           }}
           onVersionRestore={() => {
             void fetchDocument(activeDocument._id);
+            notifyWorkspaceContentMutated({
+              workstreamId: activeDocument.workstreamId ?? workstreamId,
+              refreshHub: true,
+            });
           }}
           onSave={(content, text) =>
             void updateDocument(activeDocument._id, {
               title: stripGeneratedDocumentMarkers(text.trim().split("\n")[0] || "Untitled").trim() || "Untitled",
               content,
               contentPlaintext: stripGeneratedDocumentMarkers(text),
+            }).then(() => {
+              notifyWorkspaceContentMutated({
+                workstreamId,
+                refreshHub: true,
+              });
             })
           }
           className="h-full"
         />
       </div>
-      <ArtifactAiSurface
-        artifactId={activeDocument._id}
-        context="workspace-panel"
-        workstreamId={workstreamId}
-      />
     </div>
   );
 }
@@ -458,6 +470,11 @@ function ArtifactPanelContent({
         const data = (await response.json()) as { artifactId?: string };
         if (data.artifactId) {
           setCreatedId(data.artifactId);
+          notifyWorkspaceContentMutated({
+            workstreamId,
+            refreshHub: true,
+            refreshWorkstreams: true,
+          });
         }
       } finally {
         setLoading(false);
@@ -490,8 +507,10 @@ function ArtifactPanelContent({
         {isDocument ? (
           <TiptapEditor
             artifactId={artifactId === "new" ? (createdId ?? artifactId) : artifactId}
+            workstreamId={typeof artifact.workstreamId === "string" ? artifact.workstreamId : workstreamId}
             content={(artifact.content as import("@tiptap/core").JSONContent | null) ?? null}
             compact
+            showAiBar
             showDocumentMeta
             documentTitle={stripGeneratedDocumentMarkers(String(artifact.title ?? "Untitled")).trim() || "Untitled"}
             createdAt={Number(artifact.createdAt ?? Date.now())}
@@ -512,6 +531,10 @@ function ArtifactPanelContent({
                   contentPlaintext: restoredArtifact.contentPlaintext ?? current.contentPlaintext,
                   updatedAt: restoredArtifact.updatedAt ?? current.updatedAt,
                 };
+              });
+              notifyWorkspaceContentMutated({
+                workstreamId: typeof artifact.workstreamId === "string" ? artifact.workstreamId : workstreamId,
+                refreshHub: true,
               });
             }}
             onSave={(content, text) =>
@@ -540,6 +563,10 @@ function ArtifactPanelContent({
                     updatedAt: Date.now(),
                   };
                 });
+                notifyWorkspaceContentMutated({
+                  workstreamId: typeof artifact.workstreamId === "string" ? artifact.workstreamId : workstreamId,
+                  refreshHub: true,
+                });
               })
             }
             className="h-full"
@@ -567,11 +594,13 @@ function ArtifactPanelContent({
         )}
       </div>
 
-      <ArtifactAiSurface
-        artifactId={artifactId === "new" ? (createdId ?? artifactId) : artifactId}
-        context="workspace-panel"
-        workstreamId={typeof artifact.workstreamId === "string" ? artifact.workstreamId : workstreamId}
-      />
+      {!isDocument ? (
+        <ArtifactAiSurface
+          artifactId={artifactId === "new" ? (createdId ?? artifactId) : artifactId}
+          context="workspace-panel"
+          workstreamId={typeof artifact.workstreamId === "string" ? artifact.workstreamId : workstreamId}
+        />
+      ) : null}
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { adjustWorkstreamArtifactCount, getUserByClerkId } from "./helpers";
 import { resolveWorkstreamTransfer } from "./workstream-assignment";
+import { removeWorkspaceItemForArtifact, syncWorkspaceItemForArtifact } from "./workspace-item-sync";
 
 const vEditorMode = v.union(
   v.literal("standard"),
@@ -146,6 +147,16 @@ async function migrateLegacyNoteToDocumentArtifact(
     }
     await ctx.db.delete(note._id);
     await adjustWorkstreamArtifactCount(ctx, note.workstreamId, -1);
+    await syncWorkspaceItemForArtifact(ctx, {
+      artifactId: duplicate._id,
+      ownerUserId: duplicate.ownerUserId,
+      orgId: duplicate.orgId,
+      workstreamId: duplicate.workstreamId,
+      status: duplicate.status,
+      title: duplicate.title,
+      artifactType: duplicate.type,
+      contentPlaintext: duplicate.contentPlaintext,
+    });
     return duplicate;
   }
 
@@ -184,6 +195,16 @@ async function migrateLegacyNoteToDocumentArtifact(
     description: "Migrated from legacy note",
     status: "confirmed",
     createdAt: note.createdAt,
+  });
+  await syncWorkspaceItemForArtifact(ctx, {
+    artifactId,
+    ownerUserId: note.ownerUserId,
+    orgId: note.orgId,
+    workstreamId: note.workstreamId,
+    status: "active",
+    title: note.title,
+    artifactType: "document",
+    contentPlaintext: note.contentPlaintext,
   });
   await ctx.db.delete(note._id);
 
@@ -353,6 +374,16 @@ export const create = mutation({
       createdAt: now,
     });
     await adjustWorkstreamArtifactCount(ctx, args.workstreamId, 1);
+    await syncWorkspaceItemForArtifact(ctx, {
+      artifactId: documentArtifactId,
+      ownerUserId: actor._id,
+      orgId: actor.orgId,
+      workstreamId: args.workstreamId,
+      status: "active",
+      title,
+      artifactType: "document",
+      contentPlaintext: normalizeString(args.contentPlaintext),
+    });
 
     return { noteId: documentArtifactId };
   },
@@ -447,6 +478,22 @@ export const update = mutation({
       await adjustWorkstreamArtifactCount(ctx, workstreamTransfer.from, -1);
       await adjustWorkstreamArtifactCount(ctx, workstreamTransfer.to, 1);
     }
+    await syncWorkspaceItemForArtifact(ctx, {
+      artifactId: artifact._id,
+      ownerUserId: actor._id,
+      orgId: actor.orgId,
+      workstreamId:
+        args.workstreamId === undefined
+          ? artifact.workstreamId
+          : (args.workstreamId ?? undefined),
+      status: artifact.status,
+      title: args.title === undefined ? artifact.title : normalizeString(args.title),
+      artifactType: artifact.type,
+      contentPlaintext:
+        args.contentPlaintext === undefined
+          ? artifact.contentPlaintext
+          : normalizeString(toOptionalPatchValue(args.contentPlaintext)),
+    });
     return { success: true, noteId: artifact._id, migratedFromLegacy };
   },
 });
@@ -476,6 +523,34 @@ export const remove = mutation({
     for (const version of versions) {
       await ctx.db.delete(version._id);
     }
+    const linkedChats = await ctx.db
+      .query("chats")
+      .withIndex("by_artifact", (q) => q.eq("artifactId", artifact._id))
+      .collect();
+    for (const chat of linkedChats) {
+      await ctx.db.patch(chat._id, {
+        artifactId: undefined,
+        threadType: chat.threadType === "artifact_edit" ? "conversation" : chat.threadType,
+        updatedAt: Date.now(),
+      });
+    }
+    const plannerItems = await ctx.db
+      .query("plannerItems")
+      .withIndex("by_owner", (q) => q.eq("ownerUserId", actor._id))
+      .collect();
+    for (const item of plannerItems) {
+      if (item.sourceArtifactId === artifact._id) {
+        await ctx.db.patch(item._id, {
+          sourceArtifactId: undefined,
+          updatedAt: Date.now(),
+        });
+      }
+    }
+    await removeWorkspaceItemForArtifact(ctx, {
+      artifactId: artifact._id,
+      ownerUserId: actor._id,
+      orgId: actor.orgId,
+    });
     await ctx.db.delete(artifact._id);
     await adjustWorkstreamArtifactCount(ctx, artifact.workstreamId, -1);
     return { success: true };

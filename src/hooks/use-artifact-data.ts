@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { stripGeneratedDocumentMarkers } from "@/lib/document-generator";
+import { notifyWorkspaceContentMutated } from "@/lib/workspace/events";
 
 export type WorkspaceDocument = {
   _id: string;
@@ -156,9 +157,14 @@ export function useArtifactData(params: UseArtifactDataParams = {}) {
       if (data.artifactId) {
         await fetchDocument(data.artifactId);
       }
+      notifyWorkspaceContentMutated({
+        workstreamId: input.workstreamId ?? workstreamId,
+        refreshHub: true,
+        refreshWorkstreams: true,
+      });
       return data.artifactId;
     },
-    [fetchDocument, listDocuments],
+    [fetchDocument, listDocuments, workstreamId],
   );
 
   const updateDocument = useCallback(
@@ -214,6 +220,12 @@ export function useArtifactData(params: UseArtifactDataParams = {}) {
           updatedAt,
         } as WorkspaceDocument);
       });
+      notifyWorkspaceContentMutated({
+        workstreamId: input.workstreamId === undefined
+          ? activeDocument?.workstreamId ?? workstreamId
+          : input.workstreamId ?? undefined,
+        refreshHub: true,
+      });
       return sanitizeDocumentRecord({
         ...(activeDocument?._id === nextArtifactId ? activeDocument : null),
         ...input,
@@ -221,7 +233,7 @@ export function useArtifactData(params: UseArtifactDataParams = {}) {
         updatedAt,
       } as WorkspaceDocument);
     },
-    [activeDocument],
+    [activeDocument, workstreamId],
   );
 
   return {

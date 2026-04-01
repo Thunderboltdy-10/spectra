@@ -43,12 +43,16 @@ import {
   buildConstellationNodes,
   buildMagneticNodes,
   buildLensesNodes,
+  buildWorkspaceWidgetNodes,
   type ThreadSummary,
   type NoteSummary,
   type PlannerItemSummary,
   type ArtifactSummary,
+  type WorkspaceWidgetSummary,
+  WorkspaceWidgetNode,
 } from "@/components/workspace/views/internal-content-nodes";
 import { buildHubNodes } from "@/components/workspace/hub-internal-view";
+import { subscribeWorkspaceContentMutated } from "@/lib/workspace/events";
 
 /* ─── Types ──────────────────────────────────────────────── */
 
@@ -260,6 +264,7 @@ type CachedWorkspaceContent = {
   notes: NoteSummary[];
   plannerItems: PlannerItemSummary[];
   artifacts: ArtifactSummary[];
+  widgets: WorkspaceWidgetSummary[];
   hubQuickNotes: Array<{ id: string; title: string; updatedAt: number }>;
   hubDeadlines: Array<{ id: string; title: string; dueAt: number; workstreamTitle?: string }>;
   hubActivity: Array<{ id: string; title: string; type: string; timestamp: number }>;
@@ -271,6 +276,7 @@ function emptyWorkspaceContent(): CachedWorkspaceContent {
     notes: [],
     plannerItems: [],
     artifacts: [],
+    widgets: [],
     hubQuickNotes: [],
     hubDeadlines: [],
     hubActivity: [],
@@ -720,6 +726,7 @@ const FLOW_NODE_TYPES = {
   constellationCluster: ConstellationClusterNode,
   magneticPanel: MagneticPanelNode,
   lensesLens: LensesLensNode,
+  workspaceWidget: WorkspaceWidgetNode,
   emptyState: EmptyStateNode,
   focusTimer: FocusTimerNode,
 } as const;
@@ -749,6 +756,7 @@ function WorkspaceCanvasInner({
   const contentCacheRef = useRef(new Map<string, CachedWorkspaceContent>());
   const inFlightContentRef = useRef(new Map<string, Promise<void>>());
   const internalNodeOverridesRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+  const widgetLayoutMetaRef = useRef(new Map<string, { itemId: string; origin: { x: number; y: number } }>());
   const {
     showArchived,
     showConnections,
@@ -825,6 +833,31 @@ function WorkspaceCanvasInner({
     return contentById[workstreamId] ?? contentCacheRef.current.get(workstreamId) ?? emptyWorkspaceContent();
   }, [contentById]);
 
+  const invalidateWorkstreamContent = useCallback((workstreamId?: string, options?: { includeHub?: boolean }) => {
+    if (!workstreamId) {
+      contentCacheRef.current.clear();
+      inFlightContentRef.current.clear();
+      setContentById({});
+      return;
+    }
+
+    contentCacheRef.current.delete(workstreamId);
+    inFlightContentRef.current.delete(workstreamId);
+    setContentById((current) => {
+      if (!(workstreamId in current) && !(options?.includeHub && "__hub__" in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[workstreamId];
+      if (options?.includeHub) {
+        contentCacheRef.current.delete("__hub__");
+        inFlightContentRef.current.delete("__hub__");
+        delete next.__hub__;
+      }
+      return next;
+    });
+  }, []);
+
   const fetchContentForWorkstream = useCallback(async (workstreamId: string) => {
     if (contentCacheRef.current.has(workstreamId)) {
       return;
@@ -879,11 +912,12 @@ function WorkspaceCanvasInner({
           return;
         }
 
-        const [chatsRes, docsRes, artifactsRes, plannerRes] = await Promise.all([
+        const [chatsRes, docsRes, artifactsRes, plannerRes, widgetsRes] = await Promise.all([
           fetch(`/api/chats?workstreamId=${workstreamId}&limit=20`),
           fetch(`/api/artifacts?workstreamId=${workstreamId}&type=document&limit=20`),
           fetch(`/api/artifacts?workstreamId=${workstreamId}&limit=20`),
           fetch(`/api/planner?workstreamId=${workstreamId}&limit=20`),
+          fetch(`/api/workspace-items?workstreamId=${workstreamId}`),
         ]);
 
         const next: CachedWorkspaceContent = emptyWorkspaceContent();
@@ -925,6 +959,35 @@ function WorkspaceCanvasInner({
             status: (item.status as PlannerItemSummary["status"]) ?? "pending",
           }));
         }
+        if (widgetsRes.ok) {
+          const data = await widgetsRes.json();
+          next.widgets = (data.items ?? []).flatMap((item: Record<string, unknown>) => {
+            const id = String(item._id ?? "");
+            const panelId = String(item.sourceArtifactId ?? item.sourceChatId ?? item.sourcePlannerItemId ?? "");
+            if (!id || !panelId) return [];
+            const itemType = String(item.type ?? "custom");
+            const panelType = item.sourceArtifactId
+              ? "artifact"
+              : item.sourceChatId
+                ? "chat"
+                : item.sourcePlannerItemId
+                  ? "planner"
+                  : "artifact";
+            return [{
+              id,
+              title: sanitizeTitle(item.title),
+              itemType,
+              renderMode: typeof item.renderMode === "string" ? item.renderMode : undefined,
+              contentSummary: typeof item.contentSummary === "string" ? item.contentSummary : undefined,
+              x: Number(item.x ?? 0),
+              y: Number(item.y ?? 0),
+              width: typeof item.width === "number" ? item.width : undefined,
+              height: typeof item.height === "number" ? item.height : undefined,
+              panelType,
+              panelId,
+            } satisfies WorkspaceWidgetSummary];
+          });
+        }
         contentCacheRef.current.set(workstreamId, next);
         setContentById((current) => ({ ...current, [workstreamId]: next }));
       } finally {
@@ -936,6 +999,34 @@ function WorkspaceCanvasInner({
     inFlightContentRef.current.set(workstreamId, promise);
     await promise;
   }, [sanitizeTitle, workstreams]);
+
+  useEffect(() => {
+    return subscribeWorkspaceContentMutated((detail) => {
+      if (detail.workstreamId) {
+        invalidateWorkstreamContent(detail.workstreamId, { includeHub: detail.refreshHub });
+        if (visibleWorkstreamIds.includes(detail.workstreamId)) {
+          void fetchContentForWorkstream(detail.workstreamId);
+        }
+        if (detail.refreshHub && visibleWorkstreamIds.includes("__hub__")) {
+          void fetchContentForWorkstream("__hub__");
+        }
+        return;
+      }
+
+      invalidateWorkstreamContent(undefined);
+      if (primaryWorkstreamId) {
+        void fetchContentForWorkstream(primaryWorkstreamId);
+      }
+      if (visibleWorkstreamIds.includes("__hub__")) {
+        void fetchContentForWorkstream("__hub__");
+      }
+    });
+  }, [
+    fetchContentForWorkstream,
+    invalidateWorkstreamContent,
+    primaryWorkstreamId,
+    visibleWorkstreamIds,
+  ]);
 
   useEffect(() => {
     if (!primaryWorkstreamId || visibleWorkstreamIds.length === 0) {
@@ -1054,6 +1145,7 @@ function WorkspaceCanvasInner({
   const { nodes, edges } = useMemo<{ nodes: Node[]; edges: Edge[] }>(() => {
     const generatedNodes: Node[] = [];
     const generatedEdges: Edge[] = [];
+    const nextWidgetLayoutMeta = new Map<string, { itemId: string; origin: { x: number; y: number } }>();
 
     const overviewHubNode: Node<HubAnchorNodeData> = {
       id: "hub-anchor",
@@ -1146,6 +1238,7 @@ function WorkspaceCanvasInner({
             notes: cached.notes,
             plannerItems: cached.plannerItems,
             artifacts: cached.artifacts,
+            widgets: cached.widgets,
             loading,
             workstreamEmoji: focusWorkstream?.emoji,
             workstreamTitle: focusWorkstream?.title,
@@ -1167,10 +1260,29 @@ function WorkspaceCanvasInner({
             position: internalNodeOverrides.get(node.id) ?? node.position,
           })));
           generatedEdges.push(...namespaceFlowEdges(`internal:${workstreamId}`, builderResult.edges));
+
+          const widgetNodes = namespaceFlowNodes(
+            `internal:${workstreamId}`,
+            buildWorkspaceWidgetNodes(contentData, basePos),
+          ).map((node) => {
+            const overriddenPosition = internalNodeOverrides.get(node.id) ?? node.position;
+            const rawWidgetId = node.id.split(":").pop() ?? node.id;
+            const itemId = rawWidgetId.replace(/^widget-/, "");
+            nextWidgetLayoutMeta.set(node.id, {
+              itemId,
+              origin: basePos,
+            });
+            return {
+              ...node,
+              position: overriddenPosition,
+            };
+          });
+          generatedNodes.push(...widgetNodes);
         }
       }
     }
 
+    widgetLayoutMetaRef.current = nextWidgetLayoutMeta;
     return { nodes: generatedNodes, edges: generatedEdges };
   }, [
     band,
@@ -1256,6 +1368,22 @@ function WorkspaceCanvasInner({
         next.set(node.id, { x, y });
         return next;
       });
+
+      const widgetMeta = widgetLayoutMetaRef.current.get(node.id);
+      if (widgetMeta) {
+        const relativeX = x - widgetMeta.origin.x;
+        const relativeY = y - widgetMeta.origin.y;
+        void fetch("/api/workspace-items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "update",
+            itemId: widgetMeta.itemId,
+            x: relativeX,
+            y: relativeY,
+          }),
+        });
+      }
     },
     [],
   );

@@ -17,13 +17,21 @@ function pickResolvedArtifactId(value: { _id: string } | { artifactId: string } 
   return "artifactId" in value ? value.artifactId : value._id;
 }
 
+function isArtifactNotFoundError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  return error.message.toLowerCase().includes("artifact not found");
+}
+
 async function findExistingArtifact(actorClerkId: string, artifactId: string) {
   try {
     return await convexQuery("artifacts:get", {
       actorClerkId,
       artifactId,
     }) as { _id: string } | null;
-  } catch {
+  } catch (error) {
+    if (!isArtifactNotFoundError(error)) {
+      throw error;
+    }
     return null;
   }
 }
@@ -137,10 +145,16 @@ export async function POST(request: NextRequest) {
     if (action === "delete") {
       const { noteId } = body as { noteId?: string };
       if (!noteId) return badRequest("noteId is required");
-      const result = await convexMutation("notes:remove", {
-        actorClerkId: actor.clerkId,
-        noteId,
-      });
+      const existingArtifact = await findExistingArtifact(actor.clerkId, noteId);
+      const result = existingArtifact
+        ? await convexMutation("artifacts:remove", {
+            actorClerkId: actor.clerkId,
+            artifactId: existingArtifact._id,
+          })
+        : await convexMutation("notes:remove", {
+            actorClerkId: actor.clerkId,
+            noteId,
+          });
       return ok(result);
     }
 

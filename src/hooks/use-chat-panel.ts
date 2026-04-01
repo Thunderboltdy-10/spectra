@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChatMessageAccumulator, type PanelChatMessage } from "@/lib/chat/message-state";
 import { createChatStream } from "@/lib/chat/streaming";
+import { notifyWorkspaceContentMutated } from "@/lib/workspace/events";
 
 type UseChatPanelParams = {
   workstreamId?: string;
@@ -101,6 +102,11 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
     if (!response.ok) throw new Error("Failed to create chat");
     const data = (await response.json()) as { chatId: string };
     setChatId(data.chatId);
+    notifyWorkspaceContentMutated({
+      workstreamId: params.workstreamId,
+      refreshHub: true,
+      refreshWorkstreams: true,
+    });
     return data.chatId;
   }, [
     chatId,
@@ -154,6 +160,7 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
     let activeChatId: string | null = null;
+    let didComplete = false;
 
     try {
       activeChatId = await getOrCreateChat();
@@ -171,6 +178,7 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
           throw new Error(typeof event.error === "string" ? event.error : "Generation failed");
         }
       }
+      didComplete = true;
     } catch (err) {
       if ((err as Error).name === "AbortError") {
         accumulator.cancel();
@@ -184,6 +192,12 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
         syncAccumulator();
       }
     } finally {
+      if (didComplete) {
+        notifyWorkspaceContentMutated({
+          workstreamId: params.workstreamId,
+          refreshHub: true,
+        });
+      }
       setStreaming(false);
       setStreamPhase("idle");
     }
@@ -192,6 +206,7 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
     params.mode,
     params.routerMode,
     params.thinkingLevel,
+    params.workstreamId,
     streaming,
     syncAccumulator,
   ]);

@@ -20,6 +20,7 @@ import {
   WORKSPACE_SHELLS,
   type WorkspaceShellMode,
 } from "@/lib/workspace/shell-mode";
+import { hasClerkPublishableKey } from "@/lib/clerk-config";
 
 const WorkspaceCanvas = dynamic(
   () =>
@@ -45,7 +46,11 @@ function CanvasLoader() {
   );
 }
 
-function WorkspaceContent() {
+type WorkspaceContentProps = {
+  userName: string;
+};
+
+function WorkspaceContent({ userName }: WorkspaceContentProps) {
   const router = useRouter();
   const params = useSearchParams();
   const hubOpen = params.get("hub") === "1";
@@ -53,7 +58,6 @@ function WorkspaceContent() {
   const panelType = params.get("panel") ?? undefined;
   const panelId = params.get("thread") ?? params.get("note") ?? params.get("artifact") ?? params.get("planner") ?? undefined;
 
-  const { user } = useUser();
   const {
     workstreams,
     loading,
@@ -288,8 +292,6 @@ function WorkspaceContent() {
 
   const panelWidth = panel ? getPanelWidth(panel.type) : 0;
 
-  const userName = user?.fullName || user?.firstName || "Student";
-
   // Focus timer tick
   const { timerState, tickTimer, completeTimerSession } = useWorkspaceStore();
   useEffect(() => {
@@ -458,6 +460,11 @@ function WorkspaceContent() {
   );
 }
 
+function WorkspaceContentWithClerk() {
+  const { user } = useUser();
+  return <WorkspaceContent userName={user?.fullName || user?.firstName || "Student"} />;
+}
+
 function getPanelWidth(type: string): number {
   switch (type) {
     case "chat": return 380;
@@ -472,7 +479,11 @@ function getPanelWidth(type: string): number {
 export default function WorkspacePage() {
   return (
     <Suspense fallback={<CanvasLoader />}>
-      <WorkspaceContent />
+      {hasClerkPublishableKey() ? (
+        <WorkspaceContentWithClerk />
+      ) : (
+        <WorkspaceContent userName="Student" />
+      )}
     </Suspense>
   );
 }

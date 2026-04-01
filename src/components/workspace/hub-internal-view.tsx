@@ -5,19 +5,13 @@
  *
  * When the user commits to the hub (via Hub button or deep zoom),
  * this provides buildHubNodes() to render hub-level content as React Flow nodes.
- *
- * Hub content includes:
- * - Quick Artifacts: unscoped document artifacts (workstreamId: null)
- * - Upcoming Deadlines: cross-workstream planner aggregation (next 14 days)
- * - Recent Activity: latest actions across all workstreams
- * - Quick Actions: new workstream, new document, new chat
  */
 
 import type { Node } from "@xyflow/react";
 import type { PanelType } from "@/stores/workspace-store";
-import type { GroupNodeData, EmptyStateNodeData, FocusTimerNodeData } from "./views/internal-content-nodes";
+import type { MagneticPanelData, EmptyStateNodeData, FocusTimerNodeData } from "./views/internal-content-nodes";
 
-type HubContentData = {
+export type HubContentData = {
   quickNotes: Array<{ id: string; title: string; updatedAt: number }>;
   deadlines: Array<{ id: string; title: string; dueAt: number; workstreamTitle?: string }>;
   recentActivity: Array<{ id: string; title: string; type: string; timestamp: number }>;
@@ -52,9 +46,6 @@ function formatDueDate(timestamp: number) {
   return `${Math.floor(delta / 86_400_000)}d`;
 }
 
-/**
- * Build hub-level canvas nodes — similar pattern to workstream internal views.
- */
 export function buildHubNodes(
   data: HubContentData,
   basePosition: { x: number; y: number },
@@ -88,77 +79,80 @@ export function buildHubNodes(
   if (data.quickNotes.length > 0) {
     nodes.push({
       id: "hub-notes",
-      type: "contentGroup",
+      type: "magneticPanel",
       position: { x: basePosition.x, y: basePosition.y + yOffset },
       draggable: true,
       selectable: false,
       data: {
         label: "Quick Artifacts",
-        icon: "note",
-        panelType: "artifact",
+        iconType: "note",
+        isMain: true,
         onOpenPanel: data.onOpenPanel,
-        onNew: () => data.onOpenPanel("artifact", "new"),
         items: data.quickNotes.map((n) => ({
           id: n.id,
           title: n.title,
           meta: formatTimeAgo(n.updatedAt),
+          panelType: "artifact",
         })),
-      } satisfies GroupNodeData,
+      } satisfies MagneticPanelData,
     });
-    yOffset += Math.min(data.quickNotes.length, 6) * 32 + 60 + GAP;
+    yOffset += Math.min(data.quickNotes.length, 6) * 32 + 120 + GAP;
   }
 
   // Upcoming Deadlines
   if (data.deadlines.length > 0) {
     nodes.push({
       id: "hub-deadlines",
-      type: "contentGroup",
+      type: "magneticPanel",
       position: { x: basePosition.x, y: basePosition.y + yOffset },
       draggable: true,
       selectable: false,
       data: {
         label: "Upcoming Deadlines",
-        icon: "planner",
-        panelType: "planner",
+        iconType: "planner",
+        isMain: false,
         onOpenPanel: data.onOpenPanel,
         items: data.deadlines.map((d) => ({
           id: d.id,
           title: d.title,
           meta: `${formatDueDate(d.dueAt)}${d.workstreamTitle ? ` · ${d.workstreamTitle}` : ""}`,
           statusColor: d.dueAt < Date.now() ? "var(--accent-coral)" : d.dueAt - Date.now() < 86_400_000 ? "#f59e0b" : "var(--accent-mint)",
+          panelType: "planner",
         })),
-      } satisfies GroupNodeData,
+      } satisfies MagneticPanelData,
     });
-    yOffset += Math.min(data.deadlines.length, 6) * 32 + 60 + GAP;
+    yOffset += Math.min(data.deadlines.length, 6) * 32 + 120 + GAP;
   }
 
   // Recent Activity
   if (data.recentActivity.length > 0) {
     nodes.push({
       id: "hub-activity",
-      type: "contentGroup",
-      position: { x: basePosition.x + 340, y: basePosition.y },
+      type: "magneticPanel",
+      position: { x: basePosition.x + 520, y: basePosition.y },
       draggable: true,
       selectable: false,
       data: {
         label: "Recent Activity",
-        icon: "thread",
+        iconType: "thread",
+        isMain: false,
         onOpenPanel: data.onOpenPanel,
         items: data.recentActivity.map((a) => ({
           id: a.id,
           title: a.title,
           meta: `${a.type} · ${formatTimeAgo(a.timestamp)}`,
+          panelType: "chat",
         })),
-      } satisfies GroupNodeData,
+      } satisfies MagneticPanelData,
     });
   }
 
-  // Focus Timer (positioned to the right of activity)
+  // Focus Timer
   if (data.timerState && data.onTimerStart && data.onTimerPause && data.onTimerReset) {
     nodes.push({
       id: "hub-timer",
       type: "focusTimer",
-      position: { x: basePosition.x + 340, y: basePosition.y + (data.recentActivity.length > 0 ? Math.min(data.recentActivity.length, 6) * 32 + 80 : 0) },
+      position: { x: basePosition.x + 520, y: basePosition.y + (data.recentActivity.length > 0 ? Math.min(data.recentActivity.length, 6) * 32 + 120 : 0) },
       draggable: true,
       selectable: false,
       data: {
@@ -173,24 +167,6 @@ export function buildHubNodes(
       } satisfies FocusTimerNodeData,
     });
   }
-
-  // Quick Actions
-  const actionsY = data.timerState
-    ? basePosition.y + (data.recentActivity.length > 0 ? Math.min(data.recentActivity.length, 6) * 32 + 80 : 0) + 220
-    : basePosition.y + 200;
-  nodes.push({
-    id: "hub-actions",
-    type: "emptyState",
-    position: { x: basePosition.x + 340, y: actionsY },
-    draggable: true,
-    selectable: false,
-    data: {
-      emoji: "⚡",
-      title: "Quick Actions",
-      description: "Create a new workstream, document, or start a chat.",
-      onNew: data.onNewWorkstream,
-    } satisfies EmptyStateNodeData,
-  });
 
   return nodes;
 }

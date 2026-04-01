@@ -1,12 +1,12 @@
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
-import { getEnv } from "@/lib/env";
+import { getConvexUrl } from "@/lib/env";
 
 let convexClient: ConvexHttpClient | null = null;
 
 function getConvexClient() {
   if (!convexClient) {
-    convexClient = new ConvexHttpClient(getEnv().NEXT_PUBLIC_CONVEX_URL, {
+    convexClient = new ConvexHttpClient(getConvexUrl(), {
       logger: false,
     });
   }

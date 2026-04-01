@@ -8,6 +8,7 @@ import Link from "next/link";
 import { AlertTriangle, CheckCircle2, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SpectraLogo } from "@/components/spectra-logo";
+import { hasClerkPublishableKey } from "@/lib/clerk-config";
 
 type InvitationData = {
   email: string;
@@ -26,9 +27,13 @@ type PageState =
   | { status: "expired"; reason: string }
   | { status: "error"; message: string };
 
-function JoinPageContent() {
+type JoinPageContentProps = {
+  isLoaded: boolean;
+  userId: string | null;
+};
+
+function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
   const searchParams = useSearchParams();
-  const { isLoaded, userId } = useAuth();
   const token = searchParams.get("token");
 
   const [state, setState] = useState<PageState>({ status: "loading" });
@@ -168,14 +173,13 @@ function JoinPageContent() {
     year: "numeric",
   });
 
-    function handleJoin() {
-        // Redirect to Clerk signup with the email pre-filled if possible
-        const signUpUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up";
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? typeof window !== "undefined" ? window.location.origin : "";
-        const redirect = encodeURIComponent(`${appUrl}/join?token=${encodeURIComponent(token ?? "")}`);
-        const emailParam = `email_address=${encodeURIComponent(data.email)}`;
-        window.location.href = `${signUpUrl}?${emailParam}&redirect_url=${redirect}`;
-    }
+  function handleJoin() {
+    const signUpUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up";
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? (typeof window !== "undefined" ? window.location.origin : "");
+    const redirect = encodeURIComponent(`${appUrl}/join?token=${encodeURIComponent(token ?? "")}`);
+    const emailParam = `email_address=${encodeURIComponent(data.email)}`;
+    window.location.href = `${signUpUrl}?${emailParam}&redirect_url=${redirect}`;
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)] px-4">
@@ -261,6 +265,11 @@ function JoinPageContent() {
   );
 }
 
+function JoinPageContentWithClerk() {
+  const { isLoaded, userId } = useAuth();
+  return <JoinPageContent isLoaded={isLoaded} userId={userId ?? null} />;
+}
+
 export default function JoinPage() {
   return (
     <Suspense fallback={
@@ -268,7 +277,11 @@ export default function JoinPage() {
         <SpectraLogo size={32} className="animate-pulse" />
       </div>
     }>
-      <JoinPageContent />
+      {hasClerkPublishableKey() ? (
+        <JoinPageContentWithClerk />
+      ) : (
+        <JoinPageContent isLoaded userId={null} />
+      )}
     </Suspense>
   );
 }

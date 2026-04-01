@@ -19,6 +19,7 @@ import {
   Timer,
   Users,
 } from "lucide-react";
+import { hasClerkPublishableKey } from "@/lib/clerk-config";
 import { ALL_MODES, COMING_SOON_MODES, getModeConfig, isModeAvailable } from "@/lib/modes";
 import type { Agent, StudyMode } from "@/types";
 
@@ -134,15 +135,19 @@ function dynamicWelcomeLine(params: { hour: number; month: number; orgName?: str
   return `${monthName} focus${schoolLabel}: ${timeBlock}`;
 }
 
-export function ChatWelcome({
+type ChatWelcomeImplProps = ChatWelcomeProps & {
+  firstName: string;
+};
+
+function ChatWelcomeImpl({
   onSelectAgent,
   onSelectMode,
   agents,
   activeMode,
   welcomeMessage,
   orgName,
-}: ChatWelcomeProps) {
-  const { user } = useUser();
+  firstName,
+}: ChatWelcomeImplProps) {
   const [selectedMode, setSelectedMode] = useState<StudyMode>(activeMode ?? "tutor");
   const [gamification, setGamification] = useState<{
     currentStreak: number;
@@ -178,7 +183,6 @@ export function ChatWelcome({
     void loadGamification();
   }, []);
 
-  const firstName = user?.firstName?.trim() || user?.fullName?.split(" ")[0] || "there";
   const now = new Date();
   const dayKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
   const greeting = getGreeting(now.getHours(), now.getMonth(), firstName, dayKey);
@@ -343,4 +347,18 @@ export function ChatWelcome({
       </div>
     </div>
   );
+}
+
+function ChatWelcomeWithClerk(props: ChatWelcomeProps) {
+  const { user } = useUser();
+  const firstName = user?.firstName?.trim() || user?.fullName?.split(" ")[0] || "there";
+  return <ChatWelcomeImpl {...props} firstName={firstName} />;
+}
+
+export function ChatWelcome(props: ChatWelcomeProps) {
+  if (hasClerkPublishableKey()) {
+    return <ChatWelcomeWithClerk {...props} />;
+  }
+
+  return <ChatWelcomeImpl {...props} firstName="there" />;
 }

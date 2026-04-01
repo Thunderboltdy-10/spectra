@@ -7,6 +7,7 @@ import { useSearchParams } from "next/navigation";
 import { Clock, Mail, ArrowLeft, Search, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { hasClerkPublishableKey } from "@/lib/clerk-config";
 
 type SchoolOption = {
   _id: string;
@@ -15,8 +16,12 @@ type SchoolOption = {
   description?: string;
 };
 
-function NoAccessPageContent() {
-  const { isLoaded, isSignedIn } = useUser();
+type NoAccessPageContentProps = {
+  isLoaded: boolean;
+  isSignedIn: boolean | undefined;
+};
+
+function NoAccessPageContent({ isLoaded, isSignedIn }: NoAccessPageContentProps) {
   const searchParams = useSearchParams();
   const reason = searchParams.get("reason");
   const [query, setQuery] = useState("");
@@ -257,6 +262,11 @@ function NoAccessPageContent() {
   );
 }
 
+function NoAccessPageContentWithClerk() {
+  const { isLoaded, isSignedIn } = useUser();
+  return <NoAccessPageContent isLoaded={Boolean(isLoaded)} isSignedIn={Boolean(isSignedIn)} />;
+}
+
 function NoAccessPageFallback() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)] px-4">
@@ -273,7 +283,11 @@ function NoAccessPageFallback() {
 export default function NoAccessPage() {
   return (
     <Suspense fallback={<NoAccessPageFallback />}>
-      <NoAccessPageContent />
+      {hasClerkPublishableKey() ? (
+        <NoAccessPageContentWithClerk />
+      ) : (
+        <NoAccessPageContent isLoaded isSignedIn={false} />
+      )}
     </Suspense>
   );
 }

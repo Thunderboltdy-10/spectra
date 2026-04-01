@@ -85,3 +85,46 @@ Before implementation starts, the docs in [`workspace/`](<local-workspace> shoul
 - the panel and command-surface choreography,
 - the memory and workspace-evolution model,
 - the guardrails that prevent the product from becoming either rigid or chaotic.
+
+---
+
+# Brainstorming & Implementation Plan (Updated April 1, 2026)
+
+## Strategy
+Following our discussion, the path forward involves unifying the underlying data model to support a genuine "widget" ecosystem across all shells, and overhauling the front-end to bring three entirely distinct aesthetic paradigms to life using the shared engine.
+
+### 1. Backend Foundations: The Unified Widget Ecosystem
+We have migrated `workspaceItems` to the `convex/schema.ts` as a first-class table entity. 
+- A workspace item can be *any* generic object (thread, document, planner, visualization, custom). 
+- It maintains intrinsic coordinates (`x`, `y`), dimensions (`width`, `height`), and a `renderMode`.
+- **Why this matters**: We decouple content from layout. When AI creates a visualization artifact, it can drop it onto the canvas as a custom widget without rewriting front-end logic.
+
+### 2. Frontend Redesign: Delivering Three Unforgettable Aesthetics
+We are completely rewriting `workspace-shell-stage.tsx`, `workspace-canvas.tsx`, `internal-content-nodes.tsx`, and `workspace-command-bar.tsx` to support the three different approaches dynamically via the `WorkspaceShellMode` toggle.
+
+#### Approach A: Semantic Constellations (The "Deep Space" Paradigm)
+- **Vibe**: Dark, ethereal, physics-based, data-heavy, relationship-driven.
+- **Visuals**: We drop boxes and cards entirely. Widgets are rendered as glowing text clusters connected by thin orbital rings and vector lines. Heavy use of `radial-gradient` meshes, glow effects (`mix-blend-mode: screen`), and spatial nodes. The "Right Panel" flies in cleanly, suppressing the rest of the canvas into a deeply blurred backdrop (`backdrop-filter: blur(40px) brightness(0.6)`).
+- **Interactions**: Fluid, floating hover states. Instead of strict grid layouts, widgets repel slightly, forming organic clusters.
+
+#### Approach B: Magnetic Surface (The "Tactile Glass" Paradigm) - Recommended
+- **Vibe**: Fast, tactile, translucent, highly structured but infinite.
+- **Visuals**: The macOS-meets-Linear ideal. Gorgeous frosted glass panels (`backdrop-filter: blur(24px)`), sharp 1px borders, subtle white noise textures. Elements snap into magnetic lanes, with drawers seamlessly fading out into the edges. 
+- **Command Bar**: A beautiful pill-shaped command palette at the bottom center. When you hit `Cmd+K`, it expands fluidly, casting a massive drop shadow, and acts as the universal AI entry point for both navigating to workstreams and triggering widget creation.
+
+#### Approach C: Focal Lenses (The "Guided Focus" Paradigm)
+- **Vibe**: Immersive, luxurious, cinematic.
+- **Visuals**: A "vignette" around the active workstream. Peripheral noise fades to deep shadow, and the active content sits front-and-center bathed in a soft directional glow. High contrast typography. 
+- **Layout**: Center stage is dominant. It doesn't use the whole screen width, instead keeping content intentionally constrained and highly legible. The rest of the screen operates like a dark room until you bring the spotlight there.
+
+### 3. The "Hub" and Command Surface Choreography
+The Hub is no longer a fake workstream. It is an ambient layer at the edge of the viewport.
+- **The Drawer Model**: Things like Timers, Deadlines, and Global Activity are stored in hidden edge drawers or the bottom dock. They are visible only when explicitly invoked or when contextually relevant (e.g. a deadline approaches).
+- **The Search Bar Animation**: When opening the right panel (Thread/Note), the bottom command bar smoothly animates downwards, disappearing below the screen fold, and re-emerges *inside* the right panel as the chat input. It maintains the illusion of being a singular, unified physical object moving through the interface.
+
+### 4. Implementation Next Steps
+- Implement the highly styled React Flow custom nodes for the 3 approaches in `internal-content-nodes.tsx`.
+- Refactor the Spotlight UI in `workspace-command-bar.tsx` to handle the new transitions and edge-drawer behaviors.
+- Connect the frontend components to the new Convex `workspaceItems` APIs to support moving, creating, and grouping.
+
+We are entering the Execution Phase.

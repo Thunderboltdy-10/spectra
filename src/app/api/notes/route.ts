@@ -84,7 +84,8 @@ export async function POST(request: NextRequest) {
         sourceUpdatedAt: body.sourceUpdatedAt as number | undefined,
         syncConflictSummary: body.syncConflictSummary as string | undefined,
         workstreamId: body.workstreamId as string | undefined,
-        linkedChatId: body.artifactId as string | undefined,
+        linkedChatId: body.linkedChatId as string | undefined,
+        sourceMessageId: body.sourceMessageId as string | undefined,
         lastAiEditId: body.lastAiEditId as string | undefined,
         pendingDiffs: body.pendingDiffs,
       });
@@ -114,7 +115,8 @@ export async function POST(request: NextRequest) {
         sourceUpdatedAt: body.sourceUpdatedAt as number | null | undefined,
         syncConflictSummary: body.syncConflictSummary as string | null | undefined,
         workstreamId: body.workstreamId as string | null | undefined,
-        linkedChatId: body.artifactId as string | null | undefined,
+        linkedChatId: body.linkedChatId as string | null | undefined,
+        sourceMessageId: body.sourceMessageId as string | undefined,
         lastAiEditId: body.lastAiEditId as string | null | undefined,
         pendingDiffs: body.pendingDiffs as unknown,
       });
@@ -135,18 +137,10 @@ export async function POST(request: NextRequest) {
     if (action === "delete") {
       const { noteId } = body as { noteId?: string };
       if (!noteId) return badRequest("noteId is required");
-
-      const existingArtifact = await findExistingArtifact(actor.clerkId, noteId);
-      const resolved = existingArtifact ?? await convexMutation("artifacts:getOrMigrateFromNote", {
+      const result = await convexMutation("notes:remove", {
         actorClerkId: actor.clerkId,
         noteId,
       });
-      const artifactId = pickResolvedArtifactId(resolved);
-      const result = await convexMutation("artifacts:remove", {
-        actorClerkId: actor.clerkId,
-        artifactId,
-      });
-
       return ok(result);
     }
 

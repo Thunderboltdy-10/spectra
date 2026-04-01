@@ -145,7 +145,7 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
 
     setError(null);
     const accumulator = accumulatorRef.current;
-    accumulator.appendUserMessage(text.trim());
+    const userMessageId = accumulator.appendUserMessage(text.trim());
     const assistantId = accumulator.beginAssistantMessage();
     syncAccumulator();
 
@@ -153,9 +153,10 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
     setStreamPhase("routing");
     abortRef.current?.abort();
     abortRef.current = new AbortController();
+    let activeChatId: string | null = null;
 
     try {
-      const activeChatId = await getOrCreateChat();
+      activeChatId = await getOrCreateChat();
       for await (const event of createChatStream({
         chatId: activeChatId,
         message: text.trim(),
@@ -177,6 +178,9 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
       } else {
         setError(err instanceof Error ? err.message : "Something went wrong");
         accumulator.removeMessage(assistantId);
+        if (!activeChatId) {
+          accumulator.removeMessage(userMessageId);
+        }
         syncAccumulator();
       }
     } finally {

@@ -31,10 +31,25 @@ export async function GET(request: NextRequest) {
     if (action === "get") {
       const artifactId = params.get("id");
       if (!artifactId) return badRequest("id is required");
-      const artifact = await convexQuery("artifacts:get", {
-        actorClerkId: actor.clerkId,
-        artifactId,
-      });
+      let artifact;
+      try {
+        artifact = await convexQuery("artifacts:get", {
+          actorClerkId: actor.clerkId,
+          artifactId,
+        });
+      } catch {
+        const migrated = await convexMutation<
+          { actorClerkId: string; noteId: string },
+          { artifactId: string }
+        >("artifacts:getOrMigrateFromNote", {
+          actorClerkId: actor.clerkId,
+          noteId: artifactId,
+        });
+        artifact = await convexQuery("artifacts:get", {
+          actorClerkId: actor.clerkId,
+          artifactId: migrated.artifactId,
+        });
+      }
       return ok({ artifact });
     }
 

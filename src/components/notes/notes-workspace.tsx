@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Plus, Search, StickyNote } from "lucide-react";
+import { ArrowLeft, Plus, Search } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
 import { TiptapEditor } from "@/components/editor/tiptap-editor";
 import { CreateArtifactDialog, type ArtifactTemplate } from "@/components/artifacts/create-artifact-dialog";
@@ -106,7 +106,7 @@ export function NotesWorkspace() {
             {fromWorkspace && (
               <button
                 type="button"
-                onClick={() => router.push(returnWs ? `/workspace?focus=${encodeURIComponent(returnWs)}&panel=artifact&artifact=${encodeURIComponent(noteId ?? "")}` : "/workspace")}
+                onClick={() => router.push(returnWs ? `/workspace?ws=${encodeURIComponent(returnWs)}&panel=artifact&artifact=${encodeURIComponent(noteId ?? "")}` : "/workspace")}
                 className="inline-flex items-center gap-1.5 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
               >
                 <ArrowLeft className="h-3.5 w-3.5" />

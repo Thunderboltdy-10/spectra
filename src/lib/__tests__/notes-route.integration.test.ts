@@ -48,6 +48,7 @@ describe("notes route compatibility", () => {
           sourceType: "managebac_sync",
           managebacItemId: "mb_1",
           sourceUpdatedAt: 123,
+          sourceMessageId: "msg_1",
         }),
       }),
     );
@@ -67,9 +68,35 @@ describe("notes route compatibility", () => {
       syncConflictSummary: undefined,
       workstreamId: undefined,
       linkedChatId: undefined,
+      sourceMessageId: "msg_1",
       lastAiEditId: undefined,
       pendingDiffs: undefined,
     });
+  });
+
+  it("passes linkedChatId through the notes compatibility create path", async () => {
+    const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_notes" });
+    const convexMutation = vi.fn().mockResolvedValue("artifact_2");
+
+    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery: vi.fn(), convexMutation }));
+
+    const route = await import("@/app/api/notes/route");
+    await route.POST(
+      new NextRequest("http://localhost/api/notes", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "create",
+          title: "Linked doc",
+          linkedChatId: "chat_123",
+        }),
+      }),
+    );
+
+    expect(convexMutation).toHaveBeenCalledWith("artifacts:create", expect.objectContaining({
+      actorClerkId: "user_notes",
+      linkedChatId: "chat_123",
+    }));
   });
 
   it("returns the migrated document id when a legacy note update is proxied", async () => {
@@ -94,6 +121,7 @@ describe("notes route compatibility", () => {
           action: "update",
           noteId: "legacy_note_1",
           title: "Migrated title",
+          sourceMessageId: "msg_update_1",
         }),
       }),
     );
@@ -125,8 +153,34 @@ describe("notes route compatibility", () => {
       syncConflictSummary: undefined,
       workstreamId: undefined,
       linkedChatId: undefined,
+      sourceMessageId: "msg_update_1",
       lastAiEditId: undefined,
       pendingDiffs: undefined,
+    });
+  });
+
+  it("deletes legacy notes through the notes mutation instead of remigrating them", async () => {
+    const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_notes" });
+    const convexMutation = vi.fn().mockResolvedValue({ success: true });
+
+    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery: vi.fn(), convexMutation }));
+
+    const route = await import("@/app/api/notes/route");
+    const response = await route.POST(
+      new NextRequest("http://localhost/api/notes", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "delete",
+          noteId: "legacy_note_9",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(convexMutation).toHaveBeenCalledWith("notes:remove", {
+      actorClerkId: "user_notes",
+      noteId: "legacy_note_9",
     });
   });
 });

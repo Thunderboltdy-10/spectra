@@ -20,7 +20,6 @@ import {
   RotateCcw,
   Search,
   X,
-  CalendarClock,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
@@ -51,10 +50,10 @@ export function HubBar({
   primaryWorkstreamId,
   onOpenWorkstream,
   onExitWorkstream,
-  onOpenHub,
+  onOpenHub: _onOpenHub,
   onNewWorkstream,
   onOpenWorkstreamChat,
-  panelOpen = false,
+  panelOpen: _panelOpen = false,
 }: HubBarProps) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);

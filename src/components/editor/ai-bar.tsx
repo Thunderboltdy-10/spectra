@@ -40,11 +40,11 @@ export function AiBar({ editor, onApplyEdits, onReplaceDocument, noteId, artifac
   const { aiBarPrompt, setAiBarPrompt, aiBarBusy, setAiBarBusy } = useEditorStore();
   const [pendingEdit, setPendingEdit] = useState<PendingAiLifecycle | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [confirmRetryCount, setConfirmRetryCount] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const ignoreNextEditorUpdateRef = useRef(0);
   const versionRef = useRef<PendingAiLifecycle | null>(null);
+  const confirmRetryCountRef = useRef(0);
 
   useEffect(() => {
     versionRef.current = pendingEdit;
@@ -63,20 +63,17 @@ export function AiBar({ editor, onApplyEdits, onReplaceDocument, noteId, artifac
       }),
     }).catch(() => null);
     if (!response?.ok) {
-      setConfirmRetryCount((count) => {
-        const next = count + 1;
-        if (next >= 3) {
-          setError("Confirmation failed. Changes are still applied locally. Retry manually if needed.");
-          setPendingEdit((pending) => (
-            pending && pending.versionId === current.versionId && pending.status === "applied"
-              ? { ...pending, remainingMs: -1 }
-              : pending
-          ));
-          return next;
-        }
+      confirmRetryCountRef.current += 1;
+      if (confirmRetryCountRef.current >= 3) {
+        setError("Confirmation failed. Changes are still applied locally. Retry manually if needed.");
+        setPendingEdit((pending) => (
+          pending && pending.versionId === current.versionId && pending.status === "applied"
+            ? { ...pending, remainingMs: -1 }
+            : pending
+        ));
+      } else {
         setError("Failed to confirm AI edit. Retrying shortly.");
-        return next;
-      });
+      }
       setPendingEdit((pending) => (
         pending && pending.versionId === current.versionId && pending.status === "applied" && pending.remainingMs >= 0
           ? { ...pending, remainingMs: 1000 }
@@ -86,7 +83,7 @@ export function AiBar({ editor, onApplyEdits, onReplaceDocument, noteId, artifac
     }
     versionRef.current = null;
     setPendingEdit(null);
-    setConfirmRetryCount(0);
+    confirmRetryCountRef.current = 0;
     setError(null);
     return true;
   }, []);
@@ -225,7 +222,7 @@ export function AiBar({ editor, onApplyEdits, onReplaceDocument, noteId, artifac
             status: "applied",
             remainingMs: 30_000,
           });
-          setConfirmRetryCount(0);
+          confirmRetryCountRef.current = 0;
         }
       }
       setAiBarPrompt("");

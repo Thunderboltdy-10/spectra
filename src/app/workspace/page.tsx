@@ -45,7 +45,7 @@ function WorkspaceContent() {
   const router = useRouter();
   const params = useSearchParams();
   const hubOpen = params.get("hub") === "1";
-  const wsParam = params.get("ws") ?? undefined;
+  const wsParam = params.get("ws") ?? params.get("focus") ?? undefined;
   const panelType = params.get("panel") ?? undefined;
   const panelId = params.get("thread") ?? params.get("note") ?? params.get("artifact") ?? params.get("planner") ?? undefined;
 

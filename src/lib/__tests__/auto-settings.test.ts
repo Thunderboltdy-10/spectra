@@ -257,4 +257,23 @@ describe("auto-settings prompt analysis", () => {
     expect(directives.forcedModel).toBe("openai/gpt-4o");
     expect(directives.detectedModelPhrase?.toLowerCase()).toContain("gpt-4");
   });
+
+  it("does not treat generic with-clauses as model requests", () => {
+    const directives = parseUserDirectives(
+      "Create exactly 3 multiple-choice quiz questions about photosynthesis with answers and explanations.",
+      {
+        modelCatalog: [
+          {
+            modelId: "openai/gpt-5.1",
+            name: "GPT-5.1",
+            provider: "openai",
+            description: "reasoning",
+          },
+        ],
+      },
+    );
+
+    expect(directives.forcedModel).toBeUndefined();
+    expect(directives.detectedModelPhrase).toBeUndefined();
+  });
 });

@@ -215,6 +215,8 @@ export function ChatLayout() {
     );
   }, [chat]);
 
+  const setSelectedChatId = chat.setSelectedChatId;
+
   useEffect(() => {
     const onSwitchMode = (event: Event) => {
       const detail = (event as CustomEvent<{ mode?: string }>).detail;
@@ -225,7 +227,7 @@ export function ChatLayout() {
     const onResumeChat = (event: Event) => {
       const detail = (event as CustomEvent<{ chatId?: string }>).detail;
       if (!detail?.chatId) return;
-      chat.setSelectedChatId(detail.chatId);
+      setSelectedChatId(detail.chatId);
     };
     window.addEventListener("ai-school:switch-mode", onSwitchMode);
     window.addEventListener("ai-school:open-orchestration", onOpenOrchestration);
@@ -235,7 +237,7 @@ export function ChatLayout() {
       window.removeEventListener("ai-school:open-orchestration", onOpenOrchestration);
       window.removeEventListener("ai-school:resume-chat", onResumeChat);
     };
-  }, [handleModeChange, openPanel]);
+  }, [handleModeChange, openPanel, setSelectedChatId]);
 
   function markTourSeen() {
     try {
@@ -569,7 +571,7 @@ export function ChatLayout() {
           settingsActive={panelActiveView === "settings"}
           mobileUtilitySlot={<GlobalUtilityDock placement="profile-bar" className="w-full" />}
           isOffline={chat.isOffline}
-          backHref={searchParams.get("from") === "workspace" ? `/workspace${searchParams.get("ws") ? `?focus=${searchParams.get("ws")}` : ""}` : undefined}
+          backHref={searchParams.get("from") === "workspace" ? `/workspace${searchParams.get("ws") ? `?ws=${searchParams.get("ws")}` : ""}` : undefined}
           backLabel="Workspace"
           onExport={(format) => {
             if (format === "pdf") {

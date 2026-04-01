@@ -14,6 +14,26 @@ export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();
     const params = request.nextUrl.searchParams;
+    const action = params.get("action") ?? "list";
+
+    if (action === "listMergeCandidates") {
+      const result = await convexQuery("workspaceItems:listMergeCandidates", {
+        actorClerkId: actor.clerkId,
+        workstreamId: params.get("workstreamId") ?? undefined,
+        topic: params.get("topic") ?? undefined,
+        limit: parseLimit(params.get("limit")),
+      });
+      return ok(result);
+    }
+
+    if (action === "listMutations") {
+      const mutations = await convexQuery("workspaceItems:listMutations", {
+        actorClerkId: actor.clerkId,
+        workstreamId: params.get("workstreamId") ?? undefined,
+        limit: parseLimit(params.get("limit")),
+      });
+      return ok({ mutations });
+    }
 
     const items = await convexQuery("workspaceItems:list", {
       actorClerkId: actor.clerkId,
@@ -75,6 +95,175 @@ export async function POST(request: NextRequest) {
             ? body.status
             : undefined,
         pinned: typeof body.pinned === "boolean" ? body.pinned : undefined,
+      });
+      return ok(result);
+    }
+
+    if (action === "createWidget") {
+      const type = typeof body.type === "string" ? body.type : undefined;
+      const title = typeof body.title === "string" ? body.title : undefined;
+      if (!type || !title) return badRequest("type and title are required");
+
+      const result = await convexMutation("workspaceItems:createWidget", {
+        actorClerkId: actor.clerkId,
+        workstreamId: typeof body.workstreamId === "string" ? body.workstreamId : undefined,
+        type,
+        itemType: typeof body.itemType === "string" ? body.itemType : undefined,
+        renderMode: typeof body.renderMode === "string" ? body.renderMode : undefined,
+        sourceChatId: typeof body.sourceChatId === "string" ? body.sourceChatId : undefined,
+        sourceArtifactId: typeof body.sourceArtifactId === "string" ? body.sourceArtifactId : undefined,
+        sourcePlannerItemId:
+          typeof body.sourcePlannerItemId === "string" ? body.sourcePlannerItemId : undefined,
+        title,
+        contentSummary: typeof body.contentSummary === "string" ? body.contentSummary : undefined,
+        x: typeof body.x === "number" ? body.x : 0,
+        y: typeof body.y === "number" ? body.y : 0,
+        width: typeof body.width === "number" ? body.width : undefined,
+        height: typeof body.height === "number" ? body.height : undefined,
+        zIndex: typeof body.zIndex === "number" ? body.zIndex : undefined,
+        category: typeof body.category === "string" ? body.category : undefined,
+        pinned: typeof body.pinned === "boolean" ? body.pinned : undefined,
+        collapsed: typeof body.collapsed === "boolean" ? body.collapsed : undefined,
+        hidden: typeof body.hidden === "boolean" ? body.hidden : undefined,
+        visualGroup: typeof body.visualGroup === "string" ? body.visualGroup : undefined,
+        renderProps: body.renderProps,
+        provenanceSource:
+          body.provenanceSource === "user" || body.provenanceSource === "ai" || body.provenanceSource === "system"
+            ? body.provenanceSource
+            : undefined,
+        provenanceAction: typeof body.provenanceAction === "string" ? body.provenanceAction : undefined,
+        mutationSummary: typeof body.mutationSummary === "string" ? body.mutationSummary : undefined,
+      });
+      return ok(result);
+    }
+
+    if (action === "updateWidget") {
+      const itemId = typeof body.itemId === "string" ? body.itemId : undefined;
+      if (!itemId) return badRequest("itemId is required");
+
+      const result = await convexMutation("workspaceItems:updateWidget", {
+        actorClerkId: actor.clerkId,
+        itemId,
+        x: typeof body.x === "number" ? body.x : undefined,
+        y: typeof body.y === "number" ? body.y : undefined,
+        width: typeof body.width === "number" ? body.width : undefined,
+        height: typeof body.height === "number" ? body.height : undefined,
+        zIndex: typeof body.zIndex === "number" ? body.zIndex : undefined,
+        title: typeof body.title === "string" ? body.title : undefined,
+        contentSummary: typeof body.contentSummary === "string" ? body.contentSummary : undefined,
+        category: typeof body.category === "string" ? body.category : undefined,
+        itemType: typeof body.itemType === "string" ? body.itemType : undefined,
+        renderMode: typeof body.renderMode === "string" ? body.renderMode : undefined,
+        status:
+          body.status === "active" || body.status === "archived"
+            ? body.status
+            : undefined,
+        pinned: typeof body.pinned === "boolean" ? body.pinned : undefined,
+        collapsed: typeof body.collapsed === "boolean" ? body.collapsed : undefined,
+        hidden: typeof body.hidden === "boolean" ? body.hidden : undefined,
+        visualGroup: typeof body.visualGroup === "string" ? body.visualGroup : undefined,
+        renderProps: body.renderProps,
+        provenanceSource:
+          body.provenanceSource === "user" || body.provenanceSource === "ai" || body.provenanceSource === "system"
+            ? body.provenanceSource
+            : undefined,
+        provenanceAction: typeof body.provenanceAction === "string" ? body.provenanceAction : undefined,
+        mutationSummary: typeof body.mutationSummary === "string" ? body.mutationSummary : undefined,
+      });
+      return ok(result);
+    }
+
+    if (action === "moveWidget") {
+      const itemId = typeof body.itemId === "string" ? body.itemId : undefined;
+      const workstreamId = typeof body.workstreamId === "string" ? body.workstreamId : undefined;
+      if (!itemId || !workstreamId) return badRequest("itemId and workstreamId are required");
+
+      const result = await convexMutation("workspaceItems:moveWidget", {
+        actorClerkId: actor.clerkId,
+        itemId,
+        workstreamId,
+        x: typeof body.x === "number" ? body.x : undefined,
+        y: typeof body.y === "number" ? body.y : undefined,
+        provenanceSource:
+          body.provenanceSource === "user" || body.provenanceSource === "ai" || body.provenanceSource === "system"
+            ? body.provenanceSource
+            : undefined,
+        mutationSummary: typeof body.mutationSummary === "string" ? body.mutationSummary : undefined,
+      });
+      return ok(result);
+    }
+
+    if (action === "attachItemsToWorkstream") {
+      if (!Array.isArray(body.items)) return badRequest("items array is required");
+      const workstreamId = typeof body.workstreamId === "string" ? body.workstreamId : undefined;
+      if (!workstreamId) return badRequest("workstreamId is required");
+
+      const result = await convexMutation("workspaceItems:attachItemsToWorkstream", {
+        actorClerkId: actor.clerkId,
+        workstreamId,
+        items: body.items.map((entry) => {
+          const record = entry as Record<string, unknown>;
+          return {
+            type: typeof record.type === "string" ? record.type : undefined,
+            itemType: typeof record.itemType === "string" ? record.itemType : undefined,
+            sourceChatId: typeof record.sourceChatId === "string" ? record.sourceChatId : undefined,
+            sourceArtifactId: typeof record.sourceArtifactId === "string" ? record.sourceArtifactId : undefined,
+            sourcePlannerItemId:
+              typeof record.sourcePlannerItemId === "string" ? record.sourcePlannerItemId : undefined,
+            title: typeof record.title === "string" ? record.title : undefined,
+            contentSummary: typeof record.contentSummary === "string" ? record.contentSummary : undefined,
+            renderMode: typeof record.renderMode === "string" ? record.renderMode : undefined,
+            category: typeof record.category === "string" ? record.category : undefined,
+            x: typeof record.x === "number" ? record.x : undefined,
+            y: typeof record.y === "number" ? record.y : undefined,
+            width: typeof record.width === "number" ? record.width : undefined,
+            height: typeof record.height === "number" ? record.height : undefined,
+            visualGroup: typeof record.visualGroup === "string" ? record.visualGroup : undefined,
+          };
+        }),
+        provenanceSource:
+          body.provenanceSource === "user" || body.provenanceSource === "ai" || body.provenanceSource === "system"
+            ? body.provenanceSource
+            : undefined,
+        mutationSummary: typeof body.mutationSummary === "string" ? body.mutationSummary : undefined,
+      });
+      return ok(result);
+    }
+
+    if (action === "updateWorkstreamLayout") {
+      if (!Array.isArray(body.widgets)) return badRequest("widgets array is required");
+      const workstreamId = typeof body.workstreamId === "string" ? body.workstreamId : undefined;
+      if (!workstreamId) return badRequest("workstreamId is required");
+
+      const result = await convexMutation("workspaceItems:updateWorkstreamLayout", {
+        actorClerkId: actor.clerkId,
+        workstreamId,
+        widgets: body.widgets.map((entry) => {
+          const record = entry as Record<string, unknown>;
+          return {
+            itemId: String(record.itemId ?? ""),
+            x: Number(record.x ?? 0),
+            y: Number(record.y ?? 0),
+            width: typeof record.width === "number" ? record.width : undefined,
+            height: typeof record.height === "number" ? record.height : undefined,
+            zIndex: typeof record.zIndex === "number" ? record.zIndex : undefined,
+          };
+        }),
+        provenanceSource:
+          body.provenanceSource === "user" || body.provenanceSource === "ai" || body.provenanceSource === "system"
+            ? body.provenanceSource
+            : undefined,
+        mutationSummary: typeof body.mutationSummary === "string" ? body.mutationSummary : undefined,
+      });
+      return ok(result);
+    }
+
+    if (action === "revertMutation") {
+      const mutationId = typeof body.mutationId === "string" ? body.mutationId : undefined;
+      if (!mutationId) return badRequest("mutationId is required");
+      const result = await convexMutation("workspaceItems:revertMutation", {
+        actorClerkId: actor.clerkId,
+        mutationId,
       });
       return ok(result);
     }

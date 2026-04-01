@@ -21,15 +21,56 @@ export function workspaceItemTypeForArtifact(
     case "flashcard_deck":
     case "code_project":
       return "document";
+    case "timetable":
+      return "planner";
+    case "visualization":
+    case "concept_map":
+    case "quiz":
+      return "visualization";
     case "image":
     case "diagram":
       return "media";
     case "bookmark":
     case "collection":
       return "reference";
+    case "whiteboard":
+    case "code_output":
     default:
       return "custom";
   }
+}
+
+export function workspaceCategoryForArtifact(
+  artifactType: string,
+): Doc<"workspaceItems">["category"] {
+  switch (artifactType) {
+    case "document":
+    case "note":
+    case "study_plan":
+    case "flashcard_deck":
+    case "code_project":
+      return "documents";
+    case "timetable":
+      return "planner";
+    case "visualization":
+    case "concept_map":
+    case "quiz":
+    case "code_output":
+    case "whiteboard":
+      return "visualizations";
+    case "image":
+    case "diagram":
+      return "media";
+    case "bookmark":
+    case "collection":
+      return "references";
+    default:
+      return "custom";
+  }
+}
+
+export function canonicalWorkspaceItemTypeForArtifact(): Doc<"workspaceItems">["itemType"] {
+  return "artifact";
 }
 
 async function findWorkspaceItemForArtifact(
@@ -99,10 +140,14 @@ export async function syncWorkspaceItemForArtifact(
   const nextFields = {
     workstreamId: params.workstreamId,
     type: workspaceItemTypeForArtifact(params.artifactType),
+    itemType: canonicalWorkspaceItemTypeForArtifact(),
+    sourceKind: "artifact" as const,
+    sourceId: params.artifactId,
     renderMode: params.artifactType,
     sourceArtifactId: params.artifactId,
     title: normalizeTitle(params.title),
     contentSummary: summarizeContent(params.contentPlaintext),
+    category: workspaceCategoryForArtifact(params.artifactType),
     status: "active" as const,
     updatedAt: now,
   };
@@ -120,8 +165,12 @@ export async function syncWorkspaceItemForArtifact(
     type: workspaceItemTypeForArtifact(params.artifactType),
     renderMode: params.artifactType,
     sourceArtifactId: params.artifactId,
+    itemType: canonicalWorkspaceItemTypeForArtifact(),
+    sourceKind: "artifact",
+    sourceId: params.artifactId,
     title: normalizeTitle(params.title),
     contentSummary: summarizeContent(params.contentPlaintext),
+    category: workspaceCategoryForArtifact(params.artifactType),
     x: position.x,
     y: position.y,
     width: 280,

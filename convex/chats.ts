@@ -11,7 +11,7 @@ import {
   resolveBranchedParentMessageId,
   selectMessagesForBranch,
   summarizeBranchedMessages,
-} from "./chat-branching";
+} from "./chatBranching";
 
 async function validateArtifact(
   ctx: Parameters<typeof getUserByClerkId>[0],

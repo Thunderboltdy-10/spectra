@@ -3,7 +3,7 @@ import {
   resolveBranchedParentMessageId,
   selectMessagesForBranch,
   summarizeBranchedMessages,
-} from "../chat-branching";
+} from "../chatBranching";
 
 describe("chat branching helpers", () => {
   it("keeps only the message prefix up to the pivot", () => {

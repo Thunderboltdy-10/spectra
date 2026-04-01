@@ -2,8 +2,8 @@ import { internalMutation, mutation, query, type MutationCtx } from "./_generate
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { adjustWorkstreamArtifactCount, getUserByClerkId } from "./helpers";
-import { resolveWorkstreamTransfer } from "./workstream-assignment";
-import { removeWorkspaceItemForArtifact, syncWorkspaceItemForArtifact } from "./workspace-item-sync";
+import { resolveWorkstreamTransfer } from "./workstreamAssignment";
+import { removeWorkspaceItemForArtifact, syncWorkspaceItemForArtifact } from "./workspaceItemSync";
 
 const vArtifactSourceType = v.union(
   v.literal("user_manual"),

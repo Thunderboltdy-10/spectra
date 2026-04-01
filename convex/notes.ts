@@ -2,8 +2,8 @@ import { mutation, query, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { adjustWorkstreamArtifactCount, getUserByClerkId } from "./helpers";
-import { resolveWorkstreamTransfer } from "./workstream-assignment";
-import { removeWorkspaceItemForArtifact, syncWorkspaceItemForArtifact } from "./workspace-item-sync";
+import { resolveWorkstreamTransfer } from "./workstreamAssignment";
+import { removeWorkspaceItemForArtifact, syncWorkspaceItemForArtifact } from "./workspaceItemSync";
 
 const vEditorMode = v.union(
   v.literal("standard"),

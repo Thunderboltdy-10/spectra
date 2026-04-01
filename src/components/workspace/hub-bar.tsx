@@ -1,17 +1,7 @@
 "use client";
 
-/**
- * hub-bar.tsx
- *
- * Persistent bottom bar for the workspace — the user's control center.
- * Contains: workstream pills, focus timer, deadline badge, and the AI command bar.
- * Always visible, never scrolls with the canvas.
- */
-
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
-  ChevronDown,
   ChevronLeft,
   Clock,
   Pause,
@@ -19,13 +9,16 @@ import {
   Plus,
   RotateCcw,
   Search,
-  X,
+  Send,
+  Layers,
+  Zap
 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import type { Workstream } from "@/hooks/use-workspace-data";
 import { getWorkstreamColor } from "@/lib/workspace/zoom-helpers";
-import { useWorkspaceStore, type PanelType } from "@/stores/workspace-store";
+import { useWorkspaceStore } from "@/stores/workspace-store";
+import type { WorkspaceShellMode } from "@/lib/workspace/shell-mode";
 
 type HubBarProps = {
   workstreams: Workstream[];
@@ -35,14 +28,14 @@ type HubBarProps = {
   onOpenHub: () => void;
   onNewWorkstream: () => void;
   onOpenWorkstreamChat: (workstreamId: string, query: string) => void;
-  onOpenPanel?: (type: PanelType, id: string) => void;
+  shellMode?: WorkspaceShellMode;
   panelOpen?: boolean;
 };
 
 function formatTimerDisplay(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${minutes}:${remainder.toString().padStart(2, "0")}`;
 }
 
 export function HubBar({
@@ -50,19 +43,16 @@ export function HubBar({
   primaryWorkstreamId,
   onOpenWorkstream,
   onExitWorkstream,
-  onOpenHub: _onOpenHub,
+  onOpenHub,
   onNewWorkstream,
   onOpenWorkstreamChat,
-  panelOpen: _panelOpen = false,
+  shellMode = "magnetic",
+  panelOpen = false,
 }: HubBarProps) {
-  const router = useRouter();
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [showTimerConfig, setShowTimerConfig] = useState(false);
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
-  const [showPicker, setShowPicker] = useState(false);
-  const [selectedWsId, setSelectedWsId] = useState<string | null>(null);
-  const [showTimerConfig, setShowTimerConfig] = useState(false);
-
+  const inputRef = useRef<HTMLInputElement>(null);
   const {
     timerState,
     setTimerMinutes,
@@ -84,18 +74,57 @@ export function HubBar({
     [primaryWorkstreamId, workstreams],
   );
 
-  // Auto-scope to committed workstream
-  useEffect(() => {
-    if (primaryWorkstreamId && primaryWorkstreamId !== "__hub__") {
-      setSelectedWsId(primaryWorkstreamId);
-    }
-  }, [primaryWorkstreamId]);
+  const timerRemaining = Math.max(0, timerState.sessionMinutes * 60 - timerState.elapsed);
+  const hasCommittedWorkstream = !!committedWorkstream;
 
-  // Cmd/Ctrl+K to focus
+  const shellChrome = {
+    constellations: {
+      container: "px-6 pb-6 gap-6 justify-center",
+      panel: "rounded-full border border-[rgba(14,142,232,0.3)] bg-[rgba(10,13,20,0.8)] shadow-[0_0_30px_rgba(14,142,232,0.15)] backdrop-blur-3xl px-3 py-2",
+      pill: "rounded-[24px]",
+      input: "bg-transparent placeholder-white/30 text-white",
+      activeBg: "bg-[rgba(14,142,232,0.15)] shadow-[inset_0_0_10px_rgba(14,142,232,0.2)]"
+    },
+    magnetic: {
+      container: "px-4 pb-4 gap-3 justify-center",
+      panel: "rounded-[20px] border border-white/10 bg-black/40 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.6)] backdrop-blur-2xl px-2 py-2",
+      pill: "rounded-[14px]",
+      input: "bg-transparent placeholder-white/40 text-white",
+      activeBg: "bg-white/10"
+    },
+    lenses: {
+      container: "px-8 pb-8 gap-4 justify-between",
+      panel: "rounded-[16px] border border-white/5 bg-white/[0.03] shadow-[0_10px_40px_rgba(0,0,0,0.8)] backdrop-blur-[40px] px-2 py-2",
+      pill: "rounded-[10px]",
+      input: "bg-transparent placeholder-white/20 text-white/90",
+      activeBg: "bg-white/10"
+    },
+  }[shellMode];
+
+  const inferWorkstream = useCallback((text: string) => {
+    const normalized = text.trim().toLowerCase();
+    if (!normalized) return committedWorkstream ?? activeWorkstreams[0] ?? null;
+    return activeWorkstreams.find((ws) => {
+      const haystack = `${ws.title} ${ws.description ?? ""} ${ws.subjectCode ?? ""}`.toLowerCase();
+      return haystack.includes(normalized);
+    }) ?? committedWorkstream ?? activeWorkstreams[0] ?? null;
+  }, [activeWorkstreams, committedWorkstream]);
+
+  const handleSubmit = useCallback(() => {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    const target = committedWorkstream ?? inferWorkstream(trimmed);
+    if (!target) return;
+    onOpenWorkstreamChat(target._id, trimmed);
+    setQuery("");
+    setFocused(false);
+    inputRef.current?.blur();
+  }, [committedWorkstream, inferWorkstream, onOpenWorkstreamChat, query]);
+
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
-        e.preventDefault();
+    const handler = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
         inputRef.current?.focus();
       }
     };
@@ -103,364 +132,240 @@ export function HubBar({
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // Click outside to close picker
-  useEffect(() => {
-    if (!showPicker) return;
-    const handler = () => setShowPicker(false);
-    window.addEventListener("mousedown", handler);
-    return () => window.removeEventListener("mousedown", handler);
-  }, [showPicker]);
-
-  const inferWorkstream = useCallback(
-    (text: string) => {
-      if (!text.trim()) return null;
-      const lower = text.toLowerCase();
-      return (
-        activeWorkstreams.find(
-          (ws) =>
-            ws.title.toLowerCase().includes(lower) ||
-            ws.description?.toLowerCase().includes(lower) ||
-            ws.subjectCode?.toLowerCase().includes(lower),
-        ) ?? null
-      );
-    },
-    [activeWorkstreams],
-  );
-
-  const handleSubmit = useCallback(() => {
-    const text = query.trim();
-    if (!text) return;
-
-    const targetWsId =
-      selectedWsId ??
-      inferWorkstream(text)?._id ??
-      activeWorkstreams[0]?._id;
-
-    if (targetWsId) {
-      onOpenWorkstreamChat(targetWsId, text);
-    } else {
-      router.push(`/?prompt=${encodeURIComponent(text)}`);
-    }
-    setQuery("");
-    setFocused(false);
-    inputRef.current?.blur();
-  }, [activeWorkstreams, inferWorkstream, onOpenWorkstreamChat, query, router, selectedWsId]);
-
-  const timerRemaining = timerState.sessionMinutes * 60 - timerState.elapsed;
-
   return (
-    <div className="relative z-30 shrink-0 border-t border-[var(--border-default)] bg-[var(--bg-primary)]/95 backdrop-blur-xl">
-      {/* Timer config popover */}
+    <div className={cn("absolute bottom-0 inset-x-0 z-40 transition-transform duration-500", panelOpen ? "translate-y-[150%]" : "translate-y-0")}>
       <AnimatePresence>
         {showTimerConfig && (
           <motion.div
-            initial={{ opacity: 0, y: 8, scale: 0.96 }}
+            initial={{ opacity: 0, y: 12, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.96 }}
-            transition={{ duration: 0.15 }}
-            className="absolute bottom-full right-8 mb-2 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[0_12px_40px_-12px_rgba(0,0,0,0.4)] backdrop-blur-xl"
-            onMouseDown={(e) => e.stopPropagation()}
+            exit={{ opacity: 0, y: 12, scale: 0.96 }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            className={cn(
+              "absolute bottom-full mb-6 rounded-[24px] border border-white/10 p-5 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.6)] backdrop-blur-[40px]",
+              shellMode === "constellations" ? "right-1/4 bg-[rgba(10,13,20,0.9)] border-[rgba(14,142,232,0.3)] shadow-[0_0_40px_rgba(14,142,232,0.1)]" : "right-12 bg-black/60"
+            )}
           >
-            <div className="text-xs font-medium text-[var(--text-secondary)] mb-3">
-              Focus Timer
+            <div className="mb-4 text-xs font-bold uppercase tracking-widest text-white/50 flex items-center gap-2">
+              <Zap className="w-4 h-4 text-[var(--accent-cyan)]" /> Focus Timer
             </div>
             <div className="flex gap-2">
-              {[25, 50, 90].map((mins) => (
+              {[25, 50, 90].map((minutes) => (
                 <button
-                  key={mins}
+                  key={minutes}
                   type="button"
                   onClick={() => {
-                    setTimerMinutes(mins);
+                    setTimerMinutes(minutes);
                     setShowTimerConfig(false);
                   }}
                   className={cn(
-                    "rounded-xl px-3 py-1.5 text-xs font-medium transition-colors",
-                    timerState.sessionMinutes === mins
-                      ? "bg-[var(--accent-cyan)]/15 text-[var(--accent-cyan)]"
-                      : "bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+                    "rounded-[16px] px-4 py-2 text-sm font-semibold transition-all",
+                    timerState.sessionMinutes === minutes
+                      ? "bg-[var(--accent-cyan)] text-white shadow-[0_0_20px_rgba(14,142,232,0.4)]"
+                      : "bg-white/5 text-white/70 hover:bg-white/10 hover:text-white",
                   )}
                 >
-                  {mins}m
+                  {minutes}m
                 </button>
               ))}
             </div>
             {timerState.sessionsCompleted > 0 && (
-              <div className="mt-3 text-[10px] text-[var(--text-tertiary)]">
-                Today: {timerState.sessionsCompleted} sessions
+              <div className="mt-4 text-[11px] font-mono text-white/40">
+                Today: {timerState.sessionsCompleted} sessions completed
               </div>
             )}
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Workstream picker dropdown */}
-      <AnimatePresence>
-        {showPicker && (
-          <motion.div
-            initial={{ opacity: 0, y: 8, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.96 }}
-            transition={{ duration: 0.15 }}
-            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-[320px] rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-[0_12px_40px_-12px_rgba(0,0,0,0.4)] backdrop-blur-xl"
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <div className="px-2 pb-2 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">
-              Route to workstream
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedWsId(null);
-                setShowPicker(false);
-              }}
-              className={cn(
-                "w-full rounded-xl px-3 py-2 text-left text-sm transition-colors",
-                !selectedWsId
-                  ? "bg-[var(--accent-cyan)]/10 text-[var(--accent-cyan)]"
-                  : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]",
-              )}
-            >
-              Auto (detect)
-            </button>
-            {activeWorkstreams.map((ws) => {
-              const color = getWorkstreamColor(ws.color);
-              return (
-                <button
-                  key={ws._id}
-                  type="button"
-                  onClick={() => {
-                    setSelectedWsId(ws._id);
-                    setShowPicker(false);
-                  }}
-                  className={cn(
-                    "w-full rounded-xl px-3 py-2 text-left text-sm transition-colors flex items-center gap-2",
-                    selectedWsId === ws._id
-                      ? "bg-[var(--accent-cyan)]/10 text-[var(--text-primary)]"
-                      : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]",
-                  )}
-                >
-                  <span
-                    className="h-2 w-2 rounded-full shrink-0"
-                    style={{ background: color.value }}
-                  />
-                  <span className="truncate">
-                    {ws.emoji} {ws.title}
-                  </span>
-                </button>
-              );
-            })}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Main bar content */}
-      <div className="flex items-center gap-3 px-4 py-2.5">
-        {/* Left: Breadcrumb or workstream pills */}
-        <div className="flex items-center gap-1.5 shrink-0 min-w-0">
-          {committedWorkstream ? (
-            /* Show breadcrumb when inside a workstream */
+      <div className={cn("flex items-end w-full", shellChrome.container)}>
+        
+        {/* Workstream Switcher Panel */}
+        <div className={cn("flex max-w-[50vw] items-center gap-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", shellChrome.panel)}>
+          {hasCommittedWorkstream && (
             <button
               type="button"
               onClick={onExitWorkstream}
-              className="inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />
-              <span className="max-w-[100px] truncate">
-                {committedWorkstream.emoji} {committedWorkstream.title}
-              </span>
-            </button>
-          ) : (
-            /* Show workstream pills when in overview */
-            <div className="flex items-center gap-1">
-              {activeWorkstreams.slice(0, 6).map((ws) => {
-                const color = getWorkstreamColor(ws.color);
-                const isActive = primaryWorkstreamId === ws._id;
-                return (
-                  <button
-                    key={ws._id}
-                    type="button"
-                    onClick={() => onOpenWorkstream(ws._id)}
-                    title={`${ws.emoji} ${ws.title}`}
-                    className={cn(
-                      "inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[11px] font-medium transition-all duration-200",
-                      isActive
-                        ? "text-[var(--text-primary)]"
-                        : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]",
-                    )}
-                    style={isActive ? { background: `${color.value}15` } : undefined}
-                  >
-                    <span
-                      className="h-2 w-2 rounded-full shrink-0"
-                      style={{ background: color.value, opacity: isActive ? 1 : 0.5 }}
-                    />
-                    <span className="hidden sm:inline max-w-[80px] truncate">
-                      {ws.title}
-                    </span>
-                  </button>
-                );
-              })}
-              {activeWorkstreams.length > 6 && (
-                <span className="text-[10px] text-[var(--text-tertiary)] px-1">
-                  +{activeWorkstreams.length - 6}
-                </span>
+              className={cn(
+                "inline-flex shrink-0 items-center gap-2 px-4 py-2 text-[13px] font-medium text-white/50 transition-colors hover:text-white hover:bg-white/10",
+                shellChrome.pill,
               )}
-              <button
-                type="button"
-                onClick={onNewWorkstream}
-                title="New workstream"
-                className="inline-flex items-center justify-center h-7 w-7 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </button>
-            </div>
+            >
+              <ChevronLeft className="h-4 w-4" />
+              <span>Zoom Out</span>
+            </button>
           )}
-        </div>
-
-        {/* Center: AI Command Bar */}
-        <div className="flex-1 min-w-0 max-w-[560px] mx-auto">
-          <div
+          <button
+            type="button"
+            onClick={onOpenHub}
             className={cn(
-              "relative flex items-center rounded-2xl border transition-all duration-200",
-              focused
-                ? "border-[var(--accent-cyan)]/40 bg-[var(--bg-elevated)] shadow-[0_4px_24px_-4px_rgba(14,142,232,0.15)]"
-                : "border-[var(--border-default)] bg-[var(--bg-secondary)]/80 hover:bg-[var(--bg-secondary)]",
+              "inline-flex shrink-0 items-center gap-2 px-4 py-2 text-[13px] font-bold transition-all",
+              shellChrome.pill,
+              primaryWorkstreamId === "__hub__"
+                ? `text-white ${shellChrome.activeBg}`
+                : "text-white/50 hover:bg-white/10 hover:text-white/80",
             )}
           >
-            <div className="flex items-center pl-3">
-              <Search className="h-3.5 w-3.5 text-[var(--text-tertiary)]" />
-            </div>
+            <Layers className="h-4 w-4" />
+            <span>Hub</span>
+          </button>
+          
+          <div className="w-px h-6 bg-white/10 mx-2" />
 
-            {/* Workstream scope badge */}
-            {selectedWsId && (
+          {activeWorkstreams.slice(0, 8).map((ws) => {
+            const color = getWorkstreamColor(ws.color);
+            const active = primaryWorkstreamId === ws._id;
+            return (
               <button
+                key={ws._id}
                 type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowPicker(true);
-                }}
-                className="ml-2 inline-flex items-center gap-1 rounded-lg bg-[var(--bg-hover)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors shrink-0"
+                onClick={() => onOpenWorkstream(ws._id)}
+                title={`${ws.emoji} ${ws.title}`}
+                className={cn(
+                  "inline-flex shrink-0 items-center gap-2 px-3 py-2 text-[13px] font-medium transition-all duration-300",
+                  shellChrome.pill,
+                  active
+                    ? `text-white ${shellChrome.activeBg}`
+                    : "text-white/50 hover:bg-white/10 hover:text-white/80",
+                )}
               >
                 <span
-                  className="h-1.5 w-1.5 rounded-full"
-                  style={{
-                    background:
-                      getWorkstreamColor(
-                        activeWorkstreams.find((ws) => ws._id === selectedWsId)?.color,
-                      ).value,
-                  }}
+                  className="h-2 w-2 shrink-0 rounded-full"
+                  style={{ background: color.value, opacity: active ? 1 : 0.4, boxShadow: active ? `0 0 10px ${color.value}` : 'none' }}
                 />
-                <span className="max-w-[60px] truncate">
-                  {activeWorkstreams.find((ws) => ws._id === selectedWsId)?.title ?? "Auto"}
+                <span className="max-w-[120px] truncate">
+                  {ws.emoji} {ws.title}
                 </span>
-                <X
-                  className="h-2.5 w-2.5 opacity-50 hover:opacity-100"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedWsId(null);
-                  }}
-                />
               </button>
+            );
+          })}
+          
+          <button
+            type="button"
+            onClick={onNewWorkstream}
+            className={cn(
+              "inline-flex h-9 w-9 ml-1 shrink-0 items-center justify-center text-white/40 transition-colors hover:bg-white/10 hover:text-white",
+              shellChrome.pill,
             )}
-
-            <input
-              ref={inputRef}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onFocus={() => setFocused(true)}
-              onBlur={() => {
-                setTimeout(() => setFocused(false), 150);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  handleSubmit();
-                }
-                if (e.key === "Escape") {
-                  inputRef.current?.blur();
-                }
-              }}
-              placeholder={
-                committedWorkstream
-                  ? `Ask about ${committedWorkstream.title}...`
-                  : "Ask anything, create anything..."
-              }
-              className="flex-1 bg-transparent px-2.5 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none min-w-0"
-            />
-
-            {/* Scope selector trigger */}
-            {!selectedWsId && !primaryWorkstreamId && (
-              <button
-                type="button"
-                onClick={() => setShowPicker(true)}
-                className="mr-2 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors shrink-0"
-              >
-                Auto
-                <ChevronDown className="h-2.5 w-2.5" />
-              </button>
-            )}
-
-            {/* Keyboard hint */}
-            {!focused && !query && (
-              <kbd className="mr-3 hidden sm:inline text-[10px] text-[var(--text-tertiary)] bg-[var(--bg-hover)] px-1.5 py-0.5 rounded">
-                ⌘K
-              </kbd>
-            )}
-          </div>
+            title="New workstream"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
         </div>
 
-        {/* Right: Timer + Deadline badge */}
-        <div className="flex items-center gap-2 shrink-0">
-          {/* Focus Timer */}
-          <div className="flex items-center gap-1">
+        {/* Global Action / Search Panel */}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            handleSubmit();
+          }}
+          className={cn(
+            "flex h-[52px] w-[min(28rem,30vw)] min-w-[18rem] items-center gap-3 transition-all duration-300",
+            shellChrome.panel,
+            focused && "ring-2 ring-[var(--accent-cyan)]/40 shadow-[0_0_30px_rgba(14,142,232,0.2)]"
+          )}
+        >
+          <div className="pl-2">
+            <Search className={cn("h-4 w-4 transition-colors", focused ? "text-[var(--accent-cyan)]" : "text-white/30")} />
+          </div>
+          <input
+            ref={inputRef}
+            type="text"
+            value={query}
+            onFocus={() => setFocused(true)}
+            onBlur={() => {
+              if (!query) setFocused(false);
+            }}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                setQuery("");
+                setFocused(false);
+                inputRef.current?.blur();
+              }
+            }}
+            placeholder={committedWorkstream ? `Ask inside ${committedWorkstream.title}...` : "Command or Ask AI..."}
+            className={cn(
+              "min-w-0 flex-1 border-none font-medium focus:outline-none",
+              shellChrome.input,
+            )}
+          />
+          <button
+            type="submit"
+            disabled={!query.trim()}
+            className={cn(
+              "inline-flex h-9 w-9 shrink-0 items-center justify-center transition-all duration-300",
+              shellChrome.pill,
+              query.trim()
+                ? "bg-[var(--accent-cyan)] text-white shadow-[0_0_15px_rgba(14,142,232,0.4)]"
+                : "bg-white/5 text-white/20",
+            )}
+          >
+            <Send className="h-4 w-4 ml-0.5" />
+          </button>
+        </form>
+
+        {/* Utility / Timer Panel */}
+        <div className={cn("flex shrink-0 items-center gap-1", shellChrome.panel)}>
+          <button
+            type="button"
+            onClick={() => setShowTimerConfig((value) => !value)}
+            className={cn(
+              "inline-flex items-center gap-2 px-4 py-2 text-[13px] font-bold font-mono transition-colors",
+              shellChrome.pill,
+              timerState.active
+                ? "bg-[var(--accent-cyan)]/20 text-[var(--accent-cyan)]"
+                : "text-white/60 hover:bg-white/10 hover:text-white",
+            )}
+          >
+            <Clock className="h-4 w-4" />
+            <span className="tracking-widest">
+              {timerState.active ? formatTimerDisplay(timerRemaining) : `${timerState.sessionMinutes}:00`}
+            </span>
+          </button>
+
+          <div className="w-px h-6 bg-white/10 mx-1" />
+
+          {timerState.active ? (
             <button
               type="button"
-              onClick={() => setShowTimerConfig((prev) => !prev)}
+              onClick={() => pauseTimer()}
               className={cn(
-                "inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-medium transition-colors",
-                timerState.active
-                  ? "text-[var(--accent-cyan)] bg-[var(--accent-cyan)]/10"
-                  : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]",
+                "inline-flex h-9 w-9 items-center justify-center text-white/60 transition-colors hover:bg-white/10 hover:text-white",
+                shellChrome.pill,
               )}
             >
-              <Clock className="h-3.5 w-3.5" />
-              <span className="tabular-nums">
-                {timerState.active
-                  ? formatTimerDisplay(timerRemaining)
-                  : `${timerState.sessionMinutes}:00`}
-              </span>
+              <Pause className="h-4 w-4 fill-current" />
             </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => startTimer(
+                timerState.sessionMinutes,
+                committedWorkstream?._id,
+                committedWorkstream?.title,
+              )}
+              className={cn(
+                "inline-flex h-9 w-9 items-center justify-center text-[var(--accent-cyan)] transition-colors hover:bg-[var(--accent-cyan)]/20 hover:text-[var(--accent-cyan)]",
+                shellChrome.pill,
+              )}
+            >
+              <Play className="h-4 w-4 fill-current ml-0.5" />
+            </button>
+          )}
 
-            {timerState.active ? (
-              <button
-                type="button"
-                onClick={() => pauseTimer()}
-                className="inline-flex items-center justify-center h-7 w-7 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
-                title="Pause timer"
-              >
-                <Pause className="h-3 w-3" />
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => startTimer()}
-                className="inline-flex items-center justify-center h-7 w-7 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
-                title="Start timer"
-              >
-                <Play className="h-3 w-3" />
-              </button>
-            )}
-
-            {timerState.elapsed > 0 && !timerState.active && (
-              <button
-                type="button"
-                onClick={() => resetTimer()}
-                className="inline-flex items-center justify-center h-7 w-7 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
-                title="Reset timer"
-              >
-                <RotateCcw className="h-3 w-3" />
-              </button>
-            )}
-          </div>
+          {timerState.elapsed > 0 && !timerState.active && (
+            <button
+              type="button"
+              onClick={() => resetTimer()}
+              className={cn(
+                "inline-flex h-9 w-9 items-center justify-center text-white/40 transition-colors hover:bg-white/10 hover:text-white/80",
+                shellChrome.pill,
+              )}
+            >
+              <RotateCcw className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
     </div>

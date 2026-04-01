@@ -1,10 +1,59 @@
 import { isSuperAdminEmail, requireActor } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
+import { hasConvexUrl } from "@/lib/env";
 import { ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 
 export async function GET() {
   return withRouteErrorHandling(async () => {
+    if (!hasConvexUrl()) {
+      return ok({
+        actor: {
+          clerkId: "local-demo-admin",
+          email: "local-admin@school.local",
+          name: "Local Demo Admin",
+          role: "admin",
+          orgId: "local-demo-org",
+          userId: "local-demo-user",
+          onboardingComplete: true,
+        },
+        isSuperAdmin: false,
+        chats: [],
+        models: [],
+        orgSettings: {
+          org: {
+            name: "Spectra",
+            welcomeMessage: "Running in local demo mode. Configure Convex to load school data.",
+          },
+          openRouterWarnings: [],
+        },
+        agents: [],
+        userSpending: {
+          totalSpentEur: 0,
+          totalCostCents: 0,
+          tier: "normal",
+          softLimitReached: false,
+          hardLimitReached: false,
+          softLimitCents: 0,
+          cheapOnlyLimitCents: 0,
+          hardLimitCents: 0,
+          budgetUsagePercent: 0,
+          activityUsagePercent: 0,
+          tokenUsagePercent: 0,
+          monthlyTokens: 0,
+          monthlyEvents: 0,
+          monthlyTokenBudget: 0,
+          monthlyCostCentsFromEvents: 0,
+          marginPercent: 0,
+        },
+        userMemory: {
+          updatedAt: 0,
+          summary: "",
+          entryCount: 0,
+        },
+      });
+    }
+
     const actor = await requireActor();
 
     await convexMutation("models:seedCatalogIfEmpty", { actorClerkId: actor.clerkId });

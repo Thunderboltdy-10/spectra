@@ -44,6 +44,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { hasClerkPublishableKey } from "@/lib/clerk-config";
 import { getModeConfig } from "@/lib/modes";
 import { cn } from "@/lib/utils";
 import type { Chat, UserSpending } from "@/hooks/use-chat-state";
@@ -84,6 +85,18 @@ type ChatSidebarProps = {
   orgLogoUrl?: string;
   activeStreamIds?: Set<string>;
   hasDraft?: (chatId: string) => boolean;
+};
+
+type SidebarViewer = {
+  fullName?: string | null;
+  firstName?: string | null;
+  imageUrl?: string | null;
+} | null;
+
+type ChatSidebarImplProps = ChatSidebarProps & {
+  viewer: SidebarViewer;
+  onManageAccount: () => void;
+  onSignOut: () => void;
 };
 
 function toGroupHeading(ts: number) {
@@ -138,7 +151,7 @@ function isNavActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function ChatSidebar({
+function ChatSidebarImpl({
   chats,
   selectedChatId,
   search,
@@ -159,10 +172,12 @@ export function ChatSidebar({
   orgLogoUrl,
   activeStreamIds,
   hasDraft,
-}: ChatSidebarProps) {
+  viewer,
+  onManageAccount,
+  onSignOut,
+}: ChatSidebarImplProps) {
   const pathname = usePathname();
-  const { user } = useUser();
-  const { signOut, openUserProfile } = useClerk();
+  const [hasHydrated, setHasHydrated] = useState(false);
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
   const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
@@ -184,6 +199,10 @@ export function ChatSidebar({
   const chatListEndRef = useRef<HTMLDivElement>(null);
   const pageNavScrollRef = useRef<HTMLDivElement>(null);
   const pinnedSet = pinnedChatIds ?? EMPTY_PINNED_IDS;
+
+  useEffect(() => {
+    setHasHydrated(true);
+  }, []);
 
   useEffect(() => {
     setLogoLoadFailed(false);
@@ -321,8 +340,16 @@ export function ChatSidebar({
     () => nonPinnedChats.slice(0, visibleChatCount),
     [nonPinnedChats, visibleChatCount],
   );
-  const grouped = useMemo(() => groupChats(nonPinnedChats), [nonPinnedChats]);
-  const visibleGrouped = useMemo(() => groupChats(visibleNonPinnedChats), [visibleNonPinnedChats]);
+  const grouped = useMemo(() => (
+    hasHydrated
+      ? groupChats(nonPinnedChats)
+      : [{ heading: "Chats", chats: nonPinnedChats }]
+  ), [hasHydrated, nonPinnedChats]);
+  const visibleGrouped = useMemo(() => (
+    hasHydrated
+      ? groupChats(visibleNonPinnedChats)
+      : [{ heading: "Chats", chats: visibleNonPinnedChats }]
+  ), [hasHydrated, visibleNonPinnedChats]);
   const collapsedUtilityActions = [
     {
       id: "timer",
@@ -437,26 +464,35 @@ export function ChatSidebar({
             <Settings2 className="h-4 w-4" />
           </Button>
           <ThemeToggle className="h-9.5 w-9.5 rounded-xl bg-transparent hover:bg-[var(--bg-hover)]" />
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button type="button" className="cursor-pointer rounded-full">
-                <Avatar className="h-8.5 w-8.5">
-                  <AvatarImage src={user?.imageUrl} alt={user?.fullName ?? "User"} />
-                  <AvatarFallback>{initials(user?.fullName || user?.firstName || "User")}</AvatarFallback>
-                </Avatar>
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" side="right">
-              <DropdownMenuItem onSelect={() => openUserProfile()}>
-                <UserRound className="mr-2 h-4 w-4" />
-                Manage account
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => signOut()}>
-                <Sparkles className="mr-2 h-4 w-4" />
-                Sign out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {hasHydrated ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" className="cursor-pointer rounded-full">
+                  <Avatar className="h-8.5 w-8.5">
+                    <AvatarImage src={viewer?.imageUrl ?? undefined} alt={viewer?.fullName ?? "User"} />
+                    <AvatarFallback>{initials(viewer?.fullName || viewer?.firstName || "User")}</AvatarFallback>
+                  </Avatar>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" side="right">
+                <DropdownMenuItem onSelect={onManageAccount}>
+                  <UserRound className="mr-2 h-4 w-4" />
+                  Manage account
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={onSignOut}>
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <button type="button" className="cursor-pointer rounded-full" aria-label="Account">
+              <Avatar className="h-8.5 w-8.5">
+                <AvatarImage src={viewer?.imageUrl ?? undefined} alt={viewer?.fullName ?? "User"} />
+                <AvatarFallback>{initials(viewer?.fullName || viewer?.firstName || "User")}</AvatarFallback>
+              </Avatar>
+            </button>
+          )}
         </div>
       </div>
     );
@@ -594,7 +630,9 @@ export function ChatSidebar({
                   const active = selectedChatId === chat._id;
                   // Show AI-generated title as primary, fallback to user prompt or "New chat"
                   const promptPreview = chat.title || chat.latestUserPrompt || "New chat";
-                  const secondaryLine = formatDistanceToNow(chat.updatedAt, { addSuffix: true });
+                  const secondaryLine = hasHydrated
+                    ? formatDistanceToNow(chat.updatedAt, { addSuffix: true })
+                    : "Recently updated";
                   const chatModeConfig = getModeConfig(chat.mode);
                   const isStreaming = activeStreamIds?.has(chat._id);
                   const hasDraftIndicator = hasDraft?.(chat._id);
@@ -709,29 +747,38 @@ export function ChatSidebar({
         <GlobalUtilityDock placement="profile-bar" className="mb-2 w-full" />
 
         <div className="flex items-center gap-2 px-1">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button type="button" className="cursor-pointer rounded-full">
-                <Avatar className="h-7 w-7">
-                  <AvatarImage src={user?.imageUrl} alt={user?.fullName ?? "User"} />
-                  <AvatarFallback className="text-[10px]">{initials(user?.fullName || user?.firstName || "User")}</AvatarFallback>
-                </Avatar>
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuItem onSelect={() => openUserProfile()}>
-                <UserRound className="mr-2 h-4 w-4" />
-                Manage account
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => signOut()}>
-                <Sparkles className="mr-2 h-4 w-4" />
-                Sign out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {hasHydrated ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" className="cursor-pointer rounded-full">
+                  <Avatar className="h-7 w-7">
+                    <AvatarImage src={viewer?.imageUrl ?? undefined} alt={viewer?.fullName ?? "User"} />
+                    <AvatarFallback className="text-[10px]">{initials(viewer?.fullName || viewer?.firstName || "User")}</AvatarFallback>
+                  </Avatar>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuItem onSelect={onManageAccount}>
+                  <UserRound className="mr-2 h-4 w-4" />
+                  Manage account
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={onSignOut}>
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <button type="button" className="cursor-pointer rounded-full" aria-label="Account">
+              <Avatar className="h-7 w-7">
+                <AvatarImage src={viewer?.imageUrl ?? undefined} alt={viewer?.fullName ?? "User"} />
+                <AvatarFallback className="text-[10px]">{initials(viewer?.fullName || viewer?.firstName || "User")}</AvatarFallback>
+              </Avatar>
+            </button>
+          )}
 
           <div className="min-w-0 flex-1">
-            <p className="truncate text-[13px] font-medium leading-tight">{user?.fullName ?? user?.firstName ?? "User"}</p>
+            <p className="truncate text-[13px] font-medium leading-tight">{viewer?.fullName ?? viewer?.firstName ?? "User"}</p>
             <div className="flex items-center gap-1.5 text-[10px] text-[var(--text-tertiary)]">
               <span className="inline-flex items-center gap-0.5">
                 <Flame className={cn("h-2.5 w-2.5", gamification.currentStreak > 0 ? "text-[#ef4444]" : "text-[var(--text-tertiary)]")} />
@@ -757,5 +804,34 @@ export function ChatSidebar({
         </div>
       </div>
     </div>
+  );
+}
+
+function ChatSidebarWithClerk(props: ChatSidebarProps) {
+  const { user } = useUser();
+  const { signOut, openUserProfile } = useClerk();
+
+  return (
+    <ChatSidebarImpl
+      {...props}
+      viewer={user ? { fullName: user.fullName, firstName: user.firstName, imageUrl: user.imageUrl } : null}
+      onManageAccount={() => openUserProfile()}
+      onSignOut={() => void signOut()}
+    />
+  );
+}
+
+export function ChatSidebar(props: ChatSidebarProps) {
+  if (hasClerkPublishableKey()) {
+    return <ChatSidebarWithClerk {...props} />;
+  }
+
+  return (
+    <ChatSidebarImpl
+      {...props}
+      viewer={null}
+      onManageAccount={() => {}}
+      onSignOut={() => {}}
+    />
   );
 }

@@ -15,6 +15,21 @@ function sanitizeArtifactPlaintext(value: unknown) {
   return stripGeneratedDocumentMarkers(value);
 }
 
+function isArtifactProbeMiss(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  const lower = error.message.toLowerCase();
+  return (
+    lower.includes("artifact not found")
+    || lower.includes("argumentvalidationerror")
+    || lower.includes("value does not match validator")
+    || lower.includes("not in the validator")
+    || lower.includes("extra field")
+    || lower.includes("invalid id")
+    || (lower.includes("expected table") && lower.includes("artifact"))
+    || (lower.includes("from table") && lower.includes("note"))
+  );
+}
+
 export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();
@@ -37,7 +52,10 @@ export async function GET(request: NextRequest) {
           actorClerkId: actor.clerkId,
           artifactId,
         });
-      } catch {
+      } catch (error) {
+        if (!isArtifactProbeMiss(error)) {
+          throw error;
+        }
         const migrated = await convexMutation<
           { actorClerkId: string; noteId: string },
           { artifactId: string }
@@ -90,7 +108,12 @@ export async function GET(request: NextRequest) {
       const existingArtifact = await convexQuery("artifacts:get", {
         actorClerkId: actor.clerkId,
         artifactId: noteId,
-      }).catch(() => null) as { _id: string } | null;
+      }).catch((error) => {
+        if (isArtifactProbeMiss(error)) {
+          return null;
+        }
+        throw error;
+      }) as { _id: string } | null;
       if (existingArtifact) {
         return ok({ artifactId: existingArtifact._id });
       }

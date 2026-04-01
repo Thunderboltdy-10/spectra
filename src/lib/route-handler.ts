@@ -8,6 +8,7 @@ function normalizeErrorStatus(message: string) {
 
   if (message.startsWith("AUTH_NOT_SIGNED_IN")) return 401;
   if (message.startsWith("AUTH_NO_ACCESS")) return 403;
+  if (message.startsWith("AUTH_ORG_INACTIVE")) return 403;
   if (message.startsWith("AUTH_MISCONFIGURED")) return 500;
   if (message.startsWith("AUTH_PROFILE_UNAVAILABLE")) return 500;
   if (message.startsWith("AUTH_BOOTSTRAP_FAILED")) return 500;
@@ -46,12 +47,13 @@ export async function withRouteErrorHandling<T>(
 
   try {
     const result = await handler(logger);
+    const status = result instanceof Response ? result.status : 200;
     
     // Log successful completion for API routes
     if (request) {
       logAPIResponse({
         logger,
-        status: 200,
+        status,
         duration: Date.now() - startTime,
       });
     }

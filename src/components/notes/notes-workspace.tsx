@@ -11,6 +11,7 @@ import { useEditorStore, normalizeEditorMode } from "@/stores/editor-store";
 import { getArtifactMeta, type ArtifactType } from "@/lib/artifact-types";
 import { cn } from "@/lib/utils";
 import { stripGeneratedDocumentMarkers } from "@/lib/document-generator";
+import { notifyWorkspaceContentMutated } from "@/lib/workspace/events";
 
 const EMPTY_DOC = {
   type: "doc",
@@ -220,6 +221,7 @@ export function NotesWorkspace() {
               <TiptapEditor
                 key={activeNote._id}
                 artifactId={activeNote._id}
+                workstreamId={activeNote.workstreamId}
                 content={activeNote.content}
                 showDocumentMeta
                 documentTitle={activeNote.title}
@@ -227,6 +229,10 @@ export function NotesWorkspace() {
                 updatedAt={activeNote.updatedAt}
                 onVersionRestore={() => {
                   void fetchNote(activeNote._id);
+                  notifyWorkspaceContentMutated({
+                    workstreamId: activeNote.workstreamId,
+                    refreshHub: true,
+                  });
                 }}
                 onSave={(content, text) =>
                   void updateNote(activeNote._id, {

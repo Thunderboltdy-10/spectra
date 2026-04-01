@@ -17,13 +17,31 @@ function pickResolvedArtifactId(value: { _id: string } | { artifactId: string } 
   return "artifactId" in value ? value.artifactId : value._id;
 }
 
+function isArtifactProbeMiss(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  const lower = error.message.toLowerCase();
+  return (
+    lower.includes("artifact not found")
+    || lower.includes("argumentvalidationerror")
+    || lower.includes("value does not match validator")
+    || lower.includes("not in the validator")
+    || lower.includes("extra field")
+    || lower.includes("invalid id")
+    || (lower.includes("expected table") && lower.includes("artifact"))
+    || (lower.includes("from table") && lower.includes("note"))
+  );
+}
+
 async function findExistingArtifact(actorClerkId: string, artifactId: string) {
   try {
     return await convexQuery("artifacts:get", {
       actorClerkId,
       artifactId,
     }) as { _id: string } | null;
-  } catch {
+  } catch (error) {
+    if (!isArtifactProbeMiss(error)) {
+      throw error;
+    }
     return null;
   }
 }
@@ -137,10 +155,16 @@ export async function POST(request: NextRequest) {
     if (action === "delete") {
       const { noteId } = body as { noteId?: string };
       if (!noteId) return badRequest("noteId is required");
-      const result = await convexMutation("notes:remove", {
-        actorClerkId: actor.clerkId,
-        noteId,
-      });
+      const existingArtifact = await findExistingArtifact(actor.clerkId, noteId);
+      const result = existingArtifact
+        ? await convexMutation("artifacts:remove", {
+            actorClerkId: actor.clerkId,
+            artifactId: existingArtifact._id,
+          })
+        : await convexMutation("notes:remove", {
+            actorClerkId: actor.clerkId,
+            noteId,
+          });
       return ok(result);
     }
 

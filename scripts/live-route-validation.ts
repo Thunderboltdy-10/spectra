@@ -1,5 +1,3 @@
-/* eslint-disable no-console */
-
 import { countFlashcardPairs, normalizeFlashcardDeck } from "../src/lib/flashcard-format";
 import { parseQuiz } from "../src/lib/quiz-parser";
 

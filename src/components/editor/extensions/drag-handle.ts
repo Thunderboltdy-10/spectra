@@ -111,15 +111,15 @@ export const DragHandle = Extension.create({
     };
 
     const showControls = (view: EditorView, block: TopLevelBlock) => {
-      const wrapper = view.dom.parentElement;
+      const wrapper = view.dom.closest(".tiptap-root") as HTMLElement | null ?? view.dom.parentElement;
       if (!wrapper) return;
       const wrapperRect = wrapper.getBoundingClientRect();
       const blockRect = block.dom.getBoundingClientRect();
       const isCompact = wrapper.classList.contains("tiptap-compact");
       currentBlock = block;
-      // Position relative to the wrapper, accounting for wrapper scroll
-      container.style.top = `${blockRect.top - wrapperRect.top + wrapper.scrollTop + 1}px`;
-      container.style.left = isCompact ? "-32px" : "-42px";
+      // Position relative to the visible editor surface so the controls sit beside the hovered line.
+      container.style.top = `${blockRect.top - wrapperRect.top + 1}px`;
+      container.style.left = `${Math.max(6, blockRect.left - wrapperRect.left - (isCompact ? 30 : 36))}px`;
       container.style.opacity = "1";
       container.dataset.visible = "true";
     };
@@ -136,9 +136,11 @@ export const DragHandle = Extension.create({
         view(editorView) {
           container.style.opacity = "0";
           container.dataset.visible = "false";
-          const wrapper = editorView.dom.parentElement;
+          const wrapper = editorView.dom.closest(".tiptap-root") as HTMLElement | null ?? editorView.dom.parentElement;
           if (wrapper) {
-            wrapper.style.position = "relative";
+            if (getComputedStyle(wrapper).position === "static") {
+              wrapper.style.position = "relative";
+            }
             wrapper.appendChild(container);
           }
 

@@ -7,7 +7,8 @@
  * - "full-page": renders as right-panel conversational UI
  * - "workspace-panel": inline within artifact panel, response area expands above input bar
  *
- * Action-first: AI edits auto-apply, user can discard within 30s.
+ * For document artifacts, action-first editing is handled by the editor AI bar.
+ * This surface is used for conversational follow-ups around non-document artifacts.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -201,7 +202,7 @@ export function ArtifactAiSurface({
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask AI to edit..."
+              placeholder="Ask AI about this artifact..."
               className="flex-1 bg-transparent border-none outline-none text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
               disabled={streaming}
             />
@@ -309,7 +310,7 @@ export function ArtifactAiSurface({
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask AI to edit this artifact..."
+            placeholder="Ask AI about this artifact..."
             className="flex-1 bg-transparent border-none outline-none text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
             disabled={streaming}
           />

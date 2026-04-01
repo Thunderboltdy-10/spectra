@@ -16,6 +16,15 @@ import { RightPushPanel } from "@/components/workspace/right-push-panel";
 import { useWorkspaceData } from "@/hooks/use-workspace-data";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { registerSyncCallback } from "@/lib/workspace/position-persistence";
+import {
+  notifyWorkspaceContentMutated,
+  subscribeWorkspaceContentMutated,
+} from "@/lib/workspace/events";
+import {
+  WORKSPACE_SHELLS,
+  type WorkspaceShellMode,
+} from "@/lib/workspace/shell-mode";
+import { hasClerkPublishableKey } from "@/lib/clerk-config";
 
 const WorkspaceCanvas = dynamic(
   () =>
@@ -41,7 +50,11 @@ function CanvasLoader() {
   );
 }
 
-function WorkspaceContent() {
+type WorkspaceContentProps = {
+  userName: string;
+};
+
+function WorkspaceContent({ userName }: WorkspaceContentProps) {
   const router = useRouter();
   const params = useSearchParams();
   const hubOpen = params.get("hub") === "1";
@@ -49,10 +62,10 @@ function WorkspaceContent() {
   const panelType = params.get("panel") ?? undefined;
   const panelId = params.get("thread") ?? params.get("note") ?? params.get("artifact") ?? params.get("planner") ?? undefined;
 
-  const { user } = useUser();
   const {
     workstreams,
     loading,
+    refresh,
     createWorkstream,
     updateWorkstream,
   } = useWorkspaceData();
@@ -67,11 +80,45 @@ function WorkspaceContent() {
     openPanel,
     closePanel,
     commitWorkstream,
+    setViewMode,
   } = useWorkspaceStore();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [artifactDialogOpen, setArtifactDialogOpen] = useState(false);
+  const [shellMode, setShellMode] = useState<WorkspaceShellMode>("magnetic");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const saved = window.localStorage.getItem("workspace:shell-mode");
+    if (saved && WORKSPACE_SHELLS.includes(saved as WorkspaceShellMode)) {
+      const mode = saved as WorkspaceShellMode;
+      setShellMode(mode);
+      setViewMode(
+        mode === "constellations"
+          ? "graph"
+          : mode === "lenses"
+            ? "columns"
+            : "structured",
+      );
+    }
+  }, [setViewMode]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("workspace:shell-mode", shellMode);
+  }, [shellMode]);
+
+  const handleShellModeChange = useCallback((mode: WorkspaceShellMode) => {
+    setShellMode(mode);
+    setViewMode(
+      mode === "constellations"
+        ? "graph"
+        : mode === "lenses"
+          ? "columns"
+          : "structured",
+    );
+  }, [setViewMode]);
 
   // Sync URL with store state
   useEffect(() => {
@@ -240,6 +287,11 @@ function WorkspaceContent() {
           const panelType = type === "document" || type === "note" ? "artifact" : "artifact";
           handleOpenPanel(panelType, data.artifactId);
         }
+        notifyWorkspaceContentMutated({
+          workstreamId: wsId,
+          refreshHub: true,
+          refreshWorkstreams: true,
+        });
         toast.success(`${title || "Artifact"} created`);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Failed to create artifact");
@@ -249,8 +301,6 @@ function WorkspaceContent() {
   );
 
   const panelWidth = panel ? getPanelWidth(panel.type) : 0;
-
-  const userName = user?.fullName || user?.firstName || "Student";
 
   // Focus timer tick
   const { timerState, tickTimer, completeTimerSession } = useWorkspaceStore();
@@ -278,10 +328,19 @@ function WorkspaceContent() {
       await fetch("/api/workstreams", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        keepalive: true,
         body: JSON.stringify({ action: "batchUpdatePositions", positions }),
       });
     });
   }, []);
+
+  useEffect(() => {
+    return subscribeWorkspaceContentMutated((detail) => {
+      if (detail.refreshWorkstreams) {
+        void refresh();
+      }
+    });
+  }, [refresh]);
 
   return (
     <AppShell fullBleed noScroll contentClassName="!p-0">
@@ -294,6 +353,8 @@ function WorkspaceContent() {
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           userName={userName}
+          shellMode={shellMode}
+          onShellModeChange={handleShellModeChange}
         />
 
         {/* Canvas + panel container */}
@@ -311,8 +372,6 @@ function WorkspaceContent() {
                 >
                   <WorkspaceCanvas
                     workstreams={workstreams}
-                    userName={userName}
-                    userAvatar={user?.imageUrl || ""}
                     onNewWorkstream={handleNewWorkstream}
                     onWorkstreamUpdate={updateWorkstream}
                     focusWorkstreamId={wsParam}
@@ -323,6 +382,7 @@ function WorkspaceContent() {
                     onOpenPanel={handleOpenPanel}
                     onCreateArtifact={() => setArtifactDialogOpen(true)}
                     panelWidth={panelWidth}
+                    shellMode={shellMode}
                   />
 
                   {/* Empty state */}
@@ -389,9 +449,9 @@ function WorkspaceContent() {
                 onOpenWorkstreamChat={(workstreamId, query) => {
                   useWorkspaceStore.getState().setOpenChatQuery(query);
                   handleCommitWorkstream(workstreamId);
-                  setTimeout(() => handleOpenPanel("chat", "new"), 500);
+                  setTimeout(() => handleOpenPanel("chat", "new"), 320);
                 }}
-                onOpenPanel={handleOpenPanel}
+                shellMode={shellMode}
                 panelOpen={!!panel}
               />
             </>
@@ -419,6 +479,11 @@ function WorkspaceContent() {
   );
 }
 
+function WorkspaceContentWithClerk() {
+  const { user } = useUser();
+  return <WorkspaceContent userName={user?.fullName || user?.firstName || "Student"} />;
+}
+
 function getPanelWidth(type: string): number {
   switch (type) {
     case "chat": return 380;
@@ -433,7 +498,11 @@ function getPanelWidth(type: string): number {
 export default function WorkspacePage() {
   return (
     <Suspense fallback={<CanvasLoader />}>
-      <WorkspaceContent />
+      {hasClerkPublishableKey() ? (
+        <WorkspaceContentWithClerk />
+      ) : (
+        <WorkspaceContent userName="Student" />
+      )}
     </Suspense>
   );
 }

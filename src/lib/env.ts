@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 const envSchema = z.object({
-  NEXT_PUBLIC_CONVEX_URL: z.string().url(),
+  NEXT_PUBLIC_CONVEX_URL: z.string().url().optional(),
   OPENROUTER_API_KEY: z.string().min(1).optional(),
   OPENROUTER_APP_NAME: z.string().optional(),
   OPENROUTER_SITE_URL: z.string().optional(),
@@ -26,6 +26,20 @@ export function getEnv() {
     console.warn("[env] OPENROUTER_API_KEY missing; OpenRouter-backed features will run in degraded mode.");
   }
   return parsed.data;
+}
+
+export function getConvexUrl() {
+  const url = getEnv().NEXT_PUBLIC_CONVEX_URL;
+  if (!url) {
+    throw new Error(
+      "CONVEX_NOT_CONFIGURED: NEXT_PUBLIC_CONVEX_URL is missing. Add your Convex deployment URL to .env.local.",
+    );
+  }
+  return url;
+}
+
+export function hasConvexUrl() {
+  return Boolean(getEnv().NEXT_PUBLIC_CONVEX_URL);
 }
 
 export function getAdminEmails() {

@@ -1,22 +1,16 @@
 "use client";
 
-/**
- * Canvas-native internal view nodes for committed workstreams.
- * These are React Flow custom node types that render workstream content
- * directly on the canvas (not as overlays).
- */
-
-import { memo, useState } from "react";
-import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
-import { motion, AnimatePresence } from "framer-motion";
+import { memo } from "react";
+import { Handle, Position, type Node, type NodeProps, type Edge } from "@xyflow/react";
 import {
   MessageSquare,
-  StickyNote,
   CalendarClock,
   FileText,
   Plus,
-  ChevronDown,
-  ChevronRight,
+  GitMerge,
+  Workflow,
+  Sparkles,
+  Crosshair,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { PanelType } from "@/stores/workspace-store";
@@ -51,11 +45,26 @@ export type ArtifactSummary = {
   createdAt: number;
 };
 
+export type WorkspaceWidgetSummary = {
+  id: string;
+  title: string;
+  itemType: string;
+  renderMode?: string;
+  contentSummary?: string;
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+  panelType: PanelType;
+  panelId: string;
+};
+
 export type InternalContentData = {
   threads: ThreadSummary[];
   notes: NoteSummary[];
   plannerItems: PlannerItemSummary[];
   artifacts: ArtifactSummary[];
+  widgets: WorkspaceWidgetSummary[];
   loading: boolean;
   workstreamEmoji?: string;
   workstreamTitle?: string;
@@ -73,160 +82,123 @@ function formatTimeAgo(timestamp: number) {
   return `${days}d`;
 }
 
-/* ─── Group Node (for structured view) ──────────────────────── */
-
-export type GroupNodeData = {
+type BaseGroupData = {
   label: string;
-  icon: string; // "thread" | "note" | "planner" | "artifact"
-  items: Array<{ id: string; title: string; meta?: string; statusColor?: string }>;
-  panelType?: PanelType;
+  items: Array<{ id: string; title: string; meta?: string; statusColor?: string; panelType: PanelType }>;
   onOpenPanel: (type: PanelType, id: string) => void;
-  onNew?: () => void;
 };
 
-export const GroupNode = memo(function GroupNode({
+type WorkspaceWidgetNodeData = WorkspaceWidgetSummary & {
+  onOpenPanel: (type: PanelType, id: string) => void;
+};
+
+const WIDGET_ICON_BY_TYPE = {
+  thread: MessageSquare,
+  planner: CalendarClock,
+  visualization: Workflow,
+  document: FileText,
+} as const;
+
+export const WorkspaceWidgetNode = memo(function WorkspaceWidgetNode({
   data,
-}: NodeProps<Node<GroupNodeData>>) {
-  const [expanded, setExpanded] = useState(false);
-  const maxVisible = 5;
-  const hasOverflow = data.items.length > maxVisible;
-  const visibleItems = expanded ? data.items : data.items.slice(0, maxVisible);
-
-  const Icon = {
-    thread: MessageSquare,
-    note: StickyNote,
-    planner: CalendarClock,
-    artifact: FileText,
-  }[data.icon] ?? FileText;
-
+}: NodeProps<Node<WorkspaceWidgetNodeData>>) {
+  const IconComponent =
+    WIDGET_ICON_BY_TYPE[data.itemType as keyof typeof WIDGET_ICON_BY_TYPE]
+    ?? Sparkles;
   return (
-    <div className="internal-group-node" style={{ minWidth: 420, maxWidth: 460 }}>
-      <div className="mb-5 flex items-center gap-3 pb-2">
-        <Icon className="h-3.5 w-3.5 text-[var(--text-tertiary)]" strokeWidth={1.7} />
-        <span className="text-[11px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
-          {data.label}
+    <button
+      type="button"
+      onClick={() => data.onOpenPanel(data.panelType, data.panelId)}
+      className="group flex h-full w-full flex-col rounded-[22px] border border-[var(--border-default)] bg-[var(--bg-elevated)]/92 px-4 py-4 text-left shadow-[0_18px_42px_-28px_rgba(15,23,42,0.45)] backdrop-blur-2xl transition-transform duration-200 hover:-translate-y-0.5 hover:border-[var(--accent-cyan)]/35"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2 text-[var(--text-secondary)]">
+            <IconComponent className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <div className="truncate text-[13px] font-semibold text-[var(--text-primary)]">
+              {data.title}
+            </div>
+            <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+              {data.renderMode?.replace(/^artifact:/, "") ?? data.itemType}
+            </div>
+          </div>
+        </div>
+        <span className="text-[10px] text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)]">
+          Open
         </span>
-        <span className="ml-auto text-[11px] text-[var(--text-tertiary)]">{data.items.length}</span>
       </div>
-      <div className="mb-5 h-px w-full bg-[var(--border-default)]/45" />
-
-      <div className="space-y-2">
-        <AnimatePresence initial={false}>
-          {visibleItems.map((item, i) => (
-            <motion.button
-              key={item.id}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.18, delay: i * 0.03 }}
-              type="button"
-              onClick={() => data.panelType && data.onOpenPanel(data.panelType, item.id)}
-              className={cn(
-                "workspace-content-item flex w-full items-start justify-between gap-5 rounded-xl px-3 py-2 text-left",
-                data.panelType
-                  ? "cursor-pointer hover:bg-[var(--bg-elevated)]/50"
-                  : "cursor-default",
-              )}
-            >
-              <div className="flex min-w-0 items-start gap-2.5">
-                {item.statusColor && (
-                  <span
-                    className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full"
-                    style={{ background: item.statusColor }}
-                  />
-                )}
-                <span className="truncate text-[15px] leading-7 text-[var(--text-primary)]">
-                  {item.title}
-                </span>
-              </div>
-              {item.meta && (
-                <span className="shrink-0 whitespace-nowrap pt-1 text-[11px] text-[var(--text-tertiary)]">
-                  {item.meta}
-                </span>
-              )}
-            </motion.button>
-          ))}
-        </AnimatePresence>
-
-        {data.onNew && (
-          <button
-            type="button"
-            onClick={data.onNew}
-            className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-[13px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-elevated)]/36 hover:text-[var(--text-primary)]"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Add new…
-          </button>
-        )}
+      <div className="mt-3 line-clamp-5 text-[12px] leading-5 text-[var(--text-secondary)]">
+        {data.contentSummary || "Open this widget to continue working with it."}
       </div>
-
-      {hasOverflow && (
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className="mt-3 flex items-center gap-1 px-3 text-[11px] text-[var(--text-tertiary)] transition-colors hover:text-[var(--accent-cyan)]"
-        >
-          {expanded ? (
-            <>
-              <ChevronDown className="w-3 h-3" />
-              Show less
-            </>
-          ) : (
-            <>
-              <ChevronRight className="w-3 h-3" />
-              +{data.items.length - maxVisible} more
-            </>
-          )}
-        </button>
-      )}
-    </div>
+    </button>
   );
 });
 
-/* ─── Column Node (for column view) ─────────────────────────── */
+/* ============================================================================
+   APPROACH A: SEMANTIC CONSTELLATIONS
+   "Deep Space" Paradigm: Ethereal, physics-based, data-heavy, relationship-driven.
+   Nodes: ConstellationClusterNode
+============================================================================ */
 
-export type ColumnNodeData = {
-  label: string;
-  icon: string;
-  items: Array<{ id: string; title: string }>;
-  panelType?: PanelType;
-  onOpenPanel: (type: PanelType, id: string) => void;
+export type ConstellationClusterData = BaseGroupData & {
+  glow: string;
+  align: "left" | "right";
+  iconType: string;
 };
 
-export const ColumnNode = memo(function ColumnNode({
+export const ConstellationClusterNode = memo(function ConstellationClusterNode({
   data,
-}: NodeProps<Node<ColumnNodeData>>) {
+}: NodeProps<Node<ConstellationClusterData>>) {
+  const align = data.align;
   const Icon = {
-    thread: MessageSquare,
-    note: StickyNote,
-    planner: CalendarClock,
-    artifact: FileText,
-  }[data.icon] ?? FileText;
+    thread: GitMerge,
+    note: FileText,
+    planner: Workflow,
+    artifact: Sparkles,
+  }[data.iconType] ?? FileText;
 
   return (
-    <div
-      className="internal-column-node rounded-[28px] px-4 py-4"
-      style={{
-        width: 236,
-        background: "color-mix(in oklab, var(--bg-elevated) 54%, transparent)",
-      }}
-    >
-      <div className="mb-4 flex items-center gap-2 border-b border-[var(--border-default)]/35 pb-3">
-        <Icon className="h-3.5 w-3.5 text-[var(--text-tertiary)]" strokeWidth={1.7} />
-        <span className="text-[11px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
-          {data.label}
-        </span>
-        <span className="text-[10px] text-[var(--text-tertiary)] ml-auto">{data.items.length}</span>
+    <div className={cn("relative flex w-[340px] flex-col gap-5", align === "right" && "items-end text-right")}>
+      <Handle type="target" position={align === "left" ? Position.Right : Position.Left} className="!opacity-0" />
+      <Handle type="source" position={align === "left" ? Position.Right : Position.Left} className="!opacity-0" />
+      
+      <div
+        className="pointer-events-none absolute -inset-16 -z-10 rounded-full blur-[50px] mix-blend-screen opacity-70"
+        style={{ background: `radial-gradient(circle, ${data.glow} 0%, transparent 60%)` }}
+      />
+      <div className={cn("flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.25em] text-[var(--text-tertiary)]", align === "right" && "flex-row-reverse")}>
+        <Icon className="w-4 h-4" />
+        <span>{data.label}</span>
       </div>
-      <div className="space-y-1.5">
-        {data.items.map((item) => (
+      <div className="space-y-2 w-full">
+        {data.items.slice(0, 6).map((item) => (
           <button
             key={item.id}
             type="button"
-            onClick={() => data.panelType && data.onOpenPanel(data.panelType, item.id)}
-            className="w-full truncate rounded-xl px-3 py-2 text-left text-[14px] text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-elevated)]/44"
+            onClick={() => data.onOpenPanel(item.panelType, item.id)}
+            className={cn(
+              "group relative flex w-full items-start gap-4 text-left transition-all duration-300 py-2",
+              align === "right" && "justify-end text-right flex-row-reverse",
+            )}
           >
-            {item.title || "Untitled"}
+            <div className={cn("absolute top-1/2 -translate-y-1/2 h-[1px] w-6 bg-[var(--text-tertiary)]/20 group-hover:bg-[var(--accent-cyan)]/50 transition-colors", align === "left" ? "-left-8" : "-right-8")} />
+            
+            {item.statusColor ? (
+              <span
+                className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full shadow-[0_0_12px_currentColor]"
+                style={{ color: item.statusColor, backgroundColor: item.statusColor }}
+              />
+            ) : (
+              <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-[var(--text-tertiary)] group-hover:bg-[var(--text-primary)] transition-colors shadow-[0_0_8px_rgba(255,255,255,0.5)]" />
+            )}
+            <div className="relative">
+              <div className="text-[13px] font-medium text-[var(--text-secondary)] transition-colors duration-300 group-hover:text-[var(--text-primary)] group-hover:drop-shadow-[0_0_8px_rgba(255,255,255,0.4)]">
+                {item.title}
+              </div>
+              {item.meta && <div className="text-[10px] text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)] transition-colors mt-0.5">{item.meta}</div>}
+            </div>
           </button>
         ))}
       </div>
@@ -234,115 +206,286 @@ export const ColumnNode = memo(function ColumnNode({
   );
 });
 
-/* ─── Graph Item Node (for graph view) ──────────────────────── */
+export function buildConstellationNodes(
+  data: InternalContentData,
+  basePosition: { x: number; y: number },
+): { nodes: Node[], edges: Edge[] } {
+  if (data.loading) return { nodes: [], edges: [] };
 
-export type GraphItemNodeData = {
-  title: string;
-  itemType: "thread" | "note" | "planner" | "artifact";
-  interactionCount: number;
-  panelType?: PanelType;
-  itemId: string;
-  onOpenPanel: (type: PanelType, id: string) => void;
+  const nodes: Node[] = [];
+  const edges: Edge[] = [];
+
+  const addCluster = (id: string, label: string, items: BaseGroupData["items"], dx: number, dy: number, align: "left" | "right", glow: string, iconType: string) => {
+    if (items.length === 0) return;
+    nodes.push({
+      id: `constellation-${id}`,
+      type: "constellationCluster",
+      position: { x: basePosition.x + dx, y: basePosition.y + dy },
+      draggable: true,
+      selectable: false,
+      data: { label, items, align, glow, iconType, onOpenPanel: data.onOpenPanel } satisfies ConstellationClusterData,
+    });
+    // Add semantic links to center (the workstream box itself is roughly at basePosition)
+    edges.push({
+      id: `const-edge-${id}`,
+      source: `ws-${data.workstreamTitle}`, // Pseudo-connection, won't strictly attach to handle if handle missing, but xyflow can center it.
+      target: `constellation-${id}`,
+      type: "straight",
+      animated: true,
+      style: { stroke: glow, strokeWidth: 1, opacity: 0.3, strokeDasharray: "4 4" },
+    });
+  };
+
+  addCluster("threads", "Orbital Threads", data.threads.map(t => ({ id: t.id, title: t.title, meta: `${t.messageCount} msgs`, panelType: "chat" })), -400, 100, "right", "rgba(14,142,232,0.4)", "thread");
+  addCluster("notes", "Fragmented Notes", data.notes.map(n => ({ id: n.id, title: n.title, meta: formatTimeAgo(n.updatedAt), panelType: "artifact" })), 400, -50, "left", "rgba(167,139,250,0.4)", "note");
+  addCluster("planner", "Vectors & Paths", data.plannerItems.map(p => ({ id: p.id, title: p.title, meta: p.status, statusColor: p.status === "done" ? "var(--accent-mint)" : "var(--accent-cyan)", panelType: "planner" })), -350, 350, "right", "rgba(255,111,69,0.35)", "planner");
+  addCluster("artifacts", "Constructed Artifacts", data.artifacts.map(a => ({ id: a.id, title: a.title, meta: a.type, panelType: "artifact" })), 450, 300, "left", "rgba(32,184,178,0.4)", "artifact");
+
+  return { nodes, edges };
+}
+
+/* ============================================================================
+   APPROACH B: MAGNETIC SURFACE (Recommended)
+   "Tactile Glass" Paradigm: Fast, tactile, translucent, structured. macOS/Linear feel.
+   Nodes: MagneticPanelNode
+============================================================================ */
+
+export type MagneticPanelData = BaseGroupData & {
+  iconType: string;
+  isMain?: boolean;
 };
 
-const GRAPH_COLORS = {
-  thread: "var(--accent-cyan)",
-  note: "var(--accent-mint)",
-  planner: "var(--accent-coral)",
-  artifact: "#a78bfa",
-};
-
-export const GraphItemNode = memo(function GraphItemNode({
+export const MagneticPanelNode = memo(function MagneticPanelNode({
   data,
-}: NodeProps<Node<GraphItemNodeData>>) {
-  const color = GRAPH_COLORS[data.itemType];
-  const emphasis = Math.min(data.interactionCount, 9);
+}: NodeProps<Node<MagneticPanelData>>) {
+  const Icon = {
+    thread: MessageSquare,
+    note: FileText,
+    planner: CalendarClock,
+    artifact: Sparkles,
+  }[data.iconType] ?? FileText;
 
   return (
-    <div className="relative">
-      <Handle
-        id="graph-target-left"
-        type="target"
-        position={Position.Left}
-        className="!h-2 !w-2 !border-0 !bg-transparent !opacity-0"
-      />
-      <Handle
-        id="graph-target-top"
-        type="target"
-        position={Position.Top}
-        className="!h-2 !w-2 !border-0 !bg-transparent !opacity-0"
-      />
-      <Handle
-        id="graph-source-right"
-        type="source"
-        position={Position.Right}
-        className="!h-2 !w-2 !border-0 !bg-transparent !opacity-0"
-      />
-      <Handle
-        id="graph-source-bottom"
-        type="source"
-        position={Position.Bottom}
-        className="!h-2 !w-2 !border-0 !bg-transparent !opacity-0"
-      />
-      <button
-        type="button"
-        onClick={() => data.panelType && data.onOpenPanel(data.panelType, data.itemId)}
-        className="graph-item-node group"
-        style={{
-          minWidth: 136,
-          maxWidth: 196,
-          borderRadius: 18,
-          background: "color-mix(in oklab, var(--bg-elevated) 88%, transparent)",
-          border: `1px solid color-mix(in oklab, ${color} 32%, var(--border-default))`,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          cursor: "pointer",
-          transition: "all 200ms ease",
-          boxShadow: "0 10px 24px -20px rgba(15, 23, 42, 0.3)",
-          padding: "10px 12px",
-        }}
-      >
-        <div className="flex min-w-0 items-center gap-2">
-          <span
-            className="h-2.5 w-2.5 shrink-0 rounded-full"
-            style={{ background: color, boxShadow: `0 0 0 ${2 + emphasis * 0.2}px ${color}18` }}
-          />
-          <span className="truncate text-[12px] font-medium text-[var(--text-primary)]">
-            {data.title}
-          </span>
+    <div className={cn(
+      "rounded-[24px] border border-[var(--border-default)] p-5 backdrop-blur-3xl relative overflow-hidden transition-shadow duration-300",
+      data.isMain ? "bg-[var(--bg-elevated)]/90 shadow-[0_24px_60px_-24px_rgba(0,0,0,0.15)]" : "bg-[var(--bg-elevated)]/60 shadow-[0_12px_40px_-20px_rgba(0,0,0,0.1)]",
+      "hover:shadow-[0_30px_70px_-20px_rgba(0,0,0,0.2)]"
+    )} style={{ width: data.isMain ? 480 : 340 }}>
+      <div className="absolute inset-0 bg-gradient-to-b from-[var(--bg-elevated)]/40 to-transparent pointer-events-none" />
+      
+      <div className="flex items-center gap-2.5 mb-5 relative z-10">
+        <div className="p-1.5 rounded-lg bg-[var(--bg-secondary)] text-[var(--text-secondary)] border border-[var(--border-default)]/50">
+          <Icon className="w-4 h-4" />
         </div>
-        <div className="ml-3 shrink-0 text-[10px] text-[var(--text-tertiary)]">
-          {data.interactionCount > 0 ? data.interactionCount : "new"}
+        <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--text-secondary)]">
+          {data.label}
         </div>
-      </button>
+      </div>
+      
+      <div className={cn("relative z-10", !data.isMain && "flex flex-col gap-1", data.isMain && "grid gap-3")}>
+        {data.items.slice(0, 6).map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => data.onOpenPanel(item.panelType, item.id)}
+            className={cn(
+              "group flex w-full items-center gap-3 rounded-[12px] text-left transition-all",
+              data.isMain 
+                ? "flex-col border border-[var(--border-default)]/60 bg-[var(--bg-primary)] hover:bg-[var(--bg-hover)] px-5 py-4 shadow-sm hover:shadow-[0_8px_30px_-12px_rgba(0,0,0,0.15)] hover:-translate-y-0.5" 
+                : "px-3 py-2.5 hover:bg-[var(--bg-hover)]"
+            )}
+          >
+            {data.isMain ? (
+              <>
+                <div className="flex items-start justify-between gap-4 w-full">
+                  <span className="text-[15px] font-medium text-[var(--text-primary)] leading-tight">{item.title}</span>
+                  <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-[var(--text-tertiary)] group-hover:text-[var(--accent-cyan)] transition-colors" />
+                </div>
+                {item.meta && <span className="mt-2 text-[11px] text-[var(--text-tertiary)] font-medium">{item.meta}</span>}
+              </>
+            ) : (
+              <>
+                {item.statusColor ? (
+                  <span className="h-2 w-2 shrink-0 rounded-full shadow-[0_0_8px_currentColor]" style={{ color: item.statusColor, backgroundColor: item.statusColor }} />
+                ) : (
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--text-tertiary)]" />
+                )}
+                <div className="min-w-0 flex-1 flex justify-between items-center gap-4">
+                  <div className="truncate text-[13px] font-medium text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors">{item.title}</div>
+                  {item.meta && <div className="shrink-0 text-[10px] text-[var(--text-tertiary)]">{item.meta}</div>}
+                </div>
+              </>
+            )}
+          </button>
+        ))}
+      </div>
     </div>
   );
 });
 
-/* ─── Graph Overflow Node ───────────────────────────────────── */
+export function buildMagneticNodes(
+  data: InternalContentData,
+  basePosition: { x: number; y: number },
+): { nodes: Node[], edges: Edge[] } {
+  if (data.loading) return { nodes: [], edges: [] };
+  const nodes: Node[] = [];
+  
+  const addPanel = (id: string, label: string, items: BaseGroupData["items"], dx: number, dy: number, isMain: boolean, iconType: string) => {
+    if (items.length === 0) return;
+    nodes.push({
+      id: `magnetic-${id}`,
+      type: "magneticPanel",
+      position: { x: basePosition.x + dx, y: basePosition.y + dy },
+      draggable: true,
+      selectable: false,
+      data: { label, items, iconType, isMain, onOpenPanel: data.onOpenPanel } satisfies MagneticPanelData,
+    });
+  };
 
-export type GraphOverflowNodeData = {
-  count: number;
-  itemType: string;
-  onExpand: () => void;
+  addPanel("threads", "Threads", data.threads.map(t => ({ id: t.id, title: t.title, meta: `${t.messageCount} msgs`, panelType: "chat" })), -100, 200, true, "thread");
+  addPanel("planner", "Planner", data.plannerItems.map(p => ({ id: p.id, title: p.title, meta: p.status, statusColor: p.status === "done" ? "var(--accent-mint)" : "var(--accent-cyan)", panelType: "planner" })), -480, 200, false, "planner");
+  addPanel("notes", "Documents", data.notes.map(n => ({ id: n.id, title: n.title, meta: formatTimeAgo(n.updatedAt), panelType: "artifact" })), -480, 520, false, "note");
+  addPanel("artifacts", "Artifacts", data.artifacts.map(a => ({ id: a.id, title: a.title, meta: a.type, panelType: "artifact" })), 420, 200, false, "artifact");
+
+  return { nodes, edges: [] };
+}
+
+export function buildWorkspaceWidgetNodes(
+  data: InternalContentData,
+  basePosition: { x: number; y: number },
+): Node[] {
+  if (data.loading || data.widgets.length === 0) return [];
+
+  return data.widgets.map((widget) => ({
+    id: `widget-${widget.id}`,
+    type: "workspaceWidget",
+    position: {
+      x: basePosition.x + widget.x,
+      y: basePosition.y + widget.y,
+    },
+    draggable: true,
+    selectable: false,
+    width: widget.width ?? 280,
+    height: widget.height ?? 180,
+    data: {
+      ...widget,
+      onOpenPanel: data.onOpenPanel,
+    } satisfies WorkspaceWidgetNodeData,
+  }));
+}
+
+/* ============================================================================
+   APPROACH C: FOCAL LENSES
+   "Guided Focus" Paradigm: Immersive, cinematic, high contrast within a boundary.
+   Nodes: LensesLensNode
+============================================================================ */
+
+export type LensesLensData = BaseGroupData & {
+  iconType: string;
+  isSpotlight?: boolean;
 };
 
-export const GraphOverflowNode = memo(function GraphOverflowNode({
+export const LensesLensNode = memo(function LensesLensNode({
   data,
-}: NodeProps<Node<GraphOverflowNodeData>>) {
+}: NodeProps<Node<LensesLensData>>) {
+  const Icon = {
+    thread: Crosshair,
+    note: FileText,
+    planner: CalendarClock,
+    artifact: Sparkles,
+  }[data.iconType] ?? FileText;
+
+  if (data.isSpotlight) {
+    return (
+      <div className="rounded-[40px] border border-[var(--border-default)]/60 bg-[var(--bg-elevated)]/80 p-10 shadow-[0_0_100px_rgba(255,255,255,0.05),inset_0_0_40px_rgba(255,255,255,0.05)] backdrop-blur-3xl z-10 relative" style={{ width: 560 }}>
+        <div className="absolute -top-px left-1/2 -translate-x-1/2 w-40 h-px bg-gradient-to-r from-transparent via-[var(--text-tertiary)]/40 to-transparent" />
+        
+        <div className="flex items-center gap-3 text-[11px] font-bold uppercase tracking-[0.3em] text-[var(--text-tertiary)] mb-6">
+          <Icon className="w-4 h-4" /> {data.label}
+        </div>
+
+        <div className="space-y-3">
+          {data.items.slice(0, 7).map((item, idx) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => data.onOpenPanel(item.panelType, item.id)}
+              className={cn(
+                "flex w-full items-center justify-between gap-4 rounded-[20px] border border-[var(--border-default)]/50 bg-[var(--bg-primary)] px-6 py-5 text-left transition-all duration-300 hover:bg-[var(--bg-hover)] hover:border-[var(--border-default)] hover:scale-[1.02] hover:shadow-[0_20px_40px_-20px_rgba(0,0,0,0.15)]",
+                idx === 0 && "bg-[var(--bg-secondary)] border-[var(--border-default)]" 
+              )}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="text-[16px] font-medium text-[var(--text-primary)]">{item.title}</div>
+                {item.meta && <div className="mt-1.5 text-[11px] text-[var(--text-tertiary)] font-mono tracking-wide">{item.meta}</div>}
+              </div>
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-[var(--bg-elevated)] border border-[var(--border-default)] text-[var(--text-tertiary)] group-hover:bg-[var(--accent-cyan)] group-hover:text-white transition-colors group-hover:border-transparent">
+                <MessageSquare className="w-4 h-4" />
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <button
-      type="button"
-      onClick={data.onExpand}
-      className="rounded-full px-3 py-1.5 bg-[var(--bg-secondary)] border border-[var(--border-default)] text-[10px] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:border-[var(--accent-cyan)]/40 transition-all cursor-pointer"
-    >
-      +{data.count} older {data.itemType}
-    </button>
+    <div className="opacity-80 hover:opacity-100 transition-opacity duration-500" style={{ width: 300 }}>
+      <div className="flex items-center gap-3 text-[11px] font-bold uppercase tracking-[0.3em] text-[var(--text-tertiary)] mb-6 px-2">
+        <Icon className="w-4 h-4" /> {data.label}
+      </div>
+      <div className="space-y-3">
+        {data.items.slice(0, 5).map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => data.onOpenPanel(item.panelType, item.id)}
+            className="flex w-full flex-col gap-2 rounded-[16px] border border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/40 px-5 py-4 text-left transition-all hover:bg-[var(--bg-elevated)]/80 hover:border-[var(--border-default)] backdrop-blur-md"
+          >
+            <div className="flex items-start gap-3 w-full">
+              {item.statusColor && (
+                <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full shadow-[0_0_10px_currentColor]" style={{ color: item.statusColor, backgroundColor: item.statusColor }} />
+              )}
+              <div className="text-[14px] font-medium text-[var(--text-secondary)] leading-snug group-hover:text-[var(--text-primary)] transition-colors">{item.title}</div>
+            </div>
+            {item.meta && <div className="text-[10px] text-[var(--text-tertiary)] font-mono pl-5">{item.meta}</div>}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 });
 
-/* ─── Empty State Node ──────────────────────────────────────── */
+export function buildLensesNodes(
+  data: InternalContentData,
+  basePosition: { x: number; y: number },
+): { nodes: Node[], edges: Edge[] } {
+  if (data.loading) return { nodes: [], edges: [] };
+  const nodes: Node[] = [];
+  
+  const addLens = (id: string, label: string, items: BaseGroupData["items"], dx: number, dy: number, isSpotlight: boolean, iconType: string) => {
+    if (items.length === 0) return;
+    nodes.push({
+      id: `lenses-${id}`,
+      type: "lensesLens",
+      position: { x: basePosition.x + dx, y: basePosition.y + dy },
+      draggable: true,
+      selectable: false,
+      data: { label, items, iconType, isSpotlight, onOpenPanel: data.onOpenPanel } satisfies LensesLensData,
+    });
+  };
+
+  addLens("threads", "Primary Focus", data.threads.map(t => ({ id: t.id, title: t.title, meta: `${t.messageCount} msgs`, panelType: "chat" })), -140, 200, true, "thread");
+  addLens("planner", "Directives", data.plannerItems.map(p => ({ id: p.id, title: p.title, meta: p.status, statusColor: p.status === "done" ? "var(--accent-mint)" : "var(--accent-cyan)", panelType: "planner" })), -480, 240, false, "planner");
+  addLens("notes", "References", data.notes.map(n => ({ id: n.id, title: n.title, meta: formatTimeAgo(n.updatedAt), panelType: "artifact" })), -480, 640, false, "note");
+  addLens("artifacts", "Synthesized Outputs", data.artifacts.map(a => ({ id: a.id, title: a.title, meta: a.type, panelType: "artifact" })), 480, 240, false, "artifact");
+
+  return { nodes, edges: [] };
+}
+
+/* ============================================================================
+   SHARED NODES (Empty State, Focus Timer)
+============================================================================ */
 
 export type EmptyStateNodeData = {
   emoji: string;
@@ -373,8 +516,6 @@ export const EmptyStateNode = memo(function EmptyStateNode({
   );
 });
 
-/* ─── Focus Timer Node ─────────────────────────────────────── */
-
 export type FocusTimerNodeData = {
   active: boolean;
   sessionMinutes: number;
@@ -399,14 +540,14 @@ export const FocusTimerNode = memo(function FocusTimerNode({
 
   return (
     <div
-      className="rounded-2xl border px-5 py-4 text-center"
+      className="rounded-2xl border px-5 py-4 text-center backdrop-blur-xl"
       style={{
         width: 200,
-        background: "color-mix(in oklab, var(--bg-elevated) 92%, transparent)",
+        background: "color-mix(in oklab, var(--bg-elevated) 72%, transparent)",
         borderColor: data.active
           ? "color-mix(in oklab, var(--accent-cyan) 40%, var(--border-default))"
           : "var(--border-default)",
-        boxShadow: data.active ? "0 0 20px -8px var(--accent-cyan)" : "none",
+        boxShadow: data.active ? "0 0 20px -8px var(--accent-cyan)" : "0 10px 24px -10px rgba(0,0,0,0.1)",
         transition: "border-color 300ms, box-shadow 300ms",
       }}
     >
@@ -414,31 +555,10 @@ export const FocusTimerNode = memo(function FocusTimerNode({
         Focus Timer
       </div>
 
-      {/* Timer ring */}
       <div className="relative mx-auto mb-3" style={{ width: 84, height: 84 }}>
         <svg width="84" height="84" viewBox="0 0 84 84">
-          <circle
-            cx="42"
-            cy="42"
-            r="38"
-            fill="none"
-            stroke="var(--border-default)"
-            strokeWidth="3"
-            opacity={0.4}
-          />
-          <circle
-            cx="42"
-            cy="42"
-            r="38"
-            fill="none"
-            stroke="var(--accent-cyan)"
-            strokeWidth="3"
-            strokeLinecap="round"
-            strokeDasharray={circumference}
-            strokeDashoffset={strokeDashoffset}
-            transform="rotate(-90 42 42)"
-            style={{ transition: "stroke-dashoffset 1s linear" }}
-          />
+          <circle cx="42" cy="42" r="38" fill="none" stroke="var(--border-default)" strokeWidth="3" opacity={0.4} />
+          <circle cx="42" cy="42" r="38" fill="none" stroke="var(--accent-cyan)" strokeWidth="3" strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={strokeDashoffset} transform="rotate(-90 42 42)" style={{ transition: "stroke-dashoffset 1s linear" }} />
         </svg>
         <div className="absolute inset-0 flex items-center justify-center">
           <span className="font-display text-lg font-bold text-[var(--text-primary)] tabular-nums">
@@ -447,405 +567,22 @@ export const FocusTimerNode = memo(function FocusTimerNode({
         </div>
       </div>
 
-      {/* Controls */}
       <div className="flex items-center justify-center gap-2">
         {data.active ? (
-          <button
-            type="button"
-            onClick={data.onPause}
-            className="rounded-lg px-3 py-1.5 text-xs font-medium bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
-          >
-            Pause
-          </button>
+          <button type="button" onClick={data.onPause} className="rounded-lg px-3 py-1.5 text-xs font-medium bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">Pause</button>
         ) : (
-          <button
-            type="button"
-            onClick={data.onStart}
-            className="rounded-lg px-3 py-1.5 text-xs font-medium bg-[var(--accent-cyan)] text-white hover:brightness-110 transition-all"
-          >
-            {data.elapsed > 0 ? "Resume" : "Start"}
-          </button>
+          <button type="button" onClick={data.onStart} className="rounded-lg px-3 py-1.5 text-xs font-medium bg-[var(--accent-cyan)] text-white hover:brightness-110 transition-all">{data.elapsed > 0 ? "Resume" : "Start"}</button>
         )}
         {data.elapsed > 0 && (
-          <button
-            type="button"
-            onClick={data.onReset}
-            className="rounded-lg px-3 py-1.5 text-xs font-medium bg-[var(--bg-secondary)] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
-          >
-            Reset
-          </button>
+          <button type="button" onClick={data.onReset} className="rounded-lg px-3 py-1.5 text-xs font-medium bg-[var(--bg-secondary)] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors">Reset</button>
         )}
       </div>
 
-      {/* Session count */}
       {data.sessionsCompleted > 0 && (
         <div className="mt-2 text-[10px] text-[var(--text-tertiary)]">
           {data.sessionsCompleted} session{data.sessionsCompleted !== 1 ? "s" : ""} today
         </div>
       )}
-
-      {data.workstreamTitle && (
-        <div className="mt-1.5 text-[10px] text-[var(--accent-cyan)] truncate">
-          {data.workstreamTitle}
-        </div>
-      )}
     </div>
   );
 });
-
-/* ─── Node builders ─────────────────────────────────────────── */
-
-/**
- * Build structured view nodes — vertical groups with content rows.
- * Returns React Flow nodes positioned in a vertical layout.
- */
-export function buildStructuredNodes(
-  data: InternalContentData,
-  basePosition: { x: number; y: number },
-): Node[] {
-  if (data.loading) return [];
-
-  const hasContent =
-    data.threads.length > 0 ||
-    data.notes.length > 0 ||
-    data.plannerItems.length > 0 ||
-    data.artifacts.length > 0;
-
-  if (!hasContent) {
-    return [{
-      id: "internal-empty",
-      type: "emptyState",
-      position: { x: basePosition.x, y: basePosition.y },
-      draggable: true,
-      selectable: false,
-      data: {
-        emoji: data.workstreamEmoji || "📚",
-        title: data.workstreamTitle || "Workstream",
-        description: "Start a conversation or create a note to get going.",
-        onNew: () => data.onOpenPanel("chat", "new"),
-      },
-    }];
-  }
-
-  const groups: Array<Omit<GroupNodeData, "onOpenPanel"> & { id: string; estimatedHeight: number }> = [];
-
-  if (data.threads.length > 0) {
-    groups.push({
-      id: "internal-threads",
-      label: "Threads",
-      icon: "thread",
-      panelType: "chat",
-      onNew: () => data.onOpenPanel("chat", "new"),
-      items: data.threads.map((t) => ({
-        id: t.id,
-        title: t.title,
-        meta: `${t.messageCount} msgs · ${formatTimeAgo(t.lastActivityAt)}`,
-      })),
-      estimatedHeight: 118 + Math.min(data.threads.length, 5) * 46,
-    });
-  }
-
-  if (data.notes.length > 0) {
-    groups.push({
-      id: "internal-notes",
-      label: "Documents",
-      icon: "note",
-      panelType: "artifact",
-      onNew: () => data.onOpenPanel("artifact", "new"),
-      items: data.notes.map((n) => ({
-        id: n.id,
-        title: n.title,
-        meta: formatTimeAgo(n.updatedAt),
-      })),
-      estimatedHeight: 118 + Math.min(data.notes.length, 5) * 46,
-    });
-  }
-
-  if (data.plannerItems.length > 0) {
-    groups.push({
-      id: "internal-planner",
-      label: "Planner",
-      icon: "planner",
-      panelType: "planner",
-      onNew: () => data.onOpenPanel("planner", "new"),
-      items: data.plannerItems.map((p) => ({
-        id: p.id,
-        title: p.title,
-        meta: p.dueAt ? formatTimeAgo(p.dueAt) : undefined,
-        statusColor:
-          p.status === "done" ? "var(--accent-mint)"
-            : p.status === "in_progress" ? "var(--accent-cyan)"
-              : "var(--text-tertiary)",
-      })),
-      estimatedHeight: 118 + Math.min(data.plannerItems.length, 5) * 46,
-    });
-  }
-
-  if (data.artifacts.length > 0) {
-    groups.push({
-      id: "internal-artifacts",
-      label: "Artifacts",
-      icon: "artifact",
-      panelType: "artifact",
-      onNew: () => data.onOpenPanel("artifact", "new"),
-      items: data.artifacts.map((a) => ({
-        id: a.id,
-        title: a.title,
-        meta: a.type,
-      })),
-      estimatedHeight: 118 + Math.min(data.artifacts.length, 5) * 46,
-    });
-  }
-
-  const colHeights = [0, 0];
-  const laneWidth = 520;
-  const colGap = 72;
-  const rowGap = 96;
-
-  return groups.map((group) => {
-    const colIndex = colHeights[0] <= colHeights[1] ? 0 : 1;
-    const node = {
-      id: group.id,
-      type: "contentGroup",
-      position: {
-        x: basePosition.x + colIndex * (laneWidth + colGap),
-        y: basePosition.y + colHeights[colIndex]!,
-      },
-      draggable: true,
-      selectable: false,
-      data: {
-        ...group,
-        onOpenPanel: data.onOpenPanel,
-      } satisfies GroupNodeData,
-    } satisfies Node;
-    colHeights[colIndex] += group.estimatedHeight + rowGap;
-    return node;
-  });
-}
-
-/**
- * Build column view nodes — horizontal columns for each category.
- */
-export function buildColumnNodes(
-  data: InternalContentData,
-  basePosition: { x: number; y: number },
-): Node[] {
-  if (data.loading) return [];
-
-  const columns = [
-    { label: "Threads", icon: "thread", items: data.threads.map((t) => ({ id: t.id, title: t.title })), panelType: "chat" as PanelType },
-    { label: "Documents", icon: "note", items: data.notes.map((n) => ({ id: n.id, title: n.title })), panelType: "artifact" as PanelType },
-    { label: "Tasks", icon: "planner", items: data.plannerItems.map((p) => ({ id: p.id, title: p.title })), panelType: "planner" as PanelType },
-    { label: "Artifacts", icon: "artifact", items: data.artifacts.map((a) => ({ id: a.id, title: a.title })), panelType: "artifact" as PanelType },
-  ].filter((col) => col.items.length > 0);
-
-  if (columns.length === 0) {
-    return [{
-      id: "internal-empty",
-      type: "emptyState",
-      position: basePosition,
-      draggable: true,
-      selectable: false,
-      data: {
-        emoji: data.workstreamEmoji || "📚",
-        title: data.workstreamTitle || "Workstream",
-        description: "No content yet.",
-        onNew: () => data.onOpenPanel("chat", "new"),
-      },
-    }];
-  }
-
-  return columns.map((col, i) => ({
-    id: `internal-col-${col.label.toLowerCase()}`,
-    type: "contentColumn",
-    position: { x: basePosition.x + i * 268, y: basePosition.y + ((i % 2) * 20) },
-    draggable: true,
-    selectable: false,
-    data: {
-      label: col.label,
-      icon: col.icon,
-      items: col.items,
-      panelType: col.panelType,
-      onOpenPanel: data.onOpenPanel,
-    } satisfies ColumnNodeData,
-  }));
-}
-
-/**
- * Build graph view nodes — draggable pills with edges.
- */
-export function buildGraphNodes(
-  data: InternalContentData,
-  basePosition: { x: number; y: number },
-): { nodes: Node[]; edges: import("@xyflow/react").Edge[] } {
-  if (data.loading) return { nodes: [], edges: [] };
-
-  const nodes: Node[] = [];
-  const edges: import("@xyflow/react").Edge[] = [];
-
-  const MAX_GRAPH_ITEMS = 14;
-
-  const allItems = [
-    ...data.threads.map((t) => ({
-      id: t.id,
-      title: t.title,
-      itemType: "thread" as const,
-      interactionCount: t.messageCount,
-      panelType: "chat" as PanelType,
-      createdAt: t.lastActivityAt,
-    })),
-    ...data.notes.map((n) => ({
-      id: n.id,
-      title: n.title,
-      itemType: "note" as const,
-      interactionCount: 1,
-      panelType: "artifact" as PanelType,
-      createdAt: n.updatedAt,
-    })),
-    ...data.plannerItems.map((p) => ({
-      id: p.id,
-      title: p.title,
-      itemType: "planner" as const,
-      interactionCount: 1,
-      panelType: "planner" as PanelType,
-      createdAt: p.dueAt ?? Date.now(),
-    })),
-    ...data.artifacts.map((a) => ({
-      id: a.id,
-      title: a.title,
-      itemType: "artifact" as const,
-      interactionCount: 1,
-      panelType: "artifact" as PanelType,
-      createdAt: a.createdAt,
-    })),
-  ].sort((left, right) => right.createdAt - left.createdAt);
-
-  if (allItems.length === 0) {
-    return {
-      nodes: [{
-        id: "internal-empty",
-        type: "emptyState",
-        position: basePosition,
-        draggable: true,
-        selectable: false,
-        data: {
-          emoji: data.workstreamEmoji || "📚",
-          title: data.workstreamTitle || "Workstream",
-          description: "No content to graph yet.",
-        },
-      }],
-      edges: [],
-    };
-  }
-
-  const visibleItems = allItems.slice(0, MAX_GRAPH_ITEMS);
-  const clusterCenters = {
-    thread: { x: basePosition.x - 240, y: basePosition.y + 40 },
-    note: { x: basePosition.x + 80, y: basePosition.y - 40 },
-    planner: { x: basePosition.x - 60, y: basePosition.y + 250 },
-    artifact: { x: basePosition.x + 320, y: basePosition.y + 110 },
-  } as const;
-
-  const groups = visibleItems.reduce<Record<GraphItemNodeData["itemType"], typeof visibleItems>>((acc, item) => {
-    acc[item.itemType].push(item);
-    return acc;
-  }, { thread: [], note: [], planner: [], artifact: [] });
-
-  for (const [itemType, items] of Object.entries(groups) as Array<[GraphItemNodeData["itemType"], typeof visibleItems]>) {
-    const center = clusterCenters[itemType];
-    items.forEach((item, index) => {
-      const row = Math.floor(index / 2);
-      const col = index % 2;
-      const x = center.x + col * 174 + (row % 2) * 16;
-      const y = center.y + row * 84;
-
-      nodes.push({
-        id: `graph-${item.id}`,
-        type: "graphItem",
-        position: { x, y },
-        draggable: true,
-        selectable: false,
-        data: {
-          title: item.title,
-          itemType: item.itemType,
-          interactionCount: item.interactionCount,
-          panelType: item.panelType,
-          itemId: item.id,
-          onOpenPanel: data.onOpenPanel,
-        } satisfies GraphItemNodeData,
-      });
-
-      if (index > 0) {
-        const previous = items[index - 1]!;
-        edges.push({
-          id: `graph-edge-${previous.id}-${item.id}`,
-          source: `graph-${previous.id}`,
-          target: `graph-${item.id}`,
-          sourceHandle: "graph-source-right",
-          targetHandle: "graph-target-left",
-          type: "smoothstep",
-          animated: true,
-          style: {
-            stroke: "color-mix(in oklab, var(--accent-cyan) 40%, var(--border-default))",
-            strokeWidth: 1.5,
-            opacity: 0.78,
-          },
-        });
-      }
-    });
-  }
-
-  const anchor = visibleItems[0];
-  if (anchor) {
-    for (const itemType of ["thread", "note", "planner", "artifact"] as const) {
-      const first = groups[itemType][0];
-      if (!first || first.id === anchor.id) continue;
-      edges.push({
-        id: `graph-link-${anchor.id}-${first.id}`,
-        source: `graph-${anchor.id}`,
-        target: `graph-${first.id}`,
-        sourceHandle: "graph-source-bottom",
-        targetHandle: "graph-target-top",
-        type: "smoothstep",
-        animated: true,
-        style: {
-          stroke: "color-mix(in oklab, var(--accent-mint) 34%, var(--border-default))",
-          strokeWidth: 1.35,
-          opacity: 0.68,
-        },
-      });
-    }
-  }
-
-  const overflowByType = {
-    thread: Math.max(data.threads.length - groups.thread.length, 0),
-    note: Math.max(data.notes.length - groups.note.length, 0),
-    planner: Math.max(data.plannerItems.length - groups.planner.length, 0),
-    artifact: Math.max(data.artifacts.length - groups.artifact.length, 0),
-  };
-
-  const overflowOrder: Array<[GraphOverflowNodeData["itemType"], number, { x: number; y: number }]> = [
-    ["threads", overflowByType.thread, { x: clusterCenters.thread.x + 30, y: clusterCenters.thread.y + 210 }],
-    ["documents", overflowByType.note, { x: clusterCenters.note.x + 40, y: clusterCenters.note.y + 210 }],
-    ["tasks", overflowByType.planner, { x: clusterCenters.planner.x + 10, y: clusterCenters.planner.y + 170 }],
-    ["artifacts", overflowByType.artifact, { x: clusterCenters.artifact.x + 10, y: clusterCenters.artifact.y + 170 }],
-  ];
-
-  for (const [itemType, count, position] of overflowOrder) {
-    if (count <= 0) continue;
-    nodes.push({
-      id: `graph-overflow-${itemType}`,
-      type: "graphOverflow",
-      position,
-      draggable: false,
-      selectable: false,
-      data: {
-        count,
-        itemType,
-        onExpand: () => {},
-      } satisfies GraphOverflowNodeData,
-    });
-  }
-
-  return { nodes, edges };
-}

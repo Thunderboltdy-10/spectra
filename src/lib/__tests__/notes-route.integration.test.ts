@@ -103,7 +103,7 @@ describe("notes route compatibility", () => {
     const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_notes" });
     const convexQuery = vi
       .fn()
-      .mockRejectedValueOnce(new Error("legacy note"))
+      .mockRejectedValueOnce(new Error("Artifact not found"))
       .mockResolvedValueOnce(null);
     const convexMutation = vi
       .fn()
@@ -159,12 +159,75 @@ describe("notes route compatibility", () => {
     });
   });
 
+  it("downgrades artifact validator failures during note probes so legacy notes still migrate", async () => {
+    const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_notes" });
+    const convexQuery = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('ArgumentValidationError: ID is from table "notes" but expected table "artifacts"'))
+      .mockResolvedValueOnce(null);
+    const convexMutation = vi
+      .fn()
+      .mockResolvedValueOnce({ artifactId: "artifact_migrated_2" })
+      .mockResolvedValueOnce({ success: true });
+
+    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
+
+    const route = await import("@/app/api/notes/route");
+    const response = await route.POST(
+      new NextRequest("http://localhost/api/notes", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "update",
+          noteId: "legacy_note_2",
+          title: "Migrated title",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(convexMutation).toHaveBeenNthCalledWith(1, "artifacts:getOrMigrateFromNote", {
+      actorClerkId: "user_notes",
+      noteId: "legacy_note_2",
+    });
+    expect(convexMutation).toHaveBeenNthCalledWith(2, "artifacts:update", expect.objectContaining({
+      actorClerkId: "user_notes",
+      artifactId: "artifact_migrated_2",
+    }));
+  });
+
+  it("does not remigrate when artifact lookup fails for unexpected reasons", async () => {
+    const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_notes" });
+    const convexQuery = vi.fn().mockRejectedValueOnce(new Error("database offline"));
+    const convexMutation = vi.fn();
+
+    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
+
+    const route = await import("@/app/api/notes/route");
+    const response = await route.GET(
+      new NextRequest("http://localhost/api/notes?action=get&id=artifact_1"),
+    );
+    const payload = (await response.json()) as {
+      error?: { code?: string; message?: string; status?: number };
+    };
+
+    expect(response.status).toBe(500);
+    expect(convexMutation).not.toHaveBeenCalledWith("artifacts:getOrMigrateFromNote", expect.anything());
+    expect(payload.error).toEqual(expect.objectContaining({
+      code: "INTERNAL_ERROR",
+      message: "Unexpected server error",
+      status: 500,
+    }));
+  });
+
   it("deletes legacy notes through the notes mutation instead of remigrating them", async () => {
     const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_notes" });
+    const convexQuery = vi.fn().mockResolvedValue(null);
     const convexMutation = vi.fn().mockResolvedValue({ success: true });
 
     vi.doMock("@/lib/auth-server", () => ({ requireActor }));
-    vi.doMock("@/lib/convex-server", () => ({ convexQuery: vi.fn(), convexMutation }));
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
 
     const route = await import("@/app/api/notes/route");
     const response = await route.POST(
@@ -181,6 +244,32 @@ describe("notes route compatibility", () => {
     expect(convexMutation).toHaveBeenCalledWith("notes:remove", {
       actorClerkId: "user_notes",
       noteId: "legacy_note_9",
+    });
+  });
+
+  it("deletes artifact-backed notes through the artifact removal path", async () => {
+    const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_notes" });
+    const convexQuery = vi.fn().mockResolvedValue({ _id: "artifact_9" });
+    const convexMutation = vi.fn().mockResolvedValue({ success: true });
+
+    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
+
+    const route = await import("@/app/api/notes/route");
+    const response = await route.POST(
+      new NextRequest("http://localhost/api/notes", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "delete",
+          noteId: "artifact_9",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(convexMutation).toHaveBeenCalledWith("artifacts:remove", {
+      actorClerkId: "user_notes",
+      artifactId: "artifact_9",
     });
   });
 });

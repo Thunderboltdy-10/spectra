@@ -23,6 +23,7 @@ import type { Workstream } from "@/hooks/use-workspace-data";
 import { cn } from "@/lib/utils";
 import { getWorkstreamColor } from "@/lib/workspace/zoom-helpers";
 import { stripGeneratedDocumentMarkers } from "@/lib/document-generator";
+import type { WorkspaceShellMode } from "@/lib/workspace/shell-mode";
 import {
   computeCanonicalLayout,
   applyOverrides,
@@ -34,41 +35,40 @@ import {
   initPersistenceListeners,
 } from "@/lib/workspace/position-persistence";
 import {
-  GroupNode,
-  ColumnNode,
-  GraphItemNode,
-  GraphOverflowNode,
+  ConstellationClusterNode,
+  MagneticPanelNode,
+  LensesLensNode,
   EmptyStateNode,
   FocusTimerNode,
-  buildStructuredNodes,
-  buildColumnNodes,
-  buildGraphNodes,
+  buildConstellationNodes,
+  buildMagneticNodes,
+  buildLensesNodes,
+  buildWorkspaceWidgetNodes,
   type ThreadSummary,
   type NoteSummary,
   type PlannerItemSummary,
   type ArtifactSummary,
+  type WorkspaceWidgetSummary,
+  WorkspaceWidgetNode,
 } from "@/components/workspace/views/internal-content-nodes";
 import { buildHubNodes } from "@/components/workspace/hub-internal-view";
+import { subscribeWorkspaceContentMutated } from "@/lib/workspace/events";
 
 /* ─── Types ──────────────────────────────────────────────── */
 
 type WorkspaceCanvasProps = {
   workstreams: Workstream[];
-  userName: string;
-  userAvatar: string;
   onNewWorkstream?: () => void;
   onWorkstreamUpdate?: (workstreamId: string, data: Partial<Workstream>) => void;
   focusWorkstreamId?: string;
   searchQuery?: string;
   onOpenWorkstream?: (workstreamId: string) => void;
   onOpenHub?: () => void;
-  /** Called when zoom-based commit happens */
   onCommitWorkstream?: (workstreamId: string | null) => void;
   onOpenPanel?: (type: import("@/stores/workspace-store").PanelType, id: string) => void;
-  /** Open artifact creation dialog */
   onCreateArtifact?: () => void;
-  /** Canvas width adjustment when push-panel is open */
   panelWidth?: number;
+  shellMode?: WorkspaceShellMode;
 };
 
 type WorkstreamNodeData = {
@@ -80,6 +80,16 @@ type WorkstreamNodeData = {
   neighborOpacity: number;
   lifecycle: { opacity: number; scale: number; dashed: boolean };
   onOpen: (workstreamId: string) => void;
+  shellMode: WorkspaceShellMode;
+};
+
+type HubAnchorNodeData = {
+  shellMode: WorkspaceShellMode;
+  workstreamCount: number;
+  pendingCount: number;
+  timerActive: boolean;
+  onOpen: () => void;
+  onNew?: () => void;
 };
 
 /* ─── Context menu item ─────────────────────────────────── */
@@ -113,14 +123,6 @@ function getAmbientClass(): string {
   return "workspace-ambient-night";
 }
 
-function getTimeGreeting(): string {
-  const hour = new Date().getHours();
-  if (hour >= 5 && hour < 12) return "Good morning";
-  if (hour >= 12 && hour < 17) return "Good afternoon";
-  if (hour >= 17 && hour < 22) return "Good evening";
-  return "Night owl";
-}
-
 /* ─── Zoom helpers ───────────────────────────────────────── */
 
 function getRepresentationBand(zoom: number): ZoomBand {
@@ -130,7 +132,6 @@ function getRepresentationBand(zoom: number): ZoomBand {
   return "internal";
 }
 
-/** Calculate opacity for non-focused workstreams during deep zoom */
 function getNeighborOpacity(zoom: number): number {
   if (zoom <= 0.7) return 1;
   if (zoom >= 1.0) return 0;
@@ -138,7 +139,6 @@ function getNeighborOpacity(zoom: number): number {
 }
 
 function restoreViewport(): Viewport {
-  // Default zoom is low enough to see the full 2.5x-scaled layout
   const defaultVp: Viewport = { x: 0, y: 0, zoom: 0.35 };
   if (typeof window === "undefined") {
     return defaultVp;
@@ -256,8 +256,6 @@ function buildEdges(
   if (!showConnections) return [];
   // Hide edges when inside a committed workstream
   if (committedId) return [];
-
-  // Hub is now a persistent bar — only peer links remain on canvas
   return buildPeerLinks(workstreams, positions);
 }
 
@@ -266,6 +264,7 @@ type CachedWorkspaceContent = {
   notes: NoteSummary[];
   plannerItems: PlannerItemSummary[];
   artifacts: ArtifactSummary[];
+  widgets: WorkspaceWidgetSummary[];
   hubQuickNotes: Array<{ id: string; title: string; updatedAt: number }>;
   hubDeadlines: Array<{ id: string; title: string; dueAt: number; workstreamTitle?: string }>;
   hubActivity: Array<{ id: string; title: string; type: string; timestamp: number }>;
@@ -277,6 +276,7 @@ function emptyWorkspaceContent(): CachedWorkspaceContent {
     notes: [],
     plannerItems: [],
     artifacts: [],
+    widgets: [],
     hubQuickNotes: [],
     hubDeadlines: [],
     hubActivity: [],
@@ -304,15 +304,65 @@ function namespaceFlowEdges(prefix: string, edges: Edge[]) {
 const WorkstreamNode = memo(function WorkstreamNode({
   data,
 }: NodeProps<Node<WorkstreamNodeData>>) {
-  const { workstream, band, isFocused, isDimmed, isCommitted, neighborOpacity, lifecycle, onOpen } = data;
+  const { workstream, band, isFocused, isDimmed, isCommitted, neighborOpacity, lifecycle, onOpen, shellMode } = data;
   const color = getWorkstreamColor(workstream.color);
 
   // Node width by band (scaled up for 2.5x layout)
-  const width = band === "overview" ? 420 : band === "summary" ? 520 : band === "detail" ? 620 : 700;
+  const baseWidth = band === "overview" ? 520 : band === "summary" ? 620 : band === "detail" ? 720 : 780;
+  const width = shellMode === "constellations"
+    ? baseWidth - 24
+    : shellMode === "lenses"
+      ? baseWidth - 10
+      : baseWidth;
 
-  // When committed: dissolve border (opacity + blur), don't hide entirely
-  // so internal canvas-native nodes can coexist
   const dissolving = isCommitted;
+
+  const shellNodeStyle = {
+    constellations: {
+      radius: dissolving ? "20px" : "30px",
+      background: dissolving
+        ? `linear-gradient(180deg, color-mix(in oklab, ${color.value} 8%, var(--bg-elevated)) 0%, color-mix(in oklab, var(--bg-elevated) 88%, transparent) 100%)`
+        : "transparent",
+      borderColor: dissolving ? `${color.value}40` : "transparent",
+      boxShadow: dissolving
+        ? `0 0 22px -10px ${color.value}45`
+        : isFocused
+          ? `0 0 0 1px ${color.value}18, 0 30px 80px -48px ${color.value}38`
+          : `0 20px 64px -48px ${color.value}24`,
+    },
+    magnetic: {
+      radius: dissolving ? "16px" : "22px",
+      background: "var(--bg-elevated)",
+      borderColor: dissolving ? `${color.value}40` : "var(--border-default)",
+      boxShadow: dissolving
+        ? `0 0 18px -10px ${color.value}30`
+        : isFocused
+          ? `0 0 0 1px color-mix(in oklab, ${color.value} 26%, transparent), 0 18px 36px -28px rgba(15,23,42,0.45)`
+          : "0 14px 28px -24px rgba(15,23,42,0.42)",
+    },
+    lenses: {
+      radius: dissolving ? "18px" : "28px",
+      background: "color-mix(in oklab, var(--bg-elevated) 78%, transparent)",
+      borderColor: dissolving ? `${color.value}34` : "color-mix(in oklab, rgba(255,255,255,0.14) 70%, var(--border-default))",
+      boxShadow: dissolving
+        ? `0 0 18px -10px ${color.value}32`
+        : isFocused
+          ? "0 0 0 1px rgba(255,255,255,0.08), 0 24px 58px -36px rgba(15,23,42,0.8)"
+          : "0 20px 44px -34px rgba(15,23,42,0.72)",
+    },
+  }[shellMode];
+  const enterLabel = shellMode === "constellations"
+    ? "Enter cluster"
+    : shellMode === "lenses"
+      ? "Focus view"
+      : "Open field";
+  const metricsClassName = shellMode === "constellations"
+    ? "mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-[var(--text-tertiary)]"
+    : shellMode === "lenses"
+      ? "mt-3 flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-tertiary)]"
+      : "mt-3 flex items-center gap-3 text-[10px] text-[var(--text-tertiary)]";
+  const metricSeparator = shellMode === "magnetic";
+  const showConstellationFrame = shellMode !== "constellations" || dissolving;
 
   return (
     <div className="relative">
@@ -353,26 +403,45 @@ const WorkstreamNode = memo(function WorkstreamNode({
         )}
         style={{
           width: dissolving ? width * 0.8 : width,
-          background: "var(--bg-elevated)",
-          borderWidth: 1,
+          background: shellNodeStyle.background,
+          borderWidth: showConstellationFrame ? 1 : 0,
           borderStyle: lifecycle.dashed ? "dashed" : "solid",
-          borderColor: dissolving ? color.value + "40" : "var(--border-default)",
-          boxShadow: dissolving
-            ? `0 0 20px -8px ${color.value}30`
-            : isFocused
-              ? `0 4px 16px -4px ${color.value}20, 0 2px 8px -4px rgba(0,0,0,0.06)`
-              : "0 2px 8px -4px rgba(0,0,0,0.06)",
+          borderColor: shellNodeStyle.borderColor,
+          boxShadow: shellNodeStyle.boxShadow,
+          borderRadius: shellNodeStyle.radius,
+          backdropFilter: shellMode === "lenses" ? "blur(18px)" : undefined,
         }}
       >
-        {/* Ambient color stripe — warm accent at top and bottom */}
-        <div
-          className="absolute inset-x-0 top-0 h-[3px] rounded-t-2xl opacity-0 group-hover:opacity-60 transition-opacity duration-300"
-          style={{ background: color.value }}
-        />
-        <div
-          className="absolute inset-x-0 bottom-0 h-[3px] rounded-b-2xl opacity-0 group-hover:opacity-30 transition-opacity duration-300"
-          style={{ background: color.value }}
-        />
+        {/* Ambient shell-specific accents */}
+        {shellMode === "constellations" ? (
+          <>
+            <div
+              className="pointer-events-none absolute -left-6 top-8 h-16 w-16 rounded-full opacity-40 blur-2xl transition-opacity duration-300 group-hover:opacity-65"
+              style={{ background: `${color.value}55` }}
+            />
+            <div
+              className="pointer-events-none absolute -right-4 bottom-4 h-10 w-10 rounded-full opacity-25 blur-xl transition-opacity duration-300 group-hover:opacity-45"
+              style={{ background: `${color.value}45` }}
+            />
+          </>
+        ) : (
+          <>
+            <div
+              className={cn(
+                "absolute inset-x-0 top-0 h-[3px] opacity-0 group-hover:opacity-60 transition-opacity duration-300",
+                shellMode === "magnetic" ? "rounded-t-[22px]" : "rounded-t-[30px]",
+              )}
+              style={{ background: color.value }}
+            />
+            <div
+              className={cn(
+                "absolute inset-x-0 bottom-0 h-[3px] opacity-0 group-hover:opacity-30 transition-opacity duration-300",
+                shellMode === "magnetic" ? "rounded-b-[22px]" : "rounded-b-[30px]",
+              )}
+              style={{ background: color.value }}
+            />
+          </>
+        )}
 
         <div className={cn("relative flex flex-col", dissolving ? "px-3 py-2" : "px-4 py-3.5")}>
           {/* Top row: emoji + title + type */}
@@ -382,6 +451,11 @@ const WorkstreamNode = memo(function WorkstreamNode({
                 {workstream.emoji || "📚"}
               </span>
               <div className="min-w-0">
+                {shellMode === "constellations" && !dissolving && band !== "overview" && (
+                  <div className="mb-1 text-[9px] font-semibold uppercase tracking-[0.22em] text-[var(--text-tertiary)]">
+                    constellation
+                  </div>
+                )}
                 <h3
                   className={cn(
                     "font-display leading-snug text-[var(--text-primary)]",
@@ -389,13 +463,14 @@ const WorkstreamNode = memo(function WorkstreamNode({
                     !dissolving && band === "overview" && "text-sm",
                     !dissolving && band === "summary" && "text-[0.95rem]",
                     !dissolving && (band === "detail" || band === "internal") && "text-base",
+                    shellMode === "lenses" && !dissolving && "tracking-[-0.01em]",
                   )}
                 >
                   {workstream.title}
                 </h3>
               </div>
             </div>
-            {!dissolving && (
+            {!dissolving && shellMode !== "constellations" && (
               <span
                 className="mt-0.5 shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider"
                 style={{ background: color.bg, color: color.value }}
@@ -405,7 +480,7 @@ const WorkstreamNode = memo(function WorkstreamNode({
             )}
           </div>
 
-          {/* Description (summary+, hidden when dissolving) */}
+          {/* Description */}
           <AnimatePresence>
             {band !== "overview" && !dissolving && (
               <motion.p
@@ -413,28 +488,37 @@ const WorkstreamNode = memo(function WorkstreamNode({
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
                 transition={{ duration: 0.2 }}
-                className="mt-2 line-clamp-2 text-xs leading-relaxed text-[var(--text-secondary)]"
+                className={cn(
+                  "mt-2 line-clamp-2 text-xs leading-relaxed text-[var(--text-secondary)]",
+                  shellMode === "constellations" && "max-w-[28ch]",
+                )}
               >
                 {workstream.description || "A space for threads, artifacts, and tasks."}
               </motion.p>
             )}
           </AnimatePresence>
 
-          {/* Metrics (summary+, hidden when dissolving) */}
+          {/* Metrics */}
           <AnimatePresence>
-            {band !== "overview" && !dissolving && (
+            {band !== "overview" && !dissolving && shellMode !== "constellations" && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
                 transition={{ duration: 0.2, delay: 0.05 }}
-                className="mt-3 flex items-center gap-3 text-[10px] text-[var(--text-tertiary)]"
+                className={metricsClassName}
               >
-                <span>{workstream.threadCount ?? 0} threads</span>
-                <span className="h-3 w-px bg-[var(--border-default)]" />
-                <span>{workstream.artifactCount ?? 0} artifacts</span>
-                <span className="h-3 w-px bg-[var(--border-default)]" />
-                <span>{formatActivity(workstream.lastActivityAt)}</span>
+                <span className={shellMode === "lenses" ? "rounded-full bg-[rgba(255,255,255,0.05)] px-2 py-0.5" : undefined}>
+                  {workstream.threadCount ?? 0} threads
+                </span>
+                {metricSeparator && <span className="h-3 w-px bg-[var(--border-default)]" />}
+                <span className={shellMode === "lenses" ? "rounded-full bg-[rgba(255,255,255,0.05)] px-2 py-0.5" : undefined}>
+                  {workstream.artifactCount ?? 0} artifacts
+                </span>
+                {metricSeparator && <span className="h-3 w-px bg-[var(--border-default)]" />}
+                <span className={shellMode === "lenses" ? "rounded-full bg-[rgba(255,255,255,0.05)] px-2 py-0.5" : undefined}>
+                  {formatActivity(workstream.lastActivityAt)}
+                </span>
               </motion.div>
             )}
           </AnimatePresence>
@@ -447,13 +531,22 @@ const WorkstreamNode = memo(function WorkstreamNode({
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
                 transition={{ duration: 0.2, delay: 0.1 }}
-                className="mt-3 flex items-center justify-between border-t border-[var(--border-default)] pt-3"
+                className={cn(
+                  "mt-3 flex items-center justify-between pt-3",
+                  shellMode === "constellations"
+                    ? "pt-4"
+                    : "border-t border-[var(--border-default)]",
+                )}
               >
                 <span className="text-[10px] text-[var(--text-tertiary)]">
-                  Click to enter
+                  {shellMode === "constellations"
+                    ? "Drift into focus"
+                    : shellMode === "lenses"
+                      ? "Bring into focus"
+                      : "Click to enter"}
                 </span>
                 <span className="text-xs font-medium text-[var(--accent-cyan)] transition-transform duration-150 group-hover:translate-x-1">
-                  Enter →
+                  {enterLabel} →
                 </span>
               </motion.div>
             )}
@@ -461,6 +554,87 @@ const WorkstreamNode = memo(function WorkstreamNode({
         </div>
       </motion.button>
     </div>
+  );
+});
+
+const HubAnchorNode = memo(function HubAnchorNode({
+  data,
+}: NodeProps<Node<HubAnchorNodeData>>) {
+  const shellStyles = {
+    constellations: {
+      shell: "rounded-[44px] border border-[rgba(255,255,255,0.55)] bg-[rgba(255,255,255,0.82)] shadow-[0_30px_80px_-34px_rgba(14,142,232,0.25)] backdrop-blur-xl",
+      halo: "absolute -inset-10 rounded-[56px] bg-[radial-gradient(circle,rgba(14,142,232,0.14),transparent_68%)] blur-3xl",
+      align: "items-center text-center",
+    },
+    magnetic: {
+      shell: "rounded-[32px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_26px_70px_-40px_rgba(15,23,42,0.35)]",
+      halo: "absolute inset-0 rounded-[32px] border border-white/5",
+      align: "items-start text-left",
+    },
+    lenses: {
+      shell: "rounded-[999px] border border-[rgba(255,255,255,0.16)] bg-[rgba(19,17,26,0.38)] shadow-[0_30px_90px_-40px_rgba(15,23,42,0.62)] backdrop-blur-2xl",
+      halo: "absolute -inset-6 rounded-[999px] bg-[radial-gradient(circle,rgba(255,255,255,0.10),transparent_72%)] blur-3xl",
+      align: "items-center text-center",
+    },
+  }[data.shellMode];
+
+  return (
+    <motion.button
+      type="button"
+      onClick={data.onOpen}
+      whileHover={{ scale: 1.02, y: -2 }}
+      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+      className={cn(
+        "group relative flex h-[220px] w-[320px] flex-col justify-between overflow-hidden px-7 py-6",
+        shellStyles.shell,
+        shellStyles.align,
+      )}
+    >
+      <div className={cn("pointer-events-none -z-10", shellStyles.halo)} />
+      <div className="flex items-center gap-3">
+        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--accent-cyan)]/12 text-[var(--accent-cyan)]">
+          <Home className="h-6 w-6" />
+        </div>
+        <div className={cn("min-w-0", data.shellMode !== "magnetic" && "mx-auto")}>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--text-tertiary)]">
+            Hub
+          </div>
+          <div className="font-display text-[1.55rem] leading-tight text-[var(--text-primary)]">
+            Workspace Home
+          </div>
+        </div>
+      </div>
+
+      <p className={cn("max-w-[26ch] text-sm leading-6 text-[var(--text-secondary)]", data.shellMode !== "magnetic" && "mx-auto")}>
+        Timers, quick notes, deadlines, and the cross-workstream view live here.
+      </p>
+
+      <div className={cn("flex flex-wrap gap-2", data.shellMode !== "magnetic" && "justify-center")}>
+        <span className="rounded-full border border-[var(--border-default)]/70 bg-[var(--bg-primary)]/55 px-3 py-1 text-[11px] font-medium text-[var(--text-secondary)]">
+          {data.workstreamCount} workstreams
+        </span>
+        <span className="rounded-full border border-[var(--border-default)]/70 bg-[var(--bg-primary)]/55 px-3 py-1 text-[11px] font-medium text-[var(--text-secondary)]">
+          {data.pendingCount} visible items
+        </span>
+        {data.timerActive && (
+          <span className="rounded-full border border-[var(--accent-cyan)]/30 bg-[var(--accent-cyan)]/12 px-3 py-1 text-[11px] font-medium text-[var(--accent-cyan)]">
+            timer active
+          </span>
+        )}
+      </div>
+
+      <div className={cn("flex items-center justify-between gap-3 text-sm", data.shellMode !== "magnetic" && "justify-center")}>
+        {data.onNew && (
+          <span className="inline-flex items-center gap-1.5 text-[var(--text-tertiary)]">
+            <Plus className="h-4 w-4" />
+            New
+          </span>
+        )}
+        <span className="font-medium text-[var(--accent-cyan)] transition-transform duration-150 group-hover:translate-x-1">
+          Open hub →
+        </span>
+      </div>
+    </motion.button>
   );
 });
 
@@ -474,7 +648,15 @@ function formatActivity(timestamp?: number) {
 
 /* ─── Background ─────────────────────────────────────────── */
 
-function FlowBackground({ mode, zoom }: { mode: WorkspaceBackgroundMode; zoom: number }) {
+function FlowBackground({
+  mode,
+  zoom,
+  shellMode,
+}: {
+  mode: WorkspaceBackgroundMode;
+  zoom: number;
+  shellMode: WorkspaceShellMode;
+}) {
   if (mode === "blank") return null;
   const isDots = mode === "dots";
   const gap = isDots
@@ -485,9 +667,13 @@ function FlowBackground({ mode, zoom }: { mode: WorkspaceBackgroundMode; zoom: n
       gap={gap}
       size={isDots ? 1.45 : 0.8}
       variant={isDots ? BackgroundVariant.Dots : BackgroundVariant.Lines}
-      color={isDots
-        ? "color-mix(in oklab, var(--border-default) 74%, transparent)"
-        : "color-mix(in oklab, var(--border-default) 60%, transparent)"}
+      color={shellMode === "constellations"
+        ? "color-mix(in oklab, var(--accent-cyan) 18%, var(--border-default))"
+        : shellMode === "lenses"
+          ? "color-mix(in oklab, rgba(255,255,255,0.22) 40%, var(--border-default))"
+          : isDots
+            ? "color-mix(in oklab, var(--border-default) 74%, transparent)"
+            : "color-mix(in oklab, var(--border-default) 60%, transparent)"}
     />
   );
 }
@@ -497,9 +683,11 @@ function FlowBackground({ mode, zoom }: { mode: WorkspaceBackgroundMode; zoom: n
 function WorkspaceBreadcrumb({
   workstream,
   onBack,
+  shellMode,
 }: {
   workstream: Workstream;
   onBack: () => void;
+  shellMode: WorkspaceShellMode;
 }) {
   return (
     <motion.div
@@ -507,7 +695,14 @@ function WorkspaceBreadcrumb({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
       transition={{ duration: 0.2 }}
-      className="absolute top-3 left-4 z-30 flex items-center gap-1.5"
+      className={cn(
+        "absolute top-3 left-4 z-30 flex items-center gap-1.5 rounded-full px-2.5 py-1.5",
+        shellMode === "constellations"
+          ? "bg-[color:rgba(19,17,26,0.52)] backdrop-blur-md"
+          : shellMode === "lenses"
+            ? "bg-[color:rgba(19,17,26,0.6)] backdrop-blur-xl"
+            : "bg-[var(--bg-elevated)]/72",
+      )}
     >
       <button
         type="button"
@@ -527,10 +722,11 @@ function WorkspaceBreadcrumb({
 
 const FLOW_NODE_TYPES = {
   workstream: WorkstreamNode,
-  contentGroup: GroupNode,
-  contentColumn: ColumnNode,
-  graphItem: GraphItemNode,
-  graphOverflow: GraphOverflowNode,
+  hubAnchor: HubAnchorNode,
+  constellationCluster: ConstellationClusterNode,
+  magneticPanel: MagneticPanelNode,
+  lensesLens: LensesLensNode,
+  workspaceWidget: WorkspaceWidgetNode,
   emptyState: EmptyStateNode,
   focusTimer: FocusTimerNode,
 } as const;
@@ -539,8 +735,6 @@ const FLOW_NODE_TYPES = {
 
 function WorkspaceCanvasInner({
   workstreams,
-  userName,
-  userAvatar,
   onNewWorkstream,
   focusWorkstreamId,
   searchQuery = "",
@@ -549,6 +743,7 @@ function WorkspaceCanvasInner({
   onCommitWorkstream,
   onOpenPanel,
   onCreateArtifact,
+  shellMode = "magnetic",
 }: WorkspaceCanvasProps) {
   const reactFlowRef = useRef<ReactFlowInstance | null>(null);
   const initializedRef = useRef(false);
@@ -561,6 +756,7 @@ function WorkspaceCanvasInner({
   const contentCacheRef = useRef(new Map<string, CachedWorkspaceContent>());
   const inFlightContentRef = useRef(new Map<string, Promise<void>>());
   const internalNodeOverridesRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+  const widgetLayoutMetaRef = useRef(new Map<string, { itemId: string; origin: { x: number; y: number } }>());
   const {
     showArchived,
     showConnections,
@@ -603,7 +799,6 @@ function WorkspaceCanvasInner({
     setInternalNodeOverrides(new Map());
   }, [viewMode]);
 
-  // Initialize persistence listeners
   useEffect(() => {
     const cleanup = initPersistenceListeners();
     return cleanup;
@@ -625,13 +820,11 @@ function WorkspaceCanvasInner({
   const neighborOpacity = getNeighborOpacity(zoom);
   const panelOpener = onOpenPanel ?? useWorkspaceStore.getState().openPanel;
 
-  // Compute positions using auto-layout + overrides
   const positions = useMemo(() => {
     const canonical = computeCanonicalLayout(workstreams);
     return applyOverrides(canonical, workstreams, localOverrides);
   }, [workstreams, localOverrides]);
 
-  // Update zoom band in store
   useEffect(() => {
     setZoomBand(band);
   }, [band, setZoomBand]);
@@ -639,6 +832,31 @@ function WorkspaceCanvasInner({
   const getCachedContent = useCallback((workstreamId: string) => {
     return contentById[workstreamId] ?? contentCacheRef.current.get(workstreamId) ?? emptyWorkspaceContent();
   }, [contentById]);
+
+  const invalidateWorkstreamContent = useCallback((workstreamId?: string, options?: { includeHub?: boolean }) => {
+    if (!workstreamId) {
+      contentCacheRef.current.clear();
+      inFlightContentRef.current.clear();
+      setContentById({});
+      return;
+    }
+
+    contentCacheRef.current.delete(workstreamId);
+    inFlightContentRef.current.delete(workstreamId);
+    setContentById((current) => {
+      if (!(workstreamId in current) && !(options?.includeHub && "__hub__" in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[workstreamId];
+      if (options?.includeHub) {
+        contentCacheRef.current.delete("__hub__");
+        inFlightContentRef.current.delete("__hub__");
+        delete next.__hub__;
+      }
+      return next;
+    });
+  }, []);
 
   const fetchContentForWorkstream = useCallback(async (workstreamId: string) => {
     if (contentCacheRef.current.has(workstreamId)) {
@@ -694,11 +912,12 @@ function WorkspaceCanvasInner({
           return;
         }
 
-        const [chatsRes, docsRes, artifactsRes, plannerRes] = await Promise.all([
+        const [chatsRes, docsRes, artifactsRes, plannerRes, widgetsRes] = await Promise.all([
           fetch(`/api/chats?workstreamId=${workstreamId}&limit=20`),
           fetch(`/api/artifacts?workstreamId=${workstreamId}&type=document&limit=20`),
           fetch(`/api/artifacts?workstreamId=${workstreamId}&limit=20`),
           fetch(`/api/planner?workstreamId=${workstreamId}&limit=20`),
+          fetch(`/api/workspace-items?workstreamId=${workstreamId}`),
         ]);
 
         const next: CachedWorkspaceContent = emptyWorkspaceContent();
@@ -740,6 +959,35 @@ function WorkspaceCanvasInner({
             status: (item.status as PlannerItemSummary["status"]) ?? "pending",
           }));
         }
+        if (widgetsRes.ok) {
+          const data = await widgetsRes.json();
+          next.widgets = (data.items ?? []).flatMap((item: Record<string, unknown>) => {
+            const id = String(item._id ?? "");
+            const panelId = String(item.sourceArtifactId ?? item.sourceChatId ?? item.sourcePlannerItemId ?? "");
+            if (!id || !panelId) return [];
+            const itemType = String(item.type ?? "custom");
+            const panelType = item.sourceArtifactId
+              ? "artifact"
+              : item.sourceChatId
+                ? "chat"
+                : item.sourcePlannerItemId
+                  ? "planner"
+                  : "artifact";
+            return [{
+              id,
+              title: sanitizeTitle(item.title),
+              itemType,
+              renderMode: typeof item.renderMode === "string" ? item.renderMode : undefined,
+              contentSummary: typeof item.contentSummary === "string" ? item.contentSummary : undefined,
+              x: Number(item.x ?? 0),
+              y: Number(item.y ?? 0),
+              width: typeof item.width === "number" ? item.width : undefined,
+              height: typeof item.height === "number" ? item.height : undefined,
+              panelType,
+              panelId,
+            } satisfies WorkspaceWidgetSummary];
+          });
+        }
         contentCacheRef.current.set(workstreamId, next);
         setContentById((current) => ({ ...current, [workstreamId]: next }));
       } finally {
@@ -751,6 +999,34 @@ function WorkspaceCanvasInner({
     inFlightContentRef.current.set(workstreamId, promise);
     await promise;
   }, [sanitizeTitle, workstreams]);
+
+  useEffect(() => {
+    return subscribeWorkspaceContentMutated((detail) => {
+      if (detail.workstreamId) {
+        invalidateWorkstreamContent(detail.workstreamId, { includeHub: detail.refreshHub });
+        if (visibleWorkstreamIds.includes(detail.workstreamId)) {
+          void fetchContentForWorkstream(detail.workstreamId);
+        }
+        if (detail.refreshHub && visibleWorkstreamIds.includes("__hub__")) {
+          void fetchContentForWorkstream("__hub__");
+        }
+        return;
+      }
+
+      invalidateWorkstreamContent(undefined);
+      if (primaryWorkstreamId) {
+        void fetchContentForWorkstream(primaryWorkstreamId);
+      }
+      if (visibleWorkstreamIds.includes("__hub__")) {
+        void fetchContentForWorkstream("__hub__");
+      }
+    });
+  }, [
+    fetchContentForWorkstream,
+    invalidateWorkstreamContent,
+    primaryWorkstreamId,
+    visibleWorkstreamIds,
+  ]);
 
   useEffect(() => {
     if (!primaryWorkstreamId || visibleWorkstreamIds.length === 0) {
@@ -765,14 +1041,10 @@ function WorkspaceCanvasInner({
       if (commitAnimationTimeoutRef.current) {
         clearTimeout(commitAnimationTimeoutRef.current);
       }
-      // Animated zoom into the workstream
       const instance = reactFlowRef.current;
       if (instance) {
         animatedCommitRef.current = workstreamId;
-        // Save current viewport for zoom-out restoration
         setPreviousViewport({ ...lastViewportRef.current });
-
-        // Get node position and zoom to it — centered on the card
         const node = instance.getNode(`ws-${workstreamId}`);
         if (node) {
           instance.setCenter(
@@ -783,7 +1055,6 @@ function WorkspaceCanvasInner({
         }
       }
 
-      // Commit after animation — set visibility for this workstream
       commitAnimationTimeoutRef.current = setTimeout(() => {
         setVisibleWorkstreamIds([workstreamId]);
         commitWorkstream(workstreamId);
@@ -802,12 +1073,10 @@ function WorkspaceCanvasInner({
     exitWorkstream();
     onCommitWorkstream?.(null);
 
-    // Zoom out to fit all workstreams — always centered
     const instance = reactFlowRef.current;
     if (instance) {
-      // Small delay to let nodes reappear before fitting
       setTimeout(() => {
-        instance.fitView({ padding: 0.15, duration: 400, nodes: undefined });
+        instance.fitView({ padding: 0.08, duration: 400, nodes: undefined });
       }, 50);
     }
   }, [exitWorkstream, onCommitWorkstream]);
@@ -873,8 +1142,29 @@ function WorkspaceCanvasInner({
     if (prefetchDebounceRef.current) clearTimeout(prefetchDebounceRef.current);
   }, []);
 
-  const nodes = useMemo<Node[]>(() => {
-    // Hub is now a persistent bar — no hub node on canvas
+  const { nodes, edges } = useMemo<{ nodes: Node[]; edges: Edge[] }>(() => {
+    const generatedNodes: Node[] = [];
+    const generatedEdges: Edge[] = [];
+    const nextWidgetLayoutMeta = new Map<string, { itemId: string; origin: { x: number; y: number } }>();
+
+    const overviewHubNode: Node<HubAnchorNodeData> = {
+      id: "hub-anchor",
+      type: "hubAnchor",
+      position: { x: -160, y: -120 },
+      draggable: false,
+      selectable: false,
+      hidden: !!primaryWorkstreamId && primaryWorkstreamId !== "__hub__",
+      data: {
+        shellMode,
+        workstreamCount: visibleWorkstreams.length,
+        pendingCount: visibleWorkstreams.reduce((count, ws) => count + (ws.threadCount ?? 0) + (ws.artifactCount ?? 0), 0),
+        timerActive: timerState.active,
+        onOpen: handleOpenHub,
+        onNew: onNewWorkstream,
+      },
+    };
+
+    generatedNodes.push(overviewHubNode);
 
     const workstreamNodes: Node<WorkstreamNodeData>[] = visibleWorkstreams.map((ws) => {
       const pos = positions.get(ws._id) ?? { x: 0, y: 0 };
@@ -899,12 +1189,15 @@ function WorkspaceCanvasInner({
           neighborOpacity,
           lifecycle,
           onOpen: handleOpenWorkstream,
+          shellMode,
         },
       };
     });
 
-    let internalNodes: Node[] = [];
-    if (visibleWorkstreamIds.length > 0 && primaryWorkstreamId) {
+    generatedNodes.push(...workstreamNodes);
+    generatedEdges.push(...buildEdges(visibleWorkstreams, positions, showConnections, primaryWorkstreamId));
+
+    if (visibleWorkstreamIds.length > 0) {
       for (const workstreamId of visibleWorkstreamIds) {
         const isPrimary = primaryWorkstreamId === workstreamId;
         const loading = loadingContentIds.includes(workstreamId) && !contentCacheRef.current.has(workstreamId);
@@ -926,75 +1219,71 @@ function WorkspaceCanvasInner({
             },
             { x: 80, y: 120 },
           ));
-          internalNodes.push(...namespacedHubNodes.map((node) => ({
+          generatedNodes.push(...namespacedHubNodes.map((node) => ({
             ...node,
             position: internalNodeOverrides.get(node.id) ?? node.position,
-            style: {
-              ...node.style,
-              opacity: isPrimary ? 1 : 0.6,
-            },
+            style: { ...node.style, opacity: isPrimary ? 1 : 0.6 },
           })));
           continue;
         }
 
-        const focusWorkstream = workstreams.find((workstream) => workstream._id === workstreamId);
-        const workstreamPos = positions.get(workstreamId) ?? { x: 0, y: 0 };
-        const basePos = { x: workstreamPos.x - 40, y: workstreamPos.y + 120 };
-        const contentData = {
-          threads: cached.threads,
-          notes: cached.notes,
-          plannerItems: cached.plannerItems,
-          artifacts: cached.artifacts,
-          loading,
-          workstreamEmoji: focusWorkstream?.emoji,
-          workstreamTitle: focusWorkstream?.title,
-          onOpenPanel: panelOpener,
-        };
+        // Build actual UI-specific internal nodes for the workstream!
+        if (primaryWorkstreamId === workstreamId) {
+          const workstreamPos = positions.get(workstreamId) ?? { x: 0, y: 0 };
+          const basePos = { x: workstreamPos.x, y: workstreamPos.y + 120 };
+          const focusWorkstream = workstreams.find((ws) => ws._id === workstreamId);
 
-        let builtNodes: Node[] = [];
-        if (viewMode === "structured") {
-          builtNodes = buildStructuredNodes(contentData, basePos);
-        } else if (viewMode === "columns") {
-          builtNodes = buildColumnNodes(contentData, basePos);
-        } else {
-          builtNodes = buildGraphNodes(contentData, basePos).nodes;
+          const contentData = {
+            threads: cached.threads,
+            notes: cached.notes,
+            plannerItems: cached.plannerItems,
+            artifacts: cached.artifacts,
+            widgets: cached.widgets,
+            loading,
+            workstreamEmoji: focusWorkstream?.emoji,
+            workstreamTitle: focusWorkstream?.title,
+            onOpenPanel: panelOpener,
+          };
+
+          let builderResult: { nodes: Node[], edges: Edge[] } = { nodes: [], edges: [] };
+
+          if (shellMode === "constellations") {
+            builderResult = buildConstellationNodes(contentData, basePos);
+          } else if (shellMode === "magnetic") {
+            builderResult = buildMagneticNodes(contentData, basePos);
+          } else if (shellMode === "lenses") {
+            builderResult = buildLensesNodes(contentData, basePos);
+          }
+
+          generatedNodes.push(...namespaceFlowNodes(`internal:${workstreamId}`, builderResult.nodes).map(node => ({
+            ...node,
+            position: internalNodeOverrides.get(node.id) ?? node.position,
+          })));
+          generatedEdges.push(...namespaceFlowEdges(`internal:${workstreamId}`, builderResult.edges));
+
+          const widgetNodes = namespaceFlowNodes(
+            `internal:${workstreamId}`,
+            buildWorkspaceWidgetNodes(contentData, basePos),
+          ).map((node) => {
+            const overriddenPosition = internalNodeOverrides.get(node.id) ?? node.position;
+            const rawWidgetId = node.id.split(":").pop() ?? node.id;
+            const itemId = rawWidgetId.replace(/^widget-/, "");
+            nextWidgetLayoutMeta.set(node.id, {
+              itemId,
+              origin: basePos,
+            });
+            return {
+              ...node,
+              position: overriddenPosition,
+            };
+          });
+          generatedNodes.push(...widgetNodes);
         }
-
-        const namespacedNodes = namespaceFlowNodes(`internal:${workstreamId}`, builtNodes);
-
-        // Zone background: subtle gradient tint for spatial identity
-        const wsColor = getWorkstreamColor(focusWorkstream?.color);
-        const zoneNode: Node = {
-          id: `zone-${workstreamId}`,
-          type: "default",
-          position: { x: basePos.x - 60, y: basePos.y - 40 },
-          draggable: false,
-          selectable: false,
-          data: {},
-          style: {
-            width: 600,
-            height: 500,
-            background: `radial-gradient(ellipse at center, ${wsColor.value}06 0%, transparent 70%)`,
-            borderRadius: 40,
-            border: "none",
-            pointerEvents: "none" as const,
-            zIndex: -1,
-          },
-        };
-        internalNodes.unshift(zoneNode);
-
-        internalNodes.push(...namespacedNodes.map((node) => ({
-          ...node,
-          position: internalNodeOverrides.get(node.id) ?? node.position,
-          style: {
-            ...node.style,
-            opacity: isPrimary ? 1 : 0.6,
-          },
-        })));
       }
     }
 
-    return [...workstreamNodes, ...internalNodes];
+    widgetLayoutMetaRef.current = nextWidgetLayoutMeta;
+    return { nodes: generatedNodes, edges: generatedEdges };
   }, [
     band,
     focusWorkstreamId,
@@ -1008,62 +1297,29 @@ function WorkspaceCanvasInner({
     panelOpener,
     positions,
     primaryWorkstreamId,
-    userAvatar,
-    userName,
-    viewMode,
     visibleWorkstreamIds,
     visibleWorkstreams,
-    workstreams,
     timerState,
     startTimer,
     pauseTimer,
     resetTimer,
+    shellMode,
+    showConnections,
+    workstreams,
   ]);
-
-  const edges = useMemo(() => {
-    const baseEdges = buildEdges(visibleWorkstreams, positions, showConnections, primaryWorkstreamId);
-
-    if (viewMode !== "graph" || !primaryWorkstreamId) {
-      return baseEdges;
-    }
-
-    const graphEdges = visibleWorkstreamIds
-      .filter((workstreamId) => workstreamId !== "__hub__")
-      .flatMap((workstreamId) => {
-        const focusWorkstream = workstreams.find((workstream) => workstream._id === workstreamId);
-        const workstreamPos = positions.get(workstreamId) ?? { x: 0, y: 0 };
-        const basePos = { x: workstreamPos.x - 40, y: workstreamPos.y + 120 };
-        const cached = getCachedContent(workstreamId);
-        const graphResult = buildGraphNodes({
-          threads: cached.threads,
-          notes: cached.notes,
-          plannerItems: cached.plannerItems,
-          artifacts: cached.artifacts,
-          loading: loadingContentIds.includes(workstreamId) && !contentCacheRef.current.has(workstreamId),
-          workstreamEmoji: focusWorkstream?.emoji,
-          workstreamTitle: focusWorkstream?.title,
-          onOpenPanel: panelOpener,
-        }, basePos);
-        return namespaceFlowEdges(`internal:${workstreamId}`, graphResult.edges);
-      });
-
-    return [...baseEdges, ...graphEdges];
-  }, [band, getCachedContent, loadingContentIds, panelOpener, positions, primaryWorkstreamId, showConnections, viewMode, visibleWorkstreamIds, visibleWorkstreams, workstreams]);
 
   const handleInit = useCallback((instance: ReactFlowInstance) => {
     reactFlowRef.current = instance;
     if (initializedRef.current) return;
     initializedRef.current = true;
-    // If a workstream is already committed (URL param), don't fitView
     if (primaryWorkstreamId) {
       const saved = restoreViewport();
       instance.setViewport(saved, { duration: 0 });
       setCamera({ x: saved.x, y: saved.y, z: saved.zoom });
       setZoom(saved.zoom);
     } else {
-      // FitView to center all workstreams on load
       setTimeout(() => {
-        instance.fitView({ padding: 0.15, duration: 400 });
+        instance.fitView({ padding: 0.08, duration: 400 });
         const vp = instance.getViewport();
         setCamera({ x: vp.x, y: vp.y, z: vp.zoom });
         setZoom(vp.zoom);
@@ -1074,7 +1330,6 @@ function WorkspaceCanvasInner({
   const handleMove = useCallback((_: unknown, viewport: Viewport) => {
     setZoom(viewport.zoom);
     lastViewportRef.current = { x: viewport.x, y: viewport.y, zoom: viewport.zoom };
-    // No auto-commit on zoom/pan — commitment only via explicit click
   }, []);
 
   const handleMoveEnd = useCallback(
@@ -1082,7 +1337,6 @@ function WorkspaceCanvasInner({
       setZoom(viewport.zoom);
       setCamera({ x: viewport.x, y: viewport.y, z: viewport.zoom });
       lastViewportRef.current = { x: viewport.x, y: viewport.y, zoom: viewport.zoom };
-      // No auto-commit on zoom/pan — commitment only via explicit click
       try {
         window.localStorage.setItem("workspace:viewport", JSON.stringify(viewport));
       } catch {
@@ -1091,6 +1345,34 @@ function WorkspaceCanvasInner({
     },
     [setCamera],
   );
+
+  const persistWorkstreamPosition = useCallback((workstreamId: string, x: number, y: number) => {
+    void fetch("/api/workstreams", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      keepalive: true,
+      body: JSON.stringify({
+        action: "update",
+        workstreamId,
+        canvasX: x,
+        canvasY: y,
+      }),
+    });
+  }, []);
+
+  const persistWidgetPosition = useCallback((itemId: string, x: number, y: number) => {
+    void fetch("/api/workspace-items", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      keepalive: true,
+      body: JSON.stringify({
+        action: "update",
+        itemId,
+        x,
+        y,
+      }),
+    });
+  }, []);
 
   const handleNodeDragStop = useCallback(
     (_: unknown, node: Node) => {
@@ -1105,6 +1387,7 @@ function WorkspaceCanvasInner({
           return next;
         });
         saveLocalOverride(workstreamId, x, y);
+        persistWorkstreamPosition(workstreamId, x, y);
         return;
       }
 
@@ -1114,8 +1397,15 @@ function WorkspaceCanvasInner({
         next.set(node.id, { x, y });
         return next;
       });
+
+      const widgetMeta = widgetLayoutMetaRef.current.get(node.id);
+      if (widgetMeta) {
+        const relativeX = x - widgetMeta.origin.x;
+        const relativeY = y - widgetMeta.origin.y;
+        persistWidgetPosition(widgetMeta.itemId, relativeX, relativeY);
+      }
     },
-    [],
+    [persistWidgetPosition, persistWorkstreamPosition],
   );
 
   const handleNodeDrag = useCallback((_: unknown, node: Node) => {
@@ -1147,7 +1437,6 @@ function WorkspaceCanvasInner({
     });
   }, []);
 
-  // Escape key handler
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape" && primaryWorkstreamId) {
@@ -1158,7 +1447,6 @@ function WorkspaceCanvasInner({
     return () => window.removeEventListener("keydown", handler);
   }, [handleExitWorkstream, primaryWorkstreamId]);
 
-  // Center home event listener
   useEffect(() => {
     const handler = () => {
       const instance = reactFlowRef.current;
@@ -1166,14 +1454,13 @@ function WorkspaceCanvasInner({
       if (primaryWorkstreamId) {
         handleExitWorkstream();
       } else {
-        instance.fitView({ padding: 0.15, duration: 500 });
+        instance.fitView({ padding: 0.08, duration: 500 });
       }
     };
     window.addEventListener("workspace:center-home", handler);
     return () => window.removeEventListener("workspace:center-home", handler);
   }, [handleExitWorkstream, primaryWorkstreamId]);
 
-  // Center on focused workstream from URL (just center, don't enter)
   useEffect(() => {
     const instance = reactFlowRef.current;
     if (!instance || !focusWorkstreamId) return;
@@ -1209,21 +1496,12 @@ function WorkspaceCanvasInner({
         setContextMenu({ x: event.clientX - bounds.left, y: event.clientY - bounds.top });
       }}
     >
-      {/* Subtle ambient gradient */}
-      <div
-        className="pointer-events-none absolute inset-0 opacity-60"
-        style={{
-          background:
-            "radial-gradient(ellipse 50% 40% at 15% 10%, rgba(14, 142, 232, 0.06), transparent), radial-gradient(ellipse 40% 30% at 85% 15%, rgba(32, 184, 178, 0.05), transparent)",
-        }}
-      />
-
-      {/* Breadcrumb — only when committed to a workstream */}
       <AnimatePresence>
         {committedWorkstream && (
           <WorkspaceBreadcrumb
             workstream={committedWorkstream}
             onBack={handleExitWorkstream}
+            shellMode={shellMode}
           />
         )}
       </AnimatePresence>
@@ -1252,7 +1530,17 @@ function WorkspaceCanvasInner({
         proOptions={{ hideAttribution: true }}
         className={cn("workspace-react-flow", getAmbientClass())}
       >
-        <FlowBackground mode={backgroundMode} zoom={zoom} />
+      <div
+        className="pointer-events-none absolute inset-0 z-0"
+        style={{
+          background: shellMode === "constellations"
+            ? "transparent" // Removed filters for constellations
+            : shellMode === "lenses"
+              ? "transparent" // Removed filters for lenses
+              : "transparent",
+        }}
+      />
+      <FlowBackground mode={backgroundMode} zoom={zoom} shellMode={shellMode} />
         <Controls position="bottom-left" showInteractive={false}>
           <ControlButton
             onClick={() => reactFlowRef.current?.zoomTo(0.7, { duration: 350 })}
@@ -1265,7 +1553,7 @@ function WorkspaceCanvasInner({
               if (primaryWorkstreamId) {
                 handleExitWorkstream();
               } else {
-                reactFlowRef.current?.fitView({ padding: 0.15, duration: 500 });
+                reactFlowRef.current?.fitView({ padding: 0.08, duration: 500 });
               }
             }}
             title="Fit all workstreams"
@@ -1291,7 +1579,14 @@ function WorkspaceCanvasInner({
             icon={<FileText className="h-3.5 w-3.5" />}
             label="New document"
             hint="D"
-            onClick={() => { setContextMenu(null); onCreateArtifact ? onCreateArtifact() : panelOpener("artifact", "new"); }}
+            onClick={() => {
+              setContextMenu(null);
+              if (onCreateArtifact) {
+                onCreateArtifact();
+              } else {
+                panelOpener("artifact", "new");
+              }
+            }}
           />
 
           {/* In workstream: scoped actions */}

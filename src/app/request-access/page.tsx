@@ -6,6 +6,7 @@ import { useAuth, useUser } from "@clerk/nextjs";
 import { ArrowLeft, CheckCircle2, Loader2, Search, School, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { hasClerkPublishableKey } from "@/lib/clerk-config";
 
 type SchoolMatch = {
   _id: string;
@@ -19,9 +20,13 @@ type RequestResult =
   | { status: "invite_pending"; orgName?: string }
   | { status: "already_member"; orgName?: string };
 
-function RequestAccessForm() {
-  const { isLoaded, userId } = useAuth();
-  const { user } = useUser();
+type RequestAccessFormProps = {
+  isLoaded: boolean;
+  userId: string | null;
+  userEmail: string | null;
+};
+
+function RequestAccessForm({ isLoaded, userId, userEmail }: RequestAccessFormProps) {
   const [query, setQuery] = useState("");
   const [schools, setSchools] = useState<SchoolMatch[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState("");
@@ -133,11 +138,11 @@ function RequestAccessForm() {
 
             <div className="mt-6 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 text-sm">
               <p className="font-medium text-[var(--text-primary)]">Your account</p>
-              <p className="mt-1 text-[var(--text-secondary)]">
-                {userId
-                  ? (user?.primaryEmailAddress?.emailAddress ?? "Signed in")
+                <p className="mt-1 text-[var(--text-secondary)]">
+                  {userId
+                  ? (userEmail ?? "Signed in")
                   : "Sign in first to request access."}
-              </p>
+                </p>
             </div>
 
             {!userId ? (
@@ -269,6 +274,23 @@ function RequestAccessForm() {
   );
 }
 
+function RequestAccessFormWithClerk() {
+  const { isLoaded, userId } = useAuth();
+  const { user } = useUser();
+
+  return (
+    <RequestAccessForm
+      isLoaded={isLoaded}
+      userId={userId ?? null}
+      userEmail={user?.primaryEmailAddress?.emailAddress ?? null}
+    />
+  );
+}
+
 export default function RequestAccessPage() {
-  return <RequestAccessForm />;
+  if (hasClerkPublishableKey()) {
+    return <RequestAccessFormWithClerk />;
+  }
+
+  return <RequestAccessForm isLoaded userId={null} userEmail={null} />;
 }

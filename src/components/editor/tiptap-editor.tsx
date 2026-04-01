@@ -68,6 +68,7 @@ interface TiptapEditorProps {
   className?: string;
   noteId?: string;
   artifactId?: string;
+  workstreamId?: string;
   compact?: boolean;
   showAiBar?: boolean;
   showDocumentMeta?: boolean;
@@ -100,6 +101,7 @@ export function TiptapEditor({
   className,
   noteId,
   artifactId,
+  workstreamId,
   compact,
   showAiBar = false,
   showDocumentMeta = false,
@@ -464,6 +466,7 @@ export function TiptapEditor({
           onReplaceDocument={replaceDocument}
           noteId={noteId}
           artifactId={artifactId}
+          workstreamId={workstreamId}
         />
       )}
 

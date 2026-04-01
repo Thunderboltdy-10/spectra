@@ -246,7 +246,6 @@ export function CreateArtifactDialog({
   open,
   onClose,
   onCreate,
-  defaultWorkstreamId: _defaultWorkstreamId,
 }: {
   open: boolean;
   onClose: () => void;

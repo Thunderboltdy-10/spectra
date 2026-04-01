@@ -1346,6 +1346,34 @@ function WorkspaceCanvasInner({
     [setCamera],
   );
 
+  const persistWorkstreamPosition = useCallback((workstreamId: string, x: number, y: number) => {
+    void fetch("/api/workstreams", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      keepalive: true,
+      body: JSON.stringify({
+        action: "update",
+        workstreamId,
+        canvasX: x,
+        canvasY: y,
+      }),
+    });
+  }, []);
+
+  const persistWidgetPosition = useCallback((itemId: string, x: number, y: number) => {
+    void fetch("/api/workspace-items", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      keepalive: true,
+      body: JSON.stringify({
+        action: "update",
+        itemId,
+        x,
+        y,
+      }),
+    });
+  }, []);
+
   const handleNodeDragStop = useCallback(
     (_: unknown, node: Node) => {
       const x = Math.round(node.position.x);
@@ -1359,6 +1387,7 @@ function WorkspaceCanvasInner({
           return next;
         });
         saveLocalOverride(workstreamId, x, y);
+        persistWorkstreamPosition(workstreamId, x, y);
         return;
       }
 
@@ -1373,19 +1402,10 @@ function WorkspaceCanvasInner({
       if (widgetMeta) {
         const relativeX = x - widgetMeta.origin.x;
         const relativeY = y - widgetMeta.origin.y;
-        void fetch("/api/workspace-items", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "update",
-            itemId: widgetMeta.itemId,
-            x: relativeX,
-            y: relativeY,
-          }),
-        });
+        persistWidgetPosition(widgetMeta.itemId, relativeX, relativeY);
       }
     },
-    [],
+    [persistWidgetPosition, persistWorkstreamPosition],
   );
 
   const handleNodeDrag = useCallback((_: unknown, node: Node) => {

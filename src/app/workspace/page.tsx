@@ -328,6 +328,7 @@ function WorkspaceContent({ userName }: WorkspaceContentProps) {
       await fetch("/api/workstreams", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        keepalive: true,
         body: JSON.stringify({ action: "batchUpdatePositions", positions }),
       });
     });

@@ -17,9 +17,19 @@ function pickResolvedArtifactId(value: { _id: string } | { artifactId: string } 
   return "artifactId" in value ? value.artifactId : value._id;
 }
 
-function isArtifactNotFoundError(error: unknown) {
+function isArtifactProbeMiss(error: unknown) {
   if (!(error instanceof Error)) return false;
-  return error.message.toLowerCase().includes("artifact not found");
+  const lower = error.message.toLowerCase();
+  return (
+    lower.includes("artifact not found")
+    || lower.includes("argumentvalidationerror")
+    || lower.includes("value does not match validator")
+    || lower.includes("not in the validator")
+    || lower.includes("extra field")
+    || lower.includes("invalid id")
+    || (lower.includes("expected table") && lower.includes("artifact"))
+    || (lower.includes("from table") && lower.includes("note"))
+  );
 }
 
 async function findExistingArtifact(actorClerkId: string, artifactId: string) {
@@ -29,7 +39,7 @@ async function findExistingArtifact(actorClerkId: string, artifactId: string) {
       artifactId,
     }) as { _id: string } | null;
   } catch (error) {
-    if (!isArtifactNotFoundError(error)) {
+    if (!isArtifactProbeMiss(error)) {
       throw error;
     }
     return null;

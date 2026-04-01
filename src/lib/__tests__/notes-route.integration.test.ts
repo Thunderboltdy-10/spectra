@@ -159,6 +159,43 @@ describe("notes route compatibility", () => {
     });
   });
 
+  it("downgrades artifact validator failures during note probes so legacy notes still migrate", async () => {
+    const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_notes" });
+    const convexQuery = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('ArgumentValidationError: ID is from table "notes" but expected table "artifacts"'))
+      .mockResolvedValueOnce(null);
+    const convexMutation = vi
+      .fn()
+      .mockResolvedValueOnce({ artifactId: "artifact_migrated_2" })
+      .mockResolvedValueOnce({ success: true });
+
+    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
+
+    const route = await import("@/app/api/notes/route");
+    const response = await route.POST(
+      new NextRequest("http://localhost/api/notes", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "update",
+          noteId: "legacy_note_2",
+          title: "Migrated title",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(convexMutation).toHaveBeenNthCalledWith(1, "artifacts:getOrMigrateFromNote", {
+      actorClerkId: "user_notes",
+      noteId: "legacy_note_2",
+    });
+    expect(convexMutation).toHaveBeenNthCalledWith(2, "artifacts:update", expect.objectContaining({
+      actorClerkId: "user_notes",
+      artifactId: "artifact_migrated_2",
+    }));
+  });
+
   it("does not remigrate when artifact lookup fails for unexpected reasons", async () => {
     const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_notes" });
     const convexQuery = vi.fn().mockRejectedValueOnce(new Error("database offline"));

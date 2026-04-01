@@ -41,6 +41,33 @@ describe("artifacts route integration", () => {
     });
   });
 
+  it("treats artifact validator failures as legacy-note migration candidates", async () => {
+    const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_artifacts" });
+    const convexQuery = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('ArgumentValidationError: ID is from table "notes" but expected table "artifacts"'))
+      .mockResolvedValueOnce({ _id: "artifact_legacy_2", title: "Migrated artifact" });
+    const convexMutation = vi
+      .fn()
+      .mockResolvedValueOnce({ artifactId: "artifact_legacy_2" });
+
+    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
+
+    const route = await import("@/app/api/artifacts/route");
+    const response = await route.GET(
+      new NextRequest("http://localhost/api/artifacts?action=get&id=legacy_note_2"),
+    );
+    const payload = (await response.json()) as { artifact: { _id: string } };
+
+    expect(response.status).toBe(200);
+    expect(payload.artifact._id).toBe("artifact_legacy_2");
+    expect(convexMutation).toHaveBeenCalledWith("artifacts:getOrMigrateFromNote", {
+      actorClerkId: "user_artifacts",
+      noteId: "legacy_note_2",
+    });
+  });
+
   it("does not trigger legacy migration on unexpected artifact lookup failures", async () => {
     const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_artifacts" });
     const convexQuery = vi.fn().mockRejectedValueOnce(new Error("database offline"));

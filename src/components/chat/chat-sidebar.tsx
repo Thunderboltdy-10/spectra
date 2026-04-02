@@ -375,19 +375,6 @@ function ChatSidebarImpl({
     return (
       <div className="chat-sidebar flex h-full flex-col border-r border-[var(--border-default)] px-1.5 py-3">
         <div className="mb-4 flex flex-col items-center gap-2">
-          {orgLogoUrl && orgLogoUrl.trim() && !logoLoadFailed ? (
-            <Image
-              src={orgLogoUrl}
-              alt={orgName ?? "Org"}
-              width={48}
-              height={48}
-              className="h-12 w-12 rounded-xl object-cover"
-              unoptimized
-              onError={() => setLogoLoadFailed(true)}
-            />
-          ) : (
-            <SpectraLogo size={48} showTile />
-          )}
           <Button type="button" variant="ghost" size="icon" className="h-8.5 w-8.5" onClick={onToggleCollapse} aria-label="Expand sidebar">
             <PanelLeftOpen className="h-4 w-4" />
           </Button>
@@ -500,30 +487,12 @@ function ChatSidebarImpl({
 
   return (
     <div className="chat-sidebar flex h-full flex-col border-r border-[var(--border-default)] p-3" data-usage-percent={usagePercentLabel} data-usage-status={usageStatus}>
-      <div className="mb-3 flex items-center gap-2.5">
-        <div className="flex min-w-0 flex-1 items-center gap-2.5">
-          {orgLogoUrl && orgLogoUrl.trim() && !logoLoadFailed ? (
-            <Image
-              src={orgLogoUrl}
-              alt={orgName ?? "Org"}
-              width={48}
-              height={48}
-              className="h-12 w-12 rounded-xl border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_82%,transparent)] object-cover shadow-[var(--shadow-soft)]"
-              unoptimized
-              onError={() => setLogoLoadFailed(true)}
-            />
-          ) : (
-            <SpectraLogo size={48} showTile />
-          )}
-          <div className="min-w-0 flex-1">
-            <p className="text-lg leading-none">
-              <span className="font-display">{orgName ?? "School"}</span>
-            </p>
-            <p className="mt-0.5 text-[11px] uppercase tracking-[0.12em] text-[var(--brand-primary)]">Spectra</p>
-          </div>
-        </div>
+      <div className="mb-3 flex items-center justify-between">
         <Button type="button" variant="ghost" size="icon" onClick={onToggleCollapse} aria-label="Collapse sidebar">
           <PanelLeftClose className="h-4 w-4" />
+        </Button>
+        <Button type="button" variant="ghost" size="icon" onClick={onNewChat} aria-label="New chat">
+          <Plus className="h-4 w-4" />
         </Button>
       </div>
 

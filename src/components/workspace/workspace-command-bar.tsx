@@ -4,7 +4,7 @@
  * workspace-command-bar.tsx
  *
  * Center-stage command bar for the workspace canvas.
- * Spotlight-style: bottom-center, 480px resting, 560px expanded.
+ * Spotlight-style: bottom-center, 440px resting, 640px expanded.
  * Workstream selector dropdown, auto-selects based on routing inference.
  * Cmd/Ctrl+K to focus.
  */
@@ -16,7 +16,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import type { Workstream } from "@/hooks/use-workspace-data";
 import type { PanelType } from "@/stores/workspace-store";
-import type { WorkspaceShellMode } from "@/lib/workspace/shell-mode";
 
 type WorkspaceCommandBarProps = {
   hidden?: boolean;
@@ -24,7 +23,10 @@ type WorkspaceCommandBarProps = {
   primaryWorkstreamId?: string;
   onOpenWorkstreamChat: (workstreamId: string, query: string) => void;
   onOpenPanel?: (type: PanelType, id: string) => void;
-  shellMode?: WorkspaceShellMode;
+  layoutId?: string;
+  position?: { x: number; y: number };
+  onPositionChange?: (pos: { x: number; y: number }) => void;
+  draggable?: boolean;
 };
 
 export function WorkspaceCommandBar({
@@ -32,7 +34,10 @@ export function WorkspaceCommandBar({
   workstreams,
   primaryWorkstreamId,
   onOpenWorkstreamChat,
-  shellMode = "magnetic",
+  layoutId = "workspace-command-bar",
+  position,
+  onPositionChange,
+  draggable = true,
 }: WorkspaceCommandBarProps) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -130,84 +135,85 @@ export function WorkspaceCommandBar({
   };
 
   const isScoped = !!primaryWorkstreamId && selectedWs;
-  const placeholder = isScoped
-    ? `Ask ${selectedWs?.title}...`
-    : "Ask anything...";
+  const placeholder = focused ? (isScoped ? `Ask ${selectedWs?.title}...` : "Ask anything...") : "Ask Spectra...";
 
   const shellStyles = {
-    constellations: {
-      container: focused ? "w-[590px]" : "w-[510px]",
-      bar: "border border-[rgba(14,142,232,0.4)] bg-[rgba(10,13,20,0.85)] shadow-[0_24px_60px_-26px_rgba(14,142,232,0.4)]",
-      orb: "before:absolute before:-inset-x-12 before:-bottom-6 before:h-14 before:rounded-full before:bg-[radial-gradient(circle_at_center,rgba(14,142,232,0.16),transparent_70%)] before:blur-2xl before:content-['']",
-      dock: "bottom-9",
-    },
-    magnetic: {
-      container: focused ? "w-[560px]" : "w-[480px]",
-      bar: "border border-white/10 bg-black/40 shadow-[0_20px_52px_-18px_rgba(0,0,0,0.8)] backdrop-blur-3xl",
-      orb: "",
-      dock: "bottom-8",
-    },
-    lenses: {
-      container: focused ? "w-[580px]" : "w-[510px]",
-      bar: "border border-[rgba(255,255,255,0.14)] bg-[rgba(19,17,26,0.72)] shadow-[0_28px_68px_-28px_rgba(15,23,42,0.75)] backdrop-blur-[40px]",
-      orb: "before:absolute before:-inset-x-10 before:-bottom-8 before:h-16 before:rounded-full before:bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.12),transparent_72%)] before:blur-3xl before:content-['']",
-      dock: "bottom-11",
-    },
-  }[shellMode];
+    container: focused ? "w-[600px]" : "w-[420px]",
+    bar: cn(
+      "border border-white/50 dark:border-white/20 bg-white/85 dark:bg-white/10 shadow-[0_24px_48px_-12px_rgba(0,0,0,0.12)] dark:shadow-[0_32px_80px_-16px_rgba(0,0,0,0.8)] backdrop-blur-[40px]",
+      !focused && "hover:bg-white/95 dark:hover:bg-white/15 hover:border-white/60 dark:hover:border-white/30 transition-all duration-300 cursor-text"
+    ),
+    orb: "before:absolute before:-inset-x-20 before:-bottom-12 before:h-24 before:rounded-full before:bg-[radial-gradient(circle_at_center,rgba(14,142,232,0.12),transparent_70%)] before:blur-3xl before:content-['']",
+    dock: !position ? "bottom-12 left-1/2 -translate-x-1/2" : "",
+  };
 
   return (
     <AnimatePresence>
       {!hidden && (
         <motion.div
           ref={containerRef}
-          initial={{ opacity: 0, y: 40 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: 80, scale: 0.95 }}
-          transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-          className={cn("absolute left-1/2 -translate-x-1/2 z-50", shellStyles.dock, shellStyles.orb)}
+          layoutId={layoutId}
+          initial={{ opacity: 0, y: 100 }}
+          animate={{ opacity: 1, y: position?.y ?? 0, x: position?.x ?? 0 }}
+          exit={{ opacity: 0, y: 100, scale: 0.95 }}
+          drag={draggable && !!onPositionChange}
+          dragMomentum={false}
+          onDragEnd={(_, info) => {
+            if (onPositionChange) {
+              onPositionChange({ 
+                x: (position?.x ?? 0) + info.offset.x, 
+                y: (position?.y ?? 0) + info.offset.y 
+              });
+            }
+          }}
+          transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+          className={cn("absolute z-[100]", shellStyles.dock, !position && shellStyles.orb)}
+          style={{ x: position?.x, y: position?.y }}
         >
           {/* Workstream picker dropdown (above bar) */}
           <AnimatePresence>
             {showPicker && !primaryWorkstreamId && (
               <motion.div
-                initial={{ opacity: 0, y: 4, scale: 0.97 }}
+                initial={{ opacity: 0, y: 12, scale: 0.95 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 4, scale: 0.97 }}
-                transition={{ duration: 0.15 }}
+                exit={{ opacity: 0, y: 12, scale: 0.95 }}
+                transition={{ duration: 0.25, ease: "easeOut" }}
                 className={cn(
-                  "absolute bottom-full mb-3 w-64 overflow-hidden rounded-[20px] border border-white/10 py-2 shadow-[0_16px_48px_-12px_rgba(0,0,0,0.6)] backdrop-blur-[40px]",
-                  shellMode === "magnetic" ? "left-1/2 -translate-x-1/2 bg-black/60" : "right-3 bg-black/80",
+                  "absolute bottom-full mb-5 w-80 overflow-hidden rounded-[32px] border border-white/15 py-2.5 shadow-[0_32px_80px_-16px_rgba(0,0,0,0.85)] backdrop-blur-[60px]",
+                  "left-1/2 -translate-x-1/2 bg-white/90 dark:bg-black/80",
                 )}
               >
-                <div className="px-4 py-2 text-[10px] font-bold text-white/40 uppercase tracking-[0.2em]">
-                  Send to
+                <div className="px-6 py-3 text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.3em]">
+                  Route Intelligence
                 </div>
                 <button
                   type="button"
                   onClick={() => { setSelectedWsId(null); setShowPicker(false); }}
                   className={cn(
-                    "w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-all text-left",
+                    "w-full flex items-center gap-4 px-6 py-3.5 text-sm transition-all text-left",
                     !selectedWsId
-                      ? "text-[var(--accent-cyan)] bg-[var(--accent-cyan)]/10"
-                      : "text-white/60 hover:text-white hover:bg-white/10",
+                      ? "text-[var(--accent-cyan)] bg-[var(--accent-cyan)]/10 font-bold"
+                      : "text-[var(--text-secondary)] hover:bg-black/5 dark:hover:bg-white/5",
                   )}
                 >
-                  <span className="text-sm">✨</span> Auto (detect)
+                  <span className="text-lg opacity-90">✨</span> 
+                  <span className="flex-1">Semantic Auto-detect</span>
                 </button>
+                <div className="mx-5 h-px bg-black/5 dark:bg-white/10 my-1.5" />
                 {activeWorkstreams.map((ws) => (
                   <button
                     key={ws._id}
                     type="button"
                     onClick={() => { setSelectedWsId(ws._id); setShowPicker(false); }}
                     className={cn(
-                      "w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-all text-left",
+                      "w-full flex items-center gap-4 px-6 py-3.5 text-sm transition-all text-left",
                       selectedWsId === ws._id
-                        ? "text-[var(--accent-cyan)] bg-[var(--accent-cyan)]/10"
-                        : "text-white/60 hover:text-white hover:bg-white/10",
+                        ? "text-[var(--accent-cyan)] bg-[var(--accent-cyan)]/10 font-bold"
+                        : "text-[var(--text-secondary)] hover:bg-black/5 dark:hover:bg-white/5",
                     )}
                   >
-                    <span className="text-sm leading-none">{ws.emoji || "📚"}</span>
-                    <span className="truncate">{ws.title}</span>
+                    <span className="text-lg leading-none shrink-0 opacity-90">{ws.emoji || "📚"}</span>
+                    <span className="truncate flex-1 font-semibold">{ws.title}</span>
                   </button>
                 ))}
               </motion.div>
@@ -217,14 +223,20 @@ export function WorkspaceCommandBar({
           {/* Main bar */}
           <div
             className={cn(
-              "relative flex items-center gap-3 px-4 py-3",
-              "transition-all duration-400 ease-[cubic-bezier(0.22,1,0.36,1)]",
+              "relative flex items-center gap-4 px-5 py-3",
+              "transition-all duration-600 ease-[cubic-bezier(0.22,1,0.36,1)]",
               shellStyles.bar,
               shellStyles.container,
-              shellMode === "constellations" ? "rounded-[30px]" : "rounded-full",
+              "rounded-[28px]",
             )}
+            onClick={() => inputRef.current?.focus()}
           >
-            <Search className="w-4 h-4 text-white/40 shrink-0" />
+            <div className={cn(
+              "flex h-8 w-8 items-center justify-center rounded-xl bg-black/5 dark:bg-white/5 text-[var(--text-tertiary)] transition-all duration-500",
+              focused && "text-[var(--accent-cyan)] bg-[var(--accent-cyan)]/10 scale-105"
+            )}>
+              <Search className="w-4 h-4" />
+            </div>
 
             <input
               ref={inputRef}
@@ -234,7 +246,7 @@ export function WorkspaceCommandBar({
               onFocus={() => setFocused(true)}
               onKeyDown={handleKeyDown}
               placeholder={placeholder}
-              className="flex-1 bg-transparent border-none outline-none min-w-0 text-[15px] font-medium text-white placeholder:text-white/30"
+              className="flex-1 bg-transparent border-none outline-none min-w-0 text-[16px] font-semibold text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]/60"
             />
 
             {/* Workstream selector (when focused, not scoped) */}
@@ -242,25 +254,32 @@ export function WorkspaceCommandBar({
               <button
                 ref={selectorRef}
                 type="button"
-                onClick={() => setShowPicker((v) => !v)}
+                onClick={(e) => { e.stopPropagation(); setShowPicker((v) => !v); }}
                 className={cn(
-                  "shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs transition-colors",
+                  "shrink-0 flex items-center gap-2.5 px-3.5 py-2 rounded-[16px] text-xs transition-all shadow-sm border",
                   selectedWs
-                    ? "text-white bg-white/10"
-                    : "text-white/40 hover:text-white/80 hover:bg-white/10",
+                    ? "text-[var(--text-primary)] bg-black/5 dark:bg-white/10 font-bold border-black/5 dark:border-white/10"
+                    : "text-[var(--text-tertiary)] border-transparent hover:text-[var(--text-primary)] hover:bg-black/5 dark:hover:bg-white/5",
                 )}
               >
-                <span className="max-w-[100px] truncate font-semibold">
-                  {selectedWs ? `${selectedWs.emoji} ${selectedWs.title}` : "Auto"}
+                <span className="max-w-[130px] truncate">
+                  {selectedWs ? `${selectedWs.emoji} ${selectedWs.title}` : "Auto-routing"}
                 </span>
-                <ChevronDown className="w-3.5 h-3.5 shrink-0" />
+                <ChevronDown className={cn("w-3.5 h-3.5 shrink-0 transition-transform duration-500", showPicker && "rotate-180")} />
               </button>
             )}
 
             {/* Scoped badge when inside workstream */}
-            {isScoped && focused && (
-              <span className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-[var(--accent-cyan)] bg-[var(--accent-cyan)]/10">
-                → {selectedWs?.emoji} {selectedWs?.title}
+            {isScoped && (
+              <span className={cn(
+                "shrink-0 flex items-center gap-2 px-3.5 py-2 rounded-[16px] text-xs font-bold transition-all border",
+                focused 
+                  ? "text-[var(--accent-cyan)] bg-[var(--accent-cyan)]/10 border-[var(--accent-cyan)]/20 shadow-[0_0_20px_rgba(14,142,232,0.1)]"
+                  : "text-[var(--text-tertiary)] bg-black/5 dark:bg-white/5 border-transparent"
+              )}>
+                {focused && <span className="opacity-50 tracking-[0.2em] mr-1 text-[9px]">TO</span>}
+                <span className="text-base leading-none">{selectedWs?.emoji}</span>
+                <span className="truncate max-w-[140px]">{selectedWs?.title}</span>
               </span>
             )}
 
@@ -268,8 +287,8 @@ export function WorkspaceCommandBar({
             {query && (
               <button
                 type="button"
-                onClick={() => setQuery("")}
-                className="shrink-0 p-1 rounded-full text-white/40 hover:text-white/80 hover:bg-white/10 transition-colors"
+                onClick={(e) => { e.stopPropagation(); setQuery(""); }}
+                className="shrink-0 p-1.5 rounded-xl text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -279,16 +298,16 @@ export function WorkspaceCommandBar({
             {focused && (
               <button
                 type="button"
-                onClick={handleSubmit}
+                onClick={(e) => { e.stopPropagation(); handleSubmit(); }}
                 disabled={!query.trim()}
                 className={cn(
-                  "shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300 shadow-lg",
+                  "shrink-0 w-9 h-9 rounded-[18px] flex items-center justify-center transition-all duration-500 shadow-2xl",
                   query.trim()
-                    ? "bg-[var(--accent-cyan)] text-white hover:brightness-110 hover:scale-105 shadow-[0_0_20px_rgba(14,142,232,0.5)]"
-                    : "bg-white/10 text-white/30",
+                    ? "bg-[var(--accent-cyan)] text-white hover:brightness-110 hover:scale-105 shadow-[0_0_24px_rgba(14,142,232,0.4)]"
+                    : "bg-black/5 dark:bg-white/5 text-[var(--text-tertiary)]",
                 )}
               >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 ml-0.5">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-4.5 h-4.5 ml-0.5">
                   <line x1="12" y1="19" x2="12" y2="5" />
                   <polyline points="5 12 12 5 19 12" />
                 </svg>
@@ -297,9 +316,11 @@ export function WorkspaceCommandBar({
 
             {/* Keyboard shortcut hint */}
             {!focused && (
-              <kbd className="shrink-0 text-[10px] font-bold text-white/30 px-2 py-1 rounded-[6px] border border-white/10 bg-white/5">
-                ⌘K
-              </kbd>
+              <div className="shrink-0 flex items-center gap-2 pl-1">
+                <kbd className="text-[10px] font-black text-[var(--text-tertiary)] opacity-60 px-2 py-1.5 rounded-lg border border-black/5 dark:border-white/10 bg-black/5 dark:bg-white/5 tracking-[0.1em]">
+                  ⌘K
+                </kbd>
+              </div>
             )}
           </div>
         </motion.div>

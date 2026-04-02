@@ -356,7 +356,7 @@ export function ChatMessage({
     >
       <div className={cn("w-full", isUser ? "w-fit max-w-[60%]" : "max-w-5xl xl:max-w-6xl")}>
         {isUser ? (
-          <div className={cn("ml-auto rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3 shadow-[var(--shadow-soft)]", editing && "min-w-[min(600px,90vw)]")}>
+          <div className={cn("ml-auto rounded-2xl border border-[var(--border-default)] bg-[var(--bg-user-bubble)] px-4 py-3 shadow-sm", editing && "min-w-[min(600px,90vw)]")}>
             {editing ? (
               <div className="space-y-2">
                 <textarea

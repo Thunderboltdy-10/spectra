@@ -117,9 +117,12 @@ export const DragHandle = Extension.create({
       const blockRect = block.dom.getBoundingClientRect();
       const isCompact = wrapper.classList.contains("tiptap-compact");
       currentBlock = block;
-      // Position relative to the visible editor surface so the controls sit beside the hovered line.
-      container.style.top = `${blockRect.top - wrapperRect.top + 1}px`;
-      container.style.left = `${Math.max(6, blockRect.left - wrapperRect.left - (isCompact ? 30 : 36))}px`;
+      
+      // Calculate center of the first line if it's a multi-line block
+      // But for simplicity and matching Notion style, we anchor to the top-left of the block with a small offset
+      const topOffset = isCompact ? 2 : 4;
+      container.style.top = `${blockRect.top - wrapperRect.top + topOffset}px`;
+      container.style.left = `${Math.max(-40, blockRect.left - wrapperRect.left - (isCompact ? 44 : 52))}px`;
       container.style.opacity = "1";
       container.dataset.visible = "true";
     };

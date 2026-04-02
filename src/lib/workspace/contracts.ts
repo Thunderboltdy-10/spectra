@@ -28,6 +28,7 @@ export const WORKSPACE_UTILITY_TYPES = [
   "quick_notes",
   "timetable_fragment",
   "breadcrumb",
+  "command_bar",
 ] as const;
 
 export type WorkspaceUtilityType = (typeof WORKSPACE_UTILITY_TYPES)[number];
@@ -50,4 +51,5 @@ export const DEFAULT_UTILITY_ZONES: Record<WorkspaceUtilityType, WorkspaceUtilit
   quick_notes: "left-edge",
   timetable_fragment: "right-edge",
   breadcrumb: "top-center",
+  command_bar: "bottom-left", // dummy, managed separately
 };

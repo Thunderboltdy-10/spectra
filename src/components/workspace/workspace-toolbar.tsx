@@ -5,7 +5,6 @@ import {
   Eye,
   EyeOff,
   GitBranch,
-  Grid3X3,
   Home,
   LayoutGrid,
   Plus,
@@ -13,34 +12,23 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import {
-  WORKSPACE_SHELLS,
-  WORKSPACE_SHELL_META,
-  type WorkspaceShellMode,
-} from "@/lib/workspace/shell-mode";
 
 type WorkspaceToolbarProps = {
   onCenterHome: () => void;
-  onCommitHub: () => void;
   onNewWorkstream: () => void;
   workstreamCount: number;
   searchQuery: string;
   onSearchChange: (value: string) => void;
   userName?: string;
-  shellMode: WorkspaceShellMode;
-  onShellModeChange: (mode: WorkspaceShellMode) => void;
 };
 
 export function WorkspaceToolbar({
   onCenterHome,
-  onCommitHub,
   onNewWorkstream,
   workstreamCount,
   searchQuery,
   onSearchChange,
   userName,
-  shellMode,
-  onShellModeChange,
 }: WorkspaceToolbarProps) {
   const {
     showArchived,
@@ -54,7 +42,6 @@ export function WorkspaceToolbar({
   const [searchOpen, setSearchOpen] = useState(false);
 
   const isInsideWorkstream = !!primaryWorkstreamId;
-  const isHubCommitted = primaryWorkstreamId === "__hub__";
 
   const backgroundLabel =
     backgroundMode === "dots"
@@ -125,7 +112,7 @@ export function WorkspaceToolbar({
         )}
       </div>
 
-      {/* Center: workspace title with user name */}
+      {/* Center: workspace title */}
       <div className="flex items-center gap-3 min-w-0">
         <span className="font-display text-sm font-semibold text-[var(--text-primary)] tracking-tight">
           {userName ? `${userName.split(" ")[0]}'s Workspace` : "Workspace"}
@@ -135,34 +122,9 @@ export function WorkspaceToolbar({
             {workstreamCount}
           </span>
         )}
-        <div className="flex items-center gap-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]/80 p-1">
-          {WORKSPACE_SHELLS.map((mode) => {
-            const meta = WORKSPACE_SHELL_META[mode];
-            const active = shellMode === mode;
-            return (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => onShellModeChange(mode)}
-                title={meta.description}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-medium transition-all duration-150 sm:px-2.5",
-                  active
-                    ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_8px_18px_-14px_rgba(15,23,42,0.45)]"
-                    : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]",
-                )}
-              >
-                <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[var(--bg-hover)] text-[9px]">
-                  {meta.shortLabel}
-                </span>
-                <span className="hidden lg:inline">{meta.label}</span>
-              </button>
-            );
-          })}
-        </div>
       </div>
 
-      {/* Right: actions + view toggle when inside workstream */}
+      {/* Right: actions */}
       <div className="flex items-center gap-1 flex-1 justify-end">
         <ToolbarBtn
           icon={<Home className="w-3.5 h-3.5" />}
@@ -170,15 +132,8 @@ export function WorkspaceToolbar({
           onClick={onCenterHome}
           active={!primaryWorkstreamId}
         />
-        <ToolbarBtn
-          icon={<Grid3X3 className="w-3.5 h-3.5" />}
-          label="Hub"
-          onClick={onCommitHub}
-          active={isHubCommitted}
-          glow
-        />
 
-        {!isInsideWorkstream && !isHubCommitted && (
+        {!isInsideWorkstream && (
           <>
             <ToolbarBtn
               icon={<GitBranch className={cn("w-3.5 h-3.5", !showConnections && "opacity-40")} />}
@@ -202,7 +157,7 @@ export function WorkspaceToolbar({
           active={backgroundMode !== "blank"}
         />
 
-        {!isInsideWorkstream && !isHubCommitted && (
+        {!isInsideWorkstream && (
           <>
             <div className="w-px h-5 bg-[var(--border-default)] mx-1" />
             <button

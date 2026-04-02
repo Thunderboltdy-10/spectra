@@ -1,19 +1,20 @@
 "use client";
 
 import { memo } from "react";
-import { Handle, Position, type Node, type NodeProps, type Edge } from "@xyflow/react";
+import { type Node, type NodeProps, type Edge } from "@xyflow/react";
 import {
   MessageSquare,
   CalendarClock,
   FileText,
   Plus,
-  GitMerge,
-  Workflow,
   Sparkles,
-  Crosshair,
+  Workflow,
+  Clock,
+  ArrowRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { PanelType } from "@/stores/workspace-store";
+import type { PanelType, ZoomBand } from "@/stores/workspace-store";
+import { formatDistanceToNowStrict } from "date-fns";
 
 /* ─── Data types ────────────────────────────────────────────── */
 
@@ -69,24 +70,303 @@ export type InternalContentData = {
   workstreamEmoji?: string;
   workstreamTitle?: string;
   onOpenPanel: (type: PanelType, id: string) => void;
+  band: ZoomBand;
 };
 
 /* ─── Helper ────────────────────────────────────────────────── */
 
 function formatTimeAgo(timestamp: number) {
-  const delta = Date.now() - timestamp;
-  if (delta < 60_000) return "now";
-  if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}m`;
-  if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}h`;
-  const days = Math.floor(delta / 86_400_000);
-  return `${days}d`;
+  return formatDistanceToNowStrict(new Date(timestamp), { addSuffix: false })
+    .replace(/ seconds?/, "s")
+    .replace(/ minutes?/, "m")
+    .replace(/ hours?/, "h")
+    .replace(/ days?/, "d")
+    .replace(/ months?/, "mo")
+    .replace(/ years?/, "y");
 }
 
-type BaseGroupData = {
+/* ============================================================================
+   SYNTHESIZED RENDERER (V2)
+============================================================================ */
+
+/**
+ * WorkstreamTitleNode
+ * The primary typographic anchor for the workstream cluster.
+ */
+export const WorkstreamTitleNode = memo(function WorkstreamTitleNode({
+  data,
+}: NodeProps<Node<{ title: string; emoji?: string; band: ZoomBand }>>) {
+  const isOverview = data.band === "overview";
+  return (
+    <div className={cn("flex items-center gap-4 py-2", isOverview && "opacity-80 scale-90 origin-left transition-all")}>
+      <span className={cn("filter drop-shadow-sm select-none", isOverview ? "text-2xl" : "text-4xl")}>
+        {data.emoji || "📚"}
+      </span>
+      <h2 className={cn("font-display font-bold tracking-tight text-[var(--text-primary)]", isOverview ? "text-2xl" : "text-4xl")}>
+        {data.title}
+      </h2>
+    </div>
+  );
+});
+
+/**
+ * CategoryFieldNode
+ * Generic field for THREADS, DOCUMENTS, etc.
+ * Implements "open composition" anti-card-soup.
+ */
+type CategoryFieldData = {
   label: string;
-  items: Array<{ id: string; title: string; meta?: string; statusColor?: string; panelType: PanelType }>;
+  type: "threads" | "documents" | "planner";
+  items: any[];
   onOpenPanel: (type: PanelType, id: string) => void;
+  accentColor?: string;
+  band: ZoomBand;
 };
+
+export const CategoryFieldNode = memo(function CategoryFieldNode({
+  data,
+}: NodeProps<Node<CategoryFieldData>>) {
+  const { label, type, items, onOpenPanel, accentColor = "var(--accent-cyan)", band } = data;
+  const isOverview = band === "overview";
+
+  return (
+    <div className={cn("flex flex-col gap-3 min-w-[320px] transition-all duration-300", isOverview && "opacity-40 scale-95 origin-top-left")}>
+      {/* Category Header */}
+      <div className="flex items-center gap-2 mb-1">
+        <div 
+          className="w-1 h-3.5 rounded-full" 
+          style={{ background: accentColor }} 
+        />
+        <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--text-tertiary)]">
+          {label}
+        </span>
+      </div>
+
+      {/* Content Items */}
+      <div className="flex flex-col gap-2">
+        {items.length === 0 ? (
+          <div className="px-3 py-4 rounded-xl border border-dashed border-[var(--border-default)]/30 text-[11px] text-[var(--text-tertiary)] italic">
+            No {label.toLowerCase()} yet.
+          </div>
+        ) : (
+          items.map((item) => {
+            if (isOverview) {
+              return (
+                <div key={item.id} className="h-10 w-full rounded-xl bg-white/[0.03] animate-pulse-slow" />
+              );
+            }
+            if (type === "threads") {
+              const thread = item as ThreadSummary;
+              return (
+                <button
+                  key={thread.id}
+                  onClick={() => onOpenPanel("chat", thread.id)}
+                  className="group flex w-full items-center gap-3 rounded-2xl border border-transparent bg-white/[0.02] p-3 text-left transition-all hover:bg-white/[0.05] hover:border-[var(--border-default)]/40 hover:shadow-sm"
+                >
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/[0.04] text-[var(--text-secondary)]">
+                    <MessageSquare className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[13px] font-semibold text-[var(--text-primary)]">
+                      {thread.title}
+                    </div>
+                    <div className="flex items-center gap-2 text-[10px] text-[var(--text-tertiary)]">
+                      <span className="flex items-center gap-1">
+                        <Clock className="h-2.5 w-2.5" />
+                        {formatTimeAgo(thread.lastActivityAt)}
+                      </span>
+                      <span>•</span>
+                      <span>{thread.messageCount} messages</span>
+                    </div>
+                  </div>
+                  <ArrowRight className="h-3.5 w-3.5 shrink-0 opacity-0 -translate-x-2 transition-all group-hover:opacity-40 group-hover:translate-x-0" />
+                </button>
+              );
+            }
+
+            if (type === "documents") {
+              const note = item as NoteSummary;
+              return (
+                <button
+                  key={note.id}
+                  onClick={() => onOpenPanel("artifact", note.id)}
+                  className="group relative flex w-full flex-col gap-1 rounded-2xl border border-transparent bg-[var(--bg-elevated)]/40 p-4 text-left shadow-sm backdrop-blur-sm transition-all hover:bg-[var(--bg-elevated)]/60 hover:border-[var(--border-default)]/50"
+                >
+                  <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--accent-purple)]/60 mb-1">
+                    {note.editorMode === "ai_enhanced" ? "Research Note" : "Draft"}
+                  </div>
+                  <div className="font-display text-[15px] font-bold leading-tight text-[var(--text-primary)]">
+                    {note.title}
+                  </div>
+                  <div className="mt-2 h-px w-full bg-[var(--border-default)]/20" />
+                  <div className="mt-2 text-[10px] text-[var(--text-tertiary)]">
+                    Updated {formatTimeAgo(note.updatedAt)} ago
+                  </div>
+                </button>
+              );
+            }
+
+            if (type === "planner") {
+              const p = item as PlannerItemSummary;
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => onOpenPanel("planner", p.id)}
+                  className="group flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-white/[0.04]"
+                >
+                  <div
+                    className={cn(
+                      "h-5 w-1 shrink-0 rounded-full transition-transform group-hover:scale-y-110",
+                      p.status === "done"
+                        ? "bg-[var(--accent-mint)]"
+                        : p.status === "in_progress"
+                        ? "bg-[var(--accent-cyan)] shadow-[0_0_8px_rgba(14,142,232,0.3)]"
+                        : "bg-white/15"
+                    )}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[13px] font-medium text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors">
+                      {p.title}
+                    </div>
+                    {p.dueAt && (
+                      <div className="text-[10px] text-[var(--text-tertiary)]">
+                        Due {new Date(p.dueAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                      </div>
+                    )}
+                  </div>
+                </button>
+              );
+            }
+
+            return null;
+          })
+        )}
+      </div>
+    </div>
+  );
+});
+
+/**
+ * Legacy WorkspaceFieldNode (Internal Container)
+ * Redefined to be a spatial coordinator rather than a card.
+ */
+export const WorkspaceFieldNode = memo(function WorkspaceFieldNode({
+  data,
+}: NodeProps<Node<InternalContentData>>) {
+  const { threads, notes, plannerItems, onOpenPanel, workstreamTitle, workstreamEmoji } = data;
+
+  // This node is now just a transparent wrapper that renders the "open field" composition
+  // if we're using it as a single node. 
+  // Recommended: Use buildWorkspaceNodes to emit multiple separate nodes instead.
+  
+  return (
+    <div className="flex flex-col gap-12 pointer-events-none">
+      <div className="pointer-events-auto">
+        <WorkstreamTitleNode 
+          id="title" 
+          type="workstreamTitle" 
+          data={{ title: workstreamTitle || "Untilted", emoji: workstreamEmoji }} 
+          {...({} as any)} 
+        />
+      </div>
+
+      <div className="flex gap-10 pointer-events-auto">
+        <CategoryFieldNode 
+          id="threads" 
+          type="categoryField" 
+          data={{ label: "THREADS", type: "threads", items: threads.slice(0, 5), onOpenPanel, accentColor: "var(--accent-cyan)" }} 
+          {...({} as any)} 
+        />
+        <CategoryFieldNode 
+          id="documents" 
+          type="categoryField" 
+          data={{ label: "DOCUMENTS", type: "documents", items: notes.slice(0, 5), onOpenPanel, accentColor: "var(--accent-purple)" }} 
+          {...({} as any)} 
+        />
+        <CategoryFieldNode 
+          id="planner" 
+          type="categoryField" 
+          data={{ label: "PLANNER", type: "planner", items: plannerItems.slice(0, 5), onOpenPanel, accentColor: "var(--accent-orange)" }} 
+          {...({} as any)} 
+        />
+      </div>
+    </div>
+  );
+});
+
+
+export function buildWorkspaceNodes(
+  data: InternalContentData,
+  basePosition: { x: number; y: number },
+): { nodes: Node[]; edges: Edge[] } {
+  if (data.loading) {
+    return { nodes: [], edges: [] };
+  }
+
+  // We return a set of nodes that form the "cluster"
+  const nodes: Node[] = [
+    // Title Anchor
+    {
+      id: `ws-title-${data.workstreamTitle}`,
+      type: "workstreamTitle",
+      position: { x: basePosition.x, y: basePosition.y },
+      draggable: true,
+      data: { title: data.workstreamTitle || "Untitled", emoji: data.workstreamEmoji, band: data.band },
+    },
+    // Threads Lane
+    {
+      id: `ws-lane-threads-${data.workstreamTitle}`,
+      type: "categoryField",
+      position: { x: basePosition.x, y: basePosition.y + 100 },
+      draggable: true,
+      data: { 
+        label: "THREADS", 
+        type: "threads", 
+        items: data.threads, 
+        onOpenPanel: data.onOpenPanel,
+        accentColor: "var(--accent-cyan)",
+        band: data.band
+      },
+    },
+    // Documents Lane
+    {
+      id: `ws-lane-docs-${data.workstreamTitle}`,
+      type: "categoryField",
+      position: { x: basePosition.x + 360, y: basePosition.y + 100 },
+      draggable: true,
+      data: { 
+        label: "DOCUMENTS", 
+        type: "documents", 
+        items: data.notes, 
+        onOpenPanel: data.onOpenPanel,
+        accentColor: "var(--accent-purple)",
+        band: data.band
+      },
+    },
+    // Planner Lane
+    {
+      id: `ws-lane-planner-${data.workstreamTitle}`,
+      type: "categoryField",
+      position: { x: basePosition.x + 720, y: basePosition.y + 100 },
+      draggable: true,
+      data: { 
+        label: "PLANNER", 
+        type: "planner", 
+        items: data.plannerItems, 
+        onOpenPanel: data.onOpenPanel,
+        accentColor: "var(--accent-orange)",
+        band: data.band
+      },
+    },
+  ];
+
+  return { nodes, edges: [] };
+}
+
+
+/* ============================================================================
+   WIDGETS & OTHER NODES
+============================================================================ */
 
 type WorkspaceWidgetNodeData = WorkspaceWidgetSummary & {
   onOpenPanel: (type: PanelType, id: string) => void;
@@ -105,250 +385,61 @@ export const WorkspaceWidgetNode = memo(function WorkspaceWidgetNode({
   const IconComponent =
     WIDGET_ICON_BY_TYPE[data.itemType as keyof typeof WIDGET_ICON_BY_TYPE]
     ?? Sparkles;
+
+  const isVisualization = data.itemType === "visualization" || data.renderMode === "artifact:visualization";
+
   return (
     <button
       type="button"
       onClick={() => data.onOpenPanel(data.panelType, data.panelId)}
-      className="group flex h-full w-full flex-col rounded-[22px] border border-[var(--border-default)] bg-[var(--bg-elevated)]/92 px-4 py-4 text-left shadow-[0_18px_42px_-28px_rgba(15,23,42,0.45)] backdrop-blur-2xl transition-transform duration-200 hover:-translate-y-0.5 hover:border-[var(--accent-cyan)]/35"
+      className={cn(
+        "group flex h-full w-full flex-col text-left transition-all duration-300",
+        isVisualization 
+          ? "rounded-3xl bg-white/[0.03] border border-white/5 p-2 hover:bg-white/[0.05] hover:border-white/10"
+          : "rounded-2xl border border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/60 p-4 shadow-sm backdrop-blur-md hover:bg-[var(--bg-elevated)]/80 hover:border-[var(--accent-cyan)]/30"
+      )}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2 text-[var(--text-secondary)]">
-            <IconComponent className="h-4 w-4" />
-          </span>
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/5 text-[var(--text-tertiary)] group-hover:text-[var(--text-primary)] transition-colors">
+            <IconComponent className="h-3.5 w-3.5" />
+          </div>
           <div className="min-w-0">
-            <div className="truncate text-[13px] font-semibold text-[var(--text-primary)]">
+            <div className="truncate text-[12px] font-bold text-[var(--text-primary)] leading-tight">
               {data.title}
             </div>
-            <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+            <div className="text-[9px] uppercase tracking-[0.15em] text-[var(--text-tertiary)] mt-0.5">
               {data.renderMode?.replace(/^artifact:/, "") ?? data.itemType}
             </div>
           </div>
         </div>
-        <span className="text-[10px] text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)]">
-          Open
-        </span>
       </div>
-      <div className="mt-3 line-clamp-5 text-[12px] leading-5 text-[var(--text-secondary)]">
-        {data.contentSummary || "Open this widget to continue working with it."}
+
+      <div className={cn(
+        "flex-1 overflow-hidden",
+        isVisualization ? "rounded-2xl bg-black/20 border border-white/5 p-4 flex items-center justify-center" : ""
+      )}>
+        {isVisualization ? (
+          <div className="text-center">
+            <div className="h-12 w-12 rounded-full border-2 border-[var(--accent-cyan)]/20 border-t-[var(--accent-cyan)] animate-spin mx-auto mb-2 opacity-40" />
+            <div className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-widest">Active Analysis</div>
+          </div>
+        ) : (
+          <div className="line-clamp-4 text-[11px] leading-relaxed text-[var(--text-secondary)]">
+            {data.contentSummary || "Click to explore this component's data and insights."}
+          </div>
+        )}
       </div>
+
+      {!isVisualization && (
+        <div className="mt-4 pt-3 border-t border-[var(--border-default)]/10 flex items-center justify-between">
+          <span className="text-[9px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider">Inspect</span>
+          <ArrowRight className="h-3 w-3 text-[var(--text-tertiary)] opacity-0 group-hover:opacity-100 transition-all transform group-hover:translate-x-1" />
+        </div>
+      )}
     </button>
   );
 });
-
-/* ============================================================================
-   APPROACH A: SEMANTIC CONSTELLATIONS
-   "Deep Space" Paradigm: Ethereal, physics-based, data-heavy, relationship-driven.
-   Nodes: ConstellationClusterNode
-============================================================================ */
-
-export type ConstellationClusterData = BaseGroupData & {
-  glow: string;
-  align: "left" | "right";
-  iconType: string;
-};
-
-export const ConstellationClusterNode = memo(function ConstellationClusterNode({
-  data,
-}: NodeProps<Node<ConstellationClusterData>>) {
-  const align = data.align;
-  const Icon = {
-    thread: GitMerge,
-    note: FileText,
-    planner: Workflow,
-    artifact: Sparkles,
-  }[data.iconType] ?? FileText;
-
-  return (
-    <div className={cn("relative flex w-[340px] flex-col gap-5", align === "right" && "items-end text-right")}>
-      <Handle type="target" position={align === "left" ? Position.Right : Position.Left} className="!opacity-0" />
-      <Handle type="source" position={align === "left" ? Position.Right : Position.Left} className="!opacity-0" />
-      
-      <div
-        className="pointer-events-none absolute -inset-16 -z-10 rounded-full blur-[50px] mix-blend-screen opacity-70"
-        style={{ background: `radial-gradient(circle, ${data.glow} 0%, transparent 60%)` }}
-      />
-      <div className={cn("flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.25em] text-[var(--text-tertiary)]", align === "right" && "flex-row-reverse")}>
-        <Icon className="w-4 h-4" />
-        <span>{data.label}</span>
-      </div>
-      <div className="space-y-2 w-full">
-        {data.items.slice(0, 6).map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => data.onOpenPanel(item.panelType, item.id)}
-            className={cn(
-              "group relative flex w-full items-start gap-4 text-left transition-all duration-300 py-2",
-              align === "right" && "justify-end text-right flex-row-reverse",
-            )}
-          >
-            <div className={cn("absolute top-1/2 -translate-y-1/2 h-[1px] w-6 bg-[var(--text-tertiary)]/20 group-hover:bg-[var(--accent-cyan)]/50 transition-colors", align === "left" ? "-left-8" : "-right-8")} />
-            
-            {item.statusColor ? (
-              <span
-                className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full shadow-[0_0_12px_currentColor]"
-                style={{ color: item.statusColor, backgroundColor: item.statusColor }}
-              />
-            ) : (
-              <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-[var(--text-tertiary)] group-hover:bg-[var(--text-primary)] transition-colors shadow-[0_0_8px_rgba(255,255,255,0.5)]" />
-            )}
-            <div className="relative">
-              <div className="text-[13px] font-medium text-[var(--text-secondary)] transition-colors duration-300 group-hover:text-[var(--text-primary)] group-hover:drop-shadow-[0_0_8px_rgba(255,255,255,0.4)]">
-                {item.title}
-              </div>
-              {item.meta && <div className="text-[10px] text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)] transition-colors mt-0.5">{item.meta}</div>}
-            </div>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-});
-
-export function buildConstellationNodes(
-  data: InternalContentData,
-  basePosition: { x: number; y: number },
-): { nodes: Node[], edges: Edge[] } {
-  if (data.loading) return { nodes: [], edges: [] };
-
-  const nodes: Node[] = [];
-  const edges: Edge[] = [];
-
-  const addCluster = (id: string, label: string, items: BaseGroupData["items"], dx: number, dy: number, align: "left" | "right", glow: string, iconType: string) => {
-    if (items.length === 0) return;
-    nodes.push({
-      id: `constellation-${id}`,
-      type: "constellationCluster",
-      position: { x: basePosition.x + dx, y: basePosition.y + dy },
-      draggable: true,
-      selectable: false,
-      data: { label, items, align, glow, iconType, onOpenPanel: data.onOpenPanel } satisfies ConstellationClusterData,
-    });
-    // Add semantic links to center (the workstream box itself is roughly at basePosition)
-    edges.push({
-      id: `const-edge-${id}`,
-      source: `ws-${data.workstreamTitle}`, // Pseudo-connection, won't strictly attach to handle if handle missing, but xyflow can center it.
-      target: `constellation-${id}`,
-      type: "straight",
-      animated: true,
-      style: { stroke: glow, strokeWidth: 1, opacity: 0.3, strokeDasharray: "4 4" },
-    });
-  };
-
-  addCluster("threads", "Orbital Threads", data.threads.map(t => ({ id: t.id, title: t.title, meta: `${t.messageCount} msgs`, panelType: "chat" })), -400, 100, "right", "rgba(14,142,232,0.4)", "thread");
-  addCluster("notes", "Fragmented Notes", data.notes.map(n => ({ id: n.id, title: n.title, meta: formatTimeAgo(n.updatedAt), panelType: "artifact" })), 400, -50, "left", "rgba(167,139,250,0.4)", "note");
-  addCluster("planner", "Vectors & Paths", data.plannerItems.map(p => ({ id: p.id, title: p.title, meta: p.status, statusColor: p.status === "done" ? "var(--accent-mint)" : "var(--accent-cyan)", panelType: "planner" })), -350, 350, "right", "rgba(255,111,69,0.35)", "planner");
-  addCluster("artifacts", "Constructed Artifacts", data.artifacts.map(a => ({ id: a.id, title: a.title, meta: a.type, panelType: "artifact" })), 450, 300, "left", "rgba(32,184,178,0.4)", "artifact");
-
-  return { nodes, edges };
-}
-
-/* ============================================================================
-   APPROACH B: MAGNETIC SURFACE (Recommended)
-   "Tactile Glass" Paradigm: Fast, tactile, translucent, structured. macOS/Linear feel.
-   Nodes: MagneticPanelNode
-============================================================================ */
-
-export type MagneticPanelData = BaseGroupData & {
-  iconType: string;
-  isMain?: boolean;
-};
-
-export const MagneticPanelNode = memo(function MagneticPanelNode({
-  data,
-}: NodeProps<Node<MagneticPanelData>>) {
-  const Icon = {
-    thread: MessageSquare,
-    note: FileText,
-    planner: CalendarClock,
-    artifact: Sparkles,
-  }[data.iconType] ?? FileText;
-
-  return (
-    <div className={cn(
-      "rounded-[24px] border border-[var(--border-default)] p-5 backdrop-blur-3xl relative overflow-hidden transition-shadow duration-300",
-      data.isMain ? "bg-[var(--bg-elevated)]/90 shadow-[0_24px_60px_-24px_rgba(0,0,0,0.15)]" : "bg-[var(--bg-elevated)]/60 shadow-[0_12px_40px_-20px_rgba(0,0,0,0.1)]",
-      "hover:shadow-[0_30px_70px_-20px_rgba(0,0,0,0.2)]"
-    )} style={{ width: data.isMain ? 480 : 340 }}>
-      <div className="absolute inset-0 bg-gradient-to-b from-[var(--bg-elevated)]/40 to-transparent pointer-events-none" />
-      
-      <div className="flex items-center gap-2.5 mb-5 relative z-10">
-        <div className="p-1.5 rounded-lg bg-[var(--bg-secondary)] text-[var(--text-secondary)] border border-[var(--border-default)]/50">
-          <Icon className="w-4 h-4" />
-        </div>
-        <div className="text-[12px] font-bold uppercase tracking-widest text-[var(--text-secondary)]">
-          {data.label}
-        </div>
-      </div>
-      
-      <div className={cn("relative z-10", !data.isMain && "flex flex-col gap-1", data.isMain && "grid gap-3")}>
-        {data.items.slice(0, 6).map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => data.onOpenPanel(item.panelType, item.id)}
-            className={cn(
-              "group flex w-full items-center gap-3 rounded-[12px] text-left transition-all",
-              data.isMain 
-                ? "flex-col border border-[var(--border-default)]/60 bg-[var(--bg-primary)] hover:bg-[var(--bg-hover)] px-5 py-4 shadow-sm hover:shadow-[0_8px_30px_-12px_rgba(0,0,0,0.15)] hover:-translate-y-0.5" 
-                : "px-3 py-2.5 hover:bg-[var(--bg-hover)]"
-            )}
-          >
-            {data.isMain ? (
-              <>
-                <div className="flex items-start justify-between gap-4 w-full">
-                  <span className="text-[15px] font-medium text-[var(--text-primary)] leading-tight">{item.title}</span>
-                  <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-[var(--text-tertiary)] group-hover:text-[var(--accent-cyan)] transition-colors" />
-                </div>
-                {item.meta && <span className="mt-2 text-[11px] text-[var(--text-tertiary)] font-medium">{item.meta}</span>}
-              </>
-            ) : (
-              <>
-                {item.statusColor ? (
-                  <span className="h-2 w-2 shrink-0 rounded-full shadow-[0_0_8px_currentColor]" style={{ color: item.statusColor, backgroundColor: item.statusColor }} />
-                ) : (
-                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--text-tertiary)]" />
-                )}
-                <div className="min-w-0 flex-1 flex justify-between items-center gap-4">
-                  <div className="truncate text-[13px] font-medium text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] transition-colors">{item.title}</div>
-                  {item.meta && <div className="shrink-0 text-[10px] text-[var(--text-tertiary)]">{item.meta}</div>}
-                </div>
-              </>
-            )}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-});
-
-export function buildMagneticNodes(
-  data: InternalContentData,
-  basePosition: { x: number; y: number },
-): { nodes: Node[], edges: Edge[] } {
-  if (data.loading) return { nodes: [], edges: [] };
-  const nodes: Node[] = [];
-  
-  const addPanel = (id: string, label: string, items: BaseGroupData["items"], dx: number, dy: number, isMain: boolean, iconType: string) => {
-    if (items.length === 0) return;
-    nodes.push({
-      id: `magnetic-${id}`,
-      type: "magneticPanel",
-      position: { x: basePosition.x + dx, y: basePosition.y + dy },
-      draggable: true,
-      selectable: false,
-      data: { label, items, iconType, isMain, onOpenPanel: data.onOpenPanel } satisfies MagneticPanelData,
-    });
-  };
-
-  addPanel("threads", "Threads", data.threads.map(t => ({ id: t.id, title: t.title, meta: `${t.messageCount} msgs`, panelType: "chat" })), -100, 200, true, "thread");
-  addPanel("planner", "Planner", data.plannerItems.map(p => ({ id: p.id, title: p.title, meta: p.status, statusColor: p.status === "done" ? "var(--accent-mint)" : "var(--accent-cyan)", panelType: "planner" })), -480, 200, false, "planner");
-  addPanel("notes", "Documents", data.notes.map(n => ({ id: n.id, title: n.title, meta: formatTimeAgo(n.updatedAt), panelType: "artifact" })), -480, 520, false, "note");
-  addPanel("artifacts", "Artifacts", data.artifacts.map(a => ({ id: a.id, title: a.title, meta: a.type, panelType: "artifact" })), 420, 200, false, "artifact");
-
-  return { nodes, edges: [] };
-}
 
 export function buildWorkspaceWidgetNodes(
   data: InternalContentData,
@@ -372,115 +463,6 @@ export function buildWorkspaceWidgetNodes(
       onOpenPanel: data.onOpenPanel,
     } satisfies WorkspaceWidgetNodeData,
   }));
-}
-
-/* ============================================================================
-   APPROACH C: FOCAL LENSES
-   "Guided Focus" Paradigm: Immersive, cinematic, high contrast within a boundary.
-   Nodes: LensesLensNode
-============================================================================ */
-
-export type LensesLensData = BaseGroupData & {
-  iconType: string;
-  isSpotlight?: boolean;
-};
-
-export const LensesLensNode = memo(function LensesLensNode({
-  data,
-}: NodeProps<Node<LensesLensData>>) {
-  const Icon = {
-    thread: Crosshair,
-    note: FileText,
-    planner: CalendarClock,
-    artifact: Sparkles,
-  }[data.iconType] ?? FileText;
-
-  if (data.isSpotlight) {
-    return (
-      <div className="rounded-[40px] border border-[var(--border-default)]/60 bg-[var(--bg-elevated)]/80 p-10 shadow-[0_0_100px_rgba(255,255,255,0.05),inset_0_0_40px_rgba(255,255,255,0.05)] backdrop-blur-3xl z-10 relative" style={{ width: 560 }}>
-        <div className="absolute -top-px left-1/2 -translate-x-1/2 w-40 h-px bg-gradient-to-r from-transparent via-[var(--text-tertiary)]/40 to-transparent" />
-        
-        <div className="flex items-center gap-3 text-[11px] font-bold uppercase tracking-[0.3em] text-[var(--text-tertiary)] mb-6">
-          <Icon className="w-4 h-4" /> {data.label}
-        </div>
-
-        <div className="space-y-3">
-          {data.items.slice(0, 7).map((item, idx) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => data.onOpenPanel(item.panelType, item.id)}
-              className={cn(
-                "flex w-full items-center justify-between gap-4 rounded-[20px] border border-[var(--border-default)]/50 bg-[var(--bg-primary)] px-6 py-5 text-left transition-all duration-300 hover:bg-[var(--bg-hover)] hover:border-[var(--border-default)] hover:scale-[1.02] hover:shadow-[0_20px_40px_-20px_rgba(0,0,0,0.15)]",
-                idx === 0 && "bg-[var(--bg-secondary)] border-[var(--border-default)]" 
-              )}
-            >
-              <div className="min-w-0 flex-1">
-                <div className="text-[16px] font-medium text-[var(--text-primary)]">{item.title}</div>
-                {item.meta && <div className="mt-1.5 text-[11px] text-[var(--text-tertiary)] font-mono tracking-wide">{item.meta}</div>}
-              </div>
-              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-[var(--bg-elevated)] border border-[var(--border-default)] text-[var(--text-tertiary)] group-hover:bg-[var(--accent-cyan)] group-hover:text-white transition-colors group-hover:border-transparent">
-                <MessageSquare className="w-4 h-4" />
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="opacity-80 hover:opacity-100 transition-opacity duration-500" style={{ width: 300 }}>
-      <div className="flex items-center gap-3 text-[11px] font-bold uppercase tracking-[0.3em] text-[var(--text-tertiary)] mb-6 px-2">
-        <Icon className="w-4 h-4" /> {data.label}
-      </div>
-      <div className="space-y-3">
-        {data.items.slice(0, 5).map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => data.onOpenPanel(item.panelType, item.id)}
-            className="flex w-full flex-col gap-2 rounded-[16px] border border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/40 px-5 py-4 text-left transition-all hover:bg-[var(--bg-elevated)]/80 hover:border-[var(--border-default)] backdrop-blur-md"
-          >
-            <div className="flex items-start gap-3 w-full">
-              {item.statusColor && (
-                <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full shadow-[0_0_10px_currentColor]" style={{ color: item.statusColor, backgroundColor: item.statusColor }} />
-              )}
-              <div className="text-[14px] font-medium text-[var(--text-secondary)] leading-snug group-hover:text-[var(--text-primary)] transition-colors">{item.title}</div>
-            </div>
-            {item.meta && <div className="text-[10px] text-[var(--text-tertiary)] font-mono pl-5">{item.meta}</div>}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-});
-
-export function buildLensesNodes(
-  data: InternalContentData,
-  basePosition: { x: number; y: number },
-): { nodes: Node[], edges: Edge[] } {
-  if (data.loading) return { nodes: [], edges: [] };
-  const nodes: Node[] = [];
-  
-  const addLens = (id: string, label: string, items: BaseGroupData["items"], dx: number, dy: number, isSpotlight: boolean, iconType: string) => {
-    if (items.length === 0) return;
-    nodes.push({
-      id: `lenses-${id}`,
-      type: "lensesLens",
-      position: { x: basePosition.x + dx, y: basePosition.y + dy },
-      draggable: true,
-      selectable: false,
-      data: { label, items, iconType, isSpotlight, onOpenPanel: data.onOpenPanel } satisfies LensesLensData,
-    });
-  };
-
-  addLens("threads", "Primary Focus", data.threads.map(t => ({ id: t.id, title: t.title, meta: `${t.messageCount} msgs`, panelType: "chat" })), -140, 200, true, "thread");
-  addLens("planner", "Directives", data.plannerItems.map(p => ({ id: p.id, title: p.title, meta: p.status, statusColor: p.status === "done" ? "var(--accent-mint)" : "var(--accent-cyan)", panelType: "planner" })), -480, 240, false, "planner");
-  addLens("notes", "References", data.notes.map(n => ({ id: n.id, title: n.title, meta: formatTimeAgo(n.updatedAt), panelType: "artifact" })), -480, 640, false, "note");
-  addLens("artifacts", "Synthesized Outputs", data.artifacts.map(a => ({ id: a.id, title: a.title, meta: a.type, panelType: "artifact" })), 480, 240, false, "artifact");
-
-  return { nodes, edges: [] };
 }
 
 /* ============================================================================

@@ -7,11 +7,11 @@ import { useUser } from "@clerk/nextjs";
 import { toast } from "sonner";
 import { AnimatePresence } from "framer-motion";
 import { AppShell } from "@/components/layout/app-shell";
-import { WorkspaceToolbar } from "@/components/workspace/workspace-toolbar";
+import { WorkspaceCommandBar } from "@/components/workspace/workspace-command-bar";
 import { WorkstreamCreateDialog } from "@/components/workspace/workstream-create-dialog";
 import { CreateArtifactDialog } from "@/components/artifacts/create-artifact-dialog";
-import { HubBar } from "@/components/workspace/hub-bar";
 import { RightPushPanel } from "@/components/workspace/right-push-panel";
+import { EdgeUtilityOverlay } from "@/components/workspace/edge-utility-overlay";
 // Internal view is now canvas-native (rendered as React Flow nodes inside workspace-canvas)
 import { useWorkspaceData } from "@/hooks/use-workspace-data";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -20,10 +20,6 @@ import {
   notifyWorkspaceContentMutated,
   subscribeWorkspaceContentMutated,
 } from "@/lib/workspace/events";
-import {
-  WORKSPACE_SHELLS,
-  type WorkspaceShellMode,
-} from "@/lib/workspace/shell-mode";
 import { hasClerkPublishableKey } from "@/lib/clerk-config";
 
 const WorkspaceCanvas = dynamic(
@@ -57,7 +53,6 @@ type WorkspaceContentProps = {
 function WorkspaceContent({ userName }: WorkspaceContentProps) {
   const router = useRouter();
   const params = useSearchParams();
-  const hubOpen = params.get("hub") === "1";
   const wsParam = params.get("ws") ?? params.get("focus") ?? undefined;
   const panelType = params.get("panel") ?? undefined;
   const panelId = params.get("thread") ?? params.get("note") ?? params.get("artifact") ?? params.get("planner") ?? undefined;
@@ -80,60 +75,22 @@ function WorkspaceContent({ userName }: WorkspaceContentProps) {
     openPanel,
     closePanel,
     commitWorkstream,
-    setViewMode,
   } = useWorkspaceStore();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [artifactDialogOpen, setArtifactDialogOpen] = useState(false);
-  const [shellMode, setShellMode] = useState<WorkspaceShellMode>("magnetic");
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const saved = window.localStorage.getItem("workspace:shell-mode");
-    if (saved && WORKSPACE_SHELLS.includes(saved as WorkspaceShellMode)) {
-      const mode = saved as WorkspaceShellMode;
-      setShellMode(mode);
-      setViewMode(
-        mode === "constellations"
-          ? "graph"
-          : mode === "lenses"
-            ? "columns"
-            : "structured",
-      );
-    }
-  }, [setViewMode]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem("workspace:shell-mode", shellMode);
-  }, [shellMode]);
-
-  const handleShellModeChange = useCallback((mode: WorkspaceShellMode) => {
-    setShellMode(mode);
-    setViewMode(
-      mode === "constellations"
-        ? "graph"
-        : mode === "lenses"
-          ? "columns"
-          : "structured",
-    );
-  }, [setViewMode]);
 
   // Sync URL with store state
   useEffect(() => {
-    if (hubOpen && primaryWorkstreamId !== "__hub__") {
-      commitWorkstream("__hub__");
-      return;
-    }
     if (wsParam && wsParam !== primaryWorkstreamId) {
       commitWorkstream(wsParam);
       return;
     }
-    if (!hubOpen && !wsParam && primaryWorkstreamId) {
+    if (!wsParam && primaryWorkstreamId) {
       exitWorkstream();
     }
-  }, [commitWorkstream, exitWorkstream, hubOpen, primaryWorkstreamId, wsParam]);
+  }, [commitWorkstream, exitWorkstream, primaryWorkstreamId, wsParam]);
 
   // Sync panel from URL
   useEffect(() => {
@@ -199,16 +156,12 @@ function WorkspaceContent({ userName }: WorkspaceContentProps) {
 
   const handleCommitWorkstream = useCallback(
     (workstreamId: string | null) => {
-      if (workstreamId === "__hub__") {
-        commitWorkstream("__hub__");
-        updateWorkspaceRoute({ hub: "1", ws: undefined }, "replace");
-      } else if (workstreamId) {
-        updateWorkspaceRoute({ ws: workstreamId, hub: undefined }, "replace");
+      if (workstreamId) {
+        updateWorkspaceRoute({ ws: workstreamId }, "replace");
       } else {
         exitWorkstream();
         updateWorkspaceRoute({
           ws: undefined,
-          hub: undefined,
           panel: undefined,
           thread: undefined,
           note: undefined,
@@ -217,19 +170,15 @@ function WorkspaceContent({ userName }: WorkspaceContentProps) {
         });
       }
     },
-    [commitWorkstream, exitWorkstream, updateWorkspaceRoute],
+    [exitWorkstream, updateWorkspaceRoute],
   );
 
   const handleOpenWorkstream = useCallback(
     (workstreamId: string) => {
-      updateWorkspaceRoute({ ws: workstreamId, hub: undefined }, "push");
+      updateWorkspaceRoute({ ws: workstreamId }, "push");
     },
     [updateWorkspaceRoute],
   );
-
-  const handleOpenHub = useCallback(() => {
-    updateWorkspaceRoute({ hub: "1", ws: undefined }, "push");
-  }, [updateWorkspaceRoute]);
 
   // Panel handlers — toggle if same type+id, otherwise switch
   const handleOpenPanel = useCallback(
@@ -345,17 +294,7 @@ function WorkspaceContent({ userName }: WorkspaceContentProps) {
   return (
     <AppShell fullBleed noScroll contentClassName="!p-0">
       <div className="flex flex-col h-full">
-        <WorkspaceToolbar
-          onCenterHome={() => window.dispatchEvent(new CustomEvent("workspace:center-home"))}
-          onCommitHub={handleOpenHub}
-          onNewWorkstream={handleNewWorkstream}
-          workstreamCount={activeCount}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          userName={userName}
-          shellMode={shellMode}
-          onShellModeChange={handleShellModeChange}
-        />
+        
 
         {/* Canvas + panel container */}
         <div className="flex-1 relative overflow-hidden flex flex-col" ref={containerRef}>
@@ -377,13 +316,33 @@ function WorkspaceContent({ userName }: WorkspaceContentProps) {
                     focusWorkstreamId={wsParam}
                     searchQuery={searchQuery}
                     onOpenWorkstream={handleOpenWorkstream}
-                    onOpenHub={handleOpenHub}
                     onCommitWorkstream={handleCommitWorkstream}
                     onOpenPanel={handleOpenPanel}
                     onCreateArtifact={() => setArtifactDialogOpen(true)}
                     panelWidth={panelWidth}
-                    shellMode={shellMode}
                   />
+
+                  <EdgeUtilityOverlay
+                    workstreams={workstreams}
+                    primaryWorkstreamId={primaryWorkstreamId}
+                    onOpenWorkstream={(wsId) => handleCommitWorkstream(wsId)}
+                    onExitWorkstream={() => handleCommitWorkstream(null)}
+                    panelOpen={!!panel}
+                  />
+                  {!panel && (
+                    <WorkspaceCommandBar
+                      workstreams={workstreams}
+                      primaryWorkstreamId={primaryWorkstreamId}
+                      onOpenWorkstreamChat={(wsId, query) => {
+                        handleCommitWorkstream(wsId);
+                        handleOpenPanel("chat", "new");
+                        useWorkspaceStore.getState().setOpenChatQuery(query);
+                      }}
+                      onOpenPanel={handleOpenPanel}
+                      position={useWorkspaceStore.getState().utilityPositions["command_bar"]}
+                      onPositionChange={(pos) => useWorkspaceStore.getState().setUtilityPosition("command_bar", pos)}
+                    />
+                  )}
 
                   {/* Empty state */}
                   {workstreams.length === 0 && !primaryWorkstreamId && (
@@ -415,9 +374,7 @@ function WorkspaceContent({ userName }: WorkspaceContentProps) {
                       type={panel.type}
                       id={panel.id}
                       workstreamId={
-                        primaryWorkstreamId && primaryWorkstreamId !== "__hub__"
-                          ? primaryWorkstreamId
-                          : undefined
+                        primaryWorkstreamId
                       }
                       onClose={handleClosePanel}
                       onExpand={(type, id) => {
@@ -431,29 +388,11 @@ function WorkspaceContent({ userName }: WorkspaceContentProps) {
                           router.push(`/planner?item=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
                         }
                       }}
+                      workstreams={workstreams}
                     />
                   )}
                 </AnimatePresence>
               </div>
-
-              {/* Persistent Hub Bar — always at bottom */}
-              <HubBar
-                workstreams={workstreams}
-                primaryWorkstreamId={primaryWorkstreamId}
-                onOpenWorkstream={(wsId) => {
-                  handleCommitWorkstream(wsId);
-                }}
-                onExitWorkstream={() => handleCommitWorkstream(null)}
-                onOpenHub={handleOpenHub}
-                onNewWorkstream={handleNewWorkstream}
-                onOpenWorkstreamChat={(workstreamId, query) => {
-                  useWorkspaceStore.getState().setOpenChatQuery(query);
-                  handleCommitWorkstream(workstreamId);
-                  setTimeout(() => handleOpenPanel("chat", "new"), 320);
-                }}
-                shellMode={shellMode}
-                panelOpen={!!panel}
-              />
             </>
           )}
         </div>
@@ -468,11 +407,7 @@ function WorkspaceContent({ userName }: WorkspaceContentProps) {
           open={artifactDialogOpen}
           onClose={() => setArtifactDialogOpen(false)}
           onCreate={handleCreateArtifact}
-          defaultWorkstreamId={
-            primaryWorkstreamId && primaryWorkstreamId !== "__hub__"
-              ? primaryWorkstreamId
-              : undefined
-          }
+          defaultWorkstreamId={primaryWorkstreamId}
         />
       </div>
     </AppShell>
@@ -506,3 +441,4 @@ export default function WorkspacePage() {
     </Suspense>
   );
 }
+

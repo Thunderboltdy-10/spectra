@@ -145,8 +145,8 @@ export function RightSidePanel({
       custom={width}
       className={cn(
         "relative h-full shrink-0 overflow-hidden",
-        "bg-[color-mix(in_oklab,var(--bg-primary)_94%,var(--bg-elevated))]",
-        "shadow-[-20px_0_44px_-34px_rgba(15,23,42,0.45)]",
+        "bg-[var(--bg-elevated)]/80 border-l border-[var(--border-default)]/40 backdrop-blur-[40px]",
+        "shadow-[-12px_0_32px_-16px_rgba(0,0,0,0.12),-20px_0_44px_-34px_rgba(15,23,42,0.45)]",
         className,
       )}
     >

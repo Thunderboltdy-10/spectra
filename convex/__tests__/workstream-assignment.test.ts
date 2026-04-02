@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveWorkstreamTransfer } from "../workstream-assignment";
+import { resolveWorkstreamTransfer } from "../workstreamAssignment";
 
 describe("resolveWorkstreamTransfer", () => {
   it("does not move counts when the request did not include workstreamId", () => {

@@ -29,6 +29,9 @@ import { ArtifactAiSurface } from "@/components/artifacts/artifact-ai-surface";
 import { stripGeneratedDocumentMarkers } from "@/lib/document-generator";
 import { RightSidePanel } from "@/components/shared/right-side-panel";
 import { notifyWorkspaceContentMutated } from "@/lib/workspace/events";
+import { WorkspaceCommandBar } from "@/components/workspace/workspace-command-bar";
+import { useNotesData } from "@/hooks/use-notes-data";
+import type { Workstream } from "@/hooks/use-workspace-data";
 
 // Dynamic import TiptapEditor (SSR-safe)
 const TiptapEditor = dynamic(
@@ -50,6 +53,7 @@ type RightPushPanelProps = {
   workstreamId?: string;
   onClose: () => void;
   onExpand?: (type: PanelType, id: string) => void;
+  workstreams: Workstream[];
 };
 
 const PANEL_WIDTHS: Record<PanelType, number> = {
@@ -82,6 +86,7 @@ export function RightPushPanel({
   workstreamId,
   onClose,
   onExpand,
+  workstreams,
 }: RightPushPanelProps) {
   const width = PANEL_WIDTHS[type];
   const panelRef = useRef<HTMLDivElement>(null);
@@ -96,27 +101,45 @@ export function RightPushPanel({
   }, [onClose]);
 
   return (
-    <div ref={panelRef}>
-      <RightSidePanel
-        width={width}
-        title={PANEL_LABELS[type]}
-        icon={PANEL_ICONS[type]}
-        onClose={onClose}
-        panelType={type}
-        contentKey={`${type}-${id}`}
-        actions={onExpand && type !== "route-trace" ? (
-          <button
-            type="button"
-            onClick={() => onExpand(type, id)}
-            title="Open full view"
-            className="rounded-md p-1.5 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-          >
-            <ArrowUpRight className="h-4 w-4" />
-          </button>
-        ) : null}
-      >
-        <PanelContent key={`${type}-${id}`} type={type} id={id} workstreamId={workstreamId} />
-      </RightSidePanel>
+    <div ref={panelRef} className="h-full flex flex-col pointer-events-auto">
+      <div className="flex-1 min-h-0">
+        <RightSidePanel
+          width={width}
+          title={PANEL_LABELS[type]}
+          icon={PANEL_ICONS[type]}
+          onClose={onClose}
+          panelType={type}
+          contentKey={`${type}-${id}`}
+          actions={onExpand && type !== "route-trace" ? (
+            <button
+              type="button"
+              onClick={() => onExpand(type, id)}
+              title="Open full view"
+              className="rounded-md p-1.5 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            >
+              <ArrowUpRight className="h-4 w-4" />
+            </button>
+          ) : null}
+          className="h-full"
+        >
+          <PanelContent key={`${type}-${id}`} type={type} id={id} workstreamId={workstreamId} />
+        </RightSidePanel>
+      </div>
+
+      {/* Command Bar Footer Transfer (Flying) */}
+      <div className="absolute bottom-10 left-0 right-0 flex justify-center pointer-events-none z-50">
+        <div className="pointer-events-auto w-full max-w-[90%] flex justify-center">
+          <WorkspaceCommandBar
+            workstreams={workstreams}
+            primaryWorkstreamId={workstreamId}
+            onOpenWorkstreamChat={(wsId, query) => {
+               window.dispatchEvent(new CustomEvent("ai-school:panel-chat-query", { detail: { wsId, query } }));
+            }}
+            layoutId="workspace-command-bar"
+            hidden={false}
+          />
+        </div>
+      </div>
     </div>
   );
 }
@@ -202,6 +225,16 @@ function ChatPanelContent({
     inputRef.current?.focus();
   }, [input, streaming, sendMessage]);
 
+  // Listen for panel chat query from command bar
+  useEffect(() => {
+    const handler = (e: any) => {
+      const { query } = e.detail;
+      if (query) void sendMessage(query);
+    };
+    window.addEventListener("ai-school:panel-chat-query", handler);
+    return () => window.removeEventListener("ai-school:panel-chat-query", handler);
+  }, [sendMessage]);
+
   return (
     <div className="flex flex-col h-full">
       {/* Messages area with bottom gradient mask */}
@@ -237,8 +270,8 @@ function ChatPanelContent({
               className={cn(
                 "max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed",
                 msg.role === "user"
-                  ? "bg-[var(--accent-cyan)] text-white rounded-br-md"
-                  : "bg-[var(--bg-secondary)] text-[var(--text-primary)] rounded-bl-md",
+                  ? "bg-[var(--bg-user-bubble)] border border-[var(--border-default)] shadow-sm text-[var(--text-primary)] rounded-br-md"
+                  : "bg-[var(--bg-primary)] border border-[var(--border-default)] shadow-sm text-[var(--text-primary)] rounded-bl-md",
               )}
             >
               {msg.content || (msg.streaming && (
@@ -256,7 +289,7 @@ function ChatPanelContent({
                 <summary className="cursor-pointer hover:text-[var(--text-secondary)] transition-colors">
                   Thinking...
                 </summary>
-                <div className="mt-1 px-2 py-1.5 rounded-lg bg-[var(--bg-secondary)] whitespace-pre-wrap text-[10px] max-h-32 overflow-y-auto">
+                <div className="mt-1 px-2 py-1.5 rounded-lg bg-[var(--bg-primary)] border-[var(--border-default)] shadow-sm whitespace-pre-wrap text-[10px] max-h-32 overflow-y-auto">
                   {msg.thinking}
                 </div>
               </details>
@@ -273,54 +306,7 @@ function ChatPanelContent({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Composer */}
-      <div className="shrink-0 p-3">
-        {streaming && streamPhase && (
-          <div className="flex items-center gap-2 px-3 py-1.5 mb-2 text-[10px] text-[var(--accent-cyan)]">
-            <div className="w-3 h-3 rounded-full border border-[var(--accent-cyan)] border-t-transparent animate-spin" />
-            {streamPhase}
-          </div>
-        )}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            void handleSend();
-          }}
-          className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-default)] focus-within:border-[var(--accent-cyan)]/40 transition-colors"
-        >
-          <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask a follow-up..."
-            className="flex-1 bg-transparent border-none outline-none text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
-            disabled={streaming}
-          />
-          {streaming ? (
-            <button
-              type="button"
-              onClick={stopGeneration}
-              className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center bg-[var(--accent-coral)]/15 text-[var(--accent-coral)] hover:bg-[var(--accent-coral)]/25 transition-colors"
-            >
-              <Square className="w-3 h-3" />
-            </button>
-          ) : (
-            <button
-              type="submit"
-              disabled={!input.trim()}
-              className={cn(
-                "shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-colors",
-                input.trim()
-                  ? "bg-[var(--accent-cyan)] text-white"
-                  : "bg-[var(--bg-tertiary)] text-[var(--text-tertiary)]",
-              )}
-            >
-              <Send className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </form>
-      </div>
+      {/* Internal Composer removed — now uses Command Bar in footer */}
     </div>
   );
 }
@@ -386,7 +372,6 @@ function NotePanelContent({
           workstreamId={activeDocument.workstreamId ?? workstreamId}
           content={activeDocument.content as import("@tiptap/core").JSONContent | null}
           compact
-          showAiBar
           showDocumentMeta
           documentTitle={stripGeneratedDocumentMarkers(activeDocument.title || "").trim() || "Untitled"}
           createdAt={activeDocument.createdAt}
@@ -430,19 +415,29 @@ function ArtifactPanelContent({
   workstreamId?: string;
 }) {
   const router = useRouter();
-  const [artifact, setArtifact] = useState<Record<string, unknown> | null>(null);
+  const [artifact, setArtifact] = useState<Record<string, any> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [createdId, setCreatedId] = useState<string | null>(null);
 
   const loadArtifact = useCallback(async () => {
     const effectiveId = artifactId === "new" ? createdId : artifactId;
     if (!effectiveId) return;
+
     setLoading(true);
+    setError(null);
     try {
       const response = await fetch(`/api/artifacts?action=get&id=${encodeURIComponent(effectiveId)}`);
-      if (!response.ok) throw new Error("Failed to load artifact");
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || "Failed to load artifact");
+      }
       const data = (await response.json()) as { artifact: Record<string, unknown> };
-      setArtifact(data.artifact ?? null);
+      if (!data.artifact) throw new Error("Artifact not found");
+      setArtifact(data.artifact);
+    } catch (err: any) {
+      console.error("Artifact load error:", err);
+      setError(err.message || "Failed to load artifact");
     } finally {
       setLoading(false);
     }
@@ -476,6 +471,8 @@ function ArtifactPanelContent({
             refreshWorkstreams: true,
           });
         }
+      } catch (err: any) {
+        setError(err.message);
       } finally {
         setLoading(false);
       }
@@ -490,10 +487,21 @@ function ArtifactPanelContent({
     return <EditorLoader />;
   }
 
-  if (!artifact) {
+  if (error || !artifact) {
     return (
-      <div className="flex items-center justify-center h-full text-sm text-[var(--text-secondary)]">
-        Artifact not found
+      <div className="flex flex-col items-center justify-center h-full p-6 text-center">
+        <div className="w-12 h-12 rounded-full bg-[var(--accent-coral)]/10 flex items-center justify-center mb-3">
+          <FileText className="w-6 h-6 text-[var(--accent-coral)]" />
+        </div>
+        <p className="text-sm font-semibold text-[var(--text-primary)]">
+          {error || "Artifact not found"}
+        </p>
+        <button
+          onClick={() => void loadArtifact()}
+          className="mt-4 px-4 py-2 rounded-lg bg-[var(--bg-secondary)] text-xs font-medium hover:bg-[var(--bg-hover)] transition-colors"
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -510,7 +518,6 @@ function ArtifactPanelContent({
             workstreamId={typeof artifact.workstreamId === "string" ? artifact.workstreamId : workstreamId}
             content={(artifact.content as import("@tiptap/core").JSONContent | null) ?? null}
             compact
-            showAiBar
             showDocumentMeta
             documentTitle={stripGeneratedDocumentMarkers(String(artifact.title ?? "Untitled")).trim() || "Untitled"}
             createdAt={Number(artifact.createdAt ?? Date.now())}
@@ -585,7 +592,7 @@ function ArtifactPanelContent({
               </p>
             </div>
 
-            <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+            <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-primary)] shadow-sm px-4 py-3">
               <pre className="whitespace-pre-wrap break-words text-xs leading-6 text-[var(--text-secondary)]">
                 {JSON.stringify(artifact.content ?? {}, null, 2)}
               </pre>
@@ -664,20 +671,20 @@ function PlannerPanelContent({ plannerItemId }: { plannerItemId: string }) {
       </div>
 
       <div className="mt-5 grid gap-3">
-        <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+        <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-primary)] shadow-sm px-4 py-3">
           <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Status</div>
           <div className="mt-1 text-sm text-[var(--text-primary)]">
             {String(plannerItem.status ?? "pending")}
           </div>
         </div>
-        <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+        <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-primary)] shadow-sm px-4 py-3">
           <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Priority</div>
           <div className="mt-1 text-sm text-[var(--text-primary)]">
             {String(plannerItem.priority ?? "medium")}
           </div>
         </div>
         {typeof plannerItem.description === "string" && plannerItem.description.length > 0 && (
-          <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+          <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-primary)] shadow-sm px-4 py-3">
             <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Description</div>
             <div className="mt-1 whitespace-pre-wrap text-sm leading-6 text-[var(--text-secondary)]">
               {String(plannerItem.description)}

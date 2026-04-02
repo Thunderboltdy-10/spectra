@@ -557,6 +557,317 @@ export async function executeOrchestratorTool(params: {
     };
   }
 
+  if (params.name === "create_workstream") {
+    const title = compactText(args.title, 160);
+    if (!title) {
+      return {
+        name: params.name,
+        summary: "Workspace creation skipped because no title was provided.",
+        modelPayload: { created: false },
+        eventPayload: { created: false },
+      };
+    }
+
+    const result = await convexMutation<
+      {
+        actorClerkId: string;
+        title: string;
+        description?: string;
+        emoji?: string;
+        color?: string;
+        type?: "subject" | "project" | "general";
+        provenanceSource: "ai";
+        mutationSummary?: string;
+      },
+      { workstreamId: string; mutationId: string }
+    >("workspaceOrchestration:createWorkstream", {
+      actorClerkId: context.actorClerkId,
+      title,
+      description: compactText(args.description, 400) || undefined,
+      emoji: compactText(args.emoji, 16) || undefined,
+      color: compactText(args.color, 40) || undefined,
+      type:
+        args.type === "subject" || args.type === "project" || args.type === "general"
+          ? args.type
+          : undefined,
+      provenanceSource: "ai",
+      mutationSummary: `AI created workspace ${title}`,
+    });
+
+    return {
+      name: params.name,
+      summary: `Created workspace: ${title}.`,
+      modelPayload: { workstreamId: result.workstreamId, mutationId: result.mutationId, title },
+      eventPayload: { workstreamId: result.workstreamId, mutationId: result.mutationId, title },
+    };
+  }
+
+  if (params.name === "create_widget") {
+    const title = compactText(args.title, 160);
+    const workstreamId = compactText(args.workstreamId, 128) || context.activeWorkstreamId;
+    const type = compactText(args.type, 40);
+    if (!title || !type || !workstreamId) {
+      return {
+        name: params.name,
+        summary: "Widget creation skipped because the title, type, or workstream was missing.",
+        modelPayload: { created: false },
+        eventPayload: { created: false },
+      };
+    }
+
+    const result = await convexMutation<
+      {
+        actorClerkId: string;
+        workstreamId: string;
+        type: string;
+        itemType?: "thread" | "artifact" | "planner" | "utility" | "custom";
+        renderMode?: string;
+        sourceChatId?: string;
+        sourceArtifactId?: string;
+        sourcePlannerItemId?: string;
+        title: string;
+        contentSummary?: string;
+        x: number;
+        y: number;
+        width?: number;
+        height?: number;
+        category?: string;
+        provenanceSource: "ai";
+        provenanceAction: string;
+        mutationSummary?: string;
+      },
+      { itemId: string; mutationId: string }
+    >("workspaceItems:createWidget", {
+      actorClerkId: context.actorClerkId,
+      workstreamId,
+      type,
+      itemType:
+        args.itemType === "thread" || args.itemType === "artifact" || args.itemType === "planner" || args.itemType === "utility" || args.itemType === "custom"
+          ? args.itemType
+          : undefined,
+      renderMode: compactText(args.renderMode, 80) || undefined,
+      sourceChatId: compactText(args.sourceChatId, 128) || undefined,
+      sourceArtifactId: compactText(args.sourceArtifactId, 128) || undefined,
+      sourcePlannerItemId: compactText(args.sourcePlannerItemId, 128) || undefined,
+      title,
+      contentSummary: compactText(args.contentSummary, 300) || undefined,
+      x: typeof args.x === "number" ? args.x : 80,
+      y: typeof args.y === "number" ? args.y : 220,
+      width: typeof args.width === "number" ? args.width : undefined,
+      height: typeof args.height === "number" ? args.height : undefined,
+      category: compactText(args.category, 40) || undefined,
+      provenanceSource: "ai",
+      provenanceAction: "created",
+      mutationSummary: `AI created widget ${title}`,
+    });
+
+    return {
+      name: params.name,
+      summary: `Created widget: ${title}.`,
+      modelPayload: { itemId: result.itemId, mutationId: result.mutationId, title, workstreamId },
+      eventPayload: { itemId: result.itemId, mutationId: result.mutationId, title, workstreamId },
+    };
+  }
+
+  if (params.name === "update_widget") {
+    const itemId = compactText(args.itemId, 128);
+    if (!itemId) {
+      return {
+        name: params.name,
+        summary: "Widget update skipped because no widget id was provided.",
+        modelPayload: { updated: false },
+        eventPayload: { updated: false },
+      };
+    }
+
+    const result = await convexMutation("workspaceItems:updateWidget", {
+      actorClerkId: context.actorClerkId,
+      itemId,
+      x: typeof args.x === "number" ? args.x : undefined,
+      y: typeof args.y === "number" ? args.y : undefined,
+      width: typeof args.width === "number" ? args.width : undefined,
+      height: typeof args.height === "number" ? args.height : undefined,
+      zIndex: typeof args.zIndex === "number" ? args.zIndex : undefined,
+      title: compactText(args.title, 160) || undefined,
+      contentSummary: compactText(args.contentSummary, 300) || undefined,
+      category: compactText(args.category, 40) || undefined,
+      renderMode: compactText(args.renderMode, 80) || undefined,
+      hidden: typeof args.hidden === "boolean" ? args.hidden : undefined,
+      collapsed: typeof args.collapsed === "boolean" ? args.collapsed : undefined,
+      pinned: typeof args.pinned === "boolean" ? args.pinned : undefined,
+      provenanceSource: "ai",
+      provenanceAction: "updated",
+      mutationSummary: compactText(args.title, 160)
+        ? `AI updated widget ${compactText(args.title, 160)}`
+        : "AI updated a widget",
+    }) as { success: boolean; mutationId?: string };
+
+    return {
+      name: params.name,
+      summary: "Updated widget.",
+      modelPayload: { itemId, mutationId: result.mutationId, updated: true },
+      eventPayload: { itemId, mutationId: result.mutationId, updated: true },
+    };
+  }
+
+  if (params.name === "move_widget") {
+    const itemId = compactText(args.itemId, 128);
+    const workstreamId = compactText(args.workstreamId, 128) || context.activeWorkstreamId;
+    if (!itemId || !workstreamId) {
+      return {
+        name: params.name,
+        summary: "Widget move skipped because the widget id or destination workstream was missing.",
+        modelPayload: { moved: false },
+        eventPayload: { moved: false },
+      };
+    }
+
+    const result = await convexMutation("workspaceItems:moveWidget", {
+      actorClerkId: context.actorClerkId,
+      itemId,
+      workstreamId,
+      x: typeof args.x === "number" ? args.x : undefined,
+      y: typeof args.y === "number" ? args.y : undefined,
+      provenanceSource: "ai",
+      mutationSummary: "AI moved a widget",
+    }) as { success: boolean; mutationId?: string };
+
+    return {
+      name: params.name,
+      summary: "Moved widget.",
+      modelPayload: { itemId, workstreamId, mutationId: result.mutationId, moved: true },
+      eventPayload: { itemId, workstreamId, mutationId: result.mutationId, moved: true },
+    };
+  }
+
+  if (params.name === "attach_items_to_workstream") {
+    const workstreamId = compactText(args.workstreamId, 128) || context.activeWorkstreamId;
+    const rawItems = Array.isArray(args.items) ? args.items : [];
+    if (!workstreamId || rawItems.length === 0) {
+      return {
+        name: params.name,
+        summary: "Attach flow skipped because the workstream or items were missing.",
+        modelPayload: { attached: false },
+        eventPayload: { attached: false },
+      };
+    }
+
+    const items = rawItems
+      .map((entry) => (typeof entry === "object" && entry ? entry as Record<string, unknown> : null))
+      .filter((entry): entry is Record<string, unknown> => !!entry)
+      .map((entry) => ({
+        type: compactText(entry.type, 40) || undefined,
+        itemType: compactText(entry.itemType, 40) || undefined,
+        sourceChatId: compactText(entry.sourceChatId, 128) || undefined,
+        sourceArtifactId: compactText(entry.sourceArtifactId, 128) || undefined,
+        sourcePlannerItemId: compactText(entry.sourcePlannerItemId, 128) || undefined,
+        title: compactText(entry.title, 160) || undefined,
+        contentSummary: compactText(entry.contentSummary, 300) || undefined,
+        renderMode: compactText(entry.renderMode, 80) || undefined,
+        category: compactText(entry.category, 40) || undefined,
+      }));
+
+    const result = await convexMutation("workspaceItems:attachItemsToWorkstream", {
+      actorClerkId: context.actorClerkId,
+      workstreamId,
+      items,
+      provenanceSource: "ai",
+      mutationSummary: `AI attached ${items.length} item${items.length === 1 ? "" : "s"}`,
+    }) as { success: boolean; createdItemIds?: string[]; mutationId?: string };
+
+    return {
+      name: params.name,
+      summary: `Attached ${result.createdItemIds?.length ?? 0} item${result.createdItemIds?.length === 1 ? "" : "s"} to the workspace.`,
+      modelPayload: { workstreamId, createdItemIds: result.createdItemIds ?? [], mutationId: result.mutationId },
+      eventPayload: { workstreamId, createdItemIds: result.createdItemIds ?? [], mutationId: result.mutationId },
+    };
+  }
+
+  if (params.name === "list_merge_candidates") {
+    const workstreamId = compactText(args.workstreamId, 128) || context.activeWorkstreamId;
+    const topic = compactText(args.topic, 160) || undefined;
+    const limit = clampLimit(args.limit, 8, 20);
+    const result = await convexQuery("workspaceItems:listMergeCandidates", {
+      actorClerkId: context.actorClerkId,
+      workstreamId,
+      topic,
+      limit,
+    }) as { candidates?: Array<Record<string, unknown>> };
+
+    return {
+      name: params.name,
+      summary: `Found ${result.candidates?.length ?? 0} merge candidate${result.candidates?.length === 1 ? "" : "s"}.`,
+      modelPayload: { workstreamId, topic, candidates: result.candidates ?? [] },
+      eventPayload: { workstreamId, topic, candidates: result.candidates ?? [] },
+    };
+  }
+
+  if (params.name === "update_workstream_layout") {
+    const workstreamId = compactText(args.workstreamId, 128) || context.activeWorkstreamId;
+    const rawWidgets = Array.isArray(args.widgets) ? args.widgets : [];
+    if (!workstreamId || rawWidgets.length === 0) {
+      return {
+        name: params.name,
+        summary: "Layout update skipped because the workstream or widget positions were missing.",
+        modelPayload: { updated: false },
+        eventPayload: { updated: false },
+      };
+    }
+
+    const widgets = rawWidgets
+      .map((entry) => (typeof entry === "object" && entry ? entry as Record<string, unknown> : null))
+      .filter((entry): entry is Record<string, unknown> => !!entry)
+      .map((entry) => ({
+        itemId: compactText(entry.itemId, 128),
+        x: typeof entry.x === "number" ? entry.x : 0,
+        y: typeof entry.y === "number" ? entry.y : 0,
+        width: typeof entry.width === "number" ? entry.width : undefined,
+        height: typeof entry.height === "number" ? entry.height : undefined,
+        zIndex: typeof entry.zIndex === "number" ? entry.zIndex : undefined,
+      }))
+      .filter((entry) => entry.itemId.length > 0);
+
+    const result = await convexMutation("workspaceItems:updateWorkstreamLayout", {
+      actorClerkId: context.actorClerkId,
+      workstreamId,
+      widgets,
+      provenanceSource: "ai",
+      mutationSummary: "AI reorganized the workspace layout",
+    }) as { success: boolean; mutationId?: string };
+
+    return {
+      name: params.name,
+      summary: "Updated workspace layout.",
+      modelPayload: { workstreamId, widgetCount: widgets.length, mutationId: result.mutationId },
+      eventPayload: { workstreamId, widgetCount: widgets.length, mutationId: result.mutationId },
+    };
+  }
+
+  if (params.name === "suggest_workspace_from_topic") {
+    const topic = compactText(args.topic, 160);
+    if (!topic) {
+      return {
+        name: params.name,
+        summary: "Workspace suggestion skipped because no topic was provided.",
+        modelPayload: { topic: "", shouldSuggest: false },
+        eventPayload: { topic: "", shouldSuggest: false },
+      };
+    }
+
+    const result = await convexQuery("workspaceOrchestration:suggestWorkspaceFromTopic", {
+      actorClerkId: context.actorClerkId,
+      topic,
+      limit: clampLimit(args.limit, 8, 20),
+    });
+
+    return {
+      name: params.name,
+      summary: "Scored whether this topic should become a workspace.",
+      modelPayload: result as Record<string, unknown>,
+      eventPayload: result as Record<string, unknown>,
+    };
+  }
+
   if (params.name === "fork_thread") {
     const workstreamId = compactText(args.workstreamId, 128) || context.activeWorkstreamId;
     const title = compactText(args.title, 120) || `Thread fork: ${compactText(args.reason, 80)}`;

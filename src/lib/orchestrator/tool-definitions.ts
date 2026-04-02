@@ -151,6 +151,194 @@ const TOOL_DEFINITIONS: Record<AiToolName, OpenRouterToolDefinition> = {
       },
     },
   },
+  create_workstream: {
+    type: "function",
+    function: {
+      name: "create_workstream",
+      description: "Create a new workspace/workstream when the user explicitly asks for one or confirms a suggestion.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          description: { type: "string" },
+          emoji: { type: "string" },
+          color: { type: "string" },
+          type: { type: "string", enum: ["subject", "project", "general"] },
+        },
+        required: ["title"],
+        additionalProperties: false,
+      },
+    },
+  },
+  create_widget: {
+    type: "function",
+    function: {
+      name: "create_widget",
+      description: "Create a workspace widget instance for a thread, artifact, planner item, utility, or custom output.",
+      parameters: {
+        type: "object",
+        properties: {
+          workstreamId: { type: "string" },
+          type: { type: "string", enum: ["thread", "document", "planner", "board", "visualization", "media", "reference", "custom", "utility"] },
+          itemType: { type: "string", enum: ["thread", "artifact", "planner", "utility", "custom"] },
+          title: { type: "string" },
+          contentSummary: { type: "string" },
+          renderMode: { type: "string" },
+          category: { type: "string", enum: ["threads", "documents", "planner", "boards", "visualizations", "media", "references", "custom"] },
+          sourceChatId: { type: "string" },
+          sourceArtifactId: { type: "string" },
+          sourcePlannerItemId: { type: "string" },
+          x: { type: "number" },
+          y: { type: "number" },
+          width: { type: "number" },
+          height: { type: "number" },
+        },
+        required: ["title", "type"],
+        additionalProperties: false,
+      },
+    },
+  },
+  update_widget: {
+    type: "function",
+    function: {
+      name: "update_widget",
+      description: "Update a workspace widget's layout or metadata.",
+      parameters: {
+        type: "object",
+        properties: {
+          itemId: { type: "string" },
+          title: { type: "string" },
+          contentSummary: { type: "string" },
+          renderMode: { type: "string" },
+          category: { type: "string", enum: ["threads", "documents", "planner", "boards", "visualizations", "media", "references", "custom"] },
+          x: { type: "number" },
+          y: { type: "number" },
+          width: { type: "number" },
+          height: { type: "number" },
+          zIndex: { type: "number" },
+          hidden: { type: "boolean" },
+          collapsed: { type: "boolean" },
+          pinned: { type: "boolean" },
+        },
+        required: ["itemId"],
+        additionalProperties: false,
+      },
+    },
+  },
+  move_widget: {
+    type: "function",
+    function: {
+      name: "move_widget",
+      description: "Move a widget into another workstream, optionally setting a new position.",
+      parameters: {
+        type: "object",
+        properties: {
+          itemId: { type: "string" },
+          workstreamId: { type: "string" },
+          x: { type: "number" },
+          y: { type: "number" },
+        },
+        required: ["itemId", "workstreamId"],
+        additionalProperties: false,
+      },
+    },
+  },
+  attach_items_to_workstream: {
+    type: "function",
+    function: {
+      name: "attach_items_to_workstream",
+      description: "Attach existing chats, artifacts, or planner items to a workstream by creating widget instances for them.",
+      parameters: {
+        type: "object",
+        properties: {
+          workstreamId: { type: "string" },
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                type: { type: "string" },
+                itemType: { type: "string" },
+                sourceChatId: { type: "string" },
+                sourceArtifactId: { type: "string" },
+                sourcePlannerItemId: { type: "string" },
+                title: { type: "string" },
+                contentSummary: { type: "string" },
+                renderMode: { type: "string" },
+                category: { type: "string" },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["workstreamId", "items"],
+        additionalProperties: false,
+      },
+    },
+  },
+  list_merge_candidates: {
+    type: "function",
+    function: {
+      name: "list_merge_candidates",
+      description: "List chats, artifacts, and planner items that could be attached to a workstream or new workspace.",
+      parameters: {
+        type: "object",
+        properties: {
+          workstreamId: { type: "string" },
+          topic: { type: "string" },
+          limit: { type: "number", minimum: 1, maximum: 20 },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  update_workstream_layout: {
+    type: "function",
+    function: {
+      name: "update_workstream_layout",
+      description: "Bulk-update widget positions inside one workstream, usually after an AI reorganization.",
+      parameters: {
+        type: "object",
+        properties: {
+          workstreamId: { type: "string" },
+          widgets: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                itemId: { type: "string" },
+                x: { type: "number" },
+                y: { type: "number" },
+                width: { type: "number" },
+                height: { type: "number" },
+                zIndex: { type: "number" },
+              },
+              required: ["itemId", "x", "y"],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["workstreamId", "widgets"],
+        additionalProperties: false,
+      },
+    },
+  },
+  suggest_workspace_from_topic: {
+    type: "function",
+    function: {
+      name: "suggest_workspace_from_topic",
+      description: "Score whether a topic has enough repeated evidence to deserve its own workspace and return merge candidates.",
+      parameters: {
+        type: "object",
+        properties: {
+          topic: { type: "string" },
+          limit: { type: "number", minimum: 1, maximum: 20 },
+        },
+        required: ["topic"],
+        additionalProperties: false,
+      },
+    },
+  },
   fork_thread: {
     type: "function",
     function: {
@@ -232,6 +420,14 @@ export function getAllowedAiToolNames(assignmentLevel: AssignmentLevel): AiToolN
     "get_workstream_context",
     "create_note",
     "update_planner",
+    "create_workstream",
+    "create_widget",
+    "update_widget",
+    "move_widget",
+    "attach_items_to_workstream",
+    "list_merge_candidates",
+    "update_workstream_layout",
+    "suggest_workspace_from_topic",
     "fork_thread",
     "search_web",
     "switch_mode",

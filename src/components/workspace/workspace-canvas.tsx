@@ -23,7 +23,6 @@ import type { Workstream } from "@/hooks/use-workspace-data";
 import { cn } from "@/lib/utils";
 import { getWorkstreamColor } from "@/lib/workspace/zoom-helpers";
 import { stripGeneratedDocumentMarkers } from "@/lib/document-generator";
-import type { WorkspaceShellMode } from "@/lib/workspace/shell-mode";
 import {
   computeCanonicalLayout,
   applyOverrides,
@@ -35,14 +34,12 @@ import {
   initPersistenceListeners,
 } from "@/lib/workspace/position-persistence";
 import {
-  ConstellationClusterNode,
-  MagneticPanelNode,
-  LensesLensNode,
+  WorkspaceFieldNode,
+  WorkstreamTitleNode,
+  CategoryFieldNode,
   EmptyStateNode,
   FocusTimerNode,
-  buildConstellationNodes,
-  buildMagneticNodes,
-  buildLensesNodes,
+  buildWorkspaceNodes,
   buildWorkspaceWidgetNodes,
   type ThreadSummary,
   type NoteSummary,
@@ -51,7 +48,6 @@ import {
   type WorkspaceWidgetSummary,
   WorkspaceWidgetNode,
 } from "@/components/workspace/views/internal-content-nodes";
-import { buildHubNodes } from "@/components/workspace/hub-internal-view";
 import { subscribeWorkspaceContentMutated } from "@/lib/workspace/events";
 
 /* ─── Types ──────────────────────────────────────────────── */
@@ -68,7 +64,6 @@ type WorkspaceCanvasProps = {
   onOpenPanel?: (type: import("@/stores/workspace-store").PanelType, id: string) => void;
   onCreateArtifact?: () => void;
   panelWidth?: number;
-  shellMode?: WorkspaceShellMode;
 };
 
 type WorkstreamNodeData = {
@@ -80,17 +75,9 @@ type WorkstreamNodeData = {
   neighborOpacity: number;
   lifecycle: { opacity: number; scale: number; dashed: boolean };
   onOpen: (workstreamId: string) => void;
-  shellMode: WorkspaceShellMode;
 };
 
-type HubAnchorNodeData = {
-  shellMode: WorkspaceShellMode;
-  workstreamCount: number;
-  pendingCount: number;
-  timerActive: boolean;
-  onOpen: () => void;
-  onNew?: () => void;
-};
+
 
 /* ─── Context menu item ─────────────────────────────────── */
 
@@ -304,65 +291,12 @@ function namespaceFlowEdges(prefix: string, edges: Edge[]) {
 const WorkstreamNode = memo(function WorkstreamNode({
   data,
 }: NodeProps<Node<WorkstreamNodeData>>) {
-  const { workstream, band, isFocused, isDimmed, isCommitted, neighborOpacity, lifecycle, onOpen, shellMode } = data;
+  const { workstream, band, isFocused, isDimmed, isCommitted, neighborOpacity, lifecycle, onOpen } = data;
   const color = getWorkstreamColor(workstream.color);
 
-  // Node width by band (scaled up for 2.5x layout)
-  const baseWidth = band === "overview" ? 520 : band === "summary" ? 620 : band === "detail" ? 720 : 780;
-  const width = shellMode === "constellations"
-    ? baseWidth - 24
-    : shellMode === "lenses"
-      ? baseWidth - 10
-      : baseWidth;
-
+  // Unified V2 scale
+  const width = band === "overview" ? 520 : band === "summary" ? 620 : band === "detail" ? 720 : 780;
   const dissolving = isCommitted;
-
-  const shellNodeStyle = {
-    constellations: {
-      radius: dissolving ? "20px" : "30px",
-      background: dissolving
-        ? `linear-gradient(180deg, color-mix(in oklab, ${color.value} 8%, var(--bg-elevated)) 0%, color-mix(in oklab, var(--bg-elevated) 88%, transparent) 100%)`
-        : "transparent",
-      borderColor: dissolving ? `${color.value}40` : "transparent",
-      boxShadow: dissolving
-        ? `0 0 22px -10px ${color.value}45`
-        : isFocused
-          ? `0 0 0 1px ${color.value}18, 0 30px 80px -48px ${color.value}38`
-          : `0 20px 64px -48px ${color.value}24`,
-    },
-    magnetic: {
-      radius: dissolving ? "16px" : "22px",
-      background: "var(--bg-elevated)",
-      borderColor: dissolving ? `${color.value}40` : "var(--border-default)",
-      boxShadow: dissolving
-        ? `0 0 18px -10px ${color.value}30`
-        : isFocused
-          ? `0 0 0 1px color-mix(in oklab, ${color.value} 26%, transparent), 0 18px 36px -28px rgba(15,23,42,0.45)`
-          : "0 14px 28px -24px rgba(15,23,42,0.42)",
-    },
-    lenses: {
-      radius: dissolving ? "18px" : "28px",
-      background: "color-mix(in oklab, var(--bg-elevated) 78%, transparent)",
-      borderColor: dissolving ? `${color.value}34` : "color-mix(in oklab, rgba(255,255,255,0.14) 70%, var(--border-default))",
-      boxShadow: dissolving
-        ? `0 0 18px -10px ${color.value}32`
-        : isFocused
-          ? "0 0 0 1px rgba(255,255,255,0.08), 0 24px 58px -36px rgba(15,23,42,0.8)"
-          : "0 20px 44px -34px rgba(15,23,42,0.72)",
-    },
-  }[shellMode];
-  const enterLabel = shellMode === "constellations"
-    ? "Enter cluster"
-    : shellMode === "lenses"
-      ? "Focus view"
-      : "Open field";
-  const metricsClassName = shellMode === "constellations"
-    ? "mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-[var(--text-tertiary)]"
-    : shellMode === "lenses"
-      ? "mt-3 flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-tertiary)]"
-      : "mt-3 flex items-center gap-3 text-[10px] text-[var(--text-tertiary)]";
-  const metricSeparator = shellMode === "magnetic";
-  const showConstellationFrame = shellMode !== "constellations" || dissolving;
 
   return (
     <div className="relative">
@@ -397,80 +331,59 @@ const WorkstreamNode = memo(function WorkstreamNode({
         transition={{ duration: dissolving ? 0.35 : 0.25, ease: [0.22, 1, 0.36, 1] }}
         className={cn(
           "group relative text-left transition-[box-shadow,border-color] duration-300",
-          dissolving ? "rounded-xl" : "rounded-2xl",
+          dissolving ? "rounded-[16px]" : "rounded-[22px]",
           dissolving && "pointer-events-none",
           isFocused && !dissolving && "ring-2 ring-[color:var(--accent-cyan)] ring-offset-2 ring-offset-[var(--bg-primary)]",
         )}
         style={{
           width: dissolving ? width * 0.8 : width,
-          background: shellNodeStyle.background,
-          borderWidth: showConstellationFrame ? 1 : 0,
+          background: dissolving
+            ? "transparent"
+            : isFocused
+              ? "var(--bg-elevated)"
+              : "color-mix(in oklab, var(--bg-primary) 30%, transparent)",
+          borderWidth: 1,
           borderStyle: lifecycle.dashed ? "dashed" : "solid",
-          borderColor: shellNodeStyle.borderColor,
-          boxShadow: shellNodeStyle.boxShadow,
-          borderRadius: shellNodeStyle.radius,
-          backdropFilter: shellMode === "lenses" ? "blur(18px)" : undefined,
+          borderColor: dissolving
+            ? `${color.value}40`
+            : isFocused
+              ? "var(--border-default)"
+              : "color-mix(in oklab, var(--border-default) 40%, transparent)",
+          backdropFilter: !isFocused && !dissolving ? "blur(8px)" : undefined,
+          boxShadow: dissolving
+            ? `0 0 18px -10px ${color.value}30`
+            : isFocused
+              ? `0 0 0 1px color-mix(in oklab, ${color.value} 26%, transparent), 0 18px 36px -28px rgba(15,23,42,0.45)`
+              : `0 8px 16px -12px rgba(0,0,0,0.1)`,
         }}
       >
-        {/* Ambient shell-specific accents */}
-        {shellMode === "constellations" ? (
-          <>
-            <div
-              className="pointer-events-none absolute -left-6 top-8 h-16 w-16 rounded-full opacity-40 blur-2xl transition-opacity duration-300 group-hover:opacity-65"
-              style={{ background: `${color.value}55` }}
-            />
-            <div
-              className="pointer-events-none absolute -right-4 bottom-4 h-10 w-10 rounded-full opacity-25 blur-xl transition-opacity duration-300 group-hover:opacity-45"
-              style={{ background: `${color.value}45` }}
-            />
-          </>
-        ) : (
-          <>
-            <div
-              className={cn(
-                "absolute inset-x-0 top-0 h-[3px] opacity-0 group-hover:opacity-60 transition-opacity duration-300",
-                shellMode === "magnetic" ? "rounded-t-[22px]" : "rounded-t-[30px]",
-              )}
-              style={{ background: color.value }}
-            />
-            <div
-              className={cn(
-                "absolute inset-x-0 bottom-0 h-[3px] opacity-0 group-hover:opacity-30 transition-opacity duration-300",
-                shellMode === "magnetic" ? "rounded-b-[22px]" : "rounded-b-[30px]",
-              )}
-              style={{ background: color.value }}
-            />
-          </>
+        {!isFocused && !dissolving && (
+          <div
+            className="pointer-events-none absolute -left-10 -top-10 h-40 w-40 rounded-full opacity-60 blur-3xl transition-opacity duration-300 group-hover:opacity-80"
+            style={{ background: `${color.value}45` }}
+          />
         )}
 
         <div className={cn("relative flex flex-col", dissolving ? "px-3 py-2" : "px-4 py-3.5")}>
-          {/* Top row: emoji + title + type */}
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2.5">
-              <span className={cn(dissolving ? "text-sm" : "text-lg", band === "overview" && !dissolving && "text-base")}>
+              <span className={cn(dissolving ? "text-sm" : "text-lg", !isFocused && !dissolving && "text-base")}>
                 {workstream.emoji || "📚"}
               </span>
               <div className="min-w-0">
-                {shellMode === "constellations" && !dissolving && band !== "overview" && (
-                  <div className="mb-1 text-[9px] font-semibold uppercase tracking-[0.22em] text-[var(--text-tertiary)]">
-                    constellation
-                  </div>
-                )}
                 <h3
                   className={cn(
                     "font-display leading-snug text-[var(--text-primary)]",
                     dissolving && "text-xs",
-                    !dissolving && band === "overview" && "text-sm",
-                    !dissolving && band === "summary" && "text-[0.95rem]",
-                    !dissolving && (band === "detail" || band === "internal") && "text-base",
-                    shellMode === "lenses" && !dissolving && "tracking-[-0.01em]",
+                    !dissolving && !isFocused && "text-xl",
+                    !dissolving && isFocused && "text-base",
                   )}
                 >
                   {workstream.title}
                 </h3>
               </div>
             </div>
-            {!dissolving && shellMode !== "constellations" && (
+            {!dissolving && isFocused && (
               <span
                 className="mt-0.5 shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider"
                 style={{ background: color.bg, color: color.value }}
@@ -480,73 +393,58 @@ const WorkstreamNode = memo(function WorkstreamNode({
             )}
           </div>
 
-          {/* Description */}
           <AnimatePresence>
-            {band !== "overview" && !dissolving && (
+            {isFocused && !dissolving && (
               <motion.p
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
                 transition={{ duration: 0.2 }}
-                className={cn(
-                  "mt-2 line-clamp-2 text-xs leading-relaxed text-[var(--text-secondary)]",
-                  shellMode === "constellations" && "max-w-[28ch]",
-                )}
+                className="mt-2 line-clamp-2 text-xs leading-relaxed text-[var(--text-secondary)]"
               >
                 {workstream.description || "A space for threads, artifacts, and tasks."}
               </motion.p>
             )}
           </AnimatePresence>
 
-          {/* Metrics */}
           <AnimatePresence>
-            {band !== "overview" && !dissolving && shellMode !== "constellations" && (
+            {isFocused && !dissolving && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
                 transition={{ duration: 0.2, delay: 0.05 }}
-                className={metricsClassName}
+                className="mt-3 flex items-center gap-3 text-[10px] text-[var(--text-tertiary)]"
               >
-                <span className={shellMode === "lenses" ? "rounded-full bg-[rgba(255,255,255,0.05)] px-2 py-0.5" : undefined}>
+                <span>
                   {workstream.threadCount ?? 0} threads
                 </span>
-                {metricSeparator && <span className="h-3 w-px bg-[var(--border-default)]" />}
-                <span className={shellMode === "lenses" ? "rounded-full bg-[rgba(255,255,255,0.05)] px-2 py-0.5" : undefined}>
+                <span className="h-3 w-px bg-[var(--border-default)]" />
+                <span>
                   {workstream.artifactCount ?? 0} artifacts
                 </span>
-                {metricSeparator && <span className="h-3 w-px bg-[var(--border-default)]" />}
-                <span className={shellMode === "lenses" ? "rounded-full bg-[rgba(255,255,255,0.05)] px-2 py-0.5" : undefined}>
+                <span className="h-3 w-px bg-[var(--border-default)]" />
+                <span>
                   {formatActivity(workstream.lastActivityAt)}
                 </span>
               </motion.div>
             )}
           </AnimatePresence>
 
-          {/* Detail band: enter affordance */}
           <AnimatePresence>
-            {(band === "detail" || (band === "internal" && !isCommitted)) && !dissolving && (
+            {isFocused && !dissolving && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
                 transition={{ duration: 0.2, delay: 0.1 }}
-                className={cn(
-                  "mt-3 flex items-center justify-between pt-3",
-                  shellMode === "constellations"
-                    ? "pt-4"
-                    : "border-t border-[var(--border-default)]",
-                )}
+                className="mt-3 flex items-center justify-between pt-3 border-t border-[var(--border-default)]"
               >
                 <span className="text-[10px] text-[var(--text-tertiary)]">
-                  {shellMode === "constellations"
-                    ? "Drift into focus"
-                    : shellMode === "lenses"
-                      ? "Bring into focus"
-                      : "Click to enter"}
+                  Click to enter
                 </span>
                 <span className="text-xs font-medium text-[var(--accent-cyan)] transition-transform duration-150 group-hover:translate-x-1">
-                  {enterLabel} →
+                  Open field →
                 </span>
               </motion.div>
             )}
@@ -557,86 +455,6 @@ const WorkstreamNode = memo(function WorkstreamNode({
   );
 });
 
-const HubAnchorNode = memo(function HubAnchorNode({
-  data,
-}: NodeProps<Node<HubAnchorNodeData>>) {
-  const shellStyles = {
-    constellations: {
-      shell: "rounded-[44px] border border-[rgba(255,255,255,0.55)] bg-[rgba(255,255,255,0.82)] shadow-[0_30px_80px_-34px_rgba(14,142,232,0.25)] backdrop-blur-xl",
-      halo: "absolute -inset-10 rounded-[56px] bg-[radial-gradient(circle,rgba(14,142,232,0.14),transparent_68%)] blur-3xl",
-      align: "items-center text-center",
-    },
-    magnetic: {
-      shell: "rounded-[32px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_26px_70px_-40px_rgba(15,23,42,0.35)]",
-      halo: "absolute inset-0 rounded-[32px] border border-white/5",
-      align: "items-start text-left",
-    },
-    lenses: {
-      shell: "rounded-[999px] border border-[rgba(255,255,255,0.16)] bg-[rgba(19,17,26,0.38)] shadow-[0_30px_90px_-40px_rgba(15,23,42,0.62)] backdrop-blur-2xl",
-      halo: "absolute -inset-6 rounded-[999px] bg-[radial-gradient(circle,rgba(255,255,255,0.10),transparent_72%)] blur-3xl",
-      align: "items-center text-center",
-    },
-  }[data.shellMode];
-
-  return (
-    <motion.button
-      type="button"
-      onClick={data.onOpen}
-      whileHover={{ scale: 1.02, y: -2 }}
-      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-      className={cn(
-        "group relative flex h-[220px] w-[320px] flex-col justify-between overflow-hidden px-7 py-6",
-        shellStyles.shell,
-        shellStyles.align,
-      )}
-    >
-      <div className={cn("pointer-events-none -z-10", shellStyles.halo)} />
-      <div className="flex items-center gap-3">
-        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--accent-cyan)]/12 text-[var(--accent-cyan)]">
-          <Home className="h-6 w-6" />
-        </div>
-        <div className={cn("min-w-0", data.shellMode !== "magnetic" && "mx-auto")}>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--text-tertiary)]">
-            Hub
-          </div>
-          <div className="font-display text-[1.55rem] leading-tight text-[var(--text-primary)]">
-            Workspace Home
-          </div>
-        </div>
-      </div>
-
-      <p className={cn("max-w-[26ch] text-sm leading-6 text-[var(--text-secondary)]", data.shellMode !== "magnetic" && "mx-auto")}>
-        Timers, quick notes, deadlines, and the cross-workstream view live here.
-      </p>
-
-      <div className={cn("flex flex-wrap gap-2", data.shellMode !== "magnetic" && "justify-center")}>
-        <span className="rounded-full border border-[var(--border-default)]/70 bg-[var(--bg-primary)]/55 px-3 py-1 text-[11px] font-medium text-[var(--text-secondary)]">
-          {data.workstreamCount} workstreams
-        </span>
-        <span className="rounded-full border border-[var(--border-default)]/70 bg-[var(--bg-primary)]/55 px-3 py-1 text-[11px] font-medium text-[var(--text-secondary)]">
-          {data.pendingCount} visible items
-        </span>
-        {data.timerActive && (
-          <span className="rounded-full border border-[var(--accent-cyan)]/30 bg-[var(--accent-cyan)]/12 px-3 py-1 text-[11px] font-medium text-[var(--accent-cyan)]">
-            timer active
-          </span>
-        )}
-      </div>
-
-      <div className={cn("flex items-center justify-between gap-3 text-sm", data.shellMode !== "magnetic" && "justify-center")}>
-        {data.onNew && (
-          <span className="inline-flex items-center gap-1.5 text-[var(--text-tertiary)]">
-            <Plus className="h-4 w-4" />
-            New
-          </span>
-        )}
-        <span className="font-medium text-[var(--accent-cyan)] transition-transform duration-150 group-hover:translate-x-1">
-          Open hub →
-        </span>
-      </div>
-    </motion.button>
-  );
-});
 
 function formatActivity(timestamp?: number) {
   if (!timestamp) return "Fresh";
@@ -651,11 +469,9 @@ function formatActivity(timestamp?: number) {
 function FlowBackground({
   mode,
   zoom,
-  shellMode,
 }: {
   mode: WorkspaceBackgroundMode;
   zoom: number;
-  shellMode: WorkspaceShellMode;
 }) {
   if (mode === "blank") return null;
   const isDots = mode === "dots";
@@ -667,11 +483,7 @@ function FlowBackground({
       gap={gap}
       size={isDots ? 1.45 : 0.8}
       variant={isDots ? BackgroundVariant.Dots : BackgroundVariant.Lines}
-      color={shellMode === "constellations"
-        ? "color-mix(in oklab, var(--accent-cyan) 18%, var(--border-default))"
-        : shellMode === "lenses"
-          ? "color-mix(in oklab, rgba(255,255,255,0.22) 40%, var(--border-default))"
-          : isDots
+      color={isDots
             ? "color-mix(in oklab, var(--border-default) 74%, transparent)"
             : "color-mix(in oklab, var(--border-default) 60%, transparent)"}
     />
@@ -680,52 +492,12 @@ function FlowBackground({
 
 /* ─── Breadcrumb ─────────────────────────────────────────── */
 
-function WorkspaceBreadcrumb({
-  workstream,
-  onBack,
-  shellMode,
-}: {
-  workstream: Workstream;
-  onBack: () => void;
-  shellMode: WorkspaceShellMode;
-}) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: -8 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      transition={{ duration: 0.2 }}
-      className={cn(
-        "absolute top-3 left-4 z-30 flex items-center gap-1.5 rounded-full px-2.5 py-1.5",
-        shellMode === "constellations"
-          ? "bg-[color:rgba(19,17,26,0.52)] backdrop-blur-md"
-          : shellMode === "lenses"
-            ? "bg-[color:rgba(19,17,26,0.6)] backdrop-blur-xl"
-            : "bg-[var(--bg-elevated)]/72",
-      )}
-    >
-      <button
-        type="button"
-        onClick={onBack}
-        className="inline-flex items-center gap-1 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-      >
-        <ChevronLeft className="w-4 h-4" />
-        <span>Workspace</span>
-      </button>
-      <span className="text-[var(--text-tertiary)]">/</span>
-      <span className="text-sm font-medium text-[var(--text-primary)]">
-        {workstream.emoji} {workstream.title}
-      </span>
-    </motion.div>
-  );
-}
 
 const FLOW_NODE_TYPES = {
   workstream: WorkstreamNode,
-  hubAnchor: HubAnchorNode,
-  constellationCluster: ConstellationClusterNode,
-  magneticPanel: MagneticPanelNode,
-  lensesLens: LensesLensNode,
+  workspaceField: WorkspaceFieldNode,
+  workstreamTitle: WorkstreamTitleNode,
+  categoryField: CategoryFieldNode,
   workspaceWidget: WorkspaceWidgetNode,
   emptyState: EmptyStateNode,
   focusTimer: FocusTimerNode,
@@ -743,7 +515,6 @@ function WorkspaceCanvasInner({
   onCommitWorkstream,
   onOpenPanel,
   onCreateArtifact,
-  shellMode = "magnetic",
 }: WorkspaceCanvasProps) {
   const reactFlowRef = useRef<ReactFlowInstance | null>(null);
   const initializedRef = useRef(false);
@@ -776,7 +547,7 @@ function WorkspaceCanvasInner({
     resetTimer,
   } = useWorkspaceStore();
   const [zoom, setZoom] = useState(restoreViewport().zoom);
-  const [semanticBand, setSemanticBand] = useState<ZoomBand>(() => getRepresentationBand(restoreViewport().zoom));
+  const [semanticBand, setSemanticBand] = useState<ZoomBand>("summary");
   const [localOverrides, setLocalOverrides] = useState(() => loadLocalOverrides());
   const [internalNodeOverrides, setInternalNodeOverrides] = useState<Map<string, { x: number; y: number }>>(new Map());
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -789,10 +560,12 @@ function WorkspaceCanvasInner({
 
   useEffect(() => {
     const timeout = setTimeout(() => {
-      setSemanticBand(getRepresentationBand(zoom));
+      setSemanticBand(zoom < 0.3 ? "overview" : zoom < 0.7 ? "summary" : "detail");
     }, 180);
     return () => clearTimeout(timeout);
   }, [zoom]);
+
+
 
   useEffect(() => {
     internalNodeOverridesRef.current = new Map();
@@ -824,6 +597,46 @@ function WorkspaceCanvasInner({
     const canonical = computeCanonicalLayout(workstreams);
     return applyOverrides(canonical, workstreams, localOverrides);
   }, [workstreams, localOverrides]);
+
+  // Auto-enter/exit via zoom threshold (restoring previous behavior as requested)
+  useEffect(() => {
+    if (primaryWorkstreamId && zoom < 0.25) {
+      if (onCommitWorkstream) {
+        onCommitWorkstream(null);
+      } else {
+        exitWorkstream();
+      }
+    } else if (!primaryWorkstreamId && zoom > 0.9) {
+      // Find the closest workstream to the center
+      const instance = reactFlowRef.current;
+      if (instance) {
+        const vp = instance.getViewport();
+        // find node closest to center of viewport
+        // viewport center in ReactFlow coordinates:
+        const centerX = -vp.x / vp.zoom + (typeof window !== 'undefined' ? window.innerWidth / (2 * vp.zoom) : 0);
+        const centerY = -vp.y / vp.zoom + (typeof window !== 'undefined' ? window.innerHeight / (2 * vp.zoom) : 0);
+        let closestId = null;
+        let minDist = Infinity;
+        for (const [id, pos] of positions.entries()) {
+          const dx = pos.x - centerX;
+          const dy = pos.y - centerY;
+          const dist = dx*dx + dy*dy;
+          if (dist < minDist) {
+            minDist = dist;
+            closestId = id;
+          }
+        }
+        if (closestId && minDist < 200000) {
+          if (onCommitWorkstream) {
+            onCommitWorkstream(closestId);
+          } else {
+            commitWorkstream(closestId);
+          }
+        }
+      }
+    }
+  }, [zoom, primaryWorkstreamId, exitWorkstream, positions, commitWorkstream, onCommitWorkstream]);
+
 
   useEffect(() => {
     setZoomBand(band);
@@ -1147,24 +960,7 @@ function WorkspaceCanvasInner({
     const generatedEdges: Edge[] = [];
     const nextWidgetLayoutMeta = new Map<string, { itemId: string; origin: { x: number; y: number } }>();
 
-    const overviewHubNode: Node<HubAnchorNodeData> = {
-      id: "hub-anchor",
-      type: "hubAnchor",
-      position: { x: -160, y: -120 },
-      draggable: false,
-      selectable: false,
-      hidden: !!primaryWorkstreamId && primaryWorkstreamId !== "__hub__",
-      data: {
-        shellMode,
-        workstreamCount: visibleWorkstreams.length,
-        pendingCount: visibleWorkstreams.reduce((count, ws) => count + (ws.threadCount ?? 0) + (ws.artifactCount ?? 0), 0),
-        timerActive: timerState.active,
-        onOpen: handleOpenHub,
-        onNew: onNewWorkstream,
-      },
-    };
 
-    generatedNodes.push(overviewHubNode);
 
     const workstreamNodes: Node<WorkstreamNodeData>[] = visibleWorkstreams.map((ws) => {
       const pos = positions.get(ws._id) ?? { x: 0, y: 0 };
@@ -1189,7 +985,6 @@ function WorkspaceCanvasInner({
           neighborOpacity,
           lifecycle,
           onOpen: handleOpenWorkstream,
-          shellMode,
         },
       };
     });
@@ -1203,29 +998,7 @@ function WorkspaceCanvasInner({
         const loading = loadingContentIds.includes(workstreamId) && !contentCacheRef.current.has(workstreamId);
         const cached = getCachedContent(workstreamId);
 
-        if (workstreamId === "__hub__") {
-          const namespacedHubNodes = namespaceFlowNodes(`internal:${workstreamId}`, buildHubNodes(
-            {
-              quickNotes: cached.hubQuickNotes,
-              deadlines: cached.hubDeadlines,
-              recentActivity: cached.hubActivity,
-              loading,
-              onOpenPanel: panelOpener,
-              onNewWorkstream,
-              timerState,
-              onTimerStart: () => startTimer(),
-              onTimerPause: () => pauseTimer(),
-              onTimerReset: () => resetTimer(),
-            },
-            { x: 80, y: 120 },
-          ));
-          generatedNodes.push(...namespacedHubNodes.map((node) => ({
-            ...node,
-            position: internalNodeOverrides.get(node.id) ?? node.position,
-            style: { ...node.style, opacity: isPrimary ? 1 : 0.6 },
-          })));
-          continue;
-        }
+
 
         // Build actual UI-specific internal nodes for the workstream!
         if (primaryWorkstreamId === workstreamId) {
@@ -1243,17 +1016,10 @@ function WorkspaceCanvasInner({
             workstreamEmoji: focusWorkstream?.emoji,
             workstreamTitle: focusWorkstream?.title,
             onOpenPanel: panelOpener,
+            band,
           };
 
-          let builderResult: { nodes: Node[], edges: Edge[] } = { nodes: [], edges: [] };
-
-          if (shellMode === "constellations") {
-            builderResult = buildConstellationNodes(contentData, basePos);
-          } else if (shellMode === "magnetic") {
-            builderResult = buildMagneticNodes(contentData, basePos);
-          } else if (shellMode === "lenses") {
-            builderResult = buildLensesNodes(contentData, basePos);
-          }
+          let builderResult = buildWorkspaceNodes(contentData, basePos);
 
           generatedNodes.push(...namespaceFlowNodes(`internal:${workstreamId}`, builderResult.nodes).map(node => ({
             ...node,
@@ -1303,7 +1069,6 @@ function WorkspaceCanvasInner({
     startTimer,
     pauseTimer,
     resetTimer,
-    shellMode,
     showConnections,
     workstreams,
   ]);
@@ -1497,15 +1262,7 @@ function WorkspaceCanvasInner({
       }}
     >
       <AnimatePresence>
-        {committedWorkstream && (
-          <WorkspaceBreadcrumb
-            workstream={committedWorkstream}
-            onBack={handleExitWorkstream}
-            shellMode={shellMode}
-          />
-        )}
       </AnimatePresence>
-
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -1524,8 +1281,9 @@ function WorkspaceCanvasInner({
         elementsSelectable={false}
         selectionOnDrag={false}
         panOnDrag
-        panOnScroll={false}
-        zoomOnScroll
+        panOnScroll={true}
+        zoomOnScroll={false}
+        zoomOnPinch={true}
         zoomOnDoubleClick={false}
         proOptions={{ hideAttribution: true }}
         className={cn("workspace-react-flow", getAmbientClass())}
@@ -1533,14 +1291,10 @@ function WorkspaceCanvasInner({
       <div
         className="pointer-events-none absolute inset-0 z-0"
         style={{
-          background: shellMode === "constellations"
-            ? "transparent" // Removed filters for constellations
-            : shellMode === "lenses"
-              ? "transparent" // Removed filters for lenses
-              : "transparent",
+          background: "transparent",
         }}
       />
-      <FlowBackground mode={backgroundMode} zoom={zoom} shellMode={shellMode} />
+      <FlowBackground mode={backgroundMode} zoom={zoom} />
         <Controls position="bottom-left" showInteractive={false}>
           <ControlButton
             onClick={() => reactFlowRef.current?.zoomTo(0.7, { duration: 350 })}

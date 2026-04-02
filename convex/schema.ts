@@ -247,6 +247,21 @@ export default defineSchema({
       v.literal("custom"),
       v.literal("utility")
     ),
+    itemType: v.optional(v.union(
+      v.literal("thread"),
+      v.literal("artifact"),
+      v.literal("planner"),
+      v.literal("utility"),
+      v.literal("custom"),
+    )),
+    sourceKind: v.optional(v.union(
+      v.literal("chat"),
+      v.literal("artifact"),
+      v.literal("plannerItem"),
+      v.literal("utility"),
+      v.literal("custom"),
+    )),
+    sourceId: v.optional(v.string()),
     renderMode: v.optional(v.string()),
     sourceChatId: v.optional(v.id("chats")),
     sourceArtifactId: v.optional(v.id("artifacts")),
@@ -257,8 +272,29 @@ export default defineSchema({
     y: v.number(),
     width: v.optional(v.number()),
     height: v.optional(v.number()),
+    zIndex: v.optional(v.number()),
+    category: v.optional(v.union(
+      v.literal("threads"),
+      v.literal("documents"),
+      v.literal("planner"),
+      v.literal("boards"),
+      v.literal("visualizations"),
+      v.literal("media"),
+      v.literal("references"),
+      v.literal("custom"),
+    )),
     status: v.union(v.literal("active"), v.literal("archived")),
     pinned: v.optional(v.boolean()),
+    collapsed: v.optional(v.boolean()),
+    hidden: v.optional(v.boolean()),
+    visualGroup: v.optional(v.string()),
+    renderProps: v.optional(v.any()),
+    provenanceSource: v.optional(v.union(
+      v.literal("user"),
+      v.literal("ai"),
+      v.literal("system"),
+    )),
+    provenanceAction: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -267,6 +303,27 @@ export default defineSchema({
     .index("by_source_artifact", ["sourceArtifactId"])
     .index("by_source_chat", ["sourceChatId"])
     .index("by_source_planner", ["sourcePlannerItemId"]),
+
+  workspaceMutations: defineTable({
+    orgId: v.id("orgs"),
+    ownerUserId: v.id("users"),
+    workstreamId: v.optional(v.id("workstreams")),
+    targetWorkstreamId: v.optional(v.id("workstreams")),
+    mutationType: v.string(),
+    source: v.union(v.literal("user"), v.literal("ai"), v.literal("system")),
+    summary: v.optional(v.string()),
+    targetItemIds: v.optional(v.array(v.id("workspaceItems"))),
+    before: v.optional(v.any()),
+    after: v.optional(v.any()),
+    revertData: v.optional(v.any()),
+    status: v.union(v.literal("applied"), v.literal("reverted")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    revertedAt: v.optional(v.number()),
+  })
+    .index("by_owner", ["ownerUserId"])
+    .index("by_workstream", ["workstreamId"])
+    .index("by_target_workstream", ["targetWorkstreamId"]),
 
   workstreams: defineTable({
     ownerUserId: v.id("users"),

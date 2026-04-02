@@ -7,6 +7,9 @@ import { AppShell } from "@/components/layout/app-shell";
 import { TiptapEditor } from "@/components/editor/tiptap-editor";
 import { CreateArtifactDialog, type ArtifactTemplate } from "@/components/artifacts/create-artifact-dialog";
 import { useNotesData } from "@/hooks/use-notes-data";
+import { useWorkspaceData } from "@/hooks/use-workspace-data";
+import { useWorkspaceStore } from "@/stores/workspace-store";
+import { WorkspaceCommandBar } from "@/components/workspace/workspace-command-bar";
 import { useEditorStore, normalizeEditorMode } from "@/stores/editor-store";
 import { getArtifactMeta, type ArtifactType } from "@/lib/artifact-types";
 import { cn } from "@/lib/utils";
@@ -28,6 +31,7 @@ export function NotesWorkspace() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const { editorMode, setEditorMode, openVersionHistory } = useEditorStore();
+  const { workstreams } = useWorkspaceData();
   const {
     notes,
     activeNote,
@@ -249,6 +253,22 @@ export function NotesWorkspace() {
                 Select or create an artifact.
               </div>
             )}
+          </div>
+
+          {/* Ask Chat Search Box at Bottom (Flying) */}
+          <div className="absolute bottom-10 left-1/2 -translate-x-1/2 pointer-events-none z-50">
+            <div className="pointer-events-auto">
+              <WorkspaceCommandBar
+                workstreams={workstreams}
+                onOpenWorkstreamChat={(wsId, query) => {
+                  router.push(`/workspace?ws=${encodeURIComponent(wsId)}&panel=chat&thread=new`);
+                }}
+                hidden={false}
+                position={useWorkspaceStore.getState().utilityPositions["command_bar"]}
+                onPositionChange={(pos) => useWorkspaceStore.getState().setUtilityPosition("command_bar", pos)}
+                draggable={false}
+              />
+            </div>
           </div>
         </main>
       </div>

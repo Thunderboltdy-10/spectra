@@ -1,57 +1,34 @@
 # Workspace Architecture
 
-This folder breaks the workspace redesign into a shared engine plus distinct UX shells.
+## Primary Source of Truth
 
-The key decision is simple:
+**[`WORKSPACE_FOUNDATION_V2.md`](<local-workspace>
 
-- one canvas engine,
-- one widget/artifact system,
-- one right push-panel system,
-- three materially different workspace shells,
-- one optional wildcard for future exploration.
+This is the governing document for all implementation. It synthesizes the three approach explorations into one coherent direction: Magnetic Surface (B) as the primary shell, informed by Semantic Constellations (A) for overview identity and relationship language, and Focal Lenses (C) for focus choreography and transition polish.
 
-## Files
+**The three-way shell toggle is not the product direction.** The approach files below are research records and inspiration sources. V2 is the build target.
 
-- [`FOUNDATIONS.md`](<local-workspace>
-  Shared rules across every shell.
-- [`APPROACH_A_SEMANTIC_CONSTELLATIONS.md`](<local-workspace>
-  Overview-first, relationship-heavy, more atmospheric.
-- [`APPROACH_B_MAGNETIC_SURFACE.md`](<local-workspace>
-  Recommended. Central active workspace, hidden edge utilities, strong focus.
-- [`APPROACH_C_FOCAL_LENSES.md`](<local-workspace>
-  More guided and premium, using lens behavior to focus and dim.
-- [`WILDCARD_D_STRATA_CANVAS.md`](<local-workspace>
-  Optional future direction if 2D macro-navigation remains unsatisfying.
-- [`IMPLEMENTATION_GUARDRAILS.md`](<local-workspace>
-  What to build, what not to break, and how previews should be structured.
-- [`DECISION_MATRIX.md`](<local-workspace>
-  The critical review: what works, what fails, and why one shell should lead.
-- [`BACKEND_AND_EVOLUTION.md`](<local-workspace>
-  The codebase-grounded rules for workspace growth, memory, embeddings, and AI creation.
+## File Status
 
-## Shared Interpretation
+| File | Status | Purpose |
+|---|---|---|
+| [`WORKSPACE_FOUNDATION_V2.md`](./WORKSPACE_FOUNDATION_V2.md) | **ACTIVE — build from this** | Synthesized source of truth |
+| [`FOUNDATIONS.md`](./FOUNDATIONS.md) | Reference | Shared engine rules (superseded by V2 Section 5–11) |
+| [`APPROACH_B_MAGNETIC_SURFACE.md`](./APPROACH_B_MAGNETIC_SURFACE.md) | Reference | Primary approach — the structural foundation |
+| [`APPROACH_A_SEMANTIC_CONSTELLATIONS.md`](./APPROACH_A_SEMANTIC_CONSTELLATIONS.md) | Reference | Overview identity inspiration |
+| [`APPROACH_C_FOCAL_LENSES.md`](./APPROACH_C_FOCAL_LENSES.md) | Reference | Focus choreography inspiration |
+| [`WILDCARD_D_STRATA_CANVAS.md`](./WILDCARD_D_STRATA_CANVAS.md) | Reference | Future option if 2D overview still fails |
+| [`DECISION_MATRIX.md`](./DECISION_MATRIX.md) | Reference | Original decision rationale |
+| [`BACKEND_AND_EVOLUTION.md`](./BACKEND_AND_EVOLUTION.md) | Reference | Backend gaps and evolution model (incorporated into V2) |
+| [`IMPLEMENTATION_GUARDRAILS.md`](./IMPLEMENTATION_GUARDRAILS.md) | Reference | Original guardrails (superseded by V2 Sections 11–15) |
 
-These files assume the following:
+## Core Non-Negotiables (from V2)
 
-- The infinite canvas remains the main workspace world.
-- The hub is a utility layer, not a normal workstream.
-- Threads and documents still rely on the right push-panel.
-- AI can create by default, but users can revert immediately.
-- Customization exists, but only inside curated layout rules.
-- Students and teachers use the same model with different defaults and data.
-
-## Recommendation
-
-If only one shell becomes production-first, it should be [`APPROACH_B_MAGNETIC_SURFACE.md`](<local-workspace>
-
-It best fits the current product direction and the feedback you gave:
-
-- hidden-but-reachable utilities,
-- dominant active workspace,
-- preserved infinite canvas,
-- strong right-panel story,
-- less card-heavy presentation,
-- less risk of the UI collapsing into a bottom-toolbar product.
-
-Read [`DECISION_MATRIX.md`](<local-workspace> before implementation. It is intentionally harsher than the approach files.
-Read [`BACKEND_AND_EVOLUTION.md`](<local-workspace> too. It captures the backend and orchestration implications that the shell docs alone do not.
+- One coherent workspace direction, not three parallel shells
+- Explicit-click-only state transitions — no scroll-to-enter, no proximity-triggered camera movement
+- Command surface is a singular special object, not a toolbar
+- Hub is a viewport-overlay utility layer, not a canvas workstream node
+- Strong scale separation between overview and focused states (2.5–4× zoom difference)
+- Widgets are real rendered entities (strips, sheets, modules) — not repeated card containers
+- AI always shows provenance and always allows one-click revert
+- No new workstream created without explicit user confirmation

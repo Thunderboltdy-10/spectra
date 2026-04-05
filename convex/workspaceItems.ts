@@ -8,6 +8,7 @@ import {
   recordWorkspaceMutation,
   requireWorkspaceActor,
   resolveCanonicalWorkspaceItemType,
+  normalizeCanonicalWorkspaceItemType,
   resolveWorkspaceCategory,
   resolveWorkspaceSourceId,
   resolveWorkspaceSourceKind,
@@ -34,14 +35,6 @@ const vCanonicalWorkspaceItemType = v.union(
   v.literal("thread"),
   v.literal("artifact"),
   v.literal("planner"),
-  v.literal("utility"),
-  v.literal("custom"),
-);
-
-const vWorkspaceSourceKind = v.union(
-  v.literal("chat"),
-  v.literal("artifact"),
-  v.literal("plannerItem"),
   v.literal("utility"),
   v.literal("custom"),
 );
@@ -302,7 +295,15 @@ export const update = mutation({
     if (args.contentSummary !== undefined) {
       updates.contentSummary = summarizeWorkspaceContent(args.contentSummary);
     }
-    if (args.itemType !== undefined) updates.itemType = args.itemType;
+    if (args.itemType !== undefined) {
+      updates.itemType = normalizeCanonicalWorkspaceItemType(args.itemType);
+      updates.sourceKind = resolveWorkspaceSourceKind({
+        sourceChatId: existing.sourceChatId,
+        sourceArtifactId: existing.sourceArtifactId,
+        sourcePlannerItemId: existing.sourcePlannerItemId,
+        itemType: updates.itemType as Doc<"workspaceItems">["itemType"],
+      });
+    }
     if (args.category !== undefined) updates.category = args.category;
     if (args.renderMode !== undefined) updates.renderMode = args.renderMode;
     if (args.status !== undefined) updates.status = args.status;
@@ -614,7 +615,15 @@ export const updateWidget = mutation({
     if (args.title !== undefined) updates.title = normalizeWorkspaceTitle(args.title);
     if (args.contentSummary !== undefined) updates.contentSummary = summarizeWorkspaceContent(args.contentSummary);
     if (args.category !== undefined) updates.category = args.category;
-    if (args.itemType !== undefined) updates.itemType = args.itemType;
+    if (args.itemType !== undefined) {
+      updates.itemType = normalizeCanonicalWorkspaceItemType(args.itemType);
+      updates.sourceKind = resolveWorkspaceSourceKind({
+        sourceChatId: existing.sourceChatId,
+        sourceArtifactId: existing.sourceArtifactId,
+        sourcePlannerItemId: existing.sourcePlannerItemId,
+        itemType: updates.itemType as Doc<"workspaceItems">["itemType"],
+      });
+    }
     if (args.renderMode !== undefined) updates.renderMode = args.renderMode;
     if (args.status !== undefined) updates.status = args.status;
     if (args.pinned !== undefined) updates.pinned = args.pinned;

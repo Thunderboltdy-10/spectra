@@ -17,7 +17,7 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronLeft, Crosshair, FileText, Home, Layers, MessageSquare, Plus, ZoomIn } from "lucide-react";
+import { Crosshair, FileText, Home, Layers, MessageSquare, Plus, ZoomIn } from "lucide-react";
 import { useWorkspaceStore, type WorkspaceBackgroundMode, type ZoomBand } from "@/stores/workspace-store";
 import type { Workstream } from "@/hooks/use-workspace-data";
 import { cn } from "@/lib/utils";
@@ -111,13 +111,6 @@ function getAmbientClass(): string {
 }
 
 /* ─── Zoom helpers ───────────────────────────────────────── */
-
-function getRepresentationBand(zoom: number): ZoomBand {
-  if (zoom < 0.25) return "overview";
-  if (zoom < 0.5) return "summary";
-  if (zoom < 0.9) return "detail";
-  return "internal";
-}
 
 function getNeighborOpacity(zoom: number): number {
   if (zoom <= 0.7) return 1;
@@ -541,10 +534,6 @@ function WorkspaceCanvasInner({
     setVisibleWorkstreamIds,
     exitWorkstream,
     setPreviousViewport,
-    timerState,
-    startTimer,
-    pauseTimer,
-    resetTimer,
   } = useWorkspaceStore();
   const [zoom, setZoom] = useState(restoreViewport().zoom);
   const [semanticBand, setSemanticBand] = useState<ZoomBand>("summary");
@@ -994,7 +983,6 @@ function WorkspaceCanvasInner({
 
     if (visibleWorkstreamIds.length > 0) {
       for (const workstreamId of visibleWorkstreamIds) {
-        const isPrimary = primaryWorkstreamId === workstreamId;
         const loading = loadingContentIds.includes(workstreamId) && !contentCacheRef.current.has(workstreamId);
         const cached = getCachedContent(workstreamId);
 
@@ -1019,7 +1007,7 @@ function WorkspaceCanvasInner({
             band,
           };
 
-          let builderResult = buildWorkspaceNodes(contentData, basePos);
+          const builderResult = buildWorkspaceNodes(contentData, basePos);
 
           generatedNodes.push(...namespaceFlowNodes(`internal:${workstreamId}`, builderResult.nodes).map(node => ({
             ...node,
@@ -1054,21 +1042,15 @@ function WorkspaceCanvasInner({
     band,
     focusWorkstreamId,
     getCachedContent,
-    handleOpenHub,
     handleOpenWorkstream,
     internalNodeOverrides,
     loadingContentIds,
     neighborOpacity,
-    onNewWorkstream,
     panelOpener,
     positions,
     primaryWorkstreamId,
     visibleWorkstreamIds,
     visibleWorkstreams,
-    timerState,
-    startTimer,
-    pauseTimer,
-    resetTimer,
     showConnections,
     workstreams,
   ]);
@@ -1243,10 +1225,6 @@ function WorkspaceCanvasInner({
     window.addEventListener("mousedown", handler);
     return () => window.removeEventListener("mousedown", handler);
   }, []);
-
-  const committedWorkstream = primaryWorkstreamId
-    ? workstreams.find((ws) => ws._id === primaryWorkstreamId)
-    : undefined;
 
   return (
     <div

@@ -16,8 +16,6 @@ import {
   FileText,
   MessageSquare,
   Route,
-  Send,
-  Square,
   StickyNote,
 } from "lucide-react";
 import type { PanelType } from "@/stores/workspace-store";
@@ -30,7 +28,6 @@ import { stripGeneratedDocumentMarkers } from "@/lib/document-generator";
 import { RightSidePanel } from "@/components/shared/right-side-panel";
 import { notifyWorkspaceContentMutated } from "@/lib/workspace/events";
 import { WorkspaceCommandBar } from "@/components/workspace/workspace-command-bar";
-import { useNotesData } from "@/hooks/use-notes-data";
 import type { Workstream } from "@/hooks/use-workspace-data";
 
 // Dynamic import TiptapEditor (SSR-safe)
@@ -178,16 +175,12 @@ function ChatPanelContent({
   threadId: string;
   workstreamId?: string;
 }) {
-  const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const {
     messages,
     streaming,
-    streamPhase,
     sendMessage,
-    stopGeneration,
     hydrateChat,
   } = useChatPanel({
     workstreamId,
@@ -217,19 +210,14 @@ function ChatPanelContent({
     void sendMessage(openChatQuery);
   }, [clearOpenChatQuery, messages.length, openChatQuery, sendMessage, streaming, threadId]);
 
-  const handleSend = useCallback(async () => {
-    const trimmed = input.trim();
-    if (!trimmed || streaming) return;
-    setInput("");
-    await sendMessage(trimmed);
-    inputRef.current?.focus();
-  }, [input, streaming, sendMessage]);
-
   // Listen for panel chat query from command bar
   useEffect(() => {
-    const handler = (e: any) => {
-      const { query } = e.detail;
-      if (query) void sendMessage(query);
+    const handler = (event: Event) => {
+      const customEvent = event as CustomEvent<{ query?: string }>;
+      const query = customEvent.detail?.query;
+      if (query) {
+        void sendMessage(query);
+      }
     };
     window.addEventListener("ai-school:panel-chat-query", handler);
     return () => window.removeEventListener("ai-school:panel-chat-query", handler);
@@ -415,7 +403,7 @@ function ArtifactPanelContent({
   workstreamId?: string;
 }) {
   const router = useRouter();
-  const [artifact, setArtifact] = useState<Record<string, any> | null>(null);
+  const [artifact, setArtifact] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [createdId, setCreatedId] = useState<string | null>(null);
@@ -435,9 +423,10 @@ function ArtifactPanelContent({
       const data = (await response.json()) as { artifact: Record<string, unknown> };
       if (!data.artifact) throw new Error("Artifact not found");
       setArtifact(data.artifact);
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to load artifact";
       console.error("Artifact load error:", err);
-      setError(err.message || "Failed to load artifact");
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -471,8 +460,8 @@ function ArtifactPanelContent({
             refreshWorkstreams: true,
           });
         }
-      } catch (err: any) {
-        setError(err.message);
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Failed to create artifact");
       } finally {
         setLoading(false);
       }

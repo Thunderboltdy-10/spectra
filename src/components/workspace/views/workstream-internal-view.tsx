@@ -5,7 +5,7 @@
  *
  * Canvas-native internal view for a committed workstream.
  * Renders as an overlay on top of the canvas when zoomed in.
- * Delegates to StructuredView, ColumnView, or GraphView based on viewMode.
+ * Delegates to ByTypeView, ByTopicView, or TimelineView based on viewMode.
  * This is NOT a panel or modal — it's the canvas content itself.
  */
 
@@ -133,7 +133,7 @@ export function WorkstreamInternalView({
       }}
     >
       <div className="max-w-4xl mx-auto px-8 py-16">
-        {viewMode === "structured" && (
+        {viewMode === "byType" && (
           <StructuredView
             workstream={workstream}
             threads={threads}
@@ -144,7 +144,7 @@ export function WorkstreamInternalView({
             onOpenPanel={onOpenPanel}
           />
         )}
-        {viewMode === "columns" && (
+        {viewMode === "byTopic" && (
           <ColumnView
             workstream={workstream}
             threads={threads}
@@ -155,7 +155,7 @@ export function WorkstreamInternalView({
             onOpenPanel={onOpenPanel}
           />
         )}
-        {viewMode === "graph" && (
+        {viewMode === "timeline" && (
           <GraphViewPlaceholder workstream={workstream} />
         )}
       </div>

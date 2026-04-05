@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronLeft, Clock, Pause, Play, RotateCcw, Calendar, MoreHorizontal, LayoutGrid } from 'lucide-react';
+import { ChevronLeft, Pause, Play, RotateCcw, Calendar, LayoutGrid } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import type { Workstream } from '@/hooks/use-workspace-data';

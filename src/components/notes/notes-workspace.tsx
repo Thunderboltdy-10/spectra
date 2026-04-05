@@ -260,7 +260,7 @@ export function NotesWorkspace() {
             <div className="pointer-events-auto">
               <WorkspaceCommandBar
                 workstreams={workstreams}
-                onOpenWorkstreamChat={(wsId, query) => {
+                onOpenWorkstreamChat={(wsId) => {
                   router.push(`/workspace?ws=${encodeURIComponent(wsId)}&panel=chat&thread=new`);
                 }}
                 hidden={false}

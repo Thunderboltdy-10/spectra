@@ -117,7 +117,7 @@ export const WorkstreamTitleNode = memo(function WorkstreamTitleNode({
 type CategoryFieldData = {
   label: string;
   type: "threads" | "documents" | "planner";
-  items: any[];
+  items: Array<ThreadSummary | NoteSummary | PlannerItemSummary>;
   onOpenPanel: (type: PanelType, id: string) => void;
   accentColor?: string;
   band: ZoomBand;
@@ -254,41 +254,65 @@ export const WorkspaceFieldNode = memo(function WorkspaceFieldNode({
   data,
 }: NodeProps<Node<InternalContentData>>) {
   const { threads, notes, plannerItems, onOpenPanel, workstreamTitle, workstreamEmoji } = data;
-
-  // This node is now just a transparent wrapper that renders the "open field" composition
-  // if we're using it as a single node. 
-  // Recommended: Use buildWorkspaceNodes to emit multiple separate nodes instead.
-  
   return (
     <div className="flex flex-col gap-12 pointer-events-none">
       <div className="pointer-events-auto">
-        <WorkstreamTitleNode 
-          id="title" 
-          type="workstreamTitle" 
-          data={{ title: workstreamTitle || "Untilted", emoji: workstreamEmoji }} 
-          {...({} as any)} 
-        />
+        <div className="flex items-center gap-4 py-2">
+          <span className="text-4xl filter drop-shadow-sm select-none">
+            {workstreamEmoji || "📚"}
+          </span>
+          <h2 className="font-display text-4xl font-bold tracking-tight text-[var(--text-primary)]">
+            {workstreamTitle || "Untitled"}
+          </h2>
+        </div>
       </div>
 
       <div className="flex gap-10 pointer-events-auto">
-        <CategoryFieldNode 
-          id="threads" 
-          type="categoryField" 
-          data={{ label: "THREADS", type: "threads", items: threads.slice(0, 5), onOpenPanel, accentColor: "var(--accent-cyan)" }} 
-          {...({} as any)} 
-        />
-        <CategoryFieldNode 
-          id="documents" 
-          type="categoryField" 
-          data={{ label: "DOCUMENTS", type: "documents", items: notes.slice(0, 5), onOpenPanel, accentColor: "var(--accent-purple)" }} 
-          {...({} as any)} 
-        />
-        <CategoryFieldNode 
-          id="planner" 
-          type="categoryField" 
-          data={{ label: "PLANNER", type: "planner", items: plannerItems.slice(0, 5), onOpenPanel, accentColor: "var(--accent-orange)" }} 
-          {...({} as any)} 
-        />
+        <div className="flex min-w-[280px] flex-col gap-2">
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--text-tertiary)]">
+            Threads
+          </span>
+          {threads.slice(0, 5).map((thread) => (
+            <button
+              key={thread.id}
+              type="button"
+              onClick={() => onOpenPanel("chat", thread.id)}
+              className="rounded-xl bg-white/[0.03] px-3 py-2 text-left text-xs text-[var(--text-primary)] hover:bg-white/[0.06]"
+            >
+              {thread.title}
+            </button>
+          ))}
+        </div>
+        <div className="flex min-w-[280px] flex-col gap-2">
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--text-tertiary)]">
+            Documents
+          </span>
+          {notes.slice(0, 5).map((note) => (
+            <button
+              key={note.id}
+              type="button"
+              onClick={() => onOpenPanel("artifact", note.id)}
+              className="rounded-xl bg-white/[0.03] px-3 py-2 text-left text-xs text-[var(--text-primary)] hover:bg-white/[0.06]"
+            >
+              {note.title}
+            </button>
+          ))}
+        </div>
+        <div className="flex min-w-[280px] flex-col gap-2">
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--text-tertiary)]">
+            Planner
+          </span>
+          {plannerItems.slice(0, 5).map((plannerItem) => (
+            <button
+              key={plannerItem.id}
+              type="button"
+              onClick={() => onOpenPanel("planner", plannerItem.id)}
+              className="rounded-xl bg-white/[0.03] px-3 py-2 text-left text-xs text-[var(--text-primary)] hover:bg-white/[0.06]"
+            >
+              {plannerItem.title}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );

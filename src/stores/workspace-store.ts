@@ -28,7 +28,7 @@ export type CardBounds = {
 
 export type WorkspaceBackgroundMode = "dots" | "grid" | "blank";
 
-export type WorkspaceViewMode = "structured" | "columns" | "graph";
+export type WorkspaceViewMode = "byType" | "byTopic" | "timeline";
 
 /** Zoom bands are still used as a presentation hint by the legacy canvas renderer. */
 export type ZoomBand = "overview" | "summary" | "detail" | "internal";
@@ -137,9 +137,28 @@ const DEFAULT_CAMERA: WorkspaceCameraState = {
   z: 1,
 };
 
+function normalizeWorkspaceViewMode(
+  value: unknown,
+): WorkspaceViewMode {
+  switch (value) {
+    case "byType":
+    case "byTopic":
+    case "timeline":
+      return value;
+    case "structured":
+      return "byType";
+    case "columns":
+      return "byTopic";
+    case "graph":
+      return "timeline";
+    default:
+      return "byType";
+  }
+}
+
 export const useWorkspaceStore = create<WorkspaceStoreState>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       camera: DEFAULT_CAMERA,
       setZoomBand: (band) => set({ zoomBand: band }),
       selectedWorkstreamId: undefined,
@@ -154,7 +173,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()(
       lastCanvasState: "world_overview",
       commandModeOpen: false,
       utilityRevealOpen: false,
-      viewMode: "structured",
+      viewMode: "byType",
       panel: undefined,
       openChatQuery: undefined,
       previousViewport: undefined,
@@ -203,21 +222,21 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()(
           lastCanvasState: state.lastCanvasState,
         })),
       setUtilityZone: (utility, zone) =>
-        set((state: any) => ({
+        set((state) => ({
           edgeUtilityZones: {
             ...state.edgeUtilityZones,
             [utility]: zone,
           },
         })),
       setUtilityPosition: (utility, position) =>
-        set((state: any) => ({
+        set((state) => ({
           utilityPositions: {
             ...state.utilityPositions,
             [utility]: position,
           },
         })),
       setUtilityVisible: (utility, visible) =>
-        set((state: any) => ({
+        set((state) => ({
           utilityVisible: {
             ...state.utilityVisible,
             [utility]: visible,
@@ -277,7 +296,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()(
         })),
       setPreviousViewport: (viewport) => set({ previousViewport: viewport }),
 
-      setViewMode: (viewMode) => set({ viewMode }),
+      setViewMode: (viewMode) => set({ viewMode: normalizeWorkspaceViewMode(viewMode) }),
 
       openPanel: (type, id) =>
         set((state) => ({
@@ -362,7 +381,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()(
           lastCanvasState: "world_overview",
           commandModeOpen: false,
           utilityRevealOpen: false,
-          viewMode: "structured",
+          viewMode: "byType",
           panel: undefined,
           previousViewport: undefined,
           edgeUtilityZones: { ...DEFAULT_UTILITY_ZONES },
@@ -383,7 +402,16 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()(
         backgroundMode: state.backgroundMode,
         showConnections: state.showConnections,
         showArchived: state.showArchived,
+        viewMode: state.viewMode,
       }),
+      merge: (persistedState, currentState) => {
+        const persisted = (persistedState ?? {}) as Partial<WorkspaceStoreState>;
+        return {
+          ...currentState,
+          ...persisted,
+          viewMode: normalizeWorkspaceViewMode(persisted.viewMode),
+        };
+      },
     }
   )
 );

@@ -250,6 +250,59 @@ type CachedWorkspaceContent = {
   hubActivity: Array<{ id: string; title: string; type: string; timestamp: number }>;
 };
 
+const WORKSPACE_CACHE_MAX = 7;
+
+/**
+ * Bounded LRU map.  Access order is maintained by deleting + re-inserting on
+ * every `get` and `set`, relying on JS Map's guaranteed insertion-order
+ * iteration.  The first entry is always the least-recently-used.
+ */
+class LruMap<K, V> {
+  private readonly max: number;
+  private readonly store: Map<K, V>;
+
+  constructor(max: number) {
+    this.max = max;
+    this.store = new Map();
+  }
+
+  has(key: K): boolean {
+    return this.store.has(key);
+  }
+
+  get(key: K): V | undefined {
+    if (!this.store.has(key)) return undefined;
+    const value = this.store.get(key)!;
+    // Promote to most-recently-used by deleting and re-inserting
+    this.store.delete(key);
+    this.store.set(key, value);
+    return value;
+  }
+
+  set(key: K, value: V): void {
+    if (this.store.has(key)) {
+      this.store.delete(key);
+    } else if (this.store.size >= this.max) {
+      // Evict the first (least-recently-used) entry
+      const lruKey = this.store.keys().next().value;
+      if (lruKey !== undefined) this.store.delete(lruKey);
+    }
+    this.store.set(key, value);
+  }
+
+  delete(key: K): void {
+    this.store.delete(key);
+  }
+
+  clear(): void {
+    this.store.clear();
+  }
+
+  get size(): number {
+    return this.store.size;
+  }
+}
+
 function emptyWorkspaceContent(): CachedWorkspaceContent {
   return {
     threads: [],
@@ -517,7 +570,7 @@ function WorkspaceCanvasInner({
   const prefetchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const workstreamDragThrottleRef = useRef(new Map<string, number>());
   const lastViewportRef = useRef<{ x: number; y: number; zoom: number }>({ x: 0, y: 0, zoom: 0.35 });
-  const contentCacheRef = useRef(new Map<string, CachedWorkspaceContent>());
+  const contentCacheRef = useRef(new LruMap<string, CachedWorkspaceContent>(WORKSPACE_CACHE_MAX));
   const inFlightContentRef = useRef(new Map<string, Promise<void>>());
   const internalNodeOverridesRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const widgetLayoutMetaRef = useRef(new Map<string, { itemId: string; origin: { x: number; y: number } }>());

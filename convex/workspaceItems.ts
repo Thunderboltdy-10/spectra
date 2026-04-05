@@ -814,10 +814,18 @@ export const updateWorkstreamLayout = mutation({
   handler: async (ctx, args) => {
     const actor = await requireWorkspaceActor(ctx, args.actorClerkId);
     await validateWorkspaceWorkstream(ctx, actor, args.workstreamId);
+
+    // Phase 1: validate all items before applying any patches (atomicity guarantee)
     const before: Array<{ itemId: Id<"workspaceItems">; fields: Record<string, unknown> }> = [];
+    const validatedItems: Array<{ widget: (typeof args.widgets)[number]; item: Awaited<ReturnType<typeof assertWorkspaceItemOwnership>> }> = [];
 
     for (const widget of args.widgets) {
       const item = await assertWorkspaceItemOwnership(ctx, actor, widget.itemId);
+      if (item.workstreamId !== args.workstreamId) {
+        throw new Error(
+          `Item ${widget.itemId} does not belong to workstream ${args.workstreamId}`,
+        );
+      }
       before.push({
         itemId: item._id,
         fields: {
@@ -828,13 +836,19 @@ export const updateWorkstreamLayout = mutation({
           zIndex: item.zIndex,
         },
       });
+      validatedItems.push({ widget, item });
+    }
+
+    // Phase 2: apply patches only after all validations pass
+    const now = Date.now();
+    for (const { widget, item } of validatedItems) {
       await ctx.db.patch(widget.itemId, {
         x: Math.round(widget.x),
         y: Math.round(widget.y),
         width: widget.width !== undefined ? Math.round(widget.width) : item.width,
         height: widget.height !== undefined ? Math.round(widget.height) : item.height,
         zIndex: widget.zIndex !== undefined ? Math.round(widget.zIndex) : item.zIndex,
-        updatedAt: Date.now(),
+        updatedAt: now,
         provenanceSource: args.provenanceSource ?? "ai",
         provenanceAction: "reorganized",
       });

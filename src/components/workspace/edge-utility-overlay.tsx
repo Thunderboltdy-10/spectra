@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronLeft, Pause, Play, RotateCcw, Calendar, LayoutGrid } from 'lucide-react';
+import { ChevronLeft, Pause, Play, RotateCcw, Calendar, LayoutGrid, MessageSquarePlus, Plus, FileText, Code2, BarChart2, ClipboardList, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import type { Workstream } from '@/hooks/use-workspace-data';
@@ -13,6 +13,8 @@ interface EdgeUtilityOverlayProps {
   onOpenWorkstream: (wsId: string) => void;
   onExitWorkstream: () => void;
   panelOpen: boolean;
+  onQuickChat?: (message: string) => void;
+  onCreateItem?: (type: 'note' | 'code' | 'visual' | 'planner') => void;
 }
 
 export function EdgeUtilityOverlay({
@@ -20,7 +22,9 @@ export function EdgeUtilityOverlay({
   primaryWorkstreamId,
   onOpenWorkstream,
   onExitWorkstream,
-  panelOpen
+  panelOpen,
+  onQuickChat,
+  onCreateItem,
 }: EdgeUtilityOverlayProps) {
   const {
     timerState,
@@ -34,6 +38,10 @@ export function EdgeUtilityOverlay({
 
   const [shortcutsHovered, setShortcutsHovered] = useState(false);
   const [timerHovered, setTimerHovered] = useState(false);
+  const [quickChatOpen, setQuickChatOpen] = useState(false);
+  const [quickChatDraft, setQuickChatDraft] = useState('');
+  const [createOpen, setCreateOpen] = useState(false);
+  const quickChatInputRef = useRef<HTMLInputElement>(null);
 
   const activeWorkstreams = workstreams.filter(ws => ws.status === 'active');
 
@@ -222,6 +230,139 @@ export function EdgeUtilityOverlay({
             </button>
           )}
         </motion.div>
+      </div>
+
+      {/* Bottom Right: Quick Chat Shell */}
+      <div className="absolute bottom-10 right-10 z-40 flex flex-col items-end gap-2">
+        <AnimatePresence>
+          {quickChatOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: 12, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.96 }}
+              transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+              className={cn(
+                "flex flex-col gap-2 w-72 p-3 rounded-[20px] mb-1",
+                glassStyle
+              )}
+            >
+              <div className="flex items-center justify-between px-1">
+                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--text-tertiary)]">
+                  Quick Chat
+                </span>
+                <button
+                  onClick={() => { setQuickChatOpen(false); setQuickChatDraft(''); }}
+                  className="p-1 rounded-full hover:bg-black/5 dark:hover:bg-white/10 text-[var(--text-tertiary)]"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              {primaryWorkstreamId && (
+                <div className="px-1 text-[11px] text-[var(--text-secondary)] truncate">
+                  <span className="text-[var(--text-tertiary)]">In: </span>
+                  {workstreams.find(ws => ws._id === primaryWorkstreamId)?.title ?? 'Workspace'}
+                </div>
+              )}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!quickChatDraft.trim()) return;
+                  onQuickChat?.(quickChatDraft.trim());
+                  setQuickChatDraft('');
+                  setQuickChatOpen(false);
+                }}
+                className="flex items-center gap-2"
+              >
+                <input
+                  ref={quickChatInputRef}
+                  value={quickChatDraft}
+                  onChange={(e) => setQuickChatDraft(e.target.value)}
+                  placeholder="Ask anything…"
+                  className="flex-1 rounded-xl bg-black/5 dark:bg-white/10 px-3 py-2 text-[13px] placeholder:text-[var(--text-tertiary)] outline-none border border-transparent focus:border-[var(--accent-cyan)]/40 transition-colors"
+                />
+                <button
+                  type="submit"
+                  disabled={!quickChatDraft.trim()}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-cyan)] text-white disabled:opacity-40 hover:brightness-110 transition-all"
+                >
+                  <MessageSquarePlus className="w-4 h-4" />
+                </button>
+              </form>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <motion.button
+          onClick={() => {
+            setQuickChatOpen((prev) => {
+              if (!prev) setTimeout(() => quickChatInputRef.current?.focus(), 80);
+              return !prev;
+            });
+            setCreateOpen(false);
+          }}
+          whileHover={{ scale: 1.06 }}
+          whileTap={{ scale: 0.96 }}
+          className={cn(
+            "flex items-center gap-2.5 px-4 py-2.5 rounded-full transition-all duration-300",
+            glassStyle,
+            quickChatOpen && "ring-2 ring-[var(--accent-cyan)]/50"
+          )}
+        >
+          <MessageSquarePlus className={cn("w-4.5 h-4.5 transition-colors", quickChatOpen ? "text-[var(--accent-cyan)]" : "text-[var(--text-secondary)]")} />
+          <span className="text-[12px] font-semibold">Quick Chat</span>
+        </motion.button>
+      </div>
+
+      {/* Bottom Center: Create Launcher Shell */}
+      <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-2">
+        <AnimatePresence>
+          {createOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: 8, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 8, scale: 0.96 }}
+              transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+              className={cn(
+                "flex items-center gap-1 px-2 py-2 rounded-full mb-1",
+                glassStyle
+              )}
+            >
+              {([
+                { type: 'note' as const, icon: FileText, label: 'Note', color: 'text-[var(--accent-purple)]' },
+                { type: 'code' as const, icon: Code2, label: 'Code', color: 'text-[var(--accent-mint)]' },
+                { type: 'visual' as const, icon: BarChart2, label: 'Visual', color: 'text-[var(--accent-cyan)]' },
+                { type: 'planner' as const, icon: ClipboardList, label: 'Task', color: 'text-[var(--accent-orange)]' },
+              ] as const).map(({ type, icon: Icon, label, color }) => (
+                <button
+                  key={type}
+                  onClick={() => { onCreateItem?.(type); setCreateOpen(false); }}
+                  className="flex flex-col items-center gap-1 px-3 py-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 transition-colors group"
+                >
+                  <Icon className={cn("w-4 h-4", color)} />
+                  <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--text-tertiary)] group-hover:text-[var(--text-primary)] transition-colors">
+                    {label}
+                  </span>
+                </button>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <motion.button
+          onClick={() => { setCreateOpen((p) => !p); setQuickChatOpen(false); }}
+          whileHover={{ scale: 1.06 }}
+          whileTap={{ scale: 0.96 }}
+          animate={{ rotate: createOpen ? 45 : 0 }}
+          transition={{ duration: 0.2 }}
+          className={cn(
+            "flex h-11 w-11 items-center justify-center rounded-full transition-all duration-300",
+            glassStyle,
+            createOpen && "ring-2 ring-[var(--accent-coral)]/50"
+          )}
+          title="Create"
+        >
+          <Plus className="w-5 h-5 text-[var(--text-primary)]" />
+        </motion.button>
       </div>
 
       {/* REVEAL ALL Overlay */}

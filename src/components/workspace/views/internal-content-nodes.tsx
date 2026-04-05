@@ -11,6 +11,14 @@ import {
   Workflow,
   Clock,
   ArrowRight,
+  Code2,
+  Image,
+  BookOpen,
+  HelpCircle,
+  Download,
+  Layout,
+  CheckSquare,
+  Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { PanelType, ZoomBand } from "@/stores/workspace-store";
@@ -43,7 +51,14 @@ export type ArtifactSummary = {
   id: string;
   title: string;
   type: string;
+  renderMode?: string;
   createdAt: number;
+  updatedAt?: number;
+  contentSummary?: string;
+  cardCount?: number;
+  questionCount?: number;
+  lastScore?: number;
+  language?: string;
 };
 
 export type WorkspaceWidgetSummary = {
@@ -109,15 +124,208 @@ export const WorkstreamTitleNode = memo(function WorkstreamTitleNode({
   );
 });
 
+/* ─── Canonical Glance Card Components ────────────────────── */
+
+function GlanceArtifactCard({
+  artifact,
+  onOpenPanel,
+}: {
+  artifact: ArtifactSummary;
+  onOpenPanel: (type: PanelType, id: string) => void;
+}) {
+  const mode = artifact.renderMode ?? artifact.type;
+
+  if (mode === "visualization" || mode === "concept_map" || mode === "image" || mode === "diagram") {
+    return (
+      <button
+        key={artifact.id}
+        onClick={() => onOpenPanel("artifact", artifact.id)}
+        className="group relative flex w-full flex-col gap-1 overflow-hidden rounded-2xl border border-[var(--border-default)]/30 bg-[var(--bg-elevated)]/40 text-left transition-all hover:border-[var(--accent-cyan)]/30 hover:bg-[var(--bg-elevated)]/70"
+      >
+        <div className="flex items-center justify-center h-16 bg-gradient-to-br from-[var(--accent-cyan)]/10 to-[var(--accent-purple)]/10">
+          <Image className="h-7 w-7 text-[var(--accent-cyan)]/60" />
+        </div>
+        <div className="px-3 pb-3 pt-2">
+          <div className="truncate text-[12px] font-semibold text-[var(--text-primary)]">{artifact.title}</div>
+          {artifact.contentSummary && (
+            <div className="mt-0.5 text-[10px] text-[var(--text-tertiary)] line-clamp-2">{artifact.contentSummary}</div>
+          )}
+          <div className="mt-1 flex items-center gap-1 text-[9px] uppercase tracking-[0.15em] text-[var(--accent-cyan)]/70 font-bold">
+            <Workflow className="h-2.5 w-2.5" />
+            Visual
+          </div>
+        </div>
+      </button>
+    );
+  }
+
+  if (mode === "code_project" || mode === "code_output") {
+    const lang = artifact.language ?? mode.replace("code_", "");
+    return (
+      <button
+        key={artifact.id}
+        onClick={() => onOpenPanel("artifact", artifact.id)}
+        className="group flex w-full flex-col gap-1 rounded-2xl border border-[var(--border-default)]/30 bg-[var(--bg-secondary)]/60 p-3 text-left transition-all hover:border-[var(--accent-mint)]/30 hover:bg-[var(--bg-secondary)]/80"
+      >
+        <div className="flex items-center gap-2">
+          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[var(--accent-mint)]/10 text-[var(--accent-mint)]">
+            <Code2 className="h-3.5 w-3.5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[12px] font-semibold text-[var(--text-primary)]">{artifact.title}</div>
+          </div>
+        </div>
+        <div className="mt-1 flex items-center gap-1.5">
+          <span className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest bg-[var(--accent-mint)]/10 text-[var(--accent-mint)]">
+            {lang}
+          </span>
+          {artifact.contentSummary && (
+            <span className="text-[10px] text-[var(--text-tertiary)] truncate">{artifact.contentSummary}</span>
+          )}
+        </div>
+      </button>
+    );
+  }
+
+  if (mode === "flashcard_deck") {
+    return (
+      <button
+        key={artifact.id}
+        onClick={() => onOpenPanel("artifact", artifact.id)}
+        className="group flex w-full items-center gap-3 rounded-2xl border border-[var(--border-default)]/30 bg-[var(--bg-elevated)]/40 p-3 text-left transition-all hover:border-[var(--accent-coral)]/30 hover:bg-[var(--bg-elevated)]/70"
+      >
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-coral)]/10 text-[var(--accent-coral)]">
+          <BookOpen className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[12px] font-semibold text-[var(--text-primary)]">{artifact.title}</div>
+          {artifact.cardCount !== undefined && (
+            <div className="text-[10px] text-[var(--text-tertiary)]">{artifact.cardCount} cards</div>
+          )}
+        </div>
+        <div className="text-[9px] font-bold uppercase tracking-widest text-[var(--accent-coral)]/70 shrink-0">Deck</div>
+      </button>
+    );
+  }
+
+  if (mode === "quiz") {
+    return (
+      <button
+        key={artifact.id}
+        onClick={() => onOpenPanel("artifact", artifact.id)}
+        className="group flex w-full items-center gap-3 rounded-2xl border border-[var(--border-default)]/30 bg-[var(--bg-elevated)]/40 p-3 text-left transition-all hover:border-[var(--accent-purple)]/30 hover:bg-[var(--bg-elevated)]/70"
+      >
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-purple)]/10 text-[var(--accent-purple)]">
+          <HelpCircle className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[12px] font-semibold text-[var(--text-primary)]">{artifact.title}</div>
+          <div className="flex items-center gap-2 text-[10px] text-[var(--text-tertiary)]">
+            {artifact.questionCount !== undefined && <span>{artifact.questionCount} questions</span>}
+            {artifact.lastScore !== undefined && <span>Last: {artifact.lastScore}%</span>}
+          </div>
+        </div>
+        <div className="text-[9px] font-bold uppercase tracking-widest text-[var(--accent-purple)]/70 shrink-0">Quiz</div>
+      </button>
+    );
+  }
+
+  if (mode === "study_plan" || mode === "timetable") {
+    return (
+      <button
+        key={artifact.id}
+        onClick={() => onOpenPanel("artifact", artifact.id)}
+        className="group flex w-full items-center gap-3 rounded-2xl border border-[var(--border-default)]/30 bg-[var(--bg-elevated)]/40 p-3 text-left transition-all hover:border-[var(--accent-orange)]/30 hover:bg-[var(--bg-elevated)]/70"
+      >
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-orange)]/10 text-[var(--accent-orange)]">
+          <CheckSquare className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[12px] font-semibold text-[var(--text-primary)]">{artifact.title}</div>
+          {artifact.contentSummary && (
+            <div className="text-[10px] text-[var(--text-tertiary)] truncate">{artifact.contentSummary}</div>
+          )}
+        </div>
+        <div className="text-[9px] font-bold uppercase tracking-widest text-[var(--accent-orange)]/70 shrink-0">
+          {mode === "timetable" ? "Schedule" : "Plan"}
+        </div>
+      </button>
+    );
+  }
+
+  if (mode === "whiteboard" || mode === "board") {
+    return (
+      <button
+        key={artifact.id}
+        onClick={() => onOpenPanel("artifact", artifact.id)}
+        className="group relative flex w-full flex-col gap-1 overflow-hidden rounded-2xl border border-[var(--border-default)]/30 bg-[var(--bg-elevated)]/40 text-left transition-all hover:border-[var(--accent-cyan)]/20"
+      >
+        <div className="flex items-center justify-center h-14 bg-[var(--bg-secondary)]/60">
+          <div className="flex gap-2">
+            {[0,1,2].map((i) => (
+              <div key={i} className={cn("rounded w-8 h-5 bg-white/10", i === 1 && "h-7 mt-[-4px]")} />
+            ))}
+          </div>
+        </div>
+        <div className="px-3 pb-2 pt-1.5 flex items-center gap-2">
+          <Layout className="h-3 w-3 text-[var(--text-tertiary)]" />
+          <span className="truncate text-[12px] font-semibold text-[var(--text-primary)]">{artifact.title}</span>
+          <span className="ml-auto text-[9px] font-bold uppercase tracking-widest text-[var(--text-tertiary)]">Board</span>
+        </div>
+      </button>
+    );
+  }
+
+  if (mode === "bookmark" || mode === "collection") {
+    return (
+      <button
+        key={artifact.id}
+        onClick={() => onOpenPanel("artifact", artifact.id)}
+        className="group flex w-full items-center gap-3 rounded-2xl border border-[var(--border-default)]/30 bg-[var(--bg-elevated)]/40 p-3 text-left transition-all hover:bg-[var(--bg-elevated)]/70"
+      >
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white/5 text-[var(--text-tertiary)]">
+          <Layers className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[12px] font-semibold text-[var(--text-primary)]">{artifact.title}</div>
+        </div>
+        <div className="text-[9px] font-bold uppercase tracking-widest text-[var(--text-tertiary)] shrink-0">Ref</div>
+      </button>
+    );
+  }
+
+  // Export / document / note fallback — keep the existing document card style
+  return (
+    <button
+      key={artifact.id}
+      onClick={() => onOpenPanel("artifact", artifact.id)}
+      className="group relative flex w-full flex-col gap-1 rounded-2xl border border-transparent bg-[var(--bg-elevated)]/40 p-4 text-left shadow-sm backdrop-blur-sm transition-all hover:bg-[var(--bg-elevated)]/60 hover:border-[var(--border-default)]/50"
+    >
+      <div className="flex items-center gap-2 mb-1">
+        <Download className="h-3 w-3 text-[var(--text-tertiary)]" />
+        <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--text-tertiary)]">
+          {mode === "document" ? "Doc" : mode}
+        </span>
+      </div>
+      <div className="font-display text-[15px] font-bold leading-tight text-[var(--text-primary)]">
+        {artifact.title}
+      </div>
+      {artifact.contentSummary && (
+        <div className="mt-1 text-[10px] text-[var(--text-tertiary)] line-clamp-2">{artifact.contentSummary}</div>
+      )}
+    </button>
+  );
+}
+
 /**
  * CategoryFieldNode
- * Generic field for THREADS, DOCUMENTS, etc.
+ * Generic field for THREADS, DOCUMENTS, ARTIFACTS etc.
  * Implements "open composition" anti-card-soup.
  */
 type CategoryFieldData = {
   label: string;
-  type: "threads" | "documents" | "planner";
-  items: Array<ThreadSummary | NoteSummary | PlannerItemSummary>;
+  type: "threads" | "documents" | "planner" | "artifacts";
+  items: Array<ThreadSummary | NoteSummary | PlannerItemSummary | ArtifactSummary>;
   onOpenPanel: (type: PanelType, id: string) => void;
   accentColor?: string;
   band: ZoomBand;
@@ -238,6 +446,16 @@ export const CategoryFieldNode = memo(function CategoryFieldNode({
               );
             }
 
+            if (type === "artifacts") {
+              return (
+                <GlanceArtifactCard
+                  key={item.id}
+                  artifact={item as ArtifactSummary}
+                  onOpenPanel={onOpenPanel}
+                />
+              );
+            }
+
             return null;
           })
         )}
@@ -319,6 +537,38 @@ export const WorkspaceFieldNode = memo(function WorkspaceFieldNode({
 });
 
 
+// Bucket artifact types into canonical display groups for glance lanes
+function bucketArtifacts(artifacts: ArtifactSummary[]): {
+  visual: ArtifactSummary[];
+  code: ArtifactSummary[];
+  interactive: ArtifactSummary[];
+  boards: ArtifactSummary[];
+  other: ArtifactSummary[];
+} {
+  const visual: ArtifactSummary[] = [];
+  const code: ArtifactSummary[] = [];
+  const interactive: ArtifactSummary[] = [];
+  const boards: ArtifactSummary[] = [];
+  const other: ArtifactSummary[] = [];
+
+  for (const a of artifacts) {
+    const mode = a.renderMode ?? a.type;
+    if (mode === "visualization" || mode === "concept_map" || mode === "image" || mode === "diagram") {
+      visual.push(a);
+    } else if (mode === "code_project" || mode === "code_output") {
+      code.push(a);
+    } else if (mode === "flashcard_deck" || mode === "quiz" || mode === "study_plan" || mode === "timetable") {
+      interactive.push(a);
+    } else if (mode === "whiteboard" || mode === "board") {
+      boards.push(a);
+    } else {
+      other.push(a);
+    }
+  }
+
+  return { visual, code, interactive, boards, other };
+}
+
 export function buildWorkspaceNodes(
   data: InternalContentData,
   basePosition: { x: number; y: number },
@@ -327,11 +577,35 @@ export function buildWorkspaceNodes(
     return { nodes: [], edges: [] };
   }
 
-  // We return a set of nodes that form the "cluster"
+  const { visual, code, interactive, boards } = bucketArtifacts(data.artifacts);
+
+  // Build lanes dynamically — only include non-empty artifact lanes
+  const artifactLanes: Array<{ id: string; label: string; items: ArtifactSummary[]; accentColor: string; xOffset: number }> = [];
+  let colOffset = 720; // starts after planner lane
+
+  if (visual.length > 0) {
+    artifactLanes.push({ id: "visual", label: "VISUALS", items: visual, accentColor: "var(--accent-cyan)", xOffset: colOffset });
+    colOffset += 360;
+  }
+  if (code.length > 0) {
+    artifactLanes.push({ id: "code", label: "CODE", items: code, accentColor: "var(--accent-mint)", xOffset: colOffset });
+    colOffset += 360;
+  }
+  if (interactive.length > 0) {
+    artifactLanes.push({ id: "interactive", label: "STUDY", items: interactive, accentColor: "var(--accent-coral)", xOffset: colOffset });
+    colOffset += 360;
+  }
+  if (boards.length > 0) {
+    artifactLanes.push({ id: "boards", label: "BOARDS", items: boards, accentColor: "var(--accent-purple)", xOffset: colOffset });
+    colOffset += 360;
+  }
+
+  const wsKey = data.workstreamTitle ?? "ws";
+
   const nodes: Node[] = [
     // Title Anchor
     {
-      id: `ws-title-${data.workstreamTitle}`,
+      id: `ws-title-${wsKey}`,
       type: "workstreamTitle",
       position: { x: basePosition.x, y: basePosition.y },
       draggable: true,
@@ -339,49 +613,64 @@ export function buildWorkspaceNodes(
     },
     // Threads Lane
     {
-      id: `ws-lane-threads-${data.workstreamTitle}`,
+      id: `ws-lane-threads-${wsKey}`,
       type: "categoryField",
       position: { x: basePosition.x, y: basePosition.y + 100 },
       draggable: true,
-      data: { 
-        label: "THREADS", 
-        type: "threads", 
-        items: data.threads, 
+      data: {
+        label: "THREADS",
+        type: "threads",
+        items: data.threads,
         onOpenPanel: data.onOpenPanel,
         accentColor: "var(--accent-cyan)",
-        band: data.band
+        band: data.band,
       },
     },
     // Documents Lane
     {
-      id: `ws-lane-docs-${data.workstreamTitle}`,
+      id: `ws-lane-docs-${wsKey}`,
       type: "categoryField",
       position: { x: basePosition.x + 360, y: basePosition.y + 100 },
       draggable: true,
-      data: { 
-        label: "DOCUMENTS", 
-        type: "documents", 
-        items: data.notes, 
+      data: {
+        label: "DOCUMENTS",
+        type: "documents",
+        items: data.notes,
         onOpenPanel: data.onOpenPanel,
         accentColor: "var(--accent-purple)",
-        band: data.band
+        band: data.band,
       },
     },
-    // Planner Lane
+    // Planner Lane (always present even if empty)
     {
-      id: `ws-lane-planner-${data.workstreamTitle}`,
+      id: `ws-lane-planner-${wsKey}`,
       type: "categoryField",
       position: { x: basePosition.x + 720, y: basePosition.y + 100 },
       draggable: true,
-      data: { 
-        label: "PLANNER", 
-        type: "planner", 
-        items: data.plannerItems, 
+      data: {
+        label: "PLANNER",
+        type: "planner",
+        items: data.plannerItems,
         onOpenPanel: data.onOpenPanel,
         accentColor: "var(--accent-orange)",
-        band: data.band
+        band: data.band,
       },
     },
+    // Dynamic artifact lanes (Visual, Code, Study, Boards) — appear only when non-empty
+    ...artifactLanes.map((lane) => ({
+      id: `ws-lane-${lane.id}-${wsKey}`,
+      type: "categoryField" as const,
+      position: { x: basePosition.x + lane.xOffset, y: basePosition.y + 100 },
+      draggable: true,
+      data: {
+        label: lane.label,
+        type: "artifacts" as const,
+        items: lane.items,
+        onOpenPanel: data.onOpenPanel,
+        accentColor: lane.accentColor,
+        band: data.band,
+      },
+    })),
   ];
 
   return { nodes, edges: [] };

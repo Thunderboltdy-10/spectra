@@ -17,7 +17,12 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Crosshair, FileText, Home, Layers, MessageSquare, Plus, ZoomIn } from "lucide-react";
+import {
+  Crosshair, FileText, Home, Layers, MessageSquare, Plus, ZoomIn,
+  Copy, Move, Pin, Archive, History, Code2, Image, CalendarClock,
+  LayoutList, Sparkles, Merge, ArrowRight, ChevronRight, Search,
+  SortAsc, Trash2, FolderOpen, PenLine,
+} from "lucide-react";
 import { useWorkspaceStore, type WorkspaceBackgroundMode, type ZoomBand } from "@/stores/workspace-store";
 import type { Workstream } from "@/hooks/use-workspace-data";
 import { cn } from "@/lib/utils";
@@ -593,6 +598,12 @@ function WorkspaceCanvasInner({
   const [localOverrides, setLocalOverrides] = useState(() => loadLocalOverrides());
   const [internalNodeOverrides, setInternalNodeOverrides] = useState<Map<string, { x: number; y: number }>>(new Map());
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [itemContextMenu, setItemContextMenu] = useState<{ x: number; y: number; itemId: string; itemType: "thread" | "note" | "planner" | "artifact" } | null>(null);
+  const [groupContextMenu, setGroupContextMenu] = useState<{ x: number; y: number; groupType: string } | null>(null);
+  const [focusedItemId, setFocusedItemId] = useState<string | null>(null);
+  const [movePicker, setMovePicker] = useState<{ itemId: string; sourceWorkstreamId: string } | null>(null);
+  const [movePickerSearch, setMovePickerSearch] = useState("");
+  const lastMutationIdRef = useRef<string | null>(null);
   const [contentById, setContentById] = useState<Record<string, CachedWorkspaceContent>>({});
   const [loadingContentIds, setLoadingContentIds] = useState<string[]>([]);
   const sanitizeTitle = useCallback((value: unknown) => {
@@ -1058,6 +1069,16 @@ function WorkspaceCanvasInner({
             workstreamTitle: focusWorkstream?.title,
             onOpenPanel: panelOpener,
             band,
+            // W2: Touch tier + context menus
+            focusedItemId: focusedItemId ?? undefined,
+            onFocusItem: (id: string) => setFocusedItemId(id),
+            onBlurItem: () => setFocusedItemId(null),
+            onItemContextMenu: (id: string, itemType: "thread" | "note" | "planner" | "artifact", x: number, y: number) => {
+              setItemContextMenu({ itemId: id, itemType, x, y });
+            },
+            onGroupContextMenu: (groupType: string, x: number, y: number) => {
+              setGroupContextMenu({ groupType, x, y });
+            },
           };
 
           const builderResult = buildWorkspaceNodes(contentData, basePos);
@@ -1094,6 +1115,7 @@ function WorkspaceCanvasInner({
   }, [
     band,
     focusWorkstreamId,
+    focusedItemId,
     getCachedContent,
     handleOpenWorkstream,
     internalNodeOverrides,
@@ -1239,13 +1261,40 @@ function WorkspaceCanvasInner({
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && primaryWorkstreamId) {
-        handleExitWorkstream();
+      const isModZ = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !e.shiftKey;
+      if (isModZ) {
+        if (lastMutationIdRef.current) {
+          const mutId = lastMutationIdRef.current;
+          lastMutationIdRef.current = null;
+          void fetch("/api/workspace-items", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "revertMutation", mutationId: mutId }),
+          }).then((r) => {
+            if (r.ok && primaryWorkstreamId) {
+              invalidateWorkstreamContent(primaryWorkstreamId);
+              void fetchContentForWorkstream(primaryWorkstreamId);
+            }
+          });
+        }
+        return;
+      }
+      if (e.key === "Escape") {
+        if (focusedItemId) { setFocusedItemId(null); return; }
+        if (itemContextMenu) { setItemContextMenu(null); return; }
+        if (groupContextMenu) { setGroupContextMenu(null); return; }
+        if (movePicker) { setMovePicker(null); return; }
+        if (contextMenu) { setContextMenu(null); return; }
+        if (primaryWorkstreamId) { handleExitWorkstream(); }
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleExitWorkstream, primaryWorkstreamId]);
+  }, [
+    handleExitWorkstream, primaryWorkstreamId, focusedItemId,
+    itemContextMenu, groupContextMenu, movePicker, contextMenu,
+    invalidateWorkstreamContent, fetchContentForWorkstream,
+  ]);
 
   useEffect(() => {
     const handler = () => {
@@ -1274,7 +1323,11 @@ function WorkspaceCanvasInner({
   }, [focusWorkstreamId]);
 
   useEffect(() => {
-    const handler = () => setContextMenu(null);
+    const handler = () => {
+      setContextMenu(null);
+      setItemContextMenu(null);
+      setGroupContextMenu(null);
+    };
     window.addEventListener("mousedown", handler);
     return () => window.removeEventListener("mousedown", handler);
   }, []);
@@ -1348,61 +1401,218 @@ function WorkspaceCanvasInner({
         </Controls>
       </ReactFlow>
 
+      {/* ─── Empty canvas context menu ─── */}
       {contextMenu && (
         <div
+          onMouseDown={(e) => e.stopPropagation()}
           className="absolute z-40 min-w-[220px] overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]/96 p-1.5 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.38)] backdrop-blur-xl"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
-          {/* Always: Create actions */}
+          {primaryWorkstreamId && primaryWorkstreamId !== "__hub__" ? (
+            <>
+              <ContextMenuItem icon={<FileText className="h-3.5 w-3.5" />} label="New note" onClick={() => { setContextMenu(null); panelOpener("artifact", "new"); }} />
+              <ContextMenuItem icon={<MessageSquare className="h-3.5 w-3.5" />} label="New thread" onClick={() => { setContextMenu(null); panelOpener("chat", "new"); }} />
+              <ContextMenuItem icon={<Image className="h-3.5 w-3.5" />} label="New diagram" onClick={() => { setContextMenu(null); panelOpener("artifact", "new-diagram"); }} />
+              <ContextMenuItem icon={<Code2 className="h-3.5 w-3.5" />} label="New code" onClick={() => { setContextMenu(null); panelOpener("artifact", "new-code"); }} />
+              <ContextMenuItem icon={<CalendarClock className="h-3.5 w-3.5" />} label="New planner task" onClick={() => { setContextMenu(null); panelOpener("planner", "new"); }} />
+              <div className="my-1 h-px bg-[var(--border-default)]/50" />
+              <ContextMenuItem icon={<FolderOpen className="h-3.5 w-3.5" />} label="Paste from clipboard" onClick={() => { setContextMenu(null); }} />
+            </>
+          ) : (
+            <>
+              <ContextMenuItem icon={<Layers className="h-3.5 w-3.5" />} label="New workstream" hint="W" onClick={() => { setContextMenu(null); onNewWorkstream?.(); }} />
+              <ContextMenuItem icon={<Home className="h-3.5 w-3.5" />} label="Open hub" onClick={() => { setContextMenu(null); handleOpenHub(); }} />
+              <div className="my-1 h-px bg-[var(--border-default)]/50" />
+              <ContextMenuItem icon={<FolderOpen className="h-3.5 w-3.5" />} label="Paste from clipboard" onClick={() => { setContextMenu(null); }} />
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ─── Item context menu ─── */}
+      {itemContextMenu && (
+        <div
+          onMouseDown={(e) => e.stopPropagation()}
+          className="absolute z-40 min-w-[220px] overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]/96 p-1.5 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.38)] backdrop-blur-xl"
+          style={{ left: itemContextMenu.x, top: itemContextMenu.y }}
+        >
           <ContextMenuItem
-            icon={<Layers className="h-3.5 w-3.5" />}
-            label="New workstream"
-            hint="W"
-            onClick={() => { setContextMenu(null); onNewWorkstream?.(); }}
+            icon={<FolderOpen className="h-3.5 w-3.5" />}
+            label="Open in editor"
+            onClick={() => {
+              setItemContextMenu(null);
+              const panelType = itemContextMenu.itemType === "thread" ? "chat" : itemContextMenu.itemType === "planner" ? "planner" : "artifact";
+              panelOpener(panelType, itemContextMenu.itemId);
+            }}
           />
           <ContextMenuItem
-            icon={<FileText className="h-3.5 w-3.5" />}
-            label="New document"
-            hint="D"
+            icon={<Sparkles className="h-3.5 w-3.5" />}
+            label="Edit with AI…"
             onClick={() => {
-              setContextMenu(null);
-              if (onCreateArtifact) {
-                onCreateArtifact();
-              } else {
-                panelOpener("artifact", "new");
+              setItemContextMenu(null);
+              panelOpener("artifact", itemContextMenu.itemId);
+            }}
+          />
+          <ContextMenuItem
+            icon={<Copy className="h-3.5 w-3.5" />}
+            label="Duplicate"
+            onClick={async () => {
+              const { itemId } = itemContextMenu;
+              setItemContextMenu(null);
+              const r = await fetch("/api/workspace-items", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "duplicate", itemId }),
+              });
+              if (r.ok) {
+                const data = await r.json() as { mutationId?: string };
+                if (data.mutationId) lastMutationIdRef.current = data.mutationId;
+                if (primaryWorkstreamId) {
+                  invalidateWorkstreamContent(primaryWorkstreamId);
+                  void fetchContentForWorkstream(primaryWorkstreamId);
+                }
               }
             }}
           />
+          <div className="my-1 h-px bg-[var(--border-default)]/50" />
+          <ContextMenuItem
+            icon={<Move className="h-3.5 w-3.5" />}
+            label="Move to workspace…"
+            onClick={() => {
+              const src = primaryWorkstreamId ?? "";
+              setItemContextMenu(null);
+              setMovePicker({ itemId: itemContextMenu.itemId, sourceWorkstreamId: src });
+              setMovePickerSearch("");
+            }}
+          />
+          <div className="my-1 h-px bg-[var(--border-default)]/50" />
+          <ContextMenuItem
+            icon={<Pin className="h-3.5 w-3.5" />}
+            label="Pin to top"
+            onClick={async () => {
+              const { itemId } = itemContextMenu;
+              setItemContextMenu(null);
+              await fetch("/api/workspace-items", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "pin", itemId, pinned: true }),
+              });
+              if (primaryWorkstreamId) {
+                invalidateWorkstreamContent(primaryWorkstreamId);
+                void fetchContentForWorkstream(primaryWorkstreamId);
+              }
+            }}
+          />
+          <ContextMenuItem
+            icon={<History className="h-3.5 w-3.5" />}
+            label="Version history"
+            onClick={() => {
+              setItemContextMenu(null);
+              panelOpener("artifact", itemContextMenu.itemId);
+            }}
+          />
+          <ContextMenuItem
+            icon={<Archive className="h-3.5 w-3.5" />}
+            label="Archive"
+            onClick={async () => {
+              const { itemId } = itemContextMenu;
+              setItemContextMenu(null);
+              await fetch("/api/workspace-items", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "archive", itemId }),
+              });
+              if (primaryWorkstreamId) {
+                invalidateWorkstreamContent(primaryWorkstreamId);
+                void fetchContentForWorkstream(primaryWorkstreamId);
+              }
+            }}
+          />
+        </div>
+      )}
 
-          {/* In workstream: scoped actions */}
-          {primaryWorkstreamId && primaryWorkstreamId !== "__hub__" && (
-            <>
-              <ContextMenuItem
-                icon={<MessageSquare className="h-3.5 w-3.5" />}
-                label="New thread"
-                hint="T"
-                onClick={() => { setContextMenu(null); panelOpener("chat", "new"); }}
-              />
-              <ContextMenuItem
-                icon={<Plus className="h-3.5 w-3.5" />}
-                label="New planner item"
-                hint="P"
-                onClick={() => { setContextMenu(null); panelOpener("planner", "new"); }}
-              />
-            </>
-          )}
+      {/* ─── Group context menu ─── */}
+      {groupContextMenu && (
+        <div
+          onMouseDown={(e) => e.stopPropagation()}
+          className="absolute z-40 min-w-[220px] overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]/96 p-1.5 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.38)] backdrop-blur-xl"
+          style={{ left: groupContextMenu.x, top: groupContextMenu.y }}
+        >
+          <ContextMenuItem icon={<Plus className="h-3.5 w-3.5" />} label="Add item to group" onClick={() => { setGroupContextMenu(null); panelOpener("artifact", "new"); }} />
+          <ContextMenuItem icon={<PenLine className="h-3.5 w-3.5" />} label="Rename group" onClick={() => { setGroupContextMenu(null); }} />
+          <ContextMenuItem icon={<SortAsc className="h-3.5 w-3.5" />} label="Sort by…" onClick={() => { setGroupContextMenu(null); }} />
+          <div className="my-1 h-px bg-[var(--border-default)]/50" />
+          <ContextMenuItem icon={<ChevronRight className="h-3.5 w-3.5" />} label="Collapse group" onClick={() => { setGroupContextMenu(null); }} />
+          <ContextMenuItem icon={<FolderOpen className="h-3.5 w-3.5" />} label="Open all in editor" onClick={() => { setGroupContextMenu(null); }} />
+          <ContextMenuItem icon={<Sparkles className="h-3.5 w-3.5" />} label="AI: Summarize group" onClick={() => { setGroupContextMenu(null); }} />
+          <ContextMenuItem icon={<Merge className="h-3.5 w-3.5" />} label="Merge with…" onClick={() => { setGroupContextMenu(null); }} />
+        </div>
+      )}
 
-          {/* Not in workstream: navigation */}
-          {!primaryWorkstreamId && (
-            <>
-              <div className="my-1 h-px bg-[var(--border-default)]/50" />
-              <ContextMenuItem
-                icon={<Home className="h-3.5 w-3.5" />}
-                label="Open hub"
-                onClick={() => { setContextMenu(null); handleOpenHub(); }}
+      {/* ─── Move to workspace picker ─── */}
+      {movePicker && (
+        <div
+          onMouseDown={(e) => e.stopPropagation()}
+          className="absolute z-50 w-72 overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_24px_56px_-16px_rgba(15,23,42,0.48)] backdrop-blur-xl"
+          style={{ left: "50%", top: "50%", transform: "translate(-50%,-50%)" }}
+        >
+          <div className="px-4 pt-4 pb-2">
+            <div className="text-[13px] font-semibold text-[var(--text-primary)] mb-3">Move to workspace</div>
+            <div className="flex items-center gap-2 rounded-xl border border-[var(--border-default)]/60 bg-[var(--bg-secondary)] px-3 py-2">
+              <Search className="h-3.5 w-3.5 shrink-0 text-[var(--text-tertiary)]" />
+              <input
+                autoFocus
+                type="text"
+                placeholder="Search workspaces…"
+                value={movePickerSearch}
+                onChange={(e) => setMovePickerSearch(e.target.value)}
+                className="flex-1 bg-transparent text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
               />
-            </>
-          )}
+            </div>
+          </div>
+          <div className="max-h-52 overflow-y-auto px-2 pb-2">
+            {workstreams
+              .filter((ws) => ws.status === "active" && ws._id !== movePicker.sourceWorkstreamId)
+              .filter((ws) => !movePickerSearch || ws.title.toLowerCase().includes(movePickerSearch.toLowerCase()))
+              .map((ws) => (
+                <button
+                  key={ws._id}
+                  type="button"
+                  onClick={async () => {
+                    const { itemId, sourceWorkstreamId } = movePicker;
+                    setMovePicker(null);
+                    const r = await fetch("/api/workspace-items", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ action: "moveWidget", itemId, workstreamId: ws._id }),
+                    });
+                    if (r.ok) {
+                      const data = await r.json() as { mutationId?: string };
+                      if (data.mutationId) lastMutationIdRef.current = data.mutationId;
+                      // Invalidate both source and destination
+                      invalidateWorkstreamContent(sourceWorkstreamId);
+                      invalidateWorkstreamContent(ws._id);
+                      if (primaryWorkstreamId) void fetchContentForWorkstream(primaryWorkstreamId);
+                    }
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm hover:bg-[var(--bg-hover)]"
+                >
+                  <span className="text-base">{ws.emoji || "📚"}</span>
+                  <span className="text-[13px] text-[var(--text-primary)]">{ws.title}</span>
+                  <ArrowRight className="ml-auto h-3.5 w-3.5 text-[var(--text-tertiary)]" />
+                </button>
+              ))
+            }
+          </div>
+          <div className="border-t border-[var(--border-default)]/40 px-4 py-2.5">
+            <button
+              type="button"
+              onClick={() => setMovePicker(null)}
+              className="text-[12px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
     </div>

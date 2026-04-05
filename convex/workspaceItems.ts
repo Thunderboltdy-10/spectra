@@ -496,6 +496,127 @@ export const listMergeCandidates = query({
   },
 });
 
+/* ─── W2-A1: Global search ──────────────────────────────── */
+
+export const globalSearch = query({
+  args: {
+    actorClerkId: v.string(),
+    q: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireWorkspaceActor(ctx, args.actorClerkId);
+    const query = args.q.trim().toLowerCase();
+    const limit = Math.max(1, Math.min(args.limit ?? 20, 50));
+
+    if (!query) return { results: [] };
+
+    const items = await ctx.db
+      .query("workspaceItems")
+      .withIndex("by_owner", (q) => q.eq("ownerUserId", actor._id))
+      .filter((q) => q.eq(q.field("status"), "active"))
+      .collect();
+
+    const scored = items
+      .map((item) => {
+        const titleMatch = item.title.toLowerCase().includes(query);
+        const summaryMatch = item.contentSummary?.toLowerCase().includes(query) ?? false;
+        const score = titleMatch ? 2 : summaryMatch ? 1 : 0;
+        return { item, score };
+      })
+      .filter(({ score }) => score > 0)
+      .sort((a, b) => b.score - a.score || (b.item.updatedAt - a.item.updatedAt))
+      .slice(0, limit);
+
+    // Resolve workstream titles for display
+    const workstreamIds = [...new Set(scored.map(({ item }) => item.workstreamId).filter(Boolean))];
+    const workstreamMap = new Map<string, string>();
+    for (const wsId of workstreamIds) {
+      if (!wsId) continue;
+      const ws = await ctx.db.get(wsId);
+      if (ws) workstreamMap.set(wsId, ws.title);
+    }
+
+    return {
+      results: scored.map(({ item }) => ({
+        id: item._id,
+        title: item.title,
+        type: item.type,
+        itemType: item.itemType,
+        renderMode: item.renderMode,
+        contentSummary: item.contentSummary,
+        workstreamId: item.workstreamId,
+        workstreamTitle: item.workstreamId ? (workstreamMap.get(item.workstreamId) ?? null) : null,
+        updatedAt: item.updatedAt,
+      })),
+    };
+  },
+});
+
+/* ─── W2-B1: Duplicate a workspace item ─────────────────── */
+
+export const duplicate = mutation({
+  args: {
+    actorClerkId: v.string(),
+    itemId: v.id("workspaceItems"),
+    targetWorkstreamId: v.optional(v.id("workstreams")),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireWorkspaceActor(ctx, args.actorClerkId);
+    const original = await assertWorkspaceItemOwnership(ctx, actor, args.itemId);
+    const targetWsId = args.targetWorkstreamId ?? original.workstreamId;
+    if (targetWsId) {
+      await validateWorkspaceWorkstream(ctx, actor, targetWsId);
+    }
+
+    const now = Date.now();
+    const newItemId = await ctx.db.insert("workspaceItems", {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: targetWsId,
+      status: "active",
+      type: original.type,
+      itemType: original.itemType,
+      sourceKind: original.sourceKind,
+      sourceId: original.sourceId,
+      renderMode: original.renderMode,
+      sourceChatId: original.sourceChatId,
+      sourceArtifactId: original.sourceArtifactId,
+      sourcePlannerItemId: original.sourcePlannerItemId,
+      title: `${original.title} (copy)`,
+      contentSummary: original.contentSummary,
+      x: original.x + 40,
+      y: original.y + 40,
+      width: original.width,
+      height: original.height,
+      category: original.category,
+      pinned: false,
+      collapsed: original.collapsed,
+      visualGroup: original.visualGroup,
+      renderProps: original.renderProps,
+      provenanceSource: "user",
+      provenanceAction: "duplicated",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const mutationId = await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: targetWsId,
+      targetItemIds: [newItemId],
+      mutationType: "duplicate_item",
+      source: "user",
+      summary: `Duplicated ${original.title}`,
+      before: { itemId: original._id },
+      after: { itemId: newItemId },
+      revertData: { kind: "delete_items", itemIds: [newItemId] },
+    });
+
+    return { itemId: newItemId, mutationId };
+  },
+});
+
 export const createWidget = mutation({
   args: {
     actorClerkId: v.string(),

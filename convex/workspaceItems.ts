@@ -848,6 +848,13 @@ export const attachItemsToWorkstream = mutation({
       .withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId))
       .collect();
 
+    // Seed the seen set from persisted items so we also catch within-request dupes
+    const seenSourceKeys = new Set(
+      existingItems
+        .filter((item) => item.status === "active" && item.sourceKind && item.sourceId)
+        .map((item) => `${item.sourceKind}:${item.sourceId}`),
+    );
+
     const createdItemIds: Id<"workspaceItems">[] = [];
     const now = Date.now();
 
@@ -864,12 +871,21 @@ export const attachItemsToWorkstream = mutation({
         itemType: item.itemType,
       });
 
-      const duplicate = existingItems.find((existing) => (
-        existing.status === "active"
-        && existing.sourceKind === sourceKind
-        && existing.sourceId === sourceId
-      ));
-      if (duplicate) continue;
+      // Skip if this (sourceKind, sourceId) was already present or already inserted this call
+      if (sourceKind && sourceId) {
+        const key = `${sourceKind}:${sourceId}`;
+        if (seenSourceKeys.has(key)) continue;
+        seenSourceKeys.add(key);
+      } else {
+        // No source key — fall back to original duplicate check against persisted items only
+        const duplicate = existingItems.find(
+          (existing) =>
+            existing.status === "active"
+            && existing.sourceKind === sourceKind
+            && existing.sourceId === sourceId,
+        );
+        if (duplicate) continue;
+      }
 
       const itemId = await ctx.db.insert("workspaceItems", {
         orgId: actor.orgId,

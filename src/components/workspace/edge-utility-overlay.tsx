@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronLeft, Pause, Play, RotateCcw, Calendar, LayoutGrid, MessageSquarePlus, Plus, FileText, Code2, BarChart2, ClipboardList, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -26,6 +27,7 @@ export function EdgeUtilityOverlay({
   onQuickChat,
   onCreateItem,
 }: EdgeUtilityOverlayProps) {
+  const router = useRouter();
   const {
     timerState,
     startTimer,
@@ -266,8 +268,14 @@ export function EdgeUtilityOverlay({
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
-                  if (!quickChatDraft.trim()) return;
-                  onQuickChat?.(quickChatDraft.trim());
+                  const msg = quickChatDraft.trim();
+                  if (!msg) return;
+                  if (onQuickChat) {
+                    onQuickChat(msg);
+                  } else {
+                    // Fallback: navigate to chat page with the draft pre-filled
+                    router.push(`/chat?q=${encodeURIComponent(msg)}`);
+                  }
                   setQuickChatDraft('');
                   setQuickChatOpen(false);
                 }}

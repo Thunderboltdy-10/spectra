@@ -126,6 +126,7 @@ export const suggestWorkspaceFromTopic = query({
       ctx.db
         .query("artifacts")
         .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id))
+        .filter((q) => q.eq(q.field("orgId"), orgId))
         .order("desc")
         .take(200),
       ctx.db

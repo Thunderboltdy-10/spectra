@@ -986,11 +986,12 @@ export function buildWorkspaceNodes(
     return { nodes: [], edges: [] };
   }
 
-  const { visual, code, interactive, boards } = bucketArtifacts(data.artifacts);
+  const { visual, code, interactive, boards, other } = bucketArtifacts(data.artifacts);
 
-  // Build lanes dynamically — only include non-empty artifact lanes
+  // Build lanes dynamically — only include non-empty artifact lanes.
+  // Start at 1080 (planner is at 720, width ~360) to avoid overlapping the planner column.
   const artifactLanes: Array<{ id: string; label: string; items: ArtifactSummary[]; accentColor: string; xOffset: number }> = [];
-  let colOffset = 720; // starts after planner lane
+  let colOffset = 1080;
 
   if (visual.length > 0) {
     artifactLanes.push({ id: "visual", label: "VISUALS", items: visual, accentColor: "var(--accent-cyan)", xOffset: colOffset });
@@ -1006,6 +1007,10 @@ export function buildWorkspaceNodes(
   }
   if (boards.length > 0) {
     artifactLanes.push({ id: "boards", label: "BOARDS", items: boards, accentColor: "var(--accent-purple)", xOffset: colOffset });
+    colOffset += 360;
+  }
+  if (other.length > 0) {
+    artifactLanes.push({ id: "other", label: "ARTIFACTS", items: other, accentColor: "var(--text-tertiary)", xOffset: colOffset });
     colOffset += 360;
   }
 

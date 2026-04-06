@@ -295,6 +295,8 @@ export default defineSchema({
       v.literal("system"),
     )),
     provenanceAction: v.optional(v.string()),
+    topicCluster: v.optional(v.string()),
+    clusterOverride: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

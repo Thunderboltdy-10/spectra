@@ -1,6 +1,5 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
 import {
   recordWorkspaceMutation,
   requireWorkspaceActor,
@@ -112,23 +111,28 @@ export const suggestWorkspaceFromTopic = query({
     }
 
     const limit = Math.max(1, Math.min(args.limit ?? 8, 20));
+    const orgId = actor.orgId;
     const [workstreams, chats, artifacts, plannerItems] = await Promise.all([
       ctx.db
         .query("workstreams")
         .withIndex("by_owner", (q) => q.eq("ownerUserId", actor._id))
+        .filter((q) => q.eq(q.field("orgId"), orgId))
         .collect(),
       ctx.db
         .query("chats")
         .withIndex("by_owner", (q) => q.eq("ownerUserId", actor._id))
+        .filter((q) => q.eq(q.field("orgId"), orgId))
         .collect(),
       ctx.db
         .query("artifacts")
         .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id))
+        .filter((q) => q.eq(q.field("orgId"), orgId))
         .order("desc")
         .take(200),
       ctx.db
         .query("plannerItems")
         .withIndex("by_owner", (q) => q.eq("ownerUserId", actor._id))
+        .filter((q) => q.eq(q.field("orgId"), orgId))
         .collect(),
     ]);
 
@@ -145,7 +149,7 @@ export const suggestWorkspaceFromTopic = query({
       ]));
 
     const matchingArtifacts = artifacts
-      .filter((artifact) => artifact.status === "active")
+      .filter((artifact) => artifact.status === "active" && artifact.orgId === orgId)
       .filter((artifact) => scoreTopicMatch(topic, [
         artifact.title,
         artifact.contentPlaintext,

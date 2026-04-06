@@ -8,6 +8,7 @@ import {
   recordWorkspaceMutation,
   requireWorkspaceActor,
   resolveCanonicalWorkspaceItemType,
+  normalizeCanonicalWorkspaceItemType,
   resolveWorkspaceCategory,
   resolveWorkspaceSourceId,
   resolveWorkspaceSourceKind,
@@ -34,14 +35,6 @@ const vCanonicalWorkspaceItemType = v.union(
   v.literal("thread"),
   v.literal("artifact"),
   v.literal("planner"),
-  v.literal("utility"),
-  v.literal("custom"),
-);
-
-const vWorkspaceSourceKind = v.union(
-  v.literal("chat"),
-  v.literal("artifact"),
-  v.literal("plannerItem"),
   v.literal("utility"),
   v.literal("custom"),
 );
@@ -302,7 +295,15 @@ export const update = mutation({
     if (args.contentSummary !== undefined) {
       updates.contentSummary = summarizeWorkspaceContent(args.contentSummary);
     }
-    if (args.itemType !== undefined) updates.itemType = args.itemType;
+    if (args.itemType !== undefined) {
+      updates.itemType = normalizeCanonicalWorkspaceItemType(args.itemType);
+      updates.sourceKind = resolveWorkspaceSourceKind({
+        sourceChatId: existing.sourceChatId,
+        sourceArtifactId: existing.sourceArtifactId,
+        sourcePlannerItemId: existing.sourcePlannerItemId,
+        itemType: updates.itemType as Doc<"workspaceItems">["itemType"],
+      });
+    }
     if (args.category !== undefined) updates.category = args.category;
     if (args.renderMode !== undefined) updates.renderMode = args.renderMode;
     if (args.status !== undefined) updates.status = args.status;
@@ -495,6 +496,127 @@ export const listMergeCandidates = query({
   },
 });
 
+/* ─── W2-A1: Global search ──────────────────────────────── */
+
+export const globalSearch = query({
+  args: {
+    actorClerkId: v.string(),
+    q: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireWorkspaceActor(ctx, args.actorClerkId);
+    const query = args.q.trim().toLowerCase();
+    const limit = Math.max(1, Math.min(args.limit ?? 20, 50));
+
+    if (!query) return { results: [] };
+
+    const items = await ctx.db
+      .query("workspaceItems")
+      .withIndex("by_owner", (q) => q.eq("ownerUserId", actor._id))
+      .filter((q) => q.eq(q.field("status"), "active"))
+      .collect();
+
+    const scored = items
+      .map((item) => {
+        const titleMatch = item.title.toLowerCase().includes(query);
+        const summaryMatch = item.contentSummary?.toLowerCase().includes(query) ?? false;
+        const score = titleMatch ? 2 : summaryMatch ? 1 : 0;
+        return { item, score };
+      })
+      .filter(({ score }) => score > 0)
+      .sort((a, b) => b.score - a.score || (b.item.updatedAt - a.item.updatedAt))
+      .slice(0, limit);
+
+    // Resolve workstream titles for display
+    const workstreamIds = [...new Set(scored.map(({ item }) => item.workstreamId).filter(Boolean))];
+    const workstreamMap = new Map<string, string>();
+    for (const wsId of workstreamIds) {
+      if (!wsId) continue;
+      const ws = await ctx.db.get(wsId);
+      if (ws) workstreamMap.set(wsId, ws.title);
+    }
+
+    return {
+      results: scored.map(({ item }) => ({
+        id: item._id,
+        title: item.title,
+        type: item.type,
+        itemType: item.itemType,
+        renderMode: item.renderMode,
+        contentSummary: item.contentSummary,
+        workstreamId: item.workstreamId,
+        workstreamTitle: item.workstreamId ? (workstreamMap.get(item.workstreamId) ?? null) : null,
+        updatedAt: item.updatedAt,
+      })),
+    };
+  },
+});
+
+/* ─── W2-B1: Duplicate a workspace item ─────────────────── */
+
+export const duplicate = mutation({
+  args: {
+    actorClerkId: v.string(),
+    itemId: v.id("workspaceItems"),
+    targetWorkstreamId: v.optional(v.id("workstreams")),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireWorkspaceActor(ctx, args.actorClerkId);
+    const original = await assertWorkspaceItemOwnership(ctx, actor, args.itemId);
+    const targetWsId = args.targetWorkstreamId ?? original.workstreamId;
+    if (targetWsId) {
+      await validateWorkspaceWorkstream(ctx, actor, targetWsId);
+    }
+
+    const now = Date.now();
+    const newItemId = await ctx.db.insert("workspaceItems", {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: targetWsId,
+      status: "active",
+      type: original.type,
+      itemType: original.itemType,
+      sourceKind: original.sourceKind,
+      sourceId: original.sourceId,
+      renderMode: original.renderMode,
+      sourceChatId: original.sourceChatId,
+      sourceArtifactId: original.sourceArtifactId,
+      sourcePlannerItemId: original.sourcePlannerItemId,
+      title: `${original.title} (copy)`,
+      contentSummary: original.contentSummary,
+      x: original.x + 40,
+      y: original.y + 40,
+      width: original.width,
+      height: original.height,
+      category: original.category,
+      pinned: false,
+      collapsed: original.collapsed,
+      visualGroup: original.visualGroup,
+      renderProps: original.renderProps,
+      provenanceSource: "user",
+      provenanceAction: "duplicated",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const mutationId = await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: targetWsId,
+      targetItemIds: [newItemId],
+      mutationType: "duplicate_item",
+      source: "user",
+      summary: `Duplicated ${original.title}`,
+      before: { itemId: original._id },
+      after: { itemId: newItemId },
+      revertData: { kind: "delete_items", itemIds: [newItemId] },
+    });
+
+    return { itemId: newItemId, mutationId };
+  },
+});
+
 export const createWidget = mutation({
   args: {
     actorClerkId: v.string(),
@@ -614,7 +736,15 @@ export const updateWidget = mutation({
     if (args.title !== undefined) updates.title = normalizeWorkspaceTitle(args.title);
     if (args.contentSummary !== undefined) updates.contentSummary = summarizeWorkspaceContent(args.contentSummary);
     if (args.category !== undefined) updates.category = args.category;
-    if (args.itemType !== undefined) updates.itemType = args.itemType;
+    if (args.itemType !== undefined) {
+      updates.itemType = normalizeCanonicalWorkspaceItemType(args.itemType);
+      updates.sourceKind = resolveWorkspaceSourceKind({
+        sourceChatId: existing.sourceChatId,
+        sourceArtifactId: existing.sourceArtifactId,
+        sourcePlannerItemId: existing.sourcePlannerItemId,
+        itemType: updates.itemType as Doc<"workspaceItems">["itemType"],
+      });
+    }
     if (args.renderMode !== undefined) updates.renderMode = args.renderMode;
     if (args.status !== undefined) updates.status = args.status;
     if (args.pinned !== undefined) updates.pinned = args.pinned;
@@ -718,6 +848,13 @@ export const attachItemsToWorkstream = mutation({
       .withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId))
       .collect();
 
+    // Seed the seen set from persisted items so we also catch within-request dupes
+    const seenSourceKeys = new Set(
+      existingItems
+        .filter((item) => item.status === "active" && item.sourceKind && item.sourceId)
+        .map((item) => `${item.sourceKind}:${item.sourceId}`),
+    );
+
     const createdItemIds: Id<"workspaceItems">[] = [];
     const now = Date.now();
 
@@ -734,12 +871,21 @@ export const attachItemsToWorkstream = mutation({
         itemType: item.itemType,
       });
 
-      const duplicate = existingItems.find((existing) => (
-        existing.status === "active"
-        && existing.sourceKind === sourceKind
-        && existing.sourceId === sourceId
-      ));
-      if (duplicate) continue;
+      // Skip if this (sourceKind, sourceId) was already present or already inserted this call
+      if (sourceKind && sourceId) {
+        const key = `${sourceKind}:${sourceId}`;
+        if (seenSourceKeys.has(key)) continue;
+        seenSourceKeys.add(key);
+      } else {
+        // No source key — fall back to original duplicate check against persisted items only
+        const duplicate = existingItems.find(
+          (existing) =>
+            existing.status === "active"
+            && existing.sourceKind === sourceKind
+            && existing.sourceId === sourceId,
+        );
+        if (duplicate) continue;
+      }
 
       const itemId = await ctx.db.insert("workspaceItems", {
         orgId: actor.orgId,
@@ -805,10 +951,18 @@ export const updateWorkstreamLayout = mutation({
   handler: async (ctx, args) => {
     const actor = await requireWorkspaceActor(ctx, args.actorClerkId);
     await validateWorkspaceWorkstream(ctx, actor, args.workstreamId);
+
+    // Phase 1: validate all items before applying any patches (atomicity guarantee)
     const before: Array<{ itemId: Id<"workspaceItems">; fields: Record<string, unknown> }> = [];
+    const validatedItems: Array<{ widget: (typeof args.widgets)[number]; item: Awaited<ReturnType<typeof assertWorkspaceItemOwnership>> }> = [];
 
     for (const widget of args.widgets) {
       const item = await assertWorkspaceItemOwnership(ctx, actor, widget.itemId);
+      if (item.workstreamId !== args.workstreamId) {
+        throw new Error(
+          `Item ${widget.itemId} does not belong to workstream ${args.workstreamId}`,
+        );
+      }
       before.push({
         itemId: item._id,
         fields: {
@@ -819,13 +973,19 @@ export const updateWorkstreamLayout = mutation({
           zIndex: item.zIndex,
         },
       });
+      validatedItems.push({ widget, item });
+    }
+
+    // Phase 2: apply patches only after all validations pass
+    const now = Date.now();
+    for (const { widget, item } of validatedItems) {
       await ctx.db.patch(widget.itemId, {
         x: Math.round(widget.x),
         y: Math.round(widget.y),
         width: widget.width !== undefined ? Math.round(widget.width) : item.width,
         height: widget.height !== undefined ? Math.round(widget.height) : item.height,
         zIndex: widget.zIndex !== undefined ? Math.round(widget.zIndex) : item.zIndex,
-        updatedAt: Date.now(),
+        updatedAt: now,
         provenanceSource: args.provenanceSource ?? "ai",
         provenanceAction: "reorganized",
       });

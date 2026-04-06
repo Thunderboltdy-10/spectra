@@ -46,11 +46,7 @@ function CanvasLoader() {
   );
 }
 
-type WorkspaceContentProps = {
-  userName: string;
-};
-
-function WorkspaceContent({ userName }: WorkspaceContentProps) {
+function WorkspaceContent() {
   const router = useRouter();
   const params = useSearchParams();
   const wsParam = params.get("ws") ?? params.get("focus") ?? undefined;
@@ -78,7 +74,7 @@ function WorkspaceContent({ userName }: WorkspaceContentProps) {
   } = useWorkspaceStore();
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery] = useState("");
   const [artifactDialogOpen, setArtifactDialogOpen] = useState(false);
 
   // Sync URL with store state
@@ -150,9 +146,6 @@ function WorkspaceContent({ userName }: WorkspaceContentProps) {
     },
     [createWorkstream],
   );
-
-
-  const activeCount = workstreams.filter((ws) => ws.status === "active").length;
 
   const handleCommitWorkstream = useCallback(
     (workstreamId: string | null) => {
@@ -415,8 +408,8 @@ function WorkspaceContent({ userName }: WorkspaceContentProps) {
 }
 
 function WorkspaceContentWithClerk() {
-  const { user } = useUser();
-  return <WorkspaceContent userName={user?.fullName || user?.firstName || "Student"} />;
+  useUser();
+  return <WorkspaceContent />;
 }
 
 function getPanelWidth(type: string): number {
@@ -436,7 +429,7 @@ export default function WorkspacePage() {
       {hasClerkPublishableKey() ? (
         <WorkspaceContentWithClerk />
       ) : (
-        <WorkspaceContent userName="Student" />
+        <WorkspaceContent />
       )}
     </Suspense>
   );

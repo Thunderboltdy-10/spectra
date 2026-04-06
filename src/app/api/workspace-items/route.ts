@@ -35,6 +35,16 @@ export async function GET(request: NextRequest) {
       return ok({ mutations });
     }
 
+    if (action === "search") {
+      const q = params.get("q") ?? "";
+      const result = await convexQuery("workspaceItems:globalSearch", {
+        actorClerkId: actor.clerkId,
+        q,
+        limit: parseLimit(params.get("limit")),
+      });
+      return ok(result);
+    }
+
     const items = await convexQuery("workspaceItems:list", {
       actorClerkId: actor.clerkId,
       workstreamId: params.get("workstreamId") ?? undefined,
@@ -292,6 +302,41 @@ export async function POST(request: NextRequest) {
       const result = await convexMutation("workspaceItems:remove", {
         actorClerkId: actor.clerkId,
         itemId,
+      });
+      return ok(result);
+    }
+
+    if (action === "duplicate") {
+      const itemId = typeof body.itemId === "string" ? body.itemId : undefined;
+      if (!itemId) return badRequest("itemId is required");
+      const result = await convexMutation("workspaceItems:duplicate", {
+        actorClerkId: actor.clerkId,
+        itemId,
+        targetWorkstreamId: typeof body.targetWorkstreamId === "string" ? body.targetWorkstreamId : undefined,
+      });
+      return ok(result);
+    }
+
+    if (action === "archive") {
+      const itemId = typeof body.itemId === "string" ? body.itemId : undefined;
+      if (!itemId) return badRequest("itemId is required");
+      const result = await convexMutation("workspaceItems:update", {
+        actorClerkId: actor.clerkId,
+        itemId,
+        status: "archived",
+        provenanceSource: "user",
+        provenanceAction: "archived",
+      });
+      return ok(result);
+    }
+
+    if (action === "pin") {
+      const itemId = typeof body.itemId === "string" ? body.itemId : undefined;
+      if (!itemId) return badRequest("itemId is required");
+      const result = await convexMutation("workspaceItems:update", {
+        actorClerkId: actor.clerkId,
+        itemId,
+        pinned: typeof body.pinned === "boolean" ? body.pinned : true,
       });
       return ok(result);
     }

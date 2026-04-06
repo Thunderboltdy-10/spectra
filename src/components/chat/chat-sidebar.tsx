@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -35,7 +34,6 @@ import {
 import { ThemeToggle } from "@/components/theme-toggle";
 import { GlobalUtilityDock } from "@/components/global-utility-dock";
 import { NotificationBell } from "@/components/notification-bell";
-import { SpectraLogo } from "@/components/spectra-logo";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -168,8 +166,6 @@ function ChatSidebarImpl({
   role,
   isSuperAdmin = false,
   userSpending,
-  orgName,
-  orgLogoUrl,
   activeStreamIds,
   hasDraft,
   viewer,
@@ -181,7 +177,6 @@ function ChatSidebarImpl({
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
   const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
-  const [logoLoadFailed, setLogoLoadFailed] = useState(false);
   const [activityCutoffTs, setActivityCutoffTs] = useState<number | null>(null);
   const [gamification, setGamification] = useState<{
     currentStreak: number;
@@ -203,10 +198,6 @@ function ChatSidebarImpl({
   useEffect(() => {
     setHasHydrated(true);
   }, []);
-
-  useEffect(() => {
-    setLogoLoadFailed(false);
-  }, [orgLogoUrl]);
 
   useEffect(() => {
     setActivityCutoffTs(Date.now() - (30 * 24 * 60 * 60 * 1000));

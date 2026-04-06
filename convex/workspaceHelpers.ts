@@ -131,6 +131,21 @@ export function resolveCanonicalWorkspaceItemType(params: {
   return "artifact" as const;
 }
 
+export function normalizeCanonicalWorkspaceItemType(
+  value: string | undefined,
+): Doc<"workspaceItems">["itemType"] {
+  if (
+    value === "thread"
+    || value === "artifact"
+    || value === "planner"
+    || value === "utility"
+    || value === "custom"
+  ) {
+    return value;
+  }
+  return "custom";
+}
+
 export function resolveWorkspaceCategory(params: {
   explicitCategory?: Doc<"workspaceItems">["category"];
   legacyType?: Doc<"workspaceItems">["type"];

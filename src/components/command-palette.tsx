@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   KBarAnimator,
@@ -11,7 +11,9 @@ import {
   KBarSearch,
   useKBar,
   useMatches,
+  useRegisterActions,
 } from "kbar";
+import { FileText, MessageSquare, CalendarClock, Code2, Image, Layers, Plus } from "lucide-react";
 import { ALL_MODES, getModeConfig, isModeAvailable } from "@/lib/modes";
 import { useSidebar } from "@/context/sidebar-context";
 
@@ -86,6 +88,110 @@ function CommandPaletteHotkeys() {
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [query, visualState]);
+
+  return null;
+}
+
+/* ─── Workspace search bridge ──────────────────────────────── */
+
+type WorkspaceSearchResult = {
+  id: string;
+  title: string;
+  type: string;
+  itemType?: string;
+  renderMode?: string;
+  workstreamId?: string;
+  workstreamTitle?: string | null;
+};
+
+function typeIcon(itemType?: string, renderMode?: string) {
+  const mode = renderMode ?? itemType ?? "";
+  if (mode === "code_project" || mode === "code_output") return <Code2 className="h-3.5 w-3.5" />;
+  if (mode === "visualization" || mode === "image" || mode === "diagram") return <Image className="h-3.5 w-3.5" />;
+  if (mode === "thread" || itemType === "thread") return <MessageSquare className="h-3.5 w-3.5" />;
+  if (mode === "planner" || itemType === "planner") return <CalendarClock className="h-3.5 w-3.5" />;
+  return <FileText className="h-3.5 w-3.5" />;
+}
+
+function WorkspaceSearchBridge() {
+  const { searchQuery } = useKBar((state) => ({ searchQuery: state.searchQuery }));
+  const [wsResults, setWsResults] = useState<WorkspaceSearchResult[]>([]);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fetchRef = useRef(0);
+
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!q) { setWsResults([]); return; }
+
+    debounceRef.current = setTimeout(async () => {
+      const fetchId = ++fetchRef.current;
+      try {
+        const r = await fetch(`/api/workspace-items?action=search&q=${encodeURIComponent(q)}&limit=10`);
+        if (!r.ok || fetchId !== fetchRef.current) return;
+        const data = await r.json() as { results?: WorkspaceSearchResult[] };
+        setWsResults(data.results ?? []);
+      } catch { /* silent — palette stays usable even if workspace search fails */ }
+    }, 280);
+  }, [searchQuery]);
+
+  const wsActions = useMemo(
+    () =>
+      wsResults.map((r) => ({
+        id: `ws-search-${r.id}`,
+        name: r.title,
+        subtitle: r.workstreamTitle ? `in ${r.workstreamTitle}` : undefined,
+        section: "Workspace",
+        icon: typeIcon(r.itemType, r.renderMode),
+        perform: () => {
+          if (r.workstreamId) {
+            window.dispatchEvent(new CustomEvent("workspace:navigate-to-item", {
+              detail: { itemId: r.id, workstreamId: r.workstreamId },
+            }));
+          }
+        },
+      })),
+    [wsResults],
+  );
+
+  useRegisterActions(wsActions, [wsActions]);
+
+  return null;
+}
+
+/* ─── Workspace quick commands ─────────────────────────────── */
+
+function WorkspaceQuickCommands() {
+  const { searchQuery } = useKBar((state) => ({ searchQuery: state.searchQuery }));
+
+  useRegisterActions(
+    searchQuery.trim() === ""
+      ? [
+          {
+            id: "ws-new-note",
+            name: "New note",
+            section: "Quick actions",
+            icon: <FileText className="h-3.5 w-3.5" />,
+            perform: () => window.dispatchEvent(new CustomEvent("workspace:create", { detail: { type: "note" } })),
+          },
+          {
+            id: "ws-new-workspace",
+            name: "New workspace",
+            section: "Quick actions",
+            icon: <Layers className="h-3.5 w-3.5" />,
+            perform: () => window.dispatchEvent(new CustomEvent("workspace:create", { detail: { type: "workspace" } })),
+          },
+          {
+            id: "ws-switch-workspace",
+            name: "Switch to workspace…",
+            section: "Quick actions",
+            icon: <Plus className="h-3.5 w-3.5" />,
+            perform: () => window.dispatchEvent(new Event("workspace:center-home")),
+          },
+        ]
+      : [],
+    [searchQuery],
+  );
 
   return null;
 }
@@ -228,6 +334,8 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
     >
       {children}
       <CommandPaletteHotkeys />
+      <WorkspaceSearchBridge />
+      <WorkspaceQuickCommands />
       <KBarPortal>
         <KBarPositioner className="z-[100] bg-[var(--bg-overlay)]">
           <KBarAnimator className="w-full max-w-xl rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-soft)]">

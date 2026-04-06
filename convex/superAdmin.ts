@@ -6,6 +6,13 @@ import { vRole } from "./shared";
 import type { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { purgeUserData } from "./userLifecycle";
+import {
+  addOrgToPlatformStats,
+  countPlatformStats,
+  hasPlatformSourceData,
+  rebuildPlatformStatsAggregates,
+  updateUserInPlatformStats,
+} from "./platformStatsAggregates";
 
 const SUPER_ADMIN_EMAILS = new Set(
   (process.env.SUPER_ADMIN_EMAILS ?? "pablo.martinez.dovale@gmail.com")
@@ -51,19 +58,7 @@ async function getOrgMemberCapacity(
 }
 
 async function computePlatformStats(ctx: QueryCtx | MutationCtx) {
-  const [orgs, users, messages] = await Promise.all([
-    ctx.db.query("orgs").collect(),
-    ctx.db.query("users").collect(),
-    ctx.db.query("messages").collect(),
-  ]);
-  const totalAdmins = users.filter((user) => user.role === "admin").length;
-
-  return {
-    totalOrgs: orgs.length,
-    totalUsers: users.length,
-    totalMessages: messages.length,
-    totalAdmins,
-  };
+  return countPlatformStats(ctx);
 }
 
 async function ensureOrgHasCapacityForMember(
@@ -306,7 +301,15 @@ export const refreshPlatformStats = internalMutation({
   args: {},
   handler: async (ctx) => {
     const now = Date.now();
-    const next = await computePlatformStats(ctx);
+    let next = await computePlatformStats(ctx);
+    if (
+      next.totalOrgs === 0
+      && next.totalUsers === 0
+      && next.totalMessages === 0
+      && await hasPlatformSourceData(ctx)
+    ) {
+      next = await rebuildPlatformStatsAggregates(ctx);
+    }
     const existing = await ctx.db
       .query("platformStats")
       .withIndex("by_singleton", (q) => q.eq("singletonKey", PLATFORM_STATS_SINGLETON))
@@ -326,6 +329,38 @@ export const refreshPlatformStats = internalMutation({
     }
 
     return { ok: true, ...next, lastComputedAt: now };
+  },
+});
+
+export const rebuildPlatformStats = mutation({
+  args: {
+    actorClerkId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx, args.actorClerkId);
+    const rebuilt = await rebuildPlatformStatsAggregates(ctx);
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("platformStats")
+      .withIndex("by_singleton", (q) => q.eq("singletonKey", PLATFORM_STATS_SINGLETON))
+      .unique();
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        ...rebuilt,
+        lastComputedAt: now,
+      });
+    } else {
+      await ctx.db.insert("platformStats", {
+        singletonKey: PLATFORM_STATS_SINGLETON,
+        ...rebuilt,
+        lastComputedAt: now,
+      });
+    }
+    return {
+      ok: true,
+      ...rebuilt,
+      lastComputedAt: now,
+    };
   },
 });
 
@@ -729,6 +764,9 @@ export const resetPlatformData = mutation({
     }
     summary.userMetadataReset = users.length;
 
+    const rebuiltStats = await rebuildPlatformStatsAggregates(ctx);
+    summary.platformStatsRebuilt = 1;
+
     await ctx.runMutation(internal.auditLog.logAction, {
       actorUserId: actor._id as Id<"users">,
       action: "super_admin.platform_reset",
@@ -740,6 +778,7 @@ export const resetPlatformData = mutation({
     return {
       ok: true,
       summary,
+      platformStats: rebuiltStats,
       resetAt: now,
     };
   },
@@ -820,6 +859,7 @@ export const createOrg = mutation({
       createdAt: now,
       updatedAt: now,
     });
+    await addOrgToPlatformStats(ctx, orgId);
 
     await ctx.runMutation(internal.auditLog.logAction, {
       actorUserId: actor._id as Id<"users">,
@@ -1009,10 +1049,16 @@ export const assignOrgAdmin = mutation({
     const existingInOrg = allUsers.find((u) => u.email.toLowerCase() === normalizedEmail);
 
     if (existingInOrg) {
+      const previous = { _id: existingInOrg._id, role: existingInOrg.role };
       await ctx.db.patch(existingInOrg._id, {
         role: "admin",
         updatedAt: Date.now(),
       });
+      await updateUserInPlatformStats(
+        ctx,
+        previous,
+        { _id: existingInOrg._id, role: "admin" },
+      );
       await ctx.runMutation(internal.auditLog.logAction, {
         actorUserId: actor._id as Id<"users">,
         action: "super_admin.assign_org_admin",
@@ -1040,11 +1086,17 @@ export const assignOrgAdmin = mutation({
           }
         }
       }
+      const previous = { _id: existingAnywhere._id, role: existingAnywhere.role };
       await ctx.db.patch(existingAnywhere._id, {
         orgId: args.orgId,
         role: "admin",
         updatedAt: Date.now(),
       });
+      await updateUserInPlatformStats(
+        ctx,
+        previous,
+        { _id: existingAnywhere._id, role: "admin" },
+      );
       await ctx.runMutation(internal.auditLog.logAction, {
         actorUserId: actor._id as Id<"users">,
         action: "super_admin.assign_org_admin",
@@ -1152,6 +1204,11 @@ export const updateOrgMemberRole = mutation({
       role: args.role,
       updatedAt: Date.now(),
     });
+    await updateUserInPlatformStats(
+      ctx,
+      { _id: user._id, role: user.role },
+      { _id: user._id, role: args.role },
+    );
     await ctx.runMutation(internal.auditLog.logAction, {
       actorUserId: actor._id as Id<"users">,
       action: "super_admin.update_org_member_role",
@@ -1258,11 +1315,17 @@ export const transferUser = mutation({
       }
     }
 
+    const nextRole = args.role ?? user.role;
     await ctx.db.patch(args.userId, {
       orgId: args.targetOrgId,
-      role: args.role ?? user.role,
+      role: nextRole,
       updatedAt: Date.now(),
     });
+    await updateUserInPlatformStats(
+      ctx,
+      { _id: user._id, role: user.role },
+      { _id: user._id, role: nextRole },
+    );
 
     await ctx.runMutation(internal.auditLog.logAction, {
       actorUserId: actor._id as Id<"users">,

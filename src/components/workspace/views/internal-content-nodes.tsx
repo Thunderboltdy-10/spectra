@@ -12,7 +12,7 @@ import {
   Clock,
   ArrowRight,
   Code2,
-  Image,
+  Image as ImageIcon,
   BookOpen,
   HelpCircle,
   Download,
@@ -430,7 +430,7 @@ function GlanceArtifactCard({
         className="group relative flex w-full flex-col gap-1 overflow-hidden rounded-2xl border border-[var(--border-default)]/30 bg-[var(--bg-elevated)]/40 text-left transition-all hover:border-[var(--accent-cyan)]/30 hover:bg-[var(--bg-elevated)]/70"
       >
         <div className="flex items-center justify-center h-16 bg-gradient-to-br from-[var(--accent-cyan)]/10 to-[var(--accent-purple)]/10">
-          <Image className="h-7 w-7 text-[var(--accent-cyan)]/60" />
+          <ImageIcon className="h-7 w-7 text-[var(--accent-cyan)]/60" />
         </div>
         <div className="px-3 pb-3 pt-2">
           <div className="truncate text-[12px] font-semibold text-[var(--text-primary)]">{artifact.title}</div>

@@ -13,7 +13,7 @@ import {
   useMatches,
   useRegisterActions,
 } from "kbar";
-import { FileText, MessageSquare, CalendarClock, Code2, Image, Layers, Plus } from "lucide-react";
+import { FileText, MessageSquare, CalendarClock, Code2, Image as ImageIcon, Layers, Plus } from "lucide-react";
 import { ALL_MODES, getModeConfig, isModeAvailable } from "@/lib/modes";
 import { useSidebar } from "@/context/sidebar-context";
 
@@ -107,7 +107,7 @@ type WorkspaceSearchResult = {
 function typeIcon(itemType?: string, renderMode?: string) {
   const mode = renderMode ?? itemType ?? "";
   if (mode === "code_project" || mode === "code_output") return <Code2 className="h-3.5 w-3.5" />;
-  if (mode === "visualization" || mode === "image" || mode === "diagram") return <Image className="h-3.5 w-3.5" />;
+  if (mode === "visualization" || mode === "image" || mode === "diagram") return <ImageIcon className="h-3.5 w-3.5" />;
   if (mode === "thread" || itemType === "thread") return <MessageSquare className="h-3.5 w-3.5" />;
   if (mode === "planner" || itemType === "planner") return <CalendarClock className="h-3.5 w-3.5" />;
   return <FileText className="h-3.5 w-3.5" />;

@@ -1,5 +1,6 @@
 import type { Doc, Id, TableNames } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
+import { removeMessageFromPlatformStats, removeUserFromPlatformStats } from "./platformStatsAggregates";
 
 type PurgeSummary = {
   blocked: {
@@ -293,6 +294,9 @@ export async function purgeUserData(
   increment(summary, "agentModelStats", await deleteRows(ctx, privateAgentStats.map((row) => row._id)));
   increment(summary, "agents", await deleteRows(ctx, privateAgents.map((row) => row._id)));
   increment(summary, "messages", await deleteRows(ctx, chatMessages.map((row) => row._id)));
+  for (const message of chatMessages) {
+    await removeMessageFromPlatformStats(ctx, message._id);
+  }
   increment(summary, "chats", await deleteRows(ctx, chats.map((row) => row._id)));
   increment(summary, "schoolInvitations", await deleteRows(ctx, invitationRowsToDelete.map((row) => row._id)));
 
@@ -300,6 +304,7 @@ export async function purgeUserData(
     await ctx.db.patch(target._id, { userStreakId: undefined });
   }
   await ctx.db.delete(target._id);
+  await removeUserFromPlatformStats(ctx, { _id: target._id, role: target.role });
   increment(summary, "users", 1);
 
   return summary;

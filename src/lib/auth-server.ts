@@ -146,16 +146,26 @@ export async function requireActor(): Promise<SessionActor> {
       }
     }
 
-    const shouldBootstrapAdmin = existing.role !== "admin" && isSuperAdminEmail(syncedEmail);
+    const superAdminByEmail = isSuperAdminEmail(syncedEmail);
+    const shouldBootstrapAdmin = existing.role !== "admin" && superAdminByEmail;
+    const access = superAdminByEmail
+      ? await convexQuery<
+          { clerkId: string },
+          { hasUser: boolean; hasOrg: boolean; orgActive: boolean } | null
+        >("users:accessState", {
+          clerkId: userId,
+        })
+      : null;
+    const shouldRecoverMissingOrg = superAdminByEmail && !access?.hasOrg;
     const needsIdentitySync = syncedEmail !== existing.email || syncedName !== existing.name;
 
-    if (shouldBootstrapAdmin || needsIdentitySync) {
+    if (shouldBootstrapAdmin || shouldRecoverMissingOrg || needsIdentitySync) {
       await convexMutation("users:ensureUser", {
         clerkId: userId,
         email: syncedEmail,
         name: syncedName,
         requestedRole: existing.role,
-        bootstrapAdmin: shouldBootstrapAdmin,
+        bootstrapAdmin: shouldBootstrapAdmin || shouldRecoverMissingOrg,
       });
 
       const refreshed = await convexQuery<

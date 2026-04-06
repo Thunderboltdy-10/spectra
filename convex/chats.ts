@@ -12,6 +12,7 @@ import {
   selectMessagesForBranch,
   summarizeBranchedMessages,
 } from "./chatBranching";
+import { addMessageToPlatformStats, removeMessageFromPlatformStats } from "./platformStatsAggregates";
 
 async function validateArtifact(
   ctx: Parameters<typeof getUserByClerkId>[0],
@@ -616,6 +617,7 @@ export const appendMessage = mutation({
       cancelled: args.cancelled,
       createdAt: now,
     });
+    await addMessageToPlatformStats(ctx, messageId);
 
     if (args.role === "assistant" && parentMessageId && typeof siblingCount === "number") {
       const orderedAssistantSiblings = [...existingAssistantSiblings, { _id: messageId, createdAt: now }]
@@ -710,6 +712,7 @@ export const editMessageAsSibling = mutation({
       siblingCount: siblingCandidates.length + 1,
       createdAt: now,
     });
+    await addMessageToPlatformStats(ctx, messageId);
 
     const orderedSiblings = [
       ...siblingCandidates.map((row) => ({ _id: row._id, createdAt: row.createdAt })),
@@ -822,6 +825,7 @@ export const branchFromMessage = mutation({
         cancelled: row.cancelled,
         createdAt: now + i,
       });
+      await addMessageToPlatformStats(ctx, messageId);
       sourceToBranchedId.set(row._id, messageId);
     }
 
@@ -1313,6 +1317,7 @@ export const deleteLastAssistantMessage = mutation({
     }
 
     await ctx.db.delete(lastAssistant._id);
+    await removeMessageFromPlatformStats(ctx, lastAssistant._id);
     await ctx.db.patch(chat._id, {
       updatedAt: Date.now(),
       messageCount: Math.max(0, (chat.messageCount ?? 0) - 1),
@@ -1355,6 +1360,7 @@ export const deleteLastUserMessage = mutation({
         .unique();
       if (existing && existing.userId === actor._id && existing.role === "user") {
         await ctx.db.delete(existing._id);
+        await removeMessageFromPlatformStats(ctx, existing._id);
         await ctx.db.patch(chat._id, {
           updatedAt: Date.now(),
           messageCount: Math.max(0, (chat.messageCount ?? 0) - 1),
@@ -1379,6 +1385,7 @@ export const deleteLastUserMessage = mutation({
     }
 
     await ctx.db.delete(last._id);
+    await removeMessageFromPlatformStats(ctx, last._id);
     await ctx.db.patch(chat._id, {
       updatedAt: Date.now(),
       messageCount: Math.max(0, (chat.messageCount ?? 0) - 1),

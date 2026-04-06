@@ -89,7 +89,8 @@ export default defineSchema({
     .index("by_clerk_id", ["clerkId"])
     .index("by_org", ["orgId"])
     .index("by_org_email", ["orgId", "email"])
-    .index("by_org_role", ["orgId", "role"]),
+    .index("by_org_role", ["orgId", "role"])
+    .index("by_role", ["role"]),
 
   userPreferences: defineTable({
     userId: v.id("users"),

@@ -5,6 +5,7 @@ import { internal } from "./_generated/api";
 import { dayKey, getUserByClerkId } from "./helpers";
 import { vRole } from "./shared";
 import { purgeUserData } from "./userLifecycle";
+import { addUserToPlatformStats, updateUserInPlatformStats } from "./platformStatsAggregates";
 
 function randomToken(): string {
   const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -524,6 +525,11 @@ export const updateMemberRole = mutation({
       role: args.role,
       updatedAt: Date.now(),
     });
+    await updateUserInPlatformStats(
+      ctx,
+      { _id: target._id, role: target.role },
+      { _id: target._id, role: args.role },
+    );
 
     return { ok: true };
   },
@@ -636,6 +642,7 @@ export const acceptInvitation = mutation({
     const now = Date.now();
 
     if (existingUser) {
+      const previous = { _id: existingUser._id, role: existingUser.role };
       await ctx.db.patch(existingUser._id, {
         orgId: invitation.orgId,
         role: invitation.role,
@@ -643,8 +650,13 @@ export const acceptInvitation = mutation({
         name: args.name,
         updatedAt: now,
       });
+      await updateUserInPlatformStats(
+        ctx,
+        previous,
+        { _id: existingUser._id, role: invitation.role },
+      );
     } else {
-      await ctx.db.insert("users", {
+      const userId = await ctx.db.insert("users", {
         clerkId: args.clerkId,
         email: normalizedEmail,
         name: args.name,
@@ -653,6 +665,7 @@ export const acceptInvitation = mutation({
         createdAt: now,
         updatedAt: now,
       });
+      await addUserToPlatformStats(ctx, { _id: userId, role: invitation.role });
     }
 
     await ctx.db.patch(args.invitationId, {

@@ -1,6 +1,7 @@
 import type { Id } from "./_generated/dataModel";
 import type { QueryCtx, MutationCtx } from "./_generated/server";
 import { DEFAULT_ORG_SLUG, LIMITS } from "./constants";
+import { addOrgToPlatformStats } from "./platformStatsAggregates";
 
 export type Role = "student" | "teacher" | "admin";
 
@@ -26,6 +27,7 @@ export async function getOrCreateDefaultOrg(ctx: MutationCtx): Promise<Id<"orgs"
     createdAt: now,
     updatedAt: now,
   });
+  await addOrgToPlatformStats(ctx, orgId);
   return orgId as Id<"orgs">;
 }
 

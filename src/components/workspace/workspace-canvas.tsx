@@ -19,9 +19,9 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Crosshair, FileText, Home, Layers, MessageSquare, Plus, ZoomIn,
-  Copy, Move, Pin, Archive, History, Code2, Image, CalendarClock,
-  LayoutList, Sparkles, Merge, ArrowRight, ChevronRight, Search,
-  SortAsc, Trash2, FolderOpen, PenLine,
+  Copy, Move, Pin, Archive, History, Code2, Image as ImageIcon, CalendarClock,
+  Sparkles, Merge, ArrowRight, ChevronRight, Search,
+  SortAsc, FolderOpen, PenLine,
 } from "lucide-react";
 import { useWorkspaceStore, type WorkspaceBackgroundMode, type ZoomBand } from "@/stores/workspace-store";
 import type { Workstream } from "@/hooks/use-workspace-data";
@@ -565,7 +565,6 @@ function WorkspaceCanvasInner({
   onOpenHub,
   onCommitWorkstream,
   onOpenPanel,
-  onCreateArtifact,
 }: WorkspaceCanvasProps) {
   const reactFlowRef = useRef<ReactFlowInstance | null>(null);
   const initializedRef = useRef(false);
@@ -1412,7 +1411,7 @@ function WorkspaceCanvasInner({
             <>
               <ContextMenuItem icon={<FileText className="h-3.5 w-3.5" />} label="New note" onClick={() => { setContextMenu(null); panelOpener("artifact", "new"); }} />
               <ContextMenuItem icon={<MessageSquare className="h-3.5 w-3.5" />} label="New thread" onClick={() => { setContextMenu(null); panelOpener("chat", "new"); }} />
-              <ContextMenuItem icon={<Image className="h-3.5 w-3.5" />} label="New diagram" onClick={() => { setContextMenu(null); panelOpener("artifact", "new-diagram"); }} />
+              <ContextMenuItem icon={<ImageIcon className="h-3.5 w-3.5" />} label="New diagram" onClick={() => { setContextMenu(null); panelOpener("artifact", "new-diagram"); }} />
               <ContextMenuItem icon={<Code2 className="h-3.5 w-3.5" />} label="New code" onClick={() => { setContextMenu(null); panelOpener("artifact", "new-code"); }} />
               <ContextMenuItem icon={<CalendarClock className="h-3.5 w-3.5" />} label="New planner task" onClick={() => { setContextMenu(null); panelOpener("planner", "new"); }} />
               <div className="my-1 h-px bg-[var(--border-default)]/50" />

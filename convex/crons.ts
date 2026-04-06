@@ -37,7 +37,7 @@ crons.interval(
 );
 crons.interval(
   "refresh-platform-stats",
-  { minutes: 5 },
+  { hours: 1 },
   internal.superAdmin.refreshPlatformStats,
   {},
 );

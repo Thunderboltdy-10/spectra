@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { getOrCreateDefaultOrg, getUserByClerkId } from "./helpers";
 import { api } from "./_generated/api";
+import { addUserToPlatformStats, updateUserInPlatformStats } from "./platformStatsAggregates";
 
 function normalizeRole(inputRole?: string): "student" | "teacher" | "admin" {
   if (inputRole === "teacher" || inputRole === "admin") {
@@ -102,6 +103,7 @@ async function upsertUserFromInvitation(params: {
 
   let userId = existing?._id;
   if (existing) {
+    const previous = { _id: existing._id, role: existing.role };
     await ctx.db.patch(existing._id, {
       email,
       name,
@@ -110,6 +112,7 @@ async function upsertUserFromInvitation(params: {
       invitedAt: now,
       updatedAt: now,
     });
+    await updateUserInPlatformStats(ctx, previous, { _id: existing._id, role: invitation.role });
   } else {
     userId = await ctx.db.insert("users", {
       clerkId,
@@ -121,6 +124,7 @@ async function upsertUserFromInvitation(params: {
       createdAt: now,
       updatedAt: now,
     });
+    await addUserToPlatformStats(ctx, { _id: userId, role: invitation.role });
   }
 
   await ctx.db.patch(invitation._id, {
@@ -153,7 +157,19 @@ export const ensureUser = mutation({
   },
   handler: async (ctx, args) => {
     const existing = await getUserByClerkId(ctx, args.clerkId);
-    const orgId = existing?.orgId ?? (args.bootstrapAdmin ? await getOrCreateDefaultOrg(ctx) : undefined);
+    let orgId = existing?.orgId;
+
+    // Super admins should remain operable even if their previous org was deleted.
+    if (args.bootstrapAdmin) {
+      if (!orgId) {
+        orgId = await getOrCreateDefaultOrg(ctx);
+      } else {
+        const org = await ctx.db.get(orgId);
+        if (!org) {
+          orgId = await getOrCreateDefaultOrg(ctx);
+        }
+      }
+    }
     const now = Date.now();
 
     if (!orgId) {
@@ -167,6 +183,7 @@ export const ensureUser = mutation({
 
     if (existing) {
       const nextRole = existing.role === "admin" ? "admin" : role;
+      const previous = { _id: existing._id, role: existing.role };
       await ctx.db.patch(existing._id, {
         email: args.email,
         name: args.name,
@@ -174,6 +191,7 @@ export const ensureUser = mutation({
         orgId,
         updatedAt: now,
       });
+      await updateUserInPlatformStats(ctx, previous, { _id: existing._id, role: nextRole });
 
       await ctx.runMutation(api.seed.seedDemoPack, {
         orgId,
@@ -201,6 +219,7 @@ export const ensureUser = mutation({
       createdAt: now,
       updatedAt: now,
     });
+    await addUserToPlatformStats(ctx, { _id: userId, role });
 
     await ctx.runMutation(api.seed.seedDemoPack, {
       orgId,
@@ -359,6 +378,11 @@ export const updateRole = mutation({
     }
 
     await ctx.db.patch(args.targetUserId, { role: args.role, updatedAt: Date.now() });
+    await updateUserInPlatformStats(
+      ctx,
+      { _id: target._id, role: target.role },
+      { _id: target._id, role: args.role },
+    );
     return { ok: true };
   },
 });

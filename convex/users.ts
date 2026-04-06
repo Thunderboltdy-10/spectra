@@ -157,7 +157,19 @@ export const ensureUser = mutation({
   },
   handler: async (ctx, args) => {
     const existing = await getUserByClerkId(ctx, args.clerkId);
-    const orgId = existing?.orgId ?? (args.bootstrapAdmin ? await getOrCreateDefaultOrg(ctx) : undefined);
+    let orgId = existing?.orgId;
+
+    // Super admins should remain operable even if their previous org was deleted.
+    if (args.bootstrapAdmin) {
+      if (!orgId) {
+        orgId = await getOrCreateDefaultOrg(ctx);
+      } else {
+        const org = await ctx.db.get(orgId);
+        if (!org) {
+          orgId = await getOrCreateDefaultOrg(ctx);
+        }
+      }
+    }
     const now = Date.now();
 
     if (!orgId) {

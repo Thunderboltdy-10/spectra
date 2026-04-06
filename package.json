@@ -61,7 +61,7 @@
     "framer-motion": "^12.38.0",
     "html2canvas": "^1.4.1",
     "js-tiktoken": "^1.0.21",
-    "jspdf": "^2.5.2",
+    "jspdf": "^4.2.1",
     "katex": "^0.16.28",
     "kbar": "^0.1.0-beta.48",
     "lucide-react": "^0.563.0",

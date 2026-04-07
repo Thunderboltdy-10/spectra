@@ -1017,19 +1017,11 @@ export function buildWorkspaceNodes(
   const wsKey = data.workstreamTitle ?? "ws";
 
   const nodes: Node[] = [
-    // Title Anchor
-    {
-      id: `ws-title-${wsKey}`,
-      type: "workstreamTitle",
-      position: { x: basePosition.x, y: basePosition.y },
-      draggable: true,
-      data: { title: data.workstreamTitle || "Untitled", emoji: data.workstreamEmoji, band: data.band },
-    },
-    // Threads Lane
+    // Threads Lane (title anchor node removed — workspace name shown in breadcrumb overlay)
     {
       id: `ws-lane-threads-${wsKey}`,
       type: "categoryField",
-      position: { x: basePosition.x, y: basePosition.y + 100 },
+      position: { x: basePosition.x, y: basePosition.y },
       draggable: true,
       data: {
         label: "THREADS",
@@ -1049,7 +1041,7 @@ export function buildWorkspaceNodes(
     {
       id: `ws-lane-docs-${wsKey}`,
       type: "categoryField",
-      position: { x: basePosition.x + 360, y: basePosition.y + 100 },
+      position: { x: basePosition.x + 360, y: basePosition.y },
       draggable: true,
       data: {
         label: "DOCUMENTS",
@@ -1069,7 +1061,7 @@ export function buildWorkspaceNodes(
     {
       id: `ws-lane-planner-${wsKey}`,
       type: "categoryField",
-      position: { x: basePosition.x + 720, y: basePosition.y + 100 },
+      position: { x: basePosition.x + 720, y: basePosition.y },
       draggable: true,
       data: {
         label: "PLANNER",
@@ -1089,7 +1081,7 @@ export function buildWorkspaceNodes(
     ...artifactLanes.map((lane) => ({
       id: `ws-lane-${lane.id}-${wsKey}`,
       type: "categoryField" as const,
-      position: { x: basePosition.x + lane.xOffset, y: basePosition.y + 100 },
+      position: { x: basePosition.x + lane.xOffset, y: basePosition.y },
       draggable: true,
       data: {
         label: lane.label,

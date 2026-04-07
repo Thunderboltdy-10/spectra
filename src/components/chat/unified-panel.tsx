@@ -901,9 +901,12 @@ function OrchestrationView({
     searchEnabled,
     hasFinishedWork: Boolean(routeTrace || livePhasePlan?.length || lastModelUsed),
   });
-  const displayedPhasePlan = livePhasePlan && livePhasePlan.length > 0
-    ? livePhasePlan
-    : routeTrace?.phasePlan;
+  // Filter out the "title" phase — it's a background operation users don't need to see
+  const filterPhasePlan = (plan?: typeof livePhasePlan) =>
+    plan?.filter((p) => p.id !== "title") ?? undefined;
+  const displayedPhasePlan = filterPhasePlan(
+    livePhasePlan && livePhasePlan.length > 0 ? livePhasePlan : routeTrace?.phasePlan,
+  );
 
   // Track which steps have been seen during this session
   const [seenSteps, setSeenSteps] = useState<Set<string>>(new Set(["idle"]));

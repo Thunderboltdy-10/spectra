@@ -17,12 +17,30 @@ import { cn } from "@/lib/utils";
 import type { Workstream } from "@/hooks/use-workspace-data";
 import type { PanelType } from "@/stores/workspace-store";
 
+// Detect workspace creation intent from natural language
+function detectWorkspaceCreationIntent(query: string): string | null {
+  const lower = query.toLowerCase().trim();
+  const patterns = [
+    /^create\s+(?:a\s+)?(?:new\s+)?(.+?)\s+workspace$/i,
+    /^(?:new|add)\s+workspace(?:\s+for\s+(.+))?$/i,
+    /^make\s+(?:a\s+)?(?:new\s+)?(.+?)\s+workspace$/i,
+    /^start\s+(?:a\s+)?(?:new\s+)?(.+?)\s+workspace$/i,
+    /^workspace\s+for\s+(.+)$/i,
+  ];
+  for (const pattern of patterns) {
+    const match = lower.match(pattern);
+    if (match) return (match[1] ?? "New Workspace").trim();
+  }
+  return null;
+}
+
 type WorkspaceCommandBarProps = {
   hidden?: boolean;
   workstreams: Workstream[];
   primaryWorkstreamId?: string;
   onOpenWorkstreamChat: (workstreamId: string, query: string) => void;
   onOpenPanel?: (type: PanelType, id: string) => void;
+  onCreateWorkspace?: (name: string) => void;
   layoutId?: string;
   position?: { x: number; y: number };
   onPositionChange?: (pos: { x: number; y: number }) => void;
@@ -34,6 +52,7 @@ export function WorkspaceCommandBar({
   workstreams,
   primaryWorkstreamId,
   onOpenWorkstreamChat,
+  onCreateWorkspace,
   layoutId = "workspace-command-bar",
   position,
   onPositionChange,
@@ -105,10 +124,20 @@ export function WorkspaceCommandBar({
   const handleSubmit = useCallback(() => {
     if (!query.trim()) return;
     const trimmed = query.trim();
+
+    // Check for workspace creation intent first
+    const workspaceCreationName = detectWorkspaceCreationIntent(trimmed);
+    if (workspaceCreationName && onCreateWorkspace) {
+      onCreateWorkspace(workspaceCreationName);
+      setQuery("");
+      setFocused(false);
+      return;
+    }
+
     const inferredWorkstream = !selectedWs
       ? activeWorkstreams.find((ws) => {
           const haystack = `${ws.title} ${ws.description ?? ""} ${ws.subjectCode ?? ""}`.toLowerCase();
-          return haystack.includes(trimmed.toLowerCase());
+          return trimmed.toLowerCase().split(/\s+/).some(word => word.length > 3 && haystack.includes(word));
         }) ?? null
       : selectedWs;
 
@@ -119,7 +148,7 @@ export function WorkspaceCommandBar({
     }
     setQuery("");
     setFocused(false);
-  }, [activeWorkstreams, onOpenWorkstreamChat, query, router, selectedWs]);
+  }, [activeWorkstreams, onCreateWorkspace, onOpenWorkstreamChat, query, router, selectedWs]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {

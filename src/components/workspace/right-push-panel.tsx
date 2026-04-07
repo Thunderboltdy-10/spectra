@@ -10,14 +10,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   ArrowUpRight,
   CalendarClock,
   FileText,
   MessageSquare,
   Route,
+  Send,
   StickyNote,
 } from "lucide-react";
+import { ThinkingBlock } from "@/components/chat/thinking-block";
 import type { PanelType } from "@/stores/workspace-store";
 import { useChatPanel } from "@/hooks/use-chat-panel";
 import { useArtifactData } from "@/hooks/use-artifact-data";
@@ -27,7 +31,6 @@ import { ArtifactAiSurface } from "@/components/artifacts/artifact-ai-surface";
 import { stripGeneratedDocumentMarkers } from "@/lib/document-generator";
 import { RightSidePanel } from "@/components/shared/right-side-panel";
 import { notifyWorkspaceContentMutated } from "@/lib/workspace/events";
-import { WorkspaceCommandBar } from "@/components/workspace/workspace-command-bar";
 import type { Workstream } from "@/hooks/use-workspace-data";
 
 // Dynamic import TiptapEditor (SSR-safe)
@@ -88,6 +91,17 @@ export function RightPushPanel({
   const width = PANEL_WIDTHS[type];
   const panelRef = useRef<HTMLDivElement>(null);
 
+  // Compute contextual title — show workspace name when relevant
+  const workstream = workstreams.find((ws) => ws._id === workstreamId);
+  const workstreamName = workstream?.title;
+  const contextualTitle = (() => {
+    const base = PANEL_LABELS[type];
+    if (workstreamName && (type === "chat" || type === "note" || type === "artifact")) {
+      return `${base} · ${workstreamName}`;
+    }
+    return base;
+  })();
+
   // Escape to close
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -102,7 +116,7 @@ export function RightPushPanel({
       <div className="flex-1 min-h-0">
         <RightSidePanel
           width={width}
-          title={PANEL_LABELS[type]}
+          title={contextualTitle}
           icon={PANEL_ICONS[type]}
           onClose={onClose}
           panelType={type}
@@ -123,20 +137,6 @@ export function RightPushPanel({
         </RightSidePanel>
       </div>
 
-      {/* Command Bar Footer Transfer (Flying) */}
-      <div className="absolute bottom-10 left-0 right-0 flex justify-center pointer-events-none z-50">
-        <div className="pointer-events-auto w-full max-w-[90%] flex justify-center">
-          <WorkspaceCommandBar
-            workstreams={workstreams}
-            primaryWorkstreamId={workstreamId}
-            onOpenWorkstreamChat={(wsId, query) => {
-               window.dispatchEvent(new CustomEvent("ai-school:panel-chat-query", { detail: { wsId, query } }));
-            }}
-            layoutId="workspace-command-bar"
-            hidden={false}
-          />
-        </div>
-      </div>
     </div>
   );
 }
@@ -176,6 +176,8 @@ function ChatPanelContent({
   workstreamId?: string;
 }) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [draft, setDraft] = useState("");
 
   const {
     messages,
@@ -223,18 +225,33 @@ function ChatPanelContent({
     return () => window.removeEventListener("ai-school:panel-chat-query", handler);
   }, [sendMessage]);
 
+  const handleSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      const msg = draft.trim();
+      if (!msg || streaming) return;
+      setDraft("");
+      void sendMessage(msg);
+    },
+    [draft, sendMessage, streaming],
+  );
+
+  const emptyStateLabel = workstreamId
+    ? "Ask anything in this workspace"
+    : "Start a conversation";
+
   return (
     <div className="flex flex-col h-full">
-      {/* Messages area with bottom gradient mask */}
+      {/* Messages area */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {messages.length === 0 && !streaming && (
           <div className="flex flex-col items-center justify-center h-full text-center py-12">
             <MessageSquare className="w-8 h-8 text-[var(--text-tertiary)] mb-3" />
             <p className="text-sm text-[var(--text-secondary)]">
-              Start a conversation
+              {emptyStateLabel}
             </p>
             <p className="text-xs text-[var(--text-tertiary)] mt-1">
-              Ask anything about this workstream
+              {threadId !== "new" ? "Continue the conversation" : "Type a message below to begin"}
             </p>
           </div>
         )}
@@ -262,25 +279,32 @@ function ChatPanelContent({
                   : "bg-[var(--bg-primary)] border border-[var(--border-default)] shadow-sm text-[var(--text-primary)] rounded-bl-md",
               )}
             >
-              {msg.content || (msg.streaming && (
-                <span className="inline-flex gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-tertiary)] animate-bounce" style={{ animationDelay: "0ms" }} />
-                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-tertiary)] animate-bounce" style={{ animationDelay: "150ms" }} />
-                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-tertiary)] animate-bounce" style={{ animationDelay: "300ms" }} />
-                </span>
-              ))}
+              {msg.content ? (
+                msg.role === "assistant" ? (
+                  <div className="prose prose-sm dark:prose-invert max-w-none text-[var(--text-primary)] [&>*:last-child]:mb-0 [&_code]:rounded [&_code]:bg-[var(--bg-code)] [&_code]:px-1 [&_code]:py-0.5 [&_pre]:rounded-xl [&_pre]:bg-[var(--bg-code)] [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_a]:text-[var(--accent-cyan)] [&_a]:underline-offset-2">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {msg.content}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <span className="whitespace-pre-wrap">{msg.content}</span>
+                )
+              ) : (
+                msg.streaming && (
+                  <span className="inline-flex gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-tertiary)] animate-bounce" style={{ animationDelay: "0ms" }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-tertiary)] animate-bounce" style={{ animationDelay: "150ms" }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-tertiary)] animate-bounce" style={{ animationDelay: "300ms" }} />
+                  </span>
+                )
+              )}
             </div>
 
             {/* Thinking block */}
             {msg.thinking && (
-              <details className="max-w-[85%] text-[11px] text-[var(--text-tertiary)]">
-                <summary className="cursor-pointer hover:text-[var(--text-secondary)] transition-colors">
-                  Thinking...
-                </summary>
-                <div className="mt-1 px-2 py-1.5 rounded-lg bg-[var(--bg-primary)] border-[var(--border-default)] shadow-sm whitespace-pre-wrap text-[10px] max-h-32 overflow-y-auto">
-                  {msg.thinking}
-                </div>
-              </details>
+              <div className="max-w-[85%]">
+                <ThinkingBlock content={msg.thinking} streaming={msg.streaming ?? false} />
+              </div>
             )}
 
             {/* Model used */}
@@ -294,7 +318,27 @@ function ChatPanelContent({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Internal Composer removed — now uses Command Bar in footer */}
+      {/* In-panel composer */}
+      <div className="shrink-0 border-t border-[var(--border-default)]/60 p-3">
+        <form onSubmit={handleSubmit} className="flex items-center gap-2">
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Reply…"
+            disabled={streaming}
+            className="flex-1 rounded-xl bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:ring-1 focus:ring-[var(--accent-cyan)]/40 border border-transparent transition-all disabled:opacity-50"
+          />
+          <button
+            type="submit"
+            disabled={!draft.trim() || streaming}
+            className="h-8 w-8 flex items-center justify-center rounded-xl bg-[var(--accent-cyan)] text-white disabled:opacity-40 hover:brightness-110 transition-all shrink-0"
+            title="Send"
+          >
+            <Send className="w-3.5 h-3.5" />
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
@@ -408,8 +452,26 @@ function ArtifactPanelContent({
   const [error, setError] = useState<string | null>(null);
   const [createdId, setCreatedId] = useState<string | null>(null);
 
+  // IDs starting with "new" (e.g. "new", "new-diagram", "new-code") are creation intents.
+  const isNewIntent = artifactId.startsWith("new");
+  // Parse the artifact type from the suffix: "new-diagram" → "diagram", "new-code" → "code", "new" → "document"
+  const newArtifactType = isNewIntent
+    ? (artifactId.slice(4).replace(/^-/, "") || "document")
+    : "document";
+  // Map "diagram" / "code" to a valid artifact type the API accepts
+  const resolvedNewType =
+    newArtifactType === "diagram" || newArtifactType === "code"
+      ? "document"
+      : "document";
+  const newArtifactTitle =
+    newArtifactType === "diagram"
+      ? "Untitled diagram"
+      : newArtifactType === "code"
+        ? "Untitled code file"
+        : "Untitled";
+
   const loadArtifact = useCallback(async () => {
-    const effectiveId = artifactId === "new" ? createdId : artifactId;
+    const effectiveId = isNewIntent ? createdId : artifactId;
     if (!effectiveId) return;
 
     setLoading(true);
@@ -418,7 +480,8 @@ function ArtifactPanelContent({
       const response = await fetch(`/api/artifacts?action=get&id=${encodeURIComponent(effectiveId)}`);
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || "Failed to load artifact");
+        const errMsg = typeof errData.error === "string" ? errData.error : String(errData.error || "Failed to load artifact");
+        throw new Error(errMsg);
       }
       const data = (await response.json()) as { artifact: Record<string, unknown> };
       if (!data.artifact) throw new Error("Artifact not found");
@@ -430,10 +493,10 @@ function ArtifactPanelContent({
     } finally {
       setLoading(false);
     }
-  }, [artifactId, createdId]);
+  }, [artifactId, createdId, isNewIntent]);
 
   useEffect(() => {
-    if (artifactId !== "new" || createdId) return;
+    if (!isNewIntent || createdId) return;
     setLoading(true);
     void (async () => {
       try {
@@ -442,8 +505,8 @@ function ArtifactPanelContent({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             action: "create",
-            type: "document",
-            title: "Untitled",
+            type: resolvedNewType,
+            title: newArtifactTitle,
             content: { type: "doc", content: [{ type: "paragraph" }] },
             contentPlaintext: "",
             editorMode: "standard",
@@ -466,7 +529,8 @@ function ArtifactPanelContent({
         setLoading(false);
       }
     })();
-  }, [artifactId, createdId, workstreamId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNewIntent, createdId, workstreamId]);
 
   useEffect(() => {
     void loadArtifact();
@@ -503,7 +567,7 @@ function ArtifactPanelContent({
       <div className="flex-1 min-h-0 overflow-y-auto">
         {isDocument ? (
           <TiptapEditor
-            artifactId={artifactId === "new" ? (createdId ?? artifactId) : artifactId}
+            artifactId={isNewIntent ? (createdId ?? artifactId) : artifactId}
             workstreamId={typeof artifact.workstreamId === "string" ? artifact.workstreamId : workstreamId}
             content={(artifact.content as import("@tiptap/core").JSONContent | null) ?? null}
             compact
@@ -512,7 +576,7 @@ function ArtifactPanelContent({
             createdAt={Number(artifact.createdAt ?? Date.now())}
             updatedAt={Number(artifact.updatedAt ?? Date.now())}
             onVersionHistoryOpen={() => {
-              const effectiveId = artifactId === "new" ? createdId : artifactId;
+              const effectiveId = isNewIntent ? createdId : artifactId;
               if (!effectiveId) return;
               router.push(`/notes?id=${encodeURIComponent(effectiveId)}&versionHistory=1`);
             }}
@@ -539,7 +603,7 @@ function ArtifactPanelContent({
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   action: "update",
-                  artifactId: artifactId === "new" ? createdId : artifactId,
+                  artifactId: isNewIntent ? createdId : artifactId,
                   title: stripGeneratedDocumentMarkers(text.trim().split("\n")[0] || "Untitled").trim() || "Untitled",
                   content,
                   contentPlaintext: stripGeneratedDocumentMarkers(text),
@@ -592,7 +656,7 @@ function ArtifactPanelContent({
 
       {!isDocument ? (
         <ArtifactAiSurface
-          artifactId={artifactId === "new" ? (createdId ?? artifactId) : artifactId}
+          artifactId={isNewIntent ? (createdId ?? artifactId) : artifactId}
           context="workspace-panel"
           workstreamId={typeof artifact.workstreamId === "string" ? artifact.workstreamId : workstreamId}
         />

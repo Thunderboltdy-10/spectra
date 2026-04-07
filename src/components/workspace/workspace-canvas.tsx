@@ -650,44 +650,15 @@ function WorkspaceCanvasInner({
     return applyOverrides(canonical, workstreams, localOverrides);
   }, [workstreams, localOverrides]);
 
-  // Auto-enter/exit via zoom threshold (restoring previous behavior as requested)
+  // Auto-exit when zooming far out of a committed workstream
   useEffect(() => {
-    if (primaryWorkstreamId && zoom < 0.25) {
-      if (onCommitWorkstream) {
-        onCommitWorkstream(null);
-      } else {
-        exitWorkstream();
-      }
-    } else if (!primaryWorkstreamId && zoom > 0.9) {
-      // Find the closest workstream to the center
-      const instance = reactFlowRef.current;
-      if (instance) {
-        const vp = instance.getViewport();
-        // find node closest to center of viewport
-        // viewport center in ReactFlow coordinates:
-        const centerX = -vp.x / vp.zoom + (typeof window !== 'undefined' ? window.innerWidth / (2 * vp.zoom) : 0);
-        const centerY = -vp.y / vp.zoom + (typeof window !== 'undefined' ? window.innerHeight / (2 * vp.zoom) : 0);
-        let closestId = null;
-        let minDist = Infinity;
-        for (const [id, pos] of positions.entries()) {
-          const dx = pos.x - centerX;
-          const dy = pos.y - centerY;
-          const dist = dx*dx + dy*dy;
-          if (dist < minDist) {
-            minDist = dist;
-            closestId = id;
-          }
-        }
-        if (closestId && minDist < 200000) {
-          if (onCommitWorkstream) {
-            onCommitWorkstream(closestId);
-          } else {
-            commitWorkstream(closestId);
-          }
-        }
-      }
+    if (!primaryWorkstreamId || zoom >= 0.25) return;
+    if (onCommitWorkstream) {
+      onCommitWorkstream(null);
+    } else {
+      exitWorkstream();
     }
-  }, [zoom, primaryWorkstreamId, exitWorkstream, positions, commitWorkstream, onCommitWorkstream]);
+  }, [zoom, primaryWorkstreamId, exitWorkstream, onCommitWorkstream]);
 
 
   useEffect(() => {
@@ -1027,7 +998,7 @@ function WorkspaceCanvasInner({
         position: pos,
         draggable: !primaryWorkstreamId,
         selectable: false,
-        hidden: isDimmed && neighborOpacity <= 0,
+        hidden: isCommitted || (isDimmed && neighborOpacity <= 0),
         data: {
           workstream: ws,
           band,
@@ -1133,11 +1104,42 @@ function WorkspaceCanvasInner({
     reactFlowRef.current = instance;
     if (initializedRef.current) return;
     initializedRef.current = true;
-    if (primaryWorkstreamId) {
+    // Use focusWorkstreamId (from URL param) as fallback when the store hasn't synced yet.
+    // This handles the timing gap where the canvas mounts before the URL-sync useEffect fires.
+    const initWorkstreamId = primaryWorkstreamId ?? focusWorkstreamId;
+    if (initWorkstreamId) {
+      // Workspace pre-committed via URL param.
+      // Mark animatedCommitRef so the canvas effect doesn't re-zoom on top.
+      animatedCommitRef.current = initWorkstreamId;
+      // Immediately surface internal nodes — without this, the useEffect guard above
+      // (animatedCommitRef check) would prevent the effect from ever calling
+      // setVisibleWorkstreamIds, leaving the workspace interior blank.
+      setVisibleWorkstreamIds([initWorkstreamId]);
+      void fetchContentForWorkstream(initWorkstreamId);
+      // Restore saved viewport if it was inside this workspace (zoom > 0.5)
       const saved = restoreViewport();
-      instance.setViewport(saved, { duration: 0 });
-      setCamera({ x: saved.x, y: saved.y, z: saved.zoom });
-      setZoom(saved.zoom);
+      if (saved.zoom > 0.5) {
+        instance.setViewport(saved, { duration: 0 });
+        setCamera({ x: saved.x, y: saved.y, z: saved.zoom });
+        setZoom(saved.zoom);
+      } else {
+        // Saved viewport is overview zoom — center on the workspace node at a good zoom level
+        const node = instance.getNode(`ws-${initWorkstreamId}`);
+        if (node) {
+          instance.setCenter(
+            node.position.x + 260,
+            node.position.y + 120,
+            { zoom: 0.85, duration: 0 },
+          );
+          const vp = instance.getViewport();
+          setCamera({ x: vp.x, y: vp.y, z: vp.zoom });
+          setZoom(vp.zoom);
+        } else {
+          instance.setViewport(saved, { duration: 0 });
+          setCamera({ x: saved.x, y: saved.y, z: saved.zoom });
+          setZoom(saved.zoom);
+        }
+      }
     } else {
       setTimeout(() => {
         instance.fitView({ padding: 0.08, duration: 400 });
@@ -1146,7 +1148,7 @@ function WorkspaceCanvasInner({
         setZoom(vp.zoom);
       }, 50);
     }
-  }, [primaryWorkstreamId, setCamera]);
+  }, [fetchContentForWorkstream, focusWorkstreamId, primaryWorkstreamId, setCamera, setVisibleWorkstreamIds]);
 
   const handleMove = useCallback((_: unknown, viewport: Viewport) => {
     setZoom(viewport.zoom);
@@ -1322,13 +1324,18 @@ function WorkspaceCanvasInner({
   }, [focusWorkstreamId]);
 
   useEffect(() => {
-    const handler = () => {
+    // Use capture phase so the handler fires before stopPropagation in child elements,
+    // ensuring context menus close on ANY click outside them.
+    const handler = (e: MouseEvent) => {
+      // Don't close if clicking inside a context menu element itself
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("[data-context-menu]")) return;
       setContextMenu(null);
       setItemContextMenu(null);
       setGroupContextMenu(null);
     };
-    window.addEventListener("mousedown", handler);
-    return () => window.removeEventListener("mousedown", handler);
+    window.addEventListener("mousedown", handler, true);
+    return () => window.removeEventListener("mousedown", handler, true);
   }, []);
 
   return (
@@ -1403,6 +1410,7 @@ function WorkspaceCanvasInner({
       {/* ─── Empty canvas context menu ─── */}
       {contextMenu && (
         <div
+          data-context-menu
           onMouseDown={(e) => e.stopPropagation()}
           className="absolute z-40 min-w-[220px] overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]/96 p-1.5 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.38)] backdrop-blur-xl"
           style={{ left: contextMenu.x, top: contextMenu.y }}
@@ -1431,6 +1439,7 @@ function WorkspaceCanvasInner({
       {/* ─── Item context menu ─── */}
       {itemContextMenu && (
         <div
+          data-context-menu
           onMouseDown={(e) => e.stopPropagation()}
           className="absolute z-40 min-w-[220px] overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]/96 p-1.5 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.38)] backdrop-blur-xl"
           style={{ left: itemContextMenu.x, top: itemContextMenu.y }}
@@ -1533,6 +1542,7 @@ function WorkspaceCanvasInner({
       {/* ─── Group context menu ─── */}
       {groupContextMenu && (
         <div
+          data-context-menu
           onMouseDown={(e) => e.stopPropagation()}
           className="absolute z-40 min-w-[220px] overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]/96 p-1.5 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.38)] backdrop-blur-xl"
           style={{ left: groupContextMenu.x, top: groupContextMenu.y }}
@@ -1551,6 +1561,7 @@ function WorkspaceCanvasInner({
       {/* ─── Move to workspace picker ─── */}
       {movePicker && (
         <div
+          data-context-menu
           onMouseDown={(e) => e.stopPropagation()}
           className="absolute z-50 w-72 overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_24px_56px_-16px_rgba(15,23,42,0.48)] backdrop-blur-xl"
           style={{ left: "50%", top: "50%", transform: "translate(-50%,-50%)" }}

@@ -1266,13 +1266,13 @@ button:disabled {
 .tiptap-root.tiptap-full .ProseMirror {
   font-size: 16px;
   line-height: 1.86;
-  padding: 0 0 5rem 0.75rem;
+  padding: 0 0 5rem 3.5rem; /* left: 56px to make room for gutter buttons */
 }
 
 .tiptap-root.tiptap-compact .ProseMirror {
   font-size: 14px;
   line-height: 1.72;
-  padding: 0 0 2rem;
+  padding: 0 0 2rem 3.5rem; /* left: 56px to make room for gutter buttons */
   background: transparent !important;
 }
 

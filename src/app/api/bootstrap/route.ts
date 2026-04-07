@@ -92,12 +92,24 @@ export async function GET() {
 
     const isSuperAdmin = isSuperAdminEmail(actor.email);
 
+    // Override openRouter status using the Next.js env — Convex env vars are separate
+    // from Next.js env vars and the Convex startup warning fires even when the key
+    // is properly configured in .env.local / Vercel env.
+    const openRouterKeyConfigured = Boolean(process.env.OPENROUTER_API_KEY?.trim());
+    const patchedOrgSettings = {
+      ...(orgSettings as Record<string, unknown>),
+      openRouterConfigured: openRouterKeyConfigured,
+      openRouterWarnings: openRouterKeyConfigured
+        ? []
+        : ((orgSettings as Record<string, unknown>).openRouterWarnings as string[] ?? []),
+    };
+
     return ok({
       actor,
       isSuperAdmin,
       chats,
       models,
-      orgSettings,
+      orgSettings: patchedOrgSettings,
       agents,
       userSpending,
       userMemory: {

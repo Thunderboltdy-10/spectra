@@ -7,7 +7,6 @@ import { useUser } from "@clerk/nextjs";
 import { toast } from "sonner";
 import { AnimatePresence } from "framer-motion";
 import { AppShell } from "@/components/layout/app-shell";
-import { WorkspaceCommandBar } from "@/components/workspace/workspace-command-bar";
 import { WorkstreamCreateDialog } from "@/components/workspace/workstream-create-dialog";
 import { CreateArtifactDialog } from "@/components/artifacts/create-artifact-dialog";
 import { RightPushPanel } from "@/components/workspace/right-push-panel";
@@ -21,6 +20,22 @@ import {
   subscribeWorkspaceContentMutated,
 } from "@/lib/workspace/events";
 import { hasClerkPublishableKey } from "@/lib/clerk-config";
+
+// Lightweight workspace-creation intent detection (mirrors command bar logic)
+function detectWorkspaceIntent(query: string): string | null {
+  const patterns = [
+    /^create\s+(?:a\s+)?(?:new\s+)?(.+?)\s+workspace$/i,
+    /^(?:new|add)\s+workspace(?:\s+for\s+(.+))?$/i,
+    /^make\s+(?:a\s+)?(?:new\s+)?(.+?)\s+workspace$/i,
+    /^start\s+(?:a\s+)?(?:new\s+)?(.+?)\s+workspace$/i,
+    /^workspace\s+for\s+(.+)$/i,
+  ];
+  for (const pattern of patterns) {
+    const match = query.match(pattern);
+    if (match) return (match[1] ?? "New Workspace").trim();
+  }
+  return null;
+}
 
 const WorkspaceCanvas = dynamic(
   () =>
@@ -321,22 +336,23 @@ function WorkspaceContent() {
                     onOpenWorkstream={(wsId) => handleCommitWorkstream(wsId)}
                     onExitWorkstream={() => handleCommitWorkstream(null)}
                     panelOpen={!!panel}
-                  />
-                  {!panel && (
-                    <WorkspaceCommandBar
-                      workstreams={workstreams}
-                      primaryWorkstreamId={primaryWorkstreamId}
-                      onOpenWorkstreamChat={(wsId, query) => {
-                        handleCommitWorkstream(wsId);
-                        handleOpenPanel("chat", "new");
+                    onNewWorkstream={handleNewWorkstream}
+                    onQuickChat={(query) => {
+                      // Detect workspace-creation intent before routing to chat
+                      const wsName = detectWorkspaceIntent(query);
+                      if (wsName) {
+                        handleNewWorkstream();
+                        window.dispatchEvent(new CustomEvent("workspace:suggest-name", { detail: { name: wsName } }));
+                        return;
+                      }
+                      if (primaryWorkstreamId) {
+                        handleOpenPanel('chat', 'new');
                         useWorkspaceStore.getState().setOpenChatQuery(query);
-                      }}
-                      onOpenPanel={handleOpenPanel}
-                      position={useWorkspaceStore.getState().utilityPositions["command_bar"]}
-                      onPositionChange={(pos) => useWorkspaceStore.getState().setUtilityPosition("command_bar", pos)}
-                    />
-                  )}
-
+                      } else {
+                        router.push(`/chat?prompt=${encodeURIComponent(query)}`);
+                      }
+                    }}
+                  />
                   {/* Empty state */}
                   {workstreams.length === 0 && !primaryWorkstreamId && (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
@@ -360,29 +376,33 @@ function WorkspaceContent() {
                   )}
                 </div>
 
-                {/* Right push-panel */}
+                {/* Right push-panel — motion wrapper drives the slide-in/out so the
+                    canvas and panel animate in perfect sync (no gap or overlap) */}
                 <AnimatePresence>
                   {panel && (
-                    <RightPushPanel
-                      type={panel.type}
-                      id={panel.id}
-                      workstreamId={
-                        primaryWorkstreamId
-                      }
-                      onClose={handleClosePanel}
-                      onExpand={(type, id) => {
-                        if (type === "chat") {
-                          router.push(`/chat?chatId=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
-                        } else if (type === "note") {
-                          router.push(`/artifacts?id=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
-                        } else if (type === "artifact") {
-                          router.push(`/artifacts?id=${id}`);
-                        } else if (type === "planner") {
-                          router.push(`/planner?item=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
-                        }
-                      }}
-                      workstreams={workstreams}
-                    />
+                    <div
+                      className="h-full shrink-0 overflow-hidden relative"
+                      style={{ width: panelWidth }}
+                    >
+                      <RightPushPanel
+                        type={panel.type}
+                        id={panel.id}
+                        workstreamId={primaryWorkstreamId}
+                        onClose={handleClosePanel}
+                        onExpand={(type, id) => {
+                          if (type === "chat") {
+                            router.push(`/chat?chatId=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
+                          } else if (type === "note") {
+                            router.push(`/artifacts?id=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
+                          } else if (type === "artifact") {
+                            router.push(`/artifacts?id=${id}`);
+                          } else if (type === "planner") {
+                            router.push(`/planner?item=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
+                          }
+                        }}
+                        workstreams={workstreams}
+                      />
+                    </div>
                   )}
                 </AnimatePresence>
               </div>

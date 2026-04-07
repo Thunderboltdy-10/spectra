@@ -1,9 +1,33 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ChevronLeft, Pause, Play, RotateCcw, Calendar, LayoutGrid, MessageSquarePlus, Plus, FileText, Code2, BarChart2, ClipboardList, X } from 'lucide-react';
+import {
+  ChevronLeft,
+  Pause,
+  Play,
+  RotateCcw,
+  Calendar,
+  LayoutGrid,
+  MessageSquarePlus,
+  Plus,
+  FileText,
+  Code2,
+  BarChart2,
+  ClipboardList,
+  X,
+  Dot,
+  Grid3X3,
+  Minus,
+  Eye,
+  EyeOff,
+  CheckSquare,
+  Workflow,
+  Sparkles,
+  GitBranch,
+  Layers,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import type { Workstream } from '@/hooks/use-workspace-data';
@@ -16,6 +40,70 @@ interface EdgeUtilityOverlayProps {
   panelOpen: boolean;
   onQuickChat?: (message: string) => void;
   onCreateItem?: (type: 'note' | 'code' | 'visual' | 'planner') => void;
+  onNewWorkstream?: () => void;
+}
+
+// Radial fan menu item angle map (semicircle, bottom to top)
+const CREATE_ITEMS = [
+  { type: 'note' as const, icon: FileText, label: 'Note', color: 'var(--accent-purple)', angle: 150 },
+  { type: 'code' as const, icon: Code2, label: 'Code', color: 'var(--accent-mint)', angle: 120 },
+  { type: 'visual' as const, icon: BarChart2, label: 'Visual', color: 'var(--accent-cyan)', angle: 90 },
+  { type: 'planner' as const, icon: ClipboardList, label: 'Task', color: 'var(--accent-orange)', angle: 60 },
+  { type: 'workspace' as const, icon: Layers, label: 'Workspace', color: 'var(--accent-coral)', angle: 30 },
+];
+
+function RadialItem({
+  icon: Icon,
+  label,
+  color,
+  angle,
+  radius,
+  open,
+  index,
+  onClick,
+}: {
+  icon: React.ElementType;
+  label: string;
+  color: string;
+  angle: number;
+  radius: number;
+  open: boolean;
+  index: number;
+  onClick: () => void;
+}) {
+  const rad = (angle * Math.PI) / 180;
+  const x = Math.cos(rad) * radius;
+  const y = -Math.sin(rad) * radius; // negative because CSS y is inverted
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: 0, y: 0, scale: 0.5 }}
+      animate={open ? { opacity: 1, x, y, scale: 1 } : { opacity: 0, x: 0, y: 0, scale: 0.5 }}
+      exit={{ opacity: 0, x: 0, y: 0, scale: 0.5 }}
+      transition={{
+        duration: 0.32,
+        delay: open ? index * 0.04 : (CREATE_ITEMS.length - index) * 0.025,
+        ease: [0.22, 1, 0.36, 1],
+      }}
+      className="absolute"
+      style={{ left: '50%', top: '50%', marginLeft: -22, marginTop: -22 }}
+    >
+      <motion.button
+        onClick={onClick}
+        whileHover={{ scale: 1.15 }}
+        whileTap={{ scale: 0.9 }}
+        title={label}
+        className="group relative flex h-11 w-11 flex-col items-center justify-center rounded-full shadow-[0_4px_20px_rgba(0,0,0,0.25)] transition-all duration-200"
+        style={{ background: `color-mix(in oklab, ${color} 15%, var(--bg-elevated))`, border: `1.5px solid ${color}40` }}
+      >
+        <Icon className="h-4.5 w-4.5" style={{ color }} />
+        {/* Tooltip */}
+        <span className="pointer-events-none absolute -bottom-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-default)] px-2 py-1 text-[10px] font-semibold text-[var(--text-primary)] opacity-0 group-hover:opacity-100 transition-opacity shadow-md">
+          {label}
+        </span>
+      </motion.button>
+    </motion.div>
+  );
 }
 
 export function EdgeUtilityOverlay({
@@ -26,6 +114,7 @@ export function EdgeUtilityOverlay({
   panelOpen,
   onQuickChat,
   onCreateItem,
+  onNewWorkstream,
 }: EdgeUtilityOverlayProps) {
   const router = useRouter();
   const {
@@ -35,7 +124,13 @@ export function EdgeUtilityOverlay({
     resetTimer,
     utilityRevealOpen,
     utilityPositions,
-    setUtilityPosition
+    setUtilityPosition,
+    showArchived,
+    showConnections,
+    backgroundMode,
+    setShowArchived,
+    setShowConnections,
+    setBackgroundMode,
   } = useWorkspaceStore();
 
   const [shortcutsHovered, setShortcutsHovered] = useState(false);
@@ -44,8 +139,21 @@ export function EdgeUtilityOverlay({
   const [quickChatDraft, setQuickChatDraft] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const quickChatInputRef = useRef<HTMLInputElement>(null);
+  const createButtonRef = useRef<HTMLDivElement>(null);
 
   const activeWorkstreams = workstreams.filter(ws => ws.status === 'active');
+
+  // Close radial menu on outside click
+  useEffect(() => {
+    if (!createOpen) return;
+    const handler = (e: PointerEvent) => {
+      if (createButtonRef.current && !createButtonRef.current.contains(e.target as Node)) {
+        setCreateOpen(false);
+      }
+    };
+    window.addEventListener('pointerdown', handler, true);
+    return () => window.removeEventListener('pointerdown', handler, true);
+  }, [createOpen]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -53,7 +161,17 @@ export function EdgeUtilityOverlay({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const glassStyle = "bg-white/85 dark:bg-white/15 backdrop-blur-[40px] border border-white/50 dark:border-white/20 shadow-[0_12px_40px_-8px_rgba(0,0,0,0.12)] dark:shadow-[0_20px_60px_-12px_rgba(0,0,0,0.6)] text-[var(--text-primary)]";
+  const cycleBackground = () => {
+    const modes = ['dots', 'grid', 'blank'] as const;
+    const current = modes.indexOf(backgroundMode as typeof modes[number]);
+    setBackgroundMode(modes[(current + 1) % modes.length]);
+  };
+
+  const glassStyle =
+    'bg-white/85 dark:bg-white/15 backdrop-blur-[40px] border border-white/50 dark:border-white/20 shadow-[0_12px_40px_-8px_rgba(0,0,0,0.12)] dark:shadow-[0_20px_60px_-12px_rgba(0,0,0,0.6)] text-[var(--text-primary)]';
+
+  const BackgroundIcon =
+    backgroundMode === 'dots' ? Dot : backgroundMode === 'grid' ? Grid3X3 : Minus;
 
   return (
     <>
@@ -65,8 +183,8 @@ export function EdgeUtilityOverlay({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
             className={cn(
-              "absolute top-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2 rounded-full",
-              glassStyle
+              'absolute top-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2 rounded-full',
+              glassStyle,
             )}
           >
             <button
@@ -83,7 +201,7 @@ export function EdgeUtilityOverlay({
       </AnimatePresence>
 
       {/* Bottom Left: Focus Timer */}
-      <div 
+      <div
         className="absolute bottom-10 left-10 z-40"
         onMouseEnter={() => setTimerHovered(true)}
         onMouseLeave={() => setTimerHovered(false)}
@@ -97,40 +215,44 @@ export function EdgeUtilityOverlay({
             const current = utilityPositions['focus_timer'] || { x: 0, y: 0 };
             setUtilityPosition('focus_timer', { x: 0, y: current.y + info.offset.y });
           }}
-          animate={{ 
-            y: utilityPositions['focus_timer']?.y ?? 0 
-          }}
+          animate={{ y: utilityPositions['focus_timer']?.y ?? 0 }}
           className={cn(
-            "flex items-center gap-3 p-2 rounded-full transition-all duration-500",
+            'flex items-center gap-3 p-2 rounded-full transition-all duration-500',
             glassStyle,
-            (timerState.active || timerHovered) ? "pr-5 pl-2" : "pr-2 pl-2"
+            timerState.active || timerHovered ? 'pr-5 pl-2' : 'pr-2 pl-2',
           )}
         >
           <button
-            onClick={() => timerState.active ? pauseTimer() : startTimer()}
+            onClick={() => (timerState.active ? pauseTimer() : startTimer())}
             className={cn(
-              "w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300",
-              timerState.active 
-                ? "bg-[var(--accent-cyan)] text-white shadow-[0_0_20px_rgba(14,142,232,0.4)] scale-105" 
-                : "bg-black/5 dark:bg-white/10 text-[var(--text-secondary)] hover:bg-black/10 dark:hover:bg-white/20"
+              'w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300',
+              timerState.active
+                ? 'bg-[var(--accent-cyan)] text-white shadow-[0_0_20px_rgba(14,142,232,0.4)] scale-105'
+                : 'bg-black/5 dark:bg-white/10 text-[var(--text-secondary)] hover:bg-black/10 dark:hover:bg-white/20',
             )}
           >
-            {timerState.active ? <Pause className="w-4.5 h-4.5" /> : <Play className="w-4.5 h-4.5 ml-0.5" />}
+            {timerState.active ? (
+              <Pause className="w-4 h-4" />
+            ) : (
+              <Play className="w-4 h-4 ml-0.5" />
+            )}
           </button>
-          
+
           <div className="flex items-center gap-3 overflow-hidden whitespace-nowrap">
             <div className="flex flex-col">
-              <span className={cn(
-                "text-[10px] uppercase tracking-[0.2em] font-bold leading-none mb-1 transition-colors",
-                timerState.active ? "text-[var(--accent-cyan)]" : "text-[var(--text-tertiary)]"
-              )}>
+              <span
+                className={cn(
+                  'text-[10px] uppercase tracking-[0.2em] font-bold leading-none mb-1 transition-colors',
+                  timerState.active ? 'text-[var(--accent-cyan)]' : 'text-[var(--text-tertiary)]',
+                )}
+              >
                 Focus
               </span>
               <span className="text-[15px] font-mono font-bold tabular-nums leading-none">
                 {formatTime(timerState.sessionMinutes * 60 - timerState.elapsed)}
               </span>
             </div>
-            
+
             <AnimatePresence>
               {timerHovered && (
                 <motion.div
@@ -139,7 +261,7 @@ export function EdgeUtilityOverlay({
                   exit={{ width: 0, opacity: 0, x: -10 }}
                   className="flex items-center gap-1 border-l border-black/10 dark:border-white/10 pl-3 ml-1"
                 >
-                  <button 
+                  <button
                     onClick={() => resetTimer()}
                     className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-all"
                     title="Reset timer"
@@ -154,13 +276,12 @@ export function EdgeUtilityOverlay({
       </div>
 
       {/* Left Edge: Workstream Shortcuts */}
-      <div 
+      <div
         className="absolute left-0 top-1/2 -translate-y-1/2 z-40 pl-8"
         onMouseEnter={() => setShortcutsHovered(true)}
         onMouseLeave={() => setShortcutsHovered(false)}
       >
         <motion.div
-          layout
           drag="y"
           dragConstraints={{ top: -200, bottom: 200 }}
           dragElastic={0.1}
@@ -168,13 +289,12 @@ export function EdgeUtilityOverlay({
             const current = utilityPositions['workstream_shortcuts'] || { x: 0, y: 0 };
             setUtilityPosition('workstream_shortcuts', { x: 0, y: current.y + info.offset.y });
           }}
-          animate={{ 
-            y: utilityPositions['workstream_shortcuts']?.y ?? 0 
-          }}
+          animate={{ y: utilityPositions['workstream_shortcuts']?.y ?? 0, width: shortcutsHovered ? 224 : 64 }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
           className={cn(
-            "flex flex-col gap-3 p-3 rounded-[32px] transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]",
+            'flex flex-col gap-3 p-3 rounded-[32px] overflow-hidden',
             glassStyle,
-            shortcutsHovered ? "w-56 items-start" : "w-16 items-center"
+            shortcutsHovered ? 'items-start' : 'items-center',
           )}
         >
           {!shortcutsHovered && (
@@ -185,7 +305,12 @@ export function EdgeUtilityOverlay({
               <div className="h-px w-8 bg-black/10 dark:bg-white/10" />
               <div className="flex flex-col gap-3">
                 {activeWorkstreams.slice(0, 4).map(ws => (
-                  <span key={ws._id} className="text-xl filter drop-shadow-sm opacity-60 hover:opacity-100 transition-opacity cursor-default">{ws.emoji || '📚'}</span>
+                  <span
+                    key={ws._id}
+                    className="text-xl filter drop-shadow-sm opacity-60 hover:opacity-100 transition-opacity cursor-default"
+                  >
+                    {ws.emoji || '📚'}
+                  </span>
                 ))}
               </div>
             </div>
@@ -197,45 +322,60 @@ export function EdgeUtilityOverlay({
             </div>
           )}
 
-          {shortcutsHovered && activeWorkstreams.slice(0, 8).map((ws) => {
-            const isActive = primaryWorkstreamId === ws._id;
-            return (
-              <button
-                key={ws._id}
-                onClick={() => onOpenWorkstream(ws._id)}
-                className={cn(
-                  "relative flex items-center gap-3 w-full rounded-2xl transition-all duration-200 px-3 py-2.5",
-                  isActive ? "bg-[var(--accent-cyan)]/10 text-[var(--accent-cyan)] font-bold shadow-sm" : "hover:bg-black/5 dark:hover:bg-white/5 text-[var(--text-secondary)]"
-                )}
-              >
-                <span className="text-lg leading-none shrink-0">{ws.emoji || '📚'}</span>
-                <span className="truncate text-xs tracking-tight">
-                  {ws.title}
-                </span>
-                {isActive && (
-                  <div className="absolute right-3 w-1.5 h-1.5 rounded-full bg-[var(--accent-cyan)] shadow-[0_0_8px_var(--accent-cyan)]" />
-                )}
-              </button>
-            );
-          })}
-          
+          {shortcutsHovered &&
+            activeWorkstreams.slice(0, 8).map(ws => {
+              const isActive = primaryWorkstreamId === ws._id;
+              return (
+                <button
+                  key={ws._id}
+                  onClick={() => onOpenWorkstream(ws._id)}
+                  className={cn(
+                    'relative flex items-center gap-3 w-full rounded-2xl transition-all duration-200 px-3 py-2.5',
+                    isActive
+                      ? 'bg-[var(--accent-cyan)]/10 text-[var(--accent-cyan)] font-bold shadow-sm'
+                      : 'hover:bg-black/5 dark:hover:bg-white/5 text-[var(--text-secondary)]',
+                  )}
+                >
+                  <span className="text-lg leading-none shrink-0">{ws.emoji || '📚'}</span>
+                  <span className="truncate text-xs tracking-tight">{ws.title}</span>
+                  {isActive && (
+                    <div className="absolute right-3 w-1.5 h-1.5 rounded-full bg-[var(--accent-cyan)] shadow-[0_0_8px_var(--accent-cyan)]" />
+                  )}
+                </button>
+              );
+            })}
+
           {shortcutsHovered && activeWorkstreams.length > 0 && (
             <div className="w-full h-px bg-black/10 dark:bg-white/10 my-1" />
           )}
-          
+
           {shortcutsHovered && (
-            <button
-              className="flex items-center gap-3 w-full rounded-2xl transition-all px-3 py-2.5 hover:bg-black/5 dark:hover:bg-white/5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-            >
-              <Calendar className="w-4 h-4 shrink-0" />
-              <span className="text-[10px] font-bold uppercase tracking-widest">Schedule</span>
-            </button>
+            <>
+              <button
+                onClick={() => onNewWorkstream?.()}
+                className="flex items-center gap-3 w-full rounded-2xl transition-all px-3 py-2.5 hover:bg-black/5 dark:hover:bg-white/5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+              >
+                <Plus className="w-4 h-4 shrink-0" />
+                <span className="text-[10px] font-bold uppercase tracking-widest">New Workspace</span>
+              </button>
+              <button
+                className="flex items-center gap-3 w-full rounded-2xl transition-all px-3 py-2.5 hover:bg-black/5 dark:hover:bg-white/5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+              >
+                <Calendar className="w-4 h-4 shrink-0" />
+                <span className="text-[10px] font-bold uppercase tracking-widest">Schedule</span>
+              </button>
+            </>
           )}
         </motion.div>
       </div>
 
-      {/* Bottom Right: Quick Chat Shell */}
-      <div className="absolute bottom-10 right-10 z-40 flex flex-col items-end gap-2">
+      {/* Bottom Right: Quick Chat */}
+      {/* Note: willChange:transform creates a stacking context so this element
+          doesn't visually jump when the flex-parent transitions its width */}
+      <div
+        className="absolute bottom-10 right-10 z-40 flex flex-col items-end gap-2"
+        style={{ willChange: 'transform', transform: 'translateZ(0)' }}
+      >
         <AnimatePresence>
           {quickChatOpen && (
             <motion.div
@@ -243,17 +383,17 @@ export function EdgeUtilityOverlay({
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 12, scale: 0.96 }}
               transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-              className={cn(
-                "flex flex-col gap-2 w-72 p-3 rounded-[20px] mb-1",
-                glassStyle
-              )}
+              className={cn('flex flex-col gap-2 w-72 p-3 rounded-[20px] mb-1', glassStyle)}
             >
               <div className="flex items-center justify-between px-1">
                 <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--text-tertiary)]">
                   Quick Chat
                 </span>
                 <button
-                  onClick={() => { setQuickChatOpen(false); setQuickChatDraft(''); }}
+                  onClick={() => {
+                    setQuickChatOpen(false);
+                    setQuickChatDraft('');
+                  }}
                   className="p-1 rounded-full hover:bg-black/5 dark:hover:bg-white/10 text-[var(--text-tertiary)]"
                 >
                   <X className="w-3.5 h-3.5" />
@@ -266,14 +406,13 @@ export function EdgeUtilityOverlay({
                 </div>
               )}
               <form
-                onSubmit={(e) => {
+                onSubmit={e => {
                   e.preventDefault();
                   const msg = quickChatDraft.trim();
                   if (!msg) return;
                   if (onQuickChat) {
                     onQuickChat(msg);
                   } else {
-                    // Fallback: navigate to chat page with the draft pre-filled
                     router.push(`/chat?q=${encodeURIComponent(msg)}`);
                   }
                   setQuickChatDraft('');
@@ -284,7 +423,7 @@ export function EdgeUtilityOverlay({
                 <input
                   ref={quickChatInputRef}
                   value={quickChatDraft}
-                  onChange={(e) => setQuickChatDraft(e.target.value)}
+                  onChange={e => setQuickChatDraft(e.target.value)}
                   placeholder="Ask anything…"
                   className="flex-1 rounded-xl bg-black/5 dark:bg-white/10 px-3 py-2 text-[13px] placeholder:text-[var(--text-tertiary)] outline-none border border-transparent focus:border-[var(--accent-cyan)]/40 transition-colors"
                 />
@@ -302,7 +441,7 @@ export function EdgeUtilityOverlay({
 
         <motion.button
           onClick={() => {
-            setQuickChatOpen((prev) => {
+            setQuickChatOpen(prev => {
               if (!prev) setTimeout(() => quickChatInputRef.current?.focus(), 80);
               return !prev;
             });
@@ -311,66 +450,123 @@ export function EdgeUtilityOverlay({
           whileHover={{ scale: 1.06 }}
           whileTap={{ scale: 0.96 }}
           className={cn(
-            "flex items-center gap-2.5 px-4 py-2.5 rounded-full transition-all duration-300",
+            'flex items-center gap-2.5 px-4 py-2.5 rounded-full transition-all duration-300',
             glassStyle,
-            quickChatOpen && "ring-2 ring-[var(--accent-cyan)]/50"
+            quickChatOpen && 'ring-2 ring-[var(--accent-cyan)]/50',
           )}
         >
-          <MessageSquarePlus className={cn("w-4.5 h-4.5 transition-colors", quickChatOpen ? "text-[var(--accent-cyan)]" : "text-[var(--text-secondary)]")} />
+          <MessageSquarePlus
+            className={cn(
+              'w-4 h-4 transition-colors',
+              quickChatOpen ? 'text-[var(--accent-cyan)]' : 'text-[var(--text-secondary)]',
+            )}
+          />
           <span className="text-[12px] font-semibold">Quick Chat</span>
         </motion.button>
       </div>
 
-      {/* Bottom Center: Create Launcher Shell */}
-      <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-2">
-        <AnimatePresence>
-          {createOpen && (
-            <motion.div
-              initial={{ opacity: 0, y: 8, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 8, scale: 0.96 }}
-              transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-              className={cn(
-                "flex items-center gap-1 px-2 py-2 rounded-full mb-1",
-                glassStyle
-              )}
-            >
-              {([
-                { type: 'note' as const, icon: FileText, label: 'Note', color: 'text-[var(--accent-purple)]' },
-                { type: 'code' as const, icon: Code2, label: 'Code', color: 'text-[var(--accent-mint)]' },
-                { type: 'visual' as const, icon: BarChart2, label: 'Visual', color: 'text-[var(--accent-cyan)]' },
-                { type: 'planner' as const, icon: ClipboardList, label: 'Task', color: 'text-[var(--accent-orange)]' },
-              ] as const).map(({ type, icon: Icon, label, color }) => (
-                <button
-                  key={type}
-                  onClick={() => { onCreateItem?.(type); setCreateOpen(false); }}
-                  className="flex flex-col items-center gap-1 px-3 py-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 transition-colors group"
-                >
-                  <Icon className={cn("w-4 h-4", color)} />
-                  <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--text-tertiary)] group-hover:text-[var(--text-primary)] transition-colors">
-                    {label}
-                  </span>
-                </button>
-              ))}
-            </motion.div>
-          )}
-        </AnimatePresence>
+      {/* Bottom Center: Radial Create Launcher + Hub Controls */}
+      <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-3">
 
-        <motion.button
-          onClick={() => { setCreateOpen((p) => !p); setQuickChatOpen(false); }}
-          whileHover={{ scale: 1.06 }}
-          whileTap={{ scale: 0.96 }}
-          animate={{ rotate: createOpen ? 45 : 0 }}
-          transition={{ duration: 0.2 }}
-          className={cn(
-            "flex h-11 w-11 items-center justify-center rounded-full transition-all duration-300",
-            glassStyle,
-            createOpen && "ring-2 ring-[var(--accent-coral)]/50"
-          )}
-          title="Create"
+        {/* Hub controls row (background, completed, connections) — always visible */}
+        <div className={cn('flex items-center gap-1 px-2 py-1.5 rounded-full', glassStyle)}>
+          <button
+            onClick={cycleBackground}
+            title={`Background: ${backgroundMode}`}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 transition-colors text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+          >
+            <BackgroundIcon className="w-3.5 h-3.5" />
+            <span className="text-[10px] font-semibold capitalize">{backgroundMode}</span>
+          </button>
+
+          <div className="w-px h-4 bg-black/10 dark:bg-white/10" />
+
+          <button
+            onClick={() => setShowArchived(!showArchived)}
+            title={showArchived ? 'Showing completed (faded)' : 'Hiding completed'}
+            className={cn(
+              'flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl transition-colors',
+              showArchived
+                ? 'text-[var(--text-tertiary)] hover:bg-black/5 dark:hover:bg-white/10 hover:text-[var(--text-primary)]'
+                : 'text-[var(--accent-cyan)] bg-[var(--accent-cyan)]/10',
+            )}
+          >
+            {showArchived ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+            <span className="text-[10px] font-semibold">{showArchived ? 'Completed' : 'Hidden'}</span>
+          </button>
+
+          <div className="w-px h-4 bg-black/10 dark:bg-white/10" />
+
+          <button
+            onClick={() => setShowConnections(!showConnections)}
+            title={showConnections ? 'Showing connections' : 'Hiding connections'}
+            className={cn(
+              'flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl transition-colors',
+              showConnections
+                ? 'text-[var(--accent-cyan)] bg-[var(--accent-cyan)]/10'
+                : 'text-[var(--text-tertiary)] hover:bg-black/5 dark:hover:bg-white/10 hover:text-[var(--text-primary)]',
+            )}
+          >
+            <GitBranch className="w-3.5 h-3.5" />
+            <span className="text-[10px] font-semibold">Links</span>
+          </button>
+        </div>
+
+        {/* Radial create menu container */}
+        <div
+          ref={createButtonRef}
+          className="relative flex items-center justify-center"
         >
-          <Plus className="w-5 h-5 text-[var(--text-primary)]" />
-        </motion.button>
+          {/* Radial items */}
+          <AnimatePresence>
+            {createOpen &&
+              CREATE_ITEMS.map((item, index) => (
+                <RadialItem
+                  key={item.type}
+                  icon={item.icon}
+                  label={item.label}
+                  color={item.color}
+                  angle={item.angle}
+                  radius={68}
+                  open={createOpen}
+                  index={index}
+                  onClick={() => {
+                    setCreateOpen(false);
+                    if (item.type === 'workspace') {
+                      onNewWorkstream?.();
+                    } else {
+                      onCreateItem?.(item.type);
+                    }
+                  }}
+                />
+              ))}
+          </AnimatePresence>
+
+          {/* Main + button */}
+          <motion.button
+            onClick={() => {
+              setCreateOpen(prev => !prev);
+              setQuickChatOpen(false);
+            }}
+            whileHover={{ scale: 1.08 }}
+            whileTap={{ scale: 0.92 }}
+            animate={{ rotate: createOpen ? 45 : 0 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            className={cn(
+              'relative z-10 flex h-12 w-12 items-center justify-center rounded-full transition-all duration-300',
+              glassStyle,
+              createOpen && 'ring-2 ring-[var(--accent-coral)]/60 shadow-[0_0_24px_rgba(255,100,80,0.3)]',
+            )}
+            title={createOpen ? 'Close' : 'Create…'}
+          >
+            <Plus
+              className={cn(
+                'w-5 h-5 transition-colors',
+                createOpen ? 'text-[var(--accent-coral)]' : 'text-[var(--text-primary)]',
+              )}
+            />
+          </motion.button>
+        </div>
       </div>
 
       {/* REVEAL ALL Overlay */}
@@ -381,8 +577,7 @@ export function EdgeUtilityOverlay({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-30 bg-black/20 dark:bg-black/40 backdrop-blur-sm pointer-events-none"
-          >
-          </motion.div>
+          />
         )}
       </AnimatePresence>
     </>

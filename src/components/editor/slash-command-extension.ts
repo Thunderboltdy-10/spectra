@@ -118,13 +118,28 @@ export const SLASH_COMMANDS: SlashCommandItem[] = [
   {
     id: "image",
     label: "Image",
-    description: "Embed an image from URL",
+    description: "Upload an image from your device",
     icon: "image",
     section: "Media",
     aliases: ["img", "picture"],
     action: (editor) => {
-      const url = window.prompt("Image URL:");
-      if (url) editor.chain().focus().setImage({ src: url }).run();
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = "image/*";
+      input.style.cssText = "position:fixed;left:-9999px;top:-9999px;opacity:0;pointer-events:none;";
+      document.body.appendChild(input);
+      input.onchange = () => {
+        const file = input.files?.[0];
+        document.body.removeChild(input);
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const src = e.target?.result as string | null;
+          if (src) editor.chain().focus().setImage({ src }).run();
+        };
+        reader.readAsDataURL(file);
+      };
+      input.click();
     },
   },
   // Callouts

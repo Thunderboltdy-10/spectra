@@ -1108,6 +1108,14 @@ export async function runChatPipeline(request: NextRequest) {
     return history;
   })();
   const isFirstAssistantTurn = history.every((message) => message.role !== "assistant");
+  // Don't generate a title if the chat already has a meaningful non-default title.
+  const existingChatTitle = typeof (chatData.chat as { title?: unknown }).title === "string"
+    ? ((chatData.chat as { title?: string }).title ?? "").trim()
+    : "";
+  const chatAlreadyNamed = existingChatTitle.length > 0
+    && existingChatTitle !== "New chat"
+    && existingChatTitle !== "Untitled";
+  const shouldGenerateTitle = isFirstAssistantTurn && !chatAlreadyNamed;
   const attemptStats = extractAttemptStats(history);
   const currentWorkstreamFocusSurface = (): "workspace" | "panel" | "chat" | "none" =>
     activeWorkstreamId
@@ -3369,7 +3377,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     shouldVerify,
     shouldRepair: effectiveMode === "quiz" || effectiveMode === "flashcard",
     shouldWriteMemory: routePlan.shouldWriteMemory,
-    shouldGenerateTitle: isFirstAssistantTurn,
+    shouldGenerateTitle: shouldGenerateTitle,
   });
   route.trace.phasePlan = route.trace.phasePlan.map((phase) => {
     if (phase.id === "analysis") return { ...phase, model: route.primaryModel, thinkingLevel: phaseThinkingLevel };
@@ -3553,7 +3561,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
           : routePlan.responseBudget === "normal"
             ? 1
             : 2;
-  const earlyTitlePromise = isFirstAssistantTurn
+  const earlyTitlePromise = shouldGenerateTitle
     ? maybeGenerateTitleFromUserPrompt({
         chatId,
         actorClerkId: actor.clerkId,
@@ -4270,13 +4278,25 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
       }
 
       const policyPass = checkPromptPolicyResponse({ mode: effectiveMode, response: responseText });
-      let correctedResponse = responseText;
+      // Strip any internal policy/correction notices the model may have leaked into the response.
+      // These patterns must never appear in user-facing output.
+      let correctedResponse = responseText
+        // Remove entire lines starting with these prefixes (all occurrences)
+        .replace(/^Policy correction:.*$/gim, "")
+        .replace(/^Content policy:.*$/gim, "")
+        .replace(/^Note:\s*This response.*?(?:\n|$)/gim, "")
+        .replace(/^Important note:\s*As a school.*?(?:\n|$)/gim, "")
+        // Remove inline occurrences mid-text (e.g. [...policy correction...])
+        .replace(/\[?policy correction[:\]].*/gi, "")
+        .replace(/\[?content policy[:\]].*/gi, "")
+        // Collapse runs of 3+ blank lines down to 2 after stripping
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
       if (!policyPass) {
         if (effectiveMode === "quiz" || effectiveMode === "flashcard") {
           route.trace.toolchain.push("structure_policy_guard");
-        } else {
-          correctedResponse = `${responseText}\n\nPolicy correction: citation and study-mode structure tightened to match requirements.`;
         }
+        // No visible policy notice appended — policy checks are internal only
       }
 
       // isVagueRequest is computed in the outer scope before streaming begins.

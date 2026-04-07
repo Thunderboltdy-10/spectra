@@ -156,8 +156,21 @@ export function EditorToolbar({ editor, onOpenImport }: { editor: Editor; onOpen
       </FormatBtn>
       <FormatBtn
         onClick={() => {
-          const url = window.prompt("Image URL:");
-          if (url) editor.chain().focus().setImage({ src: url }).run();
+          // Use file input for local upload — converts to base64 data URI
+          const input = document.createElement("input");
+          input.type = "file";
+          input.accept = "image/*";
+          input.onchange = () => {
+            const file = input.files?.[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              const src = e.target?.result as string | null;
+              if (src) editor.chain().focus().setImage({ src }).run();
+            };
+            reader.readAsDataURL(file);
+          };
+          input.click();
         }}
         active={false}
         title="Insert image"

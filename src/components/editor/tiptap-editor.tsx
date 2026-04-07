@@ -122,9 +122,28 @@ export function TiptapEditor({
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressNextAutosaveRef = useRef(false);
   const lastExternalContentRef = useRef<string | null>(null);
+  // Keep stable refs to latest callbacks and editor so we can flush on unmount
+  const onSaveRef = useRef(onSave);
+  onSaveRef.current = onSave;
+  const editorRef = useRef<import("@tiptap/core").Editor | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [versions, setVersions] = useState<Array<{ _id: string; createdAt: number; authorType?: string; description?: string }>>([]);
   const [loadingVersions, setLoadingVersions] = useState(false);
+
+  // Flush any pending autosave on unmount so edits aren't lost when panel closes
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+        // Immediately fire save with the latest editor content
+        const ed = editorRef.current;
+        if (ed && !ed.isDestroyed) {
+          onSaveRef.current?.(ed.getJSON(), ed.getText());
+        }
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (noteId) setActiveNoteId(noteId);
@@ -262,6 +281,43 @@ export function TiptapEditor({
         class: "prose-editor focus:outline-none",
         spellcheck: "true",
       },
+      handleDOMEvents: {
+        click(view, event) {
+          const target = event.target as HTMLElement;
+          if (target.tagName !== "IMG") return false;
+          // Open file picker to replace the clicked image
+          event.preventDefault();
+          const input = document.createElement("input");
+          input.type = "file";
+          input.accept = "image/*";
+          input.style.cssText =
+            "position:fixed;left:-9999px;top:-9999px;opacity:0;pointer-events:none;";
+          document.body.appendChild(input);
+          input.onchange = () => {
+            const file = input.files?.[0];
+            document.body.removeChild(input);
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              const src = e.target?.result as string | null;
+              if (src) {
+                // Replace the clicked image node
+                const pos = view.posAtDOM(target, 0);
+                if (pos >= 0) {
+                  const { tr } = view.state;
+                  const node = view.state.schema.nodes.image?.create({ src });
+                  if (node) {
+                    view.dispatch(tr.replaceWith(pos, pos + 1, node));
+                  }
+                }
+              }
+            };
+            reader.readAsDataURL(file);
+          };
+          input.click();
+          return true;
+        },
+      },
     },
     onUpdate: ({ editor: e }) => {
       const json = e.getJSON();
@@ -279,6 +335,11 @@ export function TiptapEditor({
       }, 1500);
     },
   });
+
+  // Keep editorRef in sync so the unmount flush can access the latest editor
+  useEffect(() => {
+    editorRef.current = editor;
+  }, [editor]);
 
   // Update content when it changes externally
   useEffect(() => {
@@ -507,6 +568,16 @@ export function TiptapEditor({
         )}
         onClick={() => editor.commands.focus()}
         onPaste={(event) => {
+          // Only intercept paste if it looks like an external document (Notion, DOCX, etc.)
+          // Let Tiptap handle plain text and normal browser copy-paste natively.
+          const html = event.clipboardData?.getData("text/html") ?? "";
+          const looksExternal =
+            html.includes("notion.so") ||
+            html.includes("data-notion") ||
+            html.includes("xmlns:w=") ||
+            html.includes("mso-") ||
+            html.includes("data-pm-");
+          if (!looksExternal) return;
           const imported = importClipboardData(event.clipboardData);
           if (!imported) return;
           event.preventDefault();

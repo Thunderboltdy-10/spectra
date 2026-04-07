@@ -9,7 +9,6 @@ import { purgeUserData } from "./userLifecycle";
 import {
   addOrgToPlatformStats,
   countPlatformStats,
-  hasPlatformSourceData,
   rebuildPlatformStatsAggregates,
   updateUserInPlatformStats,
 } from "./platformStatsAggregates";
@@ -301,15 +300,11 @@ export const refreshPlatformStats = internalMutation({
   args: {},
   handler: async (ctx) => {
     const now = Date.now();
-    let next = await computePlatformStats(ctx);
-    if (
-      next.totalOrgs === 0
-      && next.totalUsers === 0
-      && next.totalMessages === 0
-      && await hasPlatformSourceData(ctx)
-    ) {
-      next = await rebuildPlatformStatsAggregates(ctx);
-    }
+    // Always do a full rebuild so every refreshPlatformStats call produces
+    // accurate aggregates across all namespaces. The zero-guard was removed
+    // because it allowed permanently undercounted stats whenever only some
+    // dimensions were zero.
+    let next = await rebuildPlatformStatsAggregates(ctx);
     const existing = await ctx.db
       .query("platformStats")
       .withIndex("by_singleton", (q) => q.eq("singletonKey", PLATFORM_STATS_SINGLETON))

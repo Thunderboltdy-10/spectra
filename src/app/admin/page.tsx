@@ -118,7 +118,6 @@ function AdminPageContent() {
   const [notifDropdownOpen, setNotifDropdownOpen] = useState(false);
   const [sendingNotif, setSendingNotif] = useState(false);
   const [managebac, setManagebac] = useState<ManagebacAdminConfig | null>(null);
-  const [managebacBaseUrl, setManagebacBaseUrl] = useState("");
   const [managebacToken, setManagebacToken] = useState("");
   const [managebacProbeStudentId, setManagebacProbeStudentId] = useState("");
   const [managebacMappings, setManagebacMappings] = useState<Record<string, string>>({});
@@ -169,7 +168,6 @@ function AdminPageContent() {
   const pendingInvites = invitations.filter((item) => item.status === "pending").length;
 
   useEffect(() => {
-    setManagebacBaseUrl(managebac?.baseUrl ?? "");
     setManagebacMappings(buildManagebacMappingState(managebac?.studentMappings ?? []));
   }, [managebac]);
 
@@ -297,9 +295,11 @@ function AdminPageContent() {
     }
   }
 
+  const MANAGEBAC_API_URL = "https://api.managebac.com";
+
   async function discoverManagebac() {
-    if (!managebacBaseUrl.trim() || !managebacToken.trim()) {
-      toast.error("Base URL and token are required for discovery.");
+    if (!managebacToken.trim()) {
+      toast.error("API token is required for discovery.");
       return;
     }
     setManagebacDiscovering(true);
@@ -309,14 +309,14 @@ function AdminPageContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "discover",
-          baseUrl: managebacBaseUrl.trim(),
+          baseUrl: MANAGEBAC_API_URL,
           token: managebacToken.trim(),
           studentId: managebacProbeStudentId.trim() || undefined,
         }),
       });
       setManagebac((prev) => ({
         configured: prev?.configured ?? false,
-        baseUrl: managebacBaseUrl.trim(),
+        baseUrl: MANAGEBAC_API_URL,
         tokenLastFour: prev?.tokenLastFour,
         studentMappings: prev?.studentMappings ?? [],
         syncEnabled: prev?.syncEnabled ?? false,
@@ -342,7 +342,7 @@ function AdminPageContent() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          baseUrl: managebacBaseUrl.trim(),
+          baseUrl: MANAGEBAC_API_URL,
           token: managebacToken.trim() || undefined,
           studentMappings: buildManagebacStudentMappings(members, managebacMappings),
           syncEnabled: managebac?.syncEnabled ?? false,
@@ -465,10 +465,6 @@ function AdminPageContent() {
           <p className="mb-5 mt-1 text-sm text-[var(--text-secondary)]">Configure ManageBac discovery, student mapping, and sync.</p>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="space-y-1.5 sm:col-span-2">
-              <span className="text-xs text-[var(--text-secondary)]">ManageBac base URL</span>
-              <Input value={managebacBaseUrl} onChange={(event) => setManagebacBaseUrl(event.target.value)} placeholder="https://api.managebac.com" />
-            </label>
             <label className="space-y-1.5">
               <span className="text-xs text-[var(--text-secondary)]">API token</span>
               <Input value={managebacToken} onChange={(event) => setManagebacToken(event.target.value)} placeholder={managebac?.tokenLastFour ? `Stored token ••••${managebac.tokenLastFour}` : "Paste token"} type="password" />

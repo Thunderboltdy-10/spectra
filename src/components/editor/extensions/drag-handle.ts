@@ -115,14 +115,29 @@ export const DragHandle = Extension.create({
       if (!wrapper) return;
       const wrapperRect = wrapper.getBoundingClientRect();
       const blockRect = block.dom.getBoundingClientRect();
-      const isCompact = wrapper.classList.contains("tiptap-compact");
       currentBlock = block;
-      
-      // Calculate center of the first line if it's a multi-line block
-      // But for simplicity and matching Notion style, we anchor to the top-left of the block with a small offset
-      const topOffset = isCompact ? 2 : 4;
-      container.style.top = `${blockRect.top - wrapperRect.top + topOffset}px`;
-      container.style.left = `${Math.max(-40, blockRect.left - wrapperRect.left - (isCompact ? 44 : 52))}px`;
+
+      // Determine the ProseMirror content left edge (where text starts).
+      // blockRect.left is viewport-relative; wrapperRect.left is the tiptap-root left.
+      // Both are viewport-relative so the difference is the offset within the wrapper.
+      const contentLeft = blockRect.left - wrapperRect.left;
+
+      // Vertically align buttons to the top of the block, corrected for any scroll in
+      // a scrollable ancestor that lies OUTSIDE the positioned wrapper.
+      // blockRect.top and wrapperRect.top are both viewport-relative; their difference
+      // gives the visual offset. Add wrapper.scrollTop only if the wrapper itself scrolls
+      // (normally 0 since the scroll container is a parent, not the tiptap-root).
+      const scrollOffset = wrapper.scrollTop ?? 0;
+      // Center the 22px buttons within the first line (~28px line-height at 15–16px font).
+      // A 3px nudge down centers them visually on the first baseline.
+      const top = blockRect.top - wrapperRect.top + scrollOffset + 3;
+
+      // Buttons: 2 × 22px + 4px gap = 48px. Place 4px to the left of where text starts.
+      // ProseMirror has padding-left: 3.5rem (56px), so 48px + 4px gap = 52px fits in gutter.
+      const left = Math.max(0, contentLeft - 52);
+
+      container.style.top = `${top}px`;
+      container.style.left = `${left}px`;
       container.style.opacity = "1";
       container.dataset.visible = "true";
     };

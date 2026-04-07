@@ -426,7 +426,8 @@ export function buildPhasePlan(params: {
   if (params.shouldVerify) phases.push({ id: "verification", label: "Verifying critical claims", status: "planned" });
   if (params.shouldRepair) phases.push({ id: "repair", label: "Repairing response format", status: "planned" });
   if (params.shouldWriteMemory) phases.push({ id: "memory", label: "Updating long-term memory", status: "planned" });
-  if (params.shouldGenerateTitle) phases.push({ id: "title", label: "Naming this chat", status: "planned" });
+  // Title generation is a background op — omit from user-facing phase plan to avoid "Naming this chat planned" noise
+  // The pipeline still executes it; it just won't appear in the trace overlay.
   return phases;
 }
 

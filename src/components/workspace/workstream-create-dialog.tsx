@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { BookOpen, Folder, Sparkles, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { WORKSTREAM_COLORS, WORKSTREAM_EMOJIS } from "@/lib/workspace/zoom-helpers";
@@ -51,6 +51,20 @@ export function WorkstreamCreateDialog({
   const [color, setColor] = useState<string>(WORKSTREAM_COLORS[0].value);
   const [submitting, setSubmitting] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+
+  // Pre-fill title when launched from command bar workspace creation intent
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const customEvent = e as CustomEvent<{ name?: string }>;
+      const name = customEvent.detail?.name;
+      if (name) {
+        setTitle(name.charAt(0).toUpperCase() + name.slice(1));
+        setStep("details");
+      }
+    };
+    window.addEventListener("workspace:suggest-name", handler);
+    return () => window.removeEventListener("workspace:suggest-name", handler);
+  }, []);
 
   function reset() {
     setStep("type");

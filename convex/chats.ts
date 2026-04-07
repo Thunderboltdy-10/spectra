@@ -356,6 +356,25 @@ export const createChat = mutation({
       throw new Error("Unauthorized");
     }
 
+    // Deduplication: if a chat with the same workstreamId + user was created
+    // within the last 10 seconds, return that chat instead of creating a new one.
+    if (args.workstreamId) {
+      const dedupWindow = Date.now() - 10_000;
+      const recentChats = await ctx.db
+        .query("chats")
+        .withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId))
+        .collect();
+      const duplicate = recentChats.find(
+        (c) =>
+          c.ownerUserId === actor._id &&
+          !c.deletedAt &&
+          c.createdAt >= dedupWindow,
+      );
+      if (duplicate) {
+        return { chatId: duplicate._id };
+      }
+    }
+
     if (args.packId) {
       const pack = await ctx.db.get(args.packId);
       if (!pack || pack.orgId !== actor.orgId) {

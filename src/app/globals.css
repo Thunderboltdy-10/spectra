@@ -1842,6 +1842,21 @@ button:disabled {
 .transition-panel { transition: all 300ms ease-out; }
 .transition-hover { transition: all 150ms ease; }
 
+/* Canvas dimming when panel is open */
+.workspace-canvas-dim {
+  transition: opacity 300ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Tint zone smooth transitions */
+.workspace-react-flow .react-flow__node-categoryField {
+  transition: opacity 300ms ease, transform 300ms ease;
+}
+
+/* Progressive content reveal animation */
+.workspace-tint-zone {
+  transition: background 500ms ease, padding 300ms ease;
+}
+
 /* React Flow node transitions */
 .workspace-react-flow .react-flow__node {
   transition: opacity 200ms ease;

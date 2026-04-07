@@ -337,6 +337,17 @@ function WorkspaceContent() {
                     onExitWorkstream={() => handleCommitWorkstream(null)}
                     panelOpen={!!panel}
                     onNewWorkstream={handleNewWorkstream}
+                    onCreateItem={(type) => {
+                      if (type === 'note') {
+                        handleOpenPanel('artifact', 'new');
+                      } else if (type === 'code') {
+                        handleOpenPanel('artifact', 'new-code');
+                      } else if (type === 'visual') {
+                        handleOpenPanel('artifact', 'new-diagram');
+                      } else if (type === 'planner') {
+                        handleOpenPanel('planner', 'new');
+                      }
+                    }}
                     onQuickChat={(query) => {
                       // Detect workspace-creation intent before routing to chat
                       const wsName = detectWorkspaceIntent(query);
@@ -353,6 +364,15 @@ function WorkspaceContent() {
                       }
                     }}
                   />
+
+                  {/* Canvas dimming overlay when panel is open */}
+                  {panel && (
+                    <div
+                      className="absolute inset-0 bg-black/10 pointer-events-none z-[5] transition-opacity duration-300"
+                      style={{ opacity: 1 }}
+                    />
+                  )}
+
                   {/* Empty state */}
                   {workstreams.length === 0 && !primaryWorkstreamId && (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">

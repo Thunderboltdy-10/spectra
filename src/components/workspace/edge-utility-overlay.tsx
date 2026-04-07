@@ -1,36 +1,28 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  ChevronLeft,
   Pause,
   Play,
   RotateCcw,
-  Calendar,
   LayoutGrid,
-  MessageSquarePlus,
   Plus,
   FileText,
   Code2,
   BarChart2,
   ClipboardList,
   X,
-  Dot,
-  Grid3X3,
-  Minus,
-  Eye,
-  EyeOff,
-  CheckSquare,
-  Workflow,
   Sparkles,
-  GitBranch,
   Layers,
+  ArrowUp,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import type { Workstream } from '@/hooks/use-workspace-data';
+
+/* ─── Types ─────────────────────────────────────────────────────── */
 
 interface EdgeUtilityOverlayProps {
   workstreams: Workstream[];
@@ -43,14 +35,44 @@ interface EdgeUtilityOverlayProps {
   onNewWorkstream?: () => void;
 }
 
-// Radial fan menu item angle map (semicircle, bottom to top)
-const CREATE_ITEMS = [
-  { type: 'note' as const, icon: FileText, label: 'Note', color: 'var(--accent-purple)', angle: 150 },
-  { type: 'code' as const, icon: Code2, label: 'Code', color: 'var(--accent-mint)', angle: 120 },
-  { type: 'visual' as const, icon: BarChart2, label: 'Visual', color: 'var(--accent-cyan)', angle: 90 },
-  { type: 'planner' as const, icon: ClipboardList, label: 'Task', color: 'var(--accent-orange)', angle: 60 },
-  { type: 'workspace' as const, icon: Layers, label: 'Workspace', color: 'var(--accent-coral)', angle: 30 },
+/* ─── Constants ─────────────────────────────────────────────────── */
+
+const EASE_SMOOTH: [number, number, number, number] = [0.22, 1, 0.36, 1];
+
+const glassStyle =
+  'bg-[var(--bg-elevated)]/80 backdrop-blur-xl border border-[var(--border-default)]/40 shadow-[0_8px_32px_-8px_rgba(0,0,0,0.2)]';
+
+type CreateItemType = 'note' | 'code' | 'visual' | 'planner' | 'workspace' | 'ai';
+
+interface CreateMenuItem {
+  type: CreateItemType;
+  icon: React.ElementType;
+  label: string;
+  color: string;
+}
+
+const CREATE_ITEMS_BASE: CreateMenuItem[] = [
+  { type: 'note', icon: FileText, label: 'Note', color: 'var(--accent-purple)' },
+  { type: 'code', icon: Code2, label: 'Code', color: 'var(--accent-mint)' },
+  { type: 'visual', icon: BarChart2, label: 'Visual', color: 'var(--accent-cyan)' },
+  { type: 'planner', icon: ClipboardList, label: 'Task', color: 'var(--accent-orange)' },
 ];
+
+const WORKSPACE_ITEM: CreateMenuItem = {
+  type: 'workspace',
+  icon: Layers,
+  label: 'Workspace',
+  color: 'var(--accent-coral)',
+};
+
+const AI_ITEM: CreateMenuItem = {
+  type: 'ai',
+  icon: Sparkles,
+  label: 'Create with AI',
+  color: 'var(--accent-cyan)',
+};
+
+/* ─── Radial Item Sub-component ─────────────────────────────────── */
 
 function RadialItem({
   icon: Icon,
@@ -60,6 +82,7 @@ function RadialItem({
   radius,
   open,
   index,
+  total,
   onClick,
 }: {
   icon: React.ElementType;
@@ -69,21 +92,26 @@ function RadialItem({
   radius: number;
   open: boolean;
   index: number;
+  total: number;
   onClick: () => void;
 }) {
   const rad = (angle * Math.PI) / 180;
   const x = Math.cos(rad) * radius;
-  const y = -Math.sin(rad) * radius; // negative because CSS y is inverted
+  const y = -Math.sin(rad) * radius;
 
   return (
     <motion.div
-      initial={{ opacity: 0, x: 0, y: 0, scale: 0.5 }}
-      animate={open ? { opacity: 1, x, y, scale: 1 } : { opacity: 0, x: 0, y: 0, scale: 0.5 }}
-      exit={{ opacity: 0, x: 0, y: 0, scale: 0.5 }}
+      initial={{ opacity: 0, x: 0, y: 0, scale: 0.4 }}
+      animate={
+        open
+          ? { opacity: 1, x, y, scale: 1 }
+          : { opacity: 0, x: 0, y: 0, scale: 0.4 }
+      }
+      exit={{ opacity: 0, x: 0, y: 0, scale: 0.4 }}
       transition={{
-        duration: 0.32,
-        delay: open ? index * 0.04 : (CREATE_ITEMS.length - index) * 0.025,
-        ease: [0.22, 1, 0.36, 1],
+        duration: 0.3,
+        delay: open ? index * 0.04 : (total - index) * 0.025,
+        ease: EASE_SMOOTH,
       }}
       className="absolute"
       style={{ left: '50%', top: '50%', marginLeft: -22, marginTop: -22 }}
@@ -93,18 +121,494 @@ function RadialItem({
         whileHover={{ scale: 1.15 }}
         whileTap={{ scale: 0.9 }}
         title={label}
-        className="group relative flex h-11 w-11 flex-col items-center justify-center rounded-full shadow-[0_4px_20px_rgba(0,0,0,0.25)] transition-all duration-200"
-        style={{ background: `color-mix(in oklab, ${color} 15%, var(--bg-elevated))`, border: `1.5px solid ${color}40` }}
+        className="group relative flex h-11 w-11 items-center justify-center rounded-full shadow-[0_4px_20px_rgba(0,0,0,0.25)] transition-all duration-200"
+        style={{
+          background: `color-mix(in oklab, ${color} 15%, var(--bg-elevated))`,
+          border: `1.5px solid color-mix(in srgb, ${color} 40%, transparent)`,
+        }}
       >
-        <Icon className="h-4.5 w-4.5" style={{ color }} />
-        {/* Tooltip */}
-        <span className="pointer-events-none absolute -bottom-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-default)] px-2 py-1 text-[10px] font-semibold text-[var(--text-primary)] opacity-0 group-hover:opacity-100 transition-opacity shadow-md">
+        <Icon className="h-[18px] w-[18px]" style={{ color }} />
+        <span className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-default)] px-2 py-1 text-[10px] font-semibold text-[var(--text-primary)] opacity-0 group-hover:opacity-100 transition-opacity shadow-md">
           {label}
         </span>
       </motion.button>
     </motion.div>
   );
 }
+
+/* ─── Workspace Dock ────────────────────────────────────────────── */
+
+function WorkspaceDock({
+  workstreams,
+  primaryWorkstreamId,
+  onOpenWorkstream,
+  onExitWorkstream,
+}: {
+  workstreams: Workstream[];
+  primaryWorkstreamId?: string;
+  onOpenWorkstream: (wsId: string) => void;
+  onExitWorkstream: () => void;
+}) {
+  const { utilityPositions, setUtilityPosition } = useWorkspaceStore();
+  const [hovered, setHovered] = useState(false);
+
+  const activeWorkstreams = workstreams.filter(ws => ws.status === 'active');
+  const isHome = !primaryWorkstreamId;
+
+  return (
+    <div
+      className="absolute left-6 top-1/2 -translate-y-1/2 z-40"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <motion.div
+        drag="y"
+        dragConstraints={{ top: -250, bottom: 250 }}
+        dragElastic={0.1}
+        dragMomentum={false}
+        onDragEnd={(_, info) => {
+          const current = utilityPositions['workstream_shortcuts'] || { x: 0, y: 0 };
+          setUtilityPosition('workstream_shortcuts', {
+            x: 0,
+            y: current.y + info.offset.y,
+          });
+        }}
+        animate={{
+          y: utilityPositions['workstream_shortcuts']?.y ?? 0,
+          width: hovered ? 220 : 56,
+        }}
+        transition={{ duration: 0.35, ease: EASE_SMOOTH }}
+        className={cn(
+          'flex flex-col rounded-[28px] overflow-hidden',
+          glassStyle,
+        )}
+      >
+        {/* Home button */}
+        <button
+          onClick={() => {
+            if (!isHome) onExitWorkstream();
+          }}
+          className={cn(
+            'flex items-center gap-3 px-2 py-2 transition-colors duration-200 shrink-0',
+            hovered ? 'mx-2 mt-2 rounded-xl' : 'mx-auto mt-2',
+            isHome
+              ? 'text-[var(--accent-cyan)]'
+              : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
+          )}
+          title="All workspaces"
+        >
+          <div
+            className={cn(
+              'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors duration-200',
+              isHome
+                ? 'bg-[var(--accent-cyan)]/15'
+                : 'hover:bg-[var(--bg-hover)]',
+            )}
+          >
+            <LayoutGrid className="w-5 h-5" />
+          </div>
+          {hovered && (
+            <span className="text-xs font-semibold truncate whitespace-nowrap">
+              All Workspaces
+            </span>
+          )}
+        </button>
+
+        {/* Divider */}
+        <div className={cn('mx-auto my-1.5 bg-[var(--border-default)]/50', hovered ? 'w-[calc(100%-24px)]' : 'w-8', 'h-px transition-all duration-300')} />
+
+        {/* Workspace list */}
+        <div className={cn(
+          'flex flex-col gap-0.5 pb-2 overflow-y-auto',
+          activeWorkstreams.length > 6 ? 'max-h-[280px] [mask-image:linear-gradient(to_bottom,black_85%,transparent)]' : '',
+        )}>
+          {activeWorkstreams.slice(0, hovered ? undefined : 6).map(ws => {
+            const isActive = primaryWorkstreamId === ws._id;
+            return (
+              <button
+                key={ws._id}
+                onClick={() => onOpenWorkstream(ws._id)}
+                className={cn(
+                  'relative flex items-center gap-3 transition-all duration-200 shrink-0',
+                  hovered
+                    ? 'mx-2 px-2 py-2 rounded-xl hover:bg-[var(--bg-hover)]'
+                    : 'mx-auto px-0 py-1.5 justify-center',
+                )}
+                title={hovered ? undefined : ws.title}
+              >
+                {/* Cyan dot indicator for active workspace */}
+                {isActive && (
+                  <div
+                    className={cn(
+                      'absolute w-1.5 h-1.5 rounded-full bg-[var(--accent-cyan)] shadow-[0_0_8px_var(--accent-cyan)]',
+                      hovered ? '-left-0.5' : 'left-0.5',
+                      'top-1/2 -translate-y-1/2',
+                    )}
+                  />
+                )}
+
+                <motion.span
+                  whileHover={{ scale: 1.12 }}
+                  transition={{ duration: 0.15, ease: EASE_SMOOTH }}
+                  className={cn(
+                    'text-xl leading-none shrink-0 cursor-pointer select-none',
+                    hovered ? 'ml-1' : '',
+                    isActive ? 'drop-shadow-sm' : 'opacity-70 hover:opacity-100',
+                  )}
+                >
+                  {ws.emoji || '📚'}
+                </motion.span>
+
+                {hovered && (
+                  <span
+                    className={cn(
+                      'text-xs truncate whitespace-nowrap transition-colors',
+                      isActive
+                        ? 'font-semibold text-[var(--text-primary)]'
+                        : 'text-[var(--text-secondary)]',
+                    )}
+                  >
+                    {ws.title}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+/* ─── Focus Timer ───────────────────────────────────────────────── */
+
+function FocusTimer() {
+  const {
+    timerState,
+    startTimer,
+    pauseTimer,
+    resetTimer,
+    utilityPositions,
+    setUtilityPosition,
+  } = useWorkspaceStore();
+
+  const [hovered, setHovered] = useState(false);
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const remaining = Math.max(0, timerState.sessionMinutes * 60 - timerState.elapsed);
+
+  return (
+    <div
+      className="absolute bottom-10 right-6 z-40"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <motion.div
+        drag="y"
+        dragConstraints={{ top: -300, bottom: 100 }}
+        dragElastic={0.1}
+        dragMomentum={false}
+        onDragEnd={(_, info) => {
+          const current = utilityPositions['focus_timer'] || { x: 0, y: 0 };
+          setUtilityPosition('focus_timer', {
+            x: 0,
+            y: current.y + info.offset.y,
+          });
+        }}
+        animate={{ y: utilityPositions['focus_timer']?.y ?? 0 }}
+        className={cn(
+          'flex items-center gap-2 rounded-full transition-all duration-300',
+          glassStyle,
+          'p-1.5',
+        )}
+      >
+        {/* Play/Pause button */}
+        <button
+          onClick={() => (timerState.active ? pauseTimer() : startTimer())}
+          className={cn(
+            'w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300 shrink-0',
+            timerState.active
+              ? 'bg-[var(--accent-cyan)] text-white shadow-[0_0_20px_rgba(14,142,232,0.4)]'
+              : 'bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
+          )}
+        >
+          {timerState.active ? (
+            <Pause className="w-4 h-4" />
+          ) : (
+            <Play className="w-4 h-4 ml-0.5" />
+          )}
+        </button>
+
+        {/* Time display */}
+        <div className="flex flex-col pr-2 overflow-hidden">
+          <span
+            className={cn(
+              'text-[9px] uppercase tracking-[0.15em] font-bold leading-none mb-0.5 transition-colors',
+              timerState.active ? 'text-[var(--accent-cyan)]' : 'text-[var(--text-tertiary)]',
+            )}
+          >
+            Focus
+          </span>
+          <span className="text-sm font-mono font-bold tabular-nums leading-none text-[var(--text-primary)]">
+            {formatTime(remaining)}
+          </span>
+          {timerState.sessionsCompleted > 0 && (
+            <span className="text-[9px] text-[var(--text-tertiary)] leading-none mt-0.5">
+              {timerState.sessionsCompleted} done
+            </span>
+          )}
+        </div>
+
+        {/* Reset button — revealed on hover */}
+        <AnimatePresence>
+          {hovered && (
+            <motion.div
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: 36, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              transition={{ duration: 0.25, ease: EASE_SMOOTH }}
+              className="overflow-hidden flex items-center"
+            >
+              <button
+                onClick={() => resetTimer()}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full hover:bg-[var(--bg-hover)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+                title="Reset timer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
+    </div>
+  );
+}
+
+/* ─── Unified Command Bar ───────────────────────────────────────── */
+
+function UnifiedCommandBar({
+  workstreams,
+  primaryWorkstreamId,
+  onExitWorkstream,
+  onQuickChat,
+  onCreateItem,
+  onNewWorkstream,
+}: {
+  workstreams: Workstream[];
+  primaryWorkstreamId?: string;
+  onExitWorkstream: () => void;
+  onQuickChat?: (message: string) => void;
+  onCreateItem?: (type: 'note' | 'code' | 'visual' | 'planner') => void;
+  onNewWorkstream?: () => void;
+}) {
+  const router = useRouter();
+  const [draft, setDraft] = useState('');
+  const [focused, setFocused] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  const createRef = useRef<HTMLDivElement>(null);
+
+  const activeWorkspace = primaryWorkstreamId
+    ? workstreams.find(ws => ws._id === primaryWorkstreamId)
+    : null;
+
+  // Build create items list based on context
+  const createItems: CreateMenuItem[] = [
+    ...CREATE_ITEMS_BASE,
+    ...(!primaryWorkstreamId ? [WORKSPACE_ITEM] : []),
+    AI_ITEM,
+  ];
+
+  // Distribute items in a semicircle from 30 to 150 degrees
+  const totalItems = createItems.length;
+  const angleStep = totalItems > 1 ? 120 / (totalItems - 1) : 0;
+
+  // Close create menu on outside click
+  useEffect(() => {
+    if (!createOpen) return;
+    const handler = (e: PointerEvent) => {
+      if (createRef.current && !createRef.current.contains(e.target as Node)) {
+        setCreateOpen(false);
+      }
+    };
+    window.addEventListener('pointerdown', handler, true);
+    return () => window.removeEventListener('pointerdown', handler, true);
+  }, [createOpen]);
+
+  const handleSend = useCallback(() => {
+    const msg = draft.trim();
+    if (!msg) return;
+    if (onQuickChat) {
+      onQuickChat(msg);
+    } else {
+      router.push(`/chat?q=${encodeURIComponent(msg)}`);
+    }
+    setDraft('');
+    inputRef.current?.blur();
+  }, [draft, onQuickChat, router]);
+
+  const handleCreateClick = (item: CreateMenuItem) => {
+    setCreateOpen(false);
+    if (item.type === 'workspace') {
+      onNewWorkstream?.();
+    } else if (item.type === 'ai') {
+      // Focus the input and pre-fill
+      setDraft('Create ');
+      setTimeout(() => {
+        inputRef.current?.focus();
+        // Move cursor to end
+        const len = 'Create '.length;
+        inputRef.current?.setSelectionRange(len, len);
+      }, 50);
+    } else {
+      onCreateItem?.(item.type as 'note' | 'code' | 'visual' | 'planner');
+    }
+  };
+
+  const hasDraft = draft.trim().length > 0;
+
+  return (
+    <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-40">
+      <div ref={barRef} className="relative flex flex-col items-center">
+        {/* Radial create menu — fans upward from the + button */}
+        <div ref={createRef} className="absolute bottom-0 left-4 flex items-center justify-center">
+          <AnimatePresence>
+            {createOpen &&
+              createItems.map((item, index) => {
+                const angle = 30 + index * angleStep;
+                return (
+                  <RadialItem
+                    key={item.type}
+                    icon={item.icon}
+                    label={item.label}
+                    color={item.color}
+                    angle={angle}
+                    radius={90}
+                    open={createOpen}
+                    index={index}
+                    total={totalItems}
+                    onClick={() => handleCreateClick(item)}
+                  />
+                );
+              })}
+          </AnimatePresence>
+        </div>
+
+        {/* The command bar capsule */}
+        <motion.div
+          animate={{ width: focused ? 560 : 480 }}
+          transition={{ duration: 0.3, ease: EASE_SMOOTH }}
+          className={cn(
+            'relative flex items-center gap-2 rounded-full px-2 py-1.5 transition-shadow duration-300',
+            glassStyle,
+            focused
+              ? 'shadow-[0_8px_40px_-8px_rgba(14,142,232,0.2),0_0_0_1px_var(--accent-cyan)/20]'
+              : 'hover:shadow-[0_12px_40px_-8px_rgba(0,0,0,0.25)]',
+          )}
+        >
+          {/* + Create button */}
+          <motion.button
+            onClick={() => setCreateOpen(prev => !prev)}
+            whileHover={{ scale: 1.08 }}
+            whileTap={{ scale: 0.92 }}
+            animate={{ rotate: createOpen ? 45 : 0 }}
+            transition={{ duration: 0.2, ease: EASE_SMOOTH }}
+            className={cn(
+              'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors duration-200',
+              createOpen
+                ? 'bg-[var(--accent-coral)]/15 text-[var(--accent-coral)]'
+                : 'hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
+            )}
+            title={createOpen ? 'Close menu' : 'Create...'}
+          >
+            <Plus className="w-4.5 h-4.5" />
+          </motion.button>
+
+          {/* Workspace context badge */}
+          <AnimatePresence>
+            {activeWorkspace && (
+              <motion.div
+                initial={{ opacity: 0, width: 0 }}
+                animate={{ opacity: 1, width: 'auto' }}
+                exit={{ opacity: 0, width: 0 }}
+                transition={{ duration: 0.2, ease: EASE_SMOOTH }}
+                className="flex items-center gap-1 shrink-0 overflow-hidden"
+              >
+                <div className="flex items-center gap-1 rounded-full bg-[var(--bg-hover)] pl-2 pr-1 py-0.5">
+                  <span className="text-sm leading-none">{activeWorkspace.emoji || '📚'}</span>
+                  <span className="text-[11px] text-[var(--text-secondary)] truncate max-w-[80px] font-medium">
+                    {activeWorkspace.title}
+                  </span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onExitWorkstream();
+                    }}
+                    className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-[var(--bg-elevated)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+                  >
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Text input */}
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onFocus={() => {
+              setFocused(true);
+              setCreateOpen(false);
+            }}
+            onBlur={() => setFocused(false)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+              if (e.key === 'Escape') {
+                setDraft('');
+                inputRef.current?.blur();
+              }
+            }}
+            placeholder="Ask anything, create, or search..."
+            className="flex-1 min-w-0 bg-transparent px-2 py-1.5 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none"
+          />
+
+          {/* Send / Sparkles button */}
+          <motion.button
+            onClick={hasDraft ? handleSend : undefined}
+            whileHover={hasDraft ? { scale: 1.08 } : {}}
+            whileTap={hasDraft ? { scale: 0.92 } : {}}
+            disabled={!hasDraft}
+            className={cn(
+              'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all duration-200',
+              hasDraft
+                ? 'bg-[var(--accent-cyan)] text-white shadow-[0_0_12px_rgba(14,142,232,0.3)] cursor-pointer'
+                : 'text-[var(--text-tertiary)] cursor-default',
+            )}
+          >
+            {hasDraft ? (
+              <ArrowUp className="w-4 h-4" />
+            ) : (
+              <Sparkles className="w-4 h-4" />
+            )}
+          </motion.button>
+        </motion.div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Main Overlay ──────────────────────────────────────────────── */
 
 export function EdgeUtilityOverlay({
   workstreams,
@@ -116,470 +620,28 @@ export function EdgeUtilityOverlay({
   onCreateItem,
   onNewWorkstream,
 }: EdgeUtilityOverlayProps) {
-  const router = useRouter();
-  const {
-    timerState,
-    startTimer,
-    pauseTimer,
-    resetTimer,
-    utilityRevealOpen,
-    utilityPositions,
-    setUtilityPosition,
-    showArchived,
-    showConnections,
-    backgroundMode,
-    setShowArchived,
-    setShowConnections,
-    setBackgroundMode,
-  } = useWorkspaceStore();
-
-  const [shortcutsHovered, setShortcutsHovered] = useState(false);
-  const [timerHovered, setTimerHovered] = useState(false);
-  const [quickChatOpen, setQuickChatOpen] = useState(false);
-  const [quickChatDraft, setQuickChatDraft] = useState('');
-  const [createOpen, setCreateOpen] = useState(false);
-  const quickChatInputRef = useRef<HTMLInputElement>(null);
-  const createButtonRef = useRef<HTMLDivElement>(null);
-
-  const activeWorkstreams = workstreams.filter(ws => ws.status === 'active');
-
-  // Close radial menu on outside click
-  useEffect(() => {
-    if (!createOpen) return;
-    const handler = (e: PointerEvent) => {
-      if (createButtonRef.current && !createButtonRef.current.contains(e.target as Node)) {
-        setCreateOpen(false);
-      }
-    };
-    window.addEventListener('pointerdown', handler, true);
-    return () => window.removeEventListener('pointerdown', handler, true);
-  }, [createOpen]);
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const cycleBackground = () => {
-    const modes = ['dots', 'grid', 'blank'] as const;
-    const current = modes.indexOf(backgroundMode as typeof modes[number]);
-    setBackgroundMode(modes[(current + 1) % modes.length]);
-  };
-
-  const glassStyle =
-    'bg-white/85 dark:bg-white/15 backdrop-blur-[40px] border border-white/50 dark:border-white/20 shadow-[0_12px_40px_-8px_rgba(0,0,0,0.12)] dark:shadow-[0_20px_60px_-12px_rgba(0,0,0,0.6)] text-[var(--text-primary)]';
-
-  const BackgroundIcon =
-    backgroundMode === 'dots' ? Dot : backgroundMode === 'grid' ? Grid3X3 : Minus;
-
   return (
     <>
-      {/* Top Center: Breadcrumbs (if focused) */}
-      <AnimatePresence>
-        {primaryWorkstreamId && !panelOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className={cn(
-              'absolute top-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-2 rounded-full',
-              glassStyle,
-            )}
-          >
-            <button
-              onClick={onExitWorkstream}
-              className="p-1 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <span className="text-sm font-semibold">
-              {workstreams.find(ws => ws._id === primaryWorkstreamId)?.title}
-            </span>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Left Edge: Workspace Selector Dock */}
+      <WorkspaceDock
+        workstreams={workstreams}
+        primaryWorkstreamId={primaryWorkstreamId}
+        onOpenWorkstream={onOpenWorkstream}
+        onExitWorkstream={onExitWorkstream}
+      />
 
-      {/* Bottom Left: Focus Timer */}
-      <div
-        className="absolute bottom-10 left-10 z-40"
-        onMouseEnter={() => setTimerHovered(true)}
-        onMouseLeave={() => setTimerHovered(false)}
-      >
-        <motion.div
-          drag="y"
-          dragConstraints={{ top: -400, bottom: 0 }}
-          dragElastic={0.1}
-          dragMomentum={false}
-          onDragEnd={(_, info) => {
-            const current = utilityPositions['focus_timer'] || { x: 0, y: 0 };
-            setUtilityPosition('focus_timer', { x: 0, y: current.y + info.offset.y });
-          }}
-          animate={{ y: utilityPositions['focus_timer']?.y ?? 0 }}
-          className={cn(
-            'flex items-center gap-3 p-2 rounded-full transition-all duration-500',
-            glassStyle,
-            timerState.active || timerHovered ? 'pr-5 pl-2' : 'pr-2 pl-2',
-          )}
-        >
-          <button
-            onClick={() => (timerState.active ? pauseTimer() : startTimer())}
-            className={cn(
-              'w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300',
-              timerState.active
-                ? 'bg-[var(--accent-cyan)] text-white shadow-[0_0_20px_rgba(14,142,232,0.4)] scale-105'
-                : 'bg-black/5 dark:bg-white/10 text-[var(--text-secondary)] hover:bg-black/10 dark:hover:bg-white/20',
-            )}
-          >
-            {timerState.active ? (
-              <Pause className="w-4 h-4" />
-            ) : (
-              <Play className="w-4 h-4 ml-0.5" />
-            )}
-          </button>
+      {/* Bottom Center: Unified Command Bar */}
+      <UnifiedCommandBar
+        workstreams={workstreams}
+        primaryWorkstreamId={primaryWorkstreamId}
+        onExitWorkstream={onExitWorkstream}
+        onQuickChat={onQuickChat}
+        onCreateItem={onCreateItem}
+        onNewWorkstream={onNewWorkstream}
+      />
 
-          <div className="flex items-center gap-3 overflow-hidden whitespace-nowrap">
-            <div className="flex flex-col">
-              <span
-                className={cn(
-                  'text-[10px] uppercase tracking-[0.2em] font-bold leading-none mb-1 transition-colors',
-                  timerState.active ? 'text-[var(--accent-cyan)]' : 'text-[var(--text-tertiary)]',
-                )}
-              >
-                Focus
-              </span>
-              <span className="text-[15px] font-mono font-bold tabular-nums leading-none">
-                {formatTime(timerState.sessionMinutes * 60 - timerState.elapsed)}
-              </span>
-            </div>
-
-            <AnimatePresence>
-              {timerHovered && (
-                <motion.div
-                  initial={{ width: 0, opacity: 0, x: -10 }}
-                  animate={{ width: 'auto', opacity: 1, x: 0 }}
-                  exit={{ width: 0, opacity: 0, x: -10 }}
-                  className="flex items-center gap-1 border-l border-black/10 dark:border-white/10 pl-3 ml-1"
-                >
-                  <button
-                    onClick={() => resetTimer()}
-                    className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-all"
-                    title="Reset timer"
-                  >
-                    <RotateCcw className="w-4 h-4" />
-                  </button>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        </motion.div>
-      </div>
-
-      {/* Left Edge: Workstream Shortcuts */}
-      <div
-        className="absolute left-0 top-1/2 -translate-y-1/2 z-40 pl-8"
-        onMouseEnter={() => setShortcutsHovered(true)}
-        onMouseLeave={() => setShortcutsHovered(false)}
-      >
-        <motion.div
-          drag="y"
-          dragConstraints={{ top: -200, bottom: 200 }}
-          dragElastic={0.1}
-          onDragEnd={(_, info) => {
-            const current = utilityPositions['workstream_shortcuts'] || { x: 0, y: 0 };
-            setUtilityPosition('workstream_shortcuts', { x: 0, y: current.y + info.offset.y });
-          }}
-          animate={{ y: utilityPositions['workstream_shortcuts']?.y ?? 0, width: shortcutsHovered ? 224 : 64 }}
-          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-          className={cn(
-            'flex flex-col gap-3 p-3 rounded-[32px] overflow-hidden',
-            glassStyle,
-            shortcutsHovered ? 'items-start' : 'items-center',
-          )}
-        >
-          {!shortcutsHovered && (
-            <div className="flex flex-col gap-4 py-1 items-center">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--accent-cyan)]/10 text-[var(--accent-cyan)] shadow-sm">
-                <LayoutGrid className="w-5 h-5" />
-              </div>
-              <div className="h-px w-8 bg-black/10 dark:bg-white/10" />
-              <div className="flex flex-col gap-3">
-                {activeWorkstreams.slice(0, 4).map(ws => (
-                  <span
-                    key={ws._id}
-                    className="text-xl filter drop-shadow-sm opacity-60 hover:opacity-100 transition-opacity cursor-default"
-                  >
-                    {ws.emoji || '📚'}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {shortcutsHovered && (
-            <div className="w-full px-2 pt-2 pb-1 text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--text-tertiary)]">
-              Workspaces
-            </div>
-          )}
-
-          {shortcutsHovered &&
-            activeWorkstreams.slice(0, 8).map(ws => {
-              const isActive = primaryWorkstreamId === ws._id;
-              return (
-                <button
-                  key={ws._id}
-                  onClick={() => onOpenWorkstream(ws._id)}
-                  className={cn(
-                    'relative flex items-center gap-3 w-full rounded-2xl transition-all duration-200 px-3 py-2.5',
-                    isActive
-                      ? 'bg-[var(--accent-cyan)]/10 text-[var(--accent-cyan)] font-bold shadow-sm'
-                      : 'hover:bg-black/5 dark:hover:bg-white/5 text-[var(--text-secondary)]',
-                  )}
-                >
-                  <span className="text-lg leading-none shrink-0">{ws.emoji || '📚'}</span>
-                  <span className="truncate text-xs tracking-tight">{ws.title}</span>
-                  {isActive && (
-                    <div className="absolute right-3 w-1.5 h-1.5 rounded-full bg-[var(--accent-cyan)] shadow-[0_0_8px_var(--accent-cyan)]" />
-                  )}
-                </button>
-              );
-            })}
-
-          {shortcutsHovered && activeWorkstreams.length > 0 && (
-            <div className="w-full h-px bg-black/10 dark:bg-white/10 my-1" />
-          )}
-
-          {shortcutsHovered && (
-            <>
-              <button
-                onClick={() => onNewWorkstream?.()}
-                className="flex items-center gap-3 w-full rounded-2xl transition-all px-3 py-2.5 hover:bg-black/5 dark:hover:bg-white/5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-              >
-                <Plus className="w-4 h-4 shrink-0" />
-                <span className="text-[10px] font-bold uppercase tracking-widest">New Workspace</span>
-              </button>
-              <button
-                className="flex items-center gap-3 w-full rounded-2xl transition-all px-3 py-2.5 hover:bg-black/5 dark:hover:bg-white/5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-              >
-                <Calendar className="w-4 h-4 shrink-0" />
-                <span className="text-[10px] font-bold uppercase tracking-widest">Schedule</span>
-              </button>
-            </>
-          )}
-        </motion.div>
-      </div>
-
-      {/* Bottom Right: Quick Chat */}
-      {/* Note: willChange:transform creates a stacking context so this element
-          doesn't visually jump when the flex-parent transitions its width */}
-      <div
-        className="absolute bottom-10 right-10 z-40 flex flex-col items-end gap-2"
-        style={{ willChange: 'transform', transform: 'translateZ(0)' }}
-      >
-        <AnimatePresence>
-          {quickChatOpen && (
-            <motion.div
-              initial={{ opacity: 0, y: 12, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 12, scale: 0.96 }}
-              transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-              className={cn('flex flex-col gap-2 w-72 p-3 rounded-[20px] mb-1', glassStyle)}
-            >
-              <div className="flex items-center justify-between px-1">
-                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--text-tertiary)]">
-                  Quick Chat
-                </span>
-                <button
-                  onClick={() => {
-                    setQuickChatOpen(false);
-                    setQuickChatDraft('');
-                  }}
-                  className="p-1 rounded-full hover:bg-black/5 dark:hover:bg-white/10 text-[var(--text-tertiary)]"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-              {primaryWorkstreamId && (
-                <div className="px-1 text-[11px] text-[var(--text-secondary)] truncate">
-                  <span className="text-[var(--text-tertiary)]">In: </span>
-                  {workstreams.find(ws => ws._id === primaryWorkstreamId)?.title ?? 'Workspace'}
-                </div>
-              )}
-              <form
-                onSubmit={e => {
-                  e.preventDefault();
-                  const msg = quickChatDraft.trim();
-                  if (!msg) return;
-                  if (onQuickChat) {
-                    onQuickChat(msg);
-                  } else {
-                    router.push(`/chat?q=${encodeURIComponent(msg)}`);
-                  }
-                  setQuickChatDraft('');
-                  setQuickChatOpen(false);
-                }}
-                className="flex items-center gap-2"
-              >
-                <input
-                  ref={quickChatInputRef}
-                  value={quickChatDraft}
-                  onChange={e => setQuickChatDraft(e.target.value)}
-                  placeholder="Ask anything…"
-                  className="flex-1 rounded-xl bg-black/5 dark:bg-white/10 px-3 py-2 text-[13px] placeholder:text-[var(--text-tertiary)] outline-none border border-transparent focus:border-[var(--accent-cyan)]/40 transition-colors"
-                />
-                <button
-                  type="submit"
-                  disabled={!quickChatDraft.trim()}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-cyan)] text-white disabled:opacity-40 hover:brightness-110 transition-all"
-                >
-                  <MessageSquarePlus className="w-4 h-4" />
-                </button>
-              </form>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <motion.button
-          onClick={() => {
-            setQuickChatOpen(prev => {
-              if (!prev) setTimeout(() => quickChatInputRef.current?.focus(), 80);
-              return !prev;
-            });
-            setCreateOpen(false);
-          }}
-          whileHover={{ scale: 1.06 }}
-          whileTap={{ scale: 0.96 }}
-          className={cn(
-            'flex items-center gap-2.5 px-4 py-2.5 rounded-full transition-all duration-300',
-            glassStyle,
-            quickChatOpen && 'ring-2 ring-[var(--accent-cyan)]/50',
-          )}
-        >
-          <MessageSquarePlus
-            className={cn(
-              'w-4 h-4 transition-colors',
-              quickChatOpen ? 'text-[var(--accent-cyan)]' : 'text-[var(--text-secondary)]',
-            )}
-          />
-          <span className="text-[12px] font-semibold">Quick Chat</span>
-        </motion.button>
-      </div>
-
-      {/* Bottom Center: Radial Create Launcher + Hub Controls */}
-      <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-3">
-
-        {/* Hub controls row (background, completed, connections) — always visible */}
-        <div className={cn('flex items-center gap-1 px-2 py-1.5 rounded-full', glassStyle)}>
-          <button
-            onClick={cycleBackground}
-            title={`Background: ${backgroundMode}`}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/10 transition-colors text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-          >
-            <BackgroundIcon className="w-3.5 h-3.5" />
-            <span className="text-[10px] font-semibold capitalize">{backgroundMode}</span>
-          </button>
-
-          <div className="w-px h-4 bg-black/10 dark:bg-white/10" />
-
-          <button
-            onClick={() => setShowArchived(!showArchived)}
-            title={showArchived ? 'Showing completed (faded)' : 'Hiding completed'}
-            className={cn(
-              'flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl transition-colors',
-              showArchived
-                ? 'text-[var(--text-tertiary)] hover:bg-black/5 dark:hover:bg-white/10 hover:text-[var(--text-primary)]'
-                : 'text-[var(--accent-cyan)] bg-[var(--accent-cyan)]/10',
-            )}
-          >
-            {showArchived ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-            <span className="text-[10px] font-semibold">{showArchived ? 'Completed' : 'Hidden'}</span>
-          </button>
-
-          <div className="w-px h-4 bg-black/10 dark:bg-white/10" />
-
-          <button
-            onClick={() => setShowConnections(!showConnections)}
-            title={showConnections ? 'Showing connections' : 'Hiding connections'}
-            className={cn(
-              'flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl transition-colors',
-              showConnections
-                ? 'text-[var(--accent-cyan)] bg-[var(--accent-cyan)]/10'
-                : 'text-[var(--text-tertiary)] hover:bg-black/5 dark:hover:bg-white/10 hover:text-[var(--text-primary)]',
-            )}
-          >
-            <GitBranch className="w-3.5 h-3.5" />
-            <span className="text-[10px] font-semibold">Links</span>
-          </button>
-        </div>
-
-        {/* Radial create menu container */}
-        <div
-          ref={createButtonRef}
-          className="relative flex items-center justify-center"
-        >
-          {/* Radial items */}
-          <AnimatePresence>
-            {createOpen &&
-              CREATE_ITEMS.map((item, index) => (
-                <RadialItem
-                  key={item.type}
-                  icon={item.icon}
-                  label={item.label}
-                  color={item.color}
-                  angle={item.angle}
-                  radius={68}
-                  open={createOpen}
-                  index={index}
-                  onClick={() => {
-                    setCreateOpen(false);
-                    if (item.type === 'workspace') {
-                      onNewWorkstream?.();
-                    } else {
-                      onCreateItem?.(item.type);
-                    }
-                  }}
-                />
-              ))}
-          </AnimatePresence>
-
-          {/* Main + button */}
-          <motion.button
-            onClick={() => {
-              setCreateOpen(prev => !prev);
-              setQuickChatOpen(false);
-            }}
-            whileHover={{ scale: 1.08 }}
-            whileTap={{ scale: 0.92 }}
-            animate={{ rotate: createOpen ? 45 : 0 }}
-            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-            className={cn(
-              'relative z-10 flex h-12 w-12 items-center justify-center rounded-full transition-all duration-300',
-              glassStyle,
-              createOpen && 'ring-2 ring-[var(--accent-coral)]/60 shadow-[0_0_24px_rgba(255,100,80,0.3)]',
-            )}
-            title={createOpen ? 'Close' : 'Create…'}
-          >
-            <Plus
-              className={cn(
-                'w-5 h-5 transition-colors',
-                createOpen ? 'text-[var(--accent-coral)]' : 'text-[var(--text-primary)]',
-              )}
-            />
-          </motion.button>
-        </div>
-      </div>
-
-      {/* REVEAL ALL Overlay */}
-      <AnimatePresence>
-        {utilityRevealOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-30 bg-black/20 dark:bg-black/40 backdrop-blur-sm pointer-events-none"
-          />
-        )}
-      </AnimatePresence>
+      {/* Bottom Right: Focus Timer */}
+      <FocusTimer />
     </>
   );
 }

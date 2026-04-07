@@ -27,12 +27,12 @@ export type LayoutResult = {
   positions: Map<string, { x: number; y: number }>;
 };
 
-// Radial distances from hub center by lifecycle state (2.5x scale for breathing room)
+// Radial distances from hub center by lifecycle state (scaled for spacious territories)
 const RADIAL_DISTANCE = {
-  active: 1875,
-  quiet: 2588,
-  completed: 3375,
-  archived: 4050,
+  active: 2800,
+  quiet: 3800,
+  completed: 5000,
+  archived: 6000,
 } as const;
 
 // Angular sectors by type (radians from 0)
@@ -116,7 +116,7 @@ export function computeCanonicalLayout(workstreams: Workstream[]): LayoutResult 
         const dx = b.x - a.x;
         const dy = b.y - a.y;
         const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
-        const minDist = 1050; // minimum distance between nodes (2.5x scale)
+        const minDist = 1800; // minimum distance between nodes (scaled for spacious territories)
         if (dist < minDist) {
           const force = (minDist - dist) / dist * 0.3;
           const fx = dx * force;

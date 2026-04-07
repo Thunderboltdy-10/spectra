@@ -193,6 +193,7 @@ function ChatPanelContent({
     routerMode: "auto",
   });
   const { openChatQuery, clearOpenChatQuery } = useWorkspaceStore();
+  const consumedQueryRef = useRef(false);
 
   // Hydrate existing thread
   useEffect(() => {
@@ -207,7 +208,8 @@ function ChatPanelContent({
   }, [messages, streaming]);
 
   useEffect(() => {
-    if (threadId !== "new" || !openChatQuery || streaming || messages.length > 0) return;
+    if (threadId !== "new" || !openChatQuery || streaming || messages.length > 0 || consumedQueryRef.current) return;
+    consumedQueryRef.current = true;
     clearOpenChatQuery();
     void sendMessage(openChatQuery);
   }, [clearOpenChatQuery, messages.length, openChatQuery, sendMessage, streaming, threadId]);
@@ -273,11 +275,12 @@ function ChatPanelContent({
 
             <div
               className={cn(
-                "max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed",
+                "max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed break-words",
                 msg.role === "user"
                   ? "bg-[var(--bg-user-bubble)] border border-[var(--border-default)] shadow-sm text-[var(--text-primary)] rounded-br-md"
                   : "bg-[var(--bg-primary)] border border-[var(--border-default)] shadow-sm text-[var(--text-primary)] rounded-bl-md",
               )}
+              style={{ overflowWrap: 'anywhere' }}
             >
               {msg.content ? (
                 msg.role === "assistant" ? (
@@ -478,12 +481,12 @@ function ArtifactPanelContent({
     setError(null);
     try {
       const response = await fetch(`/api/artifacts?action=get&id=${encodeURIComponent(effectiveId)}`);
+      const rawData = await response.json().catch(() => ({}));
       if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        const errMsg = typeof errData.error === "string" ? errData.error : String(errData.error || "Failed to load artifact");
+        const errMsg = typeof rawData.error === "string" ? rawData.error : String(rawData.error || "Failed to load artifact");
         throw new Error(errMsg);
       }
-      const data = (await response.json()) as { artifact: Record<string, unknown> };
+      const data = rawData as { artifact: Record<string, unknown> };
       if (!data.artifact) throw new Error("Artifact not found");
       setArtifact(data.artifact);
     } catch (err: unknown) {

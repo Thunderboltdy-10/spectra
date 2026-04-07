@@ -118,13 +118,13 @@ function getAmbientClass(): string {
 /* ─── Zoom helpers ───────────────────────────────────────── */
 
 function getNeighborOpacity(zoom: number): number {
-  if (zoom <= 0.7) return 1;
-  if (zoom >= 1.0) return 0;
-  return Math.max(0, 1 - (zoom - 0.7) / 0.3);
+  if (zoom <= 0.55) return 1;
+  if (zoom >= 0.85) return 0;
+  return Math.max(0, 1 - (zoom - 0.55) / 0.3);
 }
 
 function restoreViewport(): Viewport {
-  const defaultVp: Viewport = { x: 0, y: 0, zoom: 0.35 };
+  const defaultVp: Viewport = { x: 0, y: 0, zoom: 0.18 };
   if (typeof window === "undefined") {
     return defaultVp;
   }
@@ -207,8 +207,8 @@ function buildPeerLinks(workstreams: Workstream[], positions: Map<string, { x: n
       const sourcePos = positions.get(a._id) ?? { x: 0, y: 0 };
       const targetPos = positions.get(b._id) ?? { x: 0, y: 0 };
       const { sourceHandle, targetHandle } = pickDirectionalHandles(
-        { x: sourcePos.x + 260, y: sourcePos.y + 140 },
-        { x: targetPos.x + 260, y: targetPos.y + 140 },
+        { x: sourcePos.x + 600, y: sourcePos.y + 400 },
+        { x: targetPos.x + 600, y: targetPos.y + 400 },
       );
       edges.push({
         id: `peer-${a._id}-${b._id}`,
@@ -346,7 +346,7 @@ const WorkstreamNode = memo(function WorkstreamNode({
   const color = getWorkstreamColor(workstream.color);
 
   // Unified V2 scale
-  const width = band === "overview" ? 520 : band === "summary" ? 620 : band === "detail" ? 720 : 780;
+  const width = band === "overview" ? 800 : band === "summary" ? 1200 : band === "detail" ? 1500 : 1500;
   const dissolving = isCommitted;
 
   return (
@@ -444,8 +444,9 @@ const WorkstreamNode = memo(function WorkstreamNode({
             )}
           </div>
 
+          {/* Description — shows at summary/detail zoom OR when focused */}
           <AnimatePresence>
-            {isFocused && !dissolving && (
+            {(isFocused || band !== "overview") && !dissolving && (
               <motion.p
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
@@ -458,8 +459,9 @@ const WorkstreamNode = memo(function WorkstreamNode({
             )}
           </AnimatePresence>
 
+          {/* Stats bar — shows at summary/detail zoom OR when focused */}
           <AnimatePresence>
-            {isFocused && !dissolving && (
+            {(isFocused || band !== "overview") && !dissolving && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
@@ -482,8 +484,9 @@ const WorkstreamNode = memo(function WorkstreamNode({
             )}
           </AnimatePresence>
 
+          {/* Footer with CTA — only at detail zoom or when focused */}
           <AnimatePresence>
-            {isFocused && !dissolving && (
+            {(isFocused || band === "detail") && !dissolving && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
@@ -612,7 +615,7 @@ function WorkspaceCanvasInner({
 
   useEffect(() => {
     const timeout = setTimeout(() => {
-      setSemanticBand(zoom < 0.3 ? "overview" : zoom < 0.7 ? "summary" : "detail");
+      setSemanticBand(zoom < 0.20 ? "overview" : zoom < 0.55 ? "summary" : "detail");
     }, 180);
     return () => clearTimeout(timeout);
   }, [zoom]);
@@ -652,7 +655,7 @@ function WorkspaceCanvasInner({
 
   // Auto-exit when zooming far out of a committed workstream
   useEffect(() => {
-    if (!primaryWorkstreamId || zoom >= 0.25) return;
+    if (!primaryWorkstreamId || zoom >= 0.15) return;
     if (onCommitWorkstream) {
       onCommitWorkstream(null);
     } else {
@@ -884,8 +887,8 @@ function WorkspaceCanvasInner({
         const node = instance.getNode(`ws-${workstreamId}`);
         if (node) {
           instance.setCenter(
-            node.position.x + 260,
-            node.position.y + 120,
+            node.position.x + 600,
+            node.position.y + 400,
             { zoom: 1.0, duration: 450 },
           );
         }
@@ -966,8 +969,8 @@ function WorkspaceCanvasInner({
     setVisibleWorkstreamIds([primaryWorkstreamId]);
     void fetchContentForWorkstream(primaryWorkstreamId);
     instance.setCenter(
-      node.position.x + 260,
-      node.position.y + 120,
+      node.position.x + 600,
+      node.position.y + 400,
       { zoom: 1.0, duration: 450 },
     );
   }, [fetchContentForWorkstream, positions, primaryWorkstreamId, setPreviousViewport, setVisibleWorkstreamIds]);
@@ -1025,7 +1028,7 @@ function WorkspaceCanvasInner({
         // Build actual UI-specific internal nodes for the workstream!
         if (primaryWorkstreamId === workstreamId) {
           const workstreamPos = positions.get(workstreamId) ?? { x: 0, y: 0 };
-          const basePos = { x: workstreamPos.x, y: workstreamPos.y + 120 };
+          const basePos = { x: workstreamPos.x, y: workstreamPos.y + 400 };
           const focusWorkstream = workstreams.find((ws) => ws._id === workstreamId);
 
           const contentData = {
@@ -1127,8 +1130,8 @@ function WorkspaceCanvasInner({
         const node = instance.getNode(`ws-${initWorkstreamId}`);
         if (node) {
           instance.setCenter(
-            node.position.x + 260,
-            node.position.y + 120,
+            node.position.x + 600,
+            node.position.y + 400,
             { zoom: 0.85, duration: 0 },
           );
           const vp = instance.getViewport();
@@ -1317,8 +1320,8 @@ function WorkspaceCanvasInner({
     const target = instance.getNode(`ws-${focusWorkstreamId}`);
     if (!target) return;
     instance.setCenter(
-      target.position.x + 260,
-      target.position.y + 120,
+      target.position.x + 600,
+      target.position.y + 400,
       { zoom: 0.6, duration: 600 },
     );
   }, [focusWorkstreamId]);
@@ -1357,8 +1360,8 @@ function WorkspaceCanvasInner({
         nodes={nodes}
         edges={edges}
         fitView={false}
-        minZoom={0.08}
-        maxZoom={2.5}
+        minZoom={0.12}
+        maxZoom={2.0}
         defaultViewport={restoreViewport()}
         nodeTypes={FLOW_NODE_TYPES}
         onInit={handleInit}
@@ -1371,8 +1374,8 @@ function WorkspaceCanvasInner({
         elementsSelectable={false}
         selectionOnDrag={false}
         panOnDrag
-        panOnScroll={true}
-        zoomOnScroll={false}
+        panOnScroll={false}
+        zoomOnScroll={true}
         zoomOnPinch={true}
         zoomOnDoubleClick={false}
         proOptions={{ hideAttribution: true }}

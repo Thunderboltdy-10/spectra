@@ -640,7 +640,16 @@ export const CategoryFieldNode = memo(function CategoryFieldNode({
 
   return (
     <div
-      className={cn("flex flex-col gap-3 min-w-[320px] transition-all duration-300", isOverview && "opacity-40 scale-95 origin-top-left")}
+      className={cn(
+        "workspace-tint-zone relative flex flex-col gap-3 min-w-[320px] transition-all duration-300",
+        isOverview && "opacity-60 scale-95 origin-top-left",
+      )}
+      style={{
+        // Tint zone: soft background region at 7% opacity
+        background: `radial-gradient(ellipse at center, color-mix(in oklab, ${accentColor} 7%, transparent) 0%, transparent 75%)`,
+        padding: '24px',
+        borderRadius: '24px',
+      }}
       onContextMenu={(e) => {
         if (onGroupContextMenu) {
           e.preventDefault();
@@ -658,18 +667,56 @@ export const CategoryFieldNode = memo(function CategoryFieldNode({
         <span className="ml-auto text-[9px] text-[var(--text-tertiary)]">{items.length}</span>
       </div>
 
-      {/* Content Items */}
+      {/* Content Items — progressive zoom reveal */}
       <div className="flex flex-col gap-2">
         {items.length === 0 ? (
           <div className="px-3 py-4 rounded-xl border border-dashed border-[var(--border-default)]/30 text-[11px] text-[var(--text-tertiary)] italic">
             No {label.toLowerCase()} yet.
           </div>
+        ) : isOverview ? (
+          /* OVERVIEW: Compact dot summary */
+          <div className="flex items-center gap-1.5 px-1 py-1">
+            {items.slice(0, 6).map((item) => (
+              <div
+                key={item.id}
+                className="h-2 w-2 rounded-full opacity-50"
+                style={{ background: accentColor }}
+              />
+            ))}
+            {items.length > 6 && (
+              <span className="text-[9px] text-[var(--text-tertiary)] ml-1">+{items.length - 6}</span>
+            )}
+          </div>
+        ) : !isDetail ? (
+          /* SUMMARY: Title-only compact list */
+          <div className="flex flex-col gap-1">
+            {items.slice(0, 8).map((item) => {
+              const typeIcon = type === "threads" ? <MessageSquare className="h-3 w-3" />
+                : type === "documents" ? <FileText className="h-3 w-3" />
+                : type === "planner" ? <CalendarClock className="h-3 w-3" />
+                : <Sparkles className="h-3 w-3" />;
+              const panelType = type === "threads" ? "chat" : type === "planner" ? "planner" : "artifact";
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => onOpenPanel(panelType as PanelType, item.id)}
+                  className="flex items-center gap-2 px-2 py-1 rounded-lg text-left transition-colors hover:bg-white/[0.04]"
+                >
+                  <span className="text-[var(--text-tertiary)] shrink-0">{typeIcon}</span>
+                  <span className="truncate text-[12px] text-[var(--text-secondary)]">
+                    {(item as { title?: string }).title || "Untitled"}
+                  </span>
+                </button>
+              );
+            })}
+            {items.length > 8 && (
+              <span className="text-[10px] text-[var(--text-tertiary)] px-2">+{items.length - 8} more</span>
+            )}
+          </div>
         ) : (
+          /* DETAIL: Full rendering */
           <>
             {visibleItems.map((item) => {
-              if (isOverview) {
-                return <div key={item.id} className="h-10 w-full rounded-xl bg-white/[0.03] animate-pulse-slow" />;
-              }
               if (type === "threads") {
                 const thread = item as ThreadSummary;
                 return (
@@ -1017,7 +1064,19 @@ export function buildWorkspaceNodes(
   const wsKey = data.workstreamTitle ?? "ws";
 
   const nodes: Node[] = [
-    // Threads Lane (title anchor node removed — workspace name shown in breadcrumb overlay)
+    // Workspace title at top of content (restored from regression)
+    {
+      id: `ws-title-${wsKey}`,
+      type: "workstreamTitle",
+      position: { x: basePosition.x, y: basePosition.y - 100 },
+      draggable: true,
+      data: {
+        title: data.workstreamTitle ?? "Untitled",
+        emoji: data.workstreamEmoji,
+        band: data.band,
+      },
+    },
+    // Threads Lane
     {
       id: `ws-lane-threads-${wsKey}`,
       type: "categoryField",

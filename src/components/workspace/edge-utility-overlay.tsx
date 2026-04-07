@@ -429,11 +429,17 @@ function UnifiedCommandBar({
   const totalItems = createItems.length;
   const angleStep = totalItems > 1 ? 120 / (totalItems - 1) : 0;
 
-  // Close create menu on outside click
+  // Close create menu on outside click (excluding the toggle button)
+  const toggleRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!createOpen) return;
     const handler = (e: PointerEvent) => {
-      if (createRef.current && !createRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      // Don't close if clicking the toggle button or its container (barRef)
+      if (barRef.current?.contains(target) || toggleRef.current?.contains(target)) {
+        return;
+      }
+      if (createRef.current && !createRef.current.contains(target)) {
         setCreateOpen(false);
       }
     };
@@ -514,6 +520,7 @@ function UnifiedCommandBar({
         >
           {/* + Create button */}
           <motion.button
+            ref={toggleRef}
             onClick={() => setCreateOpen(prev => !prev)}
             whileHover={{ scale: 1.08 }}
             whileTap={{ scale: 0.92 }}

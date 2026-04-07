@@ -463,9 +463,11 @@ function ArtifactPanelContent({
     : "document";
   // Map "diagram" / "code" to a valid artifact type the API accepts
   const resolvedNewType =
-    newArtifactType === "diagram" || newArtifactType === "code"
-      ? "document"
-      : "document";
+    newArtifactType === "diagram"
+      ? "diagram"
+      : newArtifactType === "code"
+        ? "code"
+        : "document";
   const newArtifactTitle =
     newArtifactType === "diagram"
       ? "Untitled diagram"

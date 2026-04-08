@@ -14,7 +14,6 @@ import {
   toOpenRouterMessages,
 } from "@/lib/orchestrator/compose";
 import {
-  classifyComplexity,
   classifyExplainDepth,
   classifyRequest,
   parseUserDirectives,
@@ -95,6 +94,7 @@ import {
 import { generatePromptAwareClarification } from "@/lib/orchestrator/clarification-generator";
 import { formatSchoolNow } from "@/lib/timezone";
 import { recordOpenRouterUsage } from "@/lib/usage-tracking";
+import { MODEL_CONFIG } from "@/lib/model-config";
 import type { ModelRouteResult, RouteTrace, StudyMode } from "@/types";
 
 type ChatRequestBody = {
@@ -153,6 +153,8 @@ type AgentSnapshot = {
 function classifierOutputFormatForRoutePlan(outputFormat: string | undefined, fallback: string) {
   return outputFormat ?? fallback;
 }
+
+const CLASSIFIER_MODEL_LANE = "cheap_classifier";
 
 type StructuredError = {
   code: string;
@@ -728,48 +730,22 @@ export async function runChatPipeline(request: NextRequest) {
     searchMode: body.autoSettings?.searchMode ?? "auto",
   };
 
-  const earlyComplexity = classifyComplexity(normalizedMessage);
-  const earlyClassification = classifyRequest({
+  const auto = await runAutoSettingsPipeline({
+    actorClerkId: actor.clerkId,
     message: normalizedMessage,
-    complexity: earlyComplexity,
     mode: safeMode,
     hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
     isFirstMessage: !body.chatId,
     multiAgentRequested: Boolean(body.forceMultiAgent),
+    currentThinkingLevel: body.thinkingLevel,
     spendingTier: budget.tier,
+    autoEnhancePrompt: autoSettings.enhancePrompt,
+    autoThinking: autoSettings.autoThinking,
+    autoSearch: autoSettings.autoSearch,
+    enhanceMode: autoSettings.enhanceMode,
+    thinkingMode: autoSettings.thinkingMode,
+    searchMode: autoSettings.searchMode,
   });
-  const skipAutoSettingsForT0 = earlyClassification.requestClass === "T0";
-  const auto: Awaited<ReturnType<typeof runAutoSettingsPipeline>> = skipAutoSettingsForT0
-    ? {
-        message: normalizedMessage,
-        promptEnhanced: false,
-        searchEnabled: false,
-        thinkingLevel: "low",
-        complexity: earlyComplexity,
-        requestClass: earlyClassification.requestClass,
-        assignmentLevel: earlyClassification.assignmentLevel,
-        classificationReason: earlyClassification.reason,
-        promptCategory: "general",
-        questionType: "other",
-        isMultipart: false,
-        suggestedMode: null,
-      }
-    : await runAutoSettingsPipeline({
-        actorClerkId: actor.clerkId,
-        message: normalizedMessage,
-        mode: safeMode,
-        hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
-        isFirstMessage: !body.chatId,
-        multiAgentRequested: Boolean(body.forceMultiAgent),
-        currentThinkingLevel: body.thinkingLevel,
-        spendingTier: budget.tier,
-        autoEnhancePrompt: autoSettings.enhancePrompt,
-        autoThinking: autoSettings.autoThinking,
-        autoSearch: autoSettings.autoSearch,
-        enhanceMode: autoSettings.enhanceMode,
-        thinkingMode: autoSettings.thinkingMode,
-        searchMode: autoSettings.searchMode,
-      });
   const userDirectives = parseUserDirectives(normalizedMessage, { modelCatalog: catalog });
   if (userDirectives.forcedModel) {
     logger.info("user directive: forced model", {
@@ -789,7 +765,7 @@ export async function runChatPipeline(request: NextRequest) {
     });
   }
   logger.info("auto-settings complete", {
-    skippedForT0: skipAutoSettingsForT0,
+    skippedForT0: false,
     promptEnhanced: auto.promptEnhanced,
     searchEnabled: auto.searchEnabled,
     promptCategory: auto.promptCategory,
@@ -1285,7 +1261,7 @@ export async function runChatPipeline(request: NextRequest) {
     !/\b(about|on|for|regarding|the|topic)\b/i.test(normalizedMessage);
 
   const requestClassification = classifyRequest({
-    message: auto.message,
+    message: normalizedMessage,
     complexity: auto.complexity,
     mode: effectiveMode,
     hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
@@ -1301,8 +1277,12 @@ export async function runChatPipeline(request: NextRequest) {
     requestClass: requestClassification.requestClass,
     classificationReason: requestClassification.reason,
   });
-  if (skipAutoSettingsForT0) {
-    pipelineController.markStageSkipped("autoSettings", "Skipped for T0 request class.");
+  if (requestClassification.requestClass === "T0") {
+    auto.message = normalizedMessage;
+    auto.promptEnhanced = false;
+    auto.searchEnabled = false;
+    auto.thinkingLevel = "low";
+    pipelineController.markStageSkipped("autoSettings", "Skipped for trivial filler T0 request.");
   } else {
     pipelineController.markStageCompleted("autoSettings");
   }
@@ -1595,7 +1575,7 @@ export async function runChatPipeline(request: NextRequest) {
   });
   const classifierInputValid = validateClassifierInput(classifierInput);
   const classifierSkillIds = classifierInput.availableSkills;
-  const classifierSource = {
+  const classifierDecisionSource = {
     tier: auto.requestClass,
     skills: selectRuntimeSkills({
       message: auto.message,
@@ -1625,8 +1605,16 @@ export async function runChatPipeline(request: NextRequest) {
               ? 0.76
               : 0.71,
   };
+  const classifierMeta = {
+    modelId: MODEL_CONFIG.smartCheap,
+    modelLane: CLASSIFIER_MODEL_LANE,
+    fallbackUsed: false,
+    fallbackReason: undefined as string | undefined,
+    timedOut: false,
+    durationMs: 0,
+  };
   const classifierValidation = classifierInputValid
-    ? validateClassifierDecision(classifierSource, classifierSkillIds)
+    ? validateClassifierDecision(classifierDecisionSource, classifierSkillIds)
     : { ok: false as const, error: "Classifier input payload is malformed." };
   if (!classifierValidation.ok) {
     logger.warn("classifier contract validation failed", {
@@ -1640,6 +1628,7 @@ export async function runChatPipeline(request: NextRequest) {
     });
   }
   const classifierDecision: ClassifierDecision = classifierValidation.value;
+  pipelineController.markStageCompleted("classifyRequest");
   const initialWorkstreamAssignment = routePlan.workstreamAssignment;
   const routedWorkstreamId =
     routePlan.workstreamAssignment.status === "assigned"
@@ -1713,7 +1702,7 @@ export async function runChatPipeline(request: NextRequest) {
       auto.thinkingLevel = workstreamDefaultThinking;
     }
     const refreshedClassification = classifyRequest({
-      message: auto.message,
+      message: normalizedMessage,
       complexity: auto.complexity,
       mode: effectiveMode,
       hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
@@ -1745,8 +1734,8 @@ export async function runChatPipeline(request: NextRequest) {
         requestClass: refreshedClassification.requestClass,
         classificationReason: refreshedClassification.reason,
       });
-      if (skipAutoSettingsForT0) {
-        pipelineController.markStageSkipped("autoSettings", "Skipped for T0 request class.");
+      if (refreshedClassification.requestClass === "T0") {
+        pipelineController.markStageSkipped("autoSettings", "Skipped for trivial filler T0 request.");
       } else {
         pipelineController.markStageCompleted("autoSettings");
       }
@@ -2281,6 +2270,11 @@ export async function runChatPipeline(request: NextRequest) {
         workstreamId: activeWorkstreamId,
         classifierInput,
         classifierDecision,
+        classifierMeta,
+        modelLanes: {
+          classifier: classifierMeta.modelLane,
+          generation: routeDecision.lane,
+        },
       },
       candidates: routeDecision.candidates,
       selected: {
@@ -2298,6 +2292,7 @@ export async function runChatPipeline(request: NextRequest) {
       classificationReason: auto.classificationReason,
       classifierInput,
       classifierDecision,
+      classifierMeta,
       stepsExecuted: pipelineSnapshot.completedStages,
       stepsSkipped: pipelineSnapshot.skippedStages.map((row) => ({
         step: row.step,

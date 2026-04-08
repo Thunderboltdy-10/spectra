@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   buildClassifierInput,
+  CLASSIFIER_OUTPUT_FORMATS,
   validateClassifierDecision,
   validateClassifierInput,
 } from "@/lib/orchestrator/classifier-contract";
+import { classifyRequest } from "@/lib/auto-settings";
 
 describe("classifier contract", () => {
   it("builds a well-formed structured classifier input", () => {
@@ -93,5 +95,69 @@ describe("classifier contract", () => {
     );
 
     expect(result.ok).toBe(false);
+  });
+
+  it("only routes trivial filler follow-ups through T0", () => {
+    const filler = classifyRequest({
+      message: "ok",
+      complexity: "simple",
+      mode: "general",
+      hasAttachments: false,
+      isFirstMessage: false,
+      spendingTier: "normal",
+    });
+    const substantive = classifyRequest({
+      message: "explain entropy",
+      complexity: "simple",
+      mode: "general",
+      hasAttachments: false,
+      isFirstMessage: false,
+      spendingTier: "normal",
+    });
+
+    expect(filler.requestClass).toBe("T0");
+    expect(substantive.requestClass).not.toBe("T0");
+  });
+
+  it("never routes first messages or attachment-bearing messages through T0", () => {
+    const first = classifyRequest({
+      message: "ok",
+      complexity: "simple",
+      mode: "general",
+      hasAttachments: false,
+      isFirstMessage: true,
+      spendingTier: "normal",
+    });
+    const withAttachment = classifyRequest({
+      message: "ok",
+      complexity: "simple",
+      mode: "general",
+      hasAttachments: true,
+      isFirstMessage: false,
+      spendingTier: "normal",
+    });
+
+    expect(first.requestClass).not.toBe("T0");
+    expect(withAttachment.requestClass).not.toBe("T0");
+  });
+
+  it("keeps classifier output formats constrained to declared schema values", () => {
+    const result = validateClassifierDecision(
+      {
+        tier: "T1",
+        skills: ["concise-chat"],
+        workspaceTarget: { kind: "none" },
+        agentId: null,
+        needsSearch: false,
+        needsMemory: false,
+        needsRag: false,
+        outputFormat: CLASSIFIER_OUTPUT_FORMATS[0],
+        thinkingLevel: "low",
+        confidence: 0.8,
+      },
+      ["concise-chat"],
+    );
+
+    expect(result.ok).toBe(true);
   });
 });

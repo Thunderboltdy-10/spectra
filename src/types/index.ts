@@ -452,6 +452,19 @@ export type RouteTrace = {
       thinkingLevel: import("@/lib/contracts/studyModes").ThinkingLevel;
       confidence: number;
     };
+    classifierMeta?: {
+      modelId: string;
+      modelLane: string;
+      fallbackUsed: boolean;
+      fallbackReason?: string;
+      timedOut: boolean;
+      durationMs: number;
+    };
+    modelLanes?: {
+      classifier: string;
+      generation: string;
+      background?: string;
+    };
   };
   candidates: RouteTraceCandidate[];
   selected: {
@@ -469,6 +482,7 @@ export type RouteTrace = {
   classificationReason?: string;
   classifierInput?: RouteTrace["inputs"]["classifierInput"];
   classifierDecision?: RouteTrace["inputs"]["classifierDecision"];
+  classifierMeta?: RouteTrace["inputs"]["classifierMeta"];
   stepsExecuted?: string[];
   stepsSkipped?: Array<{ step: string; reason: string }>;
   searchStatus?: "real_search" | "model_knowledge" | "skipped" | "error";

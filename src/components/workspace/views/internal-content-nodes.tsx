@@ -72,6 +72,7 @@ export type WorkspaceWidgetSummary = {
   itemType: string;
   renderMode?: string;
   contentSummary?: string;
+  renderProps?: Record<string, unknown>;
   x: number;
   y: number;
   width?: number;

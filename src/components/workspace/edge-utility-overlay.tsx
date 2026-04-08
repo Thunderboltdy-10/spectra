@@ -33,6 +33,7 @@ interface EdgeUtilityOverlayProps {
   onQuickChat?: (message: string) => void;
   onCreateItem?: (type: 'note' | 'code' | 'visual' | 'planner') => void;
   onNewWorkstream?: () => void;
+  onOpenHub?: () => void;
 }
 
 /* ─── Constants ─────────────────────────────────────────────────── */
@@ -71,6 +72,12 @@ const AI_ITEM: CreateMenuItem = {
   label: 'Create with AI',
   color: 'var(--accent-cyan)',
 };
+
+const HUB_VISIBILITY_KEYS = ['focus_timer', 'workstream_shortcuts', 'command_bar'] as const;
+
+function clampOffset(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
 
 /* ─── Radial Item Sub-component ─────────────────────────────────── */
 
@@ -170,7 +177,7 @@ function WorkspaceDock({
           const current = utilityPositions['workstream_shortcuts'] || { x: 0, y: 0 };
           setUtilityPosition('workstream_shortcuts', {
             x: 0,
-            y: current.y + info.offset.y,
+            y: clampOffset(current.y + info.offset.y, -250, 250),
           });
         }}
         animate={{
@@ -317,7 +324,7 @@ function FocusTimer() {
           const current = utilityPositions['focus_timer'] || { x: 0, y: 0 };
           setUtilityPosition('focus_timer', {
             x: 0,
-            y: current.y + info.offset.y,
+            y: clampOffset(current.y + info.offset.y, -300, 100),
           });
         }}
         animate={{ y: utilityPositions['focus_timer']?.y ?? 0 }}
@@ -398,6 +405,7 @@ function UnifiedCommandBar({
   onQuickChat,
   onCreateItem,
   onNewWorkstream,
+  hidden,
 }: {
   workstreams: Workstream[];
   primaryWorkstreamId?: string;
@@ -405,6 +413,7 @@ function UnifiedCommandBar({
   onQuickChat?: (message: string) => void;
   onCreateItem?: (type: 'note' | 'code' | 'visual' | 'planner') => void;
   onNewWorkstream?: () => void;
+  hidden?: boolean;
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState('');
@@ -480,7 +489,12 @@ function UnifiedCommandBar({
   const hasDraft = draft.trim().length > 0;
 
   return (
-    <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-40">
+    <div
+      className={cn(
+        'absolute bottom-10 left-1/2 -translate-x-1/2 z-40 transition-all duration-300',
+        hidden && 'pointer-events-none opacity-0 translate-y-6',
+      )}
+    >
       <div ref={barRef} className="relative flex flex-col items-center">
         {/* Radial create menu — fans upward from the + button */}
         <div ref={createRef} className="absolute bottom-0 left-4 flex items-center justify-center">
@@ -615,6 +629,20 @@ function UnifiedCommandBar({
   );
 }
 
+export function HubBar(props: Parameters<typeof UnifiedCommandBar>[0]) {
+  return <UnifiedCommandBar {...props} />;
+}
+
+export function HubInternalView() {
+  return (
+    <div className="pointer-events-none absolute inset-x-0 top-6 z-20 flex justify-center">
+      <div className="rounded-full border border-[var(--border-default)]/30 bg-[var(--bg-elevated)]/45 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.24em] text-[var(--text-tertiary)] shadow-[0_18px_45px_-30px_rgba(8,12,24,0.85)] backdrop-blur-xl">
+        Hub view
+      </div>
+    </div>
+  );
+}
+
 /* ─── Main Overlay ──────────────────────────────────────────────── */
 
 export function EdgeUtilityOverlay({
@@ -625,16 +653,49 @@ export function EdgeUtilityOverlay({
   onQuickChat,
   onCreateItem,
   onNewWorkstream,
+  onOpenHub,
 }: EdgeUtilityOverlayProps) {
+  const { utilityVisible, setUtilityVisible } = useWorkspaceStore();
+  const hubCollapsed = HUB_VISIBILITY_KEYS.every((key) => utilityVisible[key] === false);
+  const setHubCollapsed = useCallback(
+    (collapsed: boolean) => {
+      HUB_VISIBILITY_KEYS.forEach((key) => setUtilityVisible(key, !collapsed));
+    },
+    [setUtilityVisible],
+  );
+
   return (
     <>
+      {primaryWorkstreamId === '__hub__' ? <HubInternalView /> : null}
+
+      <div className="absolute right-6 top-6 z-40">
+        <motion.button
+          type="button"
+          onClick={() => setHubCollapsed(!hubCollapsed)}
+          whileHover={{ scale: 1.04 }}
+          whileTap={{ scale: 0.96 }}
+          className={cn(
+            'flex items-center gap-2 rounded-full px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-secondary)] transition-colors',
+            glassStyle,
+          )}
+          title={hubCollapsed ? 'Show hub widgets' : 'Hide hub widgets'}
+        >
+          <span>{hubCollapsed ? 'Show hub' : 'Hide hub'}</span>
+          <motion.span animate={{ rotate: hubCollapsed ? 180 : 0 }} transition={{ duration: 0.2 }}>
+            <ArrowUp className="h-3.5 w-3.5" />
+          </motion.span>
+        </motion.button>
+      </div>
+
       {/* Left Edge: Workspace Selector Dock */}
-      <WorkspaceDock
-        workstreams={workstreams}
-        primaryWorkstreamId={primaryWorkstreamId}
-        onOpenWorkstream={onOpenWorkstream}
-        onExitWorkstream={onExitWorkstream}
-      />
+      {utilityVisible.workstream_shortcuts !== false ? (
+        <WorkspaceDock
+          workstreams={workstreams}
+          primaryWorkstreamId={primaryWorkstreamId}
+          onOpenWorkstream={onOpenWorkstream}
+          onExitWorkstream={onOpenHub ?? onExitWorkstream}
+        />
+      ) : null}
 
       {/* Bottom Center: Unified Command Bar */}
       <UnifiedCommandBar
@@ -644,10 +705,11 @@ export function EdgeUtilityOverlay({
         onQuickChat={onQuickChat}
         onCreateItem={onCreateItem}
         onNewWorkstream={onNewWorkstream}
+        hidden={utilityVisible.command_bar === false}
       />
 
       {/* Bottom Right: Focus Timer */}
-      <FocusTimer />
+      {utilityVisible.focus_timer !== false ? <FocusTimer /> : null}
     </>
   );
 }

@@ -1475,7 +1475,7 @@ function WorkspaceCanvasInner({
         }}
       />
       <FlowBackground mode={backgroundMode} />
-        <Controls position="bottom-left" showInteractive={false}>
+        <Controls position="top-right" showInteractive={false}>
           <ControlButton
             onClick={() => reactFlowRef.current?.zoomTo(0.7, { duration: 350 })}
             title="Focus detail band"

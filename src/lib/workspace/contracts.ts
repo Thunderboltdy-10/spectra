@@ -45,11 +45,11 @@ export const WORKSPACE_UTILITY_ZONES = [
 export type WorkspaceUtilityZone = (typeof WORKSPACE_UTILITY_ZONES)[number];
 
 export const DEFAULT_UTILITY_ZONES: Record<WorkspaceUtilityType, WorkspaceUtilityZone> = {
-  focus_timer: "bottom-left",
+  focus_timer: "bottom-right",
   deadline_pulse: "bottom-right",
   workstream_shortcuts: "left-edge",
   quick_notes: "left-edge",
   timetable_fragment: "right-edge",
   breadcrumb: "top-center",
-  command_bar: "bottom-left", // dummy, managed separately
+  command_bar: "bottom-right", // dummy, managed separately
 };

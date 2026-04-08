@@ -1547,6 +1547,13 @@ function WorkspaceCanvasInner({
         zoomOnDoubleClick={false}
         proOptions={{ hideAttribution: true }}
         className={cn("workspace-react-flow", getAmbientClass())}
+        onNodeClick={(_: React.MouseEvent, node: Node) => {
+          if (typeof node.id !== "string") return;
+          if (!node.id.startsWith("ws-")) return;
+          const workstreamId = node.id.slice(3);
+          if (!workstreamId) return;
+          handleOpenWorkstream(workstreamId);
+        }}
       >
       <div
         className="pointer-events-none absolute inset-0 z-0"

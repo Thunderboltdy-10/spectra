@@ -8,6 +8,9 @@ import {
   Play,
   RotateCcw,
   LayoutGrid,
+  Dot,
+  Grid3X3,
+  Square,
   Plus,
   FileText,
   Code2,
@@ -19,7 +22,7 @@ import {
   ArrowUp,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useWorkspaceStore } from '@/stores/workspace-store';
+import { useWorkspaceStore, type WorkspaceBackgroundMode } from '@/stores/workspace-store';
 import type { Workstream } from '@/hooks/use-workspace-data';
 
 /* ─── Types ─────────────────────────────────────────────────────── */
@@ -74,9 +77,38 @@ const AI_ITEM: CreateMenuItem = {
 };
 
 const HUB_VISIBILITY_KEYS = ['focus_timer', 'workstream_shortcuts', 'command_bar'] as const;
+const EDGE_MARGIN = 24;
 
 function clampOffset(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function getViewportBoundedY(value: number, baseInset: number, elementHeight: number) {
+  if (typeof window === 'undefined') return value;
+  const maxTravel = Math.max(0, window.innerHeight - elementHeight - baseInset * 2) / 2;
+  return clampOffset(value, -maxTravel, maxTravel);
+}
+
+function useBoundedUtilityOffset(
+  key: 'focus_timer' | 'workstream_shortcuts',
+  baseInset: number,
+  elementHeight: number,
+) {
+  const { utilityPositions, setUtilityPosition } = useWorkspaceStore();
+  const rawY = utilityPositions[key]?.y ?? 0;
+  const boundedY = getViewportBoundedY(rawY, baseInset, elementHeight);
+
+  useEffect(() => {
+    if (rawY !== boundedY) {
+      setUtilityPosition(key, { x: 0, y: boundedY });
+    }
+  }, [baseInset, boundedY, elementHeight, key, rawY, setUtilityPosition]);
+
+  const commitY = useCallback((offset: number) => {
+    setUtilityPosition(key, { x: 0, y: getViewportBoundedY(offset, baseInset, elementHeight) });
+  }, [baseInset, elementHeight, key, setUtilityPosition]);
+
+  return { boundedY, commitY };
 }
 
 /* ─── Radial Item Sub-component ─────────────────────────────────── */
@@ -156,8 +188,10 @@ function WorkspaceDock({
   onOpenWorkstream: (wsId: string) => void;
   onExitWorkstream: () => void;
 }) {
-  const { utilityPositions, setUtilityPosition } = useWorkspaceStore();
   const [hovered, setHovered] = useState(false);
+  const DOCK_HEIGHT = 420;
+  const DOCK_INSET = EDGE_MARGIN;
+  const { boundedY, commitY } = useBoundedUtilityOffset('workstream_shortcuts', DOCK_INSET, DOCK_HEIGHT);
 
   const activeWorkstreams = workstreams.filter(ws => ws.status === 'active');
   const isHome = !primaryWorkstreamId;
@@ -170,18 +204,14 @@ function WorkspaceDock({
     >
       <motion.div
         drag="y"
-        dragConstraints={{ top: -250, bottom: 250 }}
+        dragConstraints={{ top: -320, bottom: 320 }}
         dragElastic={0.1}
         dragMomentum={false}
         onDragEnd={(_, info) => {
-          const current = utilityPositions['workstream_shortcuts'] || { x: 0, y: 0 };
-          setUtilityPosition('workstream_shortcuts', {
-            x: 0,
-            y: clampOffset(current.y + info.offset.y, -250, 250),
-          });
+          commitY(boundedY + info.offset.y);
         }}
         animate={{
-          y: utilityPositions['workstream_shortcuts']?.y ?? 0,
+          y: boundedY,
           width: hovered ? 220 : 56,
         }}
         transition={{ duration: 0.35, ease: EASE_SMOOTH }}
@@ -295,11 +325,12 @@ function FocusTimer() {
     startTimer,
     pauseTimer,
     resetTimer,
-    utilityPositions,
-    setUtilityPosition,
   } = useWorkspaceStore();
 
   const [hovered, setHovered] = useState(false);
+  const TIMER_HEIGHT = 84;
+  const TIMER_INSET = EDGE_MARGIN;
+  const { boundedY, commitY } = useBoundedUtilityOffset('focus_timer', TIMER_INSET, TIMER_HEIGHT);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -317,17 +348,13 @@ function FocusTimer() {
     >
       <motion.div
         drag="y"
-        dragConstraints={{ top: -300, bottom: 100 }}
+        dragConstraints={{ top: -320, bottom: 320 }}
         dragElastic={0.1}
         dragMomentum={false}
         onDragEnd={(_, info) => {
-          const current = utilityPositions['focus_timer'] || { x: 0, y: 0 };
-          setUtilityPosition('focus_timer', {
-            x: 0,
-            y: clampOffset(current.y + info.offset.y, -300, 100),
-          });
+          commitY(boundedY + info.offset.y);
         }}
-        animate={{ y: utilityPositions['focus_timer']?.y ?? 0 }}
+        animate={{ y: boundedY }}
         className={cn(
           'flex items-center gap-2 rounded-full transition-all duration-300',
           glassStyle,
@@ -392,6 +419,83 @@ function FocusTimer() {
           )}
         </AnimatePresence>
       </motion.div>
+    </div>
+  );
+}
+
+/* ─── Background Mode Toggle ───────────────────────────────────── */
+
+const BACKGROUND_OPTIONS: Array<{
+  mode: WorkspaceBackgroundMode;
+  label: string;
+  description: string;
+  icon: React.ElementType;
+}> = [
+  {
+    mode: 'dots',
+    label: 'Dots',
+    description: 'Soft constellation dots',
+    icon: Dot,
+  },
+  {
+    mode: 'grid',
+    label: 'Grid',
+    description: 'Structured guide lines',
+    icon: Grid3X3,
+  },
+  {
+    mode: 'blank',
+    label: 'Blank',
+    description: 'Pure open canvas',
+    icon: Square,
+  },
+];
+
+function BackgroundModeToggle() {
+  const { backgroundMode, setBackgroundMode } = useWorkspaceStore();
+
+  return (
+    <div
+      className={cn(
+        'absolute right-6 z-40',
+        glassStyle,
+        'rounded-[26px] px-3 py-3',
+      )}
+      style={{ bottom: EDGE_MARGIN + 72 }}
+      data-testid="background-mode-toggle"
+    >
+      <div className="mb-2 px-1">
+        <div className="text-[9px] font-semibold uppercase tracking-[0.24em] text-[var(--text-tertiary)]">
+          Canvas background
+        </div>
+        <div className="mt-1 text-[11px] text-[var(--text-secondary)]">
+          Pick the backdrop that helps you think.
+        </div>
+      </div>
+      <div className="flex items-center gap-1 rounded-full bg-[var(--bg-primary)]/45 p-1">
+        {BACKGROUND_OPTIONS.map((option) => {
+          const Icon = option.icon;
+          const active = backgroundMode === option.mode;
+          return (
+            <button
+              key={option.mode}
+              type="button"
+              onClick={() => setBackgroundMode(option.mode)}
+              aria-pressed={active}
+              title={`${option.label}: ${option.description}`}
+              className={cn(
+                'group relative flex items-center gap-2 rounded-full px-3 py-2 text-[11px] font-semibold transition-all duration-200',
+                active
+                  ? 'bg-[var(--accent-cyan)] text-white shadow-[0_10px_24px_-16px_rgba(14,142,232,0.75)]'
+                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]',
+              )}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              <span>{option.label}</span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -491,9 +595,10 @@ function UnifiedCommandBar({
   return (
     <div
       className={cn(
-        'absolute bottom-10 left-1/2 -translate-x-1/2 z-40 transition-all duration-300',
+        'absolute left-1/2 z-40 -translate-x-1/2 transition-all duration-300',
         hidden && 'pointer-events-none opacity-0 translate-y-6',
       )}
+      style={{ bottom: EDGE_MARGIN }}
     >
       <div ref={barRef} className="relative flex flex-col items-center">
         {/* Radial create menu — fans upward from the + button */}
@@ -710,6 +815,8 @@ export function EdgeUtilityOverlay({
 
       {/* Bottom Right: Focus Timer */}
       {utilityVisible.focus_timer !== false ? <FocusTimer /> : null}
+
+      <BackgroundModeToggle />
     </>
   );
 }

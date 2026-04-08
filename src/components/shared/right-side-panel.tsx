@@ -192,6 +192,7 @@ export function RightSidePanel({
             animate="visible"
             exit="exit"
             className="min-h-0 flex-1 overflow-hidden"
+            style={{ minWidth: 0 }}
           >
             {children}
           </motion.div>

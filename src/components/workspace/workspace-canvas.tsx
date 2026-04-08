@@ -106,6 +106,10 @@ function ContextMenuItem({ icon, label, hint, onClick }: {
   );
 }
 
+function createContextMenuAction<T extends string = string>(id: T, label: string) {
+  return { id, label } as const;
+}
+
 /* ─── Time-of-day ambient class & greeting ─────────────── */
 
 function getAmbientClass(): string {
@@ -263,6 +267,26 @@ type CachedWorkspaceContent = {
 
 const WORKSPACE_CACHE_MAX = 7;
 const HUB_CACHE_KEY = "__hub__";
+const CONTEXT_MENU_MARGIN = 18;
+const EMPTY_CANVAS_MENU_ACTIONS = {
+  note: createContextMenuAction("note", "New note"),
+  thread: createContextMenuAction("thread", "New thread"),
+  diagram: createContextMenuAction("diagram", "New diagram"),
+  code: createContextMenuAction("code", "New code"),
+  planner: createContextMenuAction("planner", "New planner task"),
+  workstream: createContextMenuAction("workstream", "New workstream"),
+  hub: createContextMenuAction("hub", "Open hub"),
+} as const;
+
+const GROUP_MENU_ACTIONS = {
+  add: createContextMenuAction("add", "Add item to group"),
+  rename: createContextMenuAction("rename", "Rename group"),
+  sort: createContextMenuAction("sort", "Sort by…"),
+  collapse: createContextMenuAction("collapse", "Collapse group"),
+  openAll: createContextMenuAction("open-all", "Open all in editor"),
+  summarize: createContextMenuAction("summarize", "AI: Summarize group"),
+  merge: createContextMenuAction("merge", "Merge with…"),
+} as const;
 
 /**
  * Bounded LRU map.  Access order is maintained by deleting + re-inserting on
@@ -437,6 +461,25 @@ function emptyWorkspaceContent(): CachedWorkspaceContent {
     hubQuickNotes: [],
     hubDeadlines: [],
     hubActivity: [],
+  };
+}
+
+function clampContextMenuPosition(
+  x: number,
+  y: number,
+  containerRect: DOMRect,
+  menuWidth = 220,
+  menuHeight = 260,
+) {
+  return {
+    x: Math.min(
+      Math.max(x, CONTEXT_MENU_MARGIN),
+      Math.max(CONTEXT_MENU_MARGIN, containerRect.width - menuWidth - CONTEXT_MENU_MARGIN),
+    ),
+    y: Math.min(
+      Math.max(y, CONTEXT_MENU_MARGIN),
+      Math.max(CONTEXT_MENU_MARGIN, containerRect.height - menuHeight - CONTEXT_MENU_MARGIN),
+    ),
   };
 }
 
@@ -709,7 +752,12 @@ function WorkspaceCanvasInner({
     setPreviousViewport,
   } = useWorkspaceStore();
   const [zoom, setZoom] = useState(restoreViewport().zoom);
-  const [semanticBand, setSemanticBand] = useState<ZoomBand>("summary");
+  const semanticBand = useMemo<ZoomBand>(() => {
+    if (primaryWorkstreamId) return "detail";
+    if (zoom < 0.20) return "overview";
+    if (zoom < 0.55) return "summary";
+    return "detail";
+  }, [primaryWorkstreamId, zoom]);
   const [localOverrides, setLocalOverrides] = useState(() => loadLocalOverrides());
   const [internalNodeOverrides, setInternalNodeOverrides] = useState<Map<string, { x: number; y: number }>>(new Map());
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -718,6 +766,15 @@ function WorkspaceCanvasInner({
   const [focusedItemId, setFocusedItemId] = useState<string | null>(null);
   const [movePicker, setMovePicker] = useState<{ itemId: string; sourceWorkstreamId: string } | null>(null);
   const [movePickerSearch, setMovePickerSearch] = useState("");
+  const [pinnedItemIds, setPinnedItemIds] = useState<Set<string>>(new Set());
+  const positionContextMenu = useCallback((clientX: number, clientY: number, width?: number, height?: number) => {
+    const root = document.querySelector("[data-workspace-flow-root]");
+    const rect = root?.getBoundingClientRect();
+    if (!rect) {
+      return { x: clientX, y: clientY };
+    }
+    return clampContextMenuPosition(clientX - rect.left, clientY - rect.top, rect, width, height);
+  }, []);
   const lastMutationIdRef = useRef<string | null>(null);
   const [contentById, setContentById] = useState<Record<string, CachedWorkspaceContent>>({});
   const [loadingContentIds, setLoadingContentIds] = useState<string[]>([]);
@@ -725,15 +782,6 @@ function WorkspaceCanvasInner({
     const text = typeof value === "string" ? stripGeneratedDocumentMarkers(value).trim() : "";
     return text || "Untitled";
   }, []);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      setSemanticBand(zoom < 0.20 ? "overview" : zoom < 0.55 ? "summary" : "detail");
-    }, 180);
-    return () => clearTimeout(timeout);
-  }, [zoom]);
-
-
 
   useEffect(() => {
     internalNodeOverridesRef.current = new Map();
@@ -888,6 +936,9 @@ function WorkspaceCanvasInner({
               itemType,
               renderMode: typeof item.renderMode === "string" ? item.renderMode : undefined,
               contentSummary: typeof item.contentSummary === "string" ? item.contentSummary : undefined,
+              renderProps: item.renderProps && typeof item.renderProps === "object"
+                ? item.renderProps as Record<string, unknown>
+                : undefined,
               x: Number(item.x ?? 0),
               y: Number(item.y ?? 0),
               width: typeof item.width === "number" ? item.width : undefined,
@@ -916,6 +967,18 @@ function WorkspaceCanvasInner({
   const getCachedContent = useCallback((workstreamId: string) => {
     return contentControllerRef.current?.getCachedContent(workstreamId) ?? emptyWorkspaceContent();
   }, []);
+
+  useEffect(() => {
+    if (!primaryWorkstreamId || primaryWorkstreamId === HUB_CACHE_KEY) {
+      setPinnedItemIds(new Set());
+      return;
+    }
+    const cached = contentById[primaryWorkstreamId];
+    if (!cached) return;
+    setPinnedItemIds(
+      new Set(cached.widgets.filter((widget) => Boolean(widget.renderProps?.pinned)).map((widget) => widget.panelId)),
+    );
+  }, [contentById, primaryWorkstreamId]);
 
   const invalidateWorkstreamContent = useCallback((workstreamId?: string, options?: { includeHub?: boolean }) => {
     contentControllerRef.current?.invalidate(workstreamId, options);
@@ -1133,10 +1196,12 @@ function WorkspaceCanvasInner({
             onFocusItem: (id: string) => setFocusedItemId(id),
             onBlurItem: () => setFocusedItemId(null),
             onItemContextMenu: (id: string, itemType: "thread" | "note" | "planner" | "artifact", x: number, y: number) => {
-              setItemContextMenu({ itemId: id, itemType, x, y });
+              const next = positionContextMenu(x, y, 220, 260);
+              setItemContextMenu({ itemId: id, itemType, x: next.x, y: next.y });
             },
             onGroupContextMenu: (groupType: string, x: number, y: number) => {
-              setGroupContextMenu({ groupType, x, y });
+              const next = positionContextMenu(x, y, 220, 220);
+              setGroupContextMenu({ groupType, x: next.x, y: next.y });
             },
           };
 
@@ -1182,6 +1247,7 @@ function WorkspaceCanvasInner({
     loadingContentIds,
     neighborOpacity,
     panelOpener,
+    positionContextMenu,
     positions,
     primaryWorkstreamId,
     visibleWorkstreamIds,
@@ -1243,7 +1309,41 @@ function WorkspaceCanvasInner({
   const handleMove = useCallback((_: unknown, viewport: Viewport) => {
     setZoom(viewport.zoom);
     lastViewportRef.current = { x: viewport.x, y: viewport.y, zoom: viewport.zoom };
-  }, []);
+
+    if (!primaryWorkstreamId && viewport.zoom >= 0.62) {
+      if (commitDebounceRef.current) {
+        clearTimeout(commitDebounceRef.current);
+      }
+      commitDebounceRef.current = setTimeout(() => {
+        const instance = reactFlowRef.current;
+        if (!instance || primaryWorkstreamId) return;
+        const viewportState = instance.getViewport();
+        if (viewportState.zoom < 0.62) return;
+        const viewportNow = instance.getViewport();
+        const bounds = document
+          .querySelector("[data-workspace-flow-root]")
+          ?.getBoundingClientRect();
+        const center = bounds
+          ? {
+              x: (bounds.width / 2 - viewportNow.x) / viewportNow.zoom,
+              y: (bounds.height / 2 - viewportNow.y) / viewportNow.zoom,
+            }
+          : { x: 0, y: 0 };
+        const candidate = visibleWorkstreams
+          .map((ws) => {
+            const pos = positions.get(ws._id) ?? { x: 0, y: 0 };
+            const dx = center.x - (pos.x + WORKSTREAM_TERRITORY.width / 2);
+            const dy = center.y - (pos.y + WORKSTREAM_TERRITORY.height / 2);
+            return { ws, distance: Math.hypot(dx, dy) };
+          })
+          .sort((a, b) => a.distance - b.distance)[0];
+
+        if (candidate && candidate.distance <= 1100) {
+          handleOpenWorkstream(candidate.ws._id);
+        }
+      }, 220);
+    }
+  }, [handleOpenWorkstream, positions, primaryWorkstreamId, visibleWorkstreams]);
 
   const handleMoveEnd = useCallback(
     (_: unknown, viewport: Viewport) => {
@@ -1388,6 +1488,17 @@ function WorkspaceCanvasInner({
   ]);
 
   useEffect(() => {
+    if (!contextMenu && !itemContextMenu && !groupContextMenu) return;
+    const handleWindowContextMenu = () => {
+      setContextMenu(null);
+      setItemContextMenu(null);
+      setGroupContextMenu(null);
+    };
+    window.addEventListener("contextmenu", handleWindowContextMenu);
+    return () => window.removeEventListener("contextmenu", handleWindowContextMenu);
+  }, [contextMenu, groupContextMenu, itemContextMenu]);
+
+  useEffect(() => {
     const handler = () => {
       const instance = reactFlowRef.current;
       if (!instance) return;
@@ -1417,9 +1528,10 @@ function WorkspaceCanvasInner({
     // Use capture phase so the handler fires before stopPropagation in child elements,
     // ensuring context menus close on ANY click outside them.
     const handler = (e: MouseEvent) => {
-      // Don't close if clicking inside a context menu element itself
-      const target = e.target as HTMLElement | null;
-      if (target?.closest("[data-context-menu]")) return;
+      // Don't close if clicking inside a context menu element itself.
+      // Browser automation and ReactFlow can dispatch events with non-HTMLElement targets.
+      const target = e.target;
+      if (target instanceof Element && target.closest("[data-context-menu]")) return;
       setContextMenu(null);
       setItemContextMenu(null);
       setGroupContextMenu(null);
@@ -1438,7 +1550,15 @@ function WorkspaceCanvasInner({
         if (target?.closest(".react-flow__node")) return;
         event.preventDefault();
         const bounds = event.currentTarget.getBoundingClientRect();
-        setContextMenu({ x: event.clientX - bounds.left, y: event.clientY - bounds.top });
+        setContextMenu(
+          clampContextMenuPosition(
+            event.clientX - bounds.left,
+            event.clientY - bounds.top,
+            bounds,
+            220,
+            260,
+          ),
+        );
       }}
     >
       <AnimatePresence>
@@ -1467,6 +1587,13 @@ function WorkspaceCanvasInner({
         zoomOnDoubleClick={false}
         proOptions={{ hideAttribution: true }}
         className={cn("workspace-react-flow", getAmbientClass())}
+        onNodeClick={(_: React.MouseEvent, node: Node) => {
+          if (typeof node.id !== "string") return;
+          if (!node.id.startsWith("ws-")) return;
+          const workstreamId = node.id.slice(3);
+          if (!workstreamId) return;
+          handleOpenWorkstream(workstreamId);
+        }}
       >
       <div
         className="pointer-events-none absolute inset-0 z-0"
@@ -1507,18 +1634,18 @@ function WorkspaceCanvasInner({
         >
           {primaryWorkstreamId && primaryWorkstreamId !== HUB_CACHE_KEY ? (
             <>
-              <ContextMenuItem icon={<FileText className="h-3.5 w-3.5" />} label="New note" onClick={() => { setContextMenu(null); panelOpener("artifact", "new"); }} />
-              <ContextMenuItem icon={<MessageSquare className="h-3.5 w-3.5" />} label="New thread" onClick={() => { setContextMenu(null); panelOpener("chat", "new"); }} />
-              <ContextMenuItem icon={<ImageIcon className="h-3.5 w-3.5" />} label="New diagram" onClick={() => { setContextMenu(null); panelOpener("artifact", "new-diagram"); }} />
-              <ContextMenuItem icon={<Code2 className="h-3.5 w-3.5" />} label="New code" onClick={() => { setContextMenu(null); panelOpener("artifact", "new-code"); }} />
-              <ContextMenuItem icon={<CalendarClock className="h-3.5 w-3.5" />} label="New planner task" onClick={() => { setContextMenu(null); panelOpener("planner", "new"); }} />
+              <ContextMenuItem icon={<FileText className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.note.label} onClick={() => { setContextMenu(null); panelOpener("artifact", "new"); }} />
+              <ContextMenuItem icon={<MessageSquare className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.thread.label} onClick={() => { setContextMenu(null); panelOpener("chat", "new"); }} />
+              <ContextMenuItem icon={<ImageIcon className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.diagram.label} onClick={() => { setContextMenu(null); panelOpener("artifact", "new-diagram"); }} />
+              <ContextMenuItem icon={<Code2 className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.code.label} onClick={() => { setContextMenu(null); panelOpener("artifact", "new-code"); }} />
+              <ContextMenuItem icon={<CalendarClock className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.planner.label} onClick={() => { setContextMenu(null); panelOpener("planner", "new"); }} />
               <div className="my-1 h-px bg-[var(--border-default)]/50" />
               <ContextMenuItem icon={<FolderOpen className="h-3.5 w-3.5" />} label="Paste from clipboard" onClick={() => { setContextMenu(null); }} />
             </>
           ) : (
             <>
-              <ContextMenuItem icon={<Layers className="h-3.5 w-3.5" />} label="New workstream" hint="W" onClick={() => { setContextMenu(null); onNewWorkstream?.(); }} />
-              <ContextMenuItem icon={<Home className="h-3.5 w-3.5" />} label="Open hub" onClick={() => { setContextMenu(null); handleOpenHub(); }} />
+              <ContextMenuItem icon={<Layers className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.workstream.label} hint="W" onClick={() => { setContextMenu(null); onNewWorkstream?.(); }} />
+              <ContextMenuItem icon={<Home className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.hub.label} onClick={() => { setContextMenu(null); handleOpenHub(); }} />
               <div className="my-1 h-px bg-[var(--border-default)]/50" />
               <ContextMenuItem icon={<FolderOpen className="h-3.5 w-3.5" />} label="Paste from clipboard" onClick={() => { setContextMenu(null); }} />
             </>
@@ -1536,7 +1663,7 @@ function WorkspaceCanvasInner({
         >
           <ContextMenuItem
             icon={<FolderOpen className="h-3.5 w-3.5" />}
-            label="Open in editor"
+            label="Open"
             onClick={() => {
               setItemContextMenu(null);
               const panelType = itemContextMenu.itemType === "thread" ? "chat" : itemContextMenu.itemType === "planner" ? "planner" : "artifact";
@@ -1586,14 +1713,21 @@ function WorkspaceCanvasInner({
           <div className="my-1 h-px bg-[var(--border-default)]/50" />
           <ContextMenuItem
             icon={<Pin className="h-3.5 w-3.5" />}
-            label="Pin to top"
+            label={pinnedItemIds.has(itemContextMenu.itemId) ? "Unpin" : "Pin"}
             onClick={async () => {
               const { itemId } = itemContextMenu;
               setItemContextMenu(null);
+              const nextPinned = !pinnedItemIds.has(itemId);
               await fetch("/api/workspace-items", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ action: "pin", itemId, pinned: true }),
+                body: JSON.stringify({ action: "pin", itemId, pinned: nextPinned }),
+              });
+              setPinnedItemIds((current) => {
+                const next = new Set(current);
+                if (nextPinned) next.add(itemId);
+                else next.delete(itemId);
+                return next;
               });
               if (primaryWorkstreamId) {
                 invalidateWorkstreamContent(primaryWorkstreamId);
@@ -1637,14 +1771,14 @@ function WorkspaceCanvasInner({
           className="absolute z-40 min-w-[220px] overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]/96 p-1.5 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.38)] backdrop-blur-xl"
           style={{ left: groupContextMenu.x, top: groupContextMenu.y }}
         >
-          <ContextMenuItem icon={<Plus className="h-3.5 w-3.5" />} label="Add item to group" onClick={() => { setGroupContextMenu(null); panelOpener("artifact", "new"); }} />
-          <ContextMenuItem icon={<PenLine className="h-3.5 w-3.5" />} label="Rename group" onClick={() => { setGroupContextMenu(null); }} />
-          <ContextMenuItem icon={<SortAsc className="h-3.5 w-3.5" />} label="Sort by…" onClick={() => { setGroupContextMenu(null); }} />
+          <ContextMenuItem icon={<Plus className="h-3.5 w-3.5" />} label={GROUP_MENU_ACTIONS.add.label} onClick={() => { setGroupContextMenu(null); panelOpener(groupContextMenu.groupType === "threads" ? "chat" : groupContextMenu.groupType === "planner" ? "planner" : "artifact", groupContextMenu.groupType === "threads" ? "new" : groupContextMenu.groupType === "planner" ? "new" : "new"); }} />
+          <ContextMenuItem icon={<PenLine className="h-3.5 w-3.5" />} label={GROUP_MENU_ACTIONS.rename.label} onClick={() => { setGroupContextMenu(null); }} />
+          <ContextMenuItem icon={<SortAsc className="h-3.5 w-3.5" />} label={GROUP_MENU_ACTIONS.sort.label} onClick={() => { setGroupContextMenu(null); }} />
           <div className="my-1 h-px bg-[var(--border-default)]/50" />
-          <ContextMenuItem icon={<ChevronRight className="h-3.5 w-3.5" />} label="Collapse group" onClick={() => { setGroupContextMenu(null); }} />
-          <ContextMenuItem icon={<FolderOpen className="h-3.5 w-3.5" />} label="Open all in editor" onClick={() => { setGroupContextMenu(null); }} />
-          <ContextMenuItem icon={<Sparkles className="h-3.5 w-3.5" />} label="AI: Summarize group" onClick={() => { setGroupContextMenu(null); }} />
-          <ContextMenuItem icon={<Merge className="h-3.5 w-3.5" />} label="Merge with…" onClick={() => { setGroupContextMenu(null); }} />
+          <ContextMenuItem icon={<ChevronRight className="h-3.5 w-3.5" />} label={GROUP_MENU_ACTIONS.collapse.label} onClick={() => { setGroupContextMenu(null); }} />
+          <ContextMenuItem icon={<FolderOpen className="h-3.5 w-3.5" />} label={GROUP_MENU_ACTIONS.openAll.label} onClick={() => { setGroupContextMenu(null); }} />
+          <ContextMenuItem icon={<Sparkles className="h-3.5 w-3.5" />} label={GROUP_MENU_ACTIONS.summarize.label} onClick={() => { setGroupContextMenu(null); }} />
+          <ContextMenuItem icon={<Merge className="h-3.5 w-3.5" />} label={GROUP_MENU_ACTIONS.merge.label} onClick={() => { setGroupContextMenu(null); }} />
         </div>
       )}
 

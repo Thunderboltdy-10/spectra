@@ -126,4 +126,71 @@ describe("useChatPanel", () => {
     });
     container.remove();
   });
+
+  it("reuses a single in-flight chat creation request for concurrent sends", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    let resolveChatCreation: ((value: Response) => void) | null = null;
+    createChatStream.mockImplementation(async function* () {
+      yield { type: "phase", phase: "answering" };
+      yield { type: "delta", content: "Done" };
+      yield { type: "done", modelUsed: "openai/gpt-5-nano" };
+    });
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/chats" && init?.method === "POST") {
+        return new Promise<Response>((resolve) => {
+          resolveChatCreation = resolve;
+        });
+      }
+      if (String(input) === "/api/chats/chat_1/messages/stream" && init?.method === "POST") {
+        return Promise.resolve(new Response("unused", { status: 200 }));
+      }
+      throw new Error(`Unexpected fetch call: ${String(input)}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { useChatPanel } = await import("@/hooks/use-chat-panel");
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    const latestRef: { current: ReturnType<typeof useChatPanel> | null } = { current: null };
+
+    function Harness() {
+      const panel = useChatPanel({
+        workstreamId: "ws_1",
+        mode: "tutor",
+        thinkingLevel: "low",
+        routerMode: "auto",
+      });
+      useEffect(() => {
+        latestRef.current = panel;
+      }, [panel]);
+      return null;
+    }
+
+    await act(async () => {
+      root.render(<Harness />);
+    });
+
+    await act(async () => {
+      const firstSend = latestRef.current?.sendMessage("First message");
+      const secondSend = latestRef.current?.sendMessage("Second message");
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      if (!resolveChatCreation) {
+        throw new Error("Chat creation resolver was not captured");
+      }
+      resolveChatCreation(new Response(JSON.stringify({ chatId: "chat_1" }), { status: 200 }));
+
+      await Promise.all([firstSend, secondSend]);
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(createChatStream.mock.calls.length).toBeGreaterThanOrEqual(2);
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
 });

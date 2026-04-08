@@ -67,13 +67,14 @@ export function useWorkspaceData() {
       canvasX?: number;
       canvasY?: number;
     }) => {
-      const res = await fetch("/api/workstreams", {
+      const res = await fetch("/api/workspace-orchestration", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "create", ...data }),
+        body: JSON.stringify({ action: "createWorkstream", ...data }),
       });
       if (!res.ok) throw new Error("Failed to create workstream");
-      const result = (await res.json()) as { workstreamId: string };
+      const result = (await res.json()) as { workstreamId?: string };
+      if (!result.workstreamId) throw new Error("Failed to create workstream");
       await fetchWorkstreams();
       return result.workstreamId;
     },

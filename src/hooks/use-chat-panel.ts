@@ -47,6 +47,8 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
   const [streamPhase, setStreamPhase] = useState<string>("idle");
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const createChatPromiseRef = useRef<Promise<string> | null>(null);
+  const inflightLookupRef = useRef<Promise<string> | null>(null);
   const counterRef = useRef(0);
   const accumulatorRef = useRef(
     new ChatMessageAccumulator([], () => `msg-${++counterRef.current}-${Date.now()}`),
@@ -72,42 +74,67 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
 
   const getOrCreateChat = useCallback(async () => {
     if (chatId) return chatId;
+    if (createChatPromiseRef.current) return createChatPromiseRef.current;
+    if (inflightLookupRef.current) return inflightLookupRef.current;
 
-    if (params.threadType === "artifact_edit" && params.artifactId) {
-      const existingResponse = await fetch(`/api/chats?artifactId=${encodeURIComponent(params.artifactId)}&limit=1`);
-      if (existingResponse.ok) {
-        const existingData = (await existingResponse.json()) as { chats?: Array<{ _id: string }> };
-        const existingChatId = existingData.chats?.[0]?._id;
-        if (existingChatId) {
-          await hydrateChat(existingChatId);
-          return existingChatId;
+    const createPromise = (async () => {
+      if (params.threadType === "artifact_edit" && params.artifactId) {
+        const existingResponse = await fetch(`/api/chats?artifactId=${encodeURIComponent(params.artifactId)}&limit=1`);
+        if (existingResponse.ok) {
+          const existingData = (await existingResponse.json()) as { chats?: Array<{ _id: string }> };
+          const existingChatId = existingData.chats?.[0]?._id;
+          if (existingChatId) {
+            await hydrateChat(existingChatId);
+            return existingChatId;
+          }
         }
       }
-    }
 
-    const response = await fetch("/api/chats", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+      if (params.workstreamId && params.threadType !== "artifact_edit" && params.initialChatId === "new") {
+        const existingResponse = await fetch(`/api/chats?workstreamId=${encodeURIComponent(params.workstreamId)}&limit=1`);
+        if (existingResponse.ok) {
+          const existingData = (await existingResponse.json()) as { chats?: Array<{ _id: string }> };
+          const existingChatId = existingData.chats?.[0]?._id;
+          if (existingChatId) {
+            await hydrateChat(existingChatId);
+            return existingChatId;
+          }
+        }
+      }
+
+      const response = await fetch("/api/chats", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workstreamId: params.workstreamId,
+          artifactId: params.artifactId,
+          threadType: params.threadType,
+          mode: params.mode ?? "tutor",
+          thinkingLevel: params.thinkingLevel ?? "low",
+          routerMode: params.routerMode ?? "auto",
+          usePersonalResources: params.usePersonalResources ?? true,
+          title: params.title,
+        }),
+      });
+      if (!response.ok) throw new Error("Failed to create chat");
+      const data = (await response.json()) as { chatId: string };
+      setChatId(data.chatId);
+      notifyWorkspaceContentMutated({
         workstreamId: params.workstreamId,
-        artifactId: params.artifactId,
-        threadType: params.threadType,
-        mode: params.mode ?? "tutor",
-        thinkingLevel: params.thinkingLevel ?? "low",
-        routerMode: params.routerMode ?? "auto",
-        usePersonalResources: params.usePersonalResources ?? true,
-        title: params.title,
-      }),
-    });
-    if (!response.ok) throw new Error("Failed to create chat");
-    const data = (await response.json()) as { chatId: string };
-    setChatId(data.chatId);
-    notifyWorkspaceContentMutated({
-      workstreamId: params.workstreamId,
-      refreshHub: true,
-      refreshWorkstreams: true,
-    });
-    return data.chatId;
+        refreshHub: true,
+        refreshWorkstreams: true,
+      });
+      return data.chatId;
+    })();
+
+    try {
+      inflightLookupRef.current = createPromise;
+      createChatPromiseRef.current = createPromise;
+      return await createPromise;
+    } finally {
+      inflightLookupRef.current = null;
+      createChatPromiseRef.current = null;
+    }
   }, [
     chatId,
     hydrateChat,
@@ -118,6 +145,7 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
     params.threadType,
     params.title,
     params.usePersonalResources,
+    params.initialChatId,
     params.workstreamId,
   ]);
 
@@ -217,6 +245,8 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
 
   const reset = useCallback(() => {
     abortRef.current?.abort();
+    createChatPromiseRef.current = null;
+    inflightLookupRef.current = null;
     accumulatorRef.current = new ChatMessageAccumulator([], () => `msg-${++counterRef.current}-${Date.now()}`);
     setMessages([]);
     setChatId(null);

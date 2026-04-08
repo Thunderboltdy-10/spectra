@@ -191,4 +191,27 @@ describe("workspace items route integration", () => {
       provenanceAction: "archived",
     });
   });
+
+  it("returns 400 when archive is requested without a valid workspace item", async () => {
+    const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_workspace" });
+    const convexMutation = vi.fn().mockRejectedValue(new Error("Workspace item not found"));
+
+    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery: vi.fn(), convexMutation }));
+
+    const route = await import("@/app/api/workspace-items/route");
+    const response = await route.POST(
+      new NextRequest("http://localhost/api/workspace-items", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "archive",
+          itemId: "missing_item",
+        }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload).toEqual({ error: "itemId is required" });
+  });
 });

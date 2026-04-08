@@ -1489,9 +1489,10 @@ function WorkspaceCanvasInner({
     // Use capture phase so the handler fires before stopPropagation in child elements,
     // ensuring context menus close on ANY click outside them.
     const handler = (e: MouseEvent) => {
-      // Don't close if clicking inside a context menu element itself
-      const target = e.target as HTMLElement | null;
-      if (target?.closest("[data-context-menu]")) return;
+      // Don't close if clicking inside a context menu element itself.
+      // Browser automation and ReactFlow can dispatch events with non-HTMLElement targets.
+      const target = e.target;
+      if (target instanceof Element && target.closest("[data-context-menu]")) return;
       setContextMenu(null);
       setItemContextMenu(null);
       setGroupContextMenu(null);

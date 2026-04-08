@@ -320,14 +320,23 @@ export async function POST(request: NextRequest) {
     if (action === "archive") {
       const itemId = typeof body.itemId === "string" ? body.itemId : undefined;
       if (!itemId) return badRequest("itemId is required");
-      const result = await convexMutation("workspaceItems:update", {
-        actorClerkId: actor.clerkId,
-        itemId,
-        status: "archived",
-        provenanceSource: "user",
-        provenanceAction: "archived",
-      });
-      return ok(result);
+
+      try {
+        const result = await convexMutation("workspaceItems:update", {
+          actorClerkId: actor.clerkId,
+          itemId,
+          status: "archived",
+          provenanceSource: "user",
+          provenanceAction: "archived",
+        });
+        return ok(result);
+      } catch (error) {
+        const message = error instanceof Error ? error.message.toLowerCase() : "";
+        if (message.includes("workspace item not found")) {
+          return badRequest("itemId is required");
+        }
+        throw error;
+      }
     }
 
     if (action === "pin") {

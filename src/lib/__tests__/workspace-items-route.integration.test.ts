@@ -164,4 +164,31 @@ describe("workspace items route integration", () => {
       mutationSummary: "Created scratchpad widget",
     });
   });
+
+  it("archives workspace items through the route with provenance", async () => {
+    const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_workspace" });
+    const convexMutation = vi.fn().mockResolvedValue({ success: true, mutationId: "mut_9" });
+
+    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery: vi.fn(), convexMutation }));
+
+    const route = await import("@/app/api/workspace-items/route");
+    await route.POST(
+      new NextRequest("http://localhost/api/workspace-items", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "archive",
+          itemId: "item_9",
+        }),
+      }),
+    );
+
+    expect(convexMutation).toHaveBeenCalledWith("workspaceItems:update", {
+      actorClerkId: "user_workspace",
+      itemId: "item_9",
+      status: "archived",
+      provenanceSource: "user",
+      provenanceAction: "archived",
+    });
+  });
 });

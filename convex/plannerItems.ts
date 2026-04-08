@@ -1,7 +1,8 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { getUserByClerkId } from "./helpers";
+import { recordWorkspaceMutation } from "./workspaceHelpers";
 
 const vPlannerType = v.union(v.literal("deadline"), v.literal("milestone"), v.literal("goal"), v.literal("reminder"));
 const vPlannerPriority = v.union(v.literal("low"), v.literal("medium"), v.literal("high"));
@@ -12,6 +13,8 @@ const vPlannerStatus = v.union(
   v.literal("cancelled"),
 );
 const vPlannerSourceType = v.union(v.literal("user_manual"), v.literal("ai_suggested"), v.literal("managebac_sync"));
+
+type PlannerCtx = Pick<MutationCtx, "db"> | Pick<QueryCtx, "db">;
 
 async function requireActor(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string) {
   const actor = await getUserByClerkId(ctx, actorClerkId);
@@ -64,6 +67,98 @@ async function validateSourceChat(
   if (!chat || chat.ownerUserId !== actor._id || chat.orgId !== actor.orgId || chat.deletedAt) {
     throw new Error("Chat not found");
   }
+}
+
+
+
+async function findWorkspaceItemForPlannerItem(
+  ctx: PlannerCtx,
+  plannerItemId: Id<"plannerItems">,
+  ownerUserId: Id<"users">,
+  orgId: Id<"orgs">,
+) {
+  const rows = await ctx.db
+    .query("workspaceItems")
+    .withIndex("by_source_planner", (q) => q.eq("sourcePlannerItemId", plannerItemId))
+    .collect();
+
+  return rows.find((row) => row.ownerUserId === ownerUserId && row.orgId === orgId) ?? null;
+}
+
+async function syncWorkspaceItemForPlannerItem(
+  ctx: Pick<MutationCtx, "db">,
+  params: {
+    plannerItemId: Id<"plannerItems">;
+    ownerUserId: Id<"users">;
+    orgId: Id<"orgs">;
+    workstreamId?: Id<"workstreams">;
+    title: string;
+    description?: string;
+    status: "pending" | "in_progress" | "completed" | "cancelled";
+    type: "deadline" | "milestone" | "goal" | "reminder";
+  },
+) {
+  const existing = await findWorkspaceItemForPlannerItem(
+    ctx,
+    params.plannerItemId,
+    params.ownerUserId,
+    params.orgId,
+  );
+  const now = Date.now();
+  const shouldArchive = !params.workstreamId || params.status === "cancelled" || params.status === "completed";
+
+  if (shouldArchive) {
+    if (existing && existing.status !== "archived") {
+      await ctx.db.patch(existing._id, {
+        status: "archived",
+        updatedAt: now,
+      });
+    }
+    return existing?._id;
+  }
+
+  const fields = {
+    workstreamId: params.workstreamId,
+    type: "planner" as const,
+    itemType: "planner" as const,
+    sourceKind: "plannerItem" as const,
+    sourceId: params.plannerItemId,
+    sourcePlannerItemId: params.plannerItemId,
+    renderMode: params.type,
+    title: params.title,
+    contentSummary: normalizeString(params.description),
+    category: "planner" as const,
+    status: params.status === "completed" ? "archived" as const : "active" as const,
+    updatedAt: now,
+  };
+
+  if (existing) {
+    await ctx.db.patch(existing._id, fields);
+    return existing._id;
+  }
+
+  return await ctx.db.insert("workspaceItems", {
+    orgId: params.orgId,
+    ownerUserId: params.ownerUserId,
+    workstreamId: params.workstreamId,
+    type: "planner",
+    itemType: "planner",
+    sourceKind: "plannerItem",
+    sourceId: params.plannerItemId,
+    sourcePlannerItemId: params.plannerItemId,
+    renderMode: params.type,
+    title: params.title,
+    contentSummary: normalizeString(params.description),
+    x: 80,
+    y: 220,
+    width: 280,
+    height: 160,
+    category: "planner",
+    status: params.status === "completed" ? "archived" : "active",
+    pinned: true,
+    createdAt: now,
+    updatedAt: now,
+  });
 }
 
 async function assertPlannerItemOwnership(
@@ -225,6 +320,29 @@ export const create = mutation({
       updatedAt: now,
     });
 
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: args.workstreamId,
+      mutationType: "create_planner_item",
+      source: "user",
+      entity: "workspace-item",
+      action: "created",
+      includeHub: true,
+      refreshHub: true,
+      summary: `Created planner item ${title}`,
+      after: { plannerItemId },
+    });
+    await syncWorkspaceItemForPlannerItem(ctx, {
+      plannerItemId,
+      ownerUserId: actor._id,
+      orgId: actor.orgId,
+      workstreamId: args.workstreamId,
+      title,
+      description: normalizeString(args.description),
+      status,
+      type: args.type ?? "deadline",
+    });
     return { plannerItemId };
   },
 });
@@ -301,6 +419,33 @@ export const update = mutation({
     }
 
     await ctx.db.patch(args.plannerItemId, updates);
+    const nextWorkstreamId = args.workstreamId === undefined ? current.workstreamId : toOptionalPatchValue(args.workstreamId);
+    const nextStatus = args.status ?? current.status;
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: current.workstreamId,
+      targetWorkstreamId: current.workstreamId !== nextWorkstreamId ? nextWorkstreamId : undefined,
+      mutationType: current.workstreamId !== nextWorkstreamId ? "move_planner_item" : "update_planner_item",
+      source: "user",
+      entity: "workspace-item",
+      action: nextStatus === "cancelled" ? "deleted" : "updated",
+      includeHub: true,
+      refreshHub: true,
+      summary: `Updated planner item ${current.title}`,
+      before: current,
+      after: updates,
+    });
+    await syncWorkspaceItemForPlannerItem(ctx, {
+      plannerItemId: args.plannerItemId,
+      ownerUserId: actor._id,
+      orgId: actor.orgId,
+      workstreamId: nextWorkstreamId ?? undefined,
+      title: (updates.title as string | undefined) ?? current.title,
+      description: (updates.description as string | undefined) ?? current.description,
+      status: nextStatus,
+      type: (updates.type as typeof current.type | undefined) ?? current.type,
+    });
     return { success: true };
   },
 });
@@ -312,7 +457,30 @@ export const remove = mutation({
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
-    await assertPlannerItemOwnership(ctx, actor, args.plannerItemId);
+    const current = await assertPlannerItemOwnership(ctx, actor, args.plannerItemId);
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: current.workstreamId,
+      mutationType: "delete_planner_item",
+      source: "user",
+      entity: "workspace-item",
+      action: "deleted",
+      includeHub: true,
+      refreshHub: true,
+      summary: `Deleted planner item ${current.title}`,
+      before: current,
+    });
+    await syncWorkspaceItemForPlannerItem(ctx, {
+      plannerItemId: args.plannerItemId,
+      ownerUserId: actor._id,
+      orgId: actor.orgId,
+      workstreamId: undefined,
+      title: current.title,
+      description: current.description,
+      status: "cancelled",
+      type: current.type,
+    });
     await ctx.db.delete(args.plannerItemId);
     return { success: true };
   },

@@ -211,13 +211,17 @@ export async function recordWorkspaceMutation(
     source: WorkspaceMutationSource;
     summary?: string;
     targetItemIds?: Id<"workspaceItems">[];
+    entity?: "artifact" | "chat" | "workspace-item";
+    action?: "created" | "updated" | "deleted";
+    includeHub?: boolean;
+    refreshHub?: boolean;
     before?: unknown;
     after?: unknown;
     revertData?: unknown;
   },
 ) {
   const now = Date.now();
-  return ctx.db.insert("workspaceMutations", {
+  const mutationId = await ctx.db.insert("workspaceMutations", {
     orgId: params.orgId,
     ownerUserId: params.ownerUserId,
     workstreamId: params.workstreamId,
@@ -233,6 +237,23 @@ export async function recordWorkspaceMutation(
     createdAt: now,
     updatedAt: now,
   });
+
+  const targets = [
+    params.workstreamId,
+    params.targetWorkstreamId,
+  ].filter((value, index, array): value is Id<"workstreams"> => Boolean(value) && array.indexOf(value) === index);
+
+  if (targets.length > 0) {
+    await Promise.all(targets.map(async (workstreamId) => {
+      const workstream = await ctx.db.get(workstreamId);
+      if (!workstream) return;
+      await ctx.db.patch(workstreamId, {
+        updatedAt: now,
+      });
+    }));
+  }
+
+  return mutationId;
 }
 
 export async function listOwnedWorkspaceItems(

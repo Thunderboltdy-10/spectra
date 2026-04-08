@@ -254,7 +254,23 @@ export const create = mutation({
       updatedAt: now,
     });
 
-    return { itemId };
+    const mutationId = await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: args.workstreamId,
+      targetItemIds: [itemId],
+      mutationType: "create_item",
+      source: "user",
+      entity: "workspace-item",
+      action: "created",
+      includeHub: true,
+      refreshHub: true,
+      summary: `Created workspace item ${args.title}`,
+      after: { itemId },
+      revertData: { kind: "delete_items", itemIds: [itemId] },
+    });
+
+    return { itemId, mutationId };
   },
 });
 
@@ -324,7 +340,43 @@ export const update = mutation({
     }
 
     await ctx.db.patch(args.itemId, updates);
-    return { success: true };
+    const nextStatus = (updates.status as Doc<"workspaceItems">["status"] | undefined) ?? existing.status;
+    const mutationId = await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: existing.workstreamId,
+      targetItemIds: [existing._id],
+      mutationType: nextStatus === "archived" && existing.status !== "archived" ? "archive_item" : "update_item",
+      source: args.provenanceSource ?? "user",
+      entity: "workspace-item",
+      action: nextStatus === "archived" && existing.status !== "archived" ? "deleted" : "updated",
+      includeHub: true,
+      refreshHub: true,
+      summary: `Updated workspace item ${existing.title}`,
+      before: existing,
+      after: { ...existing, ...updates },
+      revertData: { kind: "patch_items", patches: [{ itemId: existing._id, fields: {
+        x: existing.x,
+        y: existing.y,
+        width: existing.width,
+        height: existing.height,
+        zIndex: existing.zIndex,
+        title: existing.title,
+        contentSummary: existing.contentSummary,
+        category: existing.category,
+        itemType: existing.itemType,
+        renderMode: existing.renderMode,
+        status: existing.status,
+        pinned: existing.pinned,
+        collapsed: existing.collapsed,
+        hidden: existing.hidden,
+        visualGroup: existing.visualGroup,
+        renderProps: existing.renderProps,
+        provenanceSource: existing.provenanceSource,
+        provenanceAction: existing.provenanceAction,
+      } }] },
+    });
+    return { success: true, mutationId };
   },
 });
 
@@ -335,9 +387,24 @@ export const remove = mutation({
   },
   handler: async (ctx, args) => {
     const actor = await requireWorkspaceActor(ctx, args.actorClerkId);
-    await assertWorkspaceItemOwnership(ctx, actor, args.itemId);
+    const existing = await assertWorkspaceItemOwnership(ctx, actor, args.itemId);
     await ctx.db.delete(args.itemId);
-    return { success: true };
+    const mutationId = await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: existing.workstreamId,
+      targetItemIds: [existing._id],
+      mutationType: "delete_item",
+      source: "user",
+      entity: "workspace-item",
+      action: "deleted",
+      includeHub: true,
+      refreshHub: true,
+      summary: `Deleted workspace item ${existing.title}`,
+      before: existing,
+      revertData: { kind: "restore_item_snapshot", item: existing },
+    });
+    return { success: true, mutationId };
   },
 });
 
@@ -1028,6 +1095,7 @@ export const revertMutation = mutation({
       | { kind?: "delete_items"; itemIds?: Id<"workspaceItems">[] }
       | { kind?: "patch_items"; patches?: Array<{ itemId: Id<"workspaceItems">; fields: Record<string, unknown> }> }
       | { kind?: "archive_workstream"; workstreamId?: Id<"workstreams"> }
+      | { kind?: "restore_item_snapshot"; item?: Doc<"workspaceItems"> }
       | undefined;
 
     if (revertData?.kind === "delete_items") {
@@ -1059,6 +1127,41 @@ export const revertMutation = mutation({
           updatedAt: Date.now(),
         });
       }
+    }
+
+    if (revertData?.kind === "restore_item_snapshot" && revertData.item) {
+      const item = revertData.item;
+      await ctx.db.insert("workspaceItems", {
+        orgId: item.orgId,
+        ownerUserId: item.ownerUserId,
+        workstreamId: item.workstreamId,
+        status: item.status,
+        type: item.type,
+        itemType: item.itemType,
+        sourceKind: item.sourceKind,
+        sourceId: item.sourceId,
+        renderMode: item.renderMode,
+        sourceChatId: item.sourceChatId,
+        sourceArtifactId: item.sourceArtifactId,
+        sourcePlannerItemId: item.sourcePlannerItemId,
+        title: item.title,
+        contentSummary: item.contentSummary,
+        x: item.x,
+        y: item.y,
+        width: item.width,
+        height: item.height,
+        zIndex: item.zIndex,
+        category: item.category,
+        pinned: item.pinned,
+        collapsed: item.collapsed,
+        hidden: item.hidden,
+        visualGroup: item.visualGroup,
+        renderProps: item.renderProps,
+        provenanceSource: item.provenanceSource,
+        provenanceAction: item.provenanceAction,
+        createdAt: item.createdAt,
+        updatedAt: Date.now(),
+      });
     }
 
     await ctx.db.patch(args.mutationId, {

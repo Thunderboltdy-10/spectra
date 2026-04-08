@@ -356,26 +356,25 @@ export const createChat = mutation({
       throw new Error("Unauthorized");
     }
 
-    // Deduplication: if a chat with the same FULL identity (workstreamId, artifactId, packId, threadType) + user was created
-    // within the last 10 seconds, return that chat instead of creating a new one.
-    const dedupWindow = Date.now() - 10_000;
-    const recentChats = await ctx.db
+    const incomingThreadType = args.threadType ?? (args.artifactId ? "artifact_edit" : "conversation");
+
+    const existingChats = await ctx.db
       .query("chats")
       .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id))
       .collect();
 
-    const incomingThreadType = args.threadType ?? (args.artifactId ? "artifact_edit" : "conversation");
-    
-    const duplicate = recentChats.find(
-      (c) =>
-        !c.deletedAt &&
-        c.createdAt >= dedupWindow &&
-        c.workstreamId === args.workstreamId &&
-        c.artifactId === args.artifactId &&
-        c.packId === args.packId &&
-        c.threadType === incomingThreadType
-    );
-    
+    const duplicate = existingChats
+      .filter((chat) => !chat.deletedAt)
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .find(
+        (chat) =>
+          chat.orgId === actor.orgId
+          && chat.workstreamId === args.workstreamId
+          && chat.artifactId === args.artifactId
+          && chat.packId === args.packId
+          && chat.threadType === incomingThreadType,
+      );
+
     if (duplicate) {
       return { chatId: duplicate._id };
     }

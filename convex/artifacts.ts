@@ -4,6 +4,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { adjustWorkstreamArtifactCount, getUserByClerkId } from "./helpers";
 import { resolveWorkstreamTransfer } from "./workstreamAssignment";
 import { removeWorkspaceItemForArtifact, syncWorkspaceItemForArtifact } from "./workspaceItemSync";
+import { recordWorkspaceMutation } from "./workspaceHelpers";
 
 const vArtifactSourceType = v.union(
   v.literal("user_manual"),
@@ -564,6 +565,19 @@ export const create = mutation({
     });
 
     await adjustWorkstreamArtifactCount(ctx, args.workstreamId, 1);
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: args.workstreamId,
+      mutationType: "create_artifact",
+      source: "user",
+      entity: "artifact",
+      action: "created",
+      includeHub: true,
+      refreshHub: true,
+      summary: `Created artifact ${title}`,
+      after: { artifactId },
+    });
     await syncWorkspaceItemForArtifact(ctx, {
       artifactId,
       ownerUserId: actor._id,
@@ -672,6 +686,26 @@ export const update = mutation({
       await adjustWorkstreamArtifactCount(ctx, workstreamTransfer.to, 1);
     }
 
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId:
+        args.workstreamId === undefined
+          ? artifact.workstreamId
+          : (args.workstreamId ?? undefined),
+      targetWorkstreamId: artifact.workstreamId !== (args.workstreamId === undefined ? artifact.workstreamId : (args.workstreamId ?? undefined))
+        ? (args.workstreamId ?? undefined)
+        : undefined,
+      mutationType: artifact.workstreamId !== (args.workstreamId === undefined ? artifact.workstreamId : (args.workstreamId ?? undefined)) ? "move_artifact" : "update_artifact",
+      source: args.authorType === "agent" ? "ai" : "user",
+      entity: "artifact",
+      action: "updated",
+      includeHub: true,
+      refreshHub: true,
+      summary: `Updated artifact ${args.title === undefined ? artifact.title : normalizeString(args.title)}`,
+      before: artifact,
+      after: updates,
+    });
     await syncWorkspaceItemForArtifact(ctx, {
       artifactId: args.artifactId,
       ownerUserId: actor._id,
@@ -763,6 +797,20 @@ export const applyAiEdit = mutation({
       createdAt: now,
     });
 
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: artifact.workstreamId,
+      mutationType: "apply_ai_edit",
+      source: "ai",
+      entity: "artifact",
+      action: "updated",
+      includeHub: true,
+      refreshHub: true,
+      summary: `Applied AI edit to ${artifact.title}`,
+      before: { content: artifact.content, contentPlaintext: artifact.contentPlaintext },
+      after: { content: args.content, contentPlaintext: normalizeString(args.contentPlaintext) },
+    });
     await syncWorkspaceItemForArtifact(ctx, {
       artifactId: args.artifactId,
       ownerUserId: actor._id,
@@ -841,6 +889,20 @@ export const discardAiEdit = mutation({
       status: "discarded",
     });
 
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: artifact.workstreamId,
+      mutationType: "discard_ai_edit",
+      source: "ai",
+      entity: "artifact",
+      action: "updated",
+      includeHub: true,
+      refreshHub: true,
+      summary: `Discarded AI edit for ${artifact.title}`,
+      before: { content: artifact.content, contentPlaintext: artifact.contentPlaintext },
+      after: { content: restoredContent, contentPlaintext: version.diff?.previousPlaintext },
+    });
     await syncWorkspaceItemForArtifact(ctx, {
       artifactId: args.artifactId,
       ownerUserId: actor._id,
@@ -886,6 +948,20 @@ export const reapplyAiEdit = mutation({
     await ctx.db.patch(args.versionId, {
       status: "applied",
     });
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: artifact.workstreamId,
+      mutationType: "reapply_ai_edit",
+      source: "ai",
+      entity: "artifact",
+      action: "updated",
+      includeHub: true,
+      refreshHub: true,
+      summary: `Reapplied AI edit for ${artifact.title}`,
+      before: { content: artifact.content, contentPlaintext: artifact.contentPlaintext },
+      after: { content: version.snapshot, contentPlaintext: normalizeString(args.contentPlaintext) ?? version.diff?.nextPlaintext },
+    });
     await syncWorkspaceItemForArtifact(ctx, {
       artifactId: args.artifactId,
       ownerUserId: actor._id,
@@ -915,6 +991,20 @@ export const archive = mutation({
     if (artifact.status === "active") {
       await adjustWorkstreamArtifactCount(ctx, artifact.workstreamId, -1);
     }
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: artifact.workstreamId,
+      mutationType: "archive_artifact",
+      source: "user",
+      entity: "artifact",
+      action: "deleted",
+      includeHub: true,
+      refreshHub: true,
+      summary: `Archived artifact ${artifact.title}`,
+      before: artifact,
+      after: { status: "archived" },
+    });
     await syncWorkspaceItemForArtifact(ctx, {
       artifactId: args.artifactId,
       ownerUserId: actor._id,
@@ -944,6 +1034,20 @@ export const restore = mutation({
     if (artifact.status !== "active") {
       await adjustWorkstreamArtifactCount(ctx, artifact.workstreamId, 1);
     }
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: artifact.workstreamId,
+      mutationType: "restore_artifact",
+      source: "user",
+      entity: "artifact",
+      action: "updated",
+      includeHub: true,
+      refreshHub: true,
+      summary: `Restored artifact ${artifact.title}`,
+      before: artifact,
+      after: { status: "active" },
+    });
     await syncWorkspaceItemForArtifact(ctx, {
       artifactId: args.artifactId,
       ownerUserId: actor._id,
@@ -996,6 +1100,19 @@ export const remove = mutation({
         });
       }
     }
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: artifact.workstreamId,
+      mutationType: "delete_artifact",
+      source: "user",
+      entity: "artifact",
+      action: "deleted",
+      includeHub: true,
+      refreshHub: true,
+      summary: `Deleted artifact ${artifact.title}`,
+      before: artifact,
+    });
     await removeWorkspaceItemForArtifact(ctx, {
       artifactId: args.artifactId,
       ownerUserId: actor._id,

@@ -64,6 +64,7 @@ export type ArtifactSummary = {
   questionCount?: number;
   lastScore?: number;
   language?: string;
+  provenanceSource?: "user" | "ai" | "system";
 };
 
 export type WorkspaceWidgetSummary = {
@@ -79,6 +80,26 @@ export type WorkspaceWidgetSummary = {
   height?: number;
   panelType: PanelType;
   panelId: string;
+};
+
+export type GhostSuggestionSummary = {
+  _id: string;
+  title: string;
+  summary?: string;
+  suggestionKind: string;
+  confidenceTier: "high" | "medium" | "low";
+  confidenceScore: number;
+  renderMode?: string;
+  category?: string;
+  x: number;
+  y: number;
+  opacityIdle: number;
+  opacityHover: number;
+  provenanceSource: "ai";
+  generationModel: string;
+  modelLane: string;
+  contextSignals: string[];
+  resourceContext?: string;
 };
 
 export type InternalContentData = {
@@ -589,6 +610,7 @@ function GlanceArtifactCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="inline-flex h-2 w-2 rounded-full" style={{ background: statusTone }} />
+            {artifact.provenanceSource === "ai" ? <Sparkles className="h-3 w-3 text-[var(--glance-accent)]" /> : null}
             <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
               {canonicalMeta.label}
             </span>
@@ -612,6 +634,53 @@ function GlanceArtifactCard({
         {canonicalType === "quiz" && artifact.questionCount !== undefined ? <span>{artifact.questionCount}q</span> : null}
       </div>
     </button>
+  );
+}
+
+export function GhostSuggestionCard({
+  ghost,
+  onAccept,
+  onDismiss,
+}: {
+  ghost: GhostSuggestionSummary;
+  onAccept: (ghostId: string) => void;
+  onDismiss: (ghostId: string) => void;
+}) {
+  return (
+    <div
+      className="group relative flex w-full flex-col gap-2 rounded-xl border border-dashed border-[var(--accent-cyan)]/35 bg-[var(--bg-elevated)]/55 p-4 text-left transition-opacity"
+      style={{ opacity: ghost.opacityIdle }}
+    >
+      <div className="absolute right-3 top-3 flex items-center gap-1 text-[9px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
+        <Sparkles className="h-3 w-3 text-[var(--accent-cyan)]" />
+        AI
+      </div>
+      <div className="pr-12 text-[13px] font-semibold text-[var(--text-primary)]">{ghost.title}</div>
+      <div className="line-clamp-2 text-[11px] leading-relaxed text-[var(--text-secondary)]">
+        {ghost.summary ?? "Suggested from current workspace context"}
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] text-[var(--text-tertiary)]">
+          {ghost.confidenceTier} confidence
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onAccept(ghost._id)}
+            className="rounded-md border border-[var(--accent-cyan)]/50 px-2 py-1 text-[10px] font-medium text-[var(--text-primary)] hover:bg-[var(--accent-cyan)]/10"
+          >
+            +
+          </button>
+          <button
+            type="button"
+            onClick={() => onDismiss(ghost._id)}
+            className="rounded-md border border-[var(--border-default)] px-2 py-1 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-white/[0.05]"
+          >
+            ×
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

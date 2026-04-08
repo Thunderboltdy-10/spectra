@@ -201,7 +201,7 @@ export function resolveWorkspaceCategory(params: {
 }
 
 export async function recordWorkspaceMutation(
-  ctx: Pick<MutationCtx, "db">,
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
   params: {
     orgId: Id<"orgs">;
     ownerUserId: Id<"users">;
@@ -252,6 +252,9 @@ export async function recordWorkspaceMutation(
       });
     }));
   }
+
+
+
 
   return mutationId;
 }

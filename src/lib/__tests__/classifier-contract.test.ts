@@ -162,6 +162,32 @@ describe("classifier contract", () => {
     expect(result.ok).toBe(true);
   });
 
+
+  it("accepts medium-confidence classifier output for ghost generation routing", () => {
+    const result = validateClassifierDecision(
+      {
+        tier: "T2",
+        skills: ["concise-chat"],
+        workspaceTarget: { kind: "current", workspaceId: "ws-ghost" },
+        agentId: null,
+        needsSearch: false,
+        needsMemory: true,
+        needsRag: true,
+        outputFormat: "conversational",
+        thinkingLevel: "low",
+        confidence: 0.68,
+      },
+      ["concise-chat"],
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.tier).toBe("T2");
+      expect(result.value.confidence).toBe(0.68);
+      expect(result.value.workspaceTarget).toEqual({ kind: "current", workspaceId: "ws-ghost" });
+    }
+  });
+
   it("registers the Spectra visual skill as a substantive visualization skill", () => {
     const skill = listRegisteredSkills().find((entry) => entry.id === "spectra-visual-skill");
 

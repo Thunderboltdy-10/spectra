@@ -179,7 +179,7 @@ export function GuidedTour({ open, steps, onClose, onComplete }: GuidedTourProps
   if (!open || !step) return null;
 
   return (
-    <div className="fixed inset-0 z-[120]">
+    <div className="pointer-events-none fixed inset-0 z-[120]" aria-hidden={!open}>
       {highlightedRect ? (
         <div
           className="pointer-events-none fixed rounded-xl border border-[color-mix(in_oklab,var(--accent-cyan)_58%,white)]"
@@ -196,7 +196,7 @@ export function GuidedTour({ open, steps, onClose, onComplete }: GuidedTourProps
       )}
 
       <div
-        className="fixed w-[min(90vw,340px)] rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)]"
+        className="pointer-events-auto fixed w-[min(90vw,340px)] rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)]"
         style={{ left: cardPosition.left, top: cardPosition.top }}
         role="dialog"
         aria-modal="true"

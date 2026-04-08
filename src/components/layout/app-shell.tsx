@@ -285,6 +285,8 @@ const PAGE_TOUR_STEPS: Record<string, GuidedTourStep[]> = {
   ],
 };
 
+const NON_BLOCKING_TOUR_PATHS = new Set(["/workspace"]);
+
 export function AppShell({
   children,
   fullBleed = false,
@@ -313,6 +315,10 @@ export function AppShell({
 
   useEffect(() => {
     if (!pageTourKey) {
+      setTourOpen(false);
+      return;
+    }
+    if (NON_BLOCKING_TOUR_PATHS.has(pathname)) {
       setTourOpen(false);
       return;
     }

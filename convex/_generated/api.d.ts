@@ -28,6 +28,7 @@ import type * as feedback from "../feedback.js";
 import type * as fixCounts from "../fixCounts.js";
 import type * as flashcards from "../flashcards.js";
 import type * as gamification from "../gamification.js";
+import type * as ghosts from "../ghosts.js";
 import type * as helpers from "../helpers.js";
 import type * as images from "../images.js";
 import type * as ingestQueue from "../ingestQueue.js";
@@ -88,6 +89,7 @@ declare const fullApi: ApiFromModules<{
   fixCounts: typeof fixCounts;
   flashcards: typeof flashcards;
   gamification: typeof gamification;
+  ghosts: typeof ghosts;
   helpers: typeof helpers;
   images: typeof images;
   ingestQueue: typeof ingestQueue;

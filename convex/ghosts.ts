@@ -1,7 +1,8 @@
-import { internalMutation, mutation, query } from "./_generated/server";
+import { internalAction, internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { getUserByClerkId } from "./helpers";
+import { internal } from "./_generated/api";
 
 async function requireActor(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string) {
   const actor = await getUserByClerkId(ctx, actorClerkId);
@@ -514,5 +515,36 @@ export const regenerateForWorkstream = internalMutation({
     }
 
     return { created, invalidated: pendingRows.length, reason: "regenerated" as const };
+  },
+});
+
+export const enqueueRegenerationForWorkstream = internalMutation({
+  args: {
+    ownerUserId: v.id("users"),
+    orgId: v.id("orgs"),
+    workstreamId: v.id("workstreams"),
+    sourceWorkspaceMutationId: v.optional(v.id("workspaceMutations")),
+    trigger: v.optional(v.string()),
+    confidenceTier: v.optional(v.union(v.literal("high"), v.literal("medium"), v.literal("low"))),
+    confidenceScore: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.scheduler.runAfter(0, internal.ghosts.runRegenerationForWorkstream, args);
+    return { scheduled: true };
+  },
+});
+
+export const runRegenerationForWorkstream = internalAction({
+  args: {
+    ownerUserId: v.id("users"),
+    orgId: v.id("orgs"),
+    workstreamId: v.id("workstreams"),
+    sourceWorkspaceMutationId: v.optional(v.id("workspaceMutations")),
+    trigger: v.optional(v.string()),
+    confidenceTier: v.optional(v.union(v.literal("high"), v.literal("medium"), v.literal("low"))),
+    confidenceScore: v.optional(v.number()),
+  },
+  handler: async (ctx, args): Promise<{ created: number; invalidated: number; reason: "workstream_not_found" | "non_medium_confidence" | "regenerated" }> => {
+    return ctx.runMutation(internal.ghosts.regenerateForWorkstream, args);
   },
 });

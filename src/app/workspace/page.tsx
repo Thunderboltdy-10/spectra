@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
 import { toast } from "sonner";
-import { AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { AppShell } from "@/components/layout/app-shell";
 import { WorkstreamCreateDialog } from "@/components/workspace/workstream-create-dialog";
 import { CreateArtifactDialog } from "@/components/artifacts/create-artifact-dialog";
@@ -333,9 +333,15 @@ function WorkspaceContent() {
                   <EdgeUtilityOverlay
                     workstreams={workstreams}
                     primaryWorkstreamId={primaryWorkstreamId}
-                    onOpenWorkstream={(wsId) => handleCommitWorkstream(wsId)}
+                    onOpenWorkstream={(wsId) => {
+                      if (wsId === "__hub__") {
+                        handleCommitWorkstream(null);
+                        return;
+                      }
+                      handleCommitWorkstream(wsId);
+                    }}
                     onExitWorkstream={() => handleCommitWorkstream(null)}
-                    onOpenHub={() => handleCommitWorkstream("__hub__")}
+                    onOpenHub={() => handleCommitWorkstream(null)}
                     panelOpen={!!panel}
                     onNewWorkstream={handleNewWorkstream}
                     onCreateItem={(type) => {
@@ -357,9 +363,9 @@ function WorkspaceContent() {
                         window.dispatchEvent(new CustomEvent("workspace:suggest-name", { detail: { name: wsName } }));
                         return;
                       }
-                      if (primaryWorkstreamId) {
+                      if (primaryWorkstreamId && primaryWorkstreamId !== "__hub__") {
                         handleOpenPanel('chat', 'new');
-                        useWorkspaceStore.getState().setOpenChatQuery(query);
+                        useWorkspaceStore.getState().commitWorkstreamWithChat(primaryWorkstreamId, query);
                       } else {
                         router.push(`/chat?prompt=${encodeURIComponent(query)}`);
                       }
@@ -370,7 +376,7 @@ function WorkspaceContent() {
                   {panel && (
                     <div
                       className="absolute inset-0 bg-black/10 pointer-events-none z-[5] transition-opacity duration-300"
-                      style={{ opacity: 1 }}
+                      style={{ opacity: 1, backdropFilter: "blur(1px)" }}
                     />
                   )}
 
@@ -401,7 +407,11 @@ function WorkspaceContent() {
                     canvas and panel animate in perfect sync (no gap or overlap) */}
                 <AnimatePresence>
                   {panel && (
-                    <div
+                    <motion.div
+                      initial={{ x: panelWidth, opacity: 0.72 }}
+                      animate={{ x: 0, opacity: 1 }}
+                      exit={{ x: panelWidth, opacity: 0.72 }}
+                      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
                       className="h-full shrink-0 overflow-hidden relative"
                       style={{ width: panelWidth }}
                     >
@@ -423,7 +433,7 @@ function WorkspaceContent() {
                         }}
                         workstreams={workstreams}
                       />
-                    </div>
+                    </motion.div>
                   )}
                 </AnimatePresence>
               </div>

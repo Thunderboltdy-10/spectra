@@ -180,6 +180,7 @@ function ChatPanelContent({
   const [draft, setDraft] = useState("");
 
   const {
+    chatId,
     messages,
     streaming,
     sendMessage,
@@ -195,6 +196,10 @@ function ChatPanelContent({
   const { openChatQuery, clearOpenChatQuery } = useWorkspaceStore();
   const consumedQueryRef = useRef(false);
 
+  useEffect(() => {
+    consumedQueryRef.current = false;
+  }, [threadId, workstreamId]);
+
   // Hydrate existing thread
   useEffect(() => {
     if (threadId && threadId !== "new") {
@@ -208,11 +213,11 @@ function ChatPanelContent({
   }, [messages, streaming]);
 
   useEffect(() => {
-    if (threadId !== "new" || !openChatQuery || streaming || messages.length > 0 || consumedQueryRef.current) return;
+    if (threadId !== "new" || !openChatQuery || streaming || messages.length > 0 || consumedQueryRef.current || chatId) return;
     consumedQueryRef.current = true;
     clearOpenChatQuery();
     void sendMessage(openChatQuery);
-  }, [clearOpenChatQuery, messages.length, openChatQuery, sendMessage, streaming, threadId]);
+  }, [chatId, clearOpenChatQuery, messages.length, openChatQuery, sendMessage, streaming, threadId]);
 
   // Listen for panel chat query from command bar
   useEffect(() => {
@@ -243,9 +248,9 @@ function ChatPanelContent({
     : "Start a conversation";
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full min-h-0 flex-col bg-[linear-gradient(180deg,color-mix(in_oklab,var(--bg-elevated)_78%,transparent),color-mix(in_oklab,var(--bg-primary)_92%,transparent))]">
       {/* Messages area */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      <div className="flex-1 overflow-y-auto px-4 py-5 space-y-4">
         {messages.length === 0 && !streaming && (
           <div className="flex flex-col items-center justify-center h-full text-center py-12">
             <MessageSquare className="w-8 h-8 text-[var(--text-tertiary)] mb-3" />
@@ -275,10 +280,10 @@ function ChatPanelContent({
 
             <div
               className={cn(
-                "max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed break-words",
+                "max-w-[85%] overflow-hidden rounded-[22px] px-3.5 py-2.5 text-sm leading-relaxed break-words",
                 msg.role === "user"
-                  ? "bg-[var(--bg-user-bubble)] border border-[var(--border-default)] shadow-sm text-[var(--text-primary)] rounded-br-md"
-                  : "bg-[var(--bg-primary)] border border-[var(--border-default)] shadow-sm text-[var(--text-primary)] rounded-bl-md",
+                  ? "border border-[var(--border-default)] bg-[linear-gradient(145deg,color-mix(in_oklab,var(--bg-user-bubble)_92%,transparent),color-mix(in_oklab,var(--accent-cyan)_8%,transparent))] shadow-sm text-[var(--text-primary)] rounded-br-md"
+                  : "border border-[var(--border-default)] bg-[linear-gradient(145deg,color-mix(in_oklab,var(--bg-primary)_92%,transparent),color-mix(in_oklab,var(--accent-purple)_6%,transparent))] shadow-sm text-[var(--text-primary)] rounded-bl-md",
               )}
               style={{ overflowWrap: 'anywhere' }}
             >
@@ -322,20 +327,20 @@ function ChatPanelContent({
       </div>
 
       {/* In-panel composer */}
-      <div className="shrink-0 border-t border-[var(--border-default)]/60 p-3">
-        <form onSubmit={handleSubmit} className="flex items-center gap-2">
+      <div className="shrink-0 border-t border-[var(--border-default)]/60 bg-[color-mix(in_oklab,var(--bg-elevated)_82%,transparent)] p-3 backdrop-blur-xl">
+        <form onSubmit={handleSubmit} className="flex items-center gap-2 rounded-[20px] border border-[var(--border-default)]/60 bg-[var(--bg-secondary)]/75 px-2 py-2 shadow-[0_18px_40px_-28px_rgba(8,12,24,0.8)]">
           <input
             ref={inputRef}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder="Reply…"
             disabled={streaming}
-            className="flex-1 rounded-xl bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:ring-1 focus:ring-[var(--accent-cyan)]/40 border border-transparent transition-all disabled:opacity-50"
+            className="flex-1 rounded-xl bg-transparent px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:ring-0 border border-transparent transition-all disabled:opacity-50"
           />
           <button
             type="submit"
             disabled={!draft.trim() || streaming}
-            className="h-8 w-8 flex items-center justify-center rounded-xl bg-[var(--accent-cyan)] text-white disabled:opacity-40 hover:brightness-110 transition-all shrink-0"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--accent-cyan)] text-white disabled:opacity-40 hover:brightness-110 transition-all"
             title="Send"
           >
             <Send className="w-3.5 h-3.5" />

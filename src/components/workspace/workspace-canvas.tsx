@@ -263,6 +263,7 @@ type CachedWorkspaceContent = {
 
 const WORKSPACE_CACHE_MAX = 7;
 const HUB_CACHE_KEY = "__hub__";
+const CONTEXT_MENU_MARGIN = 18;
 
 /**
  * Bounded LRU map.  Access order is maintained by deleting + re-inserting on
@@ -437,6 +438,25 @@ function emptyWorkspaceContent(): CachedWorkspaceContent {
     hubQuickNotes: [],
     hubDeadlines: [],
     hubActivity: [],
+  };
+}
+
+function clampContextMenuPosition(
+  x: number,
+  y: number,
+  containerRect: DOMRect,
+  menuWidth = 220,
+  menuHeight = 260,
+) {
+  return {
+    x: Math.min(
+      Math.max(x, CONTEXT_MENU_MARGIN),
+      Math.max(CONTEXT_MENU_MARGIN, containerRect.width - menuWidth - CONTEXT_MENU_MARGIN),
+    ),
+    y: Math.min(
+      Math.max(y, CONTEXT_MENU_MARGIN),
+      Math.max(CONTEXT_MENU_MARGIN, containerRect.height - menuHeight - CONTEXT_MENU_MARGIN),
+    ),
   };
 }
 
@@ -709,7 +729,12 @@ function WorkspaceCanvasInner({
     setPreviousViewport,
   } = useWorkspaceStore();
   const [zoom, setZoom] = useState(restoreViewport().zoom);
-  const [semanticBand, setSemanticBand] = useState<ZoomBand>("summary");
+  const semanticBand = useMemo<ZoomBand>(() => {
+    if (primaryWorkstreamId) return "detail";
+    if (zoom < 0.20) return "overview";
+    if (zoom < 0.55) return "summary";
+    return "detail";
+  }, [primaryWorkstreamId, zoom]);
   const [localOverrides, setLocalOverrides] = useState(() => loadLocalOverrides());
   const [internalNodeOverrides, setInternalNodeOverrides] = useState<Map<string, { x: number; y: number }>>(new Map());
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -718,6 +743,14 @@ function WorkspaceCanvasInner({
   const [focusedItemId, setFocusedItemId] = useState<string | null>(null);
   const [movePicker, setMovePicker] = useState<{ itemId: string; sourceWorkstreamId: string } | null>(null);
   const [movePickerSearch, setMovePickerSearch] = useState("");
+  const positionContextMenu = useCallback((clientX: number, clientY: number, width?: number, height?: number) => {
+    const root = document.querySelector("[data-workspace-flow-root]");
+    const rect = root?.getBoundingClientRect();
+    if (!rect) {
+      return { x: clientX, y: clientY };
+    }
+    return clampContextMenuPosition(clientX - rect.left, clientY - rect.top, rect, width, height);
+  }, []);
   const lastMutationIdRef = useRef<string | null>(null);
   const [contentById, setContentById] = useState<Record<string, CachedWorkspaceContent>>({});
   const [loadingContentIds, setLoadingContentIds] = useState<string[]>([]);
@@ -725,15 +758,6 @@ function WorkspaceCanvasInner({
     const text = typeof value === "string" ? stripGeneratedDocumentMarkers(value).trim() : "";
     return text || "Untitled";
   }, []);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      setSemanticBand(zoom < 0.20 ? "overview" : zoom < 0.55 ? "summary" : "detail");
-    }, 180);
-    return () => clearTimeout(timeout);
-  }, [zoom]);
-
-
 
   useEffect(() => {
     internalNodeOverridesRef.current = new Map();
@@ -1133,10 +1157,12 @@ function WorkspaceCanvasInner({
             onFocusItem: (id: string) => setFocusedItemId(id),
             onBlurItem: () => setFocusedItemId(null),
             onItemContextMenu: (id: string, itemType: "thread" | "note" | "planner" | "artifact", x: number, y: number) => {
-              setItemContextMenu({ itemId: id, itemType, x, y });
+              const next = positionContextMenu(x, y, 220, 260);
+              setItemContextMenu({ itemId: id, itemType, x: next.x, y: next.y });
             },
             onGroupContextMenu: (groupType: string, x: number, y: number) => {
-              setGroupContextMenu({ groupType, x, y });
+              const next = positionContextMenu(x, y, 220, 220);
+              setGroupContextMenu({ groupType, x: next.x, y: next.y });
             },
           };
 
@@ -1182,6 +1208,7 @@ function WorkspaceCanvasInner({
     loadingContentIds,
     neighborOpacity,
     panelOpener,
+    positionContextMenu,
     positions,
     primaryWorkstreamId,
     visibleWorkstreamIds,
@@ -1243,7 +1270,41 @@ function WorkspaceCanvasInner({
   const handleMove = useCallback((_: unknown, viewport: Viewport) => {
     setZoom(viewport.zoom);
     lastViewportRef.current = { x: viewport.x, y: viewport.y, zoom: viewport.zoom };
-  }, []);
+
+    if (!primaryWorkstreamId && viewport.zoom >= 0.62) {
+      if (commitDebounceRef.current) {
+        clearTimeout(commitDebounceRef.current);
+      }
+      commitDebounceRef.current = setTimeout(() => {
+        const instance = reactFlowRef.current;
+        if (!instance || primaryWorkstreamId) return;
+        const viewportState = instance.getViewport();
+        if (viewportState.zoom < 0.62) return;
+        const viewportNow = instance.getViewport();
+        const bounds = document
+          .querySelector("[data-workspace-flow-root]")
+          ?.getBoundingClientRect();
+        const center = bounds
+          ? {
+              x: (bounds.width / 2 - viewportNow.x) / viewportNow.zoom,
+              y: (bounds.height / 2 - viewportNow.y) / viewportNow.zoom,
+            }
+          : { x: 0, y: 0 };
+        const candidate = visibleWorkstreams
+          .map((ws) => {
+            const pos = positions.get(ws._id) ?? { x: 0, y: 0 };
+            const dx = center.x - (pos.x + WORKSTREAM_TERRITORY.width / 2);
+            const dy = center.y - (pos.y + WORKSTREAM_TERRITORY.height / 2);
+            return { ws, distance: Math.hypot(dx, dy) };
+          })
+          .sort((a, b) => a.distance - b.distance)[0];
+
+        if (candidate && candidate.distance <= 1100) {
+          handleOpenWorkstream(candidate.ws._id);
+        }
+      }, 220);
+    }
+  }, [handleOpenWorkstream, positions, primaryWorkstreamId, visibleWorkstreams]);
 
   const handleMoveEnd = useCallback(
     (_: unknown, viewport: Viewport) => {
@@ -1388,6 +1449,17 @@ function WorkspaceCanvasInner({
   ]);
 
   useEffect(() => {
+    if (!contextMenu && !itemContextMenu && !groupContextMenu) return;
+    const handleWindowContextMenu = () => {
+      setContextMenu(null);
+      setItemContextMenu(null);
+      setGroupContextMenu(null);
+    };
+    window.addEventListener("contextmenu", handleWindowContextMenu);
+    return () => window.removeEventListener("contextmenu", handleWindowContextMenu);
+  }, [contextMenu, groupContextMenu, itemContextMenu]);
+
+  useEffect(() => {
     const handler = () => {
       const instance = reactFlowRef.current;
       if (!instance) return;
@@ -1438,7 +1510,15 @@ function WorkspaceCanvasInner({
         if (target?.closest(".react-flow__node")) return;
         event.preventDefault();
         const bounds = event.currentTarget.getBoundingClientRect();
-        setContextMenu({ x: event.clientX - bounds.left, y: event.clientY - bounds.top });
+        setContextMenu(
+          clampContextMenuPosition(
+            event.clientX - bounds.left,
+            event.clientY - bounds.top,
+            bounds,
+            220,
+            260,
+          ),
+        );
       }}
     >
       <AnimatePresence>

@@ -1,8 +1,11 @@
-import { internalAction, internalMutation, mutation, query } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { getUserByClerkId } from "./helpers";
 import { internal } from "./_generated/api";
+
+const GHOST_GENERATION_MODEL = "openai/gpt-5.4-nano";
+const GHOST_MODEL_LANE = "cheap_background";
 
 async function requireActor(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string) {
   const actor = await getUserByClerkId(ctx, actorClerkId);
@@ -504,8 +507,8 @@ export const regenerateForWorkstream = internalMutation({
         contextHash: hashContext([args.workstreamId, candidate.generationReason, candidate.title]),
         contextSignals: candidate.contextSignals,
         resourceContext: candidate.resourceContext,
-        generationModel: "openrouter/auto",
-        modelLane: "cheap_background",
+        generationModel: GHOST_GENERATION_MODEL,
+        modelLane: GHOST_MODEL_LANE,
         generationReason: `${args.trigger ?? "workspace_mutation"}: ${candidate.generationReason}`,
         unseenSessions: 0,
         createdAt: Date.now(),
@@ -546,5 +549,33 @@ export const runRegenerationForWorkstream = internalAction({
   },
   handler: async (ctx, args): Promise<{ created: number; invalidated: number; reason: "workstream_not_found" | "non_medium_confidence" | "regenerated" }> => {
     return ctx.runMutation(internal.ghosts.regenerateForWorkstream, args);
+  },
+});
+
+export const runScheduledRegenerationSweep = internalAction({
+  args: {},
+  handler: async (ctx) => {
+    const activeWorkstreams = await ctx.runQuery(internal.ghosts.listWorkstreamsForScheduledRegeneration, {});
+    let scheduled = 0;
+    for (const workstream of activeWorkstreams) {
+      await ctx.scheduler.runAfter(0, internal.ghosts.runRegenerationForWorkstream, {
+        ownerUserId: workstream.ownerUserId,
+        orgId: workstream.orgId,
+        workstreamId: workstream._id,
+        trigger: "scheduled_sweep",
+        confidenceTier: "medium",
+        confidenceScore: 0.68,
+      });
+      scheduled += 1;
+    }
+    return { scheduled };
+  },
+});
+
+export const listWorkstreamsForScheduledRegeneration = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const workstreams = await ctx.db.query("workstreams").collect();
+    return workstreams.filter((workstream) => workstream.status !== "archived");
   },
 });

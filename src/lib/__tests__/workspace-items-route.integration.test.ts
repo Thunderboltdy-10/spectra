@@ -160,6 +160,30 @@ describe("workspace items route integration", () => {
     });
   });
 
+  it("passes editingActive to ghost listing so editing suppresses ghosts", async () => {
+    const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_workspace" });
+    const convexQuery = vi.fn().mockResolvedValue({
+      sessionKey: "ws_1:123",
+      ghosts: [],
+    });
+
+    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation: vi.fn() }));
+
+    const route = await import("@/app/api/workspace-items/route");
+    const response = await route.GET(
+      new NextRequest("http://localhost/api/workspace-items?action=listGhosts&workstreamId=ws_1&sessionKey=ws_1:123&editingActive=true"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(convexQuery).toHaveBeenCalledWith("ghosts:listVisible", {
+      actorClerkId: "user_workspace",
+      workstreamId: "ws_1",
+      sessionKey: "ws_1:123",
+      editingActive: true,
+    });
+  });
+
   it("creates workspace widgets through the route", async () => {
     const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_workspace" });
     const convexMutation = vi.fn().mockResolvedValue({ itemId: "item_3", mutationId: "mut_1" });

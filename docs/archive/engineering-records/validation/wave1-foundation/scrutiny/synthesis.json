@@ -1,0 +1,105 @@
+{
+  "milestone": "wave1-foundation",
+  "validationType": "scrutiny",
+  "timestamp": "2026-04-08T16:25:00.000Z",
+  "validatorsRun": {
+    "test": {
+      "command": "npm run test:run -- --maxWorkers=4",
+      "exitCode": 0,
+      "result": "415 passed, 3 skipped",
+      "status": "pass"
+    },
+    "typecheck": {
+      "command": "npx tsc --noEmit",
+      "exitCode": 0,
+      "result": "clean",
+      "status": "pass"
+    },
+    "lint": {
+      "command": "npm run lint",
+      "exitCode": 0,
+      "result": "clean",
+      "status": "pass"
+    }
+  },
+  "reviewsSummary": {
+    "total": 7,
+    "passed": 7,
+    "failed": 0,
+    "features": [
+      {
+        "id": "w1-a1-canonical-taxonomy",
+        "commitId": "98a3ce69e8a678e6778c6b84ecf19e282829e718",
+        "status": "pass"
+      },
+      {
+        "id": "w1-a2-projection-rewrite",
+        "commitId": "a06aabbeb07c6c9d708f7772e200e7e65e021e1e",
+        "status": "pass"
+      },
+      {
+        "id": "w1-a3-cache-contract",
+        "commitId": "dbdbbfee0cc6101e9603e661eb442538b87f1fdd",
+        "status": "pass"
+      },
+      {
+        "id": "w1-b1-ai-discard-fix",
+        "commitId": "09b5ea9",
+        "status": "pass"
+      },
+      {
+        "id": "w1-c1-spatial-rebuild",
+        "commitId": "7d66795",
+        "status": "pass"
+      },
+      {
+        "id": "w1-c2-glance-renderers",
+        "commitId": "c6e023309b1a0ff83a604a92a7340727162203c3",
+        "status": "pass"
+      },
+      {
+        "id": "w1-c3-hub-primitives",
+        "commitId": "5b12280",
+        "status": "pass"
+      }
+    ]
+  },
+  "blockingIssues": [],
+  "nonBlockingIssues": [
+    {
+      "severity": "non_blocking",
+      "featureId": "w1-a2-projection-rewrite",
+      "file": "convex/chats.ts",
+      "line": 356,
+      "description": "Chat dedup uses O(n) full collection scan with no compound index. For users with many chats this could be slow, but the dedup scope is narrowly limited to (orgId, workstreamId, artifactId, packId, threadType) so it is functionally correct. The performance concern is minor given the Convex in-memory model."
+    },
+    {
+      "severity": "non_blocking",
+      "featureId": "w1-c1-spatial-rebuild",
+      "file": "src/lib/workspace/auto-layout.ts",
+      "line": 53,
+      "description": "Completed workspaces use fixed RADIAL_DISTANCE.completed (5000) rather than mean-density computation. The radial band placement is still correct per tests. The simpler fixed-distance approach is reasonable."
+    }
+  ],
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The backend-worker SKILL.md and features.json verification steps reference `npm run test:run -- --grep ...` for targeted test runs, but the Vitest CLI in this repo does not support `--grep` and throws `CACError: Unknown option --grep`. Workers discovered this empirically. The skill documentation should be updated to use a supported alternative (e.g., file path or `--testNamePattern`) for targeted validation, or explicitly warn about version-specific CLI differences.",
+      "suggestedFix": "Update backend-worker SKILL.md and AGENTS.md to document supported Vitest filter flags. Use `npm run test:run src/path/to/file.test.ts` for file-scoped runs instead of `--grep`."
+    },
+    {
+      "area": "conventions",
+      "observation": "AGENTS.md does not document the convention for resolving pre-existing lint issues in unrelated files when they block a feature validation gate. Pre-existing lint failures in convex/superAdmin.ts, edge-utility-overlay.tsx, and canonical-workspace-taxonomy.test.ts were encountered by multiple workers.",
+      "suggestedFix": "Add a section to AGENTS.md clarifying that pre-existing lint issues in unrelated files do not block feature commits, and that they should be tracked separately."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The canonical taxonomy knowledge was correctly documented in .factory/library/canonical-taxonomy.md (commit 74fa1a0). This is a good pattern for documenting implicit domain knowledge discovered during implementation."
+    },
+    {
+      "area": "conventions",
+      "observation": "The LRU cache is implemented as a private class `LruMap` inside workspace-canvas.tsx rather than a shared utility. This is appropriate for the current use case but would need extraction if other components need bounded LRU caching in the future."
+    }
+  ],
+  "summary": "All 7 wave1-foundation features passed scrutiny validation. Validators (test: 415 passed/3 skipped, typecheck: clean, lint: clean) all passed. All feature implementations correctly satisfy their contracts. No blocking issues were found. Two non-blocking observations: chat dedup uses O(n) full collection scan (functionally correct), and completed workspaces use fixed radial distance (simplification maintains correctness). Skill documentation should be updated to remove `--grep` references and document supported Vitest filter flags."
+}

@@ -168,6 +168,166 @@ export const ARTIFACT_SECTIONS = [
   "Collections",
 ] as const;
 
+/* ─── Canonical Workspace-Facing Types ──────────────────── */
+
+/**
+ * The seven canonical workspace-facing types that determine how an item
+ * is rendered on the workspace canvas. Each maps to a distinct display
+ * representation (icon, tint, card layout).
+ *
+ * VAL-W1-001: No item should fall back to a generic "artifact" card
+ * when a specific canonical type exists.
+ */
+export const CANONICAL_WORKSPACE_TYPES = [
+  "note",
+  "visual",
+  "code",
+  "export",
+  "board",
+  "flashcard_deck",
+  "quiz",
+  "thread",
+  "planner",
+] as const;
+
+export type CanonicalWorkspaceType = (typeof CANONICAL_WORKSPACE_TYPES)[number];
+
+type CanonicalWorkspaceTypeMeta = {
+  label: string;
+  color: string;
+  icon: LucideIcon;
+};
+
+/**
+ * Metadata for each canonical workspace-facing type.
+ * Used by the canvas to render type-specific cards with appropriate
+ * icons, tint colours, and labels.
+ */
+export const CANONICAL_WORKSPACE_TYPE_META: Record<
+  CanonicalWorkspaceType,
+  CanonicalWorkspaceTypeMeta
+> = {
+  note: {
+    label: "Note",
+    color: "#f59f0a",
+    icon: PenLine,
+  },
+  visual: {
+    label: "Visual",
+    color: "#1f9fb2",
+    icon: ChartColumn,
+  },
+  code: {
+    label: "Code",
+    color: "#ba4f26",
+    icon: Code2,
+  },
+  export: {
+    label: "Export",
+    color: "#637083",
+    icon: Bookmark,
+  },
+  board: {
+    label: "Board",
+    color: "#0f6fa7",
+    icon: KanbanSquare,
+  },
+  flashcard_deck: {
+    label: "Flashcard Deck",
+    color: "#1f9fb2",
+    icon: BookOpen,
+  },
+  quiz: {
+    label: "Quiz",
+    color: "#8f51d9",
+    icon: BookOpen,
+  },
+  thread: {
+    label: "Thread",
+    color: "#0e8ee8",
+    icon: FileText,
+  },
+  planner: {
+    label: "Planner",
+    color: "#158f72",
+    icon: Calendar,
+  },
+};
+
+/**
+ * Maps an artifact type (renderMode) to its canonical workspace-facing type.
+ * This determines the high-level display category on the workspace canvas.
+ *
+ * VAL-W1-002: Every legacy artifact type must map to a valid canonical type
+ * without producing undefined.
+ */
+export const ARTIFACT_TO_CANONICAL_WORKSPACE_TYPE: Record<
+  ArtifactType,
+  CanonicalWorkspaceType
+> = {
+  study_plan: "note",
+  timetable: "planner",
+  note: "note",
+  flashcard_deck: "flashcard_deck",
+  document: "note",
+  code_project: "code",
+  diagram: "visual",
+  image: "visual",
+  bookmark: "export",
+  collection: "export",
+  whiteboard: "board",
+  visualization: "visual",
+  quiz: "quiz",
+  concept_map: "visual",
+  code_output: "code",
+  custom: "export",
+};
+
+/**
+ * Maps a legacy `type` field value to a canonical workspace-facing type.
+ * Used during dual-read migration when `itemType` is absent.
+ *
+ * VAL-W1-003: Items created before the `itemType` field was added must
+ * display identically to items created after.
+ */
+export const LEGACY_TYPE_TO_CANONICAL_WORKSPACE_TYPE: Record<
+  string,
+  CanonicalWorkspaceType
+> = {
+  thread: "thread",
+  document: "note",
+  planner: "planner",
+  board: "board",
+  visualization: "visual",
+  media: "visual",
+  reference: "export",
+  custom: "export",
+  utility: "export",
+};
+
+/**
+ * Resolves the canonical workspace-facing type for a given artifact type.
+ * Falls back to "export" for unknown types.
+ */
+export function canonicalWorkspaceTypeForArtifactType(
+  artifactType: string,
+): CanonicalWorkspaceType {
+  return (
+    ARTIFACT_TO_CANONICAL_WORKSPACE_TYPE[artifactType as ArtifactType]
+    ?? "export"
+  );
+}
+
+/**
+ * Resolves the canonical workspace-facing type for a legacy `type` field value.
+ * Falls back to "export" for unknown legacy types.
+ */
+export function canonicalWorkspaceTypeForLegacyType(
+  legacyType: string,
+): CanonicalWorkspaceType {
+  return LEGACY_TYPE_TO_CANONICAL_WORKSPACE_TYPE[legacyType] ?? "export";
+}
+
 export function getArtifactMeta(type: string): ArtifactTypeMeta {
   return (
     ARTIFACT_TYPE_META[type as ArtifactType] ?? {

@@ -6,6 +6,7 @@ export type RuntimeSkill = {
   name: string;
   summary: string;
   guidance: string[];
+  prompt?: string;
   category?: string;
   sourcePath?: string;
   appliesToModes?: StudyMode[];
@@ -18,6 +19,7 @@ function toRuntimeSkill(skill: RegisteredSkill): RuntimeSkill {
     name: skill.name,
     summary: skill.summary,
     guidance: skill.guidance,
+    prompt: skill.prompt,
     category: skill.category,
     sourcePath: skill.sourcePath,
     appliesToModes: skill.appliesToModes,
@@ -66,6 +68,10 @@ export function formatRuntimeSkillBlock(skills: RuntimeSkill[]) {
       ];
       for (const item of skill.guidance) {
         lines.push(`- ${item}`);
+      }
+      if (skill.prompt) {
+        lines.push("Prompt:");
+        lines.push(skill.prompt);
       }
       if (skill.sourcePath) {
         lines.push(`Source: ${skill.sourcePath}`);

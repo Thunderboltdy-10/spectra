@@ -6,6 +6,7 @@ import {
   validateClassifierInput,
 } from "@/lib/orchestrator/classifier-contract";
 import { classifyRequest } from "@/lib/auto-settings";
+import { listRegisteredSkills, resolveSkillsForContext } from "@/lib/skills/skill-registry";
 
 describe("classifier contract", () => {
   it("builds a well-formed structured classifier input", () => {
@@ -159,5 +160,30 @@ describe("classifier contract", () => {
     );
 
     expect(result.ok).toBe(true);
+  });
+
+  it("registers the Spectra visual skill as a substantive visualization skill", () => {
+    const skill = listRegisteredSkills().find((entry) => entry.id === "spectra-visual-skill");
+
+    expect(skill).toBeDefined();
+    expect(skill?.category).toBe("visualization");
+    expect(skill?.sourcePath).toBe("/public/skills/spectra-visual-skill.md");
+    expect(skill?.prompt?.split(/\s+/).length ?? 0).toBeGreaterThanOrEqual(2000);
+  });
+
+  it("activates the Spectra visual skill for visual requests but not non-visual ones", () => {
+    const visualSkills = resolveSkillsForContext({
+      message: "Create an SVG timeline showing the stages of mitosis.",
+      mode: "explain",
+      allowedToolBundles: ["skills", "artifact"],
+    });
+    const nonVisualSkills = resolveSkillsForContext({
+      message: "Summarize mitosis in one paragraph.",
+      mode: "general",
+      allowedToolBundles: ["skills", "artifact"],
+    });
+
+    expect(visualSkills.some((skill) => skill.id === "spectra-visual-skill")).toBe(true);
+    expect(nonVisualSkills.some((skill) => skill.id === "spectra-visual-skill")).toBe(false);
   });
 });

@@ -747,6 +747,75 @@ export const createWidget = mutation({
   },
 });
 
+export const updateBySourceArtifact = mutation({
+  args: {
+    actorClerkId: v.string(),
+    sourceArtifactId: v.id("artifacts"),
+    title: v.optional(v.string()),
+    contentSummary: v.optional(v.string()),
+    renderMode: v.optional(v.string()),
+    renderProps: v.optional(v.any()),
+    provenanceSource: v.optional(vWorkspaceMutationSource),
+    provenanceAction: v.optional(v.string()),
+    mutationSummary: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireWorkspaceActor(ctx, args.actorClerkId);
+    const existing = await ctx.db
+      .query("workspaceItems")
+      .withIndex("by_source_artifact", (q) => q.eq("sourceArtifactId", args.sourceArtifactId))
+      .collect()
+      .then((rows) => rows.find((row) => row.ownerUserId === actor._id && row.orgId === actor.orgId) ?? null);
+
+    if (!existing) {
+      throw new Error("Workspace item not found");
+    }
+
+    const before = {
+      title: existing.title,
+      contentSummary: existing.contentSummary,
+      renderMode: existing.renderMode,
+      renderProps: existing.renderProps,
+      provenanceSource: existing.provenanceSource,
+      provenanceAction: existing.provenanceAction,
+    };
+
+    const updates: Record<string, unknown> = { updatedAt: Date.now() };
+    if (args.title !== undefined) updates.title = normalizeWorkspaceTitle(args.title);
+    if (args.contentSummary !== undefined) updates.contentSummary = summarizeWorkspaceContent(args.contentSummary);
+    if (args.renderMode !== undefined) updates.renderMode = args.renderMode;
+    if (args.renderProps !== undefined) updates.renderProps = args.renderProps;
+    if (args.provenanceSource !== undefined) updates.provenanceSource = args.provenanceSource;
+    if (args.provenanceAction !== undefined) updates.provenanceAction = args.provenanceAction.trim() || undefined;
+    if (args.renderMode !== undefined) {
+      updates.category = resolveWorkspaceCategory({
+        explicitCategory: existing.category,
+        legacyType: existing.type,
+        renderMode: args.renderMode,
+        itemType: existing.itemType,
+      });
+    }
+
+    await ctx.db.patch(existing._id, updates);
+    const refreshed = await ctx.db.get(existing._id);
+
+    const mutationId = await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: existing.workstreamId,
+      targetItemIds: [existing._id],
+      mutationType: "update_widget",
+      source: args.provenanceSource ?? "ai",
+      summary: args.mutationSummary ?? `Updated widget ${existing.title}`,
+      before,
+      after: refreshed,
+      revertData: { kind: "patch_items", patches: [{ itemId: existing._id, fields: before }] },
+    });
+
+    return { success: true, mutationId, itemId: existing._id };
+  },
+});
+
 export const updateWidget = mutation({
   args: {
     actorClerkId: v.string(),

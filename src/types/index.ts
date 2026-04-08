@@ -448,7 +448,8 @@ export type RouteTrace = {
         | "strict_flashcards"
         | "claims_evidence_reliability"
         | "artifact_ready"
-        | "explanation_with_visual";
+        | "explanation_with_visual"
+        | "visual_artifact";
       thinkingLevel: import("@/lib/contracts/studyModes").ThinkingLevel;
       confidence: number;
     };

@@ -542,6 +542,18 @@ function buildModeContract(mode: StudyMode): ModeContract {
       retryPolicy: "single_bounded_retry",
     };
   }
+  if (mode === "explain") {
+    return {
+      mode,
+      pedagogy: "guided_teaching",
+      outputFormat: "explanation_with_visual",
+      responseDepth: "standard",
+      escalationPolicy: "allow_tools",
+      toolBundles: ["artifact"],
+      validator: "leak_guard",
+      retryPolicy: "single_bounded_retry",
+    };
+  }
   return {
     mode,
     pedagogy: mode === "tutor" ? "guided_teaching" : "general_support",
@@ -585,6 +597,9 @@ function allowedAiToolsForAssignmentLevel(assignmentLevel: AssignmentLevel): AiT
       "dismiss_memory",
       "create_note",
       "update_planner",
+      "create_widget",
+      "update_widget",
+      "attach_items_to_workstream",
       "search_web",
       "switch_mode",
     ];
@@ -597,6 +612,9 @@ function allowedAiToolsForAssignmentLevel(assignmentLevel: AssignmentLevel): AiT
     "get_workstream_context",
     "create_note",
     "update_planner",
+    "create_widget",
+    "update_widget",
+    "attach_items_to_workstream",
     "fork_thread",
     "search_web",
     "switch_mode",

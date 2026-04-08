@@ -376,6 +376,45 @@ function isParentMessageValidatorError(error: unknown) {
   return lower.includes("argumentvalidationerror") && lower.includes("parentmessageid");
 }
 
+export function extractVisualArtifactFromResponse(params: {
+  response: string;
+  effectiveMode: StudyMode;
+  routePlan: { modeContract: { outputFormat: string } };
+  runtimeSkills: Array<{ id: string }>;
+}) {
+  const visualSkillSelected = params.runtimeSkills.some((skill) => skill.id === "spectra-visual-skill");
+  const visualFormat = params.routePlan.modeContract.outputFormat === "explanation_with_visual"
+    || params.routePlan.modeContract.outputFormat === "visual_artifact";
+  const visualRequest = visualSkillSelected || visualFormat;
+  if (!visualRequest) return null;
+
+  const svgMatch = params.response.match(/<svg[\s\S]*?<\/svg>/i);
+  if (svgMatch) {
+    const svg = svgMatch[0].trim();
+    const titleMatch = svg.match(/<title>([\s\S]*?)<\/title>/i);
+    const title = titleMatch?.[1]?.replace(/\s+/g, " ").trim() || "Spectra visual";
+    const summary = params.response
+      .replace(svg, " ")
+      .replace(/[`#>*_-]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return {
+      title,
+      content: svg,
+      summary,
+      renderMode: "visualization",
+      type: "visualization" as const,
+      category: "visualizations" as const,
+      renderProps: {
+        visualKind: "svg",
+        svg,
+      },
+    };
+  }
+
+  return null;
+}
+
 async function appendAssistantMessageWithCitationFallback(params: {
   actorClerkId: string;
   chatId: string;
@@ -3767,6 +3806,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         });
         assistantPersisted = true;
 
+
         await send({
           type: "done",
           content: clarificationText,
@@ -4739,6 +4779,12 @@ BACK: [answer or definition]`,
 
       route.trace.toolchain = [...new Set(route.trace.toolchain)];
 
+      const visualArtifact = extractVisualArtifactFromResponse({
+        response: correctedResponse,
+        effectiveMode,
+        routePlan,
+        runtimeSkills,
+      });
       let citations = inferCitations(
         correctedResponse,
         retrieval.citations,
@@ -4820,6 +4866,55 @@ BACK: [answer or definition]`,
         routeTrace: route.trace,
       });
       assistantPersisted = true;
+
+      if (visualArtifact && activeWorkstreamId) {
+        try {
+          const visualArtifactId = await convexMutation<
+            {
+              actorClerkId: string;
+              type: string;
+              title: string;
+              content: string;
+              contentPlaintext: string;
+              workstreamId?: string;
+              sourceType?: string;
+              linkedChatId?: string;
+              sourceMessageId?: string;
+              createdAt?: number;
+            },
+            string
+          >("artifacts:create", {
+            actorClerkId: actor.clerkId,
+            type: visualArtifact.type,
+            title: visualArtifact.title,
+            content: visualArtifact.content,
+            contentPlaintext: visualArtifact.summary || visualArtifact.title,
+            workstreamId: activeWorkstreamId,
+            sourceType: "ai_generated",
+            linkedChatId: chatId,
+            sourceMessageId: appended.messageId,
+          });
+
+          await convexMutation("workspaceItems:updateBySourceArtifact", {
+            actorClerkId: actor.clerkId,
+            sourceArtifactId: visualArtifactId,
+            renderMode: visualArtifact.renderMode,
+            title: visualArtifact.title,
+            contentSummary: visualArtifact.summary || visualArtifact.title,
+            renderProps: visualArtifact.renderProps,
+            provenanceSource: "ai",
+            provenanceAction: "created",
+            mutationSummary: `AI rendered visual artifact ${visualArtifact.title}`,
+          }).catch(() => {});
+
+          route.trace.toolchain.push("spectra_visual_dual_render");
+        } catch (error) {
+          logger.warn("visual artifact persistence failed", {
+            chatId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
 
       const catalogPricing = resolveCatalogPricing(modelUsed);
       const pricing =

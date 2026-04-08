@@ -12,6 +12,7 @@ export const CLASSIFIER_OUTPUT_FORMATS = [
   "claims_evidence_reliability",
   "artifact_ready",
   "explanation_with_visual",
+  "visual_artifact",
 ] as const;
 export type ClassifierOutputFormat = (typeof CLASSIFIER_OUTPUT_FORMATS)[number];
 

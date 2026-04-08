@@ -32,6 +32,7 @@ import {
   computeCanonicalLayout,
   applyOverrides,
   getLifecycleVisuals,
+  WORKSTREAM_TERRITORY,
 } from "@/lib/workspace/auto-layout";
 import {
   saveLocalOverride,
@@ -119,8 +120,8 @@ function getAmbientClass(): string {
 
 function getNeighborOpacity(zoom: number): number {
   if (zoom <= 0.55) return 1;
-  if (zoom >= 0.85) return 0;
-  return Math.max(0, 1 - (zoom - 0.55) / 0.3);
+  if (zoom >= 1.05) return 0;
+  return Math.max(0, 1 - (zoom - 0.55) / 0.5);
 }
 
 function restoreViewport(): Viewport {
@@ -144,6 +145,11 @@ function restoreViewport(): Viewport {
   }
   return defaultVp;
 }
+
+export const __workspaceCanvasTestUtils = {
+  restoreViewport,
+  getNeighborOpacity,
+};
 
 /* ─── Edge builders ──────────────────────────────────────── */
 
@@ -459,7 +465,7 @@ const WorkstreamNode = memo(function WorkstreamNode({
   const color = getWorkstreamColor(workstream.color);
 
   // Unified V2 scale
-  const width = band === "overview" ? 800 : band === "summary" ? 1200 : band === "detail" ? 1500 : 1500;
+  const width = band === "overview" ? 800 : band === "summary" ? 1200 : WORKSTREAM_TERRITORY.width;
   const dissolving = isCommitted;
 
   return (
@@ -635,19 +641,14 @@ function formatActivity(timestamp?: number) {
 
 function FlowBackground({
   mode,
-  zoom,
 }: {
   mode: WorkspaceBackgroundMode;
-  zoom: number;
 }) {
   if (mode === "blank") return null;
   const isDots = mode === "dots";
-  const gap = isDots
-    ? Math.max(22, Math.min(34, 28 / Math.max(zoom, 0.82)))
-    : 56;
   return (
     <Background
-      gap={gap}
+      gap={isDots ? 28 : 56}
       size={isDots ? 1.45 : 0.8}
       variant={isDots ? BackgroundVariant.Dots : BackgroundVariant.Lines}
       color={isDots
@@ -972,9 +973,9 @@ function WorkspaceCanvasInner({
         const node = instance.getNode(`ws-${workstreamId}`);
         if (node) {
           instance.setCenter(
-            node.position.x + 600,
-            node.position.y + 400,
-            { zoom: 1.0, duration: 450 },
+            node.position.x + WORKSTREAM_TERRITORY.width / 2,
+            node.position.y + WORKSTREAM_TERRITORY.height / 2,
+            { zoom: 0.85, duration: 450 },
           );
         }
       }
@@ -1015,7 +1016,7 @@ function WorkspaceCanvasInner({
       if (instance) {
         animatedCommitRef.current = HUB_CACHE_KEY;
         setPreviousViewport({ ...lastViewportRef.current });
-        instance.setCenter(0, 0, { zoom: 1.0, duration: 450 });
+        instance.setCenter(0, 0, { zoom: 0.85, duration: 450 });
       }
       commitAnimationTimeoutRef.current = setTimeout(() => {
         setVisibleWorkstreamIds([HUB_CACHE_KEY]);
@@ -1043,7 +1044,7 @@ function WorkspaceCanvasInner({
       setPreviousViewport({ ...lastViewportRef.current });
       setVisibleWorkstreamIds([HUB_CACHE_KEY]);
       void fetchContentForWorkstream(HUB_CACHE_KEY);
-      instance.setCenter(0, 0, { zoom: 1.0, duration: 450 });
+      instance.setCenter(0, 0, { zoom: 0.85, duration: 450 });
       return;
     }
 
@@ -1054,9 +1055,9 @@ function WorkspaceCanvasInner({
     setVisibleWorkstreamIds([primaryWorkstreamId]);
     void fetchContentForWorkstream(primaryWorkstreamId);
     instance.setCenter(
-      node.position.x + 600,
-      node.position.y + 400,
-      { zoom: 1.0, duration: 450 },
+      node.position.x + WORKSTREAM_TERRITORY.width / 2,
+      node.position.y + WORKSTREAM_TERRITORY.height / 2,
+      { zoom: 0.85, duration: 450 },
     );
   }, [fetchContentForWorkstream, positions, primaryWorkstreamId, setPreviousViewport, setVisibleWorkstreamIds]);
 
@@ -1216,8 +1217,8 @@ function WorkspaceCanvasInner({
         const node = instance.getNode(`ws-${initWorkstreamId}`);
         if (node) {
           instance.setCenter(
-            node.position.x + 600,
-            node.position.y + 400,
+            node.position.x + WORKSTREAM_TERRITORY.width / 2,
+            node.position.y + WORKSTREAM_TERRITORY.height / 2,
             { zoom: 0.85, duration: 0 },
           );
           const vp = instance.getViewport();
@@ -1406,8 +1407,8 @@ function WorkspaceCanvasInner({
     const target = instance.getNode(`ws-${focusWorkstreamId}`);
     if (!target) return;
     instance.setCenter(
-      target.position.x + 600,
-      target.position.y + 400,
+      target.position.x + WORKSTREAM_TERRITORY.width / 2,
+      target.position.y + WORKSTREAM_TERRITORY.height / 2,
       { zoom: 0.6, duration: 600 },
     );
   }, [focusWorkstreamId]);
@@ -1473,7 +1474,7 @@ function WorkspaceCanvasInner({
           background: "transparent",
         }}
       />
-      <FlowBackground mode={backgroundMode} zoom={zoom} />
+      <FlowBackground mode={backgroundMode} />
         <Controls position="bottom-left" showInteractive={false}>
           <ControlButton
             onClick={() => reactFlowRef.current?.zoomTo(0.7, { duration: 350 })}

@@ -28,12 +28,19 @@ export type LayoutResult = {
 };
 
 // Radial distances from hub center by lifecycle state (scaled for spacious territories)
-const RADIAL_DISTANCE = {
+export const RADIAL_DISTANCE = {
   active: 2800,
   quiet: 3800,
   completed: 5000,
   archived: 6000,
 } as const;
+
+export const WORKSTREAM_TERRITORY = {
+  width: 1500,
+  height: 1200,
+} as const;
+
+export const WORKSTREAM_MIN_DISTANCE = 1800;
 
 // Angular sectors by type (radians from 0)
 const TYPE_SECTORS: Record<string, number> = {
@@ -116,7 +123,7 @@ export function computeCanonicalLayout(workstreams: Workstream[]): LayoutResult 
         const dx = b.x - a.x;
         const dy = b.y - a.y;
         const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
-        const minDist = 1800; // minimum distance between nodes (scaled for spacious territories)
+        const minDist = WORKSTREAM_MIN_DISTANCE; // minimum distance between nodes (scaled for spacious territories)
         if (dist < minDist) {
           const force = (minDist - dist) / dist * 0.3;
           const fx = dx * force;

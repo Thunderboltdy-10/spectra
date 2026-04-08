@@ -1,0 +1,38 @@
+{
+  "featureId": "w1-a2-projection-rewrite",
+  "reviewedAt": "2026-04-08T15:30:00.000Z",
+  "commitId": "a06aabbeb07c6c9d708f7772e200e7e65e021e1e",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The feature implementation is solid and covers all stated requirements. All artifact mutations (create, update, applyAiEdit, discardAiEdit, reapplyAiEdit, archive, restore, remove) in convex/artifacts.ts now call recordWorkspaceMutation before syncWorkspaceItemForArtifact. Planner item mutations in convex/plannerItems.ts (create, update, remove) similarly call recordWorkspaceMutation and syncWorkspaceItemForPlannerItem. The thread dedup in convex/chats.ts was fixed by replacing the 10-second time-window dedup with stable identity-based dedup using (orgId, workstreamId, artifactId, packId, threadType). Archive/move/update projection is correctly maintained across workspaceItems.ts and plannerItems.ts. The recordWorkspaceMutation helper in workspaceHelpers.ts was extended to also bump affected workstream timestamps. Tests were updated to cover flashcard_deck renderMode preservation and archive route provenance wiring.",
+    "issues": [
+      {
+        "file": "convex/chats.ts",
+        "line": 356,
+        "severity": "non_blocking",
+        "description": "The chat dedup fix uses .find() on a full collection of the user chats, which is O(n) with no index. For users with many chats this could be slow. However, the dedup scope is narrowly limited to matching (orgId, workstreamId, artifactId, packId, threadType) so it is correct. The performance concern is minor given Convex in-memory model and typical number of chats per user."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The backend-worker skill did not explicitly guide the worker to update existing tests or add new tests for the planner projection feature. The worker correctly added tests for flashcard_deck renderMode and archive provenance, but these were added as part of the work rather than being explicitly required by the skill verification procedure.",
+      "evidence": "Transcript shows worker added tests reactively when they appeared necessary, but the skill verificationSteps only listed npm test commands and manual checks, not explicit test authoring requirements."
+    },
+    {
+      "area": "conventions",
+      "observation": "The feature handoff notes a pre-existing lint failure in convex/superAdmin.ts, edge-utility-overlay.tsx, and canonical-workspace-taxonomy.test.ts. These are not related to this feature but prevent a clean lint run. AGENTS.md does not document the convention for resolving pre-existing lint issues when they block a feature validation gate.",
+      "evidence": "Handoff discoveredIssues: pre-existing repository lint failures in unrelated files."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The worker had to discover that syncWorkspaceItemForPlannerItem needs to be called after recordWorkspaceMutation in plannerItems.ts, and that the shouldArchive condition should archive items when status is completed or cancelled. This is implicit domain knowledge that could be documented in a shared workspace projection guide.",
+      "evidence": "Diff shows the plannerItems.ts sync logic with shouldArchive condition: const shouldArchive = !params.workstreamId || params.status === cancelled || params.status === completed"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "The w1-a2-projection-rewrite feature is well-implemented. All artifact mutations now call recordWorkspaceMutation before syncing the workspace item projection. Planner item projection (syncWorkspaceItemForPlannerItem) was added to create/update/remove mutations in plannerItems.ts. The 10-second thread dedup window was replaced with atomic identity-based dedup in chats.ts. Archive, move, and update flows correctly maintain projection. The recordWorkspaceMutation helper was extended to bump workstream timestamps. Tests cover the flashcard_deck canonical renderMode and archive provenance route wiring. One minor non-blocking note: chat dedup uses an O(n) full collection scan that may warrant an index for large chat histories, but is functionally correct."
+}

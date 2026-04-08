@@ -191,4 +191,27 @@ describe("syncWorkspaceItemForArtifact", () => {
       y: 220,
     }));
   });
+
+  it("preserves canonical render modes for flashcard decks", async () => {
+    const ctx = createCtx();
+
+    await syncWorkspaceItemForArtifact(ctx as never, {
+      artifactId: "artifact_2" as never,
+      ownerUserId: "user_1" as never,
+      orgId: "org_1" as never,
+      workstreamId: "ws_1" as never,
+      status: "active",
+      title: "Deck",
+      artifactType: "flashcard_deck",
+      contentPlaintext: "Q1 A1",
+    });
+
+    expect(ctx.items[0]).toEqual(expect.objectContaining({
+      itemType: "artifact",
+      renderMode: "flashcard_deck",
+      type: "document",
+      category: "documents",
+    }));
+  });
+
 });

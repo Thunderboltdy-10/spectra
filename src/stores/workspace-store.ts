@@ -60,6 +60,7 @@ type WorkspaceStoreState = {
 
   // View mode per committed workstream
   viewMode: WorkspaceViewMode;
+  viewModeByWorkstream: Record<string, WorkspaceViewMode>;
 
   // Right push-panel
   panel?: PanelState;
@@ -112,7 +113,7 @@ type WorkspaceStoreState = {
   setPreviousViewport: (viewport: { x: number; y: number; zoom: number }) => void;
 
   // View modes
-  setViewMode: (mode: WorkspaceViewMode) => void;
+  setViewMode: (mode: WorkspaceViewMode, workstreamId?: string) => void;
 
   // Push panel
   openPanel: (type: PanelType, id: string) => void;
@@ -174,6 +175,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()(
       commandModeOpen: false,
       utilityRevealOpen: false,
       viewMode: "byType",
+      viewModeByWorkstream: {},
       panel: undefined,
       openChatQuery: undefined,
       previousViewport: undefined,
@@ -254,6 +256,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()(
         set((state) => ({
           primaryWorkstreamId: workstreamId,
           visibleWorkstreamIds: [workstreamId],
+          viewMode: state.viewModeByWorkstream[workstreamId] ?? state.viewMode,
           openChatQuery: undefined,
           panel: undefined,
           ...resolveWorkspaceState({
@@ -268,6 +271,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()(
         set((state) => ({
           primaryWorkstreamId: workstreamId,
           visibleWorkstreamIds: [workstreamId],
+          viewMode: state.viewModeByWorkstream[workstreamId] ?? state.viewMode,
           openChatQuery: query,
           panel: query ? { type: "chat", id: "new" } : undefined,
           ...resolveWorkspaceState({
@@ -278,7 +282,13 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()(
             lastCanvasState: state.lastCanvasState,
           }),
         })),
-      setPrimaryWorkstreamId: (primaryWorkstreamId) => set({ primaryWorkstreamId }),
+      setPrimaryWorkstreamId: (primaryWorkstreamId) =>
+        set((state) => ({
+          primaryWorkstreamId,
+          viewMode: primaryWorkstreamId
+            ? state.viewModeByWorkstream[primaryWorkstreamId] ?? state.viewMode
+            : state.viewMode,
+        })),
       setVisibleWorkstreamIds: (visibleWorkstreamIds) => set({ visibleWorkstreamIds }),
       exitWorkstream: () =>
         set((state) => ({
@@ -296,7 +306,21 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()(
         })),
       setPreviousViewport: (viewport) => set({ previousViewport: viewport }),
 
-      setViewMode: (viewMode) => set({ viewMode: normalizeWorkspaceViewMode(viewMode) }),
+      setViewMode: (viewMode, workstreamId) =>
+        set((state) => {
+          const normalized = normalizeWorkspaceViewMode(viewMode);
+          const targetWorkstreamId = workstreamId ?? state.primaryWorkstreamId;
+          if (!targetWorkstreamId) {
+            return { viewMode: normalized };
+          }
+          return {
+            viewMode: normalized,
+            viewModeByWorkstream: {
+              ...state.viewModeByWorkstream,
+              [targetWorkstreamId]: normalized,
+            },
+          };
+        }),
 
       openPanel: (type, id) =>
         set((state) => ({
@@ -382,6 +406,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()(
           commandModeOpen: false,
           utilityRevealOpen: false,
           viewMode: "byType",
+          viewModeByWorkstream: {},
           panel: undefined,
           previousViewport: undefined,
           edgeUtilityZones: { ...DEFAULT_UTILITY_ZONES },
@@ -403,13 +428,21 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()(
         showConnections: state.showConnections,
         showArchived: state.showArchived,
         viewMode: state.viewMode,
+        viewModeByWorkstream: state.viewModeByWorkstream,
       }),
       merge: (persistedState, currentState) => {
         const persisted = (persistedState ?? {}) as Partial<WorkspaceStoreState>;
+        const persistedViewModeByWorkstream = Object.fromEntries(
+          Object.entries(persisted.viewModeByWorkstream ?? {}).map(([workstreamId, mode]) => [
+            workstreamId,
+            normalizeWorkspaceViewMode(mode),
+          ]),
+        );
         return {
           ...currentState,
           ...persisted,
           viewMode: normalizeWorkspaceViewMode(persisted.viewMode),
+          viewModeByWorkstream: persistedViewModeByWorkstream,
         };
       },
     }

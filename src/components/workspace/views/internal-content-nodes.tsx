@@ -12,13 +12,6 @@ import {
   Clock,
   ArrowRight,
   Code2,
-  Image as ImageIcon,
-  BookOpen,
-  HelpCircle,
-  Download,
-  Layout,
-  CheckSquare,
-  Layers,
   Bold,
   Italic,
   Heading2,
@@ -28,6 +21,13 @@ import {
 import { cn } from "@/lib/utils";
 import type { PanelType, ZoomBand } from "@/stores/workspace-store";
 import { formatDistanceToNowStrict } from "date-fns";
+import {
+  CANONICAL_WORKSPACE_TYPE_META,
+  canonicalWorkspaceTypeForArtifactType,
+  canonicalWorkspaceTypeForLegacyType,
+  getArtifactMeta,
+  type CanonicalWorkspaceType,
+} from "@/lib/artifact-types";
 
 /* ─── Data types ────────────────────────────────────────────── */
 
@@ -109,6 +109,141 @@ function formatTimeAgo(timestamp: number) {
     .replace(/ days?/, "d")
     .replace(/ months?/, "mo")
     .replace(/ years?/, "y");
+}
+
+function truncateGlanceSummary(value: string | undefined, max = 180) {
+  const compact = value?.replace(/\s+/g, " ").trim();
+  if (!compact) return undefined;
+  return compact.length <= max ? compact : `${compact.slice(0, max - 1)}…`;
+}
+
+function resolveCanonicalTypeForGlance(artifact: ArtifactSummary): CanonicalWorkspaceType {
+  const mode = artifact.renderMode?.trim();
+  if (mode) {
+    return canonicalWorkspaceTypeForArtifactType(mode);
+  }
+  const type = artifact.type?.trim();
+  return type
+    ? canonicalWorkspaceTypeForLegacyType(type)
+    : "export";
+}
+
+function artifactStatusTone(artifact: ArtifactSummary) {
+  if (artifact.lastScore !== undefined) {
+    if (artifact.lastScore >= 80) return "var(--accent-mint)";
+    if (artifact.lastScore >= 50) return "var(--accent-orange)";
+    return "var(--accent-coral)";
+  }
+  const updatedAt = artifact.updatedAt ?? artifact.createdAt;
+  const age = Date.now() - updatedAt;
+  if (age < 1000 * 60 * 60 * 24) return "var(--accent-cyan)";
+  if (age < 1000 * 60 * 60 * 24 * 7) return "var(--accent-purple)";
+  return "var(--text-tertiary)";
+}
+
+function plannerStatusTone(status: PlannerItemSummary["status"]) {
+  switch (status) {
+    case "done":
+      return "var(--accent-mint)";
+    case "in_progress":
+      return "var(--accent-cyan)";
+    default:
+      return "var(--accent-orange)";
+  }
+}
+
+function typeSpecificArtifactDetail(artifact: ArtifactSummary, canonicalType: CanonicalWorkspaceType) {
+  switch (canonicalType) {
+    case "flashcard_deck":
+      return artifact.cardCount !== undefined ? `${artifact.cardCount} cards ready` : "Deck preview";
+    case "quiz":
+      if (artifact.questionCount !== undefined && artifact.lastScore !== undefined) {
+        return `${artifact.questionCount} questions • ${artifact.lastScore}% last score`;
+      }
+      if (artifact.questionCount !== undefined) return `${artifact.questionCount} questions`;
+      return "Quiz preview";
+    case "code":
+      return artifact.language ? `${artifact.language} snippet` : "Code preview";
+    case "board":
+      return "Board snapshot";
+    case "visual":
+      return "Visual preview";
+    case "export":
+      return "Export snapshot";
+    default:
+      return undefined;
+  }
+}
+
+function ThreadGlanceCard({
+  thread,
+  onOpenPanel,
+}: {
+  thread: ThreadSummary;
+  onOpenPanel: (type: PanelType, id: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onOpenPanel("chat", thread.id)}
+      className="group relative flex w-full flex-col gap-2 overflow-hidden rounded-[24px] border border-[var(--border-default)]/40 bg-[linear-gradient(145deg,color-mix(in_oklab,var(--bg-elevated)_88%,transparent),color-mix(in_oklab,var(--accent-cyan)_9%,transparent))] p-4 text-left shadow-[0_18px_40px_-28px_rgba(8,12,24,0.85)] transition-all hover:-translate-y-0.5 hover:border-[var(--accent-cyan)]/35 hover:shadow-[0_24px_60px_-30px_rgba(14,142,232,0.35)]"
+    >
+      <div className="flex items-center gap-2">
+        <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-[var(--accent-cyan)]/12 text-[var(--accent-cyan)]">
+          <MessageSquare className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[13px] font-semibold text-[var(--text-primary)]">{thread.title}</div>
+          <div className="mt-0.5 flex items-center gap-2 text-[10px] uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
+            <span className="inline-flex h-2 w-2 rounded-full bg-[var(--accent-cyan)]" />
+            Thread
+          </div>
+        </div>
+      </div>
+      <div className="line-clamp-2 text-[11px] leading-relaxed text-[var(--text-secondary)]">
+        {thread.messageCount > 0
+          ? `${thread.messageCount} messages in motion. Last activity ${formatTimeAgo(thread.lastActivityAt)} ago.`
+          : "No replies yet — open to continue the conversation."}
+      </div>
+    </button>
+  );
+}
+
+function PlannerGlanceCard({
+  item,
+  onOpenPanel,
+}: {
+  item: PlannerItemSummary;
+  onOpenPanel: (type: PanelType, id: string) => void;
+}) {
+  const dueLabel = item.dueAt
+    ? `Due ${new Date(item.dueAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
+    : "No due date set";
+  const statusTone = plannerStatusTone(item.status);
+
+  return (
+    <button
+      type="button"
+      onClick={() => onOpenPanel("planner", item.id)}
+      className="group relative flex w-full flex-col gap-2 overflow-hidden rounded-[24px] border border-[var(--border-default)]/40 bg-[linear-gradient(150deg,color-mix(in_oklab,var(--bg-elevated)_90%,transparent),color-mix(in_oklab,var(--accent-orange)_10%,transparent))] p-4 text-left shadow-[0_18px_40px_-28px_rgba(8,12,24,0.85)] transition-all hover:-translate-y-0.5 hover:border-[var(--accent-orange)]/35"
+    >
+      <div className="flex items-center gap-2">
+        <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-[var(--accent-orange)]/12 text-[var(--accent-orange)]">
+          <CalendarClock className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[13px] font-semibold text-[var(--text-primary)]">{item.title}</div>
+          <div className="mt-0.5 flex items-center gap-2 text-[10px] uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
+            <span className="inline-flex h-2 w-2 rounded-full" style={{ background: statusTone }} />
+            {item.status.replace("_", " ")}
+          </div>
+        </div>
+      </div>
+      <div className="line-clamp-2 text-[11px] leading-relaxed text-[var(--text-secondary)]">
+        {dueLabel}
+      </div>
+    </button>
+  );
 }
 
 /* ─── Touch Tier: Note inline editor ────────────────────────── */
@@ -420,186 +555,61 @@ function GlanceArtifactCard({
   artifact: ArtifactSummary;
   onOpenPanel: (type: PanelType, id: string) => void;
 }) {
-  const mode = artifact.renderMode ?? artifact.type;
+  const canonicalType = resolveCanonicalTypeForGlance(artifact);
+  const canonicalMeta = CANONICAL_WORKSPACE_TYPE_META[canonicalType];
+  const artifactMeta = getArtifactMeta((artifact.renderMode ?? artifact.type ?? "custom") as string);
+  const Icon = artifactMeta.icon ?? canonicalMeta.icon;
+  const statusTone = artifactStatusTone(artifact);
+  const summary = truncateGlanceSummary(
+    artifact.contentSummary
+      ?? typeSpecificArtifactDetail(artifact, canonicalType)
+      ?? `${canonicalMeta.label} preview`,
+  );
+  const eyebrow = typeSpecificArtifactDetail(artifact, canonicalType) ?? canonicalMeta.label;
+  const languageTag = canonicalType === "code"
+    ? (artifact.language ?? (artifact.renderMode ?? "").replace("code_", "")).trim()
+    : "";
 
-  if (mode === "visualization" || mode === "concept_map" || mode === "image" || mode === "diagram") {
-    return (
-      <button
-        key={artifact.id}
-        onClick={() => onOpenPanel("artifact", artifact.id)}
-        className="group relative flex w-full flex-col gap-1 overflow-hidden rounded-2xl border border-[var(--border-default)]/30 bg-[var(--bg-elevated)]/40 text-left transition-all hover:border-[var(--accent-cyan)]/30 hover:bg-[var(--bg-elevated)]/70"
-      >
-        <div className="flex items-center justify-center h-16 bg-gradient-to-br from-[var(--accent-cyan)]/10 to-[var(--accent-purple)]/10">
-          <ImageIcon className="h-7 w-7 text-[var(--accent-cyan)]/60" />
-        </div>
-        <div className="px-3 pb-3 pt-2">
-          <div className="truncate text-[12px] font-semibold text-[var(--text-primary)]">{artifact.title}</div>
-          {artifact.contentSummary && (
-            <div className="mt-0.5 text-[10px] text-[var(--text-tertiary)] line-clamp-2">{artifact.contentSummary}</div>
-          )}
-          <div className="mt-1 flex items-center gap-1 text-[9px] uppercase tracking-[0.15em] text-[var(--accent-cyan)]/70 font-bold">
-            <Workflow className="h-2.5 w-2.5" />
-            Visual
-          </div>
-        </div>
-      </button>
-    );
-  }
-
-  if (mode === "code_project" || mode === "code_output") {
-    const lang = artifact.language ?? mode.replace("code_", "");
-    return (
-      <button
-        key={artifact.id}
-        onClick={() => onOpenPanel("artifact", artifact.id)}
-        className="group flex w-full flex-col gap-1 rounded-2xl border border-[var(--border-default)]/30 bg-[var(--bg-secondary)]/60 p-3 text-left transition-all hover:border-[var(--accent-mint)]/30 hover:bg-[var(--bg-secondary)]/80"
-      >
-        <div className="flex items-center gap-2">
-          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[var(--accent-mint)]/10 text-[var(--accent-mint)]">
-            <Code2 className="h-3.5 w-3.5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-[12px] font-semibold text-[var(--text-primary)]">{artifact.title}</div>
-          </div>
-        </div>
-        <div className="mt-1 flex items-center gap-1.5">
-          <span className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest bg-[var(--accent-mint)]/10 text-[var(--accent-mint)]">
-            {lang}
-          </span>
-          {artifact.contentSummary && (
-            <span className="text-[10px] text-[var(--text-tertiary)] truncate">{artifact.contentSummary}</span>
-          )}
-        </div>
-      </button>
-    );
-  }
-
-  if (mode === "flashcard_deck") {
-    return (
-      <button
-        key={artifact.id}
-        onClick={() => onOpenPanel("artifact", artifact.id)}
-        className="group flex w-full items-center gap-3 rounded-2xl border border-[var(--border-default)]/30 bg-[var(--bg-elevated)]/40 p-3 text-left transition-all hover:border-[var(--accent-coral)]/30 hover:bg-[var(--bg-elevated)]/70"
-      >
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-coral)]/10 text-[var(--accent-coral)]">
-          <BookOpen className="h-4 w-4" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-[12px] font-semibold text-[var(--text-primary)]">{artifact.title}</div>
-          {artifact.cardCount !== undefined && (
-            <div className="text-[10px] text-[var(--text-tertiary)]">{artifact.cardCount} cards</div>
-          )}
-        </div>
-        <div className="text-[9px] font-bold uppercase tracking-widest text-[var(--accent-coral)]/70 shrink-0">Deck</div>
-      </button>
-    );
-  }
-
-  if (mode === "quiz") {
-    return (
-      <button
-        key={artifact.id}
-        onClick={() => onOpenPanel("artifact", artifact.id)}
-        className="group flex w-full items-center gap-3 rounded-2xl border border-[var(--border-default)]/30 bg-[var(--bg-elevated)]/40 p-3 text-left transition-all hover:border-[var(--accent-purple)]/30 hover:bg-[var(--bg-elevated)]/70"
-      >
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-purple)]/10 text-[var(--accent-purple)]">
-          <HelpCircle className="h-4 w-4" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-[12px] font-semibold text-[var(--text-primary)]">{artifact.title}</div>
-          <div className="flex items-center gap-2 text-[10px] text-[var(--text-tertiary)]">
-            {artifact.questionCount !== undefined && <span>{artifact.questionCount} questions</span>}
-            {artifact.lastScore !== undefined && <span>Last: {artifact.lastScore}%</span>}
-          </div>
-        </div>
-        <div className="text-[9px] font-bold uppercase tracking-widest text-[var(--accent-purple)]/70 shrink-0">Quiz</div>
-      </button>
-    );
-  }
-
-  if (mode === "study_plan" || mode === "timetable") {
-    return (
-      <button
-        key={artifact.id}
-        onClick={() => onOpenPanel("artifact", artifact.id)}
-        className="group flex w-full items-center gap-3 rounded-2xl border border-[var(--border-default)]/30 bg-[var(--bg-elevated)]/40 p-3 text-left transition-all hover:border-[var(--accent-orange)]/30 hover:bg-[var(--bg-elevated)]/70"
-      >
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-orange)]/10 text-[var(--accent-orange)]">
-          <CheckSquare className="h-4 w-4" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-[12px] font-semibold text-[var(--text-primary)]">{artifact.title}</div>
-          {artifact.contentSummary && (
-            <div className="text-[10px] text-[var(--text-tertiary)] truncate">{artifact.contentSummary}</div>
-          )}
-        </div>
-        <div className="text-[9px] font-bold uppercase tracking-widest text-[var(--accent-orange)]/70 shrink-0">
-          {mode === "timetable" ? "Schedule" : "Plan"}
-        </div>
-      </button>
-    );
-  }
-
-  if (mode === "whiteboard" || mode === "board") {
-    return (
-      <button
-        key={artifact.id}
-        onClick={() => onOpenPanel("artifact", artifact.id)}
-        className="group relative flex w-full flex-col gap-1 overflow-hidden rounded-2xl border border-[var(--border-default)]/30 bg-[var(--bg-elevated)]/40 text-left transition-all hover:border-[var(--accent-cyan)]/20"
-      >
-        <div className="flex items-center justify-center h-14 bg-[var(--bg-secondary)]/60">
-          <div className="flex gap-2">
-            {[0,1,2].map((i) => (
-              <div key={i} className={cn("rounded w-8 h-5 bg-white/10", i === 1 && "h-7 mt-[-4px]")} />
-            ))}
-          </div>
-        </div>
-        <div className="px-3 pb-2 pt-1.5 flex items-center gap-2">
-          <Layout className="h-3 w-3 text-[var(--text-tertiary)]" />
-          <span className="truncate text-[12px] font-semibold text-[var(--text-primary)]">{artifact.title}</span>
-          <span className="ml-auto text-[9px] font-bold uppercase tracking-widest text-[var(--text-tertiary)]">Board</span>
-        </div>
-      </button>
-    );
-  }
-
-  if (mode === "bookmark" || mode === "collection") {
-    return (
-      <button
-        key={artifact.id}
-        onClick={() => onOpenPanel("artifact", artifact.id)}
-        className="group flex w-full items-center gap-3 rounded-2xl border border-[var(--border-default)]/30 bg-[var(--bg-elevated)]/40 p-3 text-left transition-all hover:bg-[var(--bg-elevated)]/70"
-      >
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white/5 text-[var(--text-tertiary)]">
-          <Layers className="h-4 w-4" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-[12px] font-semibold text-[var(--text-primary)]">{artifact.title}</div>
-        </div>
-        <div className="text-[9px] font-bold uppercase tracking-widest text-[var(--text-tertiary)] shrink-0">Ref</div>
-      </button>
-    );
-  }
-
-  // Export / document / note fallback — keep the existing document card style
   return (
     <button
       key={artifact.id}
       onClick={() => onOpenPanel("artifact", artifact.id)}
-      className="group relative flex w-full flex-col gap-1 rounded-2xl border border-transparent bg-[var(--bg-elevated)]/40 p-4 text-left shadow-sm backdrop-blur-sm transition-all hover:bg-[var(--bg-elevated)]/60 hover:border-[var(--border-default)]/50"
+      className="group relative flex w-full flex-col gap-2 overflow-hidden rounded-[24px] border border-[var(--border-default)]/40 bg-[linear-gradient(150deg,color-mix(in_oklab,var(--bg-elevated)_90%,transparent),color-mix(in_oklab,var(--bg-secondary)_76%,transparent))] p-4 text-left shadow-[0_18px_40px_-28px_rgba(8,12,24,0.85)] backdrop-blur-sm transition-all hover:-translate-y-0.5 hover:border-[color:var(--glance-accent)]/40 hover:shadow-[0_24px_60px_-30px_rgba(15,23,42,0.65)]"
+      style={{ ["--glance-accent" as string]: canonicalMeta.color }}
     >
-      <div className="flex items-center gap-2 mb-1">
-        <Download className="h-3 w-3 text-[var(--text-tertiary)]" />
-        <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--text-tertiary)]">
-          {mode === "document" ? "Doc" : mode}
-        </span>
+      <div className="absolute inset-x-4 top-0 h-px bg-[linear-gradient(90deg,transparent,color-mix(in_oklab,var(--glance-accent)_55%,transparent),transparent)] opacity-80" />
+      <div className="flex items-start gap-3">
+        <div
+          className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-[18px] border border-white/6 text-[color:var(--glance-accent)]"
+          style={{ background: `color-mix(in oklab, ${canonicalMeta.color} 14%, transparent)` }}
+        >
+          <Icon className="h-4.5 w-4.5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-2 w-2 rounded-full" style={{ background: statusTone }} />
+            <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+              {canonicalMeta.label}
+            </span>
+            {languageTag ? (
+              <span className="rounded-full border border-white/8 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-[color:var(--glance-accent)]">
+                {languageTag}
+              </span>
+            ) : null}
+          </div>
+          <div className="mt-1 truncate text-[13px] font-semibold leading-tight text-[var(--text-primary)]">
+            {artifact.title}
+          </div>
+        </div>
       </div>
-      <div className="font-display text-[15px] font-bold leading-tight text-[var(--text-primary)]">
-        {artifact.title}
+      <div className="line-clamp-2 min-h-[2.8rem] text-[11px] leading-relaxed text-[var(--text-secondary)]">
+        {summary}
       </div>
-      {artifact.contentSummary && (
-        <div className="mt-1 text-[10px] text-[var(--text-tertiary)] line-clamp-2">{artifact.contentSummary}</div>
-      )}
+      <div className="flex items-center justify-between gap-2 text-[10px] text-[var(--text-tertiary)]">
+        <span className="truncate">{eyebrow}</span>
+        {canonicalType === "flashcard_deck" && artifact.cardCount !== undefined ? <span>{artifact.cardCount}</span> : null}
+        {canonicalType === "quiz" && artifact.questionCount !== undefined ? <span>{artifact.questionCount}q</span> : null}
+      </div>
     </button>
   );
 }
@@ -719,7 +729,7 @@ export const CategoryFieldNode = memo(function CategoryFieldNode({
             {visibleItems.map((item) => {
               if (type === "threads") {
                 const thread = item as ThreadSummary;
-                return (
+                return isDetail ? (
                   <button
                     key={thread.id}
                     onClick={() => onOpenPanel("chat", thread.id)}
@@ -750,6 +760,12 @@ export const CategoryFieldNode = memo(function CategoryFieldNode({
                     </div>
                     <ArrowRight className="h-3.5 w-3.5 shrink-0 opacity-0 -translate-x-2 transition-all group-hover:opacity-40 group-hover:translate-x-0" />
                   </button>
+                ) : (
+                  <ThreadGlanceCard
+                    key={thread.id}
+                    thread={thread}
+                    onOpenPanel={onOpenPanel}
+                  />
                 );
               }
 
@@ -807,7 +823,7 @@ export const CategoryFieldNode = memo(function CategoryFieldNode({
 
               if (type === "planner") {
                 const p = item as PlannerItemSummary;
-                return (
+                return isDetail ? (
                   <button
                     key={p.id}
                     onClick={() => onOpenPanel("planner", p.id)}
@@ -841,6 +857,12 @@ export const CategoryFieldNode = memo(function CategoryFieldNode({
                       )}
                     </div>
                   </button>
+                ) : (
+                  <PlannerGlanceCard
+                    key={p.id}
+                    item={p}
+                    onOpenPanel={onOpenPanel}
+                  />
                 );
               }
 

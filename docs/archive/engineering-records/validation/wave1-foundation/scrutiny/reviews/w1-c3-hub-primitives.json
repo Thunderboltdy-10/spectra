@@ -1,0 +1,21 @@
+{
+  "featureId": "w1-c3-hub-primitives",
+  "reviewedAt": "2026-04-08T16:20:00.000Z",
+  "commitId": "5b12280",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The implementation fully covers all requirements in the feature description and expectedBehavior. All hub primitives are correctly positioned: workspace dock at left edge, quick chat at bottom center, timer at bottom right, ReactFlow controls moved to top-right to avoid hub conflicts. Timer toggles and top breadcrumb are removed. Hub items are viewport-constrained via clampOffset. Tint zones use soft radial gradients. The new regression test verifies focus timer placement in the bottom-right zone contract.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The AGENTS.md explicitly states 'Timer shell removed' and 'Hub items are edge-bound', but the current AGENTS.md still describes the timer at 'bottom-right' alongside quick chat. The worker correctly implemented timer at bottom-right (not bottom-left), but AGENTS.md has an older description that could confuse future workers about the timer placement. Since the implementation is correct and the contract is now properly set in contracts.ts, this is informational only.",
+      "evidence": "AGENTS.md line 'Timer shell removed (see above)' and 'Quick chat + create button: BOTTOM CENTER (unified)' appear to still reference the timer shell, which was removed. However contracts.ts correctly sets focus_timer: 'bottom-right' and the implementation is correct."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Feature w1-c3-hub-primitives passes review. All required hub primitives are implemented: workspace selector dock at left edge, unified quick chat/create launcher at bottom center, focus timer at bottom right, hub collapse toggle, timer toggles removed, top breadcrumb removed, viewport-constrained hub items via clampOffset, soft gradient-edged tint zones, and ReactFlow controls repositioned to top-right. The regression test confirms focus_timer is in the bottom-right zone contract. All automated validators (typecheck, lint, tests) passed. No blocking issues found."
+}

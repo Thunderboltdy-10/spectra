@@ -304,7 +304,7 @@ export const refreshPlatformStats = internalMutation({
     // accurate aggregates across all namespaces. The zero-guard was removed
     // because it allowed permanently undercounted stats whenever only some
     // dimensions were zero.
-    let next = await rebuildPlatformStatsAggregates(ctx);
+    const next = await rebuildPlatformStatsAggregates(ctx);
     const existing = await ctx.db
       .query("platformStats")
       .withIndex("by_singleton", (q) => q.eq("singletonKey", PLATFORM_STATS_SINGLETON))

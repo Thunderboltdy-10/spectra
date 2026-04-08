@@ -335,6 +335,7 @@ function WorkspaceContent() {
                     primaryWorkstreamId={primaryWorkstreamId}
                     onOpenWorkstream={(wsId) => handleCommitWorkstream(wsId)}
                     onExitWorkstream={() => handleCommitWorkstream(null)}
+                    onOpenHub={() => handleCommitWorkstream("__hub__")}
                     panelOpen={!!panel}
                     onNewWorkstream={handleNewWorkstream}
                     onCreateItem={(type) => {

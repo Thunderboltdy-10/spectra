@@ -22,4 +22,34 @@ describe("workspace store viewMode compatibility", () => {
     useWorkspaceStore.getState().setViewMode("graph" as never);
     expect(useWorkspaceStore.getState().viewMode).toBe("timeline");
   });
+
+  it("persists view mode per workstream when committing between workspaces", () => {
+    useWorkspaceStore.getState().reset();
+
+    useWorkspaceStore.getState().commitWorkstream("ws_a");
+    useWorkspaceStore.getState().setViewMode("byTopic");
+
+    useWorkspaceStore.getState().commitWorkstream("ws_b");
+    expect(useWorkspaceStore.getState().viewMode).toBe("byTopic");
+    useWorkspaceStore.getState().setViewMode("timeline");
+
+    useWorkspaceStore.getState().commitWorkstream("ws_a");
+    expect(useWorkspaceStore.getState().viewMode).toBe("byTopic");
+
+    useWorkspaceStore.getState().commitWorkstream("ws_b");
+    expect(useWorkspaceStore.getState().viewMode).toBe("timeline");
+  });
+
+  it("retains global fallback mode when exiting a committed workstream", () => {
+    useWorkspaceStore.getState().reset();
+
+    useWorkspaceStore.getState().setViewMode("timeline");
+    useWorkspaceStore.getState().commitWorkstream("ws_a");
+    useWorkspaceStore.getState().setViewMode("byTopic");
+
+    useWorkspaceStore.getState().exitWorkstream();
+
+    expect(useWorkspaceStore.getState().viewMode).toBe("byTopic");
+    expect(useWorkspaceStore.getState().viewModeByWorkstream.ws_a).toBe("byTopic");
+  });
 });

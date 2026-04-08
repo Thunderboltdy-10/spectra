@@ -92,4 +92,78 @@ describe("artifacts route integration", () => {
       status: 500,
     }));
   });
+
+  it("forwards discard AI edit requests to Convex and returns restored content", async () => {
+    const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_artifacts" });
+    const convexQuery = vi.fn();
+    const convexMutation = vi.fn().mockResolvedValueOnce({
+      success: true,
+      content: { type: "doc", content: [{ type: "paragraph" }] },
+    });
+
+    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
+
+    const route = await import("@/app/api/artifacts/route");
+    const response = await route.POST(
+      new NextRequest("http://localhost/api/artifacts", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "discardAiEdit",
+          artifactId: "artifact_1",
+          versionId: "version_1",
+        }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({
+      success: true,
+      content: { type: "doc", content: [{ type: "paragraph" }] },
+    });
+    expect(convexMutation).toHaveBeenCalledWith("artifacts:discardAiEdit", {
+      actorClerkId: "user_artifacts",
+      artifactId: "artifact_1",
+      versionId: "version_1",
+    });
+  });
+
+  it("forwards reapply AI edit requests to Convex and returns restored AI content", async () => {
+    const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_artifacts" });
+    const convexQuery = vi.fn();
+    const convexMutation = vi.fn().mockResolvedValueOnce({
+      success: true,
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "AI draft" }] }] },
+    });
+
+    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
+
+    const route = await import("@/app/api/artifacts/route");
+    const response = await route.POST(
+      new NextRequest("http://localhost/api/artifacts", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "reapplyAiEdit",
+          artifactId: "artifact_1",
+          versionId: "version_1",
+          contentPlaintext: "AI draft",
+        }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({
+      success: true,
+      content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "AI draft" }] }] },
+    });
+    expect(convexMutation).toHaveBeenCalledWith("artifacts:reapplyAiEdit", {
+      actorClerkId: "user_artifacts",
+      artifactId: "artifact_1",
+      versionId: "version_1",
+      contentPlaintext: "AI draft",
+    });
+  });
 });

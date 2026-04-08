@@ -10,7 +10,6 @@ import {
   LEGACY_TYPE_TO_CANONICAL_WORKSPACE_TYPE,
   canonicalWorkspaceTypeForArtifactType,
   canonicalWorkspaceTypeForLegacyType,
-  type ArtifactType,
   type CanonicalWorkspaceType,
 } from "../artifact-types";
 

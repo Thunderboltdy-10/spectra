@@ -622,7 +622,6 @@ export function EdgeUtilityOverlay({
   primaryWorkstreamId,
   onOpenWorkstream,
   onExitWorkstream,
-  panelOpen,
   onQuickChat,
   onCreateItem,
   onNewWorkstream,

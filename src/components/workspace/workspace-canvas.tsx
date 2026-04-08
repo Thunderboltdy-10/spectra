@@ -256,6 +256,7 @@ type CachedWorkspaceContent = {
 };
 
 const WORKSPACE_CACHE_MAX = 7;
+const HUB_CACHE_KEY = "__hub__";
 
 /**
  * Bounded LRU map.  Access order is maintained by deleting + re-inserting on
@@ -306,6 +307,118 @@ class LruMap<K, V> {
   get size(): number {
     return this.store.size;
   }
+
+  entries(): Array<[K, V]> {
+    return Array.from(this.store.entries());
+  }
+}
+
+type WorkspaceContentSnapshot = {
+  contentById: Record<string, CachedWorkspaceContent>;
+  loadingContentIds: string[];
+  cacheKeys: string[];
+  inFlightKeys: string[];
+};
+
+export function createWorkspaceContentController(config: {
+  fetchWorkstreamContent: (workstreamId: string) => Promise<CachedWorkspaceContent>;
+  onStateChange?: (snapshot: WorkspaceContentSnapshot) => void;
+  cacheMax?: number;
+}) {
+  const cache = new LruMap<string, CachedWorkspaceContent>(config.cacheMax ?? WORKSPACE_CACHE_MAX);
+  const inFlight = new Map<string, Promise<CachedWorkspaceContent>>();
+  const loading = new Set<string>();
+  let contentById: Record<string, CachedWorkspaceContent> = {};
+  let mutationVersion = 0;
+
+  const emit = () => {
+    config.onStateChange?.({
+      contentById,
+      loadingContentIds: Array.from(loading),
+      cacheKeys: cache.entries().map(([key]) => key),
+      inFlightKeys: Array.from(inFlight.keys()),
+    });
+  };
+
+  const getCachedContent = (workstreamId: string) =>
+    contentById[workstreamId] ?? cache.get(workstreamId) ?? emptyWorkspaceContent();
+
+  const invalidate = (workstreamId?: string, options?: { includeHub?: boolean }) => {
+    mutationVersion += 1;
+    if (!workstreamId) {
+      cache.clear();
+      inFlight.clear();
+      loading.clear();
+      contentById = {};
+      emit();
+      return mutationVersion;
+    }
+
+    cache.delete(workstreamId);
+    inFlight.delete(workstreamId);
+    loading.delete(workstreamId);
+
+    const next = { ...contentById };
+    delete next[workstreamId];
+
+    if (options?.includeHub) {
+      cache.delete(HUB_CACHE_KEY);
+      inFlight.delete(HUB_CACHE_KEY);
+      loading.delete(HUB_CACHE_KEY);
+      delete next[HUB_CACHE_KEY];
+    }
+
+    contentById = next;
+    emit();
+    return mutationVersion;
+  };
+
+  const fetch = async (workstreamId: string) => {
+    if (cache.has(workstreamId)) {
+      return getCachedContent(workstreamId);
+    }
+
+    const existingPromise = inFlight.get(workstreamId);
+    if (existingPromise) {
+      return existingPromise;
+    }
+
+    const requestVersion = mutationVersion;
+    loading.add(workstreamId);
+    emit();
+
+    const promise = config.fetchWorkstreamContent(workstreamId)
+      .then((next) => {
+        if (requestVersion === mutationVersion) {
+          cache.set(workstreamId, next);
+          contentById = { ...contentById, [workstreamId]: next };
+          emit();
+        }
+        return next;
+      })
+      .finally(() => {
+        inFlight.delete(workstreamId);
+        if (loading.delete(workstreamId)) {
+          emit();
+        }
+      });
+
+    inFlight.set(workstreamId, promise);
+    return promise;
+  };
+
+  return {
+    fetch,
+    invalidate,
+    getCachedContent,
+    snapshot: () => ({
+      contentById,
+      loadingContentIds: Array.from(loading),
+      cacheKeys: cache.entries().map(([key]) => key),
+      inFlightKeys: Array.from(inFlight.keys()),
+      cacheSize: cache.size,
+    }),
+  };
 }
 
 function emptyWorkspaceContent(): CachedWorkspaceContent {
@@ -577,8 +690,7 @@ function WorkspaceCanvasInner({
   const prefetchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const workstreamDragThrottleRef = useRef(new Map<string, number>());
   const lastViewportRef = useRef<{ x: number; y: number; zoom: number }>({ x: 0, y: 0, zoom: 0.35 });
-  const contentCacheRef = useRef(new LruMap<string, CachedWorkspaceContent>(WORKSPACE_CACHE_MAX));
-  const inFlightContentRef = useRef(new Map<string, Promise<void>>());
+  const contentControllerRef = useRef<ReturnType<typeof createWorkspaceContentController> | null>(null);
   const internalNodeOverridesRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const widgetLayoutMetaRef = useRef(new Map<string, { itemId: string; origin: { x: number; y: number } }>());
   const {
@@ -668,49 +780,8 @@ function WorkspaceCanvasInner({
     setZoomBand(band);
   }, [band, setZoomBand]);
 
-  const getCachedContent = useCallback((workstreamId: string) => {
-    return contentById[workstreamId] ?? contentCacheRef.current.get(workstreamId) ?? emptyWorkspaceContent();
-  }, [contentById]);
-
-  const invalidateWorkstreamContent = useCallback((workstreamId?: string, options?: { includeHub?: boolean }) => {
-    if (!workstreamId) {
-      contentCacheRef.current.clear();
-      inFlightContentRef.current.clear();
-      setContentById({});
-      return;
-    }
-
-    contentCacheRef.current.delete(workstreamId);
-    inFlightContentRef.current.delete(workstreamId);
-    setContentById((current) => {
-      if (!(workstreamId in current) && !(options?.includeHub && "__hub__" in current)) {
-        return current;
-      }
-      const next = { ...current };
-      delete next[workstreamId];
-      if (options?.includeHub) {
-        contentCacheRef.current.delete("__hub__");
-        inFlightContentRef.current.delete("__hub__");
-        delete next.__hub__;
-      }
-      return next;
-    });
-  }, []);
-
-  const fetchContentForWorkstream = useCallback(async (workstreamId: string) => {
-    if (contentCacheRef.current.has(workstreamId)) {
-      return;
-    }
-    const existingPromise = inFlightContentRef.current.get(workstreamId);
-    if (existingPromise) {
-      await existingPromise;
-      return;
-    }
-
-    const promise = (async () => {
-      setLoadingContentIds((current) => (current.includes(workstreamId) ? current : [...current, workstreamId]));
-      try {
-        if (workstreamId === "__hub__") {
+  const fetchWorkstreamContent = useCallback(async (workstreamId: string) => {
+        if (workstreamId === HUB_CACHE_KEY) {
           const [docsRes, plannerRes, activityRes] = await Promise.all([
             fetch("/api/artifacts?action=hub&type=document&limit=12"),
             fetch("/api/planner?action=hub&limit=12&days=14"),
@@ -746,9 +817,7 @@ function WorkspaceCanvasInner({
               timestamp: Number(chat.updatedAt ?? Date.now()),
             }));
           }
-          contentCacheRef.current.set(workstreamId, next);
-          setContentById((current) => ({ ...current, [workstreamId]: next }));
-          return;
+          return next;
         }
 
         const [chatsRes, docsRes, artifactsRes, plannerRes, widgetsRes] = await Promise.all([
@@ -827,17 +896,33 @@ function WorkspaceCanvasInner({
             } satisfies WorkspaceWidgetSummary];
           });
         }
-        contentCacheRef.current.set(workstreamId, next);
-        setContentById((current) => ({ ...current, [workstreamId]: next }));
-      } finally {
-        setLoadingContentIds((current) => current.filter((id) => id !== workstreamId));
-        inFlightContentRef.current.delete(workstreamId);
-      }
-    })();
-
-    inFlightContentRef.current.set(workstreamId, promise);
-    await promise;
+        return next;
   }, [sanitizeTitle, workstreams]);
+
+  useEffect(() => {
+    contentControllerRef.current = createWorkspaceContentController({
+      fetchWorkstreamContent,
+      cacheMax: WORKSPACE_CACHE_MAX,
+      onStateChange: (snapshot) => {
+        setContentById(snapshot.contentById);
+        setLoadingContentIds(snapshot.loadingContentIds);
+      },
+    });
+    setContentById({});
+    setLoadingContentIds([]);
+  }, [fetchWorkstreamContent]);
+
+  const getCachedContent = useCallback((workstreamId: string) => {
+    return contentControllerRef.current?.getCachedContent(workstreamId) ?? emptyWorkspaceContent();
+  }, []);
+
+  const invalidateWorkstreamContent = useCallback((workstreamId?: string, options?: { includeHub?: boolean }) => {
+    contentControllerRef.current?.invalidate(workstreamId, options);
+  }, []);
+
+  const fetchContentForWorkstream = useCallback(async (workstreamId: string) => {
+    await contentControllerRef.current?.fetch(workstreamId);
+  }, []);
 
   useEffect(() => {
     return subscribeWorkspaceContentMutated((detail) => {
@@ -846,8 +931,8 @@ function WorkspaceCanvasInner({
         if (visibleWorkstreamIds.includes(detail.workstreamId)) {
           void fetchContentForWorkstream(detail.workstreamId);
         }
-        if (detail.refreshHub && visibleWorkstreamIds.includes("__hub__")) {
-          void fetchContentForWorkstream("__hub__");
+        if (detail.refreshHub && visibleWorkstreamIds.includes(HUB_CACHE_KEY)) {
+          void fetchContentForWorkstream(HUB_CACHE_KEY);
         }
         return;
       }
@@ -856,8 +941,8 @@ function WorkspaceCanvasInner({
       if (primaryWorkstreamId) {
         void fetchContentForWorkstream(primaryWorkstreamId);
       }
-      if (visibleWorkstreamIds.includes("__hub__")) {
-        void fetchContentForWorkstream("__hub__");
+      if (visibleWorkstreamIds.includes(HUB_CACHE_KEY)) {
+        void fetchContentForWorkstream(HUB_CACHE_KEY);
       }
     });
   }, [
@@ -922,20 +1007,20 @@ function WorkspaceCanvasInner({
 
   const handleOpenHub = useCallback(
     () => {
-      if (primaryWorkstreamId === "__hub__") return;
+      if (primaryWorkstreamId === HUB_CACHE_KEY) return;
       if (commitAnimationTimeoutRef.current) {
         clearTimeout(commitAnimationTimeoutRef.current);
       }
       const instance = reactFlowRef.current;
       if (instance) {
-        animatedCommitRef.current = "__hub__";
+        animatedCommitRef.current = HUB_CACHE_KEY;
         setPreviousViewport({ ...lastViewportRef.current });
         instance.setCenter(0, 0, { zoom: 1.0, duration: 450 });
       }
       commitAnimationTimeoutRef.current = setTimeout(() => {
-        setVisibleWorkstreamIds(["__hub__"]);
-        commitWorkstream("__hub__");
-        void fetchContentForWorkstream("__hub__");
+        setVisibleWorkstreamIds([HUB_CACHE_KEY]);
+        commitWorkstream(HUB_CACHE_KEY);
+        void fetchContentForWorkstream(HUB_CACHE_KEY);
         onOpenHub?.();
       }, 450);
     },
@@ -953,11 +1038,11 @@ function WorkspaceCanvasInner({
 
     if (animatedCommitRef.current === primaryWorkstreamId) return;
 
-    if (primaryWorkstreamId === "__hub__") {
-      animatedCommitRef.current = "__hub__";
+    if (primaryWorkstreamId === HUB_CACHE_KEY) {
+      animatedCommitRef.current = HUB_CACHE_KEY;
       setPreviousViewport({ ...lastViewportRef.current });
-      setVisibleWorkstreamIds(["__hub__"]);
-      void fetchContentForWorkstream("__hub__");
+      setVisibleWorkstreamIds([HUB_CACHE_KEY]);
+      void fetchContentForWorkstream(HUB_CACHE_KEY);
       instance.setCenter(0, 0, { zoom: 1.0, duration: 450 });
       return;
     }
@@ -1020,7 +1105,7 @@ function WorkspaceCanvasInner({
 
     if (visibleWorkstreamIds.length > 0) {
       for (const workstreamId of visibleWorkstreamIds) {
-        const loading = loadingContentIds.includes(workstreamId) && !contentCacheRef.current.has(workstreamId);
+        const loading = loadingContentIds.includes(workstreamId) && !(workstreamId in contentById);
         const cached = getCachedContent(workstreamId);
 
 
@@ -1087,6 +1172,7 @@ function WorkspaceCanvasInner({
     return { nodes: generatedNodes, edges: generatedEdges };
   }, [
     band,
+    contentById,
     focusWorkstreamId,
     focusedItemId,
     getCachedContent,
@@ -1418,7 +1504,7 @@ function WorkspaceCanvasInner({
           className="absolute z-40 min-w-[220px] overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]/96 p-1.5 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.38)] backdrop-blur-xl"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
-          {primaryWorkstreamId && primaryWorkstreamId !== "__hub__" ? (
+          {primaryWorkstreamId && primaryWorkstreamId !== HUB_CACHE_KEY ? (
             <>
               <ContextMenuItem icon={<FileText className="h-3.5 w-3.5" />} label="New note" onClick={() => { setContextMenu(null); panelOpener("artifact", "new"); }} />
               <ContextMenuItem icon={<MessageSquare className="h-3.5 w-3.5" />} label="New thread" onClick={() => { setContextMenu(null); panelOpener("chat", "new"); }} />

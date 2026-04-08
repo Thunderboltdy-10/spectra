@@ -1347,7 +1347,12 @@ export async function runChatPipeline(request: NextRequest) {
     const availableAgents = (await convexQuery("agents:listAgents", {
       actorClerkId: actor.clerkId,
     })) as AgentSnapshot[];
-    const matched = matchAgentToMessage(auto.message, availableAgents);
+    const matched = await matchAgentToMessage(auto.message, availableAgents, {
+      linkedAgentId:
+        typeof (activeWorkstream as { linkedAgentId?: unknown } | null)?.linkedAgentId === "string"
+          ? String((activeWorkstream as { linkedAgentId?: unknown }).linkedAgentId)
+          : null,
+    });
     if (matched) {
       const matchedScore = Number(matched.score.toFixed(2));
       if (matched.score >= 0.7) {

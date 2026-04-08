@@ -63,6 +63,12 @@ import {
 import { buildRoutePlan } from "@/lib/orchestrator/route-plan";
 import { PipelineController } from "@/lib/orchestrator/pipeline-controller";
 import { formatRuntimeSkillBlock, selectRuntimeSkills } from "@/lib/orchestrator/skills";
+import {
+  buildClassifierInput,
+  validateClassifierDecision,
+  validateClassifierInput,
+  type ClassifierDecision,
+} from "@/lib/orchestrator/classifier-contract";
 import { runAssistantStreaming, runCollaborativeStreaming } from "@/lib/orchestrator/streaming";
 import { getOpenRouterToolsForAssignmentLevel, formatToolUsageGuidance } from "@/lib/orchestrator/tool-definitions";
 import { executeOrchestratorTool } from "@/lib/orchestrator/tool-executor";
@@ -143,6 +149,10 @@ type AgentSnapshot = {
   guidelinesSummary?: string;
   guidelinesTopicMap?: string[];
 };
+
+function classifierOutputFormatForRoutePlan(outputFormat: string | undefined, fallback: string) {
+  return outputFormat ?? fallback;
+}
 
 type StructuredError = {
   code: string;
@@ -1351,6 +1361,14 @@ export async function runChatPipeline(request: NextRequest) {
       }
     }
   }
+  const classifierAvailableAgents =
+    selectedAgent
+      ? [selectedAgent]
+      : !selectedAgent && (safeMode === "auto" || body.routerMode === "auto")
+        ? ((await convexQuery("agents:listAgents", {
+            actorClerkId: actor.clerkId,
+          })) as AgentSnapshot[])
+        : [];
   if (autoSelectedAgent?.id) {
     void convexMutation("chats:updateChatSettings", {
       actorClerkId: actor.clerkId,
@@ -1555,6 +1573,73 @@ export async function runChatPipeline(request: NextRequest) {
     threadContext: buildThreadContext(),
     schoolSoulVersion: schoolSoulCapsule.version,
   });
+  const classifierInput = buildClassifierInput({
+    message: auto.message,
+    mode: effectiveMode,
+    activeWorkstreamId,
+    activeWorkstreamTitle:
+      typeof (activeWorkstream as { title?: unknown } | undefined)?.title === "string"
+        ? String((activeWorkstream as { title?: unknown }).title)
+        : undefined,
+    selectedAgentId: selectedAgent?._id,
+    conversationHistory: history.map((msg) => ({
+      role: msg.role === "assistant" ? "assistant" : "user",
+      content: msg.content,
+      mode: msg.mode as string | undefined,
+    })),
+    userThinkingLevel: body.thinkingLevel,
+    routerMode: body.routerMode,
+    memoryEnabled,
+    usePersonalResources: body.usePersonalResources,
+    availableAgents: classifierAvailableAgents,
+  });
+  const classifierInputValid = validateClassifierInput(classifierInput);
+  const classifierSkillIds = classifierInput.availableSkills;
+  const classifierSource = {
+    tier: auto.requestClass,
+    skills: selectRuntimeSkills({
+      message: auto.message,
+      mode: effectiveMode,
+      allowedToolBundles: routePlan.allowedToolBundles,
+      maxSkills: routePlan.responseBudget === "deep" ? 6 : 4,
+    }).map((skill) => skill.id),
+    workspaceTarget: activeWorkstreamId
+      ? { kind: "current" as const, workspaceId: activeWorkstreamId }
+      : routePlan.workstreamAssignment.status === "assigned"
+        ? { kind: "specific" as const, workspaceId: routePlan.workstreamAssignment.workstreamId }
+        : { kind: "none" as const },
+    agentId: selectedAgent?._id ?? autoSelectedAgent?.id ?? null,
+    needsSearch: routePlan.shouldUseWebSearch,
+    needsMemory: memoryEnabled && routePlan.shouldConsultMemory,
+    needsRag: routePlan.retrievalScopes.length > 0,
+    outputFormat: classifierOutputFormatForRoutePlan(routePlan.modeContract.outputFormat, "conversational"),
+    thinkingLevel: auto.thinkingLevel,
+    confidence:
+      routePlan.workstreamAssignment.status === "assigned"
+        ? Math.max(routePlan.workstreamAssignment.confidence, auto.requestClass === "T0" ? 0.9 : 0.72)
+        : auto.requestClass === "T0"
+          ? 0.96
+          : auto.requestClass === "T1"
+            ? 0.82
+            : auto.requestClass === "T2"
+              ? 0.76
+              : 0.71,
+  };
+  const classifierValidation = classifierInputValid
+    ? validateClassifierDecision(classifierSource, classifierSkillIds)
+    : { ok: false as const, error: "Classifier input payload is malformed." };
+  if (!classifierValidation.ok) {
+    logger.warn("classifier contract validation failed", {
+      error: classifierValidation.error,
+      inputValid: classifierInputValid,
+    });
+    return jsonError(500, {
+      code: "CLASSIFIER_CONTRACT_INVALID",
+      message: "Classifier output failed validation before pipeline consumption.",
+      retryable: true,
+    });
+  }
+  const classifierDecision: ClassifierDecision = classifierValidation.value;
   const initialWorkstreamAssignment = routePlan.workstreamAssignment;
   const routedWorkstreamId =
     routePlan.workstreamAssignment.status === "assigned"
@@ -1724,6 +1809,7 @@ export async function runChatPipeline(request: NextRequest) {
     ? selectRuntimeSkills({
         message: auto.message,
         mode: effectiveMode,
+        preferredSkillIds: classifierDecision.skills,
         allowedToolBundles: routePlan.allowedToolBundles,
         maxSkills: routePlan.responseBudget === "deep" ? 6 : 4,
       })
@@ -2176,8 +2262,8 @@ export async function runChatPipeline(request: NextRequest) {
         promptCategory: auto.promptCategory,
         questionType: auto.questionType,
         isMultipart: auto.isMultipart,
-        needsSearch: routePlan.shouldUseWebSearch || usedRecentContextCache,
-        needsRag: retrieval.citations.length > 0,
+        needsSearch: classifierDecision.needsSearch,
+        needsRag: classifierDecision.needsRag,
         needsVision: (body.attachmentTypes?.length ?? 0) > 0,
         needsTabular: false,
         spendingTier: budget.tier,
@@ -2193,6 +2279,8 @@ export async function runChatPipeline(request: NextRequest) {
         agentPreferredModel: selectedAgent?.preferredModel,
         detectedIntents,
         workstreamId: activeWorkstreamId,
+        classifierInput,
+        classifierDecision,
       },
       candidates: routeDecision.candidates,
       selected: {
@@ -2208,6 +2296,8 @@ export async function runChatPipeline(request: NextRequest) {
       assignmentLevel: auto.assignmentLevel,
       requestClass: auto.requestClass,
       classificationReason: auto.classificationReason,
+      classifierInput,
+      classifierDecision,
       stepsExecuted: pipelineSnapshot.completedStages,
       stepsSkipped: pipelineSnapshot.skippedStages.map((row) => ({
         step: row.step,

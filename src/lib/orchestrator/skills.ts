@@ -1,5 +1,5 @@
 import type { StudyMode } from "@/types";
-import { resolveSkillsForContext, type RegisteredSkill } from "@/lib/skills/skill-registry";
+import { listRegisteredSkills, resolveSkillsForContext, type RegisteredSkill } from "@/lib/skills/skill-registry";
 
 export type RuntimeSkill = {
   id: string;
@@ -28,15 +28,30 @@ function toRuntimeSkill(skill: RegisteredSkill): RuntimeSkill {
 export function selectRuntimeSkills(params: {
   message: string;
   mode: StudyMode;
+  preferredSkillIds?: string[];
   allowedToolBundles?: string[];
   maxSkills?: number;
 }): RuntimeSkill[] {
-  return resolveSkillsForContext({
+  const contextual = resolveSkillsForContext({
     message: params.message,
     mode: params.mode,
     allowedToolBundles: params.allowedToolBundles,
     maxSkills: params.maxSkills,
-  }).map(toRuntimeSkill);
+  });
+  const preferredIds = new Set(params.preferredSkillIds ?? []);
+  const preferred = preferredIds.size
+    ? listRegisteredSkills().filter((skill) => preferredIds.has(skill.id))
+    : [];
+  const ordered = [...preferred, ...contextual];
+  const seen = new Set<string>();
+  const limited: RegisteredSkill[] = [];
+  for (const skill of ordered) {
+    if (seen.has(skill.id)) continue;
+    seen.add(skill.id);
+    limited.push(skill);
+    if (limited.length >= Math.max(1, Math.min(10, params.maxSkills ?? 5))) break;
+  }
+  return limited.map(toRuntimeSkill);
 }
 
 export function formatRuntimeSkillBlock(skills: RuntimeSkill[]) {

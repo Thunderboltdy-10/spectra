@@ -402,6 +402,56 @@ export type RouteTrace = {
     agentPreferredModel?: string;
     detectedIntents?: string[];
     workstreamId?: string;
+    classifierInput?: {
+      message: string;
+      mode: import("@/lib/contracts/studyModes").StudyMode;
+      scope: {
+        level: "global" | "workspace" | "artifact" | "chat";
+        workspaceId?: string;
+        workspaceTitle?: string;
+        agentId?: string;
+        itemIds: string[];
+      };
+      conversationHistory: Array<{
+        role: "user" | "assistant";
+        content: string;
+        mode?: string;
+      }>;
+      availableSkills: string[];
+      availableAgents: Array<{
+        id: string;
+        name: string;
+        category?: string;
+        description?: string;
+      }>;
+      userPreferences: {
+        thinkingLevel: import("@/lib/contracts/studyModes").ThinkingLevel;
+        routerMode: import("@/lib/contracts/studyModes").RouterMode;
+        memoryEnabled: boolean;
+        usePersonalResources: boolean;
+      };
+    };
+    classifierDecision?: {
+      tier: "T0" | "T1" | "T2" | "T3";
+      skills: string[];
+      workspaceTarget:
+        | { kind: "current"; workspaceId?: string }
+        | { kind: "specific"; workspaceId: string }
+        | { kind: "none"; workspaceId?: undefined };
+      agentId: string | null;
+      needsSearch: boolean;
+      needsMemory: boolean;
+      needsRag: boolean;
+      outputFormat:
+        | "conversational"
+        | "strict_quiz"
+        | "strict_flashcards"
+        | "claims_evidence_reliability"
+        | "artifact_ready"
+        | "explanation_with_visual";
+      thinkingLevel: import("@/lib/contracts/studyModes").ThinkingLevel;
+      confidence: number;
+    };
   };
   candidates: RouteTraceCandidate[];
   selected: {
@@ -417,6 +467,8 @@ export type RouteTrace = {
   assignmentLevel?: AssignmentLevel;
   requestClass?: "T0" | "T1" | "T2" | "T3";
   classificationReason?: string;
+  classifierInput?: RouteTrace["inputs"]["classifierInput"];
+  classifierDecision?: RouteTrace["inputs"]["classifierDecision"];
   stepsExecuted?: string[];
   stepsSkipped?: Array<{ step: string; reason: string }>;
   searchStatus?: "real_search" | "model_knowledge" | "skipped" | "error";

@@ -1,0 +1,83 @@
+{
+  "milestone": "wave1-foundation",
+  "round": 1,
+  "status": "failure",
+  "timestamp": "2026-04-08T18:00:00.000Z",
+  "assertionsSummary": {
+    "total": 110,
+    "passed": 0,
+    "failed": 0,
+    "blocked": 110,
+    "pending": 0
+  },
+  "passedAssertions": [],
+  "failedAssertions": [],
+  "blockedAssertions": [
+    {
+      "ids": "VAL-W1-001 through VAL-W1-110",
+      "reason": "All 110 wave1-foundation assertions require authenticated workspace canvas state. The /workspace route redirects to Clerk sign-in, blocking browser automation. Per AGENTS.md: 'If browser validation requires Google/Clerk sign-in, pause and request user-assisted auth, then resume.' No API-surface test equivalents exist for canvas/UI assertions."
+    }
+  ],
+  "appliedUpdates": [],
+  "previousRound": null,
+  "setupStatus": {
+    "services": {
+      "convex": { "status": "running", "verified": true, "url": "http://127.0.0.1:3210" },
+      "web": { "status": "running", "verified": true, "url": "http://localhost:3000" }
+    },
+    "appAccessible": true,
+    "landingPage": "accessible at http://localhost:3000 - shows Spectra landing page",
+    "workspacePage": "redirects to /sign-in?redirect_url=... - auth required",
+    "browserAutomation": {
+      "status": "working",
+      "version": "0.17.1",
+      "verified": true
+    }
+  },
+  "authStatus": {
+    "clerkSignInRequired": true,
+    "signInPageAccessible": true,
+    "oauthProviders": ["Google", "Microsoft"],
+    "emailPasswordAvailable": true,
+    "automatable": false,
+    "userAssistanceRequired": true,
+    "guidance": "User must sign in once in the agent-browser session (w1-validation), then export/save auth state so subsequent subagents can load it. Alternatively, user can provide Clerk test credentials."
+  },
+  "whatWasTested": [
+    "Landing page accessible at http://localhost:3000 - renders correctly",
+    "Workspace route /workspace redirects to /sign-in - auth requirement confirmed",
+    "Convex backend running at http://127.0.0.1:3210",
+    "agent-browser tool working correctly (version 0.17.1)"
+  ],
+  "whatWasNotTested": [
+    "All 110 VAL-W1-* assertions - require authenticated workspace canvas",
+    "Canvas zoom/pan behavior - requires workspace access",
+    "Hub primitives (dock, timer, quick chat) - require authenticated workspace",
+    "Workspace item creation, archiving, moving - require authenticated workspace",
+    "AI edit discard/reapply flows - require authenticated workspace",
+    "LRU cache behavior - requires workspace navigation",
+    "Spatial layout and zoom bands - require workspace access",
+    "Glance renderers - require workspace item access",
+    "Context menus - require workspace item access",
+    "Projection sync (workspace-content-mutated) - requires workspace mutations"
+  ],
+  "blockingRootCause": "Clerk authentication blocks all workspace routes. OAuth sign-in (Google/Microsoft) cannot be automated. No bypass mechanism exists in the current codebase. No test fixtures or demo accounts available.",
+  "featuresTestableWithoutAuth": [],
+  "featuresRequiringAuth": [
+    "w1-a1-canonical-taxonomy (VAL-W1-001,002,003,095-100)",
+    "w1-a2-projection-rewrite (VAL-W1-004,005,006,007,039,045,057,058,061,087-089,106)",
+    "w1-a3-cache-contract (VAL-W1-008,009,010,011,040,062,070,086,093)",
+    "w1-b1-ai-discard-fix (VAL-W1-012,013,014,015,076,101-103)",
+    "w1-c1-spatial-rebuild (VAL-W1-016-024,035,037,038,041,042,051,054-056,059,060,063,064,066,067,068,074,075,077,078,082,084,091,092,094,107-110)",
+    "w1-c2-glance-renderers (VAL-W1-025,026,043,044)",
+    "w1-c3-hub-primitives (VAL-W1-027-033,036,047-050,053,065,069,085,090,104,105)"
+  ],
+  "scrutinyValidation": {
+    "status": "pass",
+    "tests": "416 passed, 3 skipped",
+    "typecheck": "clean",
+    "lint": "clean",
+    "featuresReviewed": 7
+  },
+  "recommendation": "Orchestrator should request user-assisted auth. Once user provides signed-in session or test credentials, validation can proceed with subagent-parallel browser testing across the 7 feature groups (110 assertions). All assertions are browser-based (agent-browser) - no API/curl alternatives exist for canvas UI testing."
+}

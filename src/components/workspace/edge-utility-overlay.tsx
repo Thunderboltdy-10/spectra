@@ -8,6 +8,9 @@ import {
   Play,
   RotateCcw,
   LayoutGrid,
+  Dot,
+  Grid3X3,
+  Square,
   Plus,
   FileText,
   Code2,
@@ -19,7 +22,7 @@ import {
   ArrowUp,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useWorkspaceStore } from '@/stores/workspace-store';
+import { useWorkspaceStore, type WorkspaceBackgroundMode } from '@/stores/workspace-store';
 import type { Workstream } from '@/hooks/use-workspace-data';
 
 /* ─── Types ─────────────────────────────────────────────────────── */
@@ -420,6 +423,83 @@ function FocusTimer() {
   );
 }
 
+/* ─── Background Mode Toggle ───────────────────────────────────── */
+
+const BACKGROUND_OPTIONS: Array<{
+  mode: WorkspaceBackgroundMode;
+  label: string;
+  description: string;
+  icon: React.ElementType;
+}> = [
+  {
+    mode: 'dots',
+    label: 'Dots',
+    description: 'Soft constellation dots',
+    icon: Dot,
+  },
+  {
+    mode: 'grid',
+    label: 'Grid',
+    description: 'Structured guide lines',
+    icon: Grid3X3,
+  },
+  {
+    mode: 'blank',
+    label: 'Blank',
+    description: 'Pure open canvas',
+    icon: Square,
+  },
+];
+
+function BackgroundModeToggle() {
+  const { backgroundMode, setBackgroundMode } = useWorkspaceStore();
+
+  return (
+    <div
+      className={cn(
+        'absolute right-6 z-40',
+        glassStyle,
+        'rounded-[26px] px-3 py-3',
+      )}
+      style={{ bottom: EDGE_MARGIN + 72 }}
+      data-testid="background-mode-toggle"
+    >
+      <div className="mb-2 px-1">
+        <div className="text-[9px] font-semibold uppercase tracking-[0.24em] text-[var(--text-tertiary)]">
+          Canvas background
+        </div>
+        <div className="mt-1 text-[11px] text-[var(--text-secondary)]">
+          Pick the backdrop that helps you think.
+        </div>
+      </div>
+      <div className="flex items-center gap-1 rounded-full bg-[var(--bg-primary)]/45 p-1">
+        {BACKGROUND_OPTIONS.map((option) => {
+          const Icon = option.icon;
+          const active = backgroundMode === option.mode;
+          return (
+            <button
+              key={option.mode}
+              type="button"
+              onClick={() => setBackgroundMode(option.mode)}
+              aria-pressed={active}
+              title={`${option.label}: ${option.description}`}
+              className={cn(
+                'group relative flex items-center gap-2 rounded-full px-3 py-2 text-[11px] font-semibold transition-all duration-200',
+                active
+                  ? 'bg-[var(--accent-cyan)] text-white shadow-[0_10px_24px_-16px_rgba(14,142,232,0.75)]'
+                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]',
+              )}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              <span>{option.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /* ─── Unified Command Bar ───────────────────────────────────────── */
 
 function UnifiedCommandBar({
@@ -735,6 +815,8 @@ export function EdgeUtilityOverlay({
 
       {/* Bottom Right: Focus Timer */}
       {utilityVisible.focus_timer !== false ? <FocusTimer /> : null}
+
+      <BackgroundModeToggle />
     </>
   );
 }

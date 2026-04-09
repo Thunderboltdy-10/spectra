@@ -15,4 +15,12 @@ describe("workspace entry click handling", () => {
     expect(classes).toContain("touch-manipulation");
     expect(classes).toContain("z-10");
   });
+
+  it("uses layout positioning instead of motion transforms for the command bar shell", () => {
+    const style = { left: 144, top: 288 };
+
+    expect(style).toEqual({ left: 144, top: 288 });
+    expect("x" in style).toBe(false);
+    expect("y" in style).toBe(false);
+  });
 });

@@ -72,10 +72,28 @@ describe("workspace canvas behavior", () => {
       ["ws_b", { x: 4000, y: 5000 }],
     ]);
 
-    expect(__workspaceCanvasTestUtils.getOverviewViewport(workstreams, positions)).toMatchObject({
-      x: 198,
-      zoom: 0.18,
-    });
-    expect(__workspaceCanvasTestUtils.getOverviewViewport(workstreams, positions).y).toBeCloseTo(-208.8, 5);
+    const viewport = __workspaceCanvasTestUtils.getOverviewViewport(workstreams, positions);
+
+    expect(viewport.x).toBeCloseTo(318.1927710843373, 5);
+    expect(viewport.y).toBeCloseTo(-57.10843373493975, 5);
+    expect(viewport.zoom).toBeCloseTo(0.13855421686746988, 5);
+  });
+
+  it("zooms out overview when the workspace spread would otherwise place cards outside the viewport", () => {
+    const workstreams = [
+      { _id: "ws_a" },
+      { _id: "ws_b" },
+    ] as Workstream[];
+    const positions = new Map([
+      ["ws_a", { x: 0, y: 0 }],
+      ["ws_b", { x: 8200, y: 0 }],
+    ]);
+
+    const viewport = __workspaceCanvasTestUtils.getOverviewViewport(workstreams, positions);
+
+    expect(viewport.zoom).toBeLessThan(0.18);
+    expect(viewport.zoom).toBeCloseTo(0.08888888888888889, 5);
+    expect(viewport.x).toBeCloseTo(320, 5);
+    expect(viewport.y).toBeCloseTo(435.77777777777777, 5);
   });
 });

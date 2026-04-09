@@ -186,9 +186,20 @@ function getOverviewViewport(
   const centerY = (minY + maxY) / 2;
   const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 1440;
   const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 900;
-  const offsetX = viewportWidth / 2 - centerX * fallback.zoom;
-  const offsetY = viewportHeight / 2 - centerY * fallback.zoom;
-  return { x: offsetX, y: offsetY, zoom: fallback.zoom };
+  const paddingX = Math.max(viewportWidth * 0.22, 320);
+  const paddingY = Math.max(viewportHeight * 0.2, 220);
+  const availableWidth = Math.max(viewportWidth - paddingX * 2, 320);
+  const availableHeight = Math.max(viewportHeight - paddingY * 2, 240);
+  const boundsWidth = Math.max(maxX - minX, overviewWidth);
+  const boundsHeight = Math.max(maxY - minY, overviewHeight);
+  const fittedZoom = Math.min(
+    fallback.zoom,
+    availableWidth / boundsWidth,
+    availableHeight / boundsHeight,
+  );
+  const offsetX = viewportWidth / 2 - centerX * fittedZoom;
+  const offsetY = viewportHeight / 2 - centerY * fittedZoom;
+  return { x: offsetX, y: offsetY, zoom: fittedZoom };
 }
 
 export const __workspaceCanvasTestUtils = {

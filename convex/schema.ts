@@ -307,6 +307,20 @@ export default defineSchema({
     .index("by_source_chat", ["sourceChatId"])
     .index("by_source_planner", ["sourcePlannerItemId"]),
 
+  workspaceTopicClusters: defineTable({
+    orgId: v.id("orgs"),
+    ownerUserId: v.id("users"),
+    workstreamId: v.id("workstreams"),
+    clusterId: v.string(),
+    generatedTitle: v.string(),
+    userTitle: v.optional(v.string()),
+    lastAppliedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_workstream", ["workstreamId"])
+    .index("by_workstream_cluster", ["workstreamId", "clusterId"]),
+
   ghostSuggestions: defineTable({
     orgId: v.id("orgs"),
     ownerUserId: v.id("users"),

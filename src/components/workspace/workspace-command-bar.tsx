@@ -9,7 +9,7 @@
  * Cmd/Ctrl+K to focus.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown, FileText, Search, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -94,6 +94,17 @@ export function WorkspaceCommandBar({
     () => activeWorkstreams.find((ws) => ws._id === selectedWsId) ?? null,
     [activeWorkstreams, selectedWsId],
   );
+  const isScoped = !!primaryWorkstreamId && selectedWs;
+  const isArtifactScoped = !!activeArtifactId;
+  const inferredScopeLevel = isArtifactScoped ? "artifact" : isScoped ? "workspace" : "global";
+  const showGlobalScopeBadge = focused && !isArtifactScoped && !isScoped;
+  const commandBarStyle = useMemo<CSSProperties | undefined>(() => {
+    if (!position) return undefined;
+    return {
+      left: position.x,
+      top: position.y,
+    };
+  }, [position]);
 
   // Auto-select workstream
   useEffect(() => {
@@ -182,8 +193,6 @@ export function WorkspaceCommandBar({
     }
   };
 
-  const isScoped = !!primaryWorkstreamId && selectedWs;
-  const isArtifactScoped = !!activeArtifactId;
   const placeholder = focused
     ? (isArtifactScoped
         ? `Edit ${activeArtifactTitle ?? "artifact"}...`
@@ -223,7 +232,7 @@ export function WorkspaceCommandBar({
           }}
           transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
           className={cn("absolute z-[100]", shellStyles.dock, !position && shellStyles.orb)}
-          style={{ x: position?.x, y: position?.y }}
+          style={commandBarStyle}
         >
           {/* Workstream picker dropdown (above bar) */}
           <AnimatePresence>
@@ -376,6 +385,17 @@ export function WorkspaceCommandBar({
                 )}
               </span>
             )}
+            {showGlobalScopeBadge && (
+              <span
+                className={cn(
+                  "shrink-0 flex items-center gap-2 px-3 py-2 rounded-[16px] text-xs font-bold transition-all border",
+                  "text-[var(--text-tertiary)] bg-black/5 dark:bg-white/5 border-transparent",
+                )}
+              >
+                <Search className="w-3.5 h-3.5" />
+                <span>All workspaces</span>
+              </span>
+            )}
 
             {/* Clear button */}
             {query && (
@@ -417,6 +437,7 @@ export function WorkspaceCommandBar({
               </div>
             )}
           </div>
+          <span className="sr-only">{`Current scope: ${inferredScopeLevel}`}</span>
         </motion.div>
       )}
     </AnimatePresence>

@@ -153,9 +153,48 @@ function restoreViewport(): Viewport {
   return defaultVp;
 }
 
+function getOverviewViewport(
+  workstreams: Workstream[],
+  positions: Map<string, { x: number; y: number }>,
+) {
+  const fallback = restoreViewport();
+  if (workstreams.length === 0) {
+    return fallback;
+  }
+
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  const overviewWidth = 800;
+  const overviewHeight = 320;
+
+  for (const workstream of workstreams) {
+    const pos = positions.get(workstream._id);
+    if (!pos) continue;
+    minX = Math.min(minX, pos.x);
+    minY = Math.min(minY, pos.y);
+    maxX = Math.max(maxX, pos.x + overviewWidth);
+    maxY = Math.max(maxY, pos.y + overviewHeight);
+  }
+
+  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+    return fallback;
+  }
+
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 1440;
+  const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 900;
+  const offsetX = viewportWidth / 2 - centerX * fallback.zoom;
+  const offsetY = viewportHeight / 2 - centerY * fallback.zoom;
+  return { x: offsetX, y: offsetY, zoom: fallback.zoom };
+}
+
 export const __workspaceCanvasTestUtils = {
   restoreViewport,
   getNeighborOpacity,
+  getOverviewViewport,
 };
 
 /* ─── Edge builders ──────────────────────────────────────── */
@@ -548,7 +587,7 @@ const WorkstreamNode = memo(function WorkstreamNode({
         whileHover={dissolving ? undefined : { scale: 1.015, y: -1.5 }}
         transition={{ duration: dissolving ? 0.35 : 0.25, ease: [0.22, 1, 0.36, 1] }}
         className={cn(
-          "group relative text-left transition-[box-shadow,border-color] duration-300",
+          "group relative z-10 cursor-pointer touch-manipulation text-left transition-[box-shadow,border-color] duration-300",
           dissolving ? "rounded-[16px]" : "rounded-[22px]",
           dissolving && "pointer-events-none",
           isFocused && !dissolving && "ring-2 ring-[color:var(--accent-cyan)] ring-offset-2 ring-offset-[var(--bg-primary)]",
@@ -825,6 +864,10 @@ function WorkspaceCanvasInner({
     const canonical = computeCanonicalLayout(workstreams);
     return applyOverrides(canonical, workstreams, localOverrides);
   }, [workstreams, localOverrides]);
+  const overviewViewport = useMemo(
+    () => getOverviewViewport(visibleWorkstreams, positions),
+    [positions, visibleWorkstreams],
+  );
 
   // Auto-exit when zooming far out of a committed workstream
   useEffect(() => {
@@ -1137,10 +1180,10 @@ function WorkspaceCanvasInner({
     const instance = reactFlowRef.current;
     if (instance) {
       setTimeout(() => {
-        instance.fitView({ padding: 0.08, duration: 400, nodes: undefined });
+        instance.setViewport(overviewViewport, { duration: 400 });
       }, 50);
     }
-  }, [exitWorkstream, onCommitWorkstream]);
+  }, [exitWorkstream, onCommitWorkstream, overviewViewport]);
 
   const handleOpenHub = useCallback(
     () => {
@@ -1395,13 +1438,12 @@ function WorkspaceCanvasInner({
       }
     } else {
       setTimeout(() => {
-        instance.fitView({ padding: 0.08, duration: 400 });
-        const vp = instance.getViewport();
-        setCamera({ x: vp.x, y: vp.y, z: vp.zoom });
-        setZoom(vp.zoom);
+        instance.setViewport(overviewViewport, { duration: 0 });
+        setCamera({ x: overviewViewport.x, y: overviewViewport.y, z: overviewViewport.zoom });
+        setZoom(overviewViewport.zoom);
       }, 50);
     }
-  }, [fetchContentForWorkstream, focusWorkstreamId, primaryWorkstreamId, setCamera, setVisibleWorkstreamIds]);
+  }, [fetchContentForWorkstream, focusWorkstreamId, overviewViewport, primaryWorkstreamId, setCamera, setVisibleWorkstreamIds]);
 
   const handleMove = useCallback((_: unknown, viewport: Viewport) => {
     setZoom(viewport.zoom);
@@ -1604,12 +1646,12 @@ function WorkspaceCanvasInner({
       if (primaryWorkstreamId) {
         handleExitWorkstream();
       } else {
-        instance.fitView({ padding: 0.08, duration: 500 });
+        instance.setViewport(overviewViewport, { duration: 500 });
       }
     };
     window.addEventListener("workspace:center-home", handler);
     return () => window.removeEventListener("workspace:center-home", handler);
-  }, [handleExitWorkstream, primaryWorkstreamId]);
+  }, [handleExitWorkstream, overviewViewport, primaryWorkstreamId]);
 
   useEffect(() => {
     const instance = reactFlowRef.current;
@@ -1693,6 +1735,20 @@ function WorkspaceCanvasInner({
           if (!workstreamId) return;
           handleOpenWorkstream(workstreamId);
         }}
+        onNodeMouseEnter={(_: React.MouseEvent, node: Node) => {
+          if (typeof node.id !== "string") return;
+          const element = document.querySelector(`[data-id="${CSS.escape(node.id)}"]`);
+          if (element instanceof HTMLElement) {
+            element.style.zIndex = "20";
+          }
+        }}
+        onNodeMouseLeave={(_: React.MouseEvent, node: Node) => {
+          if (typeof node.id !== "string") return;
+          const element = document.querySelector(`[data-id="${CSS.escape(node.id)}"]`);
+          if (element instanceof HTMLElement) {
+            element.style.removeProperty("z-index");
+          }
+        }}
       >
       <div
         className="pointer-events-none absolute inset-0 z-0"
@@ -1713,7 +1769,7 @@ function WorkspaceCanvasInner({
               if (primaryWorkstreamId) {
                 handleExitWorkstream();
               } else {
-                reactFlowRef.current?.fitView({ padding: 0.08, duration: 500 });
+                reactFlowRef.current?.setViewport(overviewViewport, { duration: 500 });
               }
             }}
             title="Fit all workstreams"

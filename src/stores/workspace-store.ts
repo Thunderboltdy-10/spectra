@@ -67,6 +67,7 @@ type WorkspaceStoreState = {
 
   // Initial chat query when entering a workstream via quick chat
   openChatQuery?: string;
+  openChatScopeCleared?: boolean;
 
   // Previous viewport for zoom-out restoration
   previousViewport?: { x: number; y: number; zoom: number };
@@ -119,6 +120,7 @@ type WorkspaceStoreState = {
   openPanel: (type: PanelType, id: string) => void;
   closePanel: () => void;
   setOpenChatQuery: (query?: string) => void;
+  setOpenChatScopeCleared: (cleared: boolean) => void;
   clearOpenChatQuery: () => void;
 
   // Timer
@@ -178,6 +180,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()(
       viewModeByWorkstream: {},
       panel: undefined,
       openChatQuery: undefined,
+      openChatScopeCleared: false,
       previousViewport: undefined,
       timerState: {
         active: false,
@@ -258,6 +261,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()(
           visibleWorkstreamIds: [workstreamId],
           viewMode: state.viewModeByWorkstream[workstreamId] ?? state.viewMode,
           openChatQuery: undefined,
+          openChatScopeCleared: false,
           panel: undefined,
           ...resolveWorkspaceState({
             activeWorkstreamId: workstreamId,
@@ -273,6 +277,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()(
           visibleWorkstreamIds: [workstreamId],
           viewMode: state.viewModeByWorkstream[workstreamId] ?? state.viewMode,
           openChatQuery: query,
+          openChatScopeCleared: false,
           panel: query ? { type: "chat", id: "new" } : undefined,
           ...resolveWorkspaceState({
             activeWorkstreamId: workstreamId,
@@ -295,6 +300,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()(
           primaryWorkstreamId: undefined,
           visibleWorkstreamIds: [],
           openChatQuery: undefined,
+          openChatScopeCleared: false,
           panel: undefined,
           ...resolveWorkspaceState({
             activeWorkstreamId: undefined,
@@ -345,7 +351,8 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()(
           }),
         })),
       setOpenChatQuery: (query) => set({ openChatQuery: query }),
-      clearOpenChatQuery: () => set({ openChatQuery: undefined }),
+      setOpenChatScopeCleared: (openChatScopeCleared) => set({ openChatScopeCleared }),
+      clearOpenChatQuery: () => set({ openChatQuery: undefined, openChatScopeCleared: false }),
 
       setTimerMinutes: (minutes) =>
         set((state) => ({
@@ -400,6 +407,7 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()(
           primaryWorkstreamId: undefined,
           visibleWorkstreamIds: [],
           openChatQuery: undefined,
+          openChatScopeCleared: false,
           zoomBand: "summary",
           workspaceState: "world_overview",
           lastCanvasState: "world_overview",

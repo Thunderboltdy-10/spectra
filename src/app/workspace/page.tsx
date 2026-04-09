@@ -14,6 +14,7 @@ import { EdgeUtilityOverlay } from "@/components/workspace/edge-utility-overlay"
 // Internal view is now canvas-native (rendered as React Flow nodes inside workspace-canvas)
 import { useWorkspaceData } from "@/hooks/use-workspace-data";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useEditorStore } from "@/stores/editor-store";
 import { registerSyncCallback } from "@/lib/workspace/position-persistence";
 import {
   notifyWorkspaceContentMutated,
@@ -87,6 +88,7 @@ function WorkspaceContent() {
     closePanel,
     commitWorkstream,
   } = useWorkspaceStore();
+  const { activeArtifactId, setActiveArtifactId } = useEditorStore();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [searchQuery] = useState("");
@@ -333,6 +335,9 @@ function WorkspaceContent() {
                   <EdgeUtilityOverlay
                     workstreams={workstreams}
                     primaryWorkstreamId={primaryWorkstreamId}
+                    activeArtifactId={activeArtifactId}
+                    activeArtifactTitle={undefined}
+                    onClearScope={() => setActiveArtifactId(undefined)}
                     onOpenWorkstream={(wsId) => {
                       if (wsId === "__hub__") {
                         handleCommitWorkstream(null);

@@ -20,6 +20,8 @@ import {
   Sparkles,
   Layers,
   ArrowUp,
+  Globe,
+  Brain,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useWorkspaceStore, type WorkspaceBackgroundMode } from '@/stores/workspace-store';
@@ -30,8 +32,11 @@ import type { Workstream } from '@/hooks/use-workspace-data';
 interface EdgeUtilityOverlayProps {
   workstreams: Workstream[];
   primaryWorkstreamId?: string;
+  activeArtifactId?: string;
+  activeArtifactTitle?: string;
   onOpenWorkstream: (wsId: string) => void;
   onExitWorkstream: () => void;
+  onClearScope?: () => void;
   panelOpen: boolean;
   onQuickChat?: (message: string) => void;
   onCreateItem?: (type: 'note' | 'code' | 'visual' | 'planner') => void;
@@ -42,6 +47,19 @@ interface EdgeUtilityOverlayProps {
 /* ─── Constants ─────────────────────────────────────────────────── */
 
 const EASE_SMOOTH: [number, number, number, number] = [0.22, 1, 0.36, 1];
+
+// Detect when a query likely falls outside the current scope
+function detectOutOfScope(query: string, scope: "artifact" | "workspace" | null): string | null {
+  if (!scope || !query.trim()) return null;
+  const lower = query.toLowerCase().trim();
+  if (scope === "artifact") {
+    const editSignals = /\b(edit|fix|change|update|revise|rewrite|improve|tighten|rephrase|reword|adjust|refine|polish|shorten|expand|reformat|proofread|correct)\b/i;
+    if (!editSignals.test(lower) && lower.length > 15) {
+      return "General question — scope will widen";
+    }
+  }
+  return null;
+}
 
 const glassStyle =
   'bg-[var(--bg-elevated)]/80 backdrop-blur-xl border border-[var(--border-default)]/40 shadow-[0_8px_32px_-8px_rgba(0,0,0,0.2)]';
@@ -505,7 +523,10 @@ function BackgroundModeToggle() {
 function UnifiedCommandBar({
   workstreams,
   primaryWorkstreamId,
+  activeArtifactId,
+  activeArtifactTitle,
   onExitWorkstream,
+  onClearScope,
   onQuickChat,
   onCreateItem,
   onNewWorkstream,
@@ -513,7 +534,10 @@ function UnifiedCommandBar({
 }: {
   workstreams: Workstream[];
   primaryWorkstreamId?: string;
+  activeArtifactId?: string;
+  activeArtifactTitle?: string;
   onExitWorkstream: () => void;
+  onClearScope?: () => void;
   onQuickChat?: (message: string) => void;
   onCreateItem?: (type: 'note' | 'code' | 'visual' | 'planner') => void;
   onNewWorkstream?: () => void;
@@ -530,6 +554,13 @@ function UnifiedCommandBar({
   const activeWorkspace = primaryWorkstreamId
     ? workstreams.find(ws => ws._id === primaryWorkstreamId)
     : null;
+  const globalScope = primaryWorkstreamId === '__hub__' || !primaryWorkstreamId;
+  const isArtifactScoped = !!activeArtifactId;
+  const scopeLabel = isArtifactScoped
+    ? (activeArtifactTitle ?? 'Artifact')
+    : globalScope ? 'Global' : activeWorkspace?.title ?? 'Workspace';
+  const scopeIcon = isArtifactScoped ? FileText : globalScope ? Globe : Layers;
+  const ScopeIcon = scopeIcon;
 
   // Build create items list based on context
   const createItems: CreateMenuItem[] = [
@@ -656,9 +687,40 @@ function UnifiedCommandBar({
             <Plus className="w-4.5 h-4.5" />
           </motion.button>
 
+          {/* Artifact deep-edit scope badge */}
+          <AnimatePresence>
+            {isArtifactScoped && (
+              <motion.div
+                initial={{ opacity: 0, width: 0 }}
+                animate={{ opacity: 1, width: 'auto' }}
+                exit={{ opacity: 0, width: 0 }}
+                transition={{ duration: 0.2, ease: EASE_SMOOTH }}
+                className="flex items-center gap-1 shrink-0 overflow-hidden"
+              >
+                <div className="flex items-center gap-1 rounded-full bg-[var(--accent-purple)]/10 border border-[var(--accent-purple)]/20 pl-2 pr-1 py-0.5">
+                  <FileText className="h-3.5 w-3.5 text-[var(--accent-purple)]" />
+                  <span className="text-[11px] text-[var(--accent-purple)] truncate max-w-[80px] font-medium">
+                    {activeArtifactTitle ?? 'Artifact'}
+                  </span>
+                  {onClearScope && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onClearScope();
+                      }}
+                      className="flex h-4 w-4 items-center justify-center rounded-full hover:bg-[var(--accent-purple)]/20 text-[var(--accent-purple)]/60 hover:text-[var(--accent-purple)] transition-colors"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           {/* Workspace context badge */}
           <AnimatePresence>
-            {activeWorkspace && (
+            {(activeWorkspace || globalScope) && !isArtifactScoped && (
               <motion.div
                 initial={{ opacity: 0, width: 0 }}
                 animate={{ opacity: 1, width: 'auto' }}
@@ -667,9 +729,13 @@ function UnifiedCommandBar({
                 className="flex items-center gap-1 shrink-0 overflow-hidden"
               >
                 <div className="flex items-center gap-1 rounded-full bg-[var(--bg-hover)] pl-2 pr-1 py-0.5">
-                  <span className="text-sm leading-none">{activeWorkspace.emoji || '📚'}</span>
+                  {activeWorkspace ? (
+                    <span className="text-sm leading-none">{activeWorkspace.emoji || '📚'}</span>
+                  ) : (
+                    <ScopeIcon className="h-3.5 w-3.5 text-[var(--text-secondary)]" />
+                  )}
                   <span className="text-[11px] text-[var(--text-secondary)] truncate max-w-[80px] font-medium">
-                    {activeWorkspace.title}
+                    {scopeLabel}
                   </span>
                   <button
                     onClick={(e) => {
@@ -686,28 +752,40 @@ function UnifiedCommandBar({
           </AnimatePresence>
 
           {/* Text input */}
-          <input
-            ref={inputRef}
-            value={draft}
-            onChange={e => setDraft(e.target.value)}
-            onFocus={() => {
-              setFocused(true);
-              setCreateOpen(false);
-            }}
-            onBlur={() => setFocused(false)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-              if (e.key === 'Escape') {
-                setDraft('');
-                inputRef.current?.blur();
-              }
-            }}
-            placeholder="Ask anything, create, or search..."
-            className="flex-1 min-w-0 bg-transparent px-2 py-1.5 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none"
-          />
+          <div className="flex-1 min-w-0 flex flex-col">
+            <input
+              ref={inputRef}
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              onFocus={() => {
+                setFocused(true);
+                setCreateOpen(false);
+              }}
+              onBlur={() => setFocused(false)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+                if (e.key === 'Escape') {
+                  setDraft('');
+                  inputRef.current?.blur();
+                }
+              }}
+              placeholder={isArtifactScoped ? `Edit ${activeArtifactTitle ?? "artifact"}…` : globalScope ? "Ask across all workspaces…" : `Ask in ${scopeLabel}…`}
+              className="w-full bg-transparent px-2 py-1.5 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none"
+            />
+            {focused && isArtifactScoped && detectOutOfScope(draft, "artifact") && (
+              <span className="px-2 text-[10px] text-[var(--text-tertiary)] italic">
+                {detectOutOfScope(draft, "artifact")}
+              </span>
+            )}
+          </div>
+
+          <div className="hidden shrink-0 items-center gap-1 rounded-full border border-[var(--border-default)]/50 bg-[var(--bg-primary)]/55 px-2 py-1 text-[10px] font-medium text-[var(--text-secondary)] md:flex">
+            <Brain className="h-3 w-3" />
+            <span>{isArtifactScoped ? 'Artifact edit' : globalScope ? 'Hint only' : 'Scoped hint'}</span>
+          </div>
 
           {/* Send / Sparkles button */}
           <motion.button
@@ -753,8 +831,11 @@ export function HubInternalView() {
 export function EdgeUtilityOverlay({
   workstreams,
   primaryWorkstreamId,
+  activeArtifactId,
+  activeArtifactTitle,
   onOpenWorkstream,
   onExitWorkstream,
+  onClearScope,
   onQuickChat,
   onCreateItem,
   onNewWorkstream,
@@ -806,7 +887,10 @@ export function EdgeUtilityOverlay({
       <UnifiedCommandBar
         workstreams={workstreams}
         primaryWorkstreamId={primaryWorkstreamId}
+        activeArtifactId={activeArtifactId}
+        activeArtifactTitle={activeArtifactTitle}
         onExitWorkstream={onExitWorkstream}
+        onClearScope={onClearScope}
         onQuickChat={onQuickChat}
         onCreateItem={onCreateItem}
         onNewWorkstream={onNewWorkstream}

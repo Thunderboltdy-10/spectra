@@ -193,4 +193,117 @@ describe("useChatPanel", () => {
     });
     container.remove();
   });
+
+  it("forwards scope metadata (workstreamId, artifactId, scopeLevel) to createChatStream", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    createChatStream.mockClear();
+    createChatStream.mockImplementation(async function* () {
+      yield { type: "phase", phase: "answering" };
+      yield { type: "delta", content: "Edited" };
+      yield { type: "done", modelUsed: "openai/gpt-5-nano" };
+    });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/chats" && init?.method === "POST") {
+        return new Response(JSON.stringify({ chatId: "chat_scope_1" }), { status: 200 });
+      }
+      throw new Error(`Unexpected fetch call: ${String(input)}`);
+    }));
+
+    const { useChatPanel } = await import("@/hooks/use-chat-panel");
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    const latestRef: { current: ReturnType<typeof useChatPanel> | null } = { current: null };
+
+    function Harness() {
+      const panel = useChatPanel({
+        workstreamId: "ws_scope",
+        artifactId: "artifact_7",
+        scopeLevel: "artifact",
+        mode: "tutor",
+        thinkingLevel: "low",
+        routerMode: "auto",
+      });
+      useEffect(() => {
+        latestRef.current = panel;
+      }, [panel]);
+      return null;
+    }
+
+    await act(async () => {
+      root.render(<Harness />);
+    });
+
+    await act(async () => {
+      await latestRef.current?.sendMessage("Fix this paragraph");
+    });
+
+    expect(createChatStream).toHaveBeenCalled();
+    const lastCall = createChatStream.mock.calls[createChatStream.mock.calls.length - 1];
+    const callArgs = lastCall[0] as Record<string, unknown>;
+    expect(callArgs.workstreamId).toBe("ws_scope");
+    expect(callArgs.artifactId).toBe("artifact_7");
+    expect(callArgs.scopeLevel).toBe("artifact");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("infers artifact scopeLevel from artifactId when scopeLevel is not provided", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    createChatStream.mockClear();
+    createChatStream.mockImplementation(async function* () {
+      yield { type: "phase", phase: "answering" };
+      yield { type: "delta", content: "Updated" };
+      yield { type: "done", modelUsed: "openai/gpt-5-nano" };
+    });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/chats" && init?.method === "POST") {
+        return new Response(JSON.stringify({ chatId: "chat_scope_2" }), { status: 200 });
+      }
+      throw new Error(`Unexpected fetch call: ${String(input)}`);
+    }));
+
+    const { useChatPanel } = await import("@/hooks/use-chat-panel");
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    const latestRef: { current: ReturnType<typeof useChatPanel> | null } = { current: null };
+
+    function Harness() {
+      // No explicit scopeLevel — should infer "artifact" from artifactId
+      const panel = useChatPanel({
+        workstreamId: "ws_scope",
+        artifactId: "artifact_7",
+        mode: "tutor",
+        thinkingLevel: "low",
+        routerMode: "auto",
+      });
+      useEffect(() => {
+        latestRef.current = panel;
+      }, [panel]);
+      return null;
+    }
+
+    await act(async () => {
+      root.render(<Harness />);
+    });
+
+    await act(async () => {
+      await latestRef.current?.sendMessage("Improve this");
+    });
+
+    expect(createChatStream).toHaveBeenCalled();
+    const lastCall = createChatStream.mock.calls[createChatStream.mock.calls.length - 1];
+    const callArgs = lastCall[0] as Record<string, unknown>;
+    expect(callArgs.scopeLevel).toBe("artifact");
+    expect(callArgs.artifactId).toBe("artifact_7");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
 });

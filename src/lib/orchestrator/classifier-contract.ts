@@ -82,6 +82,7 @@ export function buildClassifierInput(params: {
   mode: StudyMode;
   activeWorkstreamId?: string;
   activeWorkstreamTitle?: string;
+  scopeLevel?: "global" | "workspace" | "artifact" | "chat";
   selectedAgentId?: string;
   conversationHistory: Array<{
     role: "user" | "assistant";
@@ -99,19 +100,26 @@ export function buildClassifierInput(params: {
     description: string;
   }>;
   activeArtifactId?: string;
+  activeArtifactTitle?: string;
 }) {
   const skillIds = listRegisteredSkills().map((skill) => skill.id);
   const scopeLevel =
-    params.activeArtifactId ? "artifact" : params.activeWorkstreamId ? "workspace" : "global";
+    params.scopeLevel
+    ?? (params.activeArtifactId ? "artifact" : params.activeWorkstreamId ? "workspace" : "global");
+  const itemIds = params.activeArtifactId ? [params.activeArtifactId] : [];
+  const workspaceTitle =
+    scopeLevel === "artifact" && params.activeArtifactTitle
+      ? params.activeArtifactTitle
+      : params.activeWorkstreamTitle;
   return {
     message: params.message.trim(),
     mode: params.mode,
     scope: {
       level: scopeLevel,
       workspaceId: params.activeWorkstreamId,
-      workspaceTitle: params.activeWorkstreamTitle,
+      workspaceTitle,
       agentId: params.selectedAgentId,
-      itemIds: params.activeArtifactId ? [params.activeArtifactId] : [],
+      itemIds,
     },
     conversationHistory: params.conversationHistory,
     availableSkills: skillIds,

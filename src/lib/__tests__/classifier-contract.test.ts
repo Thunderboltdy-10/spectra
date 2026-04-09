@@ -34,6 +34,31 @@ describe("classifier contract", () => {
     expect(input.availableAgents[0]?.id).toBe("agent-1");
   });
 
+  it("supports artifact scope metadata distinct from workspace scope", () => {
+    const input = buildClassifierInput({
+      message: "Tighten this draft",
+      mode: "draft_coach",
+      activeWorkstreamId: "ws-1",
+      activeWorkstreamTitle: "English",
+      activeArtifactId: "artifact-7",
+      activeArtifactTitle: "Essay plan",
+      selectedAgentId: "agent-1",
+      conversationHistory: [],
+      userThinkingLevel: "medium",
+      routerMode: "auto",
+      memoryEnabled: true,
+      usePersonalResources: true,
+      availableAgents: [
+        { _id: "agent-1", name: "English Coach", category: "humanities", description: "Helps with writing" },
+      ],
+    });
+
+    expect(input.scope.level).toBe("artifact");
+    expect(input.scope.workspaceId).toBe("ws-1");
+    expect(input.scope.workspaceTitle).toBe("Essay plan");
+    expect(input.scope.itemIds).toEqual(["artifact-7"]);
+  });
+
   it("accepts valid classifier output with independent flags and multilingual stability", () => {
     const availableSkills = ["community-socratic-dialogue", "concise-chat", "deep-research"];
     const spanish = validateClassifierDecision(
@@ -211,5 +236,29 @@ describe("classifier contract", () => {
 
     expect(visualSkills.some((skill) => skill.id === "spectra-visual-skill")).toBe(true);
     expect(nonVisualSkills.some((skill) => skill.id === "spectra-visual-skill")).toBe(false);
+  });
+
+  it("respects explicit scopeLevel parameter over inferred scope", () => {
+    const input = buildClassifierInput({
+      message: "Explain quantum mechanics",
+      mode: "explain",
+      activeWorkstreamId: "ws-1",
+      activeWorkstreamTitle: "Physics",
+      activeArtifactId: "artifact-5",
+      activeArtifactTitle: "Quantum Notes",
+      scopeLevel: "workspace",
+      selectedAgentId: undefined,
+      conversationHistory: [],
+      userThinkingLevel: "medium",
+      routerMode: "auto",
+      memoryEnabled: true,
+      usePersonalResources: true,
+      availableAgents: [],
+    });
+
+    // When scopeLevel is explicitly "workspace", it should override the artifact inference
+    expect(input.scope.level).toBe("workspace");
+    // But itemIds should still include the artifact since it was specified
+    expect(input.scope.itemIds).toEqual(["artifact-5"]);
   });
 });

@@ -101,6 +101,9 @@ type ChatRequestBody = {
   chatId?: string;
   packId?: string;
   agentId?: string;
+  workstreamId?: string;
+  artifactId?: string;
+  scopeLevel?: "global" | "workspace" | "artifact";
   clientMessageId?: string;
   mode: StudyMode;
   message: string;
@@ -1023,6 +1026,12 @@ export async function runChatPipeline(request: NextRequest) {
     typeof (chatData.chat as { workstreamId?: unknown }).workstreamId === "string"
       ? String((chatData.chat as { workstreamId?: unknown }).workstreamId)
       : undefined;
+  // Allow client-specified scope metadata to override or supplement DB values
+  if (!activeWorkstreamId && body.workstreamId) {
+    activeWorkstreamId = body.workstreamId;
+  }
+  const clientArtifactId = body.artifactId;
+  const clientScopeLevel = body.scopeLevel;
   const [
     workstreamCandidates,
     initialActiveWorkstream,
@@ -1597,6 +1606,16 @@ export async function runChatPipeline(request: NextRequest) {
     threadContext: buildThreadContext(),
     schoolSoulVersion: schoolSoulCapsule.version,
   });
+  // Resolve artifact title for scope context when client specifies an artifact
+  let clientArtifactTitle: string | undefined;
+  if (clientArtifactId) {
+    const matchedArtifact = activeWorkstreamArtifacts.find(
+      (a) => String((a as { _id?: unknown })._id) === clientArtifactId,
+    );
+    if (matchedArtifact && typeof (matchedArtifact as { title?: unknown }).title === "string") {
+      clientArtifactTitle = String((matchedArtifact as { title?: unknown }).title);
+    }
+  }
   const classifierInput = buildClassifierInput({
     message: auto.message,
     mode: effectiveMode,
@@ -1605,6 +1624,9 @@ export async function runChatPipeline(request: NextRequest) {
       typeof (activeWorkstream as { title?: unknown } | undefined)?.title === "string"
         ? String((activeWorkstream as { title?: unknown }).title)
         : undefined,
+    activeArtifactId: clientArtifactId,
+    activeArtifactTitle: clientArtifactTitle,
+    scopeLevel: clientScopeLevel,
     selectedAgentId: selectedAgent?._id,
     conversationHistory: history.map((msg) => ({
       role: msg.role === "assistant" ? "assistant" : "user",

@@ -307,6 +307,119 @@ describe("useChatPanel", () => {
     container.remove();
   });
 
+  it("does not hydrate the literal 'new' placeholder as an existing chat id", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      throw new Error(`Unexpected fetch call: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { useChatPanel } = await import("@/hooks/use-chat-panel");
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    const latestRef: { current: ReturnType<typeof useChatPanel> | null } = { current: null };
+
+    function Harness() {
+      const panel = useChatPanel({
+        workstreamId: "ws_fresh",
+        initialChatId: "new",
+        mode: "tutor",
+        thinkingLevel: "low",
+        routerMode: "auto",
+      });
+      useEffect(() => {
+        latestRef.current = panel;
+      }, [panel]);
+      return null;
+    }
+
+    await act(async () => {
+      root.render(<Harness />);
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(latestRef.current?.chatId).toBe("new");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("preserves the optimistic user message when initialChatId is the new-thread placeholder", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    createChatStream.mockClear();
+    createChatStream.mockImplementation(async function* () {
+      yield { type: "phase", phase: "answering" };
+      yield { type: "delta", content: "Assistant reply" };
+      yield { type: "done", modelUsed: "openai/gpt-5-nano" };
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/chats?workstreamId=ws_new&limit=1") {
+        return new Response(JSON.stringify({ chats: [] }), { status: 200 });
+      }
+      if (String(input) === "/api/chats" && init?.method === "POST") {
+        return new Response(JSON.stringify({ chatId: "chat_created" }), { status: 200 });
+      }
+      throw new Error(`Unexpected fetch call: ${String(input)}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { useChatPanel } = await import("@/hooks/use-chat-panel");
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    const latestRef: { current: ReturnType<typeof useChatPanel> | null } = { current: null };
+
+    function Harness() {
+      const panel = useChatPanel({
+        workstreamId: "ws_new",
+        initialChatId: "new",
+        mode: "tutor",
+        thinkingLevel: "low",
+        routerMode: "auto",
+      });
+      useEffect(() => {
+        latestRef.current = panel;
+      }, [panel]);
+      return null;
+    }
+
+    await act(async () => {
+      root.render(<Harness />);
+    });
+
+    await act(async () => {
+      await latestRef.current?.sendMessage("Materialize this into the panel");
+    });
+
+    expect(latestRef.current?.messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+      streaming: message.streaming ?? false,
+    }))).toEqual([
+      {
+        role: "user",
+        content: "Materialize this into the panel",
+        streaming: false,
+      },
+      {
+        role: "assistant",
+        content: "Assistant reply",
+        streaming: false,
+      },
+    ]);
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/chats/new");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+    createChatStream.mockClear();
+  });
+
   it("infers artifact scopeLevel from artifactId when scopeLevel is not provided", async () => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     createChatStream.mockClear();

@@ -222,7 +222,7 @@ function ChatPanelContent({
     artifactId: activeArtifactId,
     agentId: linkedAgentId,
     threadType: "conversation",
-    initialChatId: threadId !== "new" ? threadId : null,
+    initialChatId: threadId,
     mode: "tutor",
     thinkingLevel: "low",
     routerMode: "auto",

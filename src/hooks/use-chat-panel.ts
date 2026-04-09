@@ -55,6 +55,11 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
   const accumulatorRef = useRef(
     new ChatMessageAccumulator([], () => `msg-${++counterRef.current}-${Date.now()}`),
   );
+  const initialChatIdRef = useRef(params.initialChatId ?? null);
+
+  useEffect(() => {
+    initialChatIdRef.current = params.initialChatId ?? null;
+  }, [params.initialChatId]);
 
   const syncAccumulator = useCallback(() => {
     setMessages([...accumulatorRef.current.messages]);
@@ -92,7 +97,7 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
         }
       }
 
-      if (params.workstreamId && params.threadType !== "artifact_edit" && params.initialChatId === "new") {
+      if (params.workstreamId && params.threadType !== "artifact_edit" && initialChatIdRef.current === "new") {
         const existingResponse = await fetch(`/api/chats?workstreamId=${encodeURIComponent(params.workstreamId)}&limit=1`);
         if (existingResponse.ok) {
           const existingData = (await existingResponse.json()) as { chats?: Array<{ _id: string }> };
@@ -149,12 +154,11 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
     params.threadType,
     params.title,
     params.usePersonalResources,
-    params.initialChatId,
     params.workstreamId,
   ]);
 
   useEffect(() => {
-    if (!params.initialChatId) return;
+    if (!params.initialChatId || params.initialChatId === "new") return;
     void hydrateChat(params.initialChatId).catch((err) => {
       setError(err instanceof Error ? err.message : "Failed to load thread");
     });

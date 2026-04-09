@@ -9,9 +9,9 @@
  * Cmd/Ctrl+K to focus.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronDown, Search, X } from "lucide-react";
+import { ChevronDown, FileText, Search, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import type { Workstream } from "@/hooks/use-workspace-data";
@@ -34,13 +34,29 @@ function detectWorkspaceCreationIntent(query: string): string | null {
   return null;
 }
 
+// Detect when a query likely falls outside the current scope
+function detectOutOfScope(query: string, scope: "artifact" | "workspace" | null): string | null {
+  if (!scope || !query.trim()) return null;
+  const lower = query.toLowerCase().trim();
+  if (scope === "artifact") {
+    const editSignals = /\b(edit|fix|change|update|revise|rewrite|improve|tighten|rephrase|reword|adjust|refine|polish|shorten|expand|reformat|proofread|correct)\b/i;
+    if (!editSignals.test(lower) && lower.length > 15) {
+      return "General question — scope will widen";
+    }
+  }
+  return null;
+}
+
 type WorkspaceCommandBarProps = {
   hidden?: boolean;
   workstreams: Workstream[];
   primaryWorkstreamId?: string;
+  activeArtifactId?: string;
+  activeArtifactTitle?: string;
   onOpenWorkstreamChat: (workstreamId: string, query: string) => void;
   onOpenPanel?: (type: PanelType, id: string) => void;
   onCreateWorkspace?: (name: string) => void;
+  onClearScope?: () => void;
   layoutId?: string;
   position?: { x: number; y: number };
   onPositionChange?: (pos: { x: number; y: number }) => void;
@@ -51,8 +67,11 @@ export function WorkspaceCommandBar({
   hidden = false,
   workstreams,
   primaryWorkstreamId,
+  activeArtifactId,
+  activeArtifactTitle,
   onOpenWorkstreamChat,
   onCreateWorkspace,
+  onClearScope,
   layoutId = "workspace-command-bar",
   position,
   onPositionChange,
@@ -75,6 +94,17 @@ export function WorkspaceCommandBar({
     () => activeWorkstreams.find((ws) => ws._id === selectedWsId) ?? null,
     [activeWorkstreams, selectedWsId],
   );
+  const isScoped = !!primaryWorkstreamId && selectedWs;
+  const isArtifactScoped = !!activeArtifactId;
+  const inferredScopeLevel = isArtifactScoped ? "artifact" : isScoped ? "workspace" : "global";
+  const showGlobalScopeBadge = focused && !isArtifactScoped && !isScoped;
+  const commandBarStyle = useMemo<CSSProperties | undefined>(() => {
+    if (!position) return undefined;
+    return {
+      left: position.x,
+      top: position.y,
+    };
+  }, [position]);
 
   // Auto-select workstream
   useEffect(() => {
@@ -163,8 +193,13 @@ export function WorkspaceCommandBar({
     }
   };
 
-  const isScoped = !!primaryWorkstreamId && selectedWs;
-  const placeholder = focused ? (isScoped ? `Ask ${selectedWs?.title}...` : "Ask anything...") : "Ask Spectra...";
+  const placeholder = focused
+    ? (isArtifactScoped
+        ? `Edit ${activeArtifactTitle ?? "artifact"}...`
+        : isScoped
+          ? `Ask ${selectedWs?.title}...`
+          : "Ask anything...")
+    : "Ask Spectra...";
 
   const shellStyles = {
     container: focused ? "w-[600px]" : "w-[420px]",
@@ -197,7 +232,7 @@ export function WorkspaceCommandBar({
           }}
           transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
           className={cn("absolute z-[100]", shellStyles.dock, !position && shellStyles.orb)}
-          style={{ x: position?.x, y: position?.y }}
+          style={commandBarStyle}
         >
           {/* Workstream picker dropdown (above bar) */}
           <AnimatePresence>
@@ -267,16 +302,23 @@ export function WorkspaceCommandBar({
               <Search className="w-4 h-4" />
             </div>
 
-            <input
-              ref={inputRef}
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onFocus={() => setFocused(true)}
-              onKeyDown={handleKeyDown}
-              placeholder={placeholder}
-              className="flex-1 bg-transparent border-none outline-none min-w-0 text-[16px] font-semibold text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]/60"
-            />
+            <div className="flex-1 min-w-0 flex flex-col">
+              <input
+                ref={inputRef}
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onFocus={() => setFocused(true)}
+                onKeyDown={handleKeyDown}
+                placeholder={placeholder}
+                className="w-full bg-transparent border-none outline-none text-[16px] font-semibold text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]/60"
+              />
+              {focused && isArtifactScoped && detectOutOfScope(query, "artifact") && (
+                <span className="text-[10px] text-[var(--text-tertiary)] italic mt-0.5">
+                  {detectOutOfScope(query, "artifact")}
+                </span>
+              )}
+            </div>
 
             {/* Workstream selector (when focused, not scoped) */}
             {focused && activeWorkstreams.length > 0 && !primaryWorkstreamId && (
@@ -298,8 +340,30 @@ export function WorkspaceCommandBar({
               </button>
             )}
 
-            {/* Scoped badge when inside workstream */}
-            {isScoped && (
+            {/* Artifact deep-edit scope badge */}
+            {isArtifactScoped && (
+              <span className={cn(
+                "shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-[14px] text-xs font-bold transition-all border",
+                focused
+                  ? "text-[var(--accent-purple)] bg-[var(--accent-purple)]/10 border-[var(--accent-purple)]/20 shadow-[0_0_16px_rgba(139,92,246,0.1)]"
+                  : "text-[var(--text-tertiary)] bg-black/5 dark:bg-white/5 border-transparent"
+              )}>
+                <FileText className="w-3.5 h-3.5" />
+                <span className="truncate max-w-[100px]">{activeArtifactTitle ?? "Artifact"}</span>
+                {onClearScope && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onClearScope(); }}
+                    className="ml-0.5 p-0.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+                    title="Clear artifact scope"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </span>
+            )}
+            {/* Workspace scoped badge when inside workstream */}
+            {isScoped && !isArtifactScoped && (
               <span className={cn(
                 "shrink-0 flex items-center gap-2 px-3.5 py-2 rounded-[16px] text-xs font-bold transition-all border",
                 focused 
@@ -309,6 +373,27 @@ export function WorkspaceCommandBar({
                 {focused && <span className="opacity-50 tracking-[0.2em] mr-1 text-[9px]">TO</span>}
                 <span className="text-base leading-none">{selectedWs?.emoji}</span>
                 <span className="truncate max-w-[140px]">{selectedWs?.title}</span>
+                {onClearScope && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onClearScope(); }}
+                    className="ml-0.5 p-0.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+                    title="Clear workspace scope"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </span>
+            )}
+            {showGlobalScopeBadge && (
+              <span
+                className={cn(
+                  "shrink-0 flex items-center gap-2 px-3 py-2 rounded-[16px] text-xs font-bold transition-all border",
+                  "text-[var(--text-tertiary)] bg-black/5 dark:bg-white/5 border-transparent",
+                )}
+              >
+                <Search className="w-3.5 h-3.5" />
+                <span>All workspaces</span>
               </span>
             )}
 
@@ -352,6 +437,7 @@ export function WorkspaceCommandBar({
               </div>
             )}
           </div>
+          <span className="sr-only">{`Current scope: ${inferredScopeLevel}`}</span>
         </motion.div>
       )}
     </AnimatePresence>

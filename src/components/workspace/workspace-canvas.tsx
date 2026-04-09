@@ -52,9 +52,12 @@ import {
   type PlannerItemSummary,
   type ArtifactSummary,
   type WorkspaceWidgetSummary,
+  type GhostSuggestionSummary,
+  GhostSuggestionCard,
   WorkspaceWidgetNode,
 } from "@/components/workspace/views/internal-content-nodes";
 import { subscribeWorkspaceContentMutated } from "@/lib/workspace/events";
+import { useEditorStore } from "@/stores/editor-store";
 
 /* ─── Types ──────────────────────────────────────────────── */
 
@@ -150,9 +153,59 @@ function restoreViewport(): Viewport {
   return defaultVp;
 }
 
+function getOverviewViewport(
+  workstreams: Workstream[],
+  positions: Map<string, { x: number; y: number }>,
+) {
+  const fallback = restoreViewport();
+  if (workstreams.length === 0) {
+    return fallback;
+  }
+
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  const overviewWidth = 800;
+  const overviewHeight = 320;
+
+  for (const workstream of workstreams) {
+    const pos = positions.get(workstream._id);
+    if (!pos) continue;
+    minX = Math.min(minX, pos.x);
+    minY = Math.min(minY, pos.y);
+    maxX = Math.max(maxX, pos.x + overviewWidth);
+    maxY = Math.max(maxY, pos.y + overviewHeight);
+  }
+
+  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+    return fallback;
+  }
+
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 1440;
+  const viewportHeight = typeof window !== "undefined" ? window.innerHeight : 900;
+  const paddingX = Math.max(viewportWidth * 0.22, 320);
+  const paddingY = Math.max(viewportHeight * 0.2, 220);
+  const availableWidth = Math.max(viewportWidth - paddingX * 2, 320);
+  const availableHeight = Math.max(viewportHeight - paddingY * 2, 240);
+  const boundsWidth = Math.max(maxX - minX, overviewWidth);
+  const boundsHeight = Math.max(maxY - minY, overviewHeight);
+  const fittedZoom = Math.min(
+    fallback.zoom,
+    availableWidth / boundsWidth,
+    availableHeight / boundsHeight,
+  );
+  const offsetX = viewportWidth / 2 - centerX * fittedZoom;
+  const offsetY = viewportHeight / 2 - centerY * fittedZoom;
+  return { x: offsetX, y: offsetY, zoom: fittedZoom };
+}
+
 export const __workspaceCanvasTestUtils = {
   restoreViewport,
   getNeighborOpacity,
+  getOverviewViewport,
 };
 
 /* ─── Edge builders ──────────────────────────────────────── */
@@ -260,6 +313,7 @@ type CachedWorkspaceContent = {
   plannerItems: PlannerItemSummary[];
   artifacts: ArtifactSummary[];
   widgets: WorkspaceWidgetSummary[];
+  ghosts: GhostSuggestionSummary[];
   hubQuickNotes: Array<{ id: string; title: string; updatedAt: number }>;
   hubDeadlines: Array<{ id: string; title: string; dueAt: number; workstreamTitle?: string }>;
   hubActivity: Array<{ id: string; title: string; type: string; timestamp: number }>;
@@ -458,6 +512,7 @@ function emptyWorkspaceContent(): CachedWorkspaceContent {
     plannerItems: [],
     artifacts: [],
     widgets: [],
+    ghosts: [],
     hubQuickNotes: [],
     hubDeadlines: [],
     hubActivity: [],
@@ -543,7 +598,7 @@ const WorkstreamNode = memo(function WorkstreamNode({
         whileHover={dissolving ? undefined : { scale: 1.015, y: -1.5 }}
         transition={{ duration: dissolving ? 0.35 : 0.25, ease: [0.22, 1, 0.36, 1] }}
         className={cn(
-          "group relative text-left transition-[box-shadow,border-color] duration-300",
+          "group relative z-10 cursor-pointer touch-manipulation text-left transition-[box-shadow,border-color] duration-300",
           dissolving ? "rounded-[16px]" : "rounded-[22px]",
           dissolving && "pointer-events-none",
           isFocused && !dissolving && "ring-2 ring-[color:var(--accent-cyan)] ring-offset-2 ring-offset-[var(--bg-primary)]",
@@ -710,6 +765,9 @@ const FLOW_NODE_TYPES = {
   workstreamTitle: WorkstreamTitleNode,
   categoryField: CategoryFieldNode,
   workspaceWidget: WorkspaceWidgetNode,
+  ghostCard: ({ data }: NodeProps<Node<{ ghost: GhostSuggestionSummary; onAccept: (id: string) => void; onDismiss: (id: string) => void }>>) => (
+    <GhostSuggestionCard ghost={data.ghost} onAccept={data.onAccept} onDismiss={data.onDismiss} />
+  ),
   emptyState: EmptyStateNode,
   focusTimer: FocusTimerNode,
 } as const;
@@ -732,6 +790,7 @@ function WorkspaceCanvasInner({
   const commitAnimationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const animatedCommitRef = useRef<string | null>(null);
   const prefetchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const commitGenerationRef = useRef(0);
   const workstreamDragThrottleRef = useRef(new Map<string, number>());
   const lastViewportRef = useRef<{ x: number; y: number; zoom: number }>({ x: 0, y: 0, zoom: 0.35 });
   const contentControllerRef = useRef<ReturnType<typeof createWorkspaceContentController> | null>(null);
@@ -767,6 +826,9 @@ function WorkspaceCanvasInner({
   const [movePicker, setMovePicker] = useState<{ itemId: string; sourceWorkstreamId: string } | null>(null);
   const [movePickerSearch, setMovePickerSearch] = useState("");
   const [pinnedItemIds, setPinnedItemIds] = useState<Set<string>>(new Set());
+  const [ghostsByWorkstream, setGhostsByWorkstream] = useState<Record<string, GhostSuggestionSummary[]>>({});
+  const { activeArtifactId, activeNoteId } = useEditorStore();
+  const editingActive = Boolean(activeArtifactId || activeNoteId);
   const positionContextMenu = useCallback((clientX: number, clientY: number, width?: number, height?: number) => {
     const root = document.querySelector("[data-workspace-flow-root]");
     const rect = root?.getBoundingClientRect();
@@ -813,6 +875,10 @@ function WorkspaceCanvasInner({
     const canonical = computeCanonicalLayout(workstreams);
     return applyOverrides(canonical, workstreams, localOverrides);
   }, [workstreams, localOverrides]);
+  const overviewViewport = useMemo(
+    () => getOverviewViewport(visibleWorkstreams, positions),
+    [positions, visibleWorkstreams],
+  );
 
   // Auto-exit when zooming far out of a committed workstream
   useEffect(() => {
@@ -948,6 +1014,7 @@ function WorkspaceCanvasInner({
             } satisfies WorkspaceWidgetSummary];
           });
         }
+        next.ghosts = [];
         return next;
   }, [sanitizeTitle, workstreams]);
 
@@ -979,6 +1046,63 @@ function WorkspaceCanvasInner({
       new Set(cached.widgets.filter((widget) => Boolean(widget.renderProps?.pinned)).map((widget) => widget.panelId)),
     );
   }, [contentById, primaryWorkstreamId]);
+
+  useEffect(() => {
+    if (!primaryWorkstreamId || primaryWorkstreamId === HUB_CACHE_KEY) return;
+    const params = new URLSearchParams({
+      action: "listGhosts",
+      workstreamId: primaryWorkstreamId,
+      editingActive: editingActive ? "true" : "false",
+    });
+    void fetch(`/api/workspace-items?${params.toString()}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data?.ghosts) return;
+        const ghosts = (data.ghosts as GhostSuggestionSummary[]).slice(0, 2);
+        setGhostsByWorkstream((prev) => ({ ...prev, [primaryWorkstreamId]: ghosts }));
+        if (data.sessionKey) {
+          void fetch("/api/workspace-items", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "markGhostsVisible",
+              workstreamId: primaryWorkstreamId,
+              sessionKey: data.sessionKey,
+              visibleGhostIds: ghosts.map((ghost) => ghost._id),
+            }),
+          });
+        }
+      })
+      .catch(() => undefined);
+  }, [primaryWorkstreamId, editingActive, contentById]);
+
+  const acceptGhost = useCallback(async (ghostId: string) => {
+    const response = await fetch("/api/workspace-items", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "acceptGhost", ghostId }),
+    });
+    if (!response.ok || !primaryWorkstreamId) return;
+    setGhostsByWorkstream((prev) => ({
+      ...prev,
+      [primaryWorkstreamId]: (prev[primaryWorkstreamId] ?? []).filter((ghost) => ghost._id !== ghostId),
+    }));
+    contentControllerRef.current?.invalidate(primaryWorkstreamId, { includeHub: true });
+    void contentControllerRef.current?.fetch(primaryWorkstreamId);
+  }, [primaryWorkstreamId]);
+
+  const dismissGhost = useCallback(async (ghostId: string) => {
+    const response = await fetch("/api/workspace-items", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "dismissGhost", ghostId }),
+    });
+    if (!response.ok || !primaryWorkstreamId) return;
+    setGhostsByWorkstream((prev) => ({
+      ...prev,
+      [primaryWorkstreamId]: (prev[primaryWorkstreamId] ?? []).filter((ghost) => ghost._id !== ghostId),
+    }));
+  }, [primaryWorkstreamId]);
 
   const invalidateWorkstreamContent = useCallback((workstreamId?: string, options?: { includeHub?: boolean }) => {
     contentControllerRef.current?.invalidate(workstreamId, options);
@@ -1029,6 +1153,7 @@ function WorkspaceCanvasInner({
       if (commitAnimationTimeoutRef.current) {
         clearTimeout(commitAnimationTimeoutRef.current);
       }
+      const generation = ++commitGenerationRef.current;
       const instance = reactFlowRef.current;
       if (instance) {
         animatedCommitRef.current = workstreamId;
@@ -1044,6 +1169,7 @@ function WorkspaceCanvasInner({
       }
 
       commitAnimationTimeoutRef.current = setTimeout(() => {
+        if (commitGenerationRef.current !== generation) return;
         setVisibleWorkstreamIds([workstreamId]);
         commitWorkstream(workstreamId);
         void fetchContentForWorkstream(workstreamId);
@@ -1054,6 +1180,7 @@ function WorkspaceCanvasInner({
   );
 
   const handleExitWorkstream = useCallback(() => {
+    ++commitGenerationRef.current;
     if (commitAnimationTimeoutRef.current) {
       clearTimeout(commitAnimationTimeoutRef.current);
     }
@@ -1064,10 +1191,10 @@ function WorkspaceCanvasInner({
     const instance = reactFlowRef.current;
     if (instance) {
       setTimeout(() => {
-        instance.fitView({ padding: 0.08, duration: 400, nodes: undefined });
+        instance.setViewport(overviewViewport, { duration: 400 });
       }, 50);
     }
-  }, [exitWorkstream, onCommitWorkstream]);
+  }, [exitWorkstream, onCommitWorkstream, overviewViewport]);
 
   const handleOpenHub = useCallback(
     () => {
@@ -1075,6 +1202,7 @@ function WorkspaceCanvasInner({
       if (commitAnimationTimeoutRef.current) {
         clearTimeout(commitAnimationTimeoutRef.current);
       }
+      const generation = ++commitGenerationRef.current;
       const instance = reactFlowRef.current;
       if (instance) {
         animatedCommitRef.current = HUB_CACHE_KEY;
@@ -1082,6 +1210,7 @@ function WorkspaceCanvasInner({
         instance.setCenter(0, 0, { zoom: 0.85, duration: 450 });
       }
       commitAnimationTimeoutRef.current = setTimeout(() => {
+        if (commitGenerationRef.current !== generation) return;
         setVisibleWorkstreamIds([HUB_CACHE_KEY]);
         commitWorkstream(HUB_CACHE_KEY);
         void fetchContentForWorkstream(HUB_CACHE_KEY);
@@ -1186,6 +1315,7 @@ function WorkspaceCanvasInner({
             plannerItems: cached.plannerItems,
             artifacts: cached.artifacts,
             widgets: cached.widgets,
+            ghosts: ghostsByWorkstream[workstreamId] ?? [],
             loading,
             workstreamEmoji: focusWorkstream?.emoji,
             workstreamTitle: focusWorkstream?.title,
@@ -1230,6 +1360,23 @@ function WorkspaceCanvasInner({
             };
           });
           generatedNodes.push(...widgetNodes);
+
+          generatedNodes.push(
+            ...(ghostsByWorkstream[workstreamId] ?? [])
+              .slice(0, editingActive ? 0 : 2)
+              .map((ghost) => ({
+                id: `ghost-${ghost._id}`,
+                position: { x: basePos.x + ghost.x, y: basePos.y + ghost.y },
+                draggable: false,
+                selectable: false,
+                data: {
+                  ghost,
+                  onAccept: acceptGhost,
+                  onDismiss: dismissGhost,
+                },
+                type: "ghostCard",
+              })),
+          );
         }
       }
     }
@@ -1237,11 +1384,15 @@ function WorkspaceCanvasInner({
     widgetLayoutMetaRef.current = nextWidgetLayoutMeta;
     return { nodes: generatedNodes, edges: generatedEdges };
   }, [
+    acceptGhost,
     band,
     contentById,
+    dismissGhost,
+    editingActive,
     focusWorkstreamId,
     focusedItemId,
     getCachedContent,
+    ghostsByWorkstream,
     handleOpenWorkstream,
     internalNodeOverrides,
     loadingContentIds,
@@ -1298,13 +1449,12 @@ function WorkspaceCanvasInner({
       }
     } else {
       setTimeout(() => {
-        instance.fitView({ padding: 0.08, duration: 400 });
-        const vp = instance.getViewport();
-        setCamera({ x: vp.x, y: vp.y, z: vp.zoom });
-        setZoom(vp.zoom);
+        instance.setViewport(overviewViewport, { duration: 0 });
+        setCamera({ x: overviewViewport.x, y: overviewViewport.y, z: overviewViewport.zoom });
+        setZoom(overviewViewport.zoom);
       }, 50);
     }
-  }, [fetchContentForWorkstream, focusWorkstreamId, primaryWorkstreamId, setCamera, setVisibleWorkstreamIds]);
+  }, [fetchContentForWorkstream, focusWorkstreamId, overviewViewport, primaryWorkstreamId, setCamera, setVisibleWorkstreamIds]);
 
   const handleMove = useCallback((_: unknown, viewport: Viewport) => {
     setZoom(viewport.zoom);
@@ -1314,9 +1464,11 @@ function WorkspaceCanvasInner({
       if (commitDebounceRef.current) {
         clearTimeout(commitDebounceRef.current);
       }
+      const debounceGeneration = commitGenerationRef.current + 1;
       commitDebounceRef.current = setTimeout(() => {
         const instance = reactFlowRef.current;
-        if (!instance || primaryWorkstreamId) return;
+        if (!instance || useWorkspaceStore.getState().primaryWorkstreamId) return;
+        if (commitGenerationRef.current !== debounceGeneration) return;
         const viewportState = instance.getViewport();
         if (viewportState.zoom < 0.62) return;
         const viewportNow = instance.getViewport();
@@ -1505,12 +1657,12 @@ function WorkspaceCanvasInner({
       if (primaryWorkstreamId) {
         handleExitWorkstream();
       } else {
-        instance.fitView({ padding: 0.08, duration: 500 });
+        instance.setViewport(overviewViewport, { duration: 500 });
       }
     };
     window.addEventListener("workspace:center-home", handler);
     return () => window.removeEventListener("workspace:center-home", handler);
-  }, [handleExitWorkstream, primaryWorkstreamId]);
+  }, [handleExitWorkstream, overviewViewport, primaryWorkstreamId]);
 
   useEffect(() => {
     const instance = reactFlowRef.current;
@@ -1594,6 +1746,20 @@ function WorkspaceCanvasInner({
           if (!workstreamId) return;
           handleOpenWorkstream(workstreamId);
         }}
+        onNodeMouseEnter={(_: React.MouseEvent, node: Node) => {
+          if (typeof node.id !== "string") return;
+          const element = document.querySelector(`[data-id="${CSS.escape(node.id)}"]`);
+          if (element instanceof HTMLElement) {
+            element.style.zIndex = "20";
+          }
+        }}
+        onNodeMouseLeave={(_: React.MouseEvent, node: Node) => {
+          if (typeof node.id !== "string") return;
+          const element = document.querySelector(`[data-id="${CSS.escape(node.id)}"]`);
+          if (element instanceof HTMLElement) {
+            element.style.removeProperty("z-index");
+          }
+        }}
       >
       <div
         className="pointer-events-none absolute inset-0 z-0"
@@ -1614,7 +1780,7 @@ function WorkspaceCanvasInner({
               if (primaryWorkstreamId) {
                 handleExitWorkstream();
               } else {
-                reactFlowRef.current?.fitView({ padding: 0.08, duration: 500 });
+                reactFlowRef.current?.setViewport(overviewViewport, { duration: 500 });
               }
             }}
             title="Fit all workstreams"

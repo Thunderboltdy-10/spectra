@@ -26,6 +26,10 @@ export type CreateChatStreamParams = {
   mode?: string;
   thinkingLevel?: "low" | "medium" | "high";
   routerMode?: "auto" | "manual" | "openrouter_auto";
+  agentId?: string;
+  workstreamId?: string;
+  artifactId?: string;
+  scopeLevel?: "global" | "workspace" | "artifact";
   signal?: AbortSignal;
   autoSettings?: {
     enhancePrompt?: boolean;
@@ -46,6 +50,10 @@ export async function* createChatStream(params: CreateChatStreamParams): AsyncGe
       chatId: params.chatId,
       message: params.message,
       mode: params.mode ?? "tutor",
+      agentId: params.agentId,
+      workstreamId: params.workstreamId,
+      artifactId: params.artifactId,
+      scopeLevel: params.scopeLevel,
       thinkingLevel: params.thinkingLevel ?? "low",
       routerMode: params.routerMode ?? "auto",
       autoSettings: params.autoSettings ?? {

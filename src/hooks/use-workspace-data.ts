@@ -31,6 +31,21 @@ export function useWorkspaceData() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const parseApiError = useCallback(
+    async (res: Response, fallback: string) => {
+      try {
+        const payload = (await res.json()) as {
+          error?: { message?: string };
+          message?: string;
+        };
+        const message = payload.error?.message ?? payload.message;
+        return message && message.trim().length > 0 ? message : fallback;
+      } catch {
+        return fallback;
+      }
+    },
+    [],
+  );
 
   const fetchWorkstreams = useCallback(async () => {
     abortRef.current?.abort();
@@ -39,7 +54,9 @@ export function useWorkspaceData() {
 
     try {
       const res = await fetch("/api/workstreams", { signal: ac.signal });
-      if (!res.ok) throw new Error("Failed to load workstreams");
+      if (!res.ok) {
+        throw new Error(await parseApiError(res, "Failed to load workstreams"));
+      }
       const data = (await res.json()) as { workstreams: Workstream[] };
       setWorkstreams(data.workstreams ?? []);
       setError(null);
@@ -50,7 +67,7 @@ export function useWorkspaceData() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [parseApiError]);
 
   useEffect(() => {
     void fetchWorkstreams();
@@ -72,13 +89,15 @@ export function useWorkspaceData() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "createWorkstream", ...data }),
       });
-      if (!res.ok) throw new Error("Failed to create workstream");
+      if (!res.ok) {
+        throw new Error(await parseApiError(res, "Failed to create workstream"));
+      }
       const result = (await res.json()) as { workstreamId?: string };
       if (!result.workstreamId) throw new Error("Failed to create workstream");
       await fetchWorkstreams();
       return result.workstreamId;
     },
-    [fetchWorkstreams],
+    [fetchWorkstreams, parseApiError],
   );
 
   const updateWorkstream = useCallback(
@@ -91,10 +110,12 @@ export function useWorkspaceData() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "update", workstreamId, ...data }),
       });
-      if (!res.ok) throw new Error("Failed to update workstream");
+      if (!res.ok) {
+        throw new Error(await parseApiError(res, "Failed to update workstream"));
+      }
       await fetchWorkstreams();
     },
-    [fetchWorkstreams],
+    [fetchWorkstreams, parseApiError],
   );
 
   const deleteWorkstream = useCallback(
@@ -104,10 +125,12 @@ export function useWorkspaceData() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "delete", workstreamId }),
       });
-      if (!res.ok) throw new Error("Failed to delete workstream");
+      if (!res.ok) {
+        throw new Error(await parseApiError(res, "Failed to delete workstream"));
+      }
       await fetchWorkstreams();
     },
-    [fetchWorkstreams],
+    [fetchWorkstreams, parseApiError],
   );
 
   return {

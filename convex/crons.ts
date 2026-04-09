@@ -53,5 +53,10 @@ crons.interval(
   internal.models.evaluateChallengerLane,
   {},
 );
-
+crons.interval(
+  "regenerate-workspace-ghosts",
+  { hours: 6 },
+  internal.ghosts.runScheduledRegenerationSweep,
+  {},
+);
 export default crons;

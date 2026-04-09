@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { __workspaceCanvasTestUtils } from "@/components/workspace/workspace-canvas";
 import { loadLocalOverrides, saveLocalOverride } from "@/lib/workspace/position-persistence";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import type { Workstream } from "@/hooks/use-workspace-data";
 
 class MemoryStorage {
   private store = new Map<string, string>();
@@ -27,7 +28,7 @@ describe("workspace canvas behavior", () => {
   beforeEach(() => {
     const storage = new MemoryStorage();
     Object.defineProperty(globalThis, "window", {
-      value: { localStorage: storage },
+      value: { localStorage: storage, innerWidth: 1440, innerHeight: 900 },
       configurable: true,
       writable: true,
     });
@@ -59,5 +60,40 @@ describe("workspace canvas behavior", () => {
     expect(__workspaceCanvasTestUtils.getNeighborOpacity(0.55)).toBe(1);
     expect(__workspaceCanvasTestUtils.getNeighborOpacity(0.8)).toBeGreaterThan(0);
     expect(__workspaceCanvasTestUtils.getNeighborOpacity(1.05)).toBe(0);
+  });
+
+  it("centers the overview viewport around the visible workstream territories", () => {
+    const workstreams = [
+      { _id: "ws_a" },
+      { _id: "ws_b" },
+    ] as Workstream[];
+    const positions = new Map([
+      ["ws_a", { x: 1000, y: 2000 }],
+      ["ws_b", { x: 4000, y: 5000 }],
+    ]);
+
+    const viewport = __workspaceCanvasTestUtils.getOverviewViewport(workstreams, positions);
+
+    expect(viewport.x).toBeCloseTo(318.1927710843373, 5);
+    expect(viewport.y).toBeCloseTo(-57.10843373493975, 5);
+    expect(viewport.zoom).toBeCloseTo(0.13855421686746988, 5);
+  });
+
+  it("zooms out overview when the workspace spread would otherwise place cards outside the viewport", () => {
+    const workstreams = [
+      { _id: "ws_a" },
+      { _id: "ws_b" },
+    ] as Workstream[];
+    const positions = new Map([
+      ["ws_a", { x: 0, y: 0 }],
+      ["ws_b", { x: 8200, y: 0 }],
+    ]);
+
+    const viewport = __workspaceCanvasTestUtils.getOverviewViewport(workstreams, positions);
+
+    expect(viewport.zoom).toBeLessThan(0.18);
+    expect(viewport.zoom).toBeCloseTo(0.08888888888888889, 5);
+    expect(viewport.x).toBeCloseTo(320, 5);
+    expect(viewport.y).toBeCloseTo(435.77777777777777, 5);
   });
 });

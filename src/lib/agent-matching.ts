@@ -1,3 +1,6 @@
+import { MODEL_CONFIG } from "@/lib/model-config";
+import { openRouterEmbeddingRequest } from "@/lib/openrouter";
+
 const STOP_WORDS = new Set([
   "a",
   "an",
@@ -33,7 +36,12 @@ export type AgentMatchCandidate = {
   name: string;
   category?: string;
   description?: string;
+  subjectArea?: string;
+  gradeLevel?: string;
+  guidelinesSummary?: string;
   guidelinesTopicMap?: string[];
+  semanticText?: string;
+  semanticEmbedding?: number[];
 };
 
 export type AgentMatchResult = {
@@ -41,6 +49,13 @@ export type AgentMatchResult = {
   agentName: string;
   score: number;
   reason: string;
+  method: "semantic" | "lexical_fallback" | "linked_agent";
+  fallbackUsed: boolean;
+  metadataScoreBreakdown?: {
+    semantic: number;
+    metadataBoost: number;
+    lexical: number;
+  };
 };
 
 function normalize(value: string) {
@@ -103,30 +118,129 @@ function contributorLabel(scores: { topics: number; category: number; name: numb
   return "Matched by agent topic map";
 }
 
-export function matchAgentToMessage(
+function cosineSimilarity(a: number[], b: number[]) {
+  if (a.length === 0 || b.length === 0 || a.length !== b.length) return 0;
+  let dot = 0;
+  let magA = 0;
+  let magB = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    dot += a[i]! * b[i]!;
+    magA += a[i]! * a[i]!;
+    magB += b[i]! * b[i]!;
+  }
+  const denom = Math.sqrt(magA) * Math.sqrt(magB);
+  if (denom === 0) return 0;
+  return dot / denom;
+}
+
+function buildAgentSemanticText(agent: AgentMatchCandidate) {
+  return [
+    agent.name,
+    agent.category,
+    agent.subjectArea,
+    agent.gradeLevel,
+    agent.description,
+    agent.guidelinesSummary,
+    ...(agent.guidelinesTopicMap ?? []),
+  ]
+    .filter((value) => typeof value === "string" && value.trim().length > 0)
+    .join("\n");
+}
+
+async function embedText(input: string) {
+  const text = input.trim();
+  if (!text) return null;
+  const result = await openRouterEmbeddingRequest(text.slice(0, 3_000), MODEL_CONFIG.embedding);
+  return result.embedding;
+}
+
+export async function buildAgentSemanticEmbeddings(agents: AgentMatchCandidate[]) {
+  const updates = await Promise.all(
+    agents.map(async (agent) => {
+      if (Array.isArray(agent.semanticEmbedding) && agent.semanticEmbedding.length > 0) {
+        return agent;
+      }
+      const semanticText = agent.semanticText ?? buildAgentSemanticText(agent);
+      try {
+        const semanticEmbedding = await embedText(semanticText);
+        return semanticEmbedding ? { ...agent, semanticText, semanticEmbedding } : { ...agent, semanticText };
+      } catch {
+        return { ...agent, semanticText };
+      }
+    }),
+  );
+  return updates;
+}
+
+export async function matchAgentToMessage(
   message: string,
   agents: AgentMatchCandidate[],
-  threshold = 0.3,
-): AgentMatchResult | null {
+  options?: {
+    threshold?: number;
+    linkedAgentId?: string | null;
+    embeddingModelAvailable?: boolean;
+  },
+): Promise<AgentMatchResult | null> {
+  const threshold = options?.threshold ?? 0.3;
   const cleanMessage = message.trim();
   if (!cleanMessage) return null;
+
+  const linkedAgent = options?.linkedAgentId ? agents.find((agent) => agent._id === options.linkedAgentId) : undefined;
+  if (linkedAgent) {
+    return {
+      agentId: linkedAgent._id,
+      agentName: linkedAgent.name,
+      score: 1,
+      reason: "Using linked workspace agent",
+      method: "linked_agent",
+      fallbackUsed: false,
+      metadataScoreBreakdown: {
+        semantic: 1,
+        metadataBoost: 0,
+        lexical: 0,
+      },
+    };
+  }
 
   const messageTokens = tokenize(cleanMessage);
   if (messageTokens.length === 0) return null;
 
+  const normalizedMessage = normalize(cleanMessage);
+  let queryEmbedding: number[] | null = null;
+  let semanticReadyAgents = agents;
+  if (options?.embeddingModelAvailable !== false) {
+    try {
+      queryEmbedding = await embedText(cleanMessage);
+      semanticReadyAgents = await buildAgentSemanticEmbeddings(agents);
+    } catch {
+      queryEmbedding = null;
+    }
+  }
+
   let best: AgentMatchResult | null = null;
 
-  for (const agent of agents) {
+  for (const agent of semanticReadyAgents) {
     const topicScore = topicCoverageScore(cleanMessage, messageTokens, agent.guidelinesTopicMap ?? []);
     const categoryScore = overlapScore(messageTokens, tokenize(agent.category ?? ""));
     const nameScore = overlapScore(messageTokens, tokenize(agent.name));
     const descriptionScore = overlapScore(messageTokens, tokenize(agent.description ?? ""));
-
-    let score = topicScore * 0.55 + categoryScore * 0.2 + nameScore * 0.15 + descriptionScore * 0.1;
-    if (normalize(cleanMessage).includes(normalize(agent.name))) {
-      score += 0.08;
-    }
-    score = Math.max(0, Math.min(1, score));
+    const lexicalScore = Math.max(
+      0,
+      Math.min(1, topicScore * 0.55 + categoryScore * 0.2 + nameScore * 0.15 + descriptionScore * 0.1),
+    );
+    const metadataBoost = Math.min(
+      0.22,
+      (normalize(agent.subjectArea ?? "") && normalizedMessage.includes(normalize(agent.subjectArea ?? "")) ? 0.08 : 0)
+      + (normalize(agent.gradeLevel ?? "") && normalizedMessage.includes(normalize(agent.gradeLevel ?? "")) ? 0.04 : 0)
+      + (normalize(agent.guidelinesSummary ?? "") && normalizedMessage.includes(normalize(agent.guidelinesSummary ?? "").slice(0, 40)) ? 0.1 : 0),
+    );
+    const semanticScore =
+      queryEmbedding && Array.isArray(agent.semanticEmbedding) && agent.semanticEmbedding.length > 0
+        ? Math.max(0, cosineSimilarity(queryEmbedding, agent.semanticEmbedding))
+        : 0;
+    const score = queryEmbedding
+      ? Math.max(0, Math.min(1, semanticScore * 0.82 + metadataBoost + lexicalScore * 0.08))
+      : Math.max(0, Math.min(1, lexicalScore));
 
     if (score < threshold) continue;
 
@@ -134,7 +248,18 @@ export function matchAgentToMessage(
       agentId: agent._id,
       agentName: agent.name,
       score,
-      reason: contributorLabel({ topics: topicScore, category: categoryScore, name: nameScore, description: descriptionScore }),
+      reason: queryEmbedding
+        ? semanticScore >= lexicalScore
+          ? "Matched by semantic similarity across agent metadata"
+          : contributorLabel({ topics: topicScore, category: categoryScore, name: nameScore, description: descriptionScore })
+        : contributorLabel({ topics: topicScore, category: categoryScore, name: nameScore, description: descriptionScore }),
+      method: queryEmbedding ? "semantic" : "lexical_fallback",
+      fallbackUsed: !queryEmbedding,
+      metadataScoreBreakdown: {
+        semantic: semanticScore,
+        metadataBoost,
+        lexical: lexicalScore,
+      },
     };
 
     if (!best || candidate.score > best.score) {

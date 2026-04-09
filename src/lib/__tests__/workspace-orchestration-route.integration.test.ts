@@ -75,4 +75,80 @@ describe("workspace orchestration route integration", () => {
       mutationSummary: "Created essay workspace",
     });
   });
+
+  it("creates a visual workspace item through the workspace items route with AI provenance", async () => {
+    const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_workspace" });
+    const convexMutation = vi.fn().mockResolvedValue({ itemId: "widget_1", mutationId: "mut_widget_1" });
+
+    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery: vi.fn(), convexMutation }));
+
+    const route = await import("@/app/api/workspace-items/route");
+    await route.POST(
+      new NextRequest("http://localhost/api/workspace-items", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "createWidget",
+          workstreamId: "ws_visual",
+          type: "visualization",
+          itemType: "artifact",
+          renderMode: "visualization",
+          title: "Cell division map",
+          contentSummary: "AI-created SVG timeline of mitosis stages.",
+          x: 240,
+          y: 180,
+          category: "visualizations",
+          provenanceSource: "ai",
+          provenanceAction: "created",
+          mutationSummary: "AI created visual artifact",
+        }),
+      }),
+    );
+
+    expect(convexMutation).toHaveBeenCalledWith("workspaceItems:createWidget", expect.objectContaining({
+      actorClerkId: "user_workspace",
+      workstreamId: "ws_visual",
+      type: "visualization",
+      itemType: "artifact",
+      renderMode: "visualization",
+      title: "Cell division map",
+      category: "visualizations",
+      provenanceSource: "ai",
+    }));
+  });
 });
+
+  it("persists dual-render visual artifacts from chat responses", async () => {
+    const createArtifact = vi.fn().mockResolvedValue("artifact_visual_1");
+    const updateBySourceArtifact = vi.fn().mockResolvedValue({ success: true, mutationId: "mut_visual_1", itemId: "item_visual_1" });
+
+    vi.doMock("@/lib/auth-server", () => ({
+      requireActor: vi.fn().mockResolvedValue({ clerkId: "user_workspace" }),
+    }));
+    vi.doMock("@/lib/convex-server", () => ({
+      convexQuery: vi.fn(),
+      convexMutation: vi.fn((name: string) => {
+        if (name === "artifacts:create") return createArtifact();
+        if (name === "workspaceItems:updateBySourceArtifact") return updateBySourceArtifact();
+        return Promise.resolve({});
+      }),
+    }));
+
+    const { extractVisualArtifactFromResponse } = await import("@/lib/orchestrator/pipeline");
+    const visual = await Promise.resolve(extractVisualArtifactFromResponse({
+      response: '<svg viewBox="0 0 1200 400"><title>Mitosis timeline</title><rect width="1200" height="400" fill="#fff" /></svg>\n\nA calm timeline of mitosis stages.',
+      effectiveMode: "explain",
+      routePlan: { modeContract: { outputFormat: "explanation_with_visual" } } as never,
+      runtimeSkills: [{ id: "spectra-visual-skill" }] as never,
+    }));
+
+    expect(visual).toMatchObject({
+      title: "Mitosis timeline",
+      renderMode: "visualization",
+      type: "visualization",
+    });
+    expect(visual?.renderProps).toMatchObject({
+      visualKind: "svg",
+    });
+  });
+

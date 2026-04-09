@@ -151,6 +151,77 @@ describe("/api/chat/dry-run routing integration", () => {
     expect(simplePayload.routeTrace.inputs.needsSearch).toBe(false);
   });
 
+  it("records classifier metadata and keeps short substantive prompts out of T0", async () => {
+    setupDryRunMocks();
+    const route = await import("@/app/api/chat/dry-run/route");
+
+    const response = await route.POST(
+      new NextRequest("http://localhost/api/chat/dry-run", {
+        method: "POST",
+        body: JSON.stringify({
+          mode: "general",
+          message: "explain entropy",
+          thinkingLevel: "low",
+          routerMode: "auto",
+          autoSettings: {
+            searchMode: "off",
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      routeTrace: {
+        requestClass: string;
+        inputs: {
+          requestClass: string;
+          classifierMeta: { modelLane: string; fallbackUsed: boolean; timedOut: boolean };
+          modelLanes: { classifier: string; generation: string };
+          classifierDecision: { tier: string };
+        };
+      };
+    };
+
+    expect(payload.routeTrace.requestClass).not.toBe("T0");
+    expect(payload.routeTrace.inputs.requestClass).not.toBe("T0");
+    expect(payload.routeTrace.inputs.classifierDecision.tier).toBe(payload.routeTrace.requestClass);
+    expect(payload.routeTrace.inputs.classifierMeta.modelLane).toBe("cheap_classifier");
+    expect(payload.routeTrace.inputs.classifierMeta.fallbackUsed).toBe(false);
+    expect(payload.routeTrace.inputs.classifierMeta.timedOut).toBe(false);
+    expect(payload.routeTrace.inputs.modelLanes.classifier).toBe("cheap_classifier");
+  });
+
+  it("keeps trivial filler follow-ups in T0 for dry-run routing", async () => {
+    setupDryRunMocks();
+    const route = await import("@/app/api/chat/dry-run/route");
+
+    const response = await route.POST(
+      new NextRequest("http://localhost/api/chat/dry-run", {
+        method: "POST",
+        body: JSON.stringify({
+          mode: "general",
+          message: "ok",
+          thinkingLevel: "medium",
+          routerMode: "auto",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      routeTrace: {
+        requestClass: string;
+        inputs: { requestClass: string };
+        stepsSkipped: Array<{ step: string; reason: string }>;
+      };
+    };
+
+    expect(payload.routeTrace.requestClass).toBe("T0");
+    expect(payload.routeTrace.inputs.requestClass).toBe("T0");
+    expect(payload.routeTrace.stepsSkipped.some((row) => row.step === "autoSettings")).toBe(true);
+  });
+
   it("honors manual routing lock for selected model", async () => {
     setupDryRunMocks();
     const route = await import("@/app/api/chat/dry-run/route");

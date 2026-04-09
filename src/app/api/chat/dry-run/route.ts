@@ -3,9 +3,11 @@ import { requireActor } from "@/lib/auth-server";
 import { convexQuery } from "@/lib/convex-server";
 import { ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
-import { classifyComplexity, classifyRequest, runAutoSettingsPipeline } from "@/lib/auto-settings";
+import { classifyRequest, runAutoSettingsPipeline } from "@/lib/auto-settings";
+import { buildClassifierInput, validateClassifierDecision, validateClassifierInput } from "@/lib/orchestrator/classifier-contract";
 import { PipelineController } from "@/lib/orchestrator/pipeline-controller";
 import { selectModelForPhase } from "@/lib/routing/phase-router";
+import { MODEL_CONFIG } from "@/lib/model-config";
 import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
 import { safeStudyMode, type StudyMode } from "@/types";
 
@@ -100,48 +102,23 @@ export async function POST(request: NextRequest) {
       searchMode: body.autoSettings?.searchMode ?? "auto",
     };
 
-    const earlyComplexity = classifyComplexity(normalizedMessage);
-    const earlyClassification = classifyRequest({
+    const auto = await runAutoSettingsPipeline({
       message: normalizedMessage,
-      complexity: earlyComplexity,
       mode: safeMode,
       hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
       isFirstMessage: false,
+      currentThinkingLevel: body.thinkingLevel,
       spendingTier: budget.tier,
+      autoEnhancePrompt: autoSettings.enhancePrompt,
+      autoThinking: autoSettings.autoThinking,
+      autoSearch: autoSettings.autoSearch,
+      enhanceMode: autoSettings.enhanceMode,
+      thinkingMode: autoSettings.thinkingMode,
+      searchMode: autoSettings.searchMode,
+      skipModelCalls: true,
     });
-    const auto: Awaited<ReturnType<typeof runAutoSettingsPipeline>> =
-      earlyClassification.requestClass === "T0"
-        ? {
-            message: normalizedMessage,
-            promptEnhanced: false,
-            searchEnabled: false,
-            thinkingLevel: "low",
-            complexity: earlyComplexity,
-            requestClass: earlyClassification.requestClass,
-            assignmentLevel: earlyClassification.assignmentLevel,
-            classificationReason: earlyClassification.reason,
-            promptCategory: "general",
-            questionType: "other",
-            isMultipart: false,
-            suggestedMode: null,
-          }
-        : await runAutoSettingsPipeline({
-            message: normalizedMessage,
-            mode: safeMode,
-            hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
-            isFirstMessage: false,
-            currentThinkingLevel: body.thinkingLevel,
-            spendingTier: budget.tier,
-            autoEnhancePrompt: autoSettings.enhancePrompt,
-            autoThinking: autoSettings.autoThinking,
-            autoSearch: autoSettings.autoSearch,
-            enhanceMode: autoSettings.enhanceMode,
-            thinkingMode: autoSettings.thinkingMode,
-            searchMode: autoSettings.searchMode,
-            skipModelCalls: true,
-          });
     const requestClassification = classifyRequest({
-      message: auto.message,
+      message: normalizedMessage,
       complexity: auto.complexity,
       mode: safeMode,
       hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
@@ -155,6 +132,15 @@ export async function POST(request: NextRequest) {
       requestClass: requestClassification.requestClass,
       classificationReason: requestClassification.reason,
     });
+    if (requestClassification.requestClass === "T0") {
+      pipelineController.markStageSkipped("autoSettings", "Skipped for trivial filler T0 request.");
+      auto.message = normalizedMessage;
+      auto.promptEnhanced = false;
+      auto.searchEnabled = false;
+      auto.thinkingLevel = "low";
+    } else {
+      pipelineController.markStageCompleted("autoSettings");
+    }
     const costGates = pipelineController.applyCostGates({
       allowSearch: auto.searchEnabled,
       allowRag: Boolean(body.usePersonalResources),
@@ -164,6 +150,44 @@ export async function POST(request: NextRequest) {
       orchestratorEnabled: true,
       budgetSoftLimited: false,
     });
+    const classifierInput = buildClassifierInput({
+      message: normalizedMessage,
+      mode: safeMode,
+      conversationHistory: [],
+      userThinkingLevel: body.thinkingLevel,
+      routerMode: body.routerMode,
+      memoryEnabled: true,
+      usePersonalResources: Boolean(body.usePersonalResources),
+      availableAgents: [],
+    });
+    const classifierInputValid = validateClassifierInput(classifierInput);
+    const classifierDecisionSource = {
+      tier: requestClassification.requestClass,
+      skills: ["concise-chat"],
+      workspaceTarget: { kind: "none" as const },
+      agentId: null,
+      needsSearch: costGates.searchEnabled,
+      needsMemory: true,
+      needsRag: costGates.ragEnabled,
+      outputFormat: "conversational" as const,
+      thinkingLevel: auto.thinkingLevel,
+      confidence: requestClassification.requestClass === "T0" ? 0.98 : 0.82,
+    };
+    const classifierValidation = classifierInputValid
+      ? validateClassifierDecision(classifierDecisionSource, classifierInput.availableSkills)
+      : { ok: false as const, error: "Classifier input payload is malformed." };
+    if (!classifierValidation.ok) {
+      return Response.json({ error: "Classifier contract invalid." }, { status: 500 });
+    }
+    const classifierDecision = classifierValidation.value;
+    const classifierMeta = {
+      modelId: MODEL_CONFIG.smartCheap,
+      modelLane: "cheap_classifier",
+      fallbackUsed: false,
+      timedOut: false,
+      durationMs: 0,
+    };
+    pipelineController.markStageCompleted("classifyRequest");
     pipelineController.markStageCompleted("modelSelection");
 
     const routingMode = autoSettings.autoModel ? body.routerMode : "manual";
@@ -232,6 +256,13 @@ export async function POST(request: NextRequest) {
           assignmentLevel: auto.assignmentLevel,
           requestClass: auto.requestClass,
           classificationReason: auto.classificationReason,
+          classifierInput,
+          classifierDecision,
+          classifierMeta,
+          modelLanes: {
+            classifier: classifierMeta.modelLane,
+            generation: routeDecision.lane,
+          },
         },
         candidates: routeDecision.candidates,
         selected: {
@@ -246,6 +277,9 @@ export async function POST(request: NextRequest) {
         assignmentLevel: auto.assignmentLevel,
         requestClass: auto.requestClass,
         classificationReason: auto.classificationReason,
+        classifierInput,
+        classifierDecision,
+        classifierMeta,
         stepsExecuted: pipelineController.getState().completedStages,
         stepsSkipped: pipelineController.getState().skippedStages.map((row) => ({
           step: row.step,

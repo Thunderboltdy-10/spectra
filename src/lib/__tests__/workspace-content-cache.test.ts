@@ -8,6 +8,7 @@ function createContent(id: string) {
     plannerItems: [],
     artifacts: [],
     widgets: [],
+    ghosts: [],
     hubQuickNotes: [],
     hubDeadlines: [],
     hubActivity: [],

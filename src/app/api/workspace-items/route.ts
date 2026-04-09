@@ -35,6 +35,18 @@ export async function GET(request: NextRequest) {
       return ok({ mutations });
     }
 
+    if (action === "listGhosts") {
+      const workstreamId = params.get("workstreamId");
+      if (!workstreamId) return badRequest("workstreamId is required");
+      const result = await convexQuery("ghosts:listVisible", {
+        actorClerkId: actor.clerkId,
+        workstreamId,
+        sessionKey: params.get("sessionKey") ?? undefined,
+        editingActive: params.get("editingActive") === "true",
+      });
+      return ok(result);
+    }
+
     if (action === "search") {
       const q = params.get("q") ?? "";
       const result = await convexQuery("workspaceItems:globalSearch", {
@@ -274,6 +286,42 @@ export async function POST(request: NextRequest) {
       const result = await convexMutation("workspaceItems:revertMutation", {
         actorClerkId: actor.clerkId,
         mutationId,
+      });
+      return ok(result);
+    }
+
+    if (action === "markGhostsVisible") {
+      const workstreamId = typeof body.workstreamId === "string" ? body.workstreamId : undefined;
+      const sessionKey = typeof body.sessionKey === "string" ? body.sessionKey : undefined;
+      const visibleGhostIds = Array.isArray(body.visibleGhostIds)
+        ? body.visibleGhostIds.filter((value): value is string => typeof value === "string")
+        : [];
+      if (!workstreamId || !sessionKey) return badRequest("workstreamId and sessionKey are required");
+      const result = await convexMutation("ghosts:markVisible", {
+        actorClerkId: actor.clerkId,
+        workstreamId,
+        sessionKey,
+        visibleGhostIds,
+      });
+      return ok(result);
+    }
+
+    if (action === "acceptGhost") {
+      const ghostId = typeof body.ghostId === "string" ? body.ghostId : undefined;
+      if (!ghostId) return badRequest("ghostId is required");
+      const result = await convexMutation("ghosts:accept", {
+        actorClerkId: actor.clerkId,
+        ghostId,
+      });
+      return ok(result);
+    }
+
+    if (action === "dismissGhost") {
+      const ghostId = typeof body.ghostId === "string" ? body.ghostId : undefined;
+      if (!ghostId) return badRequest("ghostId is required");
+      const result = await convexMutation("ghosts:dismiss", {
+        actorClerkId: actor.clerkId,
+        ghostId,
       });
       return ok(result);
     }

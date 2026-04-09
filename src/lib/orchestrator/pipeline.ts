@@ -14,7 +14,6 @@ import {
   toOpenRouterMessages,
 } from "@/lib/orchestrator/compose";
 import {
-  classifyComplexity,
   classifyExplainDepth,
   classifyRequest,
   parseUserDirectives,
@@ -63,6 +62,12 @@ import {
 import { buildRoutePlan } from "@/lib/orchestrator/route-plan";
 import { PipelineController } from "@/lib/orchestrator/pipeline-controller";
 import { formatRuntimeSkillBlock, selectRuntimeSkills } from "@/lib/orchestrator/skills";
+import {
+  buildClassifierInput,
+  validateClassifierDecision,
+  validateClassifierInput,
+  type ClassifierDecision,
+} from "@/lib/orchestrator/classifier-contract";
 import { runAssistantStreaming, runCollaborativeStreaming } from "@/lib/orchestrator/streaming";
 import { getOpenRouterToolsForAssignmentLevel, formatToolUsageGuidance } from "@/lib/orchestrator/tool-definitions";
 import { executeOrchestratorTool } from "@/lib/orchestrator/tool-executor";
@@ -89,12 +94,16 @@ import {
 import { generatePromptAwareClarification } from "@/lib/orchestrator/clarification-generator";
 import { formatSchoolNow } from "@/lib/timezone";
 import { recordOpenRouterUsage } from "@/lib/usage-tracking";
+import { MODEL_CONFIG } from "@/lib/model-config";
 import type { ModelRouteResult, RouteTrace, StudyMode } from "@/types";
 
 type ChatRequestBody = {
   chatId?: string;
   packId?: string;
   agentId?: string;
+  workstreamId?: string;
+  artifactId?: string;
+  scopeLevel?: "global" | "workspace" | "artifact";
   clientMessageId?: string;
   mode: StudyMode;
   message: string;
@@ -143,6 +152,12 @@ type AgentSnapshot = {
   guidelinesSummary?: string;
   guidelinesTopicMap?: string[];
 };
+
+function classifierOutputFormatForRoutePlan(outputFormat: string | undefined, fallback: string) {
+  return outputFormat ?? fallback;
+}
+
+const CLASSIFIER_MODEL_LANE = "cheap_classifier";
 
 type StructuredError = {
   code: string;
@@ -362,6 +377,45 @@ function isParentMessageValidatorError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error ?? "");
   const lower = message.toLowerCase();
   return lower.includes("argumentvalidationerror") && lower.includes("parentmessageid");
+}
+
+export function extractVisualArtifactFromResponse(params: {
+  response: string;
+  effectiveMode: StudyMode;
+  routePlan: { modeContract: { outputFormat: string } };
+  runtimeSkills: Array<{ id: string }>;
+}) {
+  const visualSkillSelected = params.runtimeSkills.some((skill) => skill.id === "spectra-visual-skill");
+  const visualFormat = params.routePlan.modeContract.outputFormat === "explanation_with_visual"
+    || params.routePlan.modeContract.outputFormat === "visual_artifact";
+  const visualRequest = visualSkillSelected || visualFormat;
+  if (!visualRequest) return null;
+
+  const svgMatch = params.response.match(/<svg[\s\S]*?<\/svg>/i);
+  if (svgMatch) {
+    const svg = svgMatch[0].trim();
+    const titleMatch = svg.match(/<title>([\s\S]*?)<\/title>/i);
+    const title = titleMatch?.[1]?.replace(/\s+/g, " ").trim() || "Spectra visual";
+    const summary = params.response
+      .replace(svg, " ")
+      .replace(/[`#>*_-]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return {
+      title,
+      content: svg,
+      summary,
+      renderMode: "visualization",
+      type: "visualization" as const,
+      category: "visualizations" as const,
+      renderProps: {
+        visualKind: "svg",
+        svg,
+      },
+    };
+  }
+
+  return null;
 }
 
 async function appendAssistantMessageWithCitationFallback(params: {
@@ -718,48 +772,22 @@ export async function runChatPipeline(request: NextRequest) {
     searchMode: body.autoSettings?.searchMode ?? "auto",
   };
 
-  const earlyComplexity = classifyComplexity(normalizedMessage);
-  const earlyClassification = classifyRequest({
+  const auto = await runAutoSettingsPipeline({
+    actorClerkId: actor.clerkId,
     message: normalizedMessage,
-    complexity: earlyComplexity,
     mode: safeMode,
     hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
     isFirstMessage: !body.chatId,
     multiAgentRequested: Boolean(body.forceMultiAgent),
+    currentThinkingLevel: body.thinkingLevel,
     spendingTier: budget.tier,
+    autoEnhancePrompt: autoSettings.enhancePrompt,
+    autoThinking: autoSettings.autoThinking,
+    autoSearch: autoSettings.autoSearch,
+    enhanceMode: autoSettings.enhanceMode,
+    thinkingMode: autoSettings.thinkingMode,
+    searchMode: autoSettings.searchMode,
   });
-  const skipAutoSettingsForT0 = earlyClassification.requestClass === "T0";
-  const auto: Awaited<ReturnType<typeof runAutoSettingsPipeline>> = skipAutoSettingsForT0
-    ? {
-        message: normalizedMessage,
-        promptEnhanced: false,
-        searchEnabled: false,
-        thinkingLevel: "low",
-        complexity: earlyComplexity,
-        requestClass: earlyClassification.requestClass,
-        assignmentLevel: earlyClassification.assignmentLevel,
-        classificationReason: earlyClassification.reason,
-        promptCategory: "general",
-        questionType: "other",
-        isMultipart: false,
-        suggestedMode: null,
-      }
-    : await runAutoSettingsPipeline({
-        actorClerkId: actor.clerkId,
-        message: normalizedMessage,
-        mode: safeMode,
-        hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
-        isFirstMessage: !body.chatId,
-        multiAgentRequested: Boolean(body.forceMultiAgent),
-        currentThinkingLevel: body.thinkingLevel,
-        spendingTier: budget.tier,
-        autoEnhancePrompt: autoSettings.enhancePrompt,
-        autoThinking: autoSettings.autoThinking,
-        autoSearch: autoSettings.autoSearch,
-        enhanceMode: autoSettings.enhanceMode,
-        thinkingMode: autoSettings.thinkingMode,
-        searchMode: autoSettings.searchMode,
-      });
   const userDirectives = parseUserDirectives(normalizedMessage, { modelCatalog: catalog });
   if (userDirectives.forcedModel) {
     logger.info("user directive: forced model", {
@@ -779,7 +807,7 @@ export async function runChatPipeline(request: NextRequest) {
     });
   }
   logger.info("auto-settings complete", {
-    skippedForT0: skipAutoSettingsForT0,
+    skippedForT0: false,
     promptEnhanced: auto.promptEnhanced,
     searchEnabled: auto.searchEnabled,
     promptCategory: auto.promptCategory,
@@ -998,6 +1026,12 @@ export async function runChatPipeline(request: NextRequest) {
     typeof (chatData.chat as { workstreamId?: unknown }).workstreamId === "string"
       ? String((chatData.chat as { workstreamId?: unknown }).workstreamId)
       : undefined;
+  // Allow client-specified scope metadata to override or supplement DB values
+  if (!activeWorkstreamId && body.workstreamId) {
+    activeWorkstreamId = body.workstreamId;
+  }
+  const clientArtifactId = body.artifactId;
+  const clientScopeLevel = body.scopeLevel;
   const [
     workstreamCandidates,
     initialActiveWorkstream,
@@ -1275,7 +1309,7 @@ export async function runChatPipeline(request: NextRequest) {
     !/\b(about|on|for|regarding|the|topic)\b/i.test(normalizedMessage);
 
   const requestClassification = classifyRequest({
-    message: auto.message,
+    message: normalizedMessage,
     complexity: auto.complexity,
     mode: effectiveMode,
     hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
@@ -1291,8 +1325,12 @@ export async function runChatPipeline(request: NextRequest) {
     requestClass: requestClassification.requestClass,
     classificationReason: requestClassification.reason,
   });
-  if (skipAutoSettingsForT0) {
-    pipelineController.markStageSkipped("autoSettings", "Skipped for T0 request class.");
+  if (requestClassification.requestClass === "T0") {
+    auto.message = normalizedMessage;
+    auto.promptEnhanced = false;
+    auto.searchEnabled = false;
+    auto.thinkingLevel = "low";
+    pipelineController.markStageSkipped("autoSettings", "Skipped for trivial filler T0 request.");
   } else {
     pipelineController.markStageCompleted("autoSettings");
   }
@@ -1318,7 +1356,12 @@ export async function runChatPipeline(request: NextRequest) {
     const availableAgents = (await convexQuery("agents:listAgents", {
       actorClerkId: actor.clerkId,
     })) as AgentSnapshot[];
-    const matched = matchAgentToMessage(auto.message, availableAgents);
+    const matched = await matchAgentToMessage(auto.message, availableAgents, {
+      linkedAgentId:
+        typeof (activeWorkstream as { linkedAgentId?: unknown } | null)?.linkedAgentId === "string"
+          ? String((activeWorkstream as { linkedAgentId?: unknown }).linkedAgentId)
+          : null,
+    });
     if (matched) {
       const matchedScore = Number(matched.score.toFixed(2));
       if (matched.score >= 0.7) {
@@ -1351,6 +1394,14 @@ export async function runChatPipeline(request: NextRequest) {
       }
     }
   }
+  const classifierAvailableAgents =
+    selectedAgent
+      ? [selectedAgent]
+      : !selectedAgent && (safeMode === "auto" || body.routerMode === "auto")
+        ? ((await convexQuery("agents:listAgents", {
+            actorClerkId: actor.clerkId,
+          })) as AgentSnapshot[])
+        : [];
   if (autoSelectedAgent?.id) {
     void convexMutation("chats:updateChatSettings", {
       actorClerkId: actor.clerkId,
@@ -1555,6 +1606,95 @@ export async function runChatPipeline(request: NextRequest) {
     threadContext: buildThreadContext(),
     schoolSoulVersion: schoolSoulCapsule.version,
   });
+  // Resolve artifact title for scope context when client specifies an artifact
+  let clientArtifactTitle: string | undefined;
+  if (clientArtifactId) {
+    const matchedArtifact = activeWorkstreamArtifacts.find(
+      (a) => String((a as { _id?: unknown })._id) === clientArtifactId,
+    );
+    if (matchedArtifact && typeof (matchedArtifact as { title?: unknown }).title === "string") {
+      clientArtifactTitle = String((matchedArtifact as { title?: unknown }).title);
+    }
+  }
+  const classifierInput = buildClassifierInput({
+    message: auto.message,
+    mode: effectiveMode,
+    activeWorkstreamId,
+    activeWorkstreamTitle:
+      typeof (activeWorkstream as { title?: unknown } | undefined)?.title === "string"
+        ? String((activeWorkstream as { title?: unknown }).title)
+        : undefined,
+    activeArtifactId: clientArtifactId,
+    activeArtifactTitle: clientArtifactTitle,
+    scopeLevel: clientScopeLevel,
+    selectedAgentId: selectedAgent?._id,
+    conversationHistory: history.map((msg) => ({
+      role: msg.role === "assistant" ? "assistant" : "user",
+      content: msg.content,
+      mode: msg.mode as string | undefined,
+    })),
+    userThinkingLevel: body.thinkingLevel,
+    routerMode: body.routerMode,
+    memoryEnabled,
+    usePersonalResources: body.usePersonalResources,
+    availableAgents: classifierAvailableAgents,
+  });
+  const classifierInputValid = validateClassifierInput(classifierInput);
+  const classifierSkillIds = classifierInput.availableSkills;
+  const classifierDecisionSource = {
+    tier: auto.requestClass,
+    skills: selectRuntimeSkills({
+      message: auto.message,
+      mode: effectiveMode,
+      allowedToolBundles: routePlan.allowedToolBundles,
+      maxSkills: routePlan.responseBudget === "deep" ? 6 : 4,
+    }).map((skill) => skill.id),
+    workspaceTarget: activeWorkstreamId
+      ? { kind: "current" as const, workspaceId: activeWorkstreamId }
+      : routePlan.workstreamAssignment.status === "assigned"
+        ? { kind: "specific" as const, workspaceId: routePlan.workstreamAssignment.workstreamId }
+        : { kind: "none" as const },
+    agentId: selectedAgent?._id ?? autoSelectedAgent?.id ?? null,
+    needsSearch: routePlan.shouldUseWebSearch,
+    needsMemory: memoryEnabled && routePlan.shouldConsultMemory,
+    needsRag: routePlan.retrievalScopes.length > 0,
+    outputFormat: classifierOutputFormatForRoutePlan(routePlan.modeContract.outputFormat, "conversational"),
+    thinkingLevel: auto.thinkingLevel,
+    confidence:
+      routePlan.workstreamAssignment.status === "assigned"
+        ? Math.max(routePlan.workstreamAssignment.confidence, auto.requestClass === "T0" ? 0.9 : 0.72)
+        : auto.requestClass === "T0"
+          ? 0.96
+          : auto.requestClass === "T1"
+            ? 0.82
+            : auto.requestClass === "T2"
+              ? 0.76
+              : 0.71,
+  };
+  const classifierMeta = {
+    modelId: MODEL_CONFIG.smartCheap,
+    modelLane: CLASSIFIER_MODEL_LANE,
+    fallbackUsed: false,
+    fallbackReason: undefined as string | undefined,
+    timedOut: false,
+    durationMs: 0,
+  };
+  const classifierValidation = classifierInputValid
+    ? validateClassifierDecision(classifierDecisionSource, classifierSkillIds)
+    : { ok: false as const, error: "Classifier input payload is malformed." };
+  if (!classifierValidation.ok) {
+    logger.warn("classifier contract validation failed", {
+      error: classifierValidation.error,
+      inputValid: classifierInputValid,
+    });
+    return jsonError(500, {
+      code: "CLASSIFIER_CONTRACT_INVALID",
+      message: "Classifier output failed validation before pipeline consumption.",
+      retryable: true,
+    });
+  }
+  const classifierDecision: ClassifierDecision = classifierValidation.value;
+  pipelineController.markStageCompleted("classifyRequest");
   const initialWorkstreamAssignment = routePlan.workstreamAssignment;
   const routedWorkstreamId =
     routePlan.workstreamAssignment.status === "assigned"
@@ -1628,7 +1768,7 @@ export async function runChatPipeline(request: NextRequest) {
       auto.thinkingLevel = workstreamDefaultThinking;
     }
     const refreshedClassification = classifyRequest({
-      message: auto.message,
+      message: normalizedMessage,
       complexity: auto.complexity,
       mode: effectiveMode,
       hasAttachments: (body.attachmentTypes?.length ?? 0) > 0,
@@ -1660,8 +1800,8 @@ export async function runChatPipeline(request: NextRequest) {
         requestClass: refreshedClassification.requestClass,
         classificationReason: refreshedClassification.reason,
       });
-      if (skipAutoSettingsForT0) {
-        pipelineController.markStageSkipped("autoSettings", "Skipped for T0 request class.");
+      if (refreshedClassification.requestClass === "T0") {
+        pipelineController.markStageSkipped("autoSettings", "Skipped for trivial filler T0 request.");
       } else {
         pipelineController.markStageCompleted("autoSettings");
       }
@@ -1724,6 +1864,7 @@ export async function runChatPipeline(request: NextRequest) {
     ? selectRuntimeSkills({
         message: auto.message,
         mode: effectiveMode,
+        preferredSkillIds: classifierDecision.skills,
         allowedToolBundles: routePlan.allowedToolBundles,
         maxSkills: routePlan.responseBudget === "deep" ? 6 : 4,
       })
@@ -2176,8 +2317,8 @@ export async function runChatPipeline(request: NextRequest) {
         promptCategory: auto.promptCategory,
         questionType: auto.questionType,
         isMultipart: auto.isMultipart,
-        needsSearch: routePlan.shouldUseWebSearch || usedRecentContextCache,
-        needsRag: retrieval.citations.length > 0,
+        needsSearch: classifierDecision.needsSearch,
+        needsRag: classifierDecision.needsRag,
         needsVision: (body.attachmentTypes?.length ?? 0) > 0,
         needsTabular: false,
         spendingTier: budget.tier,
@@ -2193,6 +2334,13 @@ export async function runChatPipeline(request: NextRequest) {
         agentPreferredModel: selectedAgent?.preferredModel,
         detectedIntents,
         workstreamId: activeWorkstreamId,
+        classifierInput,
+        classifierDecision,
+        classifierMeta,
+        modelLanes: {
+          classifier: classifierMeta.modelLane,
+          generation: routeDecision.lane,
+        },
       },
       candidates: routeDecision.candidates,
       selected: {
@@ -2208,6 +2356,9 @@ export async function runChatPipeline(request: NextRequest) {
       assignmentLevel: auto.assignmentLevel,
       requestClass: auto.requestClass,
       classificationReason: auto.classificationReason,
+      classifierInput,
+      classifierDecision,
+      classifierMeta,
       stepsExecuted: pipelineSnapshot.completedStages,
       stepsSkipped: pipelineSnapshot.skippedStages.map((row) => ({
         step: row.step,
@@ -3682,6 +3833,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         });
         assistantPersisted = true;
 
+
         await send({
           type: "done",
           content: clarificationText,
@@ -4654,6 +4806,12 @@ BACK: [answer or definition]`,
 
       route.trace.toolchain = [...new Set(route.trace.toolchain)];
 
+      const visualArtifact = extractVisualArtifactFromResponse({
+        response: correctedResponse,
+        effectiveMode,
+        routePlan,
+        runtimeSkills,
+      });
       let citations = inferCitations(
         correctedResponse,
         retrieval.citations,
@@ -4735,6 +4893,55 @@ BACK: [answer or definition]`,
         routeTrace: route.trace,
       });
       assistantPersisted = true;
+
+      if (visualArtifact && activeWorkstreamId) {
+        try {
+          const visualArtifactId = await convexMutation<
+            {
+              actorClerkId: string;
+              type: string;
+              title: string;
+              content: string;
+              contentPlaintext: string;
+              workstreamId?: string;
+              sourceType?: string;
+              linkedChatId?: string;
+              sourceMessageId?: string;
+              createdAt?: number;
+            },
+            string
+          >("artifacts:create", {
+            actorClerkId: actor.clerkId,
+            type: visualArtifact.type,
+            title: visualArtifact.title,
+            content: visualArtifact.content,
+            contentPlaintext: visualArtifact.summary || visualArtifact.title,
+            workstreamId: activeWorkstreamId,
+            sourceType: "ai_generated",
+            linkedChatId: chatId,
+            sourceMessageId: appended.messageId,
+          });
+
+          await convexMutation("workspaceItems:updateBySourceArtifact", {
+            actorClerkId: actor.clerkId,
+            sourceArtifactId: visualArtifactId,
+            renderMode: visualArtifact.renderMode,
+            title: visualArtifact.title,
+            contentSummary: visualArtifact.summary || visualArtifact.title,
+            renderProps: visualArtifact.renderProps,
+            provenanceSource: "ai",
+            provenanceAction: "created",
+            mutationSummary: `AI rendered visual artifact ${visualArtifact.title}`,
+          }).catch(() => {});
+
+          route.trace.toolchain.push("spectra_visual_dual_render");
+        } catch (error) {
+          logger.warn("visual artifact persistence failed", {
+            chatId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
 
       const catalogPricing = resolveCatalogPricing(modelUsed);
       const pricing =

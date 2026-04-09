@@ -59,6 +59,8 @@ const DOMAIN_TERMS = [
   "synthesis",
 ];
 
+const T0_FILLER_REGEX = /^(ok|yes|no|thanks|got it|sure|hi|hello|cool|nice|wow|hm+|ah+|lol|yep|nope)$/i;
+
 export type PromptCategory =
   | "code"
   | "math_science"
@@ -423,7 +425,8 @@ export function classifyRequest(params: {
 
   const t0Eligible =
     complexity === "simple"
-    && normalizedMessage.length < 30
+    && normalizedMessage.length < 15
+    && T0_FILLER_REGEX.test(normalizedMessage)
     && !hasAttachments
     && (mode === "auto" || mode === "general" || mode === "tutor")
     && !isFirstMessage
@@ -448,7 +451,7 @@ export function classifyRequest(params: {
     return {
       requestClass: "T0",
       assignmentLevel: "L0",
-      reason: "Short, simple follow-up with no attachments or search intent.",
+      reason: "Trivial filler follow-up matched the explicit T0 filler gate.",
     };
   }
 

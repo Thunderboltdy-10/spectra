@@ -10,6 +10,7 @@ export type RegisteredSkill = {
   category: SkillCategory;
   summary: string;
   guidance: string[];
+  prompt?: string;
   appliesToModes?: StudyMode[];
   trigger?: RegExp;
   requiredToolBundles?: Array<"skills" | "search" | "retrieval" | "memory" | "artifact" | "multi_agent">;
@@ -39,6 +40,18 @@ function markdownToGuidance(markdown?: string) {
 }
 
 const COMMUNITY_SKILLS: RegisteredSkill[] = [
+  {
+    id: "spectra-visual-skill",
+    name: "Spectra Visual Skill",
+    category: "visualization",
+    summary: "Produce Spectra-native SVG and sandboxed interactive visuals that dual-render to thread and workspace.",
+    guidance: markdownToGuidance(readSkillMarkdown("spectra-visual-skill.md")),
+    prompt: readSkillMarkdown("spectra-visual-skill.md"),
+    appliesToModes: ["document", "research", "explain", "general", "tutor"],
+    trigger: /\b(diagram|chart|visual|visualize|timeline|concept map|mind map|svg|flowchart|schematic|infographic|interactive|simulation|render)\b/i,
+    requiredToolBundles: ["skills", "artifact"],
+    sourcePath: "/public/skills/spectra-visual-skill.md",
+  },
   {
     id: "community-mermaid-diagrams",
     name: "Mermaid Diagram Generation",
@@ -171,6 +184,7 @@ const SKILL_LIBRARY: RegisteredSkill[] = [...BUILTIN_SKILLS, ...COMMUNITY_SKILLS
   guidance: skill.guidance.length > 0
     ? skill.guidance
     : ["Follow best practices for this skill category and keep output actionable."],
+  prompt: skill.prompt,
 }));
 
 export function listRegisteredSkills() {
@@ -185,12 +199,17 @@ export function resolveSkillsForContext(params: {
 }) {
   const maxSkills = Math.max(1, Math.min(10, params.maxSkills ?? 5));
   const bundles = new Set(params.allowedToolBundles ?? []);
+  const normalizedMessage = params.message.trim();
+  const hasVisualIntent = /\b(diagram|chart|visual|visualize|timeline|concept map|mind map|svg|flowchart|schematic|infographic|interactive|simulation|render)\b/i.test(normalizedMessage);
   const filtered = SKILL_LIBRARY.filter((skill) => {
     if (!skill.requiredToolBundles || skill.requiredToolBundles.length === 0) return true;
     return skill.requiredToolBundles.every((bundle) => bundles.has(bundle));
   });
 
-  const modeMatches = filtered.filter((skill) => skill.appliesToModes?.includes(params.mode));
+  const modeMatches = filtered.filter((skill) =>
+    skill.appliesToModes?.includes(params.mode)
+    && (skill.id !== "spectra-visual-skill" || hasVisualIntent)
+  );
   const triggerMatches = filtered.filter((skill) => skill.trigger?.test(params.message));
   const ordered = [...modeMatches, ...triggerMatches];
   const seen = new Set<string>();

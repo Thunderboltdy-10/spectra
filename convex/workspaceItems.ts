@@ -61,6 +61,12 @@ const vWorkspaceMutationStatus = v.union(
   v.literal("archived"),
 );
 
+const vTopicClusterMetadata = v.object({
+  clusterId: v.string(),
+  generatedTitle: v.string(),
+  userTitle: v.optional(v.string()),
+});
+
 function normalizeLegacyWorkspaceType(
   value: Doc<"workspaceItems">["type"] | undefined,
 ): Doc<"workspaceItems">["type"] {
@@ -296,6 +302,8 @@ export const update = mutation({
     renderProps: v.optional(v.any()),
     provenanceSource: v.optional(vWorkspaceMutationSource),
     provenanceAction: v.optional(v.string()),
+    topicCluster: v.optional(v.union(v.string(), v.null())),
+    clusterOverride: v.optional(v.union(v.string(), v.null())),
   },
   handler: async (ctx, args) => {
     const actor = await requireWorkspaceActor(ctx, args.actorClerkId);
@@ -330,6 +338,8 @@ export const update = mutation({
     if (args.renderProps !== undefined) updates.renderProps = args.renderProps;
     if (args.provenanceSource !== undefined) updates.provenanceSource = args.provenanceSource;
     if (args.provenanceAction !== undefined) updates.provenanceAction = args.provenanceAction.trim() || undefined;
+    if (args.topicCluster !== undefined) updates.topicCluster = args.topicCluster?.trim() || undefined;
+    if (args.clusterOverride !== undefined) updates.clusterOverride = args.clusterOverride?.trim() || undefined;
     if (args.itemType !== undefined || args.category !== undefined || args.renderMode !== undefined) {
       updates.category = resolveWorkspaceCategory({
         explicitCategory: args.category ?? existing.category,
@@ -374,9 +384,179 @@ export const update = mutation({
         renderProps: existing.renderProps,
         provenanceSource: existing.provenanceSource,
         provenanceAction: existing.provenanceAction,
+        topicCluster: existing.topicCluster,
+        clusterOverride: existing.clusterOverride,
       } }] },
     });
     return { success: true, mutationId };
+  },
+});
+
+export const saveTopicClusters = mutation({
+  args: {
+    actorClerkId: v.string(),
+    workstreamId: v.id("workstreams"),
+    clusters: v.array(vTopicClusterMetadata),
+    appliedAt: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireWorkspaceActor(ctx, args.actorClerkId);
+    await validateWorkspaceWorkstream(ctx, actor, args.workstreamId);
+
+    const now = Date.now();
+    const appliedAt = args.appliedAt ?? now;
+    const existing = await ctx.db
+      .query("workspaceTopicClusters")
+      .withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId))
+      .collect();
+
+    const nextByClusterId = new Map(
+      args.clusters.map((cluster) => [cluster.clusterId.trim(), cluster]),
+    );
+
+    for (const row of existing) {
+      if (!nextByClusterId.has(row.clusterId)) {
+        await ctx.db.delete(row._id);
+      }
+    }
+
+    for (const cluster of args.clusters) {
+      const clusterId = cluster.clusterId.trim();
+      const generatedTitle = cluster.generatedTitle.trim();
+      const userTitle = cluster.userTitle?.trim() || undefined;
+      const current = existing.find((row) => row.clusterId === clusterId) ?? null;
+
+      if (current) {
+        await ctx.db.patch(current._id, {
+          generatedTitle,
+          userTitle: userTitle ?? current.userTitle,
+          lastAppliedAt: appliedAt,
+          updatedAt: now,
+        });
+      } else {
+        await ctx.db.insert("workspaceTopicClusters", {
+          orgId: actor.orgId,
+          ownerUserId: actor._id,
+          workstreamId: args.workstreamId,
+          clusterId,
+          generatedTitle,
+          userTitle,
+          lastAppliedAt: appliedAt,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    }
+
+    return { success: true, clusterCount: args.clusters.length };
+  },
+});
+
+export const renameTopicCluster = mutation({
+  args: {
+    actorClerkId: v.string(),
+    workstreamId: v.id("workstreams"),
+    clusterId: v.string(),
+    userTitle: v.union(v.string(), v.null()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireWorkspaceActor(ctx, args.actorClerkId);
+    await validateWorkspaceWorkstream(ctx, actor, args.workstreamId);
+
+    const clusterId = args.clusterId.trim();
+    const record = await ctx.db
+      .query("workspaceTopicClusters")
+      .withIndex("by_workstream_cluster", (q) => q.eq("workstreamId", args.workstreamId).eq("clusterId", clusterId))
+      .unique();
+
+    if (!record || record.ownerUserId !== actor._id || record.orgId !== actor.orgId) {
+      throw new Error("Topic cluster not found");
+    }
+
+    const userTitle = args.userTitle?.trim() || undefined;
+    await ctx.db.patch(record._id, {
+      userTitle,
+      updatedAt: Date.now(),
+    });
+
+    return { success: true };
+  },
+});
+
+export const setTopicClusterOverride = mutation({
+  args: {
+    actorClerkId: v.string(),
+    itemId: v.id("workspaceItems"),
+    clusterId: v.union(v.string(), v.null()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireWorkspaceActor(ctx, args.actorClerkId);
+    const item = await assertWorkspaceItemOwnership(ctx, actor, args.itemId);
+    const clusterId = args.clusterId?.trim() || undefined;
+
+    await ctx.db.patch(item._id, {
+      clusterOverride: clusterId,
+      topicCluster: clusterId ?? item.topicCluster,
+      updatedAt: Date.now(),
+    });
+
+    return { success: true };
+  },
+});
+
+export const applyTopicClusterAssignments = mutation({
+  args: {
+    actorClerkId: v.string(),
+    workstreamId: v.id("workstreams"),
+    assignments: v.array(v.object({
+      itemId: v.id("workspaceItems"),
+      clusterId: v.union(v.string(), v.null()),
+    })),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireWorkspaceActor(ctx, args.actorClerkId);
+    await validateWorkspaceWorkstream(ctx, actor, args.workstreamId);
+
+    let updated = 0;
+    const normalized = args.assignments.map((assignment) => ({
+      itemId: assignment.itemId,
+      clusterId: assignment.clusterId?.trim() || undefined,
+    }));
+
+    for (const assignment of normalized) {
+      const item = await assertWorkspaceItemOwnership(ctx, actor, assignment.itemId);
+      if (item.workstreamId !== args.workstreamId) {
+        throw new Error("Workspace item not found");
+      }
+
+      if (item.clusterOverride) {
+        continue;
+      }
+
+      await ctx.db.patch(item._id, {
+        topicCluster: assignment.clusterId,
+        updatedAt: Date.now(),
+      });
+      updated += 1;
+    }
+
+    return { success: true, updated };
+  },
+});
+
+export const listTopicClusters = query({
+  args: {
+    actorClerkId: v.string(),
+    workstreamId: v.id("workstreams"),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireWorkspaceActor(ctx, args.actorClerkId);
+    await validateWorkspaceWorkstream(ctx, actor, args.workstreamId);
+
+    return ctx.db
+      .query("workspaceTopicClusters")
+      .withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId))
+      .collect();
   },
 });
 
@@ -744,6 +924,75 @@ export const createWidget = mutation({
     });
 
     return { itemId, mutationId };
+  },
+});
+
+export const updateBySourceArtifact = mutation({
+  args: {
+    actorClerkId: v.string(),
+    sourceArtifactId: v.id("artifacts"),
+    title: v.optional(v.string()),
+    contentSummary: v.optional(v.string()),
+    renderMode: v.optional(v.string()),
+    renderProps: v.optional(v.any()),
+    provenanceSource: v.optional(vWorkspaceMutationSource),
+    provenanceAction: v.optional(v.string()),
+    mutationSummary: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireWorkspaceActor(ctx, args.actorClerkId);
+    const existing = await ctx.db
+      .query("workspaceItems")
+      .withIndex("by_source_artifact", (q) => q.eq("sourceArtifactId", args.sourceArtifactId))
+      .collect()
+      .then((rows) => rows.find((row) => row.ownerUserId === actor._id && row.orgId === actor.orgId) ?? null);
+
+    if (!existing) {
+      throw new Error("Workspace item not found");
+    }
+
+    const before = {
+      title: existing.title,
+      contentSummary: existing.contentSummary,
+      renderMode: existing.renderMode,
+      renderProps: existing.renderProps,
+      provenanceSource: existing.provenanceSource,
+      provenanceAction: existing.provenanceAction,
+    };
+
+    const updates: Record<string, unknown> = { updatedAt: Date.now() };
+    if (args.title !== undefined) updates.title = normalizeWorkspaceTitle(args.title);
+    if (args.contentSummary !== undefined) updates.contentSummary = summarizeWorkspaceContent(args.contentSummary);
+    if (args.renderMode !== undefined) updates.renderMode = args.renderMode;
+    if (args.renderProps !== undefined) updates.renderProps = args.renderProps;
+    if (args.provenanceSource !== undefined) updates.provenanceSource = args.provenanceSource;
+    if (args.provenanceAction !== undefined) updates.provenanceAction = args.provenanceAction.trim() || undefined;
+    if (args.renderMode !== undefined) {
+      updates.category = resolveWorkspaceCategory({
+        explicitCategory: existing.category,
+        legacyType: existing.type,
+        renderMode: args.renderMode,
+        itemType: existing.itemType,
+      });
+    }
+
+    await ctx.db.patch(existing._id, updates);
+    const refreshed = await ctx.db.get(existing._id);
+
+    const mutationId = await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: existing.workstreamId,
+      targetItemIds: [existing._id],
+      mutationType: "update_widget",
+      source: args.provenanceSource ?? "ai",
+      summary: args.mutationSummary ?? `Updated widget ${existing.title}`,
+      before,
+      after: refreshed,
+      revertData: { kind: "patch_items", patches: [{ itemId: existing._id, fields: before }] },
+    });
+
+    return { success: true, mutationId, itemId: existing._id };
   },
 });
 

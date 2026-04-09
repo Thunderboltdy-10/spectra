@@ -1,5 +1,6 @@
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { getUserByClerkId } from "./helpers";
 
 export type WorkspaceMutationSource = "user" | "ai" | "system";
@@ -201,7 +202,7 @@ export function resolveWorkspaceCategory(params: {
 }
 
 export async function recordWorkspaceMutation(
-  ctx: Pick<MutationCtx, "db">,
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
   params: {
     orgId: Id<"orgs">;
     ownerUserId: Id<"users">;
@@ -251,6 +252,35 @@ export async function recordWorkspaceMutation(
         updatedAt: now,
       });
     }));
+  }
+
+  const ghostConfidenceTier =
+    params.source === "ai"
+      ? "high"
+      : params.source === "system"
+        ? "low"
+        : "medium";
+  const ghostConfidenceScore =
+    ghostConfidenceTier === "high"
+      ? 0.9
+      : ghostConfidenceTier === "medium"
+        ? 0.72
+        : 0.4;
+
+  if (targets.length > 0) {
+    await Promise.all(
+      targets.map((workstreamId) =>
+        ctx.scheduler.runAfter(0, internal.ghosts.runRegenerationForWorkstream, {
+          ownerUserId: params.ownerUserId,
+          orgId: params.orgId,
+          workstreamId,
+          sourceWorkspaceMutationId: mutationId,
+          trigger: params.mutationType,
+          confidenceTier: ghostConfidenceTier,
+          confidenceScore: ghostConfidenceScore,
+        }),
+      ),
+    );
   }
 
   return mutationId;

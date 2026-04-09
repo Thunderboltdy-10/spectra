@@ -25,6 +25,7 @@ import { ThinkingBlock } from "@/components/chat/thinking-block";
 import type { PanelType } from "@/stores/workspace-store";
 import { useChatPanel } from "@/hooks/use-chat-panel";
 import { useArtifactData } from "@/hooks/use-artifact-data";
+import { useEditorStore } from "@/stores/editor-store";
 import { cn } from "@/lib/utils";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { ArtifactAiSurface } from "@/components/artifacts/artifact-ai-surface";
@@ -179,6 +180,37 @@ function ChatPanelContent({
   const inputRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState("");
 
+  const { activeArtifactId } = useEditorStore();
+  const [linkedAgentId, setLinkedAgentId] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (!workstreamId) {
+      setLinkedAgentId(undefined);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/workstreams");
+        if (!response.ok) return;
+        const data = (await response.json()) as { workstreams?: Array<Record<string, unknown>> };
+        const current = data.workstreams?.find((item) => String(item._id ?? "") === workstreamId);
+        if (!cancelled) {
+          setLinkedAgentId(
+            typeof current?.linkedAgentId === "string" && current.linkedAgentId.length > 0
+              ? current.linkedAgentId
+              : undefined,
+          );
+        }
+      } catch {
+        if (!cancelled) setLinkedAgentId(undefined);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [workstreamId]);
+
   const {
     chatId,
     messages,
@@ -187,8 +219,10 @@ function ChatPanelContent({
     hydrateChat,
   } = useChatPanel({
     workstreamId,
+    artifactId: activeArtifactId,
+    agentId: linkedAgentId,
     threadType: "conversation",
-    initialChatId: threadId !== "new" ? threadId : null,
+    initialChatId: threadId,
     mode: "tutor",
     thinkingLevel: "low",
     routerMode: "auto",

@@ -307,6 +307,75 @@ export default defineSchema({
     .index("by_source_chat", ["sourceChatId"])
     .index("by_source_planner", ["sourcePlannerItemId"]),
 
+  workspaceTopicClusters: defineTable({
+    orgId: v.id("orgs"),
+    ownerUserId: v.id("users"),
+    workstreamId: v.id("workstreams"),
+    clusterId: v.string(),
+    generatedTitle: v.string(),
+    userTitle: v.optional(v.string()),
+    lastAppliedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_workstream", ["workstreamId"])
+    .index("by_workstream_cluster", ["workstreamId", "clusterId"]),
+
+  ghostSuggestions: defineTable({
+    orgId: v.id("orgs"),
+    ownerUserId: v.id("users"),
+    workstreamId: v.id("workstreams"),
+    linkedAgentId: v.optional(v.id("agents")),
+    sourceWorkspaceMutationId: v.optional(v.id("workspaceMutations")),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("accepted"),
+      v.literal("dismissed"),
+      v.literal("expired"),
+    ),
+    suggestionKind: v.union(
+      v.literal("note"),
+      v.literal("planner"),
+      v.literal("quiz"),
+      v.literal("flashcard_deck"),
+      v.literal("visualization"),
+      v.literal("code_project"),
+    ),
+    confidenceTier: v.union(
+      v.literal("high"),
+      v.literal("medium"),
+      v.literal("low"),
+    ),
+    confidenceScore: v.number(),
+    title: v.string(),
+    summary: v.optional(v.string()),
+    content: v.optional(v.string()),
+    renderMode: v.optional(v.string()),
+    category: v.optional(v.string()),
+    x: v.optional(v.number()),
+    y: v.optional(v.number()),
+    similarityKey: v.string(),
+    contextHash: v.string(),
+    contextSignals: v.array(v.string()),
+    resourceContext: v.optional(v.string()),
+    generationModel: v.string(),
+    modelLane: v.string(),
+    generationReason: v.string(),
+    unseenSessions: v.number(),
+    lastSeenSessionKey: v.optional(v.string()),
+    acceptedArtifactId: v.optional(v.id("artifacts")),
+    acceptedWorkspaceItemId: v.optional(v.id("workspaceItems")),
+    dismissedAt: v.optional(v.number()),
+    acceptedAt: v.optional(v.number()),
+    expiredAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_owner_workstream_status", ["ownerUserId", "workstreamId", "status"])
+    .index("by_workstream_status", ["workstreamId", "status"])
+    .index("by_similarity", ["ownerUserId", "similarityKey"])
+    .index("by_status_updated", ["status", "updatedAt"]),
+
   workspaceMutations: defineTable({
     orgId: v.id("orgs"),
     ownerUserId: v.id("users"),

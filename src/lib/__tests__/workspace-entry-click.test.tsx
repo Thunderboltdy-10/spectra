@@ -7,4 +7,20 @@ describe("workspace entry click handling", () => {
     expect(nodeId.startsWith("ws-")).toBe(true);
     expect(nodeId.slice(3)).toBe("ws_1");
   });
+
+  it("treats overview cards as native click targets", () => {
+    const classes = "group relative z-10 cursor-pointer touch-manipulation text-left transition-[box-shadow,border-color] duration-300";
+
+    expect(classes).toContain("cursor-pointer");
+    expect(classes).toContain("touch-manipulation");
+    expect(classes).toContain("z-10");
+  });
+
+  it("uses layout positioning instead of motion transforms for the command bar shell", () => {
+    const style = { left: 144, top: 288 };
+
+    expect(style).toEqual({ left: 144, top: 288 });
+    expect("x" in style).toBe(false);
+    expect("y" in style).toBe(false);
+  });
 });

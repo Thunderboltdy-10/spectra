@@ -76,6 +76,46 @@ describe("workspace orchestration route integration", () => {
     });
   });
 
+  it("resolves a quiz quick command to artifact creation with source chat context", async () => {
+    const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_workspace" });
+    const convexMutation = vi.fn().mockResolvedValue({ artifactId: "artifact_quiz_1" });
+
+    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery: vi.fn(), convexMutation }));
+
+    const route = await import("@/app/api/workspace-orchestration/route");
+    const response = await route.POST(
+      new NextRequest("http://localhost/api/workspace-orchestration", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "resolveCommand",
+          workstreamId: "ws_quiz",
+          sourceChatId: "chat_42",
+          query: "Create quiz: Stoichiometry basics",
+        }),
+      }),
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(convexMutation).toHaveBeenCalledWith("artifacts:create", expect.objectContaining({
+      actorClerkId: "user_workspace",
+      workstreamId: "ws_quiz",
+      sourceChatId: "chat_42",
+      type: "quiz",
+      title: "Stoichiometry basics",
+      editorMode: "ai_enhanced",
+      sourceType: "ai_generated",
+    }));
+    expect(payload).toMatchObject({
+      outcome: "artifact",
+      resolvedAction: "create_quiz",
+      artifactId: "artifact_quiz_1",
+      artifactType: "quiz",
+      title: "Stoichiometry basics",
+    });
+  });
+
   it("creates a visual workspace item through the workspace items route with AI provenance", async () => {
     const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_workspace" });
     const convexMutation = vi.fn().mockResolvedValue({ itemId: "widget_1", mutationId: "mut_widget_1" });
@@ -115,6 +155,32 @@ describe("workspace orchestration route integration", () => {
       category: "visualizations",
       provenanceSource: "ai",
     }));
+  });
+
+  it("returns authoritative batched workspace content payload", async () => {
+    const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_workspace" });
+    const convexQuery = vi.fn().mockResolvedValue({
+      workstreamId: "ws_1",
+      workspaceItems: [],
+      chats: [],
+      plannerItems: [],
+      artifacts: [],
+      topicClusters: [],
+    });
+
+    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation: vi.fn() }));
+
+    const route = await import("@/app/api/workspace-items/route");
+    const response = await route.GET(
+      new NextRequest("http://localhost/api/workspace-items?action=getWorkspaceContent&workstreamId=ws_1"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(convexQuery).toHaveBeenCalledWith("workspaceItems:getWorkspaceContent", {
+      actorClerkId: "user_workspace",
+      workstreamId: "ws_1",
+    });
   });
 });
 

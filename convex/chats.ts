@@ -356,6 +356,8 @@ export const createChat = mutation({
       throw new Error("Unauthorized");
     }
 
+    const agentId = args.agentId;
+
     const incomingThreadType = args.threadType ?? (args.artifactId ? "artifact_edit" : "conversation");
 
     const existingChats = await ctx.db
@@ -372,6 +374,7 @@ export const createChat = mutation({
           && chat.workstreamId === args.workstreamId
           && chat.artifactId === args.artifactId
           && chat.packId === args.packId
+          && chat.agentId === agentId
           && chat.threadType === incomingThreadType,
       );
 
@@ -386,7 +389,6 @@ export const createChat = mutation({
       }
     }
 
-    const agentId = args.agentId;
     if (agentId) {
       const agent = await ctx.db.get(agentId);
       if (!agent || agent.orgId !== actor.orgId) {

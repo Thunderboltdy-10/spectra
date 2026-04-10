@@ -269,7 +269,7 @@ export const ARTIFACT_TO_CANONICAL_WORKSPACE_TYPE: Record<
   timetable: "planner",
   note: "note",
   flashcard_deck: "flashcard_deck",
-  document: "note",
+  document: "export",
   code_project: "code",
   diagram: "visual",
   image: "visual",
@@ -295,7 +295,7 @@ export const LEGACY_TYPE_TO_CANONICAL_WORKSPACE_TYPE: Record<
   CanonicalWorkspaceType
 > = {
   thread: "thread",
-  document: "note",
+  document: "export",
   planner: "planner",
   board: "board",
   visualization: "visual",

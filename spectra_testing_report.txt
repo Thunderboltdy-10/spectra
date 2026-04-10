@@ -1,0 +1,207 @@
+
+﻿Comprehensive Testing Report: Spectra Workspace and Artifacts
+
+
+1. Workspace creation button missing or nonfunctional; cannot create new workspaces.
+2. Workspaces cannot be renamed; double‑click or rename field does nothing.
+3. No way to archive or delete a workspace; workspace management missing.
+4. Workspace ordering does not reflect last activity; items appear randomly.
+5. Clicking on workspace in dock does not load the workspace; you remain on current view.
+6. Workspaces sometimes appear as blank icons with no title or preview.
+7. The far‑zoom landscape shows tiny pills that are unreadable and unclickable.
+8. The radial arrangement of workspace cards conflicts with linear navigation.
+9. In far zoom, scroll pans horizontally instead of zooming; intuitive navigation broken.
+10. Zoom thresholds are abrupt; canvas jumps from far to mid zoom without smooth scaling.
+11. Keyboard shortcuts for zooming (Ctrl+ plus or minus) do not work as expected.
+12. Touchpad pinch gestures rarely recognized; zoom resets unexpectedly.
+13. You cannot center on a workspace; panning misaligns orientation.
+14. The “Hide Hub” button toggles entire UI but is misaligned and mis‑labeled.
+15. When zooming, content reflows unpredictably; items overlap or vanish.
+16. Workspaces do not fill most of the screen at mid zoom; they remain small.
+17. There’s no mini map or orientation indicator; user is easily lost.
+18. Scrollbars are missing; cannot rely on them for orientation.
+19. There’s no breadcrumb or context indicator of current workspace.
+20. The search or quick navigation to workspaces is absent.
+21. The canvas continues to render dashed outlines for groups even at deep zoom.
+22. Tint zones for groups are not subtle; they are heavy dashed rectangles.
+23. Items within a group do not align or snap; they overlap and drift.
+24. Groups cannot be resized or moved; dragging edges does nothing.
+25. The “dot” grid background remains visible at all zoom levels, cluttering the view.
+26. When zooming to deep edit, the workspace content remains static; does not reveal new controls.
+27. Semantic zoom tiers (glance, touch, deep edit) are not implemented; everything remains same.
+28. Artifact icons enlarge but do not show additional metadata or preview.
+29. The use of dotted backgrounds and dashed boxes gives a wireframe prototype feel.
+30. Text and icons become blurry on zoom due to scaling without re‑rendering.
+31. The workspace fails to maintain aspect ratio; items warp when resizing the window.
+32. Dragging across the canvas is laggy; items stutter and jerk.
+33. Attempting to multi‑select artifacts using shift‑click or marquee does nothing.
+34. Snap‑to‑grid or alignment guides are absent; results in messy layout.
+35. When dragging an artifact, there is no preview of drop location or group highlight.
+36. Collapsing or expanding groups is impossible; there is no control.
+37. Group labels cannot be edited or renamed.
+38. The grouping logic does not persist across sessions; items reposition randomly on reload.
+39. Topics grouping and timeline view modes are missing entirely.
+40. The “Planner” zone is fixed at top‑right and cannot be repositioned or resized.
+41. Dock icons on the left are vertically oriented but cannot be reordered or customized.
+42. The dock shows only icons, no labels, making it unclear which workspace is active.
+43. Hovering over dock icons does not reveal workspace names or previews.
+44. Active workspace indicator (blue dot) is faint and easy to miss.
+45. When there are more workspaces than screen height, the dock does not scroll.
+46. The creation “+” button at bottom left is misaligned and obstructs other elements.
+47. There is no drag‑and‑drop ability to reorder workspaces within the dock.
+48. Dock icons do not reflect last‑used ordering; they remain static.
+49. Edge‑bound widgets (planner, hub) can be dragged into the middle by accident.
+50. The bottom quick chat bar floats in the middle of the canvas instead of sticking to edge.
+
+51. Quick chat bar resizes unpredictably when typing long messages.
+52. The send button arrow on quick chat bar is off to the right with inconsistent spacing.
+53. There is no placeholder text hinting at AI capabilities or commands.
+54. Quick chat history resets when switching workspaces; messages vanish.
+55. The bar does not support multi‑line editing; pressing Enter sends prematurely.
+56. Quick chat bar often overlaps important content when you zoom into workspace.
+57. There is no ability to expand or collapse quick chat for more room.
+58. Quick chat scope indicator (chip for workspace thread) is hidden behind other elements.
+59. It does not display suggestions or auto‑completion for commands or features.
+60. Quick chat bar cannot be used to create artifacts directly; everything becomes a thread.
+61. Creating a note artifact via quick chat fails; resulting note does not appear on canvas.
+62. When using the dedicated artifact creation menu, new notes appear at the far left behind other items.
+63. There is no way to choose note color or style; all notes look identical.
+64. Code artifacts cannot be created; there is no option.
+65. Document imports (PDF) are missing; there is no file upload.
+66. Newly created artifacts sometimes appear outside the visible canvas; you have to search for them.
+67. Duplicate artifacts appear when creation is attempted multiple times due to no feedback.
+68. Editing note titles is impossible; double‑click does nothing.
+69. Editing note content requires opening the side panel; inline editing is missing.
+70. Notes do not auto‑save; if you navigate away, changes are lost.
+71. There is no undo or redo when editing notes; mistakes are permanent.
+72. Code artifacts display plain text; no syntax highlighting.
+73. Code cannot be executed or previewed within workspace.
+74. Diagrams or images cannot be inserted into notes.
+75. The “Mixed media” artifact type is not implemented; it’s just a placeholder.
+76. There is no search within workspace artifacts.
+77. Sorting or filtering artifacts by date, type, or status is absent.
+78. There is no indication of artifact’s last edited date or author.
+79. Artifacts cannot be dragged from one workspace to another.
+80. Deleting an artifact is inconsistent; some have a trash icon, others do not.
+81. The note editor uses markdown; but formatting icons (bold, italic) are missing.
+82. Text selection in notes is buggy; you cannot highlight across lines.
+83. Bulleted or numbered lists are not supported.
+84. Copy‑pasting from outside results in unformatted plain text.
+85. There is no color‑highlighting or annotation support.
+86. When editing code, tabs insert spaces randomly; indenting is inconsistent.
+87. The cursor often jumps to start of line when typing quickly.
+88. There is no find‑and‑replace functionality for notes or code.
+89. Spell check is absent; typos go unnoticed.
+90. You cannot resize the note editing area; it is fixed width.
+91. When editing notes in the side panel, the panel does not auto‑save on focus change.
+92. There is no collaborative editing; other users cannot see changes in real time.
+93. Comments or annotations are not supported on artifacts.
+94. For images or diagrams, there is no cropping or resizing tool.
+95. In threads, you cannot edit your messages after sending.
+96. Thread formatting options are limited; you cannot insert lists or code blocks.
+97. Copying text from threads sometimes copies hidden markdown syntax.
+98. The AI sometimes returns code or markdown in plain text making it unreadable.
+99. The deep edit panel’s width cannot be resized.
+100. The panel overlay often covers the entire workspace making it hard to reference content.
+
+101. Quick chat AI classification often misroutes requests; simple instructions spawn threads instead of artifacts.
+102. AI responses are slow and sometimes time out with no feedback.
+103. Quick chat cannot handle follow‑up queries; context is lost between messages.
+104. There is no ability to choose model type or temperature; settings absent.
+105. AI suggestions to create planner items are missing.
+106. The AI cannot link back to existing artifacts; it creates duplicates.
+107. Summaries produced by AI do not appear in the workspace; they vanish.
+108. The ghost items concept is not implemented; no confidence‑tier suggestions.
+109. Quick chat does not show badges or context chips to indicate scope (global vs workspace vs artifact).
+110. You cannot ask AI to search your workspace content; there is no retrieval.
+111. When AI fails, error messages are generic and unhelpful.
+112. AI sometimes returns random examples unrelated to workspace context.
+113. You cannot rename threads; they remain stuck with generic names.
+114. The AI cannot create diagrams or mixed media artifacts.
+115. Chat transcripts cannot be exported or saved.
+116. There is no mechanism to mark a thread as resolved or done.
+117. AI instructions to modify note content are not executed; they create new notes instead.
+118. The AI sometimes leaks system prompts or codes.
+119. There is no rating or feedback mechanism to improve AI responses.
+120. Quick chat fails to handle multi‑step commands; e.g., “create note and schedule plan” fails.
+121. Opening a thread triggers panel but not the workspace; the panel covers the note.
+122. The side panel sometimes opens blank, requiring refresh.
+123. Closing the panel doesn’t restore previous view; the workspace remains scrolled.
+124. Threads in panel do not sync with quick chat bar; duplicates occur.
+125. There is no back button to navigate previous threads or notes.
+126. Multiple panels cannot be opened side by side; there is only one.
+127. The panel cannot be detached or moved; it’s fixed on right.
+128. Panel transition animations are jarring; slide‑in effect stutters.
+129. When closing a panel, the quick chat bar resets to default state.
+130. Panel header often shows wrong title or truncated thread names.
+131. There is no display of participants or associated workspace in panel.
+132. The panel cannot be resized horizontally; limited screen real estate.
+133. The scroll position resets when new messages arrive; causing user to lose context.
+134. Panel search is missing; you cannot search within a thread.
+135. There is no button to convert a thread into a note or document.
+136. Files attached in threads cannot be downloaded; attachments vanish.
+137. Panel bottom input uses separate composer; not unified with quick chat.
+138. Notification badges for unread thread messages are missing.
+139. Panel tab bar (if multiple) is not implemented; only one panel at a time.
+140. Panel still uses dashed lines and placeholder icons reminiscent of old design.
+141. Moving artifacts or notes within workspace is not persisted; on refresh, positions reset.
+142. Newer edits are sometimes lost after a page reload; caching is broken.
+143. Sorting of items within groups resets; user arrangement is not saved.
+144. Toggling planner items done/undone does not persist across sessions.
+145. Undo/redo for drag operations is missing; mis‑drag cannot be undone.
+146. There is no history log of actions; you cannot revert to previous workspace state.
+147. The workspace fails to auto‑save frequently; network drop leads to data loss.
+148. Creating a note while offline results in silent failure; note disappears.
+149. Workspace names revert to previous names after refresh.
+150. Topic clusters or group renames are not saved; they revert on reload.
+
+151. Planner tasks created via AI vanish after leaving workspace.
+152. There is no integration with calendar or reminders; planner is static.
+153. Comments or threads attached to artifacts disappear after reload.
+154. Overlaps or z‑index of items sometimes revert to default layering.
+155. Pinning or starring important artifacts for quick access is not available.
+156. The workspace does not remember collapsed or expanded states for groups.
+157. Ghost items from AI do not get stored and vanish after page reload.
+158. Workspace zoom level resets to far zoom after page reload.
+159. Chat threads do not persist unsent drafts; you lose typed text when navigating away.
+160. There is no cross‑device syncing; changes on one device may not reflect on another.
+161. The canvas has noticeable lag when dragging items or zooming.
+162. Memory usage increases rapidly; after prolonged use the page becomes unresponsive.
+163. Loading a workspace takes several seconds; no loading indicator is displayed.
+164. When panning, frames per second drop; performance is not optimized.
+165. The site uses heavy animations even for simple transitions, causing jank.
+166. The quick chat bar appears only after other components have loaded, leading to delays.
+167. Caching of workspaces is unbounded; memory not freed when switching.
+168. The app does not implement lazy‑loading for heavy assets; all images load at once.
+169. Network requests are not batched; multiple calls lead to slow rendering.
+170. AI responses block UI rendering; they are not asynchronous.
+171. There is no offline mode or local cache; network drop kills the page.
+172. Scroll virtualization is missing; long lists of artifacts slow down drastically.
+173. Duplicate rendering occurs; same items are drawn multiple times.
+174. The event handling system triggers state updates too frequently.
+175. Debouncing or throttling for user input events is not implemented.
+176. The app keeps unnecessary data in React state, causing re‑renders.
+177. Focus timer draws constant frames even when not visible.
+178. When running in low‑end devices, the site crashes due to resource usage.
+179. The number of DOM nodes is excessive; virtualization not used.
+180. The overall performance fails the core web vitals; poor FID and LCP.
+181. The UI uses inconsistent fonts and font sizes across components.
+182. Color palette does not align with modern design guidelines; too muted.
+183. Buttons have inconsistent border radius and shadows.
+184. Icons are mismatched and unclear; some drawn by hand, others generic.
+185. The dotted canvas background is distracting.
+186. Dashed outlines around groups make the interface feel like a wireframe.
+187. Spacing and alignment are inconsistent; elements float.
+188. There is no dark mode.
+189. Many controls lack hover states or focus indicators; poor feedback.
+190. Keyboard navigation is nearly impossible; no tab order.
+191. Contrast is low; text not readable for vision‑impaired users.
+192. There are no ARIA labels on interactive elements; accessibility fails.
+193. Tooltips are missing; icons have no explanation.
+194. Buttons do not have accessible names; screen reader cannot describe them.
+195. The quick chat input has placeholder text but no label.
+196. The side panel’s close icon is small and hard to click.
+197. Focus order jumps unpredictably between nav items.
+198. There is no skip navigation link for screen readers.
+199. Color‑coded statuses are not accompanied by text; reliance on color alone.
+200. High‑density information like planner tasks are not grouped for readability.

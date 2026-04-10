@@ -191,10 +191,10 @@ export function getLifecycleVisuals(ws: Workstream): {
   dashed: boolean;
 } {
   if (ws.status === "archived") {
-    return { opacity: 0.2, scale: 0.8, dashed: true };
+    return { opacity: 0.25, scale: 0.85, dashed: false };
   }
   if (ws.status === "completed") {
-    return { opacity: 0.35, scale: 0.85, dashed: true };
+    return { opacity: 0.4, scale: 0.9, dashed: false };
   }
   // Check for quiet (no activity in 14+ days)
   if (ws.lastActivityAt) {

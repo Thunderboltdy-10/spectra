@@ -29,6 +29,14 @@ import type { Workstream } from '@/hooks/use-workspace-data';
 
 /* ─── Types ─────────────────────────────────────────────────────── */
 
+type ResolveCommandResult = {
+  outcome: 'chat' | 'planner' | 'artifact';
+  openPanel?: { type: string; id: string };
+  plannerItemId?: string;
+  artifactId?: string;
+  artifactType?: string;
+};
+
 interface EdgeUtilityOverlayProps {
   workstreams: Workstream[];
   primaryWorkstreamId?: string;
@@ -42,6 +50,8 @@ interface EdgeUtilityOverlayProps {
   onCreateItem?: (type: 'note' | 'code' | 'visual' | 'planner') => void;
   onNewWorkstream?: () => void;
   onOpenHub?: () => void;
+  onResolveCommand?: (params: { query: string; workstreamId?: string; artifactId?: string }) => Promise<ResolveCommandResult | null>;
+  onOpenPanel?: (type: 'chat' | 'note' | 'artifact' | 'planner' | 'route-trace', id: string) => void;
 }
 
 /* ─── Constants ─────────────────────────────────────────────────── */
@@ -62,7 +72,7 @@ function detectOutOfScope(query: string, scope: "artifact" | "workspace" | null)
 }
 
 const glassStyle =
-  'bg-[var(--bg-elevated)]/80 backdrop-blur-xl border border-[var(--border-default)]/40 shadow-[0_8px_32px_-8px_rgba(0,0,0,0.2)]';
+  'bg-[var(--bg-elevated)]/85 backdrop-blur-2xl border border-[var(--border-default)]/30 shadow-[0_12px_40px_-12px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.04)]';
 
 type CreateItemType = 'note' | 'code' | 'visual' | 'planner' | 'workspace' | 'ai';
 
@@ -116,9 +126,15 @@ function useBoundedUtilityOffset(
   const rawY = utilityPositions[key]?.y ?? 0;
   const boundedY = getViewportBoundedY(rawY, baseInset, elementHeight);
 
+  // Only correct the store when the difference is significant (>1px) to avoid
+  // infinite update loops caused by floating-point drift.
+  const correctedRef = useRef(false);
   useEffect(() => {
-    if (rawY !== boundedY) {
+    if (Math.abs(rawY - boundedY) > 1 && !correctedRef.current) {
+      correctedRef.current = true;
       setUtilityPosition(key, { x: 0, y: boundedY });
+    } else {
+      correctedRef.current = false;
     }
   }, [baseInset, boundedY, elementHeight, key, rawY, setUtilityPosition]);
 
@@ -216,7 +232,8 @@ function WorkspaceDock({
 
   return (
     <div
-      className="absolute left-6 top-1/2 -translate-y-1/2 z-40"
+      className="absolute top-1/2 -translate-y-1/2 z-40"
+      style={{ left: EDGE_MARGIN }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -360,7 +377,8 @@ function FocusTimer() {
 
   return (
     <div
-      className="absolute bottom-10 right-6 z-40"
+      className="absolute z-40"
+      style={{ bottom: EDGE_MARGIN + 16, right: EDGE_MARGIN }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -475,11 +493,11 @@ function BackgroundModeToggle() {
   return (
     <div
       className={cn(
-        'absolute right-6 z-40',
+        'absolute z-40',
         glassStyle,
         'rounded-[26px] px-3 py-3',
       )}
-      style={{ bottom: EDGE_MARGIN + 72 }}
+      style={{ bottom: EDGE_MARGIN + 72, right: EDGE_MARGIN }}
       data-testid="background-mode-toggle"
     >
       <div className="mb-2 px-1">
@@ -530,7 +548,10 @@ function UnifiedCommandBar({
   onQuickChat,
   onCreateItem,
   onNewWorkstream,
+  onResolveCommand,
+  onOpenPanel,
   hidden,
+  panelOpen,
 }: {
   workstreams: Workstream[];
   primaryWorkstreamId?: string;
@@ -541,12 +562,16 @@ function UnifiedCommandBar({
   onQuickChat?: (message: string) => void;
   onCreateItem?: (type: 'note' | 'code' | 'visual' | 'planner') => void;
   onNewWorkstream?: () => void;
+  onResolveCommand?: (params: { query: string; workstreamId?: string; artifactId?: string }) => Promise<ResolveCommandResult | null>;
+  onOpenPanel?: (type: 'chat' | 'note' | 'artifact' | 'planner' | 'route-trace', id: string) => void;
   hidden?: boolean;
+  panelOpen?: boolean;
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState('');
   const [focused, setFocused] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [resolving, setResolving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const createRef = useRef<HTMLDivElement>(null);
@@ -591,29 +616,71 @@ function UnifiedCommandBar({
     return () => window.removeEventListener('pointerdown', handler, true);
   }, [createOpen]);
 
-  const handleSend = useCallback(() => {
+  // Cmd/Ctrl+K to focus the command input
+  useEffect(() => {
+    if (hidden) return;
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [hidden]);
+
+  const handleSend = useCallback(async () => {
     const msg = draft.trim();
-    if (!msg) return;
+    if (!msg || resolving) return;
+
+    setDraft('');
+    inputRef.current?.blur();
+
+    // First, try resolving the command through the workspace orchestration API.
+    // This handles structured intents like "create a note: X", "add task: Y", etc.
+    if (onResolveCommand) {
+      setResolving(true);
+      try {
+        const workstreamId = primaryWorkstreamId && primaryWorkstreamId !== '__hub__' ? primaryWorkstreamId : undefined;
+        const result = await onResolveCommand({
+          query: msg,
+          workstreamId,
+          artifactId: activeArtifactId,
+        });
+        if (result && result.outcome !== 'chat') {
+          // Command was resolved into a concrete action (planner item, artifact, etc.)
+          if (result.openPanel && onOpenPanel) {
+            const panelType = result.openPanel.type as 'chat' | 'note' | 'artifact' | 'planner' | 'route-trace';
+            onOpenPanel(panelType, result.openPanel.id);
+          }
+          return;
+        }
+      } catch {
+        // Fall through to chat if resolution fails
+      } finally {
+        setResolving(false);
+      }
+    }
+
+    // Fallback: route to chat
     if (onQuickChat) {
       onQuickChat(msg);
     } else {
       router.push(`/chat?q=${encodeURIComponent(msg)}`);
     }
-    setDraft('');
-    inputRef.current?.blur();
-  }, [draft, onQuickChat, router]);
+  }, [draft, resolving, onResolveCommand, onQuickChat, router, primaryWorkstreamId, activeArtifactId, onOpenPanel]);
 
   const handleCreateClick = (item: CreateMenuItem) => {
     setCreateOpen(false);
     if (item.type === 'workspace') {
       onNewWorkstream?.();
     } else if (item.type === 'ai') {
-      // Focus the input and pre-fill
-      setDraft('Create ');
+      // Focus the input and pre-fill with a guided prompt.
+      // The resolveCommand API parses "create a note: X" / "create task: Y" / "create code: Z" patterns.
+      setDraft('Create a ');
       setTimeout(() => {
         inputRef.current?.focus();
-        // Move cursor to end
-        const len = 'Create '.length;
+        const len = 'Create a '.length;
         inputRef.current?.setSelectionRange(len, len);
       }, 50);
     } else {
@@ -628,6 +695,7 @@ function UnifiedCommandBar({
       className={cn(
         'absolute left-1/2 z-40 -translate-x-1/2 transition-all duration-300',
         hidden && 'pointer-events-none opacity-0 translate-y-6',
+        panelOpen && !hidden && 'opacity-70 scale-[0.96] translate-y-1',
       )}
       style={{ bottom: EDGE_MARGIN }}
     >
@@ -658,14 +726,14 @@ function UnifiedCommandBar({
 
         {/* The command bar capsule */}
         <motion.div
-          animate={{ width: focused ? 560 : 480 }}
+          animate={{ width: focused ? 620 : 520 }}
           transition={{ duration: 0.3, ease: EASE_SMOOTH }}
           className={cn(
-            'relative flex items-center gap-2 rounded-full px-2 py-1.5 transition-shadow duration-300',
+            'relative flex items-center gap-2 rounded-full px-2.5 py-2 transition-shadow duration-300',
             glassStyle,
             focused
-              ? 'shadow-[0_8px_40px_-8px_rgba(14,142,232,0.2),0_0_0_1px_var(--accent-cyan)/20]'
-              : 'hover:shadow-[0_12px_40px_-8px_rgba(0,0,0,0.25)]',
+              ? 'shadow-[0_12px_48px_-8px_rgba(14,142,232,0.2),0_0_0_1px_color-mix(in_oklab,var(--accent-cyan)_25%,transparent)]'
+              : 'hover:shadow-[0_16px_48px_-8px_rgba(0,0,0,0.3)]',
           )}
         >
           {/* + Create button */}
@@ -765,14 +833,15 @@ function UnifiedCommandBar({
               onKeyDown={e => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
-                  handleSend();
+                  void handleSend();
                 }
                 if (e.key === 'Escape') {
                   setDraft('');
                   inputRef.current?.blur();
+                  setFocused(false);
                 }
               }}
-              placeholder={isArtifactScoped ? `Edit ${activeArtifactTitle ?? "artifact"}…` : globalScope ? "Ask across all workspaces…" : `Ask in ${scopeLabel}…`}
+              placeholder={resolving ? 'Resolving…' : isArtifactScoped ? `Edit ${activeArtifactTitle ?? "artifact"}…` : globalScope ? "Ask or create across all workspaces…" : `Ask or create in ${scopeLabel}…`}
               className="w-full bg-transparent px-2 py-1.5 text-[13px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none"
             />
             {focused && isArtifactScoped && detectOutOfScope(draft, "artifact") && (
@@ -780,27 +849,42 @@ function UnifiedCommandBar({
                 {detectOutOfScope(draft, "artifact")}
               </span>
             )}
+            {focused && !isArtifactScoped && /^(create|add|make|write)\s/i.test(draft.trim()) && (
+              <span className="px-2 text-[10px] text-[var(--text-tertiary)]">
+                Try: &quot;create a note: topic&quot;, &quot;add task: name&quot;, or &quot;create code: function name&quot;
+              </span>
+            )}
           </div>
 
-          <div className="hidden shrink-0 items-center gap-1 rounded-full border border-[var(--border-default)]/50 bg-[var(--bg-primary)]/55 px-2 py-1 text-[10px] font-medium text-[var(--text-secondary)] md:flex">
-            <Brain className="h-3 w-3" />
-            <span>{isArtifactScoped ? 'Artifact edit' : globalScope ? 'Hint only' : 'Scoped hint'}</span>
-          </div>
+          {focused ? (
+            <div className="hidden shrink-0 items-center gap-1 rounded-full border border-[var(--border-default)]/50 bg-[var(--bg-primary)]/55 px-2 py-1 text-[10px] font-medium text-[var(--text-secondary)] md:flex">
+              <Brain className="h-3 w-3" />
+              <span>{isArtifactScoped ? 'Artifact edit' : globalScope ? 'Global' : 'Scoped'}</span>
+            </div>
+          ) : (
+            <kbd className="hidden shrink-0 items-center gap-1 rounded-lg border border-[var(--border-default)]/50 bg-[var(--bg-primary)]/55 px-2 py-1 text-[10px] font-bold text-[var(--text-tertiary)] md:flex tracking-wide">
+              ⌘K
+            </kbd>
+          )}
 
           {/* Send / Sparkles button */}
           <motion.button
             onClick={hasDraft ? handleSend : undefined}
-            whileHover={hasDraft ? { scale: 1.08 } : {}}
-            whileTap={hasDraft ? { scale: 0.92 } : {}}
-            disabled={!hasDraft}
+            whileHover={hasDraft && !resolving ? { scale: 1.08 } : {}}
+            whileTap={hasDraft && !resolving ? { scale: 0.92 } : {}}
+            disabled={!hasDraft || resolving}
             className={cn(
               'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all duration-200',
-              hasDraft
-                ? 'bg-[var(--accent-cyan)] text-white shadow-[0_0_12px_rgba(14,142,232,0.3)] cursor-pointer'
-                : 'text-[var(--text-tertiary)] cursor-default',
+              resolving
+                ? 'bg-[var(--accent-cyan)]/60 text-white cursor-wait'
+                : hasDraft
+                  ? 'bg-[var(--accent-cyan)] text-white shadow-[0_0_12px_rgba(14,142,232,0.3)] cursor-pointer'
+                  : 'text-[var(--text-tertiary)] cursor-default',
             )}
           >
-            {hasDraft ? (
+            {resolving ? (
+              <div className="w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+            ) : hasDraft ? (
               <ArrowUp className="w-4 h-4" />
             ) : (
               <Sparkles className="w-4 h-4" />
@@ -836,10 +920,13 @@ export function EdgeUtilityOverlay({
   onOpenWorkstream,
   onExitWorkstream,
   onClearScope,
+  panelOpen,
   onQuickChat,
   onCreateItem,
   onNewWorkstream,
   onOpenHub,
+  onResolveCommand,
+  onOpenPanel,
 }: EdgeUtilityOverlayProps) {
   const { utilityVisible, setUtilityVisible } = useWorkspaceStore();
   const hubCollapsed = HUB_VISIBILITY_KEYS.every((key) => utilityVisible[key] === false);
@@ -854,7 +941,7 @@ export function EdgeUtilityOverlay({
     <>
       {primaryWorkstreamId === '__hub__' ? <HubInternalView /> : null}
 
-      <div className="absolute right-6 top-6 z-40">
+      <div className="absolute z-40" style={{ right: EDGE_MARGIN, top: EDGE_MARGIN }}>
         <motion.button
           type="button"
           onClick={() => setHubCollapsed(!hubCollapsed)}
@@ -864,9 +951,9 @@ export function EdgeUtilityOverlay({
             'flex items-center gap-2 rounded-full px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-secondary)] transition-colors',
             glassStyle,
           )}
-          title={hubCollapsed ? 'Show hub widgets' : 'Hide hub widgets'}
+          title={hubCollapsed ? 'Show workspace tools' : 'Hide workspace tools'}
         >
-          <span>{hubCollapsed ? 'Show hub' : 'Hide hub'}</span>
+          <span>{hubCollapsed ? 'Show tools' : 'Hide tools'}</span>
           <motion.span animate={{ rotate: hubCollapsed ? 180 : 0 }} transition={{ duration: 0.2 }}>
             <ArrowUp className="h-3.5 w-3.5" />
           </motion.span>
@@ -894,7 +981,10 @@ export function EdgeUtilityOverlay({
         onQuickChat={onQuickChat}
         onCreateItem={onCreateItem}
         onNewWorkstream={onNewWorkstream}
+        onResolveCommand={onResolveCommand}
+        onOpenPanel={onOpenPanel}
         hidden={utilityVisible.command_bar === false}
+        panelOpen={panelOpen}
       />
 
       {/* Bottom Right: Focus Timer */}

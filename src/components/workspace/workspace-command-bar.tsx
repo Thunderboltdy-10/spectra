@@ -56,6 +56,7 @@ type WorkspaceCommandBarProps = {
   onOpenWorkstreamChat: (workstreamId: string, query: string) => void;
   onOpenPanel?: (type: PanelType, id: string) => void;
   onCreateWorkspace?: (name: string) => void;
+  onResolveCommand?: (params: { query: string; workstreamId?: string; artifactId?: string }) => Promise<boolean>;
   onClearScope?: () => void;
   layoutId?: string;
   position?: { x: number; y: number };
@@ -71,6 +72,7 @@ export function WorkspaceCommandBar({
   activeArtifactTitle,
   onOpenWorkstreamChat,
   onCreateWorkspace,
+  onResolveCommand,
   onClearScope,
   layoutId = "workspace-command-bar",
   position,
@@ -171,6 +173,26 @@ export function WorkspaceCommandBar({
         }) ?? null
       : selectedWs;
 
+    const resolvedWorkstreamId = inferredWorkstream?._id ?? primaryWorkstreamId ?? undefined;
+    if (onResolveCommand) {
+      void onResolveCommand({
+        query: trimmed,
+        workstreamId: resolvedWorkstreamId,
+        artifactId: activeArtifactId,
+      }).then((handled) => {
+        if (!handled) {
+          if (inferredWorkstream) {
+            onOpenWorkstreamChat(inferredWorkstream._id, trimmed);
+          } else {
+            router.push(`/chat?prompt=${encodeURIComponent(trimmed)}`);
+          }
+        }
+      });
+      setQuery("");
+      setFocused(false);
+      return;
+    }
+
     if (inferredWorkstream) {
       onOpenWorkstreamChat(inferredWorkstream._id, trimmed);
     } else {
@@ -178,7 +200,7 @@ export function WorkspaceCommandBar({
     }
     setQuery("");
     setFocused(false);
-  }, [activeWorkstreams, onCreateWorkspace, onOpenWorkstreamChat, query, router, selectedWs]);
+  }, [activeArtifactId, activeWorkstreams, onCreateWorkspace, onOpenWorkstreamChat, onResolveCommand, primaryWorkstreamId, query, router, selectedWs]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {

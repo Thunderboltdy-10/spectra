@@ -105,7 +105,7 @@ async function syncWorkspaceItemForPlannerItem(
     params.orgId,
   );
   const now = Date.now();
-  const shouldArchive = !params.workstreamId || params.status === "cancelled" || params.status === "completed";
+  const shouldArchive = !params.workstreamId || params.status === "cancelled";
 
   if (shouldArchive) {
     if (existing && existing.status !== "archived") {
@@ -128,7 +128,7 @@ async function syncWorkspaceItemForPlannerItem(
     title: params.title,
     contentSummary: normalizeString(params.description),
     category: "planner" as const,
-    status: params.status === "completed" ? "archived" as const : "active" as const,
+    status: "active" as const,
     updatedAt: now,
   };
 
@@ -154,7 +154,7 @@ async function syncWorkspaceItemForPlannerItem(
     width: 280,
     height: 160,
     category: "planner",
-    status: params.status === "completed" ? "archived" : "active",
+    status: "active",
     pinned: true,
     createdAt: now,
     updatedAt: now,

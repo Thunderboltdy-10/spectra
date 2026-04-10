@@ -1,5 +1,11 @@
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
+import {
+  resolveCanonicalWorkspaceItemType,
+  resolveWorkspaceCategory,
+  resolveWorkspaceSourceId,
+  resolveWorkspaceSourceKind,
+} from "./workspaceHelpers";
 
 function normalizeTitle(value: string | undefined) {
   const trimmed = value?.trim();
@@ -16,11 +22,15 @@ export function workspaceItemTypeForArtifact(
   artifactType: string,
 ): Doc<"workspaceItems">["type"] {
   switch (artifactType) {
-    case "document":
+    case "note":
     case "study_plan":
     case "flashcard_deck":
     case "code_project":
       return "document";
+    case "document":
+    case "bookmark":
+    case "collection":
+      return "reference";
     case "timetable":
       return "planner";
     case "visualization":
@@ -30,9 +40,6 @@ export function workspaceItemTypeForArtifact(
     case "image":
     case "diagram":
       return "media";
-    case "bookmark":
-    case "collection":
-      return "reference";
     case "whiteboard":
     case "code_output":
     default:
@@ -44,12 +51,15 @@ export function workspaceCategoryForArtifact(
   artifactType: string,
 ): Doc<"workspaceItems">["category"] {
   switch (artifactType) {
-    case "document":
     case "note":
     case "study_plan":
     case "flashcard_deck":
     case "code_project":
       return "documents";
+    case "document":
+    case "bookmark":
+    case "collection":
+      return "references";
     case "timetable":
       return "planner";
     case "visualization":
@@ -61,9 +71,6 @@ export function workspaceCategoryForArtifact(
     case "image":
     case "diagram":
       return "media";
-    case "bookmark":
-    case "collection":
-      return "references";
     default:
       return "custom";
   }
@@ -71,6 +78,32 @@ export function workspaceCategoryForArtifact(
 
 export function canonicalWorkspaceItemTypeForArtifact(): Doc<"workspaceItems">["itemType"] {
   return "artifact";
+}
+
+export function canonicalRenderModeForArtifact(artifactType: string) {
+  switch (artifactType) {
+    case "study_plan":
+      return "note";
+    case "timetable":
+      return "planner";
+    case "document":
+    case "bookmark":
+    case "collection":
+    case "custom":
+      return "export";
+    case "code_project":
+    case "code_output":
+      return "code";
+    case "diagram":
+    case "image":
+    case "visualization":
+    case "concept_map":
+      return "visual";
+    case "whiteboard":
+      return "board";
+    default:
+      return artifactType;
+  }
 }
 
 async function findWorkspaceItemForArtifact(
@@ -140,14 +173,28 @@ export async function syncWorkspaceItemForArtifact(
   const nextFields = {
     workstreamId: params.workstreamId,
     type: workspaceItemTypeForArtifact(params.artifactType),
-    itemType: canonicalWorkspaceItemTypeForArtifact(),
-    sourceKind: "artifact" as const,
-    sourceId: params.artifactId,
-    renderMode: params.artifactType,
+    itemType: resolveCanonicalWorkspaceItemType({
+      legacyType: workspaceItemTypeForArtifact(params.artifactType),
+      itemType: canonicalWorkspaceItemTypeForArtifact(),
+      sourceArtifactId: params.artifactId,
+    }),
+    sourceKind: resolveWorkspaceSourceKind({
+      sourceArtifactId: params.artifactId,
+      itemType: canonicalWorkspaceItemTypeForArtifact(),
+    }),
+    sourceId: resolveWorkspaceSourceId({
+      sourceArtifactId: params.artifactId,
+    }),
+    renderMode: canonicalRenderModeForArtifact(params.artifactType),
     sourceArtifactId: params.artifactId,
     title: normalizeTitle(params.title),
     contentSummary: summarizeContent(params.contentPlaintext),
-    category: workspaceCategoryForArtifact(params.artifactType),
+    category: resolveWorkspaceCategory({
+      legacyType: workspaceItemTypeForArtifact(params.artifactType),
+      renderMode: canonicalRenderModeForArtifact(params.artifactType),
+      itemType: canonicalWorkspaceItemTypeForArtifact(),
+      explicitCategory: workspaceCategoryForArtifact(params.artifactType),
+    }),
     status: "active" as const,
     updatedAt: now,
   };
@@ -165,12 +212,26 @@ export async function syncWorkspaceItemForArtifact(
     type: workspaceItemTypeForArtifact(params.artifactType),
     renderMode: params.artifactType,
     sourceArtifactId: params.artifactId,
-    itemType: canonicalWorkspaceItemTypeForArtifact(),
-    sourceKind: "artifact",
-    sourceId: params.artifactId,
+    itemType: resolveCanonicalWorkspaceItemType({
+      legacyType: workspaceItemTypeForArtifact(params.artifactType),
+      itemType: canonicalWorkspaceItemTypeForArtifact(),
+      sourceArtifactId: params.artifactId,
+    }),
+    sourceKind: resolveWorkspaceSourceKind({
+      sourceArtifactId: params.artifactId,
+      itemType: canonicalWorkspaceItemTypeForArtifact(),
+    }),
+    sourceId: resolveWorkspaceSourceId({
+      sourceArtifactId: params.artifactId,
+    }),
     title: normalizeTitle(params.title),
     contentSummary: summarizeContent(params.contentPlaintext),
-    category: workspaceCategoryForArtifact(params.artifactType),
+    category: resolveWorkspaceCategory({
+      legacyType: workspaceItemTypeForArtifact(params.artifactType),
+      renderMode: params.artifactType,
+      itemType: canonicalWorkspaceItemTypeForArtifact(),
+      explicitCategory: workspaceCategoryForArtifact(params.artifactType),
+    }),
     x: position.x,
     y: position.y,
     width: 280,

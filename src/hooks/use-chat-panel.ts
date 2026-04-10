@@ -97,18 +97,6 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
         }
       }
 
-      if (params.workstreamId && params.threadType !== "artifact_edit" && initialChatIdRef.current === "new") {
-        const existingResponse = await fetch(`/api/chats?workstreamId=${encodeURIComponent(params.workstreamId)}&limit=1`);
-        if (existingResponse.ok) {
-          const existingData = (await existingResponse.json()) as { chats?: Array<{ _id: string }> };
-          const existingChatId = existingData.chats?.[0]?._id;
-          if (existingChatId) {
-            await hydrateChat(existingChatId);
-            return existingChatId;
-          }
-        }
-      }
-
       const response = await fetch("/api/chats", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

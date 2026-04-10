@@ -126,13 +126,13 @@ function getAmbientClass(): string {
 /* ─── Zoom helpers ───────────────────────────────────────── */
 
 function getNeighborOpacity(zoom: number): number {
-  if (zoom <= 0.55) return 1;
-  if (zoom >= 1.05) return 0;
-  return Math.max(0, 1 - (zoom - 0.55) / 0.5);
+  if (zoom <= 0.22) return 1;
+  if (zoom >= 0.68) return 0;
+  return Math.max(0, 1 - (zoom - 0.22) / 0.46);
 }
 
 function restoreViewport(): Viewport {
-  const defaultVp: Viewport = { x: 0, y: 0, zoom: 0.18 };
+  const defaultVp: Viewport = { x: 0, y: 0, zoom: 0.12 };
   if (typeof window === "undefined") {
     return defaultVp;
   }
@@ -166,8 +166,8 @@ function getOverviewViewport(
   let minY = Number.POSITIVE_INFINITY;
   let maxX = Number.NEGATIVE_INFINITY;
   let maxY = Number.NEGATIVE_INFINITY;
-  const overviewWidth = 800;
-  const overviewHeight = 320;
+  const overviewWidth = 1500;
+  const overviewHeight = 1200;
 
   for (const workstream of workstreams) {
     const pos = positions.get(workstream._id);
@@ -193,7 +193,7 @@ function getOverviewViewport(
   const boundsWidth = Math.max(maxX - minX, overviewWidth);
   const boundsHeight = Math.max(maxY - minY, overviewHeight);
   const fittedZoom = Math.min(
-    fallback.zoom,
+    0.16,
     availableWidth / boundsWidth,
     availableHeight / boundsHeight,
   );
@@ -284,10 +284,9 @@ function buildPeerLinks(workstreams: Workstream[], positions: Map<string, { x: n
         selectable: false,
         deletable: false,
         style: {
-          stroke: "color-mix(in oklab, var(--accent-mint) 30%, var(--border-default))",
+          stroke: "color-mix(in oklab, var(--accent-mint) 20%, var(--border-default))",
           strokeWidth: 1,
-          strokeDasharray: "6 10",
-          opacity: 0.4,
+          opacity: 0.25,
         },
       });
     }
@@ -317,6 +316,15 @@ type CachedWorkspaceContent = {
   hubQuickNotes: Array<{ id: string; title: string; updatedAt: number }>;
   hubDeadlines: Array<{ id: string; title: string; dueAt: number; workstreamTitle?: string }>;
   hubActivity: Array<{ id: string; title: string; type: string; timestamp: number }>;
+};
+
+type BatchedWorkspaceContentResponse = {
+  workstreamId: string;
+  workspaceItems?: Array<Record<string, unknown>>;
+  chats?: Array<Record<string, unknown>>;
+  plannerItems?: Array<Record<string, unknown>>;
+  artifacts?: Array<Record<string, unknown>>;
+  topicClusters?: Array<Record<string, unknown>>;
 };
 
 const WORKSPACE_CACHE_MAX = 7;
@@ -562,8 +570,8 @@ const WorkstreamNode = memo(function WorkstreamNode({
   const { workstream, band, isFocused, isDimmed, isCommitted, neighborOpacity, lifecycle, onOpen } = data;
   const color = getWorkstreamColor(workstream.color);
 
-  // Unified V2 scale
-  const width = band === "overview" ? 800 : band === "summary" ? 1200 : WORKSTREAM_TERRITORY.width;
+  // Large spatial territories — cards are always legible even at far zoom
+  const width = band === "overview" ? 920 : band === "summary" ? 1300 : WORKSTREAM_TERRITORY.width;
   const dissolving = isCommitted;
 
   return (
@@ -595,13 +603,13 @@ const WorkstreamNode = memo(function WorkstreamNode({
           scale: dissolving ? 0.92 : lifecycle.scale,
           y: dissolving ? -4 : 0,
         }}
-        whileHover={dissolving ? undefined : { scale: 1.015, y: -1.5 }}
+        whileHover={dissolving ? undefined : { scale: 1.012, y: -2 }}
         transition={{ duration: dissolving ? 0.35 : 0.25, ease: [0.22, 1, 0.36, 1] }}
         className={cn(
           "group relative z-10 cursor-pointer touch-manipulation text-left transition-[box-shadow,border-color] duration-300",
-          dissolving ? "rounded-[16px]" : "rounded-[22px]",
+          dissolving ? "rounded-[20px]" : "rounded-[28px]",
           dissolving && "pointer-events-none",
-          isFocused && !dissolving && "ring-2 ring-[color:var(--accent-cyan)] ring-offset-2 ring-offset-[var(--bg-primary)]",
+          isFocused && !dissolving && "ring-2 ring-[color:var(--accent-cyan)] ring-offset-3 ring-offset-[var(--bg-primary)]",
         )}
         style={{
           width: dissolving ? width * 0.8 : width,
@@ -609,72 +617,75 @@ const WorkstreamNode = memo(function WorkstreamNode({
             ? "transparent"
             : isFocused
               ? "var(--bg-elevated)"
-              : "color-mix(in oklab, var(--bg-primary) 30%, transparent)",
+              : `linear-gradient(135deg, color-mix(in oklab, var(--bg-elevated) 70%, transparent), color-mix(in oklab, ${color.value} 5%, var(--bg-primary)))`,
           borderWidth: 1,
-          borderStyle: lifecycle.dashed ? "dashed" : "solid",
+          borderStyle: "solid",
           borderColor: dissolving
-            ? `${color.value}40`
+            ? `${color.value}30`
             : isFocused
-              ? "var(--border-default)"
-              : "color-mix(in oklab, var(--border-default) 40%, transparent)",
-          backdropFilter: !isFocused && !dissolving ? "blur(8px)" : undefined,
+              ? `color-mix(in oklab, ${color.value} 35%, var(--border-default))`
+              : "color-mix(in oklab, var(--border-default) 50%, transparent)",
+          backdropFilter: !dissolving ? "blur(16px) saturate(1.2)" : undefined,
           boxShadow: dissolving
-            ? `0 0 18px -10px ${color.value}30`
+            ? `0 0 24px -12px ${color.value}25`
             : isFocused
-              ? `0 0 0 1px color-mix(in oklab, ${color.value} 26%, transparent), 0 18px 36px -28px rgba(15,23,42,0.45)`
-              : `0 8px 16px -12px rgba(0,0,0,0.1)`,
+              ? `0 0 0 1px color-mix(in oklab, ${color.value} 20%, transparent), 0 24px 48px -20px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.04)`
+              : `0 12px 32px -16px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.03)`,
         }}
       >
+        {/* Accent glow behind card */}
         {!isFocused && !dissolving && (
           <div
-            className="pointer-events-none absolute -left-10 -top-10 h-40 w-40 rounded-full opacity-60 blur-3xl transition-opacity duration-300 group-hover:opacity-80"
-            style={{ background: `${color.value}45` }}
+            className="pointer-events-none absolute -left-12 -top-12 h-48 w-48 rounded-full opacity-40 blur-[60px] transition-opacity duration-500 group-hover:opacity-60"
+            style={{ background: color.value }}
           />
         )}
 
-        <div className={cn("relative flex flex-col", dissolving ? "px-3 py-2" : "px-4 py-3.5")}>
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex items-center gap-2.5">
-              <span className={cn(dissolving ? "text-sm" : "text-lg", !isFocused && !dissolving && "text-base")}>
+        {/* Top accent line */}
+        <div
+          className="pointer-events-none absolute inset-x-6 top-0 h-px opacity-50"
+          style={{ background: `linear-gradient(90deg, transparent, ${color.value}, transparent)` }}
+        />
+
+        <div className={cn("relative flex flex-col", dissolving ? "px-4 py-3" : "px-6 py-5")}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className={cn(
+                "select-none filter drop-shadow-sm",
+                dissolving ? "text-base" : "text-2xl",
+                !isFocused && !dissolving && "text-xl",
+              )}>
                 {workstream.emoji || "📚"}
               </span>
               <div className="min-w-0">
                 <h3
                   className={cn(
                     "font-display leading-snug text-[var(--text-primary)]",
-                    dissolving && "text-xs",
-                    !dissolving && !isFocused && "text-xl",
-                    !dissolving && isFocused && "text-base",
+                    dissolving && "text-sm",
+                    !dissolving && !isFocused && "text-2xl font-bold",
+                    !dissolving && isFocused && "text-lg font-semibold",
                   )}
                 >
                   {workstream.title}
                 </h3>
               </div>
             </div>
-            {!dissolving && isFocused && (
+            {!dissolving && (
               <span
-                className="mt-0.5 shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider"
-                style={{ background: color.bg, color: color.value }}
+                className="mt-1 shrink-0 rounded-lg px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em]"
+                style={{ background: `color-mix(in oklab, ${color.value} 15%, transparent)`, color: color.value }}
               >
                 {workstream.type}
               </span>
             )}
           </div>
 
-          {/* Description — shows at summary/detail zoom OR when focused */}
-          <AnimatePresence>
-            {(isFocused || band !== "overview") && !dissolving && (
-              <motion.p
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.2 }}
-                className="mt-2 line-clamp-2 text-xs leading-relaxed text-[var(--text-secondary)]"
-              >
-                {workstream.description || "A space for threads, artifacts, and tasks."}
-              </motion.p>
-            )}
-          </AnimatePresence>
+          {/* Description — always shows for non-dissolving states */}
+          {!dissolving && (
+            <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+              {workstream.description || "A space for threads, artifacts, and tasks."}
+            </p>
+          )}
 
           {/* Stats bar — shows at summary/detail zoom OR when focused */}
           <AnimatePresence>
@@ -684,17 +695,17 @@ const WorkstreamNode = memo(function WorkstreamNode({
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
                 transition={{ duration: 0.2, delay: 0.05 }}
-                className="mt-3 flex items-center gap-3 text-[10px] text-[var(--text-tertiary)]"
+                className="mt-4 flex items-center gap-4 text-xs text-[var(--text-tertiary)]"
               >
-                <span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent-cyan)]" />
                   {workstream.threadCount ?? 0} threads
                 </span>
-                <span className="h-3 w-px bg-[var(--border-default)]" />
-                <span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent-purple)]" />
                   {workstream.artifactCount ?? 0} artifacts
                 </span>
-                <span className="h-3 w-px bg-[var(--border-default)]" />
-                <span>
+                <span className="ml-auto text-[10px]">
                   {formatActivity(workstream.lastActivityAt)}
                 </span>
               </motion.div>
@@ -709,13 +720,13 @@ const WorkstreamNode = memo(function WorkstreamNode({
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
                 transition={{ duration: 0.2, delay: 0.1 }}
-                className="mt-3 flex items-center justify-between pt-3 border-t border-[var(--border-default)]"
+                className="mt-4 flex items-center justify-between pt-4 border-t border-[var(--border-default)]/30"
               >
-                <span className="text-[10px] text-[var(--text-tertiary)]">
-                  Click to enter
+                <span className="text-xs text-[var(--text-tertiary)]">
+                  Click to enter workspace
                 </span>
-                <span className="text-xs font-medium text-[var(--accent-cyan)] transition-transform duration-150 group-hover:translate-x-1">
-                  Open field →
+                <span className="flex items-center gap-1 text-sm font-semibold text-[var(--accent-cyan)] transition-transform duration-150 group-hover:translate-x-1">
+                  Open <ArrowRight className="h-3.5 w-3.5" />
                 </span>
               </motion.div>
             )}
@@ -742,16 +753,13 @@ function FlowBackground({
 }: {
   mode: WorkspaceBackgroundMode;
 }) {
-  if (mode === "blank") return null;
-  const isDots = mode === "dots";
+  if (mode === "blank" || mode === "dots") return null;
   return (
     <Background
-      gap={isDots ? 28 : 56}
-      size={isDots ? 1.45 : 0.8}
-      variant={isDots ? BackgroundVariant.Dots : BackgroundVariant.Lines}
-      color={isDots
-            ? "color-mix(in oklab, var(--border-default) 74%, transparent)"
-            : "color-mix(in oklab, var(--border-default) 60%, transparent)"}
+      gap={64}
+      size={0.5}
+      variant={BackgroundVariant.Lines}
+      color={"color-mix(in oklab, var(--border-default) 25%, transparent)"}
     />
   );
 }
@@ -792,7 +800,7 @@ function WorkspaceCanvasInner({
   const prefetchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const commitGenerationRef = useRef(0);
   const workstreamDragThrottleRef = useRef(new Map<string, number>());
-  const lastViewportRef = useRef<{ x: number; y: number; zoom: number }>({ x: 0, y: 0, zoom: 0.35 });
+  const lastViewportRef = useRef<{ x: number; y: number; zoom: number }>({ x: 0, y: 0, zoom: 0.16 });
   const contentControllerRef = useRef<ReturnType<typeof createWorkspaceContentController> | null>(null);
   const internalNodeOverridesRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const widgetLayoutMetaRef = useRef(new Map<string, { itemId: string; origin: { x: number; y: number } }>());
@@ -812,11 +820,10 @@ function WorkspaceCanvasInner({
   } = useWorkspaceStore();
   const [zoom, setZoom] = useState(restoreViewport().zoom);
   const semanticBand = useMemo<ZoomBand>(() => {
-    if (primaryWorkstreamId) return "detail";
-    if (zoom < 0.20) return "overview";
-    if (zoom < 0.55) return "summary";
+    if (zoom < 0.16) return "overview";
+    if (zoom < 0.38) return "summary";
     return "detail";
-  }, [primaryWorkstreamId, zoom]);
+  }, [zoom]);
   const [localOverrides, setLocalOverrides] = useState(() => loadLocalOverrides());
   const [internalNodeOverrides, setInternalNodeOverrides] = useState<Map<string, { x: number; y: number }>>(new Map());
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -827,6 +834,7 @@ function WorkspaceCanvasInner({
   const [movePickerSearch, setMovePickerSearch] = useState("");
   const [pinnedItemIds, setPinnedItemIds] = useState<Set<string>>(new Set());
   const [ghostsByWorkstream, setGhostsByWorkstream] = useState<Record<string, GhostSuggestionSummary[]>>({});
+  const [contextMenuSearch, setContextMenuSearch] = useState("");
   const { activeArtifactId, activeNoteId } = useEditorStore();
   const editingActive = Boolean(activeArtifactId || activeNoteId);
   const positionContextMenu = useCallback((clientX: number, clientY: number, width?: number, height?: number) => {
@@ -880,17 +888,6 @@ function WorkspaceCanvasInner({
     [positions, visibleWorkstreams],
   );
 
-  // Auto-exit when zooming far out of a committed workstream
-  useEffect(() => {
-    if (!primaryWorkstreamId || zoom >= 0.15) return;
-    if (onCommitWorkstream) {
-      onCommitWorkstream(null);
-    } else {
-      exitWorkstream();
-    }
-  }, [zoom, primaryWorkstreamId, exitWorkstream, onCommitWorkstream]);
-
-
   useEffect(() => {
     setZoomBand(band);
   }, [band, setZoomBand]);
@@ -935,56 +932,54 @@ function WorkspaceCanvasInner({
           return next;
         }
 
-        const [chatsRes, docsRes, artifactsRes, plannerRes, widgetsRes] = await Promise.all([
-          fetch(`/api/chats?workstreamId=${workstreamId}&limit=20`),
-          fetch(`/api/artifacts?workstreamId=${workstreamId}&type=document&limit=20`),
-          fetch(`/api/artifacts?workstreamId=${workstreamId}&limit=20`),
-          fetch(`/api/planner?workstreamId=${workstreamId}&limit=20`),
-          fetch(`/api/workspace-items?workstreamId=${workstreamId}`),
-        ]);
+        const workspaceContentRes = await fetch(`/api/workspace-items?action=getWorkspaceContent&workstreamId=${workstreamId}`);
 
         const next: CachedWorkspaceContent = emptyWorkspaceContent();
-        if (chatsRes.ok) {
-          const data = await chatsRes.json();
-          next.threads = (data.chats ?? []).map((chat: Record<string, unknown>) => ({
+        if (workspaceContentRes.ok) {
+          const data = await workspaceContentRes.json() as BatchedWorkspaceContentResponse;
+
+          next.threads = (data.chats ?? []).map((chat) => ({
             id: String(chat._id),
             title: sanitizeTitle(chat.title ?? chat.latestUserPrompt ?? "Untitled"),
             messageCount: Number(chat.messageCount ?? 0),
             lastActivityAt: Number(chat.updatedAt ?? Date.now()),
           }));
-        }
-        if (docsRes.ok) {
-          const data = await docsRes.json();
-          next.notes = (data.artifacts ?? []).map((artifact: Record<string, unknown>) => ({
-            id: String(artifact._id),
-            title: sanitizeTitle(artifact.title),
-            updatedAt: Number(artifact.updatedAt ?? Date.now()),
-            editorMode: String(artifact.editorMode ?? "standard"),
-          }));
-        }
-        if (artifactsRes.ok) {
-          const data = await artifactsRes.json();
+
+          next.notes = (data.artifacts ?? [])
+            .filter((artifact) => {
+              const renderMode = String(artifact.renderMode ?? artifact.type ?? "");
+              return renderMode === "note" || renderMode === "document" || artifact.type === "note";
+            })
+            .map((artifact) => ({
+              id: String(artifact._id),
+              title: sanitizeTitle(artifact.title),
+              updatedAt: Number(artifact.updatedAt ?? Date.now()),
+              editorMode: String(artifact.editorMode ?? "standard"),
+            }));
+
           next.artifacts = (data.artifacts ?? [])
-            .filter((artifact: Record<string, unknown>) => artifact.type !== "document")
-            .map((artifact: Record<string, unknown>) => ({
+            .filter((artifact) => {
+              const renderMode = String(artifact.renderMode ?? artifact.type ?? "");
+              return renderMode !== "note" && renderMode !== "document" && artifact.type !== "note";
+            })
+            .map((artifact) => ({
               id: String(artifact._id),
               title: sanitizeTitle(artifact.title),
               type: String(artifact.type ?? "artifact"),
+              renderMode: typeof artifact.renderMode === "string" ? artifact.renderMode : undefined,
               createdAt: Number(artifact.createdAt ?? Date.now()),
+              updatedAt: typeof artifact.updatedAt === "number" ? artifact.updatedAt : undefined,
+              contentSummary: typeof artifact.contentPlaintext === "string" ? artifact.contentPlaintext : undefined,
             }));
-        }
-        if (plannerRes.ok) {
-          const data = await plannerRes.json();
-          next.plannerItems = (data.plannerItems ?? []).map((item: Record<string, unknown>) => ({
+
+          next.plannerItems = (data.plannerItems ?? []).map((item) => ({
             id: String(item._id),
             title: sanitizeTitle(item.title),
             dueAt: typeof item.dueAt === "number" ? item.dueAt : undefined,
             status: (item.status as PlannerItemSummary["status"]) ?? "pending",
           }));
-        }
-        if (widgetsRes.ok) {
-          const data = await widgetsRes.json();
-          next.widgets = (data.items ?? []).flatMap((item: Record<string, unknown>) => {
+
+          next.widgets = (data.workspaceItems ?? []).flatMap((item) => {
             const id = String(item._id ?? "");
             const panelId = String(item.sourceArtifactId ?? item.sourceChatId ?? item.sourcePlannerItemId ?? "");
             if (!id || !panelId) return [];
@@ -1149,50 +1144,27 @@ function WorkspaceCanvasInner({
 
   const handleOpenWorkstream = useCallback(
     (workstreamId: string) => {
-      if (primaryWorkstreamId === workstreamId) return;
-      if (commitAnimationTimeoutRef.current) {
-        clearTimeout(commitAnimationTimeoutRef.current);
-      }
-      const generation = ++commitGenerationRef.current;
       const instance = reactFlowRef.current;
-      if (instance) {
-        animatedCommitRef.current = workstreamId;
-        setPreviousViewport({ ...lastViewportRef.current });
-        const node = instance.getNode(`ws-${workstreamId}`);
-        if (node) {
-          instance.setCenter(
-            node.position.x + WORKSTREAM_TERRITORY.width / 2,
-            node.position.y + WORKSTREAM_TERRITORY.height / 2,
-            { zoom: 0.85, duration: 450 },
-          );
-        }
-      }
-
-      commitAnimationTimeoutRef.current = setTimeout(() => {
-        if (commitGenerationRef.current !== generation) return;
-        setVisibleWorkstreamIds([workstreamId]);
-        commitWorkstream(workstreamId);
-        void fetchContentForWorkstream(workstreamId);
-        onOpenWorkstream?.(workstreamId);
-      }, 450);
+      const node = instance?.getNode(`ws-${workstreamId}`);
+      if (!instance || !node) return;
+      setPreviousViewport({ ...lastViewportRef.current });
+      instance.setCenter(
+        node.position.x + WORKSTREAM_TERRITORY.width / 2,
+        node.position.y + WORKSTREAM_TERRITORY.height / 2,
+        { zoom: Math.max(instance.getViewport().zoom, 0.42), duration: 550 },
+      );
+      onOpenWorkstream?.(workstreamId);
     },
-    [commitWorkstream, fetchContentForWorkstream, onOpenWorkstream, primaryWorkstreamId, setPreviousViewport, setVisibleWorkstreamIds],
+    [onOpenWorkstream, setPreviousViewport],
   );
 
   const handleExitWorkstream = useCallback(() => {
-    ++commitGenerationRef.current;
-    if (commitAnimationTimeoutRef.current) {
-      clearTimeout(commitAnimationTimeoutRef.current);
-    }
+    const instance = reactFlowRef.current;
     animatedCommitRef.current = null;
     exitWorkstream();
     onCommitWorkstream?.(null);
-
-    const instance = reactFlowRef.current;
     if (instance) {
-      setTimeout(() => {
-        instance.setViewport(overviewViewport, { duration: 400 });
-      }, 50);
+      instance.setViewport(overviewViewport, { duration: 500 });
     }
   }, [exitWorkstream, onCommitWorkstream, overviewViewport]);
 
@@ -1219,39 +1191,6 @@ function WorkspaceCanvasInner({
     },
     [commitWorkstream, fetchContentForWorkstream, onOpenHub, primaryWorkstreamId, setPreviousViewport, setVisibleWorkstreamIds],
   );
-
-  useEffect(() => {
-    const instance = reactFlowRef.current;
-    if (!instance || !initializedRef.current) return;
-
-    if (!primaryWorkstreamId) {
-      animatedCommitRef.current = null;
-      return;
-    }
-
-    if (animatedCommitRef.current === primaryWorkstreamId) return;
-
-    if (primaryWorkstreamId === HUB_CACHE_KEY) {
-      animatedCommitRef.current = HUB_CACHE_KEY;
-      setPreviousViewport({ ...lastViewportRef.current });
-      setVisibleWorkstreamIds([HUB_CACHE_KEY]);
-      void fetchContentForWorkstream(HUB_CACHE_KEY);
-      instance.setCenter(0, 0, { zoom: 0.85, duration: 450 });
-      return;
-    }
-
-    const node = instance.getNode(`ws-${primaryWorkstreamId}`);
-    if (!node) return;
-    animatedCommitRef.current = primaryWorkstreamId;
-    setPreviousViewport({ ...lastViewportRef.current });
-    setVisibleWorkstreamIds([primaryWorkstreamId]);
-    void fetchContentForWorkstream(primaryWorkstreamId);
-    instance.setCenter(
-      node.position.x + WORKSTREAM_TERRITORY.width / 2,
-      node.position.y + WORKSTREAM_TERRITORY.height / 2,
-      { zoom: 0.85, duration: 450 },
-    );
-  }, [fetchContentForWorkstream, positions, primaryWorkstreamId, setPreviousViewport, setVisibleWorkstreamIds]);
 
   useEffect(() => () => {
     if (commitDebounceRef.current) clearTimeout(commitDebounceRef.current);
@@ -1296,8 +1235,9 @@ function WorkspaceCanvasInner({
     generatedNodes.push(...workstreamNodes);
     generatedEdges.push(...buildEdges(visibleWorkstreams, positions, showConnections, primaryWorkstreamId));
 
-    if (visibleWorkstreamIds.length > 0) {
-      for (const workstreamId of visibleWorkstreamIds) {
+    const renderWorkstreamIds = primaryWorkstreamId ? [primaryWorkstreamId] : [];
+    if (renderWorkstreamIds.length > 0) {
+      for (const workstreamId of renderWorkstreamIds) {
         const loading = loadingContentIds.includes(workstreamId) && !(workstreamId in contentById);
         const cached = getCachedContent(workstreamId);
 
@@ -1415,28 +1355,20 @@ function WorkspaceCanvasInner({
     // This handles the timing gap where the canvas mounts before the URL-sync useEffect fires.
     const initWorkstreamId = primaryWorkstreamId ?? focusWorkstreamId;
     if (initWorkstreamId) {
-      // Workspace pre-committed via URL param.
-      // Mark animatedCommitRef so the canvas effect doesn't re-zoom on top.
-      animatedCommitRef.current = initWorkstreamId;
-      // Immediately surface internal nodes — without this, the useEffect guard above
-      // (animatedCommitRef check) would prevent the effect from ever calling
-      // setVisibleWorkstreamIds, leaving the workspace interior blank.
       setVisibleWorkstreamIds([initWorkstreamId]);
       void fetchContentForWorkstream(initWorkstreamId);
-      // Restore saved viewport if it was inside this workspace (zoom > 0.5)
       const saved = restoreViewport();
-      if (saved.zoom > 0.5) {
+      if (saved.zoom > 0.34) {
         instance.setViewport(saved, { duration: 0 });
         setCamera({ x: saved.x, y: saved.y, z: saved.zoom });
         setZoom(saved.zoom);
       } else {
-        // Saved viewport is overview zoom — center on the workspace node at a good zoom level
         const node = instance.getNode(`ws-${initWorkstreamId}`);
         if (node) {
           instance.setCenter(
             node.position.x + WORKSTREAM_TERRITORY.width / 2,
             node.position.y + WORKSTREAM_TERRITORY.height / 2,
-            { zoom: 0.85, duration: 0 },
+            { zoom: 0.42, duration: 0 },
           );
           const vp = instance.getViewport();
           setCamera({ x: vp.x, y: vp.y, z: vp.zoom });
@@ -1459,43 +1391,50 @@ function WorkspaceCanvasInner({
   const handleMove = useCallback((_: unknown, viewport: Viewport) => {
     setZoom(viewport.zoom);
     lastViewportRef.current = { x: viewport.x, y: viewport.y, zoom: viewport.zoom };
-
-    if (!primaryWorkstreamId && viewport.zoom >= 0.62) {
-      if (commitDebounceRef.current) {
-        clearTimeout(commitDebounceRef.current);
-      }
-      const debounceGeneration = commitGenerationRef.current + 1;
-      commitDebounceRef.current = setTimeout(() => {
-        const instance = reactFlowRef.current;
-        if (!instance || useWorkspaceStore.getState().primaryWorkstreamId) return;
-        if (commitGenerationRef.current !== debounceGeneration) return;
-        const viewportState = instance.getViewport();
-        if (viewportState.zoom < 0.62) return;
-        const viewportNow = instance.getViewport();
-        const bounds = document
-          .querySelector("[data-workspace-flow-root]")
-          ?.getBoundingClientRect();
-        const center = bounds
-          ? {
-              x: (bounds.width / 2 - viewportNow.x) / viewportNow.zoom,
-              y: (bounds.height / 2 - viewportNow.y) / viewportNow.zoom,
-            }
-          : { x: 0, y: 0 };
-        const candidate = visibleWorkstreams
-          .map((ws) => {
-            const pos = positions.get(ws._id) ?? { x: 0, y: 0 };
-            const dx = center.x - (pos.x + WORKSTREAM_TERRITORY.width / 2);
-            const dy = center.y - (pos.y + WORKSTREAM_TERRITORY.height / 2);
-            return { ws, distance: Math.hypot(dx, dy) };
-          })
-          .sort((a, b) => a.distance - b.distance)[0];
-
-        if (candidate && candidate.distance <= 1100) {
-          handleOpenWorkstream(candidate.ws._id);
-        }
-      }, 220);
+    if (commitDebounceRef.current) {
+      clearTimeout(commitDebounceRef.current);
     }
-  }, [handleOpenWorkstream, positions, primaryWorkstreamId, visibleWorkstreams]);
+
+    commitDebounceRef.current = setTimeout(() => {
+      const instance = reactFlowRef.current;
+      if (!instance) return;
+      const viewportState = instance.getViewport();
+      const bounds = document
+        .querySelector("[data-workspace-flow-root]")
+        ?.getBoundingClientRect();
+      const center = bounds
+        ? {
+            x: (bounds.width / 2 - viewportState.x) / viewportState.zoom,
+            y: (bounds.height / 2 - viewportState.y) / viewportState.zoom,
+          }
+        : { x: 0, y: 0 };
+
+      const candidate = visibleWorkstreams
+        .map((ws) => {
+          const pos = positions.get(ws._id) ?? { x: 0, y: 0 };
+          const dx = center.x - (pos.x + WORKSTREAM_TERRITORY.width / 2);
+          const dy = center.y - (pos.y + WORKSTREAM_TERRITORY.height / 2);
+          return { ws, distance: Math.hypot(dx, dy) };
+        })
+        .sort((a, b) => a.distance - b.distance)[0];
+
+      if (viewportState.zoom >= 0.34 && candidate && candidate.distance <= 1400) {
+        if (useWorkspaceStore.getState().primaryWorkstreamId !== candidate.ws._id) {
+          commitWorkstream(candidate.ws._id);
+          setVisibleWorkstreamIds([candidate.ws._id]);
+          void fetchContentForWorkstream(candidate.ws._id);
+          onCommitWorkstream?.(candidate.ws._id);
+        }
+        return;
+      }
+
+      if (viewportState.zoom < 0.24 && useWorkspaceStore.getState().primaryWorkstreamId) {
+        exitWorkstream();
+        setVisibleWorkstreamIds([]);
+        onCommitWorkstream?.(null);
+      }
+    }, 120);
+  }, [commitWorkstream, exitWorkstream, fetchContentForWorkstream, onCommitWorkstream, positions, setVisibleWorkstreamIds, visibleWorkstreams]);
 
   const handleMoveEnd = useCallback(
     (_: unknown, viewport: Viewport) => {
@@ -1624,10 +1563,10 @@ function WorkspaceCanvasInner({
       }
       if (e.key === "Escape") {
         if (focusedItemId) { setFocusedItemId(null); return; }
-        if (itemContextMenu) { setItemContextMenu(null); return; }
-        if (groupContextMenu) { setGroupContextMenu(null); return; }
+        if (itemContextMenu) { setItemContextMenu(null); setContextMenuSearch(""); return; }
+        if (groupContextMenu) { setGroupContextMenu(null); setContextMenuSearch(""); return; }
         if (movePicker) { setMovePicker(null); return; }
-        if (contextMenu) { setContextMenu(null); return; }
+        if (contextMenu) { setContextMenu(null); setContextMenuSearch(""); return; }
         if (primaryWorkstreamId) { handleExitWorkstream(); }
       }
     };
@@ -1687,6 +1626,7 @@ function WorkspaceCanvasInner({
       setContextMenu(null);
       setItemContextMenu(null);
       setGroupContextMenu(null);
+      setContextMenuSearch("");
     };
     window.addEventListener("mousedown", handler, true);
     return () => window.removeEventListener("mousedown", handler, true);
@@ -1719,8 +1659,8 @@ function WorkspaceCanvasInner({
         nodes={nodes}
         edges={edges}
         fitView={false}
-        minZoom={0.12}
-        maxZoom={2.0}
+        minZoom={0.05}
+        maxZoom={3.0}
         defaultViewport={restoreViewport()}
         nodeTypes={FLOW_NODE_TYPES}
         onInit={handleInit}
@@ -1795,26 +1735,36 @@ function WorkspaceCanvasInner({
         <div
           data-context-menu
           onMouseDown={(e) => e.stopPropagation()}
-          className="absolute z-40 min-w-[220px] overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]/96 p-1.5 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.38)] backdrop-blur-xl"
+          className="absolute z-40 min-w-[220px] overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]/96 p-1.5 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.38)] backdrop-blur-xl flex flex-col"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
+          <div className="flex items-center gap-2 px-2 py-1.5 mb-1 border-b border-[var(--border-default)]/50 shrink-0">
+            <Search className="w-3.5 h-3.5 text-[var(--text-tertiary)]" />
+            <input
+              autoFocus
+              className="bg-transparent outline-none text-xs text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] w-full"
+              placeholder="Search actions..."
+              value={contextMenuSearch}
+              onChange={(e) => setContextMenuSearch(e.target.value)}
+            />
+          </div>
           {primaryWorkstreamId && primaryWorkstreamId !== HUB_CACHE_KEY ? (
-            <>
-              <ContextMenuItem icon={<FileText className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.note.label} onClick={() => { setContextMenu(null); panelOpener("artifact", "new"); }} />
-              <ContextMenuItem icon={<MessageSquare className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.thread.label} onClick={() => { setContextMenu(null); panelOpener("chat", "new"); }} />
-              <ContextMenuItem icon={<ImageIcon className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.diagram.label} onClick={() => { setContextMenu(null); panelOpener("artifact", "new-diagram"); }} />
-              <ContextMenuItem icon={<Code2 className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.code.label} onClick={() => { setContextMenu(null); panelOpener("artifact", "new-code"); }} />
-              <ContextMenuItem icon={<CalendarClock className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.planner.label} onClick={() => { setContextMenu(null); panelOpener("planner", "new"); }} />
-              <div className="my-1 h-px bg-[var(--border-default)]/50" />
-              <ContextMenuItem icon={<FolderOpen className="h-3.5 w-3.5" />} label="Paste from clipboard" onClick={() => { setContextMenu(null); }} />
-            </>
+            <div className="flex flex-col gap-0.5 overflow-y-auto max-h-[300px]">
+              {(!contextMenuSearch || EMPTY_CANVAS_MENU_ACTIONS.note.label.toLowerCase().includes(contextMenuSearch.toLowerCase())) && <ContextMenuItem icon={<FileText className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.note.label} onClick={() => { setContextMenu(null); setContextMenuSearch(""); panelOpener("artifact", "new"); }} />}
+              {(!contextMenuSearch || EMPTY_CANVAS_MENU_ACTIONS.thread.label.toLowerCase().includes(contextMenuSearch.toLowerCase())) && <ContextMenuItem icon={<MessageSquare className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.thread.label} onClick={() => { setContextMenu(null); setContextMenuSearch(""); panelOpener("chat", "new"); }} />}
+              {(!contextMenuSearch || EMPTY_CANVAS_MENU_ACTIONS.diagram.label.toLowerCase().includes(contextMenuSearch.toLowerCase())) && <ContextMenuItem icon={<ImageIcon className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.diagram.label} onClick={() => { setContextMenu(null); setContextMenuSearch(""); panelOpener("artifact", "new-diagram"); }} />}
+              {(!contextMenuSearch || EMPTY_CANVAS_MENU_ACTIONS.code.label.toLowerCase().includes(contextMenuSearch.toLowerCase())) && <ContextMenuItem icon={<Code2 className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.code.label} onClick={() => { setContextMenu(null); setContextMenuSearch(""); panelOpener("artifact", "new-code"); }} />}
+              {(!contextMenuSearch || EMPTY_CANVAS_MENU_ACTIONS.planner.label.toLowerCase().includes(contextMenuSearch.toLowerCase())) && <ContextMenuItem icon={<CalendarClock className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.planner.label} onClick={() => { setContextMenu(null); setContextMenuSearch(""); panelOpener("planner", "new"); }} />}
+              <div className="my-1 h-px bg-[var(--border-default)]/50 shrink-0" />
+              {(!contextMenuSearch || "Paste from clipboard".toLowerCase().includes(contextMenuSearch.toLowerCase())) && <ContextMenuItem icon={<FolderOpen className="h-3.5 w-3.5" />} label="Paste from clipboard" onClick={() => { setContextMenu(null); setContextMenuSearch(""); }} />}
+            </div>
           ) : (
-            <>
-              <ContextMenuItem icon={<Layers className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.workstream.label} hint="W" onClick={() => { setContextMenu(null); onNewWorkstream?.(); }} />
-              <ContextMenuItem icon={<Home className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.hub.label} onClick={() => { setContextMenu(null); handleOpenHub(); }} />
-              <div className="my-1 h-px bg-[var(--border-default)]/50" />
-              <ContextMenuItem icon={<FolderOpen className="h-3.5 w-3.5" />} label="Paste from clipboard" onClick={() => { setContextMenu(null); }} />
-            </>
+            <div className="flex flex-col gap-0.5 overflow-y-auto max-h-[300px]">
+              {(!contextMenuSearch || EMPTY_CANVAS_MENU_ACTIONS.workstream.label.toLowerCase().includes(contextMenuSearch.toLowerCase())) && <ContextMenuItem icon={<Layers className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.workstream.label} hint="W" onClick={() => { setContextMenu(null); setContextMenuSearch(""); onNewWorkstream?.(); }} />}
+              {(!contextMenuSearch || EMPTY_CANVAS_MENU_ACTIONS.hub.label.toLowerCase().includes(contextMenuSearch.toLowerCase())) && <ContextMenuItem icon={<Home className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.hub.label} onClick={() => { setContextMenu(null); setContextMenuSearch(""); handleOpenHub(); }} />}
+              <div className="my-1 h-px bg-[var(--border-default)]/50 shrink-0" />
+              {(!contextMenuSearch || "Paste from clipboard".toLowerCase().includes(contextMenuSearch.toLowerCase())) && <ContextMenuItem icon={<FolderOpen className="h-3.5 w-3.5" />} label="Paste from clipboard" onClick={() => { setContextMenu(null); setContextMenuSearch(""); }} />}
+            </div>
           )}
         </div>
       )}

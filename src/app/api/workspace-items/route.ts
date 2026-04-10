@@ -57,6 +57,16 @@ export async function GET(request: NextRequest) {
       return ok(result);
     }
 
+    if (action === "getWorkspaceContent") {
+      const workstreamId = params.get("workstreamId");
+      if (!workstreamId) return badRequest("workstreamId is required");
+      const result = await convexQuery("workspaceItems:getWorkspaceContent", {
+        actorClerkId: actor.clerkId,
+        workstreamId,
+      });
+      return ok(result);
+    }
+
     const items = await convexQuery("workspaceItems:list", {
       actorClerkId: actor.clerkId,
       workstreamId: params.get("workstreamId") ?? undefined,

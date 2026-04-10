@@ -557,13 +557,19 @@ export const WorkstreamTitleNode = memo(function WorkstreamTitleNode({
 }: NodeProps<Node<{ title: string; emoji?: string; band: ZoomBand }>>) {
   const isOverview = data.band === "overview";
   return (
-    <div className={cn("flex items-center gap-4 py-2", isOverview && "opacity-80 scale-90 origin-left transition-all")}>
-      <span className={cn("filter drop-shadow-sm select-none", isOverview ? "text-2xl" : "text-4xl")}>
+    <div className={cn("flex items-center gap-5 py-3", isOverview && "opacity-80 scale-90 origin-left transition-all")}>
+      <span className={cn("filter drop-shadow-md select-none", isOverview ? "text-3xl" : "text-5xl")}>
         {data.emoji || "📚"}
       </span>
-      <h2 className={cn("font-display font-bold tracking-tight text-[var(--text-primary)]", isOverview ? "text-2xl" : "text-4xl")}>
-        {data.title}
-      </h2>
+      <div className="flex flex-col gap-1">
+        <h2 className={cn("font-display font-bold tracking-tight text-[var(--text-primary)]", isOverview ? "text-3xl" : "text-5xl")}>
+          {data.title}
+        </h2>
+        <div className={cn(
+          "h-0.5 rounded-full",
+          isOverview ? "w-12" : "w-20",
+        )} style={{ background: "linear-gradient(90deg, var(--accent-cyan), transparent)" }} />
+      </div>
     </div>
   );
 });
@@ -648,7 +654,7 @@ export function GhostSuggestionCard({
 }) {
   return (
     <div
-      className="group relative flex w-full flex-col gap-2 rounded-xl border border-dashed border-[var(--accent-cyan)]/35 bg-[var(--bg-elevated)]/55 p-4 text-left transition-opacity"
+      className="group relative flex w-full flex-col gap-2 rounded-2xl border border-[var(--accent-cyan)]/20 bg-[var(--bg-elevated)]/40 p-4 text-left backdrop-blur-sm transition-all hover:bg-[var(--bg-elevated)]/55 hover:border-[var(--accent-cyan)]/35"
       style={{ opacity: ghost.opacityIdle }}
     >
       <div className="absolute right-3 top-3 flex items-center gap-1 text-[9px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
@@ -721,14 +727,18 @@ export const CategoryFieldNode = memo(function CategoryFieldNode({
   return (
     <div
       className={cn(
-        "workspace-tint-zone relative flex flex-col gap-3 min-w-[320px] transition-all duration-300",
+        "workspace-tint-zone relative flex flex-col gap-3 min-w-[340px] transition-all duration-300",
         isOverview && "opacity-60 scale-95 origin-top-left",
       )}
       style={{
-        // Tint zone: soft background region at 7% opacity
-        background: `radial-gradient(ellipse at center, color-mix(in oklab, ${accentColor} 7%, transparent) 0%, transparent 75%)`,
-        padding: '24px',
-        borderRadius: '24px',
+        // Tint zone: layered radial + linear gradients for organic soft-edge feel
+        background: [
+          `radial-gradient(ellipse 130% 110% at 25% 35%, color-mix(in oklab, ${accentColor} 8%, transparent) 0%, transparent 65%)`,
+          `radial-gradient(ellipse 100% 130% at 75% 65%, color-mix(in oklab, ${accentColor} 4%, transparent) 0%, transparent 60%)`,
+          `linear-gradient(145deg, color-mix(in oklab, var(--bg-elevated) 4%, transparent) 0%, transparent 40%)`,
+        ].join(', '),
+        padding: '28px',
+        borderRadius: '28px',
       }}
       onContextMenu={(e) => {
         if (onGroupContextMenu) {
@@ -739,58 +749,112 @@ export const CategoryFieldNode = memo(function CategoryFieldNode({
       }}
     >
       {/* Category Header */}
-      <div className="flex items-center gap-2 mb-1">
-        <div className="w-1 h-3.5 rounded-full" style={{ background: accentColor }} />
-        <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--text-tertiary)]">
+      <div className="flex items-center gap-2.5 mb-2">
+        <div className="w-1.5 h-4 rounded-full" style={{ background: accentColor, opacity: 0.7 }} />
+        <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
           {label}
         </span>
-        <span className="ml-auto text-[9px] text-[var(--text-tertiary)]">{items.length}</span>
+        <span className="ml-auto rounded-full bg-white/[0.04] px-2 py-0.5 text-[9px] font-medium text-[var(--text-tertiary)]">{items.length}</span>
       </div>
 
       {/* Content Items — progressive zoom reveal */}
       <div className="flex flex-col gap-2">
         {items.length === 0 ? (
-          <div className="px-3 py-4 rounded-xl border border-dashed border-[var(--border-default)]/30 text-[11px] text-[var(--text-tertiary)] italic">
+          <div className="px-3 py-4 rounded-2xl bg-white/[0.02] border border-[var(--border-default)]/15 text-[11px] text-[var(--text-tertiary)]">
             No {label.toLowerCase()} yet.
           </div>
         ) : isOverview ? (
-          /* OVERVIEW: Compact dot summary */
-          <div className="flex items-center gap-1.5 px-1 py-1">
-            {items.slice(0, 6).map((item) => (
+          /* OVERVIEW: Compact pill summary with titles */
+          <div className="flex flex-wrap items-center gap-1 px-1 py-0.5">
+            {items.slice(0, 4).map((item) => (
               <div
                 key={item.id}
-                className="h-2 w-2 rounded-full opacity-50"
-                style={{ background: accentColor }}
-              />
+                className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[8px] font-medium truncate max-w-[140px]"
+                style={{
+                  background: `color-mix(in oklab, ${accentColor} 12%, transparent)`,
+                  color: "var(--text-secondary)",
+                }}
+              >
+                <div className="h-1.5 w-1.5 rounded-full shrink-0 opacity-60" style={{ background: accentColor }} />
+                <span className="truncate">{(item as { title?: string }).title || "Untitled"}</span>
+              </div>
             ))}
-            {items.length > 6 && (
-              <span className="text-[9px] text-[var(--text-tertiary)] ml-1">+{items.length - 6}</span>
+            {items.length > 4 && (
+              <span className="text-[8px] text-[var(--text-tertiary)] ml-0.5">+{items.length - 4}</span>
             )}
           </div>
         ) : !isDetail ? (
-          /* SUMMARY: Title-only compact list */
-          <div className="flex flex-col gap-1">
+          /* SUMMARY: Mini-card list with preview + status + time */
+          <div className="flex flex-col gap-1.5">
             {items.slice(0, 8).map((item) => {
               const typeIcon = type === "threads" ? <MessageSquare className="h-3 w-3" />
                 : type === "documents" ? <FileText className="h-3 w-3" />
                 : type === "planner" ? <CalendarClock className="h-3 w-3" />
                 : <Sparkles className="h-3 w-3" />;
               const panelType = type === "threads" ? "chat" : type === "planner" ? "planner" : "artifact";
+
+              // Extract preview info per type
+              let preview = "";
+              let statusColor = accentColor;
+              let timeAgo = "";
+
+              if (type === "threads") {
+                const t = item as ThreadSummary;
+                preview = t.messageCount > 0 ? `${t.messageCount} messages` : "No replies yet";
+                timeAgo = formatTimeAgo(t.lastActivityAt);
+                statusColor = "var(--accent-cyan)";
+              } else if (type === "documents") {
+                const n = item as NoteSummary;
+                timeAgo = formatTimeAgo(n.updatedAt);
+                preview = n.editorMode === "ai_enhanced" ? "Research note" : "Draft";
+                statusColor = "var(--accent-purple)";
+              } else if (type === "planner") {
+                const p = item as PlannerItemSummary;
+                preview = p.dueAt
+                  ? `Due ${new Date(p.dueAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
+                  : "No due date";
+                statusColor = plannerStatusTone(p.status);
+              } else if (type === "artifacts") {
+                const a = item as ArtifactSummary;
+                const canonicalType = resolveCanonicalTypeForGlance(a);
+                preview = truncateGlanceSummary(a.contentSummary ?? typeSpecificArtifactDetail(a, canonicalType), 60) ?? "";
+                statusColor = artifactStatusTone(a);
+                timeAgo = formatTimeAgo(a.updatedAt ?? a.createdAt);
+              }
+
               return (
                 <button
                   key={item.id}
                   onClick={() => onOpenPanel(panelType as PanelType, item.id)}
-                  className="flex items-center gap-2 px-2 py-1 rounded-lg text-left transition-colors hover:bg-white/[0.04]"
+                  className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left transition-all hover:bg-white/[0.05] hover:shadow-sm group"
                 >
-                  <span className="text-[var(--text-tertiary)] shrink-0">{typeIcon}</span>
-                  <span className="truncate text-[12px] text-[var(--text-secondary)]">
-                    {(item as { title?: string }).title || "Untitled"}
-                  </span>
+                  <div className="relative shrink-0">
+                    <div className="absolute -left-1 top-1/2 -translate-y-1/2 h-1.5 w-1.5 rounded-full" style={{ background: statusColor }} />
+                    <span className="text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)] transition-colors">{typeIcon}</span>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[12px] font-medium text-[var(--text-primary)]">
+                      {(item as { title?: string }).title || "Untitled"}
+                    </div>
+                    {preview && (
+                      <div className="truncate text-[10px] text-[var(--text-tertiary)] mt-0.5">
+                        {preview}
+                      </div>
+                    )}
+                  </div>
+                  {timeAgo && (
+                    <span className="text-[9px] text-[var(--text-tertiary)] shrink-0 tabular-nums">{timeAgo}</span>
+                  )}
                 </button>
               );
             })}
             {items.length > 8 && (
-              <span className="text-[10px] text-[var(--text-tertiary)] px-2">+{items.length - 8} more</span>
+              <button
+                onClick={() => setExpanded(true)}
+                className="text-[10px] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] px-2.5 py-1 transition-colors"
+              >
+                +{items.length - 8} more
+              </button>
             )}
           </div>
         ) : (
@@ -989,8 +1053,7 @@ export const CategoryFieldNode = memo(function CategoryFieldNode({
               <button
                 type="button"
                 onClick={() => setExpanded(true)}
-                className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-[var(--border-default)]/40 py-2 text-[11px] text-[var(--text-tertiary)] transition-colors hover:border-[var(--border-default)]/70 hover:text-[var(--text-secondary)]"
-                style={{ animation: "none" }}
+                className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-white/[0.03] border border-[var(--border-default)]/20 py-2.5 text-[11px] font-medium text-[var(--text-tertiary)] transition-all hover:bg-white/[0.06] hover:text-[var(--text-secondary)]"
               >
                 <ChevronDown className="h-3 w-3" />
                 +{hiddenCount} more
@@ -1000,7 +1063,7 @@ export const CategoryFieldNode = memo(function CategoryFieldNode({
               <button
                 type="button"
                 onClick={() => setExpanded(false)}
-                className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-[var(--border-default)]/30 py-1.5 text-[10px] text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-secondary)]"
+                className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-white/[0.02] border border-[var(--border-default)]/15 py-2 text-[10px] text-[var(--text-tertiary)] transition-all hover:bg-white/[0.04] hover:text-[var(--text-secondary)]"
               >
                 Show less
               </button>
@@ -1128,29 +1191,29 @@ export function buildWorkspaceNodes(
   const { visual, code, interactive, boards, other } = bucketArtifacts(data.artifacts);
 
   // Build lanes dynamically — only include non-empty artifact lanes.
-  // Start at 1080 (planner is at 720, width ~360) to avoid overlapping the planner column.
+  // Start at 1200 (planner is at 800, width ~400) to avoid overlapping the planner column.
   const artifactLanes: Array<{ id: string; label: string; items: ArtifactSummary[]; accentColor: string; xOffset: number }> = [];
-  let colOffset = 1080;
+  let colOffset = 1200;
 
   if (visual.length > 0) {
     artifactLanes.push({ id: "visual", label: "VISUALS", items: visual, accentColor: "var(--accent-cyan)", xOffset: colOffset });
-    colOffset += 360;
+    colOffset += 400;
   }
   if (code.length > 0) {
     artifactLanes.push({ id: "code", label: "CODE", items: code, accentColor: "var(--accent-mint)", xOffset: colOffset });
-    colOffset += 360;
+    colOffset += 400;
   }
   if (interactive.length > 0) {
     artifactLanes.push({ id: "interactive", label: "STUDY", items: interactive, accentColor: "var(--accent-coral)", xOffset: colOffset });
-    colOffset += 360;
+    colOffset += 400;
   }
   if (boards.length > 0) {
     artifactLanes.push({ id: "boards", label: "BOARDS", items: boards, accentColor: "var(--accent-purple)", xOffset: colOffset });
-    colOffset += 360;
+    colOffset += 400;
   }
   if (other.length > 0) {
     artifactLanes.push({ id: "other", label: "ARTIFACTS", items: other, accentColor: "var(--text-tertiary)", xOffset: colOffset });
-    colOffset += 360;
+    colOffset += 400;
   }
 
   const wsKey = data.workstreamTitle ?? "ws";
@@ -1192,7 +1255,7 @@ export function buildWorkspaceNodes(
     {
       id: `ws-lane-docs-${wsKey}`,
       type: "categoryField",
-      position: { x: basePosition.x + 360, y: basePosition.y },
+      position: { x: basePosition.x + 400, y: basePosition.y },
       draggable: true,
       data: {
         label: "DOCUMENTS",
@@ -1212,7 +1275,7 @@ export function buildWorkspaceNodes(
     {
       id: `ws-lane-planner-${wsKey}`,
       type: "categoryField",
-      position: { x: basePosition.x + 720, y: basePosition.y },
+      position: { x: basePosition.x + 800, y: basePosition.y },
       draggable: true,
       data: {
         label: "PLANNER",

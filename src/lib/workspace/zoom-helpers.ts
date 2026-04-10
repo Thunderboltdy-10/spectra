@@ -9,9 +9,9 @@ export function clamp01(value: number): number {
 }
 
 export function getZoomLevel(cameraZ: number): ZoomLevel {
-  if (cameraZ < 0.3) return "overview";
-  if (cameraZ < 0.6) return "summary";
-  if (cameraZ < 1.0) return "standard";
+  if (cameraZ < 0.2) return "overview";
+  if (cameraZ < 0.45) return "summary";
+  if (cameraZ < 0.85) return "standard";
   return "detail";
 }
 

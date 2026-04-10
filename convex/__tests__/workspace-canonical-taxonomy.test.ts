@@ -6,6 +6,11 @@ import {
   resolveWorkspaceSourceKind,
   resolveWorkspaceSourceId,
 } from "../workspaceHelpers";
+import {
+  canonicalRenderModeForArtifact,
+  workspaceCategoryForArtifact,
+  workspaceItemTypeForArtifact,
+} from "../workspaceItemSync";
 
 /* ─── resolveCanonicalWorkspaceItemType ─────────────────── */
 
@@ -221,6 +226,32 @@ describe("normalizeCanonicalWorkspaceItemType", () => {
 
   it("rejects undefined → custom", () => {
     expect(normalizeCanonicalWorkspaceItemType(undefined)).toBe("custom");
+  });
+});
+
+describe("workspaceItemSync artifact taxonomy", () => {
+  it("normalizes render modes into canonical workspace-facing artifact groups", () => {
+    expect(canonicalRenderModeForArtifact("document")).toBe("export");
+    expect(canonicalRenderModeForArtifact("bookmark")).toBe("export");
+    expect(canonicalRenderModeForArtifact("code_output")).toBe("code");
+    expect(canonicalRenderModeForArtifact("diagram")).toBe("visual");
+    expect(canonicalRenderModeForArtifact("whiteboard")).toBe("board");
+    expect(canonicalRenderModeForArtifact("study_plan")).toBe("note");
+  });
+
+  it("maps quiz artifacts to visualization workspace items and categories", () => {
+    expect(workspaceItemTypeForArtifact("quiz")).toBe("visualization");
+    expect(workspaceCategoryForArtifact("quiz")).toBe("visualizations");
+  });
+
+  it("maps flashcard decks to document workspace items and document categories", () => {
+    expect(workspaceItemTypeForArtifact("flashcard_deck")).toBe("document");
+    expect(workspaceCategoryForArtifact("flashcard_deck")).toBe("documents");
+  });
+
+  it("maps bookmark-like artifacts to reference workspace items and categories", () => {
+    expect(workspaceItemTypeForArtifact("bookmark")).toBe("reference");
+    expect(workspaceCategoryForArtifact("bookmark")).toBe("references");
   });
 });
 

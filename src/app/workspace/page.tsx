@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
 import { toast } from "sonner";
 import { AnimatePresence, motion } from "framer-motion";
@@ -64,6 +64,7 @@ function CanvasLoader() {
 
 function WorkspaceContent() {
   const router = useRouter();
+  const pathname = usePathname();
   const params = useSearchParams();
   const wsParam = params.get("ws") ?? params.get("focus") ?? undefined;
   const panelType = params.get("panel") ?? undefined;
@@ -94,17 +95,6 @@ function WorkspaceContent() {
   const [searchQuery] = useState("");
   const [artifactDialogOpen, setArtifactDialogOpen] = useState(false);
 
-  // Sync URL with store state
-  useEffect(() => {
-    if (wsParam && wsParam !== primaryWorkstreamId) {
-      commitWorkstream(wsParam);
-      return;
-    }
-    if (!wsParam && primaryWorkstreamId) {
-      exitWorkstream();
-    }
-  }, [commitWorkstream, exitWorkstream, primaryWorkstreamId, wsParam]);
-
   // Sync panel from URL
   useEffect(() => {
     if (panelType && panelId) {
@@ -132,15 +122,17 @@ function WorkspaceContent() {
           next.set(key, value);
         }
       }
-      const query = next.toString();
-      const href = query ? `/workspace?${query}` : "/workspace";
+      next.delete("ws");
+      next.delete("focus");
+      const sanitizedQuery = next.toString();
+      const href = sanitizedQuery ? `${pathname}?${sanitizedQuery}` : pathname;
       if (history === "push") {
         router.push(href);
       } else {
         router.replace(href, { scroll: false });
       }
     },
-    [params, router],
+    [params, pathname, router],
   );
 
   const handleCreate = useCallback(
@@ -167,11 +159,11 @@ function WorkspaceContent() {
   const handleCommitWorkstream = useCallback(
     (workstreamId: string | null) => {
       if (workstreamId) {
-        updateWorkspaceRoute({ ws: workstreamId }, "replace");
+        commitWorkstream(workstreamId);
+        updateWorkspaceRoute({}, "replace");
       } else {
         exitWorkstream();
         updateWorkspaceRoute({
-          ws: undefined,
           panel: undefined,
           thread: undefined,
           note: undefined,
@@ -180,14 +172,15 @@ function WorkspaceContent() {
         });
       }
     },
-    [exitWorkstream, updateWorkspaceRoute],
+    [commitWorkstream, exitWorkstream, updateWorkspaceRoute],
   );
 
   const handleOpenWorkstream = useCallback(
     (workstreamId: string) => {
-      updateWorkspaceRoute({ ws: workstreamId }, "push");
+      commitWorkstream(workstreamId);
+      updateWorkspaceRoute({}, "replace");
     },
-    [updateWorkspaceRoute],
+    [commitWorkstream, updateWorkspaceRoute],
   );
 
   // Panel handlers — toggle if same type+id, otherwise switch
@@ -259,6 +252,62 @@ function WorkspaceContent() {
     [handleOpenPanel, primaryWorkstreamId],
   );
 
+  // Structured creation through workspace orchestration — creates a real artifact/planner item
+  // and opens the panel for it, instead of opening a panel with a sentinel "new" ID.
+  const handleCreateItem = useCallback(async (type: 'note' | 'code' | 'visual' | 'planner') => {
+    const wsId = primaryWorkstreamId && primaryWorkstreamId !== '__hub__' ? primaryWorkstreamId : undefined;
+    try {
+      if (type === 'planner') {
+        const res = await fetch('/api/workspace-orchestration', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'resolveCommand',
+            query: 'create task: New task',
+            workstreamId: wsId,
+          }),
+        });
+        if (!res.ok) throw new Error('Failed to create task');
+        const data = await res.json() as { outcome: string; openPanel?: { type: string; id: string } };
+        if (data.openPanel) {
+          handleOpenPanel(data.openPanel.type as 'planner', data.openPanel.id);
+        }
+        toast.success('Task created');
+      } else {
+        const artifactType = type === 'code' ? 'code_project' : type === 'visual' ? 'diagram' : 'note';
+        const title = type === 'code' ? 'Untitled Code' : type === 'visual' ? 'Untitled Visual' : 'Untitled Note';
+        const editorMode = type === 'code' ? 'code' : 'standard';
+        const res = await fetch('/api/artifacts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'create',
+            type: artifactType,
+            title,
+            tags: [],
+            content: type === 'code' ? '' : { type: 'doc', content: [{ type: 'paragraph' }] },
+            contentPlaintext: '',
+            editorMode,
+            workstreamId: wsId,
+          }),
+        });
+        if (!res.ok) throw new Error('Failed to create item');
+        const data = await res.json() as { artifactId?: string };
+        if (data.artifactId) {
+          handleOpenPanel('artifact', data.artifactId);
+        }
+        toast.success(`${title.replace('Untitled ', '')} created`);
+      }
+      notifyWorkspaceContentMutated({
+        workstreamId: wsId,
+        refreshHub: true,
+        refreshWorkstreams: true,
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to create item');
+    }
+  }, [handleOpenPanel, primaryWorkstreamId]);
+
   const panelWidth = panel ? getPanelWidth(panel.type) : 0;
 
   // Focus timer tick
@@ -315,10 +364,7 @@ function WorkspaceContent() {
               {/* Canvas zone + right panel */}
               <div className="flex-1 relative overflow-hidden flex">
                 {/* Main canvas area */}
-                <div
-                  className="relative overflow-hidden transition-all duration-300 ease-out"
-                  style={{ flex: `1 1 ${panelWidth > 0 ? `calc(100% - ${panelWidth}px)` : "100%"}` }}
-                >
+                <div className="flex-1 relative overflow-hidden">
                   <WorkspaceCanvas
                     workstreams={workstreams}
                     onNewWorkstream={handleNewWorkstream}
@@ -349,15 +395,53 @@ function WorkspaceContent() {
                     onOpenHub={() => handleCommitWorkstream(null)}
                     panelOpen={!!panel}
                     onNewWorkstream={handleNewWorkstream}
+                    onOpenPanel={handleOpenPanel}
                     onCreateItem={(type) => {
                       if (type === 'note') {
-                        handleOpenPanel('artifact', 'new');
+                        void handleCreateItem('note');
                       } else if (type === 'code') {
-                        handleOpenPanel('artifact', 'new-code');
+                        void handleCreateItem('code');
                       } else if (type === 'visual') {
-                        handleOpenPanel('artifact', 'new-diagram');
+                        void handleCreateItem('visual');
                       } else if (type === 'planner') {
-                        handleOpenPanel('planner', 'new');
+                        void handleCreateItem('planner');
+                      }
+                    }}
+                    onResolveCommand={async (params) => {
+                      try {
+                        const res = await fetch('/api/workspace-orchestration', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            action: 'resolveCommand',
+                            query: params.query,
+                            workstreamId: params.workstreamId,
+                            artifactId: params.artifactId,
+                          }),
+                        });
+                        if (!res.ok) return null;
+                        const data = await res.json() as {
+                          outcome: 'chat' | 'planner' | 'artifact';
+                          openPanel?: { type: string; id: string };
+                          plannerItemId?: string;
+                          artifactId?: string;
+                          artifactType?: string;
+                        };
+                        if (data.outcome !== 'chat') {
+                          notifyWorkspaceContentMutated({
+                            workstreamId: params.workstreamId,
+                            refreshHub: true,
+                            refreshWorkstreams: true,
+                          });
+                          if (data.outcome === 'planner') {
+                            toast.success('Task created');
+                          } else if (data.outcome === 'artifact') {
+                            toast.success('Item created');
+                          }
+                        }
+                        return data;
+                      } catch {
+                        return null;
                       }
                     }}
                     onQuickChat={(query) => {
@@ -377,13 +461,22 @@ function WorkspaceContent() {
                     }}
                   />
 
-                  {/* Canvas dimming overlay when panel is open */}
-                  {panel && (
-                    <div
-                      className="absolute inset-0 bg-black/10 pointer-events-none z-[5] transition-opacity duration-300"
-                      style={{ opacity: 1, backdropFilter: "blur(1px)" }}
-                    />
-                  )}
+                  {/* Canvas dimming overlay when panel is open — subtle ambient darkening */}
+                  <AnimatePresence>
+                    {panel && (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                        className="absolute inset-0 pointer-events-none z-[5]"
+                        style={{
+                          background: "radial-gradient(ellipse 80% 90% at 30% 50%, rgba(0,0,0,0.06) 0%, rgba(0,0,0,0.14) 100%)",
+                          backdropFilter: "blur(1.5px) saturate(0.9)",
+                        }}
+                      />
+                    )}
+                  </AnimatePresence>
 
                   {/* Empty state */}
                   {workstreams.length === 0 && !primaryWorkstreamId && (
@@ -410,35 +503,27 @@ function WorkspaceContent() {
 
                 {/* Right push-panel — motion wrapper drives the slide-in/out so the
                     canvas and panel animate in perfect sync (no gap or overlap) */}
-                <AnimatePresence>
+                <AnimatePresence mode="wait">
                   {panel && (
-                    <motion.div
-                      initial={{ x: panelWidth, opacity: 0.72 }}
-                      animate={{ x: 0, opacity: 1 }}
-                      exit={{ x: panelWidth, opacity: 0.72 }}
-                      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-                      className="h-full shrink-0 overflow-hidden relative"
-                      style={{ width: panelWidth }}
-                    >
-                      <RightPushPanel
-                        type={panel.type}
-                        id={panel.id}
-                        workstreamId={primaryWorkstreamId}
-                        onClose={handleClosePanel}
-                        onExpand={(type, id) => {
-                          if (type === "chat") {
-                            router.push(`/chat?chatId=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
-                          } else if (type === "note") {
-                            router.push(`/artifacts?id=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
-                          } else if (type === "artifact") {
-                            router.push(`/artifacts?id=${id}`);
-                          } else if (type === "planner") {
-                            router.push(`/planner?item=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
-                          }
-                        }}
-                        workstreams={workstreams}
-                      />
-                    </motion.div>
+                    <RightPushPanel
+                      key={`${panel.type}-${panel.id}`}
+                      type={panel.type}
+                      id={panel.id}
+                      workstreamId={primaryWorkstreamId}
+                      onClose={handleClosePanel}
+                      onExpand={(type, id) => {
+                        if (type === "chat") {
+                          router.push(`/chat?chatId=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
+                        } else if (type === "note") {
+                          router.push(`/artifacts?id=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
+                        } else if (type === "artifact") {
+                          router.push(`/artifacts?id=${id}`);
+                        } else if (type === "planner") {
+                          router.push(`/planner?item=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
+                        }
+                      }}
+                      workstreams={workstreams}
+                    />
                   )}
                 </AnimatePresence>
               </div>

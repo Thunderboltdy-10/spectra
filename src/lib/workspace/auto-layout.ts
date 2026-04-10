@@ -29,10 +29,10 @@ export type LayoutResult = {
 
 // Radial distances from hub center by lifecycle state (scaled for spacious territories)
 export const RADIAL_DISTANCE = {
-  active: 2800,
-  quiet: 3800,
-  completed: 5000,
-  archived: 6000,
+  active: 3000,
+  quiet: 4500,
+  completed: 6000,
+  archived: 7500,
 } as const;
 
 export const WORKSTREAM_TERRITORY = {
@@ -40,7 +40,7 @@ export const WORKSTREAM_TERRITORY = {
   height: 1200,
 } as const;
 
-export const WORKSTREAM_MIN_DISTANCE = 1800;
+export const WORKSTREAM_MIN_DISTANCE = 2000;
 
 // Angular sectors by type (radians from 0)
 const TYPE_SECTORS: Record<string, number> = {
@@ -191,10 +191,10 @@ export function getLifecycleVisuals(ws: Workstream): {
   dashed: boolean;
 } {
   if (ws.status === "archived") {
-    return { opacity: 0.2, scale: 0.8, dashed: true };
+    return { opacity: 0.25, scale: 0.85, dashed: false };
   }
   if (ws.status === "completed") {
-    return { opacity: 0.35, scale: 0.85, dashed: true };
+    return { opacity: 0.4, scale: 0.9, dashed: false };
   }
   // Check for quiet (no activity in 14+ days)
   if (ws.lastActivityAt) {

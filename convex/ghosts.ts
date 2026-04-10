@@ -3,6 +3,8 @@ import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { getUserByClerkId } from "./helpers";
 import { internal } from "./_generated/api";
+import { syncWorkspaceItemForArtifact } from "./workspaceItemSync";
+import { recordWorkspaceMutation } from "./workspaceHelpers";
 
 const GHOST_GENERATION_MODEL = "openai/gpt-5.4-nano";
 const GHOST_MODEL_LANE = "cheap_background";
@@ -23,12 +25,6 @@ async function assertWorkstreamOwnership(
     throw new Error("Workstream not found");
   }
   return workstream;
-}
-
-function normalizeText(value: string | undefined, max = 240) {
-  if (!value) return undefined;
-  const normalized = value.replace(/\s+/g, " ").trim();
-  return normalized ? normalized.slice(0, max) : undefined;
 }
 
 function buildSessionKey(workstreamId: string) {
@@ -62,7 +58,7 @@ async function gatherWorkstreamContext(
   ctx: Parameters<typeof getUserByClerkId>[0],
   workstreamId: Id<"workstreams">,
 ) {
-  const [artifacts, notes, plannerItems, linkedAgent] = await Promise.all([
+  const [artifacts, notes, plannerItems, linkedAgent, workspaceItems] = await Promise.all([
     ctx.db
       .query("artifacts")
       .withIndex("by_workstream", (q) => q.eq("workstreamId", workstreamId))
@@ -80,6 +76,10 @@ async function gatherWorkstreamContext(
       if (!workstream?.linkedAgentId) return null;
       return ctx.db.get(workstream.linkedAgentId);
     })(),
+    ctx.db
+      .query("workspaceItems")
+      .withIndex("by_workstream", (q) => q.eq("workstreamId", workstreamId))
+      .collect(),
   ]);
 
   const activeArtifacts = artifacts.filter((artifact) => artifact.status === "active").sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 8);
@@ -89,6 +89,9 @@ async function gatherWorkstreamContext(
   const dueSoonPlannerItems = activePlannerItems.filter((item) => typeof item.dueAt === "number" && item.dueAt >= Date.now() && item.dueAt - Date.now() <= 1000 * 60 * 60 * 24 * 4);
   const hasQuiz = activeArtifacts.some((artifact) => artifact.type === "quiz");
   const hasFlashcards = activeArtifacts.some((artifact) => artifact.type === "flashcard_deck");
+  const activeWorkspaceItems = workspaceItems.filter((item) => item.status === "active");
+  const workspaceHasQuiz = activeWorkspaceItems.some((item) => item.renderMode === "quiz");
+  const workspaceHasFlashcards = activeWorkspaceItems.some((item) => item.renderMode === "flashcard_deck");
   const latestArtifactTitle = activeArtifacts[0]?.title;
   const latestNoteTitle = activeNotes[0]?.title;
   const latestPlannerTitle = activePlannerItems[0]?.title;
@@ -98,10 +101,11 @@ async function gatherWorkstreamContext(
     activeArtifacts,
     activeNotes,
     activePlannerItems,
+    activeWorkspaceItems,
     overduePlannerItems,
     dueSoonPlannerItems,
-    hasQuiz,
-    hasFlashcards,
+    hasQuiz: hasQuiz || workspaceHasQuiz,
+    hasFlashcards: hasFlashcards || workspaceHasFlashcards,
     latestArtifactTitle,
     latestNoteTitle,
     latestPlannerTitle,
@@ -373,49 +377,56 @@ export const accept = mutation({
       });
     }
 
-    const workspaceItemId = await ctx.db.insert("workspaceItems", {
-      orgId: actor.orgId,
+    await syncWorkspaceItemForArtifact(ctx, {
+      artifactId,
       ownerUserId: actor._id,
+      orgId: actor.orgId,
       workstreamId: ghost.workstreamId,
-      type: artifactType === "document" ? "document" : "visualization",
-      itemType: "artifact",
-      sourceKind: "artifact",
-      sourceId: String(artifactId),
-      sourceArtifactId: artifactId,
-      renderMode: ghost.renderMode ?? artifactType,
-      title: ghost.title,
-      contentSummary: normalizeText(ghost.summary ?? ghost.content ?? ghost.title, 180),
-      x: Math.round(ghost.x ?? 1180),
-      y: Math.round(ghost.y ?? 880),
-      category: artifactType === "document" ? "documents" : "visualizations",
       status: "active",
-      pinned: false,
-      provenanceSource: "ai",
-      provenanceAction: "ghost_accepted",
-      createdAt: now,
-      updatedAt: now,
+      title: ghost.title,
+      artifactType: ghost.renderMode ?? artifactType,
+      contentPlaintext: ghost.summary ?? ghost.content ?? ghost.title,
     });
 
-    await ctx.db.insert("workspaceMutations", {
-      orgId: actor.orgId,
-      ownerUserId: actor._id,
-      workstreamId: ghost.workstreamId,
-      mutationType: "create_item",
-      source: "ai",
-      summary: `Accepted ghost ${ghost.title}`,
-      targetItemIds: [workspaceItemId],
-      after: { itemId: workspaceItemId, artifactId },
-      revertData: { kind: "delete_items", itemIds: [workspaceItemId] },
-      status: "applied",
-      createdAt: now,
-      updatedAt: now,
-    });
+    const workspaceItem = await ctx.db
+      .query("workspaceItems")
+      .withIndex("by_source_artifact", (q) => q.eq("sourceArtifactId", artifactId))
+      .collect()
+      .then((rows) => rows.find((row) => row.ownerUserId === actor._id && row.orgId === actor.orgId) ?? null);
+
+    const workspaceItemId = workspaceItem?._id;
+
+    if (workspaceItemId) {
+      await ctx.db.patch(workspaceItemId, {
+        x: Math.round(ghost.x ?? workspaceItem.x ?? 1180),
+        y: Math.round(ghost.y ?? workspaceItem.y ?? 880),
+        pinned: false,
+        provenanceSource: "ai",
+        provenanceAction: "ghost_accepted",
+        updatedAt: now,
+      });
+    }
+
+    const mutationId = workspaceItemId
+      ? await recordWorkspaceMutation(ctx, {
+          orgId: actor.orgId,
+          ownerUserId: actor._id,
+          workstreamId: ghost.workstreamId,
+          mutationType: "create_item",
+          source: "ai",
+          summary: `Accepted ghost ${ghost.title}`,
+          targetItemIds: [workspaceItemId],
+          after: { itemId: workspaceItemId, artifactId },
+          revertData: { kind: "delete_items", itemIds: [workspaceItemId] },
+        })
+      : undefined;
 
     await ctx.db.patch(args.ghostId, {
       status: "accepted",
       acceptedAt: now,
       acceptedArtifactId: artifactId,
       acceptedWorkspaceItemId: workspaceItemId,
+      sourceWorkspaceMutationId: mutationId,
       updatedAt: now,
     });
 
@@ -477,15 +488,44 @@ export const regenerateForWorkstream = internalMutation({
       .query("ghostSuggestions")
       .withIndex("by_similarity", (q) => q.eq("ownerUserId", args.ownerUserId))
       .collect();
+    const pendingSimilarityKeys = new Set(
+      pendingRows
+        .map((row) => row.similarityKey)
+        .filter((value): value is string => Boolean(value)),
+    );
     const dismissedKeys = new Set(
       existingSimilarityRows
         .filter((row) => row.status === "dismissed")
         .map((row) => row.similarityKey),
     );
+    const historicalKeys = new Set(
+      existingSimilarityRows
+        .map((row) => row.similarityKey)
+        .filter((value): value is string => Boolean(value)),
+    );
+    const acceptedArtifactIds = new Set(
+      existingSimilarityRows
+        .map((row) => row.acceptedArtifactId)
+        .filter((value): value is Id<"artifacts"> => Boolean(value)),
+    );
+    const projectedArtifactTitles = new Set(
+      context.activeArtifacts
+        .filter((artifact) => acceptedArtifactIds.has(artifact._id))
+        .map((artifact) => artifact.title.trim().toLowerCase())
+        .filter(Boolean),
+    );
 
     let created = 0;
     for (const candidate of candidates) {
       if (dismissedKeys.has(candidate.similarityKey)) continue;
+      if (pendingSimilarityKeys.has(candidate.similarityKey)) continue;
+      if (projectedArtifactTitles.has(candidate.title.trim().toLowerCase())) continue;
+      if (historicalKeys.has(candidate.similarityKey) && context.activeWorkspaceItems.some((item) =>
+        item.sourceKind === "artifact"
+        && item.renderMode === candidate.renderMode
+        && item.title.trim().toLowerCase() === candidate.title.trim().toLowerCase())) {
+        continue;
+      }
       await ctx.db.insert("ghostSuggestions", {
         orgId: args.orgId,
         ownerUserId: args.ownerUserId,

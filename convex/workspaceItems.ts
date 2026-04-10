@@ -800,6 +800,65 @@ export const globalSearch = query({
   },
 });
 
+export const getWorkspaceContent = query({
+  args: {
+    actorClerkId: v.string(),
+    workstreamId: v.id("workstreams"),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireWorkspaceActor(ctx, args.actorClerkId);
+    await validateWorkspaceWorkstream(ctx, actor, args.workstreamId);
+
+    const [workspaceItems, chats, plannerItems, artifacts, topicClusters] = await Promise.all([
+      ctx.db
+        .query("workspaceItems")
+        .withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId))
+        .filter((q) => q.eq(q.field("status"), "active"))
+        .collect(),
+      ctx.db
+        .query("chats")
+        .withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId))
+        .collect(),
+      ctx.db
+        .query("plannerItems")
+        .withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId))
+        .collect(),
+      ctx.db
+        .query("artifacts")
+        .withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId))
+        .collect(),
+      ctx.db
+        .query("workspaceTopicClusters")
+        .withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId))
+        .collect(),
+    ]);
+
+    return {
+      workstreamId: args.workstreamId,
+      workspaceItems: workspaceItems
+        .filter((item) => item.ownerUserId === actor._id && item.orgId === actor.orgId)
+        .sort((a, b) => (b.updatedAt - a.updatedAt)),
+      chats: chats
+        .filter((chat) => chat.ownerUserId === actor._id && chat.orgId === actor.orgId && !chat.deletedAt)
+        .sort((a, b) => b.updatedAt - a.updatedAt),
+      plannerItems: plannerItems
+        .filter((item) => item.ownerUserId === actor._id && item.orgId === actor.orgId)
+        .sort((a, b) => {
+          const dueA = a.dueAt ?? Number.MAX_SAFE_INTEGER;
+          const dueB = b.dueAt ?? Number.MAX_SAFE_INTEGER;
+          if (dueA !== dueB) return dueA - dueB;
+          return b.updatedAt - a.updatedAt;
+        }),
+      artifacts: artifacts
+        .filter((artifact) => artifact.ownerUserId === actor._id && artifact.orgId === actor.orgId && artifact.status === "active")
+        .sort((a, b) => b.updatedAt - a.updatedAt),
+      topicClusters: topicClusters
+        .filter((cluster) => cluster.ownerUserId === actor._id && cluster.orgId === actor.orgId)
+        .sort((a, b) => a.generatedTitle.localeCompare(b.generatedTitle)),
+    };
+  },
+});
+
 /* ─── W2-B1: Duplicate a workspace item ─────────────────── */
 
 export const duplicate = mutation({

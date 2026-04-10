@@ -491,77 +491,21 @@ button:disabled {
   animation: right-panel-enter-sheet 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-/* ─── Workspace React Flow ────────────────────────────────── */
 
-.workspace-react-flow {
-  /* Prevent page scroll — workspace is a spatial surface */
-  touch-action: none;
-  background-image: radial-gradient(circle, color-mix(in oklab, var(--border-default) 72%, transparent) 1.1px, transparent 1.1px);
-  background-size: 28px 28px;
-}
 
-.workspace-react-flow .react-flow__renderer,
-.workspace-react-flow .react-flow__pane,
-.workspace-react-flow .react-flow__viewport {
-  cursor: grab;
-}
 
-.workspace-react-flow .react-flow__pane.dragging,
-.workspace-react-flow .react-flow__viewport.dragging {
-  cursor: grabbing;
-}
 
-.workspace-react-flow .react-flow__controls {
-  border: 1px solid var(--border-default);
-  border-radius: 14px;
-  overflow: hidden;
-  box-shadow: 0 4px 16px -4px rgba(0, 0, 0, 0.08);
-  background: color-mix(in oklab, var(--bg-elevated) 92%, transparent);
-  backdrop-filter: blur(16px);
-  gap: 0;
-}
 
-.workspace-react-flow .react-flow__controls-button {
-  background: transparent;
-  color: var(--text-secondary);
-  border-bottom: 1px solid var(--border-default);
-  transition: all 160ms ease;
-}
 
-.workspace-react-flow .react-flow__controls-button:last-child {
-  border-bottom: none;
-}
-
-.workspace-react-flow .react-flow__controls-button:hover {
-  background: var(--bg-hover);
-  color: var(--accent-cyan);
-}
 
 /* Smoother edge rendering */
-.workspace-react-flow .react-flow__edge-path {
-  transition: stroke-opacity 300ms ease;
-}
 
 /* Node entrance animations */
-.workspace-react-flow .react-flow__node {
-  transition: filter 220ms ease, box-shadow 220ms ease;
-  will-change: transform;
-}
 
-.workspace-react-flow .react-flow__node:hover {
-  filter: brightness(1.02);
-  z-index: 10 !important;
-}
 
 /* Background pattern refinement */
-.workspace-react-flow .react-flow__background {
-  opacity: 0.6;
-}
 
 /* Ensure background dots persist at all zoom levels, including committed state */
-.workspace-react-flow .react-flow__background pattern {
-  opacity: 1;
-}
 
 .right-panel-content {
 }
@@ -1670,12 +1614,6 @@ button:disabled {
   padding-right: 0.5rem;
 }
 
-.workspace-react-flow .react-flow__node-contentGroup,
-.workspace-react-flow .react-flow__node-contentColumn {
-  background: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
-}
 
 /* ── Floating Menu ──────────────────────────────────────────────────── */
 
@@ -1757,51 +1695,15 @@ button:disabled {
   animation: ai-delete-highlight 250ms ease-out forwards;
 }
 
-/* ── Workspace canvas overlay animations ────────────────────────────────── */
-
-@keyframes ws-focus-backdrop {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
 
 /* Tldraw override — hide default toolbars, style selectors */
-.workspace-canvas-root .tl-container {
-  background: transparent !important;
-}
 
-.workspace-canvas-root .tl-overlays__item {
-  display: none !important;
-}
 
-/* ── Ambient Polish: Workspace Micro-interactions ────────────── */
 
-/* Content items: subtle lift on hover */
-@keyframes content-item-enter {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.workspace-content-item {
-  transition: transform 150ms ease, box-shadow 150ms ease;
-}
-.workspace-content-item:hover {
-  transform: scale(1.01);
-  box-shadow: 0 4px 12px -4px rgba(0, 0, 0, 0.08);
-}
 
 /* Staggered content entry — applied by JS setting --stagger-index */
-.workspace-stagger-enter {
-  animation: content-item-enter 300ms ease-out backwards;
-  animation-delay: calc(var(--stagger-index, 0) * 30ms);
-}
 
 /* Workstream card hover: shadow deepens, border warms */
-.workspace-card-hover {
-  transition: box-shadow 200ms ease, border-color 200ms ease, transform 200ms ease;
-}
-.workspace-card-hover:hover {
-  box-shadow: 0 6px 20px -6px rgba(0, 0, 0, 0.12);
-}
 
 /* Panel open: spring feel via overshoot easing */
 @keyframes panel-spring-in {
@@ -1816,23 +1718,7 @@ button:disabled {
   50% { box-shadow: 0 0 24px -8px var(--zone-color, var(--accent-cyan)); }
 }
 
-.workspace-zone-active {
-  animation: zone-active-glow 4s ease-in-out 1;
-}
 
-/* Time-of-day ambient tint (applied on .workspace-react-flow) */
-.workspace-ambient-morning {
-  --ambient-tint: linear-gradient(135deg, rgba(255, 200, 100, 0.015) 0%, transparent 60%);
-}
-.workspace-ambient-afternoon {
-  --ambient-tint: linear-gradient(135deg, rgba(100, 180, 255, 0.012) 0%, transparent 60%);
-}
-.workspace-ambient-evening {
-  --ambient-tint: linear-gradient(135deg, rgba(160, 120, 220, 0.018) 0%, transparent 60%);
-}
-.workspace-ambient-night {
-  --ambient-tint: linear-gradient(135deg, rgba(60, 80, 140, 0.02) 0%, transparent 60%);
-}
 
 /* Smooth transitions timing table (standardized) */
 .transition-reveal { transition: all 300ms ease-out; }
@@ -1843,21 +1729,9 @@ button:disabled {
 .transition-hover { transition: all 150ms ease; }
 
 /* Canvas dimming when panel is open */
-.workspace-canvas-dim {
-  transition: opacity 300ms cubic-bezier(0.22, 1, 0.36, 1);
-}
 
 /* Tint zone smooth transitions */
-.workspace-react-flow .react-flow__node-categoryField {
-  transition: opacity 300ms ease, transform 300ms ease;
-}
 
 /* Progressive content reveal animation */
-.workspace-tint-zone {
-  transition: background 500ms ease, padding 300ms ease;
-}
 
 /* React Flow node transitions */
-.workspace-react-flow .react-flow__node {
-  transition: opacity 200ms ease;
-}

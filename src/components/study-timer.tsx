@@ -184,7 +184,6 @@ function getInitialTimerState(): PersistedTimerState {
   };
 }
 
-import { useWorkspaceStore } from "@/stores/workspace-store";
 
 export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTimerProps) {
   const initialState = useMemo(getInitialTimerState, []);
@@ -207,17 +206,7 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
   const duration = phaseDurationMs(phase, workMinutes, breakMinutes);
   const progress = Math.min(1, Math.max(0, 1 - (remainingMs / duration)));
 
-  useEffect(() => {
-    useWorkspaceStore.setState((state) => ({
-      timerState: {
-        ...state.timerState,
-        active: isRunning,
-        sessionMinutes: phase === "work" ? workMinutes : breakMinutes,
-        elapsed: Math.max(0, Math.floor((duration - remainingMs) / 1000)),
-        sessionsCompleted: completedSessions,
-      },
-    }));
-  }, [isRunning, workMinutes, breakMinutes, phase, duration, remainingMs, completedSessions]);
+  // Timer state is local only — workspace integration removed
 
   useEffect(() => {
     const handleStart = () => setIsRunning(true);

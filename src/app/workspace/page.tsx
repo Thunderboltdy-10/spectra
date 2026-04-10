@@ -364,10 +364,7 @@ function WorkspaceContent() {
               {/* Canvas zone + right panel */}
               <div className="flex-1 relative overflow-hidden flex">
                 {/* Main canvas area */}
-                <div
-                  className="relative overflow-hidden transition-all duration-300 ease-out"
-                  style={{ flex: `1 1 ${panelWidth > 0 ? `calc(100% - ${panelWidth}px)` : "100%"}` }}
-                >
+                <div className="flex-1 relative overflow-hidden">
                   <WorkspaceCanvas
                     workstreams={workstreams}
                     onNewWorkstream={handleNewWorkstream}
@@ -506,35 +503,27 @@ function WorkspaceContent() {
 
                 {/* Right push-panel — motion wrapper drives the slide-in/out so the
                     canvas and panel animate in perfect sync (no gap or overlap) */}
-                <AnimatePresence>
+                <AnimatePresence mode="wait">
                   {panel && (
-                    <motion.div
-                      initial={{ x: panelWidth, opacity: 0.72 }}
-                      animate={{ x: 0, opacity: 1 }}
-                      exit={{ x: panelWidth, opacity: 0.72 }}
-                      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-                      className="h-full shrink-0 overflow-hidden relative"
-                      style={{ width: panelWidth }}
-                    >
-                      <RightPushPanel
-                        type={panel.type}
-                        id={panel.id}
-                        workstreamId={primaryWorkstreamId}
-                        onClose={handleClosePanel}
-                        onExpand={(type, id) => {
-                          if (type === "chat") {
-                            router.push(`/chat?chatId=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
-                          } else if (type === "note") {
-                            router.push(`/artifacts?id=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
-                          } else if (type === "artifact") {
-                            router.push(`/artifacts?id=${id}`);
-                          } else if (type === "planner") {
-                            router.push(`/planner?item=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
-                          }
-                        }}
-                        workstreams={workstreams}
-                      />
-                    </motion.div>
+                    <RightPushPanel
+                      key={`${panel.type}-${panel.id}`}
+                      type={panel.type}
+                      id={panel.id}
+                      workstreamId={primaryWorkstreamId}
+                      onClose={handleClosePanel}
+                      onExpand={(type, id) => {
+                        if (type === "chat") {
+                          router.push(`/chat?chatId=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
+                        } else if (type === "note") {
+                          router.push(`/artifacts?id=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
+                        } else if (type === "artifact") {
+                          router.push(`/artifacts?id=${id}`);
+                        } else if (type === "planner") {
+                          router.push(`/planner?item=${id}&from=workspace&ws=${primaryWorkstreamId ?? ""}`);
+                        }
+                      }}
+                      workstreams={workstreams}
+                    />
                   )}
                 </AnimatePresence>
               </div>

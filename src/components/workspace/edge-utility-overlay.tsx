@@ -118,7 +118,7 @@ function getViewportBoundedY(value: number, baseInset: number, elementHeight: nu
 }
 
 function useBoundedUtilityOffset(
-  key: 'focus_timer' | 'workstream_shortcuts',
+  key: import("@/lib/workspace/contracts").WorkspaceUtilityType,
   baseInset: number,
   elementHeight: number,
 ) {
@@ -489,49 +489,63 @@ const BACKGROUND_OPTIONS: Array<{
 
 function BackgroundModeToggle() {
   const { backgroundMode, setBackgroundMode } = useWorkspaceStore();
+  const BG_HEIGHT = 80;
+  const BG_INSET = EDGE_MARGIN + 72;
+  const { boundedY, commitY } = useBoundedUtilityOffset('background_toggle', BG_INSET, BG_HEIGHT);
 
   return (
     <div
-      className={cn(
-        'absolute z-40',
-        glassStyle,
-        'rounded-[26px] px-3 py-3',
-      )}
-      style={{ bottom: EDGE_MARGIN + 72, right: EDGE_MARGIN }}
+      className="absolute z-40"
+      style={{ bottom: BG_INSET, right: EDGE_MARGIN }}
       data-testid="background-mode-toggle"
     >
-      <div className="mb-2 px-1">
-        <div className="text-[9px] font-semibold uppercase tracking-[0.24em] text-[var(--text-tertiary)]">
-          Canvas background
+      <motion.div
+        drag="y"
+        dragConstraints={{ top: -320, bottom: 320 }}
+        dragElastic={0.1}
+        dragMomentum={false}
+        onDragEnd={(_, info) => {
+          commitY(boundedY + info.offset.y);
+        }}
+        animate={{ y: boundedY }}
+        className={cn(
+          glassStyle,
+          'rounded-[26px] px-3 py-3',
+        )}
+      >
+        <div className="mb-2 px-1">
+          <div className="text-[9px] font-semibold uppercase tracking-[0.24em] text-[var(--text-tertiary)]">
+            Canvas background
+          </div>
+          <div className="mt-1 text-[11px] text-[var(--text-secondary)]">
+            Pick the backdrop that helps you think.
+          </div>
         </div>
-        <div className="mt-1 text-[11px] text-[var(--text-secondary)]">
-          Pick the backdrop that helps you think.
+        <div className="flex items-center gap-1 rounded-full bg-[var(--bg-primary)]/45 p-1">
+          {BACKGROUND_OPTIONS.map((option) => {
+            const Icon = option.icon;
+            const active = backgroundMode === option.mode;
+            return (
+              <button
+                key={option.mode}
+                type="button"
+                onClick={() => setBackgroundMode(option.mode)}
+                aria-pressed={active}
+                title={`${option.label}: ${option.description}`}
+                className={cn(
+                  'group relative flex items-center gap-2 rounded-full px-3 py-2 text-[11px] font-semibold transition-all duration-200',
+                  active
+                    ? 'bg-[var(--accent-cyan)] text-white shadow-[0_10px_24px_-16px_rgba(14,142,232,0.75)]'
+                    : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]',
+                )}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                <span>{option.label}</span>
+              </button>
+            );
+          })}
         </div>
-      </div>
-      <div className="flex items-center gap-1 rounded-full bg-[var(--bg-primary)]/45 p-1">
-        {BACKGROUND_OPTIONS.map((option) => {
-          const Icon = option.icon;
-          const active = backgroundMode === option.mode;
-          return (
-            <button
-              key={option.mode}
-              type="button"
-              onClick={() => setBackgroundMode(option.mode)}
-              aria-pressed={active}
-              title={`${option.label}: ${option.description}`}
-              className={cn(
-                'group relative flex items-center gap-2 rounded-full px-3 py-2 text-[11px] font-semibold transition-all duration-200',
-                active
-                  ? 'bg-[var(--accent-cyan)] text-white shadow-[0_10px_24px_-16px_rgba(14,142,232,0.75)]'
-                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]',
-              )}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              <span>{option.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      </motion.div>
     </div>
   );
 }
@@ -700,27 +714,30 @@ function UnifiedCommandBar({
       style={{ bottom: EDGE_MARGIN }}
     >
       <div ref={barRef} className="relative flex flex-col items-center">
-        {/* Radial create menu — fans upward from the + button */}
-        <div ref={createRef} className="absolute bottom-0 left-4 flex items-center justify-center">
+        <div ref={createRef} className="absolute bottom-12 left-4 z-50">
           <AnimatePresence>
-            {createOpen &&
-              createItems.map((item, index) => {
-                const angle = 30 + index * angleStep;
-                return (
-                  <RadialItem
+            {createOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                transition={{ duration: 0.2, ease: EASE_SMOOTH }}
+                className="flex flex-col gap-1 w-48 rounded-2xl p-1.5 shadow-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] backdrop-blur-xl"
+              >
+                {createItems.map((item) => (
+                  <button
                     key={item.type}
-                    icon={item.icon}
-                    label={item.label}
-                    color={item.color}
-                    angle={angle}
-                    radius={90}
-                    open={createOpen}
-                    index={index}
-                    total={totalItems}
                     onClick={() => handleCreateClick(item)}
-                  />
-                );
-              })}
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-[13px] text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                  >
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg" style={{ background: `color-mix(in srgb, ${item.color} 15%, transparent)` }}>
+                      <item.icon className="h-4 w-4" style={{ color: item.color }} />
+                    </div>
+                    <span className="font-medium">{item.label}</span>
+                  </button>
+                ))}
+              </motion.div>
+            )}
           </AnimatePresence>
         </div>
 
@@ -788,7 +805,7 @@ function UnifiedCommandBar({
 
           {/* Workspace context badge */}
           <AnimatePresence>
-            {(activeWorkspace || globalScope) && !isArtifactScoped && (
+            {activeWorkspace && !isArtifactScoped && (
               <motion.div
                 initial={{ opacity: 0, width: 0 }}
                 animate={{ opacity: 1, width: 'auto' }}
@@ -797,13 +814,9 @@ function UnifiedCommandBar({
                 className="flex items-center gap-1 shrink-0 overflow-hidden"
               >
                 <div className="flex items-center gap-1 rounded-full bg-[var(--bg-hover)] pl-2 pr-1 py-0.5">
-                  {activeWorkspace ? (
-                    <span className="text-sm leading-none">{activeWorkspace.emoji || '📚'}</span>
-                  ) : (
-                    <ScopeIcon className="h-3.5 w-3.5 text-[var(--text-secondary)]" />
-                  )}
+                  <span className="text-sm leading-none">{activeWorkspace.emoji || '📚'}</span>
                   <span className="text-[11px] text-[var(--text-secondary)] truncate max-w-[80px] font-medium">
-                    {scopeLabel}
+                    {activeWorkspace.title}
                   </span>
                   <button
                     onClick={(e) => {
@@ -856,16 +869,9 @@ function UnifiedCommandBar({
             )}
           </div>
 
-          {focused ? (
-            <div className="hidden shrink-0 items-center gap-1 rounded-full border border-[var(--border-default)]/50 bg-[var(--bg-primary)]/55 px-2 py-1 text-[10px] font-medium text-[var(--text-secondary)] md:flex">
-              <Brain className="h-3 w-3" />
-              <span>{isArtifactScoped ? 'Artifact edit' : globalScope ? 'Global' : 'Scoped'}</span>
-            </div>
-          ) : (
-            <kbd className="hidden shrink-0 items-center gap-1 rounded-lg border border-[var(--border-default)]/50 bg-[var(--bg-primary)]/55 px-2 py-1 text-[10px] font-bold text-[var(--text-tertiary)] md:flex tracking-wide">
-              ⌘K
-            </kbd>
-          )}
+          <kbd className="hidden shrink-0 items-center gap-1 rounded-lg border border-[var(--border-default)]/50 bg-[var(--bg-primary)]/55 px-2 py-1 text-[10px] font-bold text-[var(--text-tertiary)] md:flex tracking-wide">
+            ⌘K
+          </kbd>
 
           {/* Send / Sparkles button */}
           <motion.button

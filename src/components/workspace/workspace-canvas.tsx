@@ -834,6 +834,7 @@ function WorkspaceCanvasInner({
   const [movePickerSearch, setMovePickerSearch] = useState("");
   const [pinnedItemIds, setPinnedItemIds] = useState<Set<string>>(new Set());
   const [ghostsByWorkstream, setGhostsByWorkstream] = useState<Record<string, GhostSuggestionSummary[]>>({});
+  const [contextMenuSearch, setContextMenuSearch] = useState("");
   const { activeArtifactId, activeNoteId } = useEditorStore();
   const editingActive = Boolean(activeArtifactId || activeNoteId);
   const positionContextMenu = useCallback((clientX: number, clientY: number, width?: number, height?: number) => {
@@ -1562,10 +1563,10 @@ function WorkspaceCanvasInner({
       }
       if (e.key === "Escape") {
         if (focusedItemId) { setFocusedItemId(null); return; }
-        if (itemContextMenu) { setItemContextMenu(null); return; }
-        if (groupContextMenu) { setGroupContextMenu(null); return; }
+        if (itemContextMenu) { setItemContextMenu(null); setContextMenuSearch(""); return; }
+        if (groupContextMenu) { setGroupContextMenu(null); setContextMenuSearch(""); return; }
         if (movePicker) { setMovePicker(null); return; }
-        if (contextMenu) { setContextMenu(null); return; }
+        if (contextMenu) { setContextMenu(null); setContextMenuSearch(""); return; }
         if (primaryWorkstreamId) { handleExitWorkstream(); }
       }
     };
@@ -1625,6 +1626,7 @@ function WorkspaceCanvasInner({
       setContextMenu(null);
       setItemContextMenu(null);
       setGroupContextMenu(null);
+      setContextMenuSearch("");
     };
     window.addEventListener("mousedown", handler, true);
     return () => window.removeEventListener("mousedown", handler, true);
@@ -1657,8 +1659,8 @@ function WorkspaceCanvasInner({
         nodes={nodes}
         edges={edges}
         fitView={false}
-        minZoom={0.12}
-        maxZoom={2.0}
+        minZoom={0.05}
+        maxZoom={3.0}
         defaultViewport={restoreViewport()}
         nodeTypes={FLOW_NODE_TYPES}
         onInit={handleInit}
@@ -1733,26 +1735,36 @@ function WorkspaceCanvasInner({
         <div
           data-context-menu
           onMouseDown={(e) => e.stopPropagation()}
-          className="absolute z-40 min-w-[220px] overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]/96 p-1.5 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.38)] backdrop-blur-xl"
+          className="absolute z-40 min-w-[220px] overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)]/96 p-1.5 shadow-[0_18px_48px_-18px_rgba(15,23,42,0.38)] backdrop-blur-xl flex flex-col"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
+          <div className="flex items-center gap-2 px-2 py-1.5 mb-1 border-b border-[var(--border-default)]/50 shrink-0">
+            <Search className="w-3.5 h-3.5 text-[var(--text-tertiary)]" />
+            <input
+              autoFocus
+              className="bg-transparent outline-none text-xs text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] w-full"
+              placeholder="Search actions..."
+              value={contextMenuSearch}
+              onChange={(e) => setContextMenuSearch(e.target.value)}
+            />
+          </div>
           {primaryWorkstreamId && primaryWorkstreamId !== HUB_CACHE_KEY ? (
-            <>
-              <ContextMenuItem icon={<FileText className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.note.label} onClick={() => { setContextMenu(null); panelOpener("artifact", "new"); }} />
-              <ContextMenuItem icon={<MessageSquare className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.thread.label} onClick={() => { setContextMenu(null); panelOpener("chat", "new"); }} />
-              <ContextMenuItem icon={<ImageIcon className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.diagram.label} onClick={() => { setContextMenu(null); panelOpener("artifact", "new-diagram"); }} />
-              <ContextMenuItem icon={<Code2 className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.code.label} onClick={() => { setContextMenu(null); panelOpener("artifact", "new-code"); }} />
-              <ContextMenuItem icon={<CalendarClock className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.planner.label} onClick={() => { setContextMenu(null); panelOpener("planner", "new"); }} />
-              <div className="my-1 h-px bg-[var(--border-default)]/50" />
-              <ContextMenuItem icon={<FolderOpen className="h-3.5 w-3.5" />} label="Paste from clipboard" onClick={() => { setContextMenu(null); }} />
-            </>
+            <div className="flex flex-col gap-0.5 overflow-y-auto max-h-[300px]">
+              {(!contextMenuSearch || EMPTY_CANVAS_MENU_ACTIONS.note.label.toLowerCase().includes(contextMenuSearch.toLowerCase())) && <ContextMenuItem icon={<FileText className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.note.label} onClick={() => { setContextMenu(null); setContextMenuSearch(""); panelOpener("artifact", "new"); }} />}
+              {(!contextMenuSearch || EMPTY_CANVAS_MENU_ACTIONS.thread.label.toLowerCase().includes(contextMenuSearch.toLowerCase())) && <ContextMenuItem icon={<MessageSquare className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.thread.label} onClick={() => { setContextMenu(null); setContextMenuSearch(""); panelOpener("chat", "new"); }} />}
+              {(!contextMenuSearch || EMPTY_CANVAS_MENU_ACTIONS.diagram.label.toLowerCase().includes(contextMenuSearch.toLowerCase())) && <ContextMenuItem icon={<ImageIcon className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.diagram.label} onClick={() => { setContextMenu(null); setContextMenuSearch(""); panelOpener("artifact", "new-diagram"); }} />}
+              {(!contextMenuSearch || EMPTY_CANVAS_MENU_ACTIONS.code.label.toLowerCase().includes(contextMenuSearch.toLowerCase())) && <ContextMenuItem icon={<Code2 className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.code.label} onClick={() => { setContextMenu(null); setContextMenuSearch(""); panelOpener("artifact", "new-code"); }} />}
+              {(!contextMenuSearch || EMPTY_CANVAS_MENU_ACTIONS.planner.label.toLowerCase().includes(contextMenuSearch.toLowerCase())) && <ContextMenuItem icon={<CalendarClock className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.planner.label} onClick={() => { setContextMenu(null); setContextMenuSearch(""); panelOpener("planner", "new"); }} />}
+              <div className="my-1 h-px bg-[var(--border-default)]/50 shrink-0" />
+              {(!contextMenuSearch || "Paste from clipboard".toLowerCase().includes(contextMenuSearch.toLowerCase())) && <ContextMenuItem icon={<FolderOpen className="h-3.5 w-3.5" />} label="Paste from clipboard" onClick={() => { setContextMenu(null); setContextMenuSearch(""); }} />}
+            </div>
           ) : (
-            <>
-              <ContextMenuItem icon={<Layers className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.workstream.label} hint="W" onClick={() => { setContextMenu(null); onNewWorkstream?.(); }} />
-              <ContextMenuItem icon={<Home className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.hub.label} onClick={() => { setContextMenu(null); handleOpenHub(); }} />
-              <div className="my-1 h-px bg-[var(--border-default)]/50" />
-              <ContextMenuItem icon={<FolderOpen className="h-3.5 w-3.5" />} label="Paste from clipboard" onClick={() => { setContextMenu(null); }} />
-            </>
+            <div className="flex flex-col gap-0.5 overflow-y-auto max-h-[300px]">
+              {(!contextMenuSearch || EMPTY_CANVAS_MENU_ACTIONS.workstream.label.toLowerCase().includes(contextMenuSearch.toLowerCase())) && <ContextMenuItem icon={<Layers className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.workstream.label} hint="W" onClick={() => { setContextMenu(null); setContextMenuSearch(""); onNewWorkstream?.(); }} />}
+              {(!contextMenuSearch || EMPTY_CANVAS_MENU_ACTIONS.hub.label.toLowerCase().includes(contextMenuSearch.toLowerCase())) && <ContextMenuItem icon={<Home className="h-3.5 w-3.5" />} label={EMPTY_CANVAS_MENU_ACTIONS.hub.label} onClick={() => { setContextMenu(null); setContextMenuSearch(""); handleOpenHub(); }} />}
+              <div className="my-1 h-px bg-[var(--border-default)]/50 shrink-0" />
+              {(!contextMenuSearch || "Paste from clipboard".toLowerCase().includes(contextMenuSearch.toLowerCase())) && <ContextMenuItem icon={<FolderOpen className="h-3.5 w-3.5" />} label="Paste from clipboard" onClick={() => { setContextMenu(null); setContextMenuSearch(""); }} />}
+            </div>
           )}
         </div>
       )}

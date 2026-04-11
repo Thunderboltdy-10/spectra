@@ -2,7 +2,7 @@ import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/s
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { getUserByClerkId } from "./helpers";
-import { recordWorkspaceMutation } from "./workspaceHelpers";
+import { computeWorkspaceItemDefaultFrame, recordWorkspaceMutation } from "./workspaceHelpers";
 
 const vPlannerType = v.union(v.literal("deadline"), v.literal("milestone"), v.literal("goal"), v.literal("reminder"));
 const vPlannerPriority = v.union(v.literal("low"), v.literal("medium"), v.literal("high"));
@@ -137,6 +137,12 @@ async function syncWorkspaceItemForPlannerItem(
     return existing._id;
   }
 
+  const frame = computeWorkspaceItemDefaultFrame({
+    itemType: "planner",
+    renderMode: params.type,
+    pinned: true,
+  });
+
   return await ctx.db.insert("workspaceItems", {
     orgId: params.orgId,
     ownerUserId: params.ownerUserId,
@@ -149,10 +155,10 @@ async function syncWorkspaceItemForPlannerItem(
     renderMode: params.type,
     title: params.title,
     contentSummary: normalizeString(params.description),
-    x: 80,
-    y: 220,
-    width: 280,
-    height: 160,
+    x: frame.x,
+    y: frame.y,
+    width: frame.width,
+    height: frame.height,
     category: "planner",
     status: "active",
     pinned: true,

@@ -1,0 +1,998 @@
+/* eslint-disable @typescript-eslint/no-unsafe-function-type */
+import { mutation, query } from "./_generated/server";
+import { v } from "convex/values";
+import type { Doc, Id } from "./_generated/dataModel";
+import { getUserByClerkId } from "./helpers";
+import {
+  buildWorkspaceSearchText,
+  computeWorkspaceItemDefaultFrame,
+  recordWorkspaceMutation,
+  resolveCanonicalWorkspaceItemType,
+  resolveWorkspaceCategory,
+  type WorkspaceSearchResultSource,
+} from "./workspaceHelpers";
+
+const ARTIFACT_TO_CANONICAL_WORKSPACE_TYPE: Record<string, string> = {
+  document: "export",
+  note: "note",
+  board: "board",
+  diagram: "visual",
+  concept_map: "visual",
+  timeline: "visual",
+  image: "visual",
+  visualization: "visual",
+  flashcard_deck: "flashcard_deck",
+  quiz: "quiz",
+  code_output: "code",
+  code_project: "code",
+  bookmark: "export",
+  reference: "export",
+  table: "export",
+  custom: "export",
+};
+
+const LEGACY_TYPE_TO_CANONICAL_WORKSPACE_TYPE: Record<string, string> = {
+  thread: "thread",
+  document: "export",
+  planner: "planner",
+  board: "board",
+  visualization: "visual",
+  media: "visual",
+  reference: "export",
+  custom: "export",
+  utility: "export",
+};
+
+function canonicalWorkspaceTypeForArtifactType(artifactType: string) {
+  return ARTIFACT_TO_CANONICAL_WORKSPACE_TYPE[artifactType] ?? "export";
+}
+
+function canonicalWorkspaceTypeForLegacyType(legacyType: string) {
+  return LEGACY_TYPE_TO_CANONICAL_WORKSPACE_TYPE[legacyType] ?? "export";
+}
+
+async function requireActor(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string) {
+  const actor = await getUserByClerkId(ctx, actorClerkId);
+  if (!actor) throw new Error("Unauthorized");
+  return actor;
+}
+
+async function requireOwnedWorkstream(ctx: { db: { get: Function } }, actor: { _id: Id<"users">; orgId: Id<"orgs"> }, workstreamId: Id<"workstreams">) {
+  const workstream = await ctx.db.get(workstreamId);
+  if (!workstream || workstream.ownerUserId !== actor._id || workstream.orgId !== actor.orgId) {
+    throw new Error("Workstream not found");
+  }
+  return workstream;
+}
+
+async function requireOwnedItem(ctx: { db: { get: Function } }, actor: { _id: Id<"users">; orgId: Id<"orgs"> }, itemId: Id<"workspaceItems">) {
+  const item = await ctx.db.get(itemId);
+  if (!item || item.ownerUserId !== actor._id || item.orgId !== actor.orgId) {
+    throw new Error("Workspace item not found");
+  }
+  return item;
+}
+
+type WorkspaceMutationCtx = {
+  db: {
+    get: Function;
+    insert: Function;
+    patch: Function;
+    query: Function;
+  };
+};
+
+function workspaceFacingTypeForItem(item: Doc<"workspaceItems">) {
+  if (item.itemType === "planner" || item.type === "planner") return "planner" as const;
+  if (item.itemType === "thread" || item.type === "thread") return "thread" as const;
+  if (item.renderMode) return canonicalWorkspaceTypeForArtifactType(item.renderMode);
+  return canonicalWorkspaceTypeForLegacyType(item.type);
+}
+
+function normalizeText(value: string | null | undefined, max = 280) {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim().replace(/\s+/g, " ");
+  return trimmed.length > 0 ? trimmed.slice(0, max) : undefined;
+}
+
+function searchTextForWorkspaceItem(params: {
+  title?: string | null;
+  contentSummary?: string | null;
+  renderMode?: string | null;
+  category?: string | null;
+}) {
+  return buildWorkspaceSearchText(params.title, params.contentSummary, params.renderMode, params.category);
+}
+
+function isActiveThreadChat(chat: Doc<"chats">, actorId: Id<"users">, orgId: Id<"orgs">, workstreamId: Id<"workstreams">) {
+  return chat.ownerUserId === actorId && chat.orgId === orgId && chat.workstreamId === workstreamId && !chat.deletedAt;
+}
+
+function defaultLegacyTypeForItemType(itemType: string): Doc<"workspaceItems">["type"] {
+  switch (itemType) {
+    case "thread": return "thread";
+    case "planner": return "planner";
+    case "utility": return "utility";
+    case "custom": return "custom";
+    default: return "document";
+  }
+}
+
+export const getWorkspaceContent = query({
+  args: {
+    actorClerkId: v.string(),
+    workstreamId: v.id("workstreams"),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    const workstream = await ctx.db.get(args.workstreamId);
+    if (!workstream || workstream.ownerUserId !== actor._id || workstream.orgId !== actor.orgId) {
+      throw new Error("Workstream not found");
+    }
+
+    const [items, artifacts, plannerItems, chats, latestMutation] = await Promise.all([
+      ctx.db.query("workspaceItems").withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId)).collect(),
+      ctx.db.query("artifacts").withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId)).collect(),
+      ctx.db.query("plannerItems").withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId)).collect(),
+      ctx.db.query("chats").withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId)).collect(),
+      ctx.db.query("workspaceMutations").withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId)).order("desc").first(),
+    ]);
+
+    const activeItems = items
+      .filter((item) => item.ownerUserId === actor._id && item.orgId === actor.orgId && item.status === "active")
+      .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0) || a.createdAt - b.createdAt)
+      .map((item) => ({ ...item, workspaceType: workspaceFacingTypeForItem(item) }));
+
+    const projectedThreadIds = new Set(activeItems.filter((item) => item.itemType === "thread" && item.sourceChatId).map((item) => item.sourceChatId));
+
+    const threadItems = chats
+      .filter((chat) => isActiveThreadChat(chat, actor._id, actor.orgId, args.workstreamId))
+      .filter((chat) => !projectedThreadIds.has(chat._id))
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .map((chat, index) => ({
+        _id: (`virtual-thread-${chat._id}`) as Id<"workspaceItems">,
+        _creationTime: chat._creationTime,
+        orgId: actor.orgId,
+        ownerUserId: actor._id,
+        workstreamId: args.workstreamId,
+        type: "thread" as const,
+        itemType: "thread" as const,
+        sourceKind: "chat" as const,
+        sourceId: chat._id as unknown as string,
+        renderMode: "thread",
+        sourceChatId: chat._id,
+        title: chat.title,
+        contentSummary: normalizeText(chat.latestUserPrompt ?? chat.contextSummary),
+        searchText: searchTextForWorkspaceItem({
+          title: chat.title,
+          contentSummary: normalizeText(chat.latestUserPrompt ?? chat.contextSummary),
+          renderMode: "thread",
+          category: "threads",
+        }),
+        x: 120,
+        y: 420 + index * 220,
+        width: 320,
+        height: 180,
+        zIndex: 0,
+        category: "threads" as const,
+        status: "active" as const,
+        pinned: false,
+        collapsed: false,
+        hidden: false,
+        provenanceSource: "user" as const,
+        createdAt: chat.createdAt,
+        updatedAt: chat.updatedAt,
+        workspaceType: "thread" as const,
+      }));
+
+    return {
+      workstream,
+      items: [...activeItems, ...threadItems].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0) || a.createdAt - b.createdAt),
+      artifacts: artifacts.filter((artifact) => artifact.ownerUserId === actor._id && artifact.orgId === actor.orgId && artifact.status === "active"),
+      plannerItems: plannerItems.filter((item) => item.ownerUserId === actor._id && item.orgId === actor.orgId && item.status !== "cancelled"),
+      chats: chats.filter((chat) => chat.ownerUserId === actor._id && chat.orgId === actor.orgId && !chat.deletedAt),
+      revision: latestMutation?.updatedAt ?? workstream.updatedAt,
+    };
+  },
+});
+
+export const updateItemLayout = mutation({
+  args: {
+    actorClerkId: v.string(),
+    itemId: v.id("workspaceItems"),
+    x: v.number(),
+    y: v.number(),
+    width: v.optional(v.number()),
+    height: v.optional(v.number()),
+    zIndex: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    const item = await requireOwnedItem(ctx, actor, args.itemId);
+
+    await ctx.db.patch(args.itemId, {
+      x: args.x,
+      y: args.y,
+      width: args.width ?? item.width,
+      height: args.height ?? item.height,
+      zIndex: args.zIndex ?? item.zIndex,
+      updatedAt: Date.now(),
+    });
+
+    return { success: true };
+  },
+});
+
+export const createWidget = mutation({
+  args: {
+    actorClerkId: v.string(),
+    workstreamId: v.id("workstreams"),
+    title: v.string(),
+    type: v.optional(v.union(v.literal("thread"), v.literal("document"), v.literal("planner"), v.literal("board"), v.literal("visualization"), v.literal("media"), v.literal("reference"), v.literal("custom"), v.literal("utility"))),
+    itemType: v.optional(v.union(v.literal("thread"), v.literal("artifact"), v.literal("planner"), v.literal("utility"), v.literal("custom"))),
+    renderMode: v.optional(v.string()),
+    contentSummary: v.optional(v.string()),
+    x: v.optional(v.number()),
+    y: v.optional(v.number()),
+    width: v.optional(v.number()),
+    height: v.optional(v.number()),
+    category: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    await requireOwnedWorkstream(ctx, actor, args.workstreamId);
+    const now = Date.now();
+    const itemType = resolveCanonicalWorkspaceItemType({ itemType: args.itemType, legacyType: args.type });
+    const legacyType = args.type ?? defaultLegacyTypeForItemType(itemType);
+    const category = resolveWorkspaceCategory({ category: args.category, itemType, renderMode: args.renderMode, legacyType });
+
+    const itemId = await ctx.db.insert("workspaceItems", {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: args.workstreamId,
+      type: legacyType,
+      itemType,
+      sourceKind: itemType === "thread" ? "chat" : itemType === "planner" ? "plannerItem" : itemType === "utility" ? "utility" : "custom",
+      sourceId: undefined,
+      renderMode: args.renderMode,
+      title: args.title.trim(),
+      contentSummary: normalizeText(args.contentSummary),
+      searchText: searchTextForWorkspaceItem({
+        title: args.title,
+        contentSummary: normalizeText(args.contentSummary),
+        renderMode: args.renderMode,
+        category,
+      }),
+      x: args.x ?? 120,
+      y: args.y ?? 120,
+      width: args.width ?? 320,
+      height: args.height ?? 200,
+      zIndex: 0,
+      category,
+      status: "active",
+      pinned: false,
+      collapsed: false,
+      hidden: false,
+      provenanceSource: "user",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: args.workstreamId,
+      mutationType: "create_widget",
+      source: "user",
+      targetItemIds: [itemId],
+      after: { itemId },
+      summary: `Created widget ${args.title}`,
+    });
+
+    return { itemId };
+  },
+});
+
+export const updateWidget = mutation({
+  args: {
+    actorClerkId: v.string(),
+    itemId: v.id("workspaceItems"),
+    title: v.optional(v.string()),
+    contentSummary: v.optional(v.string()),
+    renderMode: v.optional(v.string()),
+    x: v.optional(v.number()),
+    y: v.optional(v.number()),
+    width: v.optional(v.number()),
+    height: v.optional(v.number()),
+    hidden: v.optional(v.boolean()),
+    collapsed: v.optional(v.boolean()),
+    pinned: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    const item = await requireOwnedItem(ctx, actor, args.itemId);
+    const patch: Record<string, unknown> = { updatedAt: Date.now() };
+    if (args.title !== undefined) patch.title = args.title.trim();
+    if (args.contentSummary !== undefined) patch.contentSummary = normalizeText(args.contentSummary);
+    if (args.renderMode !== undefined) patch.renderMode = args.renderMode;
+    if (args.x !== undefined) patch.x = args.x;
+    if (args.y !== undefined) patch.y = args.y;
+    if (args.width !== undefined) patch.width = args.width;
+    if (args.height !== undefined) patch.height = args.height;
+    if (args.hidden !== undefined) patch.hidden = args.hidden;
+    if (args.collapsed !== undefined) patch.collapsed = args.collapsed;
+    if (args.pinned !== undefined) patch.pinned = args.pinned;
+    patch.searchText = searchTextForWorkspaceItem({
+      title: (patch.title as string | undefined) ?? item.title,
+      contentSummary: (patch.contentSummary as string | undefined) ?? item.contentSummary,
+      renderMode: (patch.renderMode as string | undefined) ?? item.renderMode,
+      category: item.category,
+    });
+
+    await ctx.db.patch(args.itemId, patch);
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: item.workstreamId,
+      mutationType: "update_widget",
+      source: "user",
+      targetItemIds: [item._id],
+      before: item,
+      after: patch,
+      summary: `Updated widget ${item.title}`,
+    });
+    return { success: true };
+  },
+});
+
+export const moveWidget = mutation({
+  args: {
+    actorClerkId: v.string(),
+    itemId: v.id("workspaceItems"),
+    targetWorkstreamId: v.id("workstreams"),
+    x: v.optional(v.number()),
+    y: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    const item = await requireOwnedItem(ctx, actor, args.itemId);
+    await requireOwnedWorkstream(ctx, actor, args.targetWorkstreamId);
+    const patch = {
+      workstreamId: args.targetWorkstreamId,
+      x: args.x ?? item.x,
+      y: args.y ?? item.y,
+      updatedAt: Date.now(),
+    };
+    await ctx.db.patch(args.itemId, patch);
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: item.workstreamId,
+      targetWorkstreamId: args.targetWorkstreamId,
+      mutationType: "move_widget",
+      source: "user",
+      targetItemIds: [item._id],
+      before: item,
+      after: patch,
+      summary: `Moved widget ${item.title}`,
+    });
+    return { success: true };
+  },
+});
+
+export const setPinned = mutation({
+  args: {
+    actorClerkId: v.string(),
+    itemId: v.id("workspaceItems"),
+    pinned: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    const item = await requireOwnedItem(ctx, actor, args.itemId);
+    if ((item.pinned ?? false) === args.pinned) {
+      return { success: true, itemId: item._id, pinned: args.pinned };
+    }
+
+    const patch = {
+      pinned: args.pinned,
+      updatedAt: Date.now(),
+    };
+    await ctx.db.patch(item._id, patch);
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: item.workstreamId,
+      mutationType: args.pinned ? "pin_workspace_item" : "unpin_workspace_item",
+      source: "user",
+      targetItemIds: [item._id],
+      before: item,
+      after: patch,
+      summary: `${args.pinned ? "Pinned" : "Unpinned"} ${item.title}`,
+    });
+    return { success: true, itemId: item._id, pinned: args.pinned };
+  },
+});
+
+export const archiveItem = mutation({
+  args: {
+    actorClerkId: v.string(),
+    itemId: v.id("workspaceItems"),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    const item = await requireOwnedItem(ctx, actor, args.itemId);
+    if (item.status === "archived") {
+      return { success: true, itemId: item._id, status: "archived" };
+    }
+
+    const patch = {
+      status: "archived" as const,
+      updatedAt: Date.now(),
+    };
+    await ctx.db.patch(item._id, patch);
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: item.workstreamId,
+      mutationType: "archive_workspace_item",
+      source: "user",
+      targetItemIds: [item._id],
+      before: item,
+      after: patch,
+      summary: `Archived ${item.title}`,
+    });
+    return { success: true, itemId: item._id, status: "archived" };
+  },
+});
+
+async function duplicateArtifactWorkspaceItem(
+  ctx: WorkspaceMutationCtx,
+  actor: { _id: Id<"users">; orgId: Id<"orgs"> },
+  item: Doc<"workspaceItems">,
+) {
+  if (!item.sourceArtifactId) throw new Error("Workspace item is not linked to an artifact");
+  const artifact = await ctx.db.get(item.sourceArtifactId);
+  if (!artifact || artifact.ownerUserId !== actor._id || artifact.orgId !== actor.orgId) {
+    throw new Error("Artifact not found");
+  }
+
+  const now = Date.now();
+  const clonedArtifactId = await ctx.db.insert("artifacts", {
+    ownerUserId: artifact.ownerUserId,
+    orgId: artifact.orgId,
+    workstreamId: artifact.workstreamId,
+    type: artifact.type,
+    title: `${artifact.title} copy`,
+    content: artifact.content,
+    editorMode: artifact.editorMode,
+    contentPlaintext: artifact.contentPlaintext,
+    sourceType: artifact.sourceType,
+    managebacItemId: undefined,
+    sourceDeleted: artifact.sourceDeleted,
+    sourceUpdatedAt: artifact.sourceUpdatedAt,
+    syncConflictSummary: artifact.syncConflictSummary,
+    lastAiEditId: artifact.lastAiEditId,
+    pendingDiffs: artifact.pendingDiffs,
+    legacyNoteId: undefined,
+    layout: artifact.layout,
+    tags: artifact.tags,
+    linkedAgentId: artifact.linkedAgentId,
+    linkedChatId: artifact.linkedChatId,
+    status: "active",
+    pinnedAt: item.pinned ? now : undefined,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const frame = computeWorkspaceItemDefaultFrame({
+    itemType: "artifact",
+    renderMode: artifact.type,
+    pinned: item.pinned ?? false,
+  });
+  const duplicateItemId = await ctx.db.insert("workspaceItems", {
+    orgId: actor.orgId,
+    ownerUserId: actor._id,
+    workstreamId: item.workstreamId,
+    type: item.type,
+    itemType: "artifact",
+    sourceKind: "artifact",
+    sourceId: clonedArtifactId as unknown as string,
+    sourceArtifactId: clonedArtifactId,
+    renderMode: item.renderMode,
+    title: `${item.title} copy`,
+    contentSummary: item.contentSummary,
+    searchText: searchTextForWorkspaceItem({
+      title: `${item.title} copy`,
+      contentSummary: item.contentSummary,
+      renderMode: item.renderMode,
+      category: item.category,
+    }),
+    x: item.x + 48,
+    y: item.y + 48,
+    width: item.width ?? frame.width,
+    height: item.height ?? frame.height,
+    zIndex: (item.zIndex ?? 0) + 1,
+    category: item.category,
+    status: "active",
+    pinned: item.pinned,
+    collapsed: item.collapsed,
+    hidden: item.hidden,
+    provenanceSource: item.provenanceSource,
+    provenanceAction: "duplicate",
+    topicCluster: item.topicCluster,
+    clusterOverride: item.clusterOverride,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await recordWorkspaceMutation(ctx, {
+    orgId: actor.orgId,
+    ownerUserId: actor._id,
+    workstreamId: item.workstreamId,
+    mutationType: "duplicate_workspace_item",
+    source: "user",
+    targetItemIds: [item._id, duplicateItemId],
+    before: item,
+    after: { duplicateItemId, clonedArtifactId },
+    summary: `Duplicated ${item.title}`,
+  });
+
+  return { itemId: duplicateItemId, artifactId: clonedArtifactId };
+}
+
+export const duplicateItem = mutation({
+  args: {
+    actorClerkId: v.string(),
+    itemId: v.id("workspaceItems"),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    const item = await requireOwnedItem(ctx, actor, args.itemId);
+
+    if (item.itemType === "artifact") {
+      return duplicateArtifactWorkspaceItem(ctx, actor, item);
+    }
+
+    const now = Date.now();
+    const duplicatedTitle = `${item.title} copy`;
+    const duplicateItemId = await ctx.db.insert("workspaceItems", {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: item.workstreamId,
+      type: item.type,
+      itemType: item.itemType,
+      sourceKind: item.sourceKind,
+      sourceId: item.sourceId,
+      renderMode: item.renderMode,
+      sourceChatId: item.sourceChatId,
+      sourceArtifactId: item.sourceArtifactId,
+      sourcePlannerItemId: item.sourcePlannerItemId,
+      title: duplicatedTitle,
+      contentSummary: item.contentSummary,
+      searchText: searchTextForWorkspaceItem({
+        title: duplicatedTitle,
+        contentSummary: item.contentSummary,
+        renderMode: item.renderMode,
+        category: item.category,
+      }),
+      x: item.x + 48,
+      y: item.y + 48,
+      width: item.width,
+      height: item.height,
+      zIndex: (item.zIndex ?? 0) + 1,
+      category: item.category,
+      status: "active",
+      pinned: item.pinned,
+      collapsed: item.collapsed,
+      hidden: item.hidden,
+      provenanceSource: item.provenanceSource,
+      provenanceAction: "duplicate",
+      topicCluster: item.topicCluster,
+      clusterOverride: item.clusterOverride,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: item.workstreamId,
+      mutationType: "duplicate_workspace_item",
+      source: "user",
+      targetItemIds: [item._id, duplicateItemId],
+      before: item,
+      after: { duplicateItemId },
+      summary: `Duplicated ${item.title}`,
+    });
+
+    return { itemId: duplicateItemId };
+  },
+});
+
+export const attachItemsToWorkstream = mutation({
+  args: {
+    actorClerkId: v.string(),
+    workstreamId: v.id("workstreams"),
+    items: v.array(v.object({
+      title: v.string(),
+      type: v.optional(v.union(v.literal("thread"), v.literal("document"), v.literal("planner"), v.literal("board"), v.literal("visualization"), v.literal("media"), v.literal("reference"), v.literal("custom"), v.literal("utility"))),
+      itemType: v.optional(v.union(v.literal("thread"), v.literal("artifact"), v.literal("planner"), v.literal("utility"), v.literal("custom"))),
+      sourceChatId: v.optional(v.id("chats")),
+      sourceArtifactId: v.optional(v.id("artifacts")),
+      sourcePlannerItemId: v.optional(v.id("plannerItems")),
+      renderMode: v.optional(v.string()),
+      contentSummary: v.optional(v.string()),
+      x: v.optional(v.number()),
+      y: v.optional(v.number()),
+      width: v.optional(v.number()),
+      height: v.optional(v.number()),
+    })),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    await requireOwnedWorkstream(ctx, actor, args.workstreamId);
+    const existing = await ctx.db.query("workspaceItems").withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId)).collect();
+    const inserted: Id<"workspaceItems">[] = [];
+    const now = Date.now();
+
+    for (const incoming of args.items) {
+      const duplicate = existing.find((item) =>
+        item.title === incoming.title
+        && item.sourceChatId === incoming.sourceChatId
+        && item.sourceArtifactId === incoming.sourceArtifactId
+        && item.sourcePlannerItemId === incoming.sourcePlannerItemId
+      );
+      if (duplicate) continue;
+
+      const itemType = resolveCanonicalWorkspaceItemType({
+        itemType: incoming.itemType,
+        legacyType: incoming.type,
+        sourceChatId: incoming.sourceChatId,
+        sourceArtifactId: incoming.sourceArtifactId,
+        sourcePlannerItemId: incoming.sourcePlannerItemId,
+      });
+      const legacyType = incoming.type ?? defaultLegacyTypeForItemType(itemType);
+      const category = resolveWorkspaceCategory({ itemType, renderMode: incoming.renderMode, legacyType });
+
+      const itemId = await ctx.db.insert("workspaceItems", {
+        orgId: actor.orgId,
+        ownerUserId: actor._id,
+        workstreamId: args.workstreamId,
+        type: legacyType,
+        itemType,
+        sourceKind: incoming.sourceChatId ? "chat" : incoming.sourcePlannerItemId ? "plannerItem" : incoming.sourceArtifactId ? "artifact" : "custom",
+        sourceId: incoming.sourceChatId ?? incoming.sourceArtifactId ?? incoming.sourcePlannerItemId ?? undefined,
+        sourceChatId: incoming.sourceChatId,
+        sourceArtifactId: incoming.sourceArtifactId,
+        sourcePlannerItemId: incoming.sourcePlannerItemId,
+        renderMode: incoming.renderMode,
+        title: incoming.title.trim(),
+        contentSummary: normalizeText(incoming.contentSummary),
+        searchText: searchTextForWorkspaceItem({
+          title: incoming.title,
+          contentSummary: normalizeText(incoming.contentSummary),
+          renderMode: incoming.renderMode,
+          category,
+        }),
+        x: incoming.x ?? 120,
+        y: incoming.y ?? 120,
+        width: incoming.width ?? 320,
+        height: incoming.height ?? 200,
+        zIndex: 0,
+        category,
+        status: "active",
+        pinned: false,
+        collapsed: false,
+        hidden: false,
+        provenanceSource: "user",
+        createdAt: now,
+        updatedAt: now,
+      });
+      inserted.push(itemId);
+    }
+
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: args.workstreamId,
+      mutationType: "attach_items_to_workstream",
+      source: "user",
+      targetItemIds: inserted,
+      after: { inserted },
+      summary: `Attached ${inserted.length} item${inserted.length === 1 ? "" : "s"}`,
+    });
+
+    return { itemIds: inserted };
+  },
+});
+
+export const listMergeCandidates = query({
+  args: {
+    actorClerkId: v.string(),
+    workstreamId: v.id("workstreams"),
+    search: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    await requireOwnedWorkstream(ctx, actor, args.workstreamId);
+    const search = normalizeText(args.search, 80)?.toLowerCase();
+    const items = await ctx.db.query("workspaceItems").withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId)).collect();
+    return items.filter((item) => item.ownerUserId === actor._id && item.orgId === actor.orgId && item.status === "active").filter((item) => {
+      if (!search) return true;
+      return [item.title, item.contentSummary, item.renderMode].filter(Boolean).some((value) => String(value).toLowerCase().includes(search));
+    });
+  },
+});
+
+export const updateWorkstreamLayout = mutation({
+  args: {
+    actorClerkId: v.string(),
+    workstreamId: v.id("workstreams"),
+    items: v.array(v.object({
+      itemId: v.id("workspaceItems"),
+      x: v.number(),
+      y: v.number(),
+      width: v.optional(v.number()),
+      height: v.optional(v.number()),
+      zIndex: v.optional(v.number()),
+    })),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    await requireOwnedWorkstream(ctx, actor, args.workstreamId);
+    const updated: Id<"workspaceItems">[] = [];
+    for (const incoming of args.items) {
+      const item = await requireOwnedItem(ctx, actor, incoming.itemId);
+      if (item.workstreamId !== args.workstreamId) throw new Error("Workspace item not in target workstream");
+      await ctx.db.patch(incoming.itemId, {
+        x: incoming.x,
+        y: incoming.y,
+        width: incoming.width ?? item.width,
+        height: incoming.height ?? item.height,
+        zIndex: incoming.zIndex ?? item.zIndex,
+        updatedAt: Date.now(),
+      });
+      updated.push(incoming.itemId);
+    }
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: args.workstreamId,
+      mutationType: "update_workstream_layout",
+      source: "user",
+      targetItemIds: updated,
+      after: { updated },
+      summary: `Updated layout for ${updated.length} item${updated.length === 1 ? "" : "s"}`,
+    });
+    return { success: true };
+  },
+});
+
+export const updateBySourceArtifact = mutation({
+  args: {
+    actorClerkId: v.string(),
+    sourceArtifactId: v.id("artifacts"),
+    title: v.optional(v.string()),
+    contentSummary: v.optional(v.string()),
+    renderMode: v.optional(v.string()),
+    provenanceSource: v.optional(v.union(v.literal("user"), v.literal("ai"), v.literal("system"))),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    const items = await ctx.db.query("workspaceItems").withIndex("by_source_artifact", (q) => q.eq("sourceArtifactId", args.sourceArtifactId)).collect();
+    const item = items.find((row) => row.ownerUserId === actor._id && row.orgId === actor.orgId);
+    if (!item) throw new Error("Workspace item not found");
+    const patch: Record<string, unknown> = { updatedAt: Date.now() };
+    if (args.title !== undefined) patch.title = args.title.trim();
+    if (args.contentSummary !== undefined) patch.contentSummary = normalizeText(args.contentSummary);
+    if (args.renderMode !== undefined) patch.renderMode = args.renderMode;
+    if (args.provenanceSource !== undefined) patch.provenanceSource = args.provenanceSource;
+    patch.searchText = searchTextForWorkspaceItem({
+      title: (patch.title as string | undefined) ?? item.title,
+      contentSummary: (patch.contentSummary as string | undefined) ?? item.contentSummary,
+      renderMode: (patch.renderMode as string | undefined) ?? item.renderMode,
+      category: item.category,
+    });
+    await ctx.db.patch(item._id, patch);
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: item.workstreamId,
+      mutationType: "update_by_source_artifact",
+      source: "system",
+      targetItemIds: [item._id],
+      before: item,
+      after: patch,
+      summary: `Updated projected artifact ${item.title}`,
+    });
+    return { success: true };
+  },
+});
+
+export const searchWorkspace = query({
+  args: {
+    actorClerkId: v.string(),
+    query: v.string(),
+    workstreamId: v.optional(v.id("workstreams")),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    const queryText = normalizeText(args.query, 120);
+    if (!queryText) return [];
+    const limit = Math.max(1, Math.min(args.limit ?? 20, 50));
+
+    const [workstreams, artifacts, plannerItems, messages, workspaceItems] = await Promise.all([
+      ctx.db
+        .query("workstreams")
+        .withSearchIndex("search_title", (q) =>
+          q.search("title", queryText).eq("ownerUserId", actor._id).eq("orgId", actor.orgId).eq("status", "active"),
+        )
+        .take(limit),
+      ctx.db
+        .query("artifacts")
+        .withSearchIndex("search_content", (q) =>
+          q.search("contentPlaintext", queryText).eq("ownerUserId", actor._id).eq("orgId", actor.orgId).eq("status", "active"),
+        )
+        .take(limit),
+      ctx.db
+        .query("workspaceItems")
+        .withSearchIndex("search_text", (q) =>
+          q.search("searchText", queryText).eq("ownerUserId", actor._id).eq("orgId", actor.orgId).eq("status", "active"),
+        )
+        .take(limit),
+      ctx.db.query("plannerItems").withIndex("by_owner", (q) => q.eq("ownerUserId", actor._id)).collect(),
+      ctx.db.query("messages").withSearchIndex("search_content", (q) => q.search("content", queryText).eq("userId", actor._id)).take(limit),
+    ]);
+
+    const workstreamMap = new Map(workstreams.map((row) => [row._id, row]));
+    const resultKeys = new Set<string>();
+    const results: Array<{
+      id: string;
+      sourceType: WorkspaceSearchResultSource;
+      title: string;
+      snippet?: string;
+      workspaceId?: Id<"workstreams">;
+      workspaceTitle?: string;
+      itemId?: Id<"workspaceItems">;
+      artifactId?: Id<"artifacts">;
+      plannerItemId?: Id<"plannerItems">;
+      chatId?: Id<"chats">;
+      messageId?: Id<"messages">;
+      matchedText?: string;
+      updatedAt: number;
+    }> = [];
+
+    for (const row of workstreams) {
+      if (args.workstreamId && row._id !== args.workstreamId) continue;
+      const key = `workstream:${row._id}`;
+      if (resultKeys.has(key)) continue;
+      resultKeys.add(key);
+      results.push({
+        id: key,
+        sourceType: "workstream",
+        title: row.title,
+        snippet: normalizeText(row.description, 220),
+        workspaceId: row._id,
+        workspaceTitle: row.title,
+        updatedAt: row.updatedAt,
+      });
+    }
+
+    for (const row of artifacts) {
+      if (args.workstreamId && row.workstreamId !== args.workstreamId) continue;
+      const key = `artifact:${row._id}`;
+      if (resultKeys.has(key)) continue;
+      resultKeys.add(key);
+      const workspace = row.workstreamId ? workstreamMap.get(row.workstreamId) ?? await ctx.db.get(row.workstreamId) : null;
+      results.push({
+        id: key,
+        sourceType: "artifact",
+        title: row.title,
+        snippet: normalizeText(row.contentPlaintext, 220),
+        workspaceId: row.workstreamId,
+        workspaceTitle: workspace?.title,
+        artifactId: row._id,
+        matchedText: normalizeText(row.contentPlaintext, 180),
+        updatedAt: row.updatedAt,
+      });
+    }
+
+    const plannerHits = plannerItems
+      .filter((row) => row.orgId === actor.orgId)
+      .filter((row) => (args.workstreamId ? row.workstreamId === args.workstreamId : true))
+      .filter((row) =>
+        buildWorkspaceSearchText(row.title, row.description, row.type, row.priority)
+          .toLowerCase()
+          .includes(queryText.toLowerCase()),
+      )
+      .slice(0, limit);
+    for (const row of plannerHits) {
+      const key = `planner:${row._id}`;
+      if (resultKeys.has(key)) continue;
+      resultKeys.add(key);
+      const workspace = row.workstreamId ? workstreamMap.get(row.workstreamId) ?? await ctx.db.get(row.workstreamId) : null;
+      results.push({
+        id: key,
+        sourceType: "planner",
+        title: row.title,
+        snippet: normalizeText(row.description, 220),
+        workspaceId: row.workstreamId,
+        workspaceTitle: workspace?.title,
+        plannerItemId: row._id,
+        matchedText: normalizeText(row.description ?? row.title, 180),
+        updatedAt: row.updatedAt,
+      });
+    }
+
+    for (const row of messages) {
+      const chat = await ctx.db.get(row.chatId);
+      if (!chat || chat.ownerUserId !== actor._id || chat.orgId !== actor.orgId || chat.deletedAt) continue;
+      if (args.workstreamId && chat.workstreamId !== args.workstreamId) continue;
+      const key = `thread:${row._id}`;
+      if (resultKeys.has(key)) continue;
+      resultKeys.add(key);
+      const workspace = chat.workstreamId ? workstreamMap.get(chat.workstreamId) ?? await ctx.db.get(chat.workstreamId) : null;
+      results.push({
+        id: key,
+        sourceType: "thread",
+        title: chat.title,
+        snippet: normalizeText(row.content, 220),
+        workspaceId: chat.workstreamId,
+        workspaceTitle: workspace?.title,
+        chatId: chat._id,
+        messageId: row._id,
+        matchedText: normalizeText(row.content, 180),
+        updatedAt: row.createdAt,
+      });
+    }
+
+    for (const row of workspaceItems) {
+      if (args.workstreamId && row.workstreamId !== args.workstreamId) continue;
+      const key = `item:${row._id}`;
+      if (resultKeys.has(key)) continue;
+      resultKeys.add(key);
+      const workspace = row.workstreamId ? workstreamMap.get(row.workstreamId) ?? await ctx.db.get(row.workstreamId) : null;
+      results.push({
+        id: key,
+        sourceType:
+          row.itemType === "planner"
+            ? "planner"
+            : row.itemType === "thread"
+              ? "thread"
+              : "artifact",
+        title: row.title,
+        snippet: normalizeText(row.contentSummary, 220),
+        workspaceId: row.workstreamId,
+        workspaceTitle: workspace?.title,
+        itemId: row._id,
+        artifactId: row.sourceArtifactId,
+        plannerItemId: row.sourcePlannerItemId,
+        chatId: row.sourceChatId,
+        matchedText: normalizeText(row.contentSummary ?? row.title, 180),
+        updatedAt: row.updatedAt,
+      });
+    }
+
+    return results
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, limit);
+  },
+});
+
+export const listRecentMutations = query({
+  args: {
+    actorClerkId: v.string(),
+    workstreamId: v.optional(v.id("workstreams")),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    const limit = Math.max(1, Math.min(args.limit ?? 20, 50));
+    const rows = args.workstreamId
+      ? await ctx.db.query("workspaceMutations").withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId)).order("desc").take(limit)
+      : await ctx.db.query("workspaceMutations").withIndex("by_owner", (q) => q.eq("ownerUserId", actor._id)).order("desc").take(limit);
+
+    return rows.filter((row) => row.ownerUserId === actor._id && row.orgId === actor.orgId);
+  },
+});

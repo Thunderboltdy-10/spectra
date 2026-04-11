@@ -298,6 +298,7 @@ export default defineSchema({
     provenanceAction: v.optional(v.string()),
     topicCluster: v.optional(v.string()),
     clusterOverride: v.optional(v.string()),
+    searchText: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -305,7 +306,11 @@ export default defineSchema({
     .index("by_owner", ["ownerUserId"])
     .index("by_source_artifact", ["sourceArtifactId"])
     .index("by_source_chat", ["sourceChatId"])
-    .index("by_source_planner", ["sourcePlannerItemId"]),
+    .index("by_source_planner", ["sourcePlannerItemId"])
+    .searchIndex("search_text", {
+      searchField: "searchText",
+      filterFields: ["ownerUserId", "orgId", "workstreamId", "status", "itemType"],
+    }),
 
   workspaceTopicClusters: defineTable({
     orgId: v.id("orgs"),

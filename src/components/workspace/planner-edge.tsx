@@ -65,11 +65,11 @@ export function PlannerEdge({ tasks, onTaskClick, onToggleTask, className }: Pla
     <button
       type="button"
       className={cn(
-        "flex flex-col items-center gap-2 rounded-r-[32px] border border-l-0 border-[var(--border-default)]/45 bg-[var(--bg-elevated)]/95 py-5 pl-1.5 pr-2.5 backdrop-blur-xl shadow-[0_10px_24px_-16px_rgba(8,22,40,0.14)]",
+        "flex flex-col items-center gap-2.5 rounded-r-[20px] border border-l-0 border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/95 py-5 pl-1.5 pr-2.5 backdrop-blur-xl shadow-[0_10px_24px_-16px_rgba(8,22,40,0.14)]",
         className,
       )}
     >
-      <CalendarCheck className="h-4 w-4 text-[var(--text-secondary)]" />
+      <CalendarCheck className="h-4.5 w-4.5 text-[var(--text-secondary)]" />
       <span className="text-[10px] font-semibold text-[var(--text-secondary)]" style={{ writingMode: "vertical-rl", textOrientation: "mixed" }}>Planner</span>
       {pendingCount > 0 ? (
         <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[var(--accent-coral)] px-1 text-[9px] font-bold text-white">
@@ -88,9 +88,9 @@ export function PlannerEdge({ tasks, onTaskClick, onToggleTask, className }: Pla
       locked={locked}
       onToggleLock={() => setLocked((value) => !value)}
       className="!top-5 !-translate-y-0"
-      expandedClassName="left-0 top-0 rounded-r-[32px]"
+      expandedClassName="left-0 top-0"
     >
-      <div className="flex h-[min(72vh,720px)] w-[300px] flex-col rounded-r-[32px]">
+      <div className="flex h-[min(72vh,720px)] w-[300px] flex-col">
         <div className="flex items-center justify-between px-4 pb-3 pt-5">
           <div className="flex items-center gap-2">
             <CalendarCheck className="h-4 w-4 text-[var(--accent-cyan)]" />

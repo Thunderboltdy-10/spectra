@@ -23,6 +23,9 @@ export async function PATCH(request: NextRequest) {
       actorClerkId: actor.clerkId,
       defaultLanding: body.defaultLanding as "smart" | "workspace" | "chat" | undefined,
       workspaceLayout: body.workspaceLayout as { x: number; y: number; z: number } | null | undefined,
+      workspaceViewMode: body.workspaceViewMode as "byType" | "byTopic" | "timeline" | null | undefined,
+      workspaceBackgroundMode: body.workspaceBackgroundMode as "dots" | "blank" | "grid" | null | undefined,
+      workspaceHubVisibility: body.workspaceHubVisibility as "hidden" | "collapsed" | "expanded" | null | undefined,
       editorDefaultMode: body.editorDefaultMode as "agentic" | "notion" | "simple" | null | undefined,
     });
 

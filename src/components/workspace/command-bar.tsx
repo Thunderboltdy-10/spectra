@@ -2,11 +2,6 @@
 
 import { useCallback, useRef, useState, useEffect } from "react";
 import {
-  CalendarCheck,
-  Code2,
-  FileText,
-  Image,
-  MessageSquare,
   Plus,
   Square,
   Wand2,
@@ -19,24 +14,11 @@ import {
 import { cn } from "@/lib/utils";
 import { ResultCardStack } from "@/components/workspace/result-card";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-
-type MenuItem = {
-  id: string;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-  shortcut?: string;
-  secondary?: boolean;
-};
-
-const MENU_ITEMS: MenuItem[] = [
-  { id: "workspace", label: "New Workspace", icon: Layers, shortcut: "W" },
-  { id: "ai", label: "Ask AI", icon: Wand2, shortcut: "A" },
-  { id: "note", label: "Note", icon: FileText, shortcut: "N" },
-  { id: "code", label: "Code", icon: Code2, shortcut: "C" },
-  { id: "visual", label: "Visual", icon: Image, shortcut: "V" },
-  { id: "task", label: "Task", icon: CalendarCheck, shortcut: "T" },
-  { id: "thread", label: "Thread", icon: MessageSquare, secondary: true },
-];
+import {
+  ACTION_MENU_ITEMS,
+  ActionMenuContent,
+  type ActionMenuItemId,
+} from "@/components/workspace/shared-action-menu";
 
 /* u2500u2500u2500 Action Mode Detection u2500u2500u2500 */
 
@@ -196,7 +178,7 @@ export function CommandBar({
     adjustTextareaHeight();
   }, [value, adjustTextareaHeight]);
 
-  const handleMenuAction = useCallback((id: string) => {
+  const handleMenuAction = useCallback((id: ActionMenuItemId) => {
     setMenuOpen(false);
     setHighlightedIdx(-1);
     switch (id) {
@@ -232,13 +214,13 @@ export function CommandBar({
     if (menuOpen) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setHighlightedIdx((prev) => (prev + 1) % MENU_ITEMS.length);
+        setHighlightedIdx((prev) => (prev + 1) % ACTION_MENU_ITEMS.length);
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
-        setHighlightedIdx((prev) => (prev - 1 + MENU_ITEMS.length) % MENU_ITEMS.length);
+        setHighlightedIdx((prev) => (prev - 1 + ACTION_MENU_ITEMS.length) % ACTION_MENU_ITEMS.length);
       } else if (e.key === "Enter" && highlightedIdx >= 0) {
         e.preventDefault();
-        handleMenuAction(MENU_ITEMS[highlightedIdx].id);
+        handleMenuAction(ACTION_MENU_ITEMS[highlightedIdx].id);
       } else if (e.key === "Escape") {
         e.preventDefault();
         setMenuOpen(false);
@@ -314,14 +296,14 @@ export function CommandBar({
       {/* Main command input */}
       <div
         className={cn(
-          "relative flex w-full min-w-[320px] items-end gap-2 rounded-[22px] border pl-2.5 pr-2.5 py-2",
-          "border-[var(--border-default)]/50 bg-[var(--bg-elevated)]/95 backdrop-blur-xl",
+          "relative flex w-full min-w-[320px] items-end gap-2 rounded-[20px] border pl-2.5 pr-2.5 py-2",
+          "border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/95 backdrop-blur-xl",
           "transition-all duration-300 ease-[var(--ease-standard)]",
           focused
-            ? "shadow-[0_18px_48px_-14px_rgba(8,22,40,0.30),0_4px_18px_-10px_rgba(8,22,40,0.20)] border-[color-mix(in_oklab,var(--accent-cyan)_30%,var(--border-default))]"
-            : "shadow-[0_10px_32px_-14px_rgba(8,22,40,0.20),0_4px_12px_-10px_rgba(8,22,40,0.14)]",
+            ? "shadow-[0_18px_48px_-14px_rgba(8,22,40,0.26),0_4px_18px_-10px_rgba(8,22,40,0.16)] border-[color-mix(in_oklab,var(--accent-cyan)_25%,var(--border-default))]"
+            : "shadow-[0_10px_32px_-14px_rgba(8,22,40,0.18),0_4px_12px_-10px_rgba(8,22,40,0.12)]",
           hasContextualItem && focused &&
-            "border-[color-mix(in_oklab,var(--accent-cyan)_40%,var(--border-default))]",
+            "border-[color-mix(in_oklab,var(--accent-cyan)_35%,var(--border-default))]",
         )}
       >
         {/* Create menu */}
@@ -333,7 +315,7 @@ export function CommandBar({
               setHighlightedIdx(-1);
             }}
             className={cn(
-              "flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-150",
+              "flex h-9 w-9 items-center justify-center rounded-[12px] transition-all duration-150",
               menuOpen
                 ? "rotate-45 bg-[var(--accent-cyan)]/12 text-[var(--accent-cyan)]"
                 : "bg-[var(--bg-secondary)] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
@@ -343,43 +325,13 @@ export function CommandBar({
           </button>
 
           {menuOpen ? (
-            <div className="absolute bottom-[calc(100%+8px)] left-0 z-50 flex flex-col min-w-[200px] gap-0.5 rounded-2xl border border-[var(--border-default)]/50 bg-[var(--bg-elevated)]/98 p-1.5 shadow-[0_18px_44px_-18px_rgba(8,22,40,0.30)] backdrop-blur-xl">
-              {MENU_ITEMS.map((item, idx) => {
-                  const showDivider = item.secondary && idx > 0 && !MENU_ITEMS[idx - 1].secondary;
-                  return (
-                    <div key={item.id}>
-                      {showDivider && (
-                        <div className="my-1 h-px bg-[var(--border-default)]/25" />
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => handleMenuAction(item.id)}
-                        onMouseEnter={() => setHighlightedIdx(idx)}
-                        className={cn(
-                          "flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-colors w-full text-left",
-                          highlightedIdx === idx
-                            ? item.id === "ai"
-                              ? "bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)] text-[var(--accent-cyan)]"
-                              : "bg-[var(--bg-hover)] text-[var(--text-primary)]"
-                            : item.id === "ai"
-                              ? "text-[var(--accent-cyan)]/80"
-                              : item.secondary
-                                ? "text-[var(--text-tertiary)]"
-                                : "text-[var(--text-secondary)]",
-                        )}
-                      >
-                        <item.icon className="h-4 w-4 shrink-0" />
-                        <span className="flex-1">{item.label}</span>
-                        {item.shortcut && (
-                          <span className="text-[10px] font-medium text-[var(--text-tertiary)]/50">
-                            {item.shortcut}
-                          </span>
-                        )}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
+            <div className="absolute bottom-[calc(100%+8px)] left-0 z-50 min-w-[200px] rounded-2xl border border-[var(--border-default)]/50 bg-[var(--bg-elevated)]/98 p-1.5 shadow-[0_18px_44px_-18px_rgba(8,22,40,0.30)] backdrop-blur-xl">
+              <ActionMenuContent
+                highlightedIdx={highlightedIdx}
+                onAction={handleMenuAction}
+                onHover={setHighlightedIdx}
+              />
+            </div>
           ) : null}
         </div>
 
@@ -425,7 +377,7 @@ export function CommandBar({
             <button
               type="button"
               onClick={onStopStreaming}
-              className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent-coral)]/12 text-[var(--accent-coral)] transition-colors hover:bg-[var(--accent-coral)]/20"
+              className="flex h-9 w-9 items-center justify-center rounded-[12px] bg-[var(--accent-coral)]/12 text-[var(--accent-coral)] transition-colors hover:bg-[var(--accent-coral)]/20"
             >
               <Square className="h-3.5 w-3.5" />
             </button>
@@ -435,7 +387,7 @@ export function CommandBar({
               onClick={handleSubmit}
               disabled={!value.trim() || disabled}
               className={cn(
-                "flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-150",
+                "flex h-9 w-9 items-center justify-center rounded-[12px] transition-all duration-150",
                 value.trim()
                   ? "bg-[var(--accent-cyan)] text-white shadow-[0_4px_12px_-6px_rgba(14,142,232,0.50)]"
                   : "bg-[var(--bg-secondary)] text-[var(--text-tertiary)]",

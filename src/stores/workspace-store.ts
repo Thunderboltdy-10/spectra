@@ -8,7 +8,7 @@ import type {
   WorkspaceData,
   WorkspaceItemData,
 } from "@/lib/workspace/contracts";
-import { zoomTierForLevel, zoomTierProgress, VIEWPORT } from "@/lib/workspace/contracts";
+import { zoomTierForLevel, zoomTierProgress, VIEWPORT, computeWorkspaceEnvelope } from "@/lib/workspace/contracts";
 
 export type DeepEditTarget = {
   item: WorkspaceItemData;
@@ -17,6 +17,32 @@ export type DeepEditTarget = {
 };
 
 import type { ResultCardData } from "@/components/workspace/result-card";
+
+type WorkspacePreferencesPayload = {
+  workspaceViewMode?: ViewMode;
+  workspaceBackgroundMode?: BackgroundMode;
+  workspaceHubVisibility?: HubVisibility;
+};
+
+let persistWorkspacePreferencesTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleWorkspacePreferencesPersist(patch: WorkspacePreferencesPayload) {
+  if (typeof window === "undefined") return;
+
+  if (persistWorkspacePreferencesTimer) {
+    clearTimeout(persistWorkspacePreferencesTimer);
+  }
+
+  persistWorkspacePreferencesTimer = setTimeout(() => {
+    void fetch("/api/preferences", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    }).catch(() => {
+      // Preference sync is best-effort; avoid breaking workspace interactions.
+    });
+  }, 120);
+}
 
 type WorkspaceState = {
   zoom: number;
@@ -54,6 +80,7 @@ type WorkspaceState = {
   resultCards: ResultCardData[];
 
   workspaces: WorkspaceData[];
+  hasHydratedPreferences: boolean;
 
   setZoom: (zoom: number) => void;
   setViewport: (x: number, y: number, zoom: number) => void;
@@ -102,6 +129,12 @@ type WorkspaceState = {
   clearResultCards: () => void;
 
   setWorkspaces: (workspaces: WorkspaceData[]) => void;
+  hydratePreferences: (preferences: WorkspacePreferencesPayload) => void;
+
+  /** Computed fly-to target for dock navigation */
+  flyToTarget: { centerX: number; centerY: number; zoom: number; requestId: number } | null;
+  flyToWorkspace: (id: string) => void;
+  clearFlyToTarget: () => void;
 };
 
 const HUB_VISIBILITY_ORDER: HubVisibility[] = ["collapsed", "expanded", "hidden"];
@@ -130,6 +163,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   resultCards: [],
 
   workspaces: [],
+  hasHydratedPreferences: false,
+  flyToTarget: null,
 
   setZoom: (zoom) =>
     set({
@@ -165,7 +200,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
     set({ nearestWorkspaceId: id }),
 
   setViewMode: (mode) =>
-    set({ viewMode: mode }),
+    set(() => {
+      scheduleWorkspacePreferencesPersist({ workspaceViewMode: mode });
+      return { viewMode: mode };
+    }),
 
   setFocusedItem: (id) =>
     set({ focusedItemId: id }),
@@ -227,7 +265,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   /* ── Hub Visibility ── */
 
   setHubVisibility: (visibility) =>
-    set({ hubVisibility: visibility }),
+    set(() => {
+      scheduleWorkspacePreferencesPersist({ workspaceHubVisibility: visibility });
+      return { hubVisibility: visibility };
+    }),
 
   cycleHubVisibility: () =>
     set((state) => ({
@@ -236,7 +277,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
     })),
 
   setBackgroundMode: (mode) =>
-    set({ backgroundMode: mode }),
+    set(() => {
+      scheduleWorkspacePreferencesPersist({ workspaceBackgroundMode: mode });
+      return { backgroundMode: mode };
+    }),
 
   togglePlanner: () =>
     set((state) => ({ plannerOpen: !state.plannerOpen })),
@@ -317,4 +361,34 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
 
   setWorkspaces: (workspaces) =>
     set({ workspaces }),
+
+  hydratePreferences: (preferences) =>
+    set((state) => ({
+      viewMode: preferences.workspaceViewMode ?? state.viewMode,
+      backgroundMode: preferences.workspaceBackgroundMode ?? state.backgroundMode,
+      hubVisibility: preferences.workspaceHubVisibility ?? state.hubVisibility,
+      hasHydratedPreferences: true,
+    })),
+
+  flyToWorkspace: (id) =>
+    set((state) => {
+      const idx = state.workspaces.findIndex((w) => w.id === id);
+      if (idx < 0) return state;
+      const ws = state.workspaces[idx];
+      const envelope = computeWorkspaceEnvelope(idx, ws.itemCount);
+      return {
+        committedWorkspaceId: id,
+        activeWorkspaceId: id,
+        nearestWorkspaceId: id,
+        flyToTarget: {
+          centerX: envelope.centerX,
+          centerY: envelope.centerY,
+          zoom: envelope.fitZoom,
+          requestId: Date.now(),
+        },
+      };
+    }),
+
+  clearFlyToTarget: () =>
+    set({ flyToTarget: null }),
 }));

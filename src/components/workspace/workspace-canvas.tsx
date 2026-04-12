@@ -30,31 +30,68 @@ import { TYPE_TO_TINT, TYPE_GROUP_LABELS } from "@/lib/workspace/contracts";
 import { cn } from "@/lib/utils";
 
 import {
-  CalendarCheck,
-  Code2,
-  FileText,
-  Image as ImageIcon,
-  MessageSquare,
-  Wand2,
   Trash2,
   Link,
   ExternalLink,
-  Layers,
 } from "lucide-react";
+import { ActionMenuContent } from "@/components/workspace/shared-action-menu";
 import { ArtifactContent, ThreadContent } from "./focus-panel";
 
-/* ─── Shared helpers ─── */
+/* ═══════════════════════════════════════════════════════════════
+   Palette & Helpers
+   ═══════════════════════════════════════════════════════════════ */
 
-const TINT_BG_COLORS: Record<string, string> = {
-  warm: "rgba(245, 158, 11, 0.15)",
-  cool: "rgba(14, 142, 232, 0.12)",
-  neutral: "rgba(107, 95, 82, 0.10)",
-  accent: "rgba(32, 184, 178, 0.12)",
-  muted: "rgba(158, 144, 130, 0.10)",
+/** Soft pastel palette for workspace territory regions */
+const TERRITORY_COLORS: Record<string, { core: string; mid: string; outer: string; border: string }> = {
+  warm: {
+    core: "rgba(245, 178, 60, 0.18)",
+    mid: "rgba(245, 178, 60, 0.08)",
+    outer: "rgba(245, 178, 60, 0.02)",
+    border: "rgba(245, 178, 60, 0.12)",
+  },
+  cool: {
+    core: "rgba(56, 152, 232, 0.16)",
+    mid: "rgba(56, 152, 232, 0.07)",
+    outer: "rgba(56, 152, 232, 0.015)",
+    border: "rgba(56, 152, 232, 0.10)",
+  },
+  neutral: {
+    core: "rgba(140, 130, 115, 0.12)",
+    mid: "rgba(140, 130, 115, 0.06)",
+    outer: "rgba(140, 130, 115, 0.015)",
+    border: "rgba(140, 130, 115, 0.08)",
+  },
+  accent: {
+    core: "rgba(50, 196, 180, 0.15)",
+    mid: "rgba(50, 196, 180, 0.07)",
+    outer: "rgba(50, 196, 180, 0.015)",
+    border: "rgba(50, 196, 180, 0.10)",
+  },
+  muted: {
+    core: "rgba(158, 144, 130, 0.10)",
+    mid: "rgba(158, 144, 130, 0.05)",
+    outer: "rgba(158, 144, 130, 0.01)",
+    border: "rgba(158, 144, 130, 0.07)",
+  },
 };
 
-function tintBg(variant: string) {
-  return TINT_BG_COLORS[variant] ?? TINT_BG_COLORS.neutral;
+function getTerritoryColor(variant: string) {
+  return TERRITORY_COLORS[variant] ?? TERRITORY_COLORS.neutral;
+}
+
+/** Determine dominant tint for a workspace from its items */
+function dominantTint(ws: WorkspaceData): string {
+  const counts: Record<string, number> = {};
+  for (const item of ws.items) {
+    const tint = TYPE_TO_TINT[item.itemType as CanonicalWorkspaceType] ?? "neutral";
+    counts[tint] = (counts[tint] ?? 0) + 1;
+  }
+  let best = "neutral";
+  let bestCount = 0;
+  for (const [k, v] of Object.entries(counts)) {
+    if (v > bestCount) { best = k; bestCount = v; }
+  }
+  return best;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -78,13 +115,26 @@ function StatusDot({ status, className }: { status: string; className?: string }
   );
 }
 
-/* ─── Node data types ─── */
+/**
+ * Compute a counter-scale factor so that content rendered inside the
+ * ReactFlow node maintains a stable perceived size across zoom levels.
+ * This is the key to semantic zoom: text/icons don't shrink to nothing.
+ */
+function stableScale(zoom: number, targetZoom: number): number {
+  if (zoom >= targetZoom) return 1;
+  return targetZoom / zoom;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Node Data Types
+   ═══════════════════════════════════════════════════════════════ */
 
 type WorkspaceNodeData = {
   workspace: WorkspaceData;
   zoomTier: "landscape" | "summary" | "detail";
   zoomProgress: number;
   zoom: number;
+  tint: string;
 };
 
 type ItemNodeData = {
@@ -104,101 +154,183 @@ type GroupLabelNodeData = {
 };
 
 /* ═══════════════════════════════════════════════════════════════
-   Workspace Territory Node — semantic zoom representation
+   Workspace Territory Node — Semantic Zoom Recomposition
+
+   This node is the key architectural piece. Instead of rendering
+   a simple scaled header, it structurally recomposes based on
+   the current zoom tier:
+
+   LANDSCAPE: Large soft pastel region with centered name/emoji/status.
+              Reads as a meaningful envelope from far away.
+              Items are NOT shown — only the territory identity.
+
+   SUMMARY:   Territory fades to a lighter region.
+              Workspace name stays visible as a floating label.
+              Items begin appearing as compact chips below groups.
+
+   DETAIL:    Territory becomes the lightest wash.
+              Full item cards with previews become available.
+              Workspace label becomes a small anchored header.
    ═══════════════════════════════════════════════════════════════ */
 
 function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
-  const { workspace, zoom } = data;
-  
-  const targetZoom = 0.3;
-  const scale = zoom < targetZoom ? targetZoom / zoom : 1;
-  
-  // A subtle glow effect that spans the entire space of a workspace,
-  // removing the hard card container borders and integrating fully with the canvas.
-  // The size is dynamically adjusted based on ReactFlow rendering.
+  const { workspace, zoomTier, zoomProgress, zoom, tint } = data;
+  const colors = getTerritoryColor(tint);
+
+  // Counter-scale to keep the identity readable at all zoom levels
+  const identityScale = stableScale(zoom, 0.25);
+
+  // Opacity of territory region increases at landscape, subtle at detail
+  const regionOpacity =
+    zoomTier === "landscape"
+      ? 0.9 + zoomProgress * 0.1
+      : zoomTier === "summary"
+        ? 0.7 - zoomProgress * 0.3
+        : 0.3;
+
+  // At landscape tier, show a large centered identity.
+  // At summary/detail, show a smaller anchored top-left label.
+  const isLandscape = zoomTier === "landscape";
+
   return (
     <div
-      style={{
-        width: "100%",
-        height: "100%",
-        pointerEvents: "none",
-      }}
-      className="relative flex flex-col justify-start items-center opacity-70 transition-opacity duration-500"
+      style={{ width: "100%", height: "100%", pointerEvents: "none" }}
+      className="relative"
     >
-      {/* Soft radial aura representing the workspace background territory */}
-      <div 
-        className="absolute w-full h-full"
+      {/* ── Soft pastel radial territory region ── */}
+      <div
+        className="absolute inset-0 rounded-[80px]"
         style={{
-          background: `radial-gradient(ellipse at 50% 30%, ${tintBg(TYPE_TO_TINT[workspace.items[0]?.itemType as CanonicalWorkspaceType] ?? "neutral")} 0%, transparent 65%)`,
-          filter: 'blur(120px)',
-          zIndex: -1,
-        }}
-      />
-      
-      {/* Extremely faint structural guide */}
-      <div 
-        className="absolute top-10 w-[80%] h-[1px] opacity-20"
-        style={{
-          background: `linear-gradient(90deg, transparent 0%, var(--border-default) 50%, transparent 100%)`
+          opacity: regionOpacity,
+          background: `
+            radial-gradient(ellipse 90% 80% at 50% 35%, ${colors.core} 0%, ${colors.mid} 40%, ${colors.outer} 70%, transparent 100%)
+          `,
+          transition: "opacity 0.4s ease",
         }}
       />
 
-      {/* Floating Header */}
-      <div 
-        className="relative flex flex-col items-center gap-12 mt-40 z-10 opacity-90"
-        style={{ 
-          transform: `scale(${scale})`, 
-          transformOrigin: 'top center',
-          transition: 'transform 0.1s linear'
+      {/* ── Territory boundary — soft dashed border for orientation ── */}
+      <div
+        className="absolute inset-[12px] rounded-[72px]"
+        style={{
+          border: `2px dashed ${colors.border}`,
+          opacity: zoomTier === "landscape" ? 0.5 : zoomTier === "summary" ? 0.3 : 0.15,
+          transition: "opacity 0.4s ease",
         }}
-      >
-        <div className="flex items-center justify-center h-[360px] w-[360px] rounded-[5rem] bg-[var(--bg-elevated)]/50 backdrop-blur-2xl border border-[var(--border-default)]/20 shadow-[0_24px_64px_-16px_rgba(7,20,35,0.15)]">
-          <span className="text-[200px] leading-none" style={{ filter: 'drop-shadow(0 8px 16px rgba(0,0,0,0.12))' }}>{workspace.emoji}</span>
-        </div>
-        <div className="flex flex-col items-center gap-6">
-          <h3 className="font-bold text-[var(--text-primary)] text-[140px] tracking-[-0.02em]" style={{ textShadow: '0 4px 24px rgba(0,0,0,0.1)' }}>
-            {workspace.name}
-          </h3>
-          <div className="flex items-center gap-8">
-            <span className="text-[52px] font-medium tracking-wide text-[var(--text-tertiary)] uppercase bg-[var(--bg-secondary)]/30 backdrop-blur-md px-12 py-6 rounded-full border border-[var(--border-default)]/20">
-              {workspace.itemCount} item{workspace.itemCount !== 1 ? "s" : ""}
+      />
+
+      {/* ── Identity layer ── */}
+      {isLandscape ? (
+        /* LANDSCAPE: Large centered identity */
+        <div
+          className="absolute inset-0 flex flex-col items-center justify-center gap-8"
+          style={{
+            transform: `scale(${identityScale})`,
+            transformOrigin: "center center",
+            transition: "transform 0.15s linear",
+          }}
+        >
+          {/* Emoji container */}
+          <div className="flex h-[280px] w-[280px] items-center justify-center rounded-[4rem] bg-[var(--bg-elevated)]/40 backdrop-blur-xl border border-[var(--border-default)]/15 shadow-[0_16px_48px_-12px_rgba(7,20,35,0.12)]">
+            <span className="text-[160px] leading-none" style={{ filter: "drop-shadow(0 6px 12px rgba(0,0,0,0.08))" }}>
+              {workspace.emoji}
             </span>
-            <StatusDot status={workspace.status} className="h-10 w-10" />
+          </div>
+
+          {/* Name + meta */}
+          <div className="flex flex-col items-center gap-5">
+            <h3 className="font-bold text-[var(--text-primary)] text-[100px] tracking-[-0.02em] text-center max-w-[2400px] leading-[1.1]" style={{ textShadow: "0 3px 16px rgba(0,0,0,0.06)" }}>
+              {workspace.name}
+            </h3>
+            <div className="flex items-center gap-6">
+              <span className="text-[40px] font-medium tracking-wide text-[var(--text-tertiary)] bg-[var(--bg-secondary)]/25 backdrop-blur-md px-10 py-4 rounded-full border border-[var(--border-default)]/15">
+                {workspace.itemCount} item{workspace.itemCount !== 1 ? "s" : ""}
+              </span>
+              <StatusDot status={workspace.status} className="h-8 w-8" />
+            </div>
+          </div>
+
+          {/* Landscape-only: item type summary chips */}
+          <div className="flex flex-wrap items-center justify-center gap-4 mt-4 max-w-[2000px]">
+            {Object.entries(TYPE_GROUP_LABELS).map(([key, group]) => {
+              const count = workspace.items.filter((i) =>
+                group.types.includes(i.itemType as CanonicalWorkspaceType)
+              ).length;
+              if (count === 0) return null;
+              return (
+                <span
+                  key={key}
+                  className="text-[32px] font-medium text-[var(--text-tertiary)]/70 bg-[var(--bg-secondary)]/20 px-8 py-3 rounded-full"
+                >
+                  {group.label} {count}
+                </span>
+              );
+            })}
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-/* ─── Group Label Node ─── */
-
-function GroupLabelNode({ data }: { data: GroupLabelNodeData }) {
-  const targetZoom = 0.3;
-  const scale = data.zoom < targetZoom ? targetZoom / data.zoom : 1;
-
-  return (
-    <div 
-      className="flex items-center gap-8 px-6 select-none pointer-events-none w-full"
-      style={{ 
-        transform: `scale(${scale})`, 
-        transformOrigin: 'left center',
-        transition: 'transform 0.1s linear'
-      }}
-    >
-      <span className="text-[64px] font-bold uppercase tracking-[0.15em] text-[var(--text-tertiary)]/60">
-        {data.label}
-      </span>
-      <span className="text-[48px] tabular-nums text-[var(--text-tertiary)]/40 font-semibold">
-        {data.count}
-      </span>
-      <div className="flex-1 h-[4px] bg-[var(--border-default)]/30 ml-8" />
+      ) : (
+        /* SUMMARY / DETAIL: Smaller anchored top-left label */
+        <div
+          className="absolute top-[60px] left-[80px] flex items-center gap-6 pointer-events-none z-10"
+          style={{
+            transform: `scale(${stableScale(zoom, 0.35)})`,
+            transformOrigin: "top left",
+            transition: "transform 0.15s linear",
+          }}
+        >
+          <span className="text-[56px] leading-none">{workspace.emoji}</span>
+          <h3 className="font-semibold text-[var(--text-primary)] text-[52px] tracking-[-0.01em]" style={{ textShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+            {workspace.name}
+          </h3>
+          <span className="text-[28px] font-medium text-[var(--text-tertiary)]/60 ml-4">
+            {workspace.itemCount}
+          </span>
+          <StatusDot status={workspace.status} className="h-5 w-5" />
+        </div>
+      )}
     </div>
   );
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   Item Node — adapts representation by zoom level
+   Group Label Node — scales stably with zoom
+   ═══════════════════════════════════════════════════════════════ */
+
+function GroupLabelNode({ data }: { data: GroupLabelNodeData }) {
+  const scale = stableScale(data.zoom, 0.35);
+
+  return (
+    <div
+      className="flex items-center gap-8 px-6 select-none pointer-events-none w-full"
+      style={{
+        transform: `scale(${scale})`,
+        transformOrigin: "left center",
+        transition: "transform 0.1s linear",
+      }}
+    >
+      <span className="text-[52px] font-bold uppercase tracking-[0.14em] text-[var(--text-tertiary)]/50">
+        {data.label}
+      </span>
+      <span className="text-[38px] tabular-nums text-[var(--text-tertiary)]/35 font-semibold">
+        {data.count}
+      </span>
+      <div className="flex-1 h-[3px] bg-[var(--border-default)]/25 ml-6" />
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Item Node — structural recomposition by zoom tier
+
+   LANDSCAPE: Items are NOT rendered (territory identity only).
+              This is enforced in buildNodes by not emitting item
+              nodes at landscape tier.
+
+   SUMMARY:   Compact chip — icon + title + status, no preview.
+              Stable perceived size via counter-scaling.
+
+   DETAIL:    Full card — icon, title, preview, meta row.
+              Or inline deep-edit content at very high zoom.
    ═══════════════════════════════════════════════════════════════ */
 
 function ItemNode({ data }: { data: ItemNodeData }) {
@@ -212,29 +344,35 @@ function ItemNode({ data }: { data: ItemNodeData }) {
   const isFocused = focusedItemId === item.id;
   const isOpenInDeepEdit = deepEditTargets.some((t) => t.item.id === item.id);
 
-  const isLandscape = zoomTier === "landscape";
   const isSummary = zoomTier === "summary";
   const isDetail = zoomTier === "detail";
-  // Reveal preview at high zoom tiers or progressively, revealing slower
-  const showPreview = isDetail || (isSummary && zoomProgress > 0.6);
+  const showPreview = isDetail || (isSummary && zoomProgress > 0.7);
 
-  const canvasWidth = TERRITORY.ITEM_COL_WIDTH - 20; // 480
-  const canvasHeight = isDetail ? TERRITORY.ITEM_ROW_HEIGHT * 2.5 : TERRITORY.ITEM_ROW_HEIGHT - 20;
+  // Counter-scale to maintain stable perceived size
+  const scale = stableScale(zoom, 0.4);
+
+  const canvasWidth = TERRITORY.ITEM_COL_WIDTH - 20;
+  const canvasHeight = isDetail && zoomProgress > 0.5
+    ? TERRITORY.ITEM_ROW_HEIGHT * 2.5
+    : TERRITORY.ITEM_ROW_HEIGHT - 20;
 
   const dynamicBorderWidth = Math.max(1, 1 / zoom);
   const borderColor = isFocused
     ? "color-mix(in oklab, var(--accent-cyan) 40%, var(--border-default))"
     : isOpenInDeepEdit && !isFocused
-    ? "color-mix(in oklab, var(--accent-cyan) 18%, var(--border-default))"
-    : hovered
-    ? "color-mix(in oklab, var(--accent-cyan) 22%, var(--border-default))"
-    : "color-mix(in srgb, var(--border-default) 50%, transparent)";
+      ? "color-mix(in oklab, var(--accent-cyan) 18%, var(--border-default))"
+      : hovered
+        ? "color-mix(in oklab, var(--accent-cyan) 22%, var(--border-default))"
+        : "color-mix(in srgb, var(--border-default) 50%, transparent)";
 
   return (
     <div
       style={{
         width: canvasWidth,
         height: canvasHeight,
+        transform: `scale(${scale})`,
+        transformOrigin: "top left",
+        transition: "transform 0.12s linear",
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -280,16 +418,16 @@ function ItemNode({ data }: { data: ItemNodeData }) {
           </div>
         )}
 
-        {isDetail ? (
-          // --- DETAIL TIER (Deep Edit inline) ---
+        {isDetail && zoomProgress > 0.5 ? (
+          /* ── DETAIL TIER: Inline deep-edit content ── */
           <div className="flex-1 overflow-hidden w-full h-full pointer-events-auto bg-[var(--bg-elevated)]">
-             {item.itemType === "thread" ? <ThreadContent item={item} /> : <ArtifactContent item={item} />}
+            {item.itemType === "thread" ? <ThreadContent item={item} /> : <ArtifactContent item={item} />}
           </div>
         ) : (
-          // --- LANDSCAPE / SUMMARY TIERS ---
+          /* ── SUMMARY / early DETAIL: Structured card ── */
           <>
             {/* Header row */}
-            <div className={cn("flex items-center gap-4 px-6 pt-6", isLandscape && "pb-6")}>
+            <div className={cn("flex items-center gap-4 px-6 pt-6", isSummary && zoomProgress < 0.4 && "pb-6")}>
               <div
                 className={cn(
                   "flex h-12 w-12 items-center justify-center rounded-[14px] transition-all duration-200 shrink-0",
@@ -314,10 +452,10 @@ function ItemNode({ data }: { data: ItemNodeData }) {
               />
             </div>
 
-            {!isLandscape && (
+            {/* Preview + meta — progressively revealed */}
+            {(isSummary ? zoomProgress > 0.3 : true) && (
               <>
                 <div className="flex-1 flex flex-col justify-center min-h-0 mt-2 px-6">
-                  {/* Preview text — appears progressively as height allows */}
                   {showPreview && item.preview && (
                     <p className="pl-[64px] text-base leading-[1.6] text-[var(--text-tertiary)] line-clamp-3">
                       {item.preview}
@@ -354,7 +492,11 @@ function ItemNode({ data }: { data: ItemNodeData }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   Build Nodes — layout engine
+   Build Nodes — layout engine with semantic zoom awareness
+
+   Key change: at LANDSCAPE tier, item nodes are NOT emitted.
+   Territory identity (name, emoji, summary chips) is enough.
+   Items appear only at SUMMARY and DETAIL tiers.
    ═══════════════════════════════════════════════════════════════ */
 
 function buildNodes(
@@ -362,34 +504,42 @@ function buildNodes(
   zoomTier: "landscape" | "summary" | "detail",
   zoomProgress: number,
   zoom: number,
+  viewMode: "byType" | "byTopic" | "timeline" = "byType",
 ): Node[] {
   const nodes: Node[] = [];
+  const isLandscape = zoomTier === "landscape";
 
-  const rowHeight = zoomTier === "detail" ? TERRITORY.ITEM_ROW_HEIGHT * 2.6 : TERRITORY.ITEM_ROW_HEIGHT;
+  const rowHeight =
+    zoomTier === "detail" ? TERRITORY.ITEM_ROW_HEIGHT * 2.6 : TERRITORY.ITEM_ROW_HEIGHT;
 
-  // Show all workspace territories in grid
   workspaces.forEach((ws, idx) => {
     const col = idx % TERRITORY.COLS;
     const row = Math.floor(idx / TERRITORY.COLS);
-    
-    // Dynamic height based on content
+    const tint = dominantTint(ws);
+
+    // Compute dynamic territory dimensions based on content
     const grouped: Record<string, WorkspaceItemData[]> = {};
     for (const item of ws.items) {
       const key = item.itemType;
       if (!grouped[key]) grouped[key] = [];
       grouped[key].push(item);
     }
-    
-    let requiredHeight = 900; // Base header height (increased to accommodate massive fonts)
+
+    let requiredHeight = 900; // Header area
     for (const [, group] of Object.entries(TYPE_GROUP_LABELS)) {
       const items = group.types.flatMap((t) => grouped[t] ?? []);
       if (items.length > 0) {
-        requiredHeight += 120 + Math.ceil(items.length / TERRITORY.ITEMS_PER_ROW) * rowHeight + 40;
+        requiredHeight +=
+          120 + Math.ceil(items.length / TERRITORY.ITEMS_PER_ROW) * rowHeight + 40;
       }
     }
     const territoryHeight = Math.max(TERRITORY.HEIGHT, requiredHeight);
-    const territoryWidth = Math.max(TERRITORY.WIDTH, 80 + TERRITORY.ITEMS_PER_ROW * TERRITORY.ITEM_COL_WIDTH + 60); // Dynamic width based on columns
-    
+    const territoryWidth = Math.max(
+      TERRITORY.WIDTH,
+      80 + TERRITORY.ITEMS_PER_ROW * TERRITORY.ITEM_COL_WIDTH + 60,
+    );
+
+    // Territory node u2014 always present
     nodes.push({
       id: `ws-${ws.id}`,
       type: "workspaceTerritory",
@@ -397,28 +547,32 @@ function buildNodes(
         x: col * TERRITORY.SPACING_X,
         y: row * TERRITORY.SPACING_Y,
       },
-      data: { workspace: ws, zoomTier, zoomProgress, zoom } satisfies WorkspaceNodeData,
+      data: { workspace: ws, zoomTier, zoomProgress, zoom, tint } satisfies WorkspaceNodeData,
       draggable: false,
       selectable: true,
       style: { width: territoryWidth, height: territoryHeight, zIndex: 0 },
     });
 
-    // Render items as child nodes
-    let groupY = 900; // Offset below header
+    // u2500u2500 Items: only emitted at summary+ tiers u2500u2500
+    if (isLandscape) return;
 
-    for (const [, group] of Object.entries(TYPE_GROUP_LABELS)) {
-      const items = group.types.flatMap((t) => grouped[t] ?? []);
-      if (items.length === 0) continue;
+    // u2500u2500 Lens-based layout: byType, byTopic, timeline u2500u2500
+    if (viewMode === "timeline") {
+      // Timeline lens: sort all items by updatedAt, layout in a single column
+      const sortedItems = [...ws.items].sort(
+        (a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0),
+      );
 
+      // Timeline header
       nodes.push({
-        id: `group-${ws.id}-${group.label}`,
+        id: `group-${ws.id}-timeline`,
         type: "groupLabel",
         parentId: `ws-${ws.id}`,
-        position: { x: 80, y: groupY },
+        position: { x: 80, y: 900 },
         data: {
-          label: group.label,
-          variant: TYPE_TO_TINT[group.types[0]],
-          count: items.length,
+          label: "Recent Activity",
+          variant: "neutral",
+          count: sortedItems.length,
           zoom,
         } satisfies GroupLabelNodeData,
         draggable: false,
@@ -426,42 +580,134 @@ function buildNodes(
         style: { width: TERRITORY.WIDTH - 160, zIndex: 1 },
       });
 
-      groupY += 120;
-
-      items.forEach((item, idx) => {
-        const itemCol = idx % TERRITORY.ITEMS_PER_ROW;
-        const itemRow = Math.floor(idx / TERRITORY.ITEMS_PER_ROW);
+      sortedItems.forEach((item, itemIdx) => {
+        const itemCol = itemIdx % TERRITORY.ITEMS_PER_ROW;
+        const itemRow = Math.floor(itemIdx / TERRITORY.ITEMS_PER_ROW);
         nodes.push({
           id: `item-${item.id}`,
           type: "itemNode",
           parentId: `ws-${ws.id}`,
           position: {
-            x: item.canvasX ?? (80 + itemCol * TERRITORY.ITEM_COL_WIDTH),
-            y: item.canvasY ?? (groupY + itemRow * rowHeight),
+            x: 80 + itemCol * TERRITORY.ITEM_COL_WIDTH,
+            y: 1020 + itemRow * rowHeight,
           },
           data: {
             item,
             zoomTier,
             zoomProgress,
             zoom,
-            groupLabel: group.label,
-            isFirst: idx === 0,
+            groupLabel: "Recent Activity",
+            isFirst: itemIdx === 0,
           } satisfies ItemNodeData,
           draggable: true,
           selectable: true,
           style: { zIndex: 2 },
         });
       });
+    } else if (viewMode === "byTopic") {
+      // byTopic lens: group by workspace (since items already belong to workspaces)
+      // Within a single workspace, just list all items flat
+      nodes.push({
+        id: `group-${ws.id}-topic`,
+        type: "groupLabel",
+        parentId: `ws-${ws.id}`,
+        position: { x: 80, y: 900 },
+        data: {
+          label: ws.name,
+          variant: tint,
+          count: ws.items.length,
+          zoom,
+        } satisfies GroupLabelNodeData,
+        draggable: false,
+        selectable: false,
+        style: { width: TERRITORY.WIDTH - 160, zIndex: 1 },
+      });
 
-      groupY +=
-        Math.ceil(items.length / TERRITORY.ITEMS_PER_ROW) * rowHeight + 40;
+      ws.items.forEach((item, itemIdx) => {
+        const itemCol = itemIdx % TERRITORY.ITEMS_PER_ROW;
+        const itemRow = Math.floor(itemIdx / TERRITORY.ITEMS_PER_ROW);
+        nodes.push({
+          id: `item-${item.id}`,
+          type: "itemNode",
+          parentId: `ws-${ws.id}`,
+          position: {
+            x: 80 + itemCol * TERRITORY.ITEM_COL_WIDTH,
+            y: 1020 + itemRow * rowHeight,
+          },
+          data: {
+            item,
+            zoomTier,
+            zoomProgress,
+            zoom,
+            groupLabel: ws.name,
+            isFirst: itemIdx === 0,
+          } satisfies ItemNodeData,
+          draggable: true,
+          selectable: true,
+          style: { zIndex: 2 },
+        });
+      });
+    } else {
+      // Default byType lens
+      let groupY = 900;
+
+      for (const [, group] of Object.entries(TYPE_GROUP_LABELS)) {
+        const items = group.types.flatMap((t) => grouped[t] ?? []);
+        if (items.length === 0) continue;
+
+        nodes.push({
+          id: `group-${ws.id}-${group.label}`,
+          type: "groupLabel",
+          parentId: `ws-${ws.id}`,
+          position: { x: 80, y: groupY },
+          data: {
+            label: group.label,
+            variant: TYPE_TO_TINT[group.types[0]],
+            count: items.length,
+            zoom,
+          } satisfies GroupLabelNodeData,
+          draggable: false,
+          selectable: false,
+          style: { width: TERRITORY.WIDTH - 160, zIndex: 1 },
+        });
+
+        groupY += 120;
+
+        items.forEach((item, itemIdx) => {
+          const itemCol = itemIdx % TERRITORY.ITEMS_PER_ROW;
+          const itemRow = Math.floor(itemIdx / TERRITORY.ITEMS_PER_ROW);
+          nodes.push({
+            id: `item-${item.id}`,
+            type: "itemNode",
+            parentId: `ws-${ws.id}`,
+            position: {
+              x: item.canvasX ?? 80 + itemCol * TERRITORY.ITEM_COL_WIDTH,
+              y: item.canvasY ?? groupY + itemRow * rowHeight,
+            },
+            data: {
+              item,
+              zoomTier,
+              zoomProgress,
+              zoom,
+              groupLabel: group.label,
+              isFirst: itemIdx === 0,
+            } satisfies ItemNodeData,
+            draggable: true,
+            selectable: true,
+            style: { zIndex: 2 },
+          });
+        });
+
+        groupY +=
+          Math.ceil(items.length / TERRITORY.ITEMS_PER_ROW) * rowHeight + 40;
+      }
     }
   });
 
   return nodes;
 }
 
-/* ─── Node Type Registry ─── */
+/* ── Node Type Registry ── */
 
 const NODE_TYPES = {
   workspaceTerritory: WorkspaceTerritoryNode,
@@ -470,7 +716,34 @@ const NODE_TYPES = {
 };
 
 /* ═══════════════════════════════════════════════════════════════
-   Canvas Inner — the actual ReactFlow instance
+   Fixed Screen-Size Background
+
+   The background pattern (dots/grid) must NOT scale with zoom.
+   It uses a CSS overlay that tiles at a fixed pixel size and
+   does NOT respond to viewport transforms. This creates a
+   trustworthy spatial reference system.
+   ═══════════════════════════════════════════════════════════════ */
+
+function CanvasBackground({ mode }: { mode: "dots" | "blank" | "grid" }) {
+  if (mode === "blank") return null;
+
+  const isDots = mode === "dots";
+  return (
+    <div
+      className="absolute inset-0 pointer-events-none z-0"
+      style={{
+        backgroundImage: isDots
+          ? "radial-gradient(circle, var(--border-default) 1px, transparent 1px)"
+          : "linear-gradient(var(--border-default) 0.5px, transparent 0.5px), linear-gradient(90deg, var(--border-default) 0.5px, transparent 0.5px)",
+        backgroundSize: isDots ? "28px 28px" : "40px 40px",
+        opacity: isDots ? 0.35 : 0.2,
+      }}
+    />
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Canvas Inner — the ReactFlow instance
    ═══════════════════════════════════════════════════════════════ */
 
 type WorkspaceCanvasProps = {
@@ -486,37 +759,36 @@ function WorkspaceCanvasInner({
   const zoomTier = useWorkspaceStore((s) => s.zoomTier);
   const zoomProgress = useWorkspaceStore((s) => s.zoomProgress);
   const zoom = useWorkspaceStore((s) => s.zoom);
-  const viewportX = useWorkspaceStore((s) => s.viewportX);
-  const viewportY = useWorkspaceStore((s) => s.viewportY);
+  const viewMode = useWorkspaceStore((s) => s.viewMode);
   const setViewport = useWorkspaceStore((s) => s.setViewport);
   const setFocusedItem = useWorkspaceStore((s) => s.setFocusedItem);
   const backgroundMode = useWorkspaceStore((s) => s.backgroundMode);
-  const committedWorkspaceId = useWorkspaceStore((s) => s.committedWorkspaceId);
+  const flyToTarget = useWorkspaceStore((s) => s.flyToTarget);
+  const clearFlyToTarget = useWorkspaceStore((s) => s.clearFlyToTarget);
 
   const { setCenter } = useReactFlow();
 
+  // ── Fly-to-workspace animation (triggered by dock or commitToWorkspace) ──
+  const lastFlyToRef = useRef<number>(0);
   useEffect(() => {
-    if (committedWorkspaceId) {
-      const idx = workspaces.findIndex(w => w.id === committedWorkspaceId);
-      if (idx >= 0) {
-        const col = idx % TERRITORY.COLS;
-        const row = Math.floor(idx / TERRITORY.COLS);
-        const centerX = col * TERRITORY.SPACING_X + TERRITORY.WIDTH / 2;
-        const centerY = row * TERRITORY.SPACING_Y + TERRITORY.HEIGHT / 2;
-        
-        setCenter(centerX, centerY, { zoom: VP.DEFAULT_ZOOM, duration: 800 });
-      }
-    }
-  }, [committedWorkspaceId, workspaces, setCenter]);
+    if (!flyToTarget || flyToTarget.requestId === lastFlyToRef.current) return;
+    lastFlyToRef.current = flyToTarget.requestId;
+
+    setCenter(flyToTarget.centerX, flyToTarget.centerY, {
+      zoom: flyToTarget.zoom,
+      duration: 700,
+    });
+
+    // Clear after animation
+    const timer = setTimeout(() => clearFlyToTarget(), 750);
+    return () => clearTimeout(timer);
+  }, [flyToTarget, setCenter, clearFlyToTarget]);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Commit transition: soften the harsh mode jump when entering/leaving a workspace
-  const transitioning = false;
-
   const nodes = useMemo(
-    () => buildNodes(workspaces, zoomTier, zoomProgress, zoom),
-    [workspaces, zoomTier, zoomProgress, zoom],
+    () => buildNodes(workspaces, zoomTier, zoomProgress, zoom, viewMode),
+    [workspaces, zoomTier, zoomProgress, zoom, viewMode],
   );
 
   const edges: Edge[] = useMemo(() => [], []);
@@ -545,21 +817,34 @@ function WorkspaceCanvasInner({
     [onNodeClick, onItemClick, setFocusedItem],
   );
 
-  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, type: 'pane' | 'node', id?: string } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    type: "pane" | "node";
+    id?: string;
+  } | null>(null);
 
   const handlePaneContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY, type: 'pane' });
+    setContextMenu({ x: e.clientX, y: e.clientY, type: "pane" });
   }, []);
 
-  const handleNodeContextMenu = useCallback((e: React.MouseEvent, node: Node) => {
-    e.preventDefault();
-    if (node.type === 'itemNode') {
-      setContextMenu({ x: e.clientX, y: e.clientY, type: 'node', id: node.id.replace('item-', '') });
-    } else {
-      setContextMenu({ x: e.clientX, y: e.clientY, type: 'pane' });
-    }
-  }, []);
+  const handleNodeContextMenu = useCallback(
+    (e: React.MouseEvent, node: Node) => {
+      e.preventDefault();
+      if (node.type === "itemNode") {
+        setContextMenu({
+          x: e.clientX,
+          y: e.clientY,
+          type: "node",
+          id: node.id.replace("item-", ""),
+        });
+      } else {
+        setContextMenu({ x: e.clientX, y: e.clientY, type: "pane" });
+      }
+    },
+    [],
+  );
 
   const handlePaneClick = useCallback(() => {
     setFocusedItem(null);
@@ -572,27 +857,13 @@ function WorkspaceCanvasInner({
     return () => window.removeEventListener("click", handleGlobalClick);
   }, []);
 
-
-
   return (
-    <div 
-      className="h-full w-full relative"
-      style={{
-        backgroundImage: backgroundMode === "dots" 
-          ? "radial-gradient(circle, var(--border-default) 1.5px, transparent 1.5px)"
-          : backgroundMode === "grid" 
-            ? "linear-gradient(var(--border-default) 1px, transparent 1px), linear-gradient(90deg, var(--border-default) 1px, transparent 1px)"
-            : "none",
-        backgroundSize: backgroundMode === "dots" ? "32px 32px" : backgroundMode === "grid" ? "48px 48px" : "auto",
-        backgroundPosition: `${viewportX}px ${viewportY}px`
-      }}
-    >
-      <div
-        className={cn(
-          "h-full w-full transition-opacity duration-200 ease-[var(--ease-standard)]",
-          transitioning ? "opacity-0" : "opacity-100",
-        )}
-      >
+    <div className="h-full w-full relative bg-[var(--bg-primary)]">
+      {/* Fixed screen-size background pattern — does not scale with zoom */}
+      <CanvasBackground mode={backgroundMode} />
+
+      {/* ReactFlow canvas */}
+      <div className="h-full w-full relative z-[1]">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -611,74 +882,61 @@ function WorkspaceCanvasInner({
           defaultViewport={{ x: 80, y: 40, zoom: VP.DEFAULT_ZOOM }}
           proOptions={{ hideAttribution: true }}
           fitView={true}
-          fitViewOptions={{ padding: 0.3, maxZoom: VP.DEFAULT_ZOOM + 0.05 }}
+          fitViewOptions={{ padding: 0.35, maxZoom: VP.DEFAULT_ZOOM + 0.05 }}
           deleteKeyCode={null}
           selectionKeyCode={null}
-        >
-        </ReactFlow>
-
-        {/* Context Menu */}
-        {contextMenu && (
-          <div
-            className="fixed z-[100] flex min-w-[180px] flex-col gap-0.5 rounded-xl border border-[var(--border-default)]/50 bg-[var(--bg-elevated)]/95 p-1.5 shadow-[0_12px_28px_-12px_rgba(8,22,40,0.30)] backdrop-blur-xl"
-            style={{ top: contextMenu.y, left: contextMenu.x }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {contextMenu.type === "pane" ? (
-              <>
-                <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-                  Create new
-                </div>
-                <button type="button" className="flex items-center gap-2.5 rounded-lg px-2 py-2 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
-                  <Layers className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
-                  <span className="flex-1 text-left">New Workspace</span>
-                </button>
-                <button type="button" className="flex items-center gap-2.5 rounded-lg px-2 py-2 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
-                  <Wand2 className="h-4 w-4 shrink-0 text-[var(--accent-cyan)]/80" />
-                  <span className="flex-1 text-left">Ask AI</span>
-                </button>
-                <button type="button" className="flex items-center gap-2.5 rounded-lg px-2 py-2 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
-                  <FileText className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
-                  <span className="flex-1 text-left">Note</span>
-                </button>
-                <button type="button" className="flex items-center gap-2.5 rounded-lg px-2 py-2 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
-                  <Code2 className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
-                  <span className="flex-1 text-left">Code</span>
-                </button>
-                <button type="button" className="flex items-center gap-2.5 rounded-lg px-2 py-2 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
-                  <ImageIcon className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
-                  <span className="flex-1 text-left">Visual</span>
-                </button>
-                <button type="button" className="flex items-center gap-2.5 rounded-lg px-2 py-2 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
-                  <CalendarCheck className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
-                  <span className="flex-1 text-left">Task</span>
-                </button>
-                <div className="my-0.5 h-px bg-[var(--border-default)]/25" />
-                <button type="button" className="flex items-center gap-2.5 rounded-lg px-2 py-2 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
-                  <MessageSquare className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
-                  <span className="flex-1 text-left">Thread</span>
-                </button>
-              </>
-            ) : (
-              <>
-                <button type="button" onClick={() => { onItemClick?.(contextMenu.id!); setContextMenu(null); }} className="flex items-center gap-2.5 rounded-lg px-2 py-2 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
-                  <ExternalLink className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
-                  <span className="flex-1 text-left">Open in Right Hub</span>
-                </button>
-                <button type="button" onClick={() => setContextMenu(null)} className="flex items-center gap-2.5 rounded-lg px-2 py-2 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
-                  <Link className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
-                  <span className="flex-1 text-left">Copy Link</span>
-                </button>
-                <div className="my-0.5 h-px bg-[var(--border-default)]/25" />
-                <button type="button" onClick={() => setContextMenu(null)} className="flex items-center gap-2.5 rounded-lg px-2 py-2 text-[13px] font-medium text-[var(--danger)] transition-colors hover:bg-[var(--danger)]/10">
-                  <Trash2 className="h-4 w-4 shrink-0 text-[var(--danger)]/80" />
-                  <span className="flex-1 text-left">Delete Item</span>
-                </button>
-              </>
-            )}
-          </div>
-        )}
+          style={{ background: "transparent" }}
+        />
       </div>
+
+      {/* Context Menu — shared action menu for pane, item-specific for nodes */}
+      {contextMenu && (
+        <div
+          className="fixed z-[100] min-w-[180px] rounded-2xl border border-[var(--border-default)]/50 bg-[var(--bg-elevated)]/95 p-1.5 shadow-[0_12px_28px_-12px_rgba(8,22,40,0.30)] backdrop-blur-xl"
+          style={{
+            top: Math.min(contextMenu.y, (typeof window !== "undefined" ? window.innerHeight : 800) - 320),
+            left: Math.min(contextMenu.x, (typeof window !== "undefined" ? window.innerWidth : 1200) - 220),
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {contextMenu.type === "pane" ? (
+            <ActionMenuContent
+              onAction={() => setContextMenu(null)}
+            />
+          ) : (
+            <div className="flex flex-col gap-0.5">
+              <button
+                type="button"
+                onClick={() => {
+                  onItemClick?.(contextMenu.id!);
+                  setContextMenu(null);
+                }}
+                className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              >
+                <ExternalLink className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
+                <span className="flex-1 text-left">Open in Right Hub</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setContextMenu(null)}
+                className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              >
+                <Link className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
+                <span className="flex-1 text-left">Copy Link</span>
+              </button>
+              <div className="my-0.5 h-px bg-[var(--border-default)]/25" />
+              <button
+                type="button"
+                onClick={() => setContextMenu(null)}
+                className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] font-medium text-[var(--danger)] transition-colors hover:bg-[var(--danger)]/10"
+              >
+                <Trash2 className="h-4 w-4 shrink-0 text-[var(--danger)]/80" />
+                <span className="flex-1 text-left">Delete Item</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

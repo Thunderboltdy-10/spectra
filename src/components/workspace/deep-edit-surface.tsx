@@ -392,10 +392,10 @@ export function DeepEditSurface({
     <button
       type="button"
       className={cn(
-        "flex flex-col items-center gap-2 rounded-l-[32px] border border-r-0 py-5 pl-2 pr-1.5 backdrop-blur-xl transition-all duration-200",
+        "flex flex-col items-center gap-2.5 rounded-l-[22px] border border-r-0 py-5 pl-2.5 pr-2 backdrop-blur-xl transition-all duration-200",
         isFocused
           ? "border-[color-mix(in_oklab,var(--accent-cyan)_25%,var(--border-default))] bg-[var(--bg-elevated)]/98 shadow-[0_10px_24px_-16px_rgba(14,142,232,0.18)]"
-          : "border-[var(--border-default)]/45 bg-[var(--bg-elevated)]/95 shadow-[0_10px_24px_-16px_rgba(8,22,40,0.14)]",
+          : "border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/95 shadow-[0_10px_24px_-16px_rgba(8,22,40,0.14)]",
       )}
     >
       {isFocused && (
@@ -405,11 +405,11 @@ export function DeepEditSurface({
       )}
       {meta?.icon ? (
         <meta.icon
-          className="h-4 w-4 text-[var(--text-secondary)]"
+          className="h-4.5 w-4.5 text-[var(--text-secondary)]"
           style={{ color: meta.color }}
         />
       ) : (
-        <BookOpen className="h-4 w-4 text-[var(--text-secondary)]" />
+        <BookOpen className="h-4.5 w-4.5 text-[var(--text-secondary)]" />
       )}
       <span
         className="max-h-[120px] text-[10px] font-semibold text-[var(--text-secondary)]"
@@ -445,7 +445,7 @@ export function DeepEditSurface({
     >
       <div
         className={cn(
-          "flex flex-col transition-all duration-300",
+          "flex flex-col transition-all duration-300 overflow-hidden",
           expanded ? "h-[680px] w-[520px]" : "h-[560px] w-[420px]",
         )}
       >

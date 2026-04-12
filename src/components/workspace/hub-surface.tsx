@@ -13,6 +13,8 @@ type HubSurfaceProps = {
   locked?: boolean;
   pinned?: boolean;
   hidden?: boolean;
+  /** When true, outside-click closes this surface even when locked (for drawers/menus) */
+  dismissOnOutsideClick?: boolean;
   className?: string;
   collapsedClassName?: string;
   expandedClassName?: string;
@@ -20,10 +22,10 @@ type HubSurfaceProps = {
   onTogglePin?: () => void;
 };
 
-/** Debounce delay before expanding on hover (ms) u2014 prevents jitter */
-const HOVER_ENTER_DELAY = 180;
+/** Debounce delay before expanding on hover (ms) — less aggressive */
+const HOVER_ENTER_DELAY = 260;
 /** Debounce delay before collapsing after mouse leaves (ms) */
-const HOVER_LEAVE_DELAY = 280;
+const HOVER_LEAVE_DELAY = 340;
 
 function edgeClasses(edge: HubEdge) {
   switch (edge) {
@@ -59,6 +61,7 @@ export function HubSurface({
   locked = false,
   pinned = false,
   hidden = false,
+  dismissOnOutsideClick = false,
   className,
   collapsedClassName,
   expandedClassName,
@@ -71,32 +74,37 @@ export function HubSurface({
 
   const expanded = locked || hovered;
 
-  // Close on click outside if locked but user wants to close
+  /**
+   * Outside-click semantics:
+   * - Locked/open surfaces stay fixed — do NOT close on outside press.
+   * - Only surfaces with `dismissOnOutsideClick` close on outside press.
+   * This prevents accidental closure of locked hub items while allowing
+   * menus/drawers to dismiss naturally.
+   */
   useEffect(() => {
     if (!expanded) return;
+    // Only dismiss on outside click for surfaces that explicitly opt in
+    if (!dismissOnOutsideClick) return;
     function handleClickOutside(e: MouseEvent) {
       const target = e.target as HTMLElement;
       const surface = document.querySelector(`[data-hub-surface-id="${id}"]`);
       if (surface && !surface.contains(target)) {
         if (locked && onToggleLock) {
-          onToggleLock(); // Unlock it to close
+          onToggleLock();
         }
       }
     }
-    // Bind to the capture phase so it triggers before other things consume the event
     document.addEventListener("mousedown", handleClickOutside, true);
     return () => document.removeEventListener("mousedown", handleClickOutside, true);
-  }, [expanded, locked, onToggleLock, id]);
+  }, [expanded, locked, onToggleLock, id, dismissOnOutsideClick]);
 
   const classes = useMemo(() => edgeClasses(edge), [edge]);
 
   const handleMouseEnter = useCallback(() => {
-    // Cancel any pending leave
     if (leaveTimerRef.current) {
       clearTimeout(leaveTimerRef.current);
       leaveTimerRef.current = null;
     }
-    // Debounce enter
     if (!hovered && !locked) {
       enterTimerRef.current = setTimeout(() => {
         setHovered(true);
@@ -107,12 +115,10 @@ export function HubSurface({
   }, [hovered, locked]);
 
   const handleMouseLeave = useCallback(() => {
-    // Cancel any pending enter
     if (enterTimerRef.current) {
       clearTimeout(enterTimerRef.current);
       enterTimerRef.current = null;
     }
-    // Debounce leave
     leaveTimerRef.current = setTimeout(() => {
       setHovered(false);
     }, HOVER_LEAVE_DELAY);
@@ -152,10 +158,10 @@ export function HubSurface({
             expandedClassName,
           )}
         >
-          <div className="relative overflow-hidden rounded-[32px] border border-[var(--border-default)]/45 bg-[var(--bg-elevated)]/96 backdrop-blur-xl shadow-[0_18px_44px_-18px_rgba(8,22,40,0.28)]">
+          <div className="relative overflow-hidden rounded-[28px] border border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/96 backdrop-blur-xl shadow-[0_18px_44px_-18px_rgba(8,22,40,0.28)]">
             {/* Lock/Pin controls */}
             {(onToggleLock || onTogglePin) && (
-              <div className="absolute right-2 top-2 z-[60] flex items-center gap-1">
+              <div className="absolute right-2.5 top-2.5 z-[60] flex items-center gap-1">
                 {onTogglePin ? (
                   <button
                     type="button"

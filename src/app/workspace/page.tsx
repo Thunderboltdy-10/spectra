@@ -10,8 +10,9 @@ import {
   type WorkspaceDockItem,
 } from "@/components/workspace/workspace-dock";
 import { TimerWidget } from "@/components/workspace/timer-widget";
-import { BackgroundToggle } from "@/components/workspace/background-toggle";
-import { HubVisibilityToggle } from "@/components/workspace/hub-visibility-toggle";
+import { UtilityHubGroup } from "@/components/workspace/utility-hub-group";
+import { QuickNotesHub } from "@/components/workspace/quick-notes-hub";
+import { LensHub } from "@/components/workspace/lens-hub";
 import {
   PlannerEdge,
   type PlannerTask,
@@ -60,6 +61,7 @@ export default function WorkspacePage() {
   const {
     committedWorkspaceId,
     commitToWorkspace,
+    flyToWorkspace,
     setWorkspaces,
     workspaces,
     setFocusedItem,
@@ -73,6 +75,8 @@ export default function WorkspacePage() {
     updateResultCard,
     dismissResultCard: storeDismissResultCard,
     reopenResultCard: storeReopenResultCard,
+    hydratePreferences,
+    hasHydratedPreferences,
   } = useWorkspaceStore();
 
   /* ─── Real data hook: fetches from backend, falls back to demo ─── */
@@ -83,6 +87,35 @@ export default function WorkspacePage() {
     loading: dataLoading,
     refresh: refreshData,
   } = useWorkspaceData(committedWorkspaceId);
+
+  useEffect(() => {
+    if (hasHydratedPreferences) return;
+    let cancelled = false;
+
+    const loadPreferences = async () => {
+      try {
+        const response = await fetch("/api/preferences");
+        if (!response.ok) return;
+        const payload = (await response.json()) as {
+          preferences?: {
+            workspaceViewMode?: "byType" | "byTopic" | "timeline";
+            workspaceBackgroundMode?: "dots" | "blank" | "grid";
+            workspaceHubVisibility?: "hidden" | "collapsed" | "expanded";
+          };
+        };
+        if (!cancelled && payload.preferences) {
+          hydratePreferences(payload.preferences);
+        }
+      } catch {
+        // Preference hydration is best-effort.
+      }
+    };
+
+    void loadPreferences();
+    return () => {
+      cancelled = true;
+    };
+  }, [hasHydratedPreferences, hydratePreferences]);
 
   // Sync live data into the store, or use demo fallback
   const prevIsLiveRef = useRef(false);
@@ -134,9 +167,9 @@ export default function WorkspacePage() {
 
   const handleWorkspaceSelect = useCallback(
     (id: string) => {
-      commitToWorkspace(id);
+      flyToWorkspace(id);
     },
-    [commitToWorkspace],
+    [flyToWorkspace],
   );
 
   const handleBack = useCallback(() => {
@@ -155,9 +188,9 @@ export default function WorkspacePage() {
 
   const handleCanvasNodeClick = useCallback(
     (workspaceId: string) => {
-      commitToWorkspace(workspaceId);
+      flyToWorkspace(workspaceId);
     },
-    [commitToWorkspace],
+    [flyToWorkspace],
   );
 
   const handleCanvasItemClick = useCallback(
@@ -306,9 +339,14 @@ export default function WorkspacePage() {
         onGoHome={handleBack}
       />
 
-      {/* Hub ecology: Right-edge utilities */}
-      <BackgroundToggle />
-      <HubVisibilityToggle />
+      {/* Hub ecology: Top-right utility controls (background + hub visibility) */}
+      <UtilityHubGroup />
+
+      {/* Hub ecology: Top-center lens switcher */}
+      <LensHub />
+
+      {/* Hub ecology: Left-edge quick notes (~3/4 down) */}
+      <QuickNotesHub />
 
       {/* Hub ecology: Bottom-center unified command bar with result cards */}
       <CommandBar

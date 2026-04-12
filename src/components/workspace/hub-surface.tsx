@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
-import { Pin, PinOff } from "lucide-react";
+import { useCallback, useMemo, useRef, useState, useEffect } from "react";
+import { Pin, PinOff, Lock, Unlock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { HubEdge } from "@/lib/workspace/contracts";
 
@@ -70,6 +70,24 @@ export function HubSurface({
   const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const expanded = locked || hovered;
+
+  // Close on click outside if locked but user wants to close
+  useEffect(() => {
+    if (!expanded) return;
+    function handleClickOutside(e: MouseEvent) {
+      const target = e.target as HTMLElement;
+      const surface = document.querySelector(`[data-hub-surface-id="${id}"]`);
+      if (surface && !surface.contains(target)) {
+        if (locked && onToggleLock) {
+          onToggleLock(); // Unlock it to close
+        }
+      }
+    }
+    // Bind to the capture phase so it triggers before other things consume the event
+    document.addEventListener("mousedown", handleClickOutside, true);
+    return () => document.removeEventListener("mousedown", handleClickOutside, true);
+  }, [expanded, locked, onToggleLock, id]);
+
   const classes = useMemo(() => edgeClasses(edge), [edge]);
 
   const handleMouseEnter = useCallback(() => {
@@ -134,10 +152,10 @@ export function HubSurface({
             expandedClassName,
           )}
         >
-          <div className="relative overflow-hidden rounded-[22px] border border-[var(--border-default)]/45 bg-[var(--bg-elevated)]/96 backdrop-blur-xl shadow-[0_18px_44px_-18px_rgba(8,22,40,0.28)]">
+          <div className="relative overflow-hidden rounded-[32px] border border-[var(--border-default)]/45 bg-[var(--bg-elevated)]/96 backdrop-blur-xl shadow-[0_18px_44px_-18px_rgba(8,22,40,0.28)]">
             {/* Lock/Pin controls */}
             {(onToggleLock || onTogglePin) && (
-              <div className="absolute right-2 top-2 z-10 flex items-center gap-1">
+              <div className="absolute right-2 top-2 z-[60] flex items-center gap-1">
                 {onTogglePin ? (
                   <button
                     type="button"
@@ -152,13 +170,14 @@ export function HubSurface({
                     type="button"
                     onClick={onToggleLock}
                     className={cn(
-                      "flex h-7 items-center rounded-lg px-2 text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors",
+                      "flex h-7 w-7 items-center justify-center rounded-lg transition-colors shadow-sm border border-[var(--border-default)]/20",
                       locked
-                        ? "bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)] text-[var(--accent-cyan)]"
-                        : "bg-[var(--bg-secondary)]/80 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+                        ? "bg-[var(--bg-elevated)] text-[var(--accent-cyan)] ring-1 ring-[var(--accent-cyan)]/20"
+                        : "bg-[var(--bg-elevated)]/80 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
                     )}
+                    title={locked ? "Unlock" : "Lock"}
                   >
-                    {locked ? "Locked" : "Lock"}
+                    {locked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
                   </button>
                 ) : null}
               </div>

@@ -65,7 +65,7 @@ export function PlannerEdge({ tasks, onTaskClick, onToggleTask, className }: Pla
     <button
       type="button"
       className={cn(
-        "flex flex-col items-center gap-2 rounded-r-[20px] border border-l-0 border-[var(--border-default)]/45 bg-[var(--bg-elevated)]/95 py-5 pl-1.5 pr-2 backdrop-blur-xl shadow-[0_10px_24px_-16px_rgba(8,22,40,0.14)]",
+        "flex flex-col items-center gap-2 rounded-r-[32px] border border-l-0 border-[var(--border-default)]/45 bg-[var(--bg-elevated)]/95 py-5 pl-1.5 pr-2.5 backdrop-blur-xl shadow-[0_10px_24px_-16px_rgba(8,22,40,0.14)]",
         className,
       )}
     >
@@ -88,9 +88,9 @@ export function PlannerEdge({ tasks, onTaskClick, onToggleTask, className }: Pla
       locked={locked}
       onToggleLock={() => setLocked((value) => !value)}
       className="!top-5 !-translate-y-0"
-      expandedClassName="left-0 top-0"
+      expandedClassName="left-0 top-0 rounded-r-[32px]"
     >
-      <div className="flex h-[min(72vh,720px)] w-[300px] flex-col">
+      <div className="flex h-[min(72vh,720px)] w-[300px] flex-col rounded-r-[32px]">
         <div className="flex items-center justify-between px-4 pb-3 pt-5">
           <div className="flex items-center gap-2">
             <CalendarCheck className="h-4 w-4 text-[var(--accent-cyan)]" />

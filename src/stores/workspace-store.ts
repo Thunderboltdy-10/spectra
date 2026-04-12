@@ -142,17 +142,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
     set((state) => {
       const nextTier = zoomTierForLevel(zoom);
       const progress = zoomTierProgress(zoom);
-      let committedWorkspaceId = state.committedWorkspaceId;
-
-      // Auto-exit: zoom out below exit threshold
-      if (committedWorkspaceId && zoom < VIEWPORT.AUTO_EXIT_THRESHOLD) {
-        committedWorkspaceId = null;
-      }
-
-      // Auto-entry: zoom in past threshold when near a workspace
-      if (!committedWorkspaceId && zoom >= VIEWPORT.AUTO_ENTRY_THRESHOLD && state.nearestWorkspaceId) {
-        committedWorkspaceId = state.nearestWorkspaceId;
-      }
+      const committedWorkspaceId = state.committedWorkspaceId;
 
       return {
         viewportX: x,
@@ -188,16 +178,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
       const exists = state.deepEditTargets.find((t) => t.item.id === item.id);
       if (exists) return { focusedItemId: item.id };
 
-      // Replacement semantics: if thereu2019s an unlocked surface of the
-      // same itemType, replace it instead of spawning a sibling.
-      const sameTypeUnlockedIdx = state.deepEditTargets.findIndex(
-        (t) => t.item.itemType === item.itemType && !t.locked && !t.pinned,
+      // Replacement semantics: if there's an unlocked surface, replace it
+      // rather than stacking, to keep the UI clean as a single active deep edit.
+      const unlockedIdx = state.deepEditTargets.findIndex(
+        (t) => !t.locked && !t.pinned,
       );
 
       let nextTargets: DeepEditTarget[];
-      if (sameTypeUnlockedIdx >= 0) {
+      if (unlockedIdx >= 0) {
         nextTargets = [...state.deepEditTargets];
-        nextTargets[sameTypeUnlockedIdx] = { item, locked: false, pinned: false };
+        nextTargets[unlockedIdx] = { item, locked: false, pinned: false };
       } else {
         nextTargets = [
           ...state.deepEditTargets,

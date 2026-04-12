@@ -12,11 +12,11 @@ import type { CanonicalWorkspaceType } from "@/lib/artifact-types";
  */
 export const ZOOM_TIERS = {
   /** Far out – all workspaces visible as readable cards */
-  LANDSCAPE: { max: 0.52, label: "landscape" },
+  LANDSCAPE: { max: 0.15, label: "landscape" },
   /** Mid – workspace interior becomes structured and grouped */
-  SUMMARY: { min: 0.52, max: 1.1, label: "summary" },
+  SUMMARY: { min: 0.15, max: 0.5, label: "summary" },
   /** Deep – content-level detail, inline editing available */
-  DETAIL: { min: 1.1, label: "detail" },
+  DETAIL: { min: 0.5, label: "detail" },
 } as const;
 
 export type ZoomTier = "landscape" | "summary" | "detail";
@@ -37,7 +37,9 @@ export function zoomTierProgress(zoom: number): number {
   }
   if (zoom < ZOOM_TIERS.SUMMARY.max) {
     const range = ZOOM_TIERS.SUMMARY.max - ZOOM_TIERS.SUMMARY.min;
-    return Math.max(0, Math.min(1, (zoom - ZOOM_TIERS.SUMMARY.min) / range));
+    const linearProgress = Math.max(0, Math.min(1, (zoom - ZOOM_TIERS.SUMMARY.min) / range));
+    // Smooth out detail revelation using an ease-in curve
+    return linearProgress * linearProgress;
   }
   const detailMax = 2.0;
   return Math.max(0, Math.min(1, (zoom - ZOOM_TIERS.DETAIL.min) / (detailMax - ZOOM_TIERS.DETAIL.min)));
@@ -46,14 +48,14 @@ export function zoomTierProgress(zoom: number): number {
 /* ─── Viewport Constants ─────────────────────────────── */
 
 export const VIEWPORT = {
-  MIN_ZOOM: 0.18,
-  MAX_ZOOM: 2.5,
+  MIN_ZOOM: 0.05,
+  MAX_ZOOM: 3.0,
   /** Start at a zoom where workspace cards are clearly readable */
-  DEFAULT_ZOOM: 0.42,
+  DEFAULT_ZOOM: 0.15,
   /** Zoom level that triggers auto-commit into the closest workspace */
-  AUTO_ENTRY_THRESHOLD: 0.72,
+  AUTO_ENTRY_THRESHOLD: 0.45,
   /** Zoom level below which we auto-exit a committed workspace */
-  AUTO_EXIT_THRESHOLD: 0.38,
+  AUTO_EXIT_THRESHOLD: 0.20,
   /** Zoom speed multiplier — controls how fast the wheel zooms */
   ZOOM_SENSITIVITY: 1.3,
 } as const;
@@ -62,18 +64,18 @@ export const VIEWPORT = {
 
 export const TERRITORY = {
   /** Width of a workspace territory node */
-  WIDTH: 600,
+  WIDTH: 6000,
   /** Height of a workspace territory node */
-  HEIGHT: 420,
+  HEIGHT: 4000,
   /** Spacing between workspace centers – tighter for map-like feel */
-  SPACING_X: 780,
-  SPACING_Y: 560,
+  SPACING_X: 8000,
+  SPACING_Y: 8000,
   /** Max workspaces per row before wrapping */
   COLS: 3,
   /** Interior layout – columns of items inside a committed workspace */
-  ITEM_COL_WIDTH: 340,
-  ITEM_ROW_HEIGHT: 130,
-  ITEMS_PER_ROW: 3,
+  ITEM_COL_WIDTH: 600,
+  ITEM_ROW_HEIGHT: 280,
+  ITEMS_PER_ROW: 5,
 } as const;
 
 /* ─── View Modes ─────────────────────────────────────── */

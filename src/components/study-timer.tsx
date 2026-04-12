@@ -239,10 +239,11 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
           display,
           isRunning,
           progress,
+          phase
         },
       }),
     );
-  }, [display, isRunning, progress]);
+  }, [display, isRunning, progress, phase]);
 
   // Hydration now happens synchronously via getInitialTimerState in useState initializers.
 

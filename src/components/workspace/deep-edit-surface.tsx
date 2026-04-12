@@ -392,7 +392,7 @@ export function DeepEditSurface({
     <button
       type="button"
       className={cn(
-        "flex flex-col items-center gap-2 rounded-l-[20px] border border-r-0 py-5 pl-2 pr-1.5 backdrop-blur-xl transition-all duration-200",
+        "flex flex-col items-center gap-2 rounded-l-[32px] border border-r-0 py-5 pl-2 pr-1.5 backdrop-blur-xl transition-all duration-200",
         isFocused
           ? "border-[color-mix(in_oklab,var(--accent-cyan)_25%,var(--border-default))] bg-[var(--bg-elevated)]/98 shadow-[0_10px_24px_-16px_rgba(14,142,232,0.18)]"
           : "border-[var(--border-default)]/45 bg-[var(--bg-elevated)]/95 shadow-[0_10px_24px_-16px_rgba(8,22,40,0.14)]",

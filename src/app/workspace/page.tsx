@@ -10,6 +10,8 @@ import {
   type WorkspaceDockItem,
 } from "@/components/workspace/workspace-dock";
 import { TimerWidget } from "@/components/workspace/timer-widget";
+import { BackgroundToggle } from "@/components/workspace/background-toggle";
+import { HubVisibilityToggle } from "@/components/workspace/hub-visibility-toggle";
 import {
   PlannerEdge,
   type PlannerTask,
@@ -303,6 +305,10 @@ export default function WorkspacePage() {
         onCreateNew={noop}
         onGoHome={handleBack}
       />
+
+      {/* Hub ecology: Right-edge utilities */}
+      <BackgroundToggle />
+      <HubVisibilityToggle />
 
       {/* Hub ecology: Bottom-center unified command bar with result cards */}
       <CommandBar

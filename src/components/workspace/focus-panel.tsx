@@ -60,8 +60,7 @@ function formatTime(timestamp?: number): string {
   return `${Math.floor(diff / 86_400_000)}d ago`;
 }
 
-/* eslint-disable-next-line @typescript-eslint/no-unused-vars */
-function ThreadContent(_props: { item: WorkspaceItemData }) {
+export function ThreadContent({ }: { item: WorkspaceItemData }) {
   const [message, setMessage] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -119,7 +118,7 @@ function ThreadContent(_props: { item: WorkspaceItemData }) {
   );
 }
 
-function ArtifactContent({ item }: { item: WorkspaceItemData }) {
+export function ArtifactContent({ item }: { item: WorkspaceItemData }) {
   const meta = CANONICAL_WORKSPACE_TYPE_META[item.itemType as CanonicalWorkspaceType];
 
   return (

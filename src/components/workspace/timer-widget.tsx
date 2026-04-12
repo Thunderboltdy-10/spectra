@@ -1,102 +1,57 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Pause, Play, RotateCcw, ChevronDown, ChevronUp } from "lucide-react";
+import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { HubSurface } from "@/components/workspace/hub-surface";
-
-const DEFAULT_WORK_MINUTES = 40;
-const DEFAULT_BREAK_MINUTES = 5;
-
-type TimerPhase = "work" | "break";
-
-function formatTime(totalSeconds: number) {
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
-}
+import { StudyTimer } from "@/components/study-timer";
+import { Clock3 } from "lucide-react";
 
 export function TimerWidget({ className }: { className?: string }) {
   const [locked, setLocked] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-  const [phase, setPhase] = useState<TimerPhase>("work");
-  const [isRunning, setIsRunning] = useState(false);
-  const [remainingSeconds, setRemainingSeconds] = useState(DEFAULT_WORK_MINUTES * 60);
-  const [completedSessions, setCompletedSessions] = useState(0);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const totalDuration = (phase === "work" ? DEFAULT_WORK_MINUTES : DEFAULT_BREAK_MINUTES) * 60;
-  const progress = 1 - remainingSeconds / totalDuration;
-  const phaseColor = phase === "work" ? "var(--accent-cyan)" : "var(--accent-mint)";
+  const [timerState, setTimerState] = useState<{display: string, isRunning: boolean, progress: number, phase?: string} | null>(null);
 
   useEffect(() => {
-    if (!isRunning) return undefined;
-    intervalRef.current = setInterval(() => {
-      setRemainingSeconds((previous) => {
-        if (previous <= 1) {
-          setIsRunning(false);
-          if (phase === "work") {
-            setCompletedSessions((count) => count + 1);
-            setPhase("break");
-            return DEFAULT_BREAK_MINUTES * 60;
-          }
-          setPhase("work");
-          return DEFAULT_WORK_MINUTES * 60;
-        }
-        return previous - 1;
-      });
-    }, 1000);
-
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+    const handleTimerState = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail) {
+        setTimerState(customEvent.detail);
+      }
     };
-  }, [isRunning, phase]);
-
-  const handleReset = useCallback(() => {
-    setIsRunning(false);
-    setPhase("work");
-    setRemainingSeconds(DEFAULT_WORK_MINUTES * 60);
+    window.addEventListener("ai-school:timer-state", handleTimerState);
+    return () => window.removeEventListener("ai-school:timer-state", handleTimerState);
   }, []);
 
   const collapsed = (
-    <button
-      type="button"
-      onClick={() => setExpanded((open) => !open)}
+    <div
       className={cn(
-        "flex items-center gap-2 rounded-[16px] border px-3 py-2",
+        "flex items-center gap-2.5 rounded-[20px] border px-3 h-10 min-w-10",
         "border-[var(--border-default)]/45 bg-[var(--bg-elevated)]/95 backdrop-blur-xl",
-        "transition-all duration-200 ease-[var(--ease-standard)]",
-        isRunning && "border-[color-mix(in_oklab,var(--accent-cyan)_22%,var(--border-default))]",
+        "transition-all duration-200 ease-[var(--ease-standard)] cursor-pointer hover:bg-[var(--bg-hover)]",
+        timerState?.isRunning && "border-[color-mix(in_oklab,var(--accent-cyan)_22%,var(--border-default))]",
       )}
       style={{
         boxShadow: "0 8px 22px -16px rgba(8,22,40,0.14)",
       }}
+      onClick={() => setLocked(!locked)}
     >
-      <div className="relative h-5 w-5">
-        <svg className="-rotate-90 h-5 w-5" viewBox="0 0 20 20">
-          <circle cx="10" cy="10" r="8" fill="none" stroke="var(--bg-tertiary)" strokeWidth="2" />
-          <circle
-            cx="10"
-            cy="10"
-            r="8"
-            fill="none"
-            stroke={phaseColor}
-            strokeWidth="2"
-            strokeDasharray={`${progress * 50.27} 50.27`}
-            strokeLinecap="round"
-            className="transition-all duration-1000 ease-linear"
-          />
-        </svg>
-      </div>
-      <span className="font-mono text-[12px] font-semibold tabular-nums text-[var(--text-primary)]">
-        {formatTime(remainingSeconds)}
-      </span>
-      {expanded ? (
-        <ChevronDown className="h-3 w-3 text-[var(--text-tertiary)]" />
-      ) : (
-        <ChevronUp className="h-3 w-3 text-[var(--text-tertiary)]" />
+      <Clock3 className={cn("h-4 w-4 shrink-0 transition-colors", timerState?.isRunning ? (timerState.phase === 'work' ? "text-[var(--accent-cyan)]" : "text-[var(--success)]") : "text-[var(--text-secondary)]")} />
+      {timerState && (
+        <div className="flex flex-col justify-center mt-0.5 w-[38px] gap-1 shrink-0">
+          <span className="font-mono text-[11px] font-semibold tabular-nums text-[var(--text-primary)] leading-none text-center">
+            {timerState.display}
+          </span>
+          <div className="h-[2px] w-full overflow-hidden rounded-full bg-[var(--bg-secondary)]">
+            <div
+              className={cn(
+                "h-full rounded-full transition-all duration-500",
+                timerState.isRunning ? (timerState.phase === 'work' ? "bg-[var(--accent-cyan)]" : "bg-[var(--success)]") : "bg-[var(--text-tertiary)]"
+              )}
+              style={{ width: `${timerState.progress * 100}%` }}
+            />
+          </div>
+        </div>
       )}
-    </button>
+    </div>
   );
 
   return (
@@ -106,70 +61,17 @@ export function TimerWidget({ className }: { className?: string }) {
       collapsed={collapsed}
       locked={locked}
       onToggleLock={() => setLocked((value) => !value)}
-      className={cn("left-auto right-6 translate-x-0", className)}
+      className={cn("left-auto right-6 translate-x-0 z-[100]", className)}
       expandedClassName="right-0 bottom-0"
     >
-      <div className="flex flex-col items-end gap-2 p-2">
-      {expanded && (
-        <div
-          className="flex w-[196px] flex-col gap-3 rounded-[20px] border border-[var(--border-default)]/45 bg-[var(--bg-elevated)]/95 p-4 backdrop-blur-xl"
-          style={{ boxShadow: "0 14px 36px -22px rgba(8,22,40,0.20)" }}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-              {phase === "work" ? "Study Focus" : "Break"}
-            </span>
-            <span className="text-[10px] text-[var(--text-tertiary)]/50">
-              {DEFAULT_WORK_MINUTES}/{DEFAULT_BREAK_MINUTES}m
-            </span>
-          </div>
-
-          <div className="text-center">
-            <span
-              className="font-mono text-[28px] font-bold tracking-tight"
-              style={{ color: phaseColor }}
-            >
-              {formatTime(remainingSeconds)}
-            </span>
-          </div>
-
-          {/* Progress bar */}
-          <div className="h-[3px] w-full overflow-hidden rounded-full bg-[var(--bg-tertiary)]">
-            <div
-              className="h-full rounded-full transition-all duration-1000 ease-linear"
-              style={{ width: `${progress * 100}%`, backgroundColor: phaseColor }}
-            />
-          </div>
-
-          {/* Controls */}
-          <div className="flex items-center justify-center gap-2">
-            <button
-              type="button"
-              onClick={handleReset}
-              className="flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--bg-secondary)] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsRunning((running) => !running)}
-              className="flex h-9 w-9 items-center justify-center rounded-xl text-white transition-transform duration-150 hover:scale-[1.02]"
-              style={{
-                backgroundColor: phaseColor,
-                boxShadow: `0 8px 18px -10px color-mix(in oklab, ${phaseColor} 50%, transparent)`,
-              }}
-            >
-              {isRunning ? <Pause className="h-4 w-4" /> : <Play className="ml-0.5 h-4 w-4" />}
-            </button>
-          </div>
-
-          {completedSessions > 0 && (
-            <div className="text-center text-[10px] text-[var(--text-tertiary)]/60">
-              {completedSessions} session{completedSessions === 1 ? "" : "s"}
-            </div>
-          )}
-        </div>
-      )}
+      <div 
+        className="flex flex-col items-end p-2 pointer-events-auto w-[340px]"
+      >
+        <StudyTimer 
+          open={true} 
+          onOpen={() => {}} 
+          onClose={() => setLocked(false)} 
+        />
       </div>
     </HubSurface>
   );

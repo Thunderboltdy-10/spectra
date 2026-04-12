@@ -5,14 +5,12 @@ import {
   useMemo,
   useRef,
   useState,
-  useEffect,
 } from "react";
 import {
   ReactFlow,
   ReactFlowProvider,
   Background,
   BackgroundVariant,
-  useReactFlow,
   type Node,
   type Edge,
   type Viewport,
@@ -23,6 +21,7 @@ import {
   TERRITORY,
   type WorkspaceData,
   type WorkspaceItemData,
+  type BackgroundMode,
 } from "@/lib/workspace/contracts";
 import {
   CANONICAL_WORKSPACE_TYPE_META,
@@ -31,7 +30,7 @@ import {
 import { TYPE_TO_TINT, TYPE_GROUP_LABELS } from "@/lib/workspace/contracts";
 import { cn } from "@/lib/utils";
 
-/* ─── Node Types ─── */
+/* u2500u2500u2500 Node Types u2500u2500u2500 */
 
 type WorkspaceNodeData = {
   workspace: WorkspaceData;
@@ -51,7 +50,7 @@ type GroupLabelNodeData = {
   count: number;
 };
 
-/* ─── Tint Background Helper ─── */
+/* u2500u2500u2500 Tint Background Helper u2500u2500u2500 */
 
 const TINT_BG_COLORS: Record<string, string> = {
   warm: "rgba(245, 158, 11, 0.04)",
@@ -65,7 +64,7 @@ function tintBg(variant: string) {
   return TINT_BG_COLORS[variant] ?? TINT_BG_COLORS.neutral;
 }
 
-/* ─── Status Dot ─── */
+/* u2500u2500u2500 Status Dot u2500u2500u2500 */
 
 const STATUS_COLORS: Record<string, string> = {
   active: "bg-[var(--success)]",
@@ -87,7 +86,7 @@ function StatusDot({ status }: { status: string }) {
   );
 }
 
-/* ─── Time Ago Helper ─── */
+/* u2500u2500u2500 Time Ago Helper u2500u2500u2500 */
 
 function timeAgo(timestamp?: number): string {
   if (!timestamp) return "";
@@ -98,7 +97,7 @@ function timeAgo(timestamp?: number): string {
   return `${Math.floor(diff / 86_400_000)}d ago`;
 }
 
-/* ─── Workspace Territory Node ─── */
+/* u2500u2500u2500 Workspace Territory Node u2500u2500u2500 */
 
 function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
   const { workspace, zoomTier } = data;
@@ -135,7 +134,7 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      {/* Territory tint wash — large diffuse background region */}
+      {/* Territory tint wash */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
@@ -167,10 +166,9 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
         <StatusDot status={workspace.status} />
       </div>
 
-      {/* Content — progressively revealed based on zoom tier */}
+      {/* Content u2014 progressively revealed based on zoom tier */}
       {!isLandscape && (
         <div className="relative flex flex-1 flex-col gap-3 p-5">
-          {/* Tint zone summaries — visual grouping areas */}
           {Object.entries(TYPE_GROUP_LABELS).map(([key, group]) => {
             const count = group.types.reduce(
               (sum, t) => sum + (groupCounts[t] ?? 0),
@@ -198,7 +196,6 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
                     {count}
                   </span>
                 </div>
-                {/* Show first 2 item titles as preview */}
                 <div className="flex flex-col gap-1">
                   {groupItems.slice(0, 2).map((item) => {
                     const meta =
@@ -299,7 +296,7 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
         </div>
       )}
 
-      {/* Entry affordance — subtle bottom bar */}
+      {/* Entry affordance */}
       <div
         className={cn(
           "absolute bottom-0 left-0 right-0 h-[2px] transition-all duration-300",
@@ -312,13 +309,11 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
   );
 }
 
-/* ─── Group Label Node (rendered inside committed workspace) ─── */
+/* u2500u2500u2500 Group Label Node u2500u2500u2500 */
 
 function GroupLabelNode({ data }: { data: GroupLabelNodeData }) {
   return (
-    <div
-      className="flex items-center gap-2 px-1 select-none pointer-events-none"
-    >
+    <div className="flex items-center gap-2 px-1 select-none pointer-events-none">
       <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]/45">
         {data.label}
       </span>
@@ -330,7 +325,7 @@ function GroupLabelNode({ data }: { data: GroupLabelNodeData }) {
   );
 }
 
-/* ─── Item Node (rendered at detail zoom inside committed workspace) ─── */
+/* u2500u2500u2500 Item Node u2500u2500u2500 */
 
 function ItemNode({ data }: { data: ItemNodeData }) {
   const { item } = data;
@@ -339,32 +334,62 @@ function ItemNode({ data }: { data: ItemNodeData }) {
   const Icon = meta?.icon;
   const [hovered, setHovered] = useState(false);
   const focusedItemId = useWorkspaceStore((s) => s.focusedItemId);
+  const deepEditTargets = useWorkspaceStore((s) => s.deepEditTargets);
   const isFocused = focusedItemId === item.id;
+  const isOpenInDeepEdit = deepEditTargets.some((t) => t.item.id === item.id);
 
   return (
     <div
       className={cn(
         "group relative flex min-w-[240px] max-w-[300px] flex-col gap-1.5 rounded-[14px] border px-3.5 py-3",
         "border-[var(--border-default)]/50 bg-[var(--bg-elevated)]/92",
-        "transition-all duration-200 ease-[var(--ease-standard)]",
-        hovered && "border-[color-mix(in_oklab,var(--accent-cyan)_22%,var(--border-default))]",
-        isFocused && "ring-1 ring-[var(--accent-cyan)]/30 border-[color-mix(in_oklab,var(--accent-cyan)_35%,var(--border-default))]",
+        "transition-all duration-300 ease-[var(--ease-standard)]",
+        hovered && !isFocused && "border-[color-mix(in_oklab,var(--accent-cyan)_22%,var(--border-default))]",
+        isFocused && "border-[color-mix(in_oklab,var(--accent-cyan)_40%,var(--border-default))]",
+        isOpenInDeepEdit && !isFocused && "border-[color-mix(in_oklab,var(--accent-cyan)_18%,var(--border-default))] opacity-80",
       )}
       style={{
         boxShadow: isFocused
-          ? "0 12px 30px -14px rgba(14,142,232,0.18)"
-          : hovered
-            ? "0 10px 26px -16px rgba(7,20,35,0.18)"
-            : "0 6px 18px -14px rgba(7,20,35,0.12)",
+          ? "0 12px 30px -14px rgba(14,142,232,0.22), 0 0 0 1px color-mix(in oklab, var(--accent-cyan) 20%, transparent)"
+          : isOpenInDeepEdit
+            ? "0 8px 22px -14px rgba(14,142,232,0.12)"
+            : hovered
+              ? "0 10px 26px -16px rgba(7,20,35,0.18)"
+              : "0 6px 18px -14px rgba(7,20,35,0.12)",
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
+      {/* Active connection indicator u2014 shows this item is open on the right edge */}
+      {isOpenInDeepEdit && (
+        <div className="absolute -right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 pointer-events-none">
+          <div
+            className={cn(
+              "h-6 w-[3px] rounded-full transition-all duration-300",
+              isFocused
+                ? "bg-[var(--accent-cyan)] shadow-[0_0_8px_2px_rgba(14,142,232,0.35)]"
+                : "bg-[var(--accent-cyan)]/30",
+            )}
+          />
+          <div
+            className={cn(
+              "h-px transition-all duration-300",
+              isFocused
+                ? "w-3 bg-[var(--accent-cyan)]/40"
+                : "w-1.5 bg-[var(--accent-cyan)]/15",
+            )}
+          />
+        </div>
+      )}
+
       <div className="flex items-center gap-2">
         <div
-          className="flex h-7 w-7 items-center justify-center rounded-lg"
+          className={cn(
+            "flex h-7 w-7 items-center justify-center rounded-lg transition-all duration-200",
+            isFocused && "ring-1 ring-[var(--accent-cyan)]/20",
+          )}
           style={{
-            backgroundColor: `color-mix(in oklab, ${meta?.color ?? "#637083"} 10%, var(--bg-secondary))`,
+            backgroundColor: `color-mix(in oklab, ${meta?.color ?? "#637083"} ${isFocused ? "14" : "10"}%, var(--bg-secondary))`,
           }}
         >
           {Icon && (
@@ -387,7 +412,15 @@ function ItemNode({ data }: { data: ItemNodeData }) {
         </p>
       )}
       <div className="flex items-center justify-between pl-9">
-        <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--text-tertiary)]/60">
+        <span
+          className="rounded-md px-1 py-0.5 text-[10px] font-medium uppercase tracking-[0.1em]"
+          style={{
+            backgroundColor: isFocused
+              ? `color-mix(in oklab, ${meta?.color ?? "var(--text-tertiary)"} 8%, transparent)`
+              : "transparent",
+            color: `color-mix(in oklab, ${meta?.color ?? "var(--text-tertiary)"} ${isFocused ? "80" : "50"}%, transparent)`,
+          }}
+        >
           {meta?.label ?? item.itemType}
         </span>
         {item.meta && (
@@ -396,21 +429,11 @@ function ItemNode({ data }: { data: ItemNodeData }) {
           </span>
         )}
       </div>
-
-      {/* Focus ring glow */}
-      {isFocused && (
-        <div
-          className="absolute -inset-px rounded-[15px] pointer-events-none"
-          style={{
-            boxShadow: `0 0 0 1px color-mix(in oklab, var(--accent-cyan) 18%, transparent)`,
-          }}
-        />
-      )}
     </div>
   );
 }
 
-/* ─── Build Nodes ─── */
+/* u2500u2500u2500 Build Nodes u2500u2500u2500 */
 
 function buildNodes(
   workspaces: WorkspaceData[],
@@ -423,7 +446,6 @@ function buildNodes(
   if (committedWorkspaceId) {
     const ws = workspaces.find((w) => w.id === committedWorkspaceId);
     if (ws) {
-      // Group items by type for spatial layout
       const grouped: Record<string, WorkspaceItemData[]> = {};
       for (const item of ws.items) {
         const key = item.itemType;
@@ -436,7 +458,6 @@ function buildNodes(
         const items = group.types.flatMap((t) => grouped[t] ?? []);
         if (items.length === 0) continue;
 
-        // Add group label node
         nodes.push({
           id: `group-${group.label}`,
           type: "groupLabel",
@@ -453,7 +474,6 @@ function buildNodes(
 
         groupY += 36;
 
-        // Position items in a flowing grid within each group
         const COL_WIDTH = 320;
         const ROW_HEIGHT = 120;
         const ITEMS_PER_ROW = 3;
@@ -506,7 +526,21 @@ function buildNodes(
   return nodes;
 }
 
-/* ─── Node Type Registry ─── */
+/* u2500u2500u2500 Background Renderer u2500u2500u2500 */
+
+function CanvasBackground({ mode }: { mode: BackgroundMode }) {
+  switch (mode) {
+    case "grid":
+      return <Background variant={BackgroundVariant.Lines} gap={32} size={0.5} color="var(--border-default)" />;
+    case "blank":
+      return null;
+    case "dots":
+    default:
+      return <Background variant={BackgroundVariant.Dots} gap={28} size={1} />;
+  }
+}
+
+/* u2500u2500u2500 Node Type Registry u2500u2500u2500 */
 
 const NODE_TYPES = {
   workspaceTerritory: WorkspaceTerritoryNode,
@@ -514,7 +548,7 @@ const NODE_TYPES = {
   groupLabel: GroupLabelNode,
 };
 
-/* ─── Canvas ─── */
+/* u2500u2500u2500 Canvas u2500u2500u2500 */
 
 type WorkspaceCanvasProps = {
   onNodeClick?: (workspaceId: string) => void;
@@ -529,11 +563,10 @@ function WorkspaceCanvasInner({
   const zoomTier = useWorkspaceStore((s) => s.zoomTier);
   const committedWorkspaceId = useWorkspaceStore((s) => s.committedWorkspaceId);
   const setViewport = useWorkspaceStore((s) => s.setViewport);
-  const panelOpen = useWorkspaceStore((s) => s.panelOpen);
   const setFocusedItem = useWorkspaceStore((s) => s.setFocusedItem);
+  const backgroundMode = useWorkspaceStore((s) => s.backgroundMode);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const reactFlowInstance = useReactFlow();
 
   const nodes = useMemo(
     () => buildNodes(workspaces, zoomTier, committedWorkspaceId),
@@ -544,7 +577,6 @@ function WorkspaceCanvasInner({
 
   const handleViewportChange = useCallback(
     (vp: Viewport) => {
-      // Debounce store updates to avoid excessive renders
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         setViewport(vp.x, vp.y, vp.zoom);
@@ -571,27 +603,8 @@ function WorkspaceCanvasInner({
     setFocusedItem(null);
   }, [setFocusedItem]);
 
-  // Fit view on committed workspace change
-  useEffect(() => {
-    if (committedWorkspaceId) {
-      // Slight delay so ReactFlow layout settles
-      const timer = setTimeout(() => {
-        reactFlowInstance.fitView({
-          padding: 0.2,
-          duration: 350,
-        });
-      }, 80);
-      return () => clearTimeout(timer);
-    }
-  }, [committedWorkspaceId, reactFlowInstance]);
-
   return (
-    <div
-      className={cn(
-        "h-full w-full transition-opacity duration-300",
-        panelOpen && "opacity-[0.88]",
-      )}
-    >
+    <div className="h-full w-full">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -599,26 +612,19 @@ function WorkspaceCanvasInner({
         onViewportChange={handleViewportChange}
         onNodeClick={handleNodeClick}
         onPaneClick={handlePaneClick}
-        /* Scroll = zoom (spec requirement) */
         zoomOnScroll={true}
         panOnScroll={false}
         panOnDrag={true}
         zoomOnPinch={true}
-        /* Viewport bounds */
         minZoom={VP.MIN_ZOOM}
         maxZoom={VP.MAX_ZOOM}
         defaultViewport={{ x: 200, y: 100, zoom: VP.DEFAULT_ZOOM }}
-        /* Clean canvas — no extra controls */
         proOptions={{ hideAttribution: true }}
         fitView={false}
         deleteKeyCode={null}
         selectionKeyCode={null}
       >
-        <Background
-          variant={BackgroundVariant.Dots}
-          gap={28}
-          size={1}
-        />
+        <CanvasBackground mode={backgroundMode} />
       </ReactFlow>
     </div>
   );

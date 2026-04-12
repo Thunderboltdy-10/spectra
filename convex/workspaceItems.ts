@@ -143,55 +143,15 @@ export const getWorkspaceContent = query({
       .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0) || a.createdAt - b.createdAt)
       .map((item) => ({ ...item, workspaceType: workspaceFacingTypeForItem(item) }));
 
-    const projectedThreadIds = new Set(activeItems.filter((item) => item.itemType === "thread" && item.sourceChatId).map((item) => item.sourceChatId));
-
-    const threadItems = chats
-      .filter((chat) => isActiveThreadChat(chat, actor._id, actor.orgId, args.workstreamId))
-      .filter((chat) => !projectedThreadIds.has(chat._id))
-      .sort((a, b) => a.createdAt - b.createdAt)
-      .map((chat, index) => ({
-        _id: (`virtual-thread-${chat._id}`) as Id<"workspaceItems">,
-        _creationTime: chat._creationTime,
-        orgId: actor.orgId,
-        ownerUserId: actor._id,
-        workstreamId: args.workstreamId,
-        type: "thread" as const,
-        itemType: "thread" as const,
-        sourceKind: "chat" as const,
-        sourceId: chat._id as unknown as string,
-        renderMode: "thread",
-        sourceChatId: chat._id,
-        title: chat.title,
-        contentSummary: normalizeText(chat.latestUserPrompt ?? chat.contextSummary),
-        searchText: searchTextForWorkspaceItem({
-          title: chat.title,
-          contentSummary: normalizeText(chat.latestUserPrompt ?? chat.contextSummary),
-          renderMode: "thread",
-          category: "threads",
-        }),
-        x: 120,
-        y: 420 + index * 220,
-        width: 320,
-        height: 180,
-        zIndex: 0,
-        category: "threads" as const,
-        status: "active" as const,
-        pinned: false,
-        collapsed: false,
-        hidden: false,
-        provenanceSource: "user" as const,
-        createdAt: chat.createdAt,
-        updatedAt: chat.updatedAt,
-        workspaceType: "thread" as const,
-      }));
-
     return {
       workstream,
-      items: [...activeItems, ...threadItems].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0) || a.createdAt - b.createdAt),
+      items: activeItems,
       artifacts: artifacts.filter((artifact) => artifact.ownerUserId === actor._id && artifact.orgId === actor.orgId && artifact.status === "active"),
       plannerItems: plannerItems.filter((item) => item.ownerUserId === actor._id && item.orgId === actor.orgId && item.status !== "cancelled"),
-      chats: chats.filter((chat) => chat.ownerUserId === actor._id && chat.orgId === actor.orgId && !chat.deletedAt),
-      revision: latestMutation?.updatedAt ?? workstream.updatedAt,
+      chats: chats.filter((chat) => isActiveThreadChat(chat, actor._id, actor.orgId, args.workstreamId)),
+      revision: workstream.workspaceRevision ?? latestMutation?.updatedAt ?? workstream.updatedAt,
+      revisionKey: workstream.workspaceRevisionKey ?? latestMutation?.revisionKey ?? `${args.workstreamId}:${workstream.updatedAt}`,
+      lastMutationId: workstream.lastWorkspaceMutationId ?? latestMutation?._id,
     };
   },
 });
@@ -210,13 +170,32 @@ export const updateItemLayout = mutation({
     const actor = await requireActor(ctx, args.actorClerkId);
     const item = await requireOwnedItem(ctx, actor, args.itemId);
 
-    await ctx.db.patch(args.itemId, {
+    const patch = {
       x: args.x,
       y: args.y,
       width: args.width ?? item.width,
       height: args.height ?? item.height,
       zIndex: args.zIndex ?? item.zIndex,
       updatedAt: Date.now(),
+    };
+
+    await ctx.db.patch(args.itemId, patch);
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: item.workstreamId,
+      mutationType: "update_item_layout",
+      source: "user",
+      targetItemIds: [item._id],
+      before: {
+        x: item.x,
+        y: item.y,
+        width: item.width,
+        height: item.height,
+        zIndex: item.zIndex,
+      },
+      after: patch,
+      summary: `Updated layout for ${item.title}`,
     });
 
     return { success: true };
@@ -822,7 +801,7 @@ export const searchWorkspace = query({
     if (!queryText) return [];
     const limit = Math.max(1, Math.min(args.limit ?? 20, 50));
 
-    const [workstreams, artifacts, plannerItems, messages, workspaceItems] = await Promise.all([
+    const [workstreams, artifacts, workspaceItems, plannerItems, messages] = await Promise.all([
       ctx.db
         .query("workstreams")
         .withSearchIndex("search_title", (q) =>

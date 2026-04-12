@@ -12,6 +12,7 @@ import type {
   ThreadStrategy,
   ToolBundle,
   WorkstreamAssignment,
+  WorkspaceActionTarget,
 } from "@/types";
 
 type BuildRoutePlanParams = {
@@ -307,7 +308,26 @@ function decideThreadStrategy(params: {
   message: string;
   threadContext?: BuildRoutePlanParams["threadContext"];
   workstreamAssignment: WorkstreamAssignment;
+  workspaceActionIntent?: "note" | "planner" | "thread" | "result" | "widget";
 }): ThreadStrategy {
+  if (
+    params.workstreamAssignment.status === "assigned"
+    && params.workspaceActionIntent
+    && params.workspaceActionIntent !== "thread"
+  ) {
+    return {
+      action: "defer_to_workspace_action",
+      confidence: 0.86,
+      reason: `Workspace intent resolved to ${params.workspaceActionIntent} before thread creation.`,
+      contextWindowPressure: normalizeConfidence(params.threadContext?.contextWindowUtilization ?? 0),
+      topicContinuity: 0,
+      timeGapHours: params.threadContext?.lastMessageAt
+        ? Math.max(0, (Date.now() - params.threadContext.lastMessageAt) / (60 * 60 * 1000))
+        : undefined,
+      turnsSinceCompaction: params.threadContext?.turnsSinceCompaction,
+    };
+  }
+
   if (!params.threadContext?.currentChatId) {
     return {
       action: "new_chat",
@@ -368,6 +388,88 @@ function decideThreadStrategy(params: {
     topicContinuity,
     timeGapHours,
     turnsSinceCompaction,
+  };
+}
+
+function inferWorkspaceAction(params: {
+  message: string;
+  workstreamAssignment: WorkstreamAssignment;
+  selectedMode: StudyMode;
+}): RoutePlan["workspaceAction"] {
+  if (params.workstreamAssignment.status !== "assigned") return undefined;
+  const message = compactText(params.message);
+  const noteIntent = /\b(note|write down|jot down|summari[sz]e this|make (?:a )?note|capture this)\b/i.test(message);
+  const plannerIntent = /\b(remind me|todo|to-do|task|deadline|plan|schedule|due\b|tomorrow|next week)\b/i.test(message);
+  const threadIntent = /\b(chat about|discuss|talk through|continue thread|open thread|ask ai)\b/i.test(message);
+  const widgetIntent = /\b(widget|timer|panel|dock|pin this|hub item)\b/i.test(message);
+  const createIntent = /\b(create|make|add|start|open)\b/i.test(message);
+
+  if (plannerIntent) {
+    return {
+      intent: "planner",
+      confidence: 0.83,
+      reason: "Workspace message reads like a planner/task action.",
+      target: {
+        type: "planner",
+        title: message.slice(0, 120),
+        description: message.slice(0, 280),
+        priority: /\burgent|asap|important|high priority\b/i.test(message) ? "high" : "medium",
+        status: "pending",
+      },
+    };
+  }
+
+  if (noteIntent || (createIntent && /\b(note|summary|summary note|doc|document)\b/i.test(message))) {
+    return {
+      intent: "note",
+      confidence: 0.8,
+      reason: "Workspace message reads like note creation/capture.",
+      target: {
+        type: "note",
+        title: message.slice(0, 120),
+        content: message,
+      },
+    };
+  }
+
+  if (widgetIntent) {
+    return {
+      intent: "widget",
+      confidence: 0.74,
+      reason: "Workspace message targets a workspace widget/hub item.",
+      target: {
+        type: "widget",
+        title: message.slice(0, 120),
+        widgetType: "custom",
+        summary: message.slice(0, 280),
+      },
+    };
+  }
+
+  if (threadIntent) {
+    return {
+      intent: "thread",
+      confidence: 0.72,
+      reason: "Workspace message explicitly asks for discussion/thread behavior.",
+      target: {
+        type: "thread",
+        title: message.slice(0, 120),
+        reason: "Explicit discussion intent in workspace.",
+      },
+    };
+  }
+
+  return {
+    intent: "result",
+    confidence: params.selectedMode === "research" ? 0.76 : 0.68,
+    reason: "Default workspace action is a result card instead of immediate thread creation.",
+    target: {
+      type: "result",
+      title: message.slice(0, 120) || "Workspace result",
+      summary: message.slice(0, 280),
+      status: "processing",
+      variant: "summary",
+    } satisfies WorkspaceActionTarget,
   };
 }
 
@@ -645,10 +747,16 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
     selectedAgentId: params.selectedAgent?._id,
     workstreamContext: params.workstreamContext,
   });
+  const workspaceAction = inferWorkspaceAction({
+    message: params.message,
+    workstreamAssignment,
+    selectedMode: params.selectedMode,
+  });
   const threadStrategy = decideThreadStrategy({
     message: params.message,
     threadContext: params.threadContext,
     workstreamAssignment,
+    workspaceActionIntent: workspaceAction?.intent,
   });
   const shouldUseSchoolResources = params.hasPack || params.hasAgentResources || /upload|attached|file|notes|resource|chapter|pack/i.test(lowerMessage);
   const researchNeedsSearch =
@@ -834,6 +942,7 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
           : (["none"] as const),
     workstreamAssignment,
     threadStrategy,
+    workspaceAction,
     contextWindowStrategy,
     candidateModelRequirements: {
       required,

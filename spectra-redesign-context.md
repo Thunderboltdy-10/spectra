@@ -45,11 +45,12 @@ Every item on the canvas exists in one of three interaction tiers based on zoom 
 - Click outside or press Escape → exits focus, returns to canvas navigation
 - Not all types support inline editing at Touch tier
 
-**Deep Edit (panel opens)**
-- Triggered by: double-click, right-click → "Open in editor", or AI targets item via quick chat
+**Deep Edit (expanded workspace surface)**
+- Triggered by: double-click, right-click → "Open in editor", explicit open actions, or AI targets item via the unified command bar
 - Full toolbar, AI editing, version history, diff view
-- Canvas dims slightly behind panel, targeted item highlighted
-- The panel slides from the right with animation
+- Canvas dims slightly behind the expanded surface, targeted item remains visually anchored
+- In `/workspace`, Deep Edit expands through edge-bound hub surfaces and strong right-edge operating layers rather than a separate right-panel mental model
+- `/chat` may still use right-panel behavior, but `/workspace` does not
 
 **Per-type Touch tier behavior:**
 
@@ -97,21 +98,30 @@ Hub items are persistent UI elements that live at the edges of the canvas, prese
 
 1. **Workspace selector** (left edge): Vertical pill/dock with numbered workspace icons. Ordered by last activity. Hover expands to show workspace name + emoji. Click navigates to that workspace (pans + zooms). Currently active workspace is highlighted. Think macOS dock behavior.
 
-2. **Quick chat** (bottom center): The main AI interaction bar. Capsule-shaped input with a send button. Context-aware per zoom level (see Section 4). When in a workspace, shows a subtle workspace badge. When editing an artifact, shows the artifact name badge.
+2. **Unified command bar** (bottom center): The main AI interaction and creation surface. It must unify command entry and creation affordances so the product does not split “chat” and “create” into competing controls. Context-aware per zoom level. When in a workspace, shows a subtle workspace badge. When editing an artifact, shows the artifact name badge. AI results should often surface as command/result cards just above this bar instead of defaulting to thread opening.
 
 3. **Timer/Focus** (bottom right): Pomodoro-style focus timer. Shows time remaining when active. Click to expand: shows session length control (default 40 min work / 5 min break), sessions completed count. When active, can be linked to current workspace for XP tracking. Connects to gamification system.
 
-4. **"+" creation button** (bottom left): Radial or dropdown menu with artifact primitives: Note, Code, Visual, Thread (new conversation), Planner Task, Export (create document). Plus "Create with AI..." option that focuses the quick chat. Additionally includes "New workspace" option when in the all-workspaces view.
+4. **Creation affordance** (integrated with the unified command bar, with optional left-side launcher behavior when needed): Artifact primitives include Note, Code, Visual, Thread, Planner Task, Export, plus "Create with AI..." which focuses the unified command bar. "New workspace" remains available in all-workspaces view. The user should experience this as one creation/action system, not as a separate mini-product next to chat.
 
-5. **Toggle expanded/collapsed** (bottom left, next to +): A button (needs an icon — suggest chevron or compress/expand icon) that toggles between expanded and collapsed views for user-created hub widgets. Only affects user-added hub items, not the defaults.
+5. **Toggle expanded/collapsed** (part of the hub ecology): A button (needs an icon — suggest chevron or compress/expand icon) that toggles between expanded and collapsed views for user-created hub widgets. Only affects user-added hub items, not the defaults.
 
 **User-creatable hub items:**
-Users can add widgets to the hub via the quick chat or "+" menu. Examples include:
+Users can add widgets to the hub via the unified command bar or creation affordances. Examples include:
 - Quick Notes panel (collapsible, hover to expand)
 - Planner/Timetable panel (collapsible, shows upcoming deadlines from all workspaces, tasks organized by day — Today, Tomorrow, This Week, Later. Click a task to navigate to its workspace and open it. Should integrate with ManageBac deadlines when available.)
 - Custom widgets created via AI
 
 These user hub items can be toggled on/off, are collapsible (hover to expand), and are draggable along the canvas edges.
+
+**Hub interaction rules:**
+- Important items can become hub items and can be unpinned later
+- Motion must be strongly constrained by edge rails
+- Hover expands naturally
+- Each item can be locked open individually
+- Global hub state supports hidden, collapsed/default, and fully expanded modes
+- The right edge is the home for threads, notes, and deep-edit operating surfaces in the workspace
+- Planner lives on the left edge above the workspace selector
 
 ### 1.7 Overflow Handling
 
@@ -122,6 +132,9 @@ When a group has more than ~6 items:
 - The Cmd+K search is the safety net for finding anything regardless of overflow
 
 ### 1.8 Canvas Navigation
+
+The workspace must remain one continuous canvas even as the system derives active workspace scope internally. `byType`, `byTopic`, and `timeline` are organizational lenses within this same canvas, not separate boxed workspace views.
+
 
 - Zoom in/out: scroll wheel or pinch
 - Pan: click and drag on empty canvas
@@ -159,6 +172,9 @@ When a group has more than ~6 items:
 
 ### 1.10 Cmd+K Global Search
 
+The default zoomed-out workspace representation must be strong enough that this search acts as overflow recovery and precision navigation, not as a crutch for an unreadable landscape.
+
+
 A command palette (like VS Code or Linear) accessible via Cmd+K from anywhere.
 
 - Searches across ALL workspaces, all artifact types, all thread content
@@ -170,6 +186,9 @@ A command palette (like VS Code or Linear) accessible via Cmd+K from anywhere.
 Currently exists as `WorkspaceCommandBar` but needs significant enhancement: proper search indexing, result ranking, workspace navigation on select.
 
 ### 1.11 Right-Click Context Menus
+
+Right-click and selection actions should also support pinning meaningful objects to the hub.
+
 
 Context menus exist on three targets:
 
@@ -346,6 +365,9 @@ The agent implementing this should research the current skills ecosystem (https:
 
 ### 4.1 Scope as Hint, Not Constraint
 
+The unified command bar is a true action surface. It must not default to thread creation. It should often resolve directly to notes, planner items, widgets, code, visuals, exports, or edits, with threads as one possible downstream continuation path rather than the default visible output.
+
+
 The quick chat should be able to do ANYTHING from ANYWHERE. The workspace context influences the classifier's default assumptions but never limits what the user can do.
 
 When inside the Physics workspace and the user asks about calculus, the system should handle it — either answering in place or gently suggesting: "This looks like a Math question — want me to add it to your Math workspace?" But it never blocks the request.
@@ -384,6 +406,17 @@ Do NOT dump all memory and context into the system prompt — this confuses mode
 The classifier's output determines which skills are active, and each skill has a defined context budget.
 
 ### 4.4 Quick Chat Workspace Detection
+
+Agent responses inside the workspace should often appear first as command/result cards just above the unified command bar: loading while processing, then a dismissible two-line summary card, press-to-reopen, and double-click-to-open-thread/deep-edit when needed.
+
+### 4.5 Workspace Deep Edit Surfaces
+
+Inside `/workspace`, Deep Edit occurs through expanded hub and edge-bound surfaces rather than a right-panel model. Threads, notes, and similar operating surfaces expand from the right edge as part of the hub ecology.
+
+### 4.6 Background Modes
+
+The workspace must support dots, blank, and grid background modes. Dots remain fixed-size on screen and do not scale with content.
+
 
 Keep the existing workspace auto-detection but add a visible indicator: when in a workspace, the quick chat input shows a subtle badge with the workspace name and a small "x" to clear the scope. If the AI detects a message belongs to a different workspace, show an inline suggestion in the response (not a blocking modal).
 

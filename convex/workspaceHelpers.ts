@@ -116,9 +116,11 @@ export async function recordWorkspaceMutation(
     before?: unknown;
     after?: unknown;
     revertData?: unknown;
+    revisionKey?: string;
   },
 ): Promise<Id<"workspaceMutations"> | undefined> {
   const now = Date.now();
+  const touched = Array.from(new Set([args.workstreamId, args.targetWorkstreamId].filter(Boolean))) as Id<"workstreams">[];
   const summary = args.summary ?? ([args.action, args.entity, args.mutationType.replace(/_/g, " ")].filter(Boolean).join(" ") || args.mutationType.replace(/_/g, " "));
   const revertData = args.revertData ?? {
     entity: args.entity,
@@ -130,6 +132,7 @@ export async function recordWorkspaceMutation(
     targetWorkstreamId: args.targetWorkstreamId,
     targetItemIds: args.targetItemIds,
   };
+  const revisionKey = args.revisionKey ?? `${args.mutationType}:${now}`;
 
   const mutationId = await ctx.db.insert("workspaceMutations", {
     orgId: args.orgId,
@@ -143,18 +146,22 @@ export async function recordWorkspaceMutation(
     before: args.before,
     after: args.after,
     revertData,
+    revisionKey,
+    affectedWorkstreamIds: touched,
     status: "applied",
     createdAt: now,
     updatedAt: now,
   });
 
-  const touched = [args.workstreamId, args.targetWorkstreamId].filter(Boolean) as Id<"workstreams">[];
   for (const workstreamId of touched) {
     const workstream = await ctx.db.get(workstreamId);
     if (!workstream) continue;
     await ctx.db.patch(workstreamId, {
       updatedAt: now,
       lastActivityAt: now,
+      workspaceRevision: now,
+      workspaceRevisionKey: `${revisionKey}:${workstreamId}`,
+      lastWorkspaceMutationId: mutationId,
     });
   }
 

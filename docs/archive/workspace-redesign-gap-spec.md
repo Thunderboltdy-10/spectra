@@ -12,12 +12,13 @@ This document should be treated as the strongest synthesis of what has been conc
 
 The following should be treated as the product truth, in this order:
 
-1. `spectra-workspace-redesign-agent-execution-spec.md`
-2. `spectra-redesign-context.md`
-3. `1.jpeg` and `2.jpeg`
-4. direct manual user observations from browser testing
-5. `spectra_testing_report.txt`
-6. the current codebase
+1. `docs/workspace-mega-source-of-truth.md`
+2. `spectra-workspace-redesign-agent-execution-spec.md`
+3. `spectra-redesign-context.md`
+4. `1.jpeg` and `2.jpeg`
+5. direct manual user observations from browser testing
+6. `spectra_testing_report.txt`
+7. the current codebase
 
 The current codebase is **not** the source of truth. It is evidence. It contains a mixture of real foundations, misleading shells, placeholder implementations, partial migrations, and disconnected subsystems. It should never be used to argue that the product is closer to done than real usage evidence suggests.
 
@@ -76,7 +77,7 @@ One particularly important example is version history: it is promising, but curr
 
 ## 4. High-level conclusion
 
-The current workspace is still much closer to a partially modernized prototype than to the intended AI-native study environment. The codebase contains many redesign-shaped shells: view mode types, canonical type helpers, ghost plumbing, panel shells, focus timers, dock shells, workspace mutations, clustering fields, scope badges, partial touch editors, and some projection logic. But these do not yet compose into the intended product.
+The current workspace is still much closer to a partially modernized prototype than to the intended AI-native study environment. The codebase contains many redesign-shaped shells: view mode types, canonical type helpers, ghost plumbing, panel shells, focus timers, dock shells, workspace mutations, clustering fields, scope badges, partial touch editors, and some projection logic. But these do not yet compose into the intended product. The new source of truth also replaces the old `/workspace` right-panel Deep Edit model with edge-bound deep-edit surfaces and a hub ecology, so any surviving panel-first assumptions should now be treated as evidence of prior architectural drift.
 
 The core failure is not “many bugs.” The core failure is that the system still lacks a strong enough underlying contract for:
 

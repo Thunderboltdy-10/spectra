@@ -138,7 +138,7 @@ export function GlanceCard({ item, className }: { item: GlanceCardData; classNam
             backgroundColor: `color-mix(in oklab, ${color} 10%, var(--bg-secondary))`,
           }}
         >
-          <Icon className="h-4 w-4" style={{ color }} />
+          <span style={{ color }}><Icon className="h-4 w-4" /></span>
         </div>
         <span className="flex-1 truncate text-[13px] font-semibold text-[var(--text-primary)]">
           {item.title}

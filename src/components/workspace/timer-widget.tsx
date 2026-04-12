@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Pause, Play, RotateCcw, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { HubSurface } from "@/components/workspace/hub-surface";
 
 const DEFAULT_WORK_MINUTES = 40;
 const DEFAULT_BREAK_MINUTES = 5;
@@ -16,6 +17,7 @@ function formatTime(totalSeconds: number) {
 }
 
 export function TimerWidget({ className }: { className?: string }) {
+  const [locked, setLocked] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [phase, setPhase] = useState<TimerPhase>("work");
   const [isRunning, setIsRunning] = useState(false);
@@ -56,8 +58,58 @@ export function TimerWidget({ className }: { className?: string }) {
     setRemainingSeconds(DEFAULT_WORK_MINUTES * 60);
   }, []);
 
+  const collapsed = (
+    <button
+      type="button"
+      onClick={() => setExpanded((open) => !open)}
+      className={cn(
+        "flex items-center gap-2 rounded-[16px] border px-3 py-2",
+        "border-[var(--border-default)]/45 bg-[var(--bg-elevated)]/95 backdrop-blur-xl",
+        "transition-all duration-200 ease-[var(--ease-standard)]",
+        isRunning && "border-[color-mix(in_oklab,var(--accent-cyan)_22%,var(--border-default))]",
+      )}
+      style={{
+        boxShadow: "0 8px 22px -16px rgba(8,22,40,0.14)",
+      }}
+    >
+      <div className="relative h-5 w-5">
+        <svg className="-rotate-90 h-5 w-5" viewBox="0 0 20 20">
+          <circle cx="10" cy="10" r="8" fill="none" stroke="var(--bg-tertiary)" strokeWidth="2" />
+          <circle
+            cx="10"
+            cy="10"
+            r="8"
+            fill="none"
+            stroke={phaseColor}
+            strokeWidth="2"
+            strokeDasharray={`${progress * 50.27} 50.27`}
+            strokeLinecap="round"
+            className="transition-all duration-1000 ease-linear"
+          />
+        </svg>
+      </div>
+      <span className="font-mono text-[12px] font-semibold tabular-nums text-[var(--text-primary)]">
+        {formatTime(remainingSeconds)}
+      </span>
+      {expanded ? (
+        <ChevronDown className="h-3 w-3 text-[var(--text-tertiary)]" />
+      ) : (
+        <ChevronUp className="h-3 w-3 text-[var(--text-tertiary)]" />
+      )}
+    </button>
+  );
+
   return (
-    <div className={cn("fixed bottom-6 right-6 z-50 flex flex-col items-end gap-2", className)}>
+    <HubSurface
+      id="workspace-timer"
+      edge="bottom"
+      collapsed={collapsed}
+      locked={locked}
+      onToggleLock={() => setLocked((value) => !value)}
+      className={cn("left-auto right-6 translate-x-0", className)}
+      expandedClassName="right-0 bottom-0"
+    >
+      <div className="flex flex-col items-end gap-2 p-2">
       {expanded && (
         <div
           className="flex w-[196px] flex-col gap-3 rounded-[20px] border border-[var(--border-default)]/45 bg-[var(--bg-elevated)]/95 p-4 backdrop-blur-xl"
@@ -118,47 +170,7 @@ export function TimerWidget({ className }: { className?: string }) {
           )}
         </div>
       )}
-
-      {/* Collapsed timer pill */}
-      <button
-        type="button"
-        onClick={() => setExpanded((open) => !open)}
-        className={cn(
-          "flex items-center gap-2 rounded-[16px] border px-3 py-2",
-          "border-[var(--border-default)]/45 bg-[var(--bg-elevated)]/95 backdrop-blur-xl",
-          "transition-all duration-200 ease-[var(--ease-standard)]",
-          isRunning && "border-[color-mix(in_oklab,var(--accent-cyan)_22%,var(--border-default))]",
-        )}
-        style={{
-          boxShadow: "0 8px 22px -16px rgba(8,22,40,0.14)",
-        }}
-      >
-        {/* Mini progress ring */}
-        <div className="relative h-5 w-5">
-          <svg className="-rotate-90 h-5 w-5" viewBox="0 0 20 20">
-            <circle cx="10" cy="10" r="8" fill="none" stroke="var(--bg-tertiary)" strokeWidth="2" />
-            <circle
-              cx="10"
-              cy="10"
-              r="8"
-              fill="none"
-              stroke={phaseColor}
-              strokeWidth="2"
-              strokeDasharray={`${progress * 50.27} 50.27`}
-              strokeLinecap="round"
-              className="transition-all duration-1000 ease-linear"
-            />
-          </svg>
-        </div>
-        <span className="font-mono text-[12px] font-semibold tabular-nums text-[var(--text-primary)]">
-          {formatTime(remainingSeconds)}
-        </span>
-        {expanded ? (
-          <ChevronDown className="h-3 w-3 text-[var(--text-tertiary)]" />
-        ) : (
-          <ChevronUp className="h-3 w-3 text-[var(--text-tertiary)]" />
-        )}
-      </button>
-    </div>
+      </div>
+    </HubSurface>
   );
 }

@@ -55,6 +55,7 @@ export type ClassifierDecision = {
   tier: ClassifierTier;
   skills: string[];
   workspaceTarget: ClassifierWorkspaceTarget;
+  workspaceIntent?: "note" | "planner" | "thread" | "result" | "widget";
   agentId: string | null;
   needsSearch: boolean;
   needsMemory: boolean;
@@ -68,6 +69,7 @@ export type ClassifierDecisionSource = {
   tier?: string;
   skills?: unknown;
   workspaceTarget?: unknown;
+  workspaceIntent?: unknown;
   agentId?: unknown;
   needsSearch?: unknown;
   needsMemory?: unknown;
@@ -174,6 +176,16 @@ export function validateClassifierDecision(
   ) {
     return { ok: false, error: "Classifier outputFormat is invalid." };
   }
+  if (
+    source.workspaceIntent !== undefined
+    && source.workspaceIntent !== "note"
+    && source.workspaceIntent !== "planner"
+    && source.workspaceIntent !== "thread"
+    && source.workspaceIntent !== "result"
+    && source.workspaceIntent !== "widget"
+  ) {
+    return { ok: false, error: "Classifier workspaceIntent is invalid." };
+  }
   if (typeof source.needsSearch !== "boolean" || typeof source.needsMemory !== "boolean" || typeof source.needsRag !== "boolean") {
     return { ok: false, error: "Classifier needs flags must be booleans." };
   }
@@ -197,6 +209,7 @@ export function validateClassifierDecision(
       tier: tier as ClassifierTier,
       skills: source.skills as string[],
       workspaceTarget: workspaceTarget as ClassifierWorkspaceTarget,
+      workspaceIntent: source.workspaceIntent as ClassifierDecision["workspaceIntent"],
       agentId: source.agentId,
       needsSearch: source.needsSearch,
       needsMemory: source.needsMemory,

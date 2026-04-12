@@ -1184,6 +1184,15 @@ button:disabled {
   100% { transform: translateX(400%); }
 }
 
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+.animate-\[shimmer_2s_ease-in-out_infinite\] {
+  animation: shimmer 2s ease-in-out infinite;
+}
+
 @keyframes spin-slow {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }

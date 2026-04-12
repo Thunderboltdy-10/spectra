@@ -198,6 +198,30 @@ const TOOL_DEFINITIONS: Record<AiToolName, OpenRouterToolDefinition> = {
       },
     },
   },
+  surface_result: {
+    type: "function",
+    function: {
+      name: "surface_result",
+      description: "Create a workspace command/result record so the UI can show a command/result card without defaulting to a thread.",
+      parameters: {
+        type: "object",
+        properties: {
+          workstreamId: { type: "string" },
+          intent: { type: "string", enum: ["note", "planner", "thread", "result", "widget"] },
+          status: { type: "string", enum: ["processing", "completed", "dismissed"] },
+          title: { type: "string" },
+          summary: { type: "string" },
+          detail: { type: "string" },
+          variant: { type: "string", enum: ["summary", "answer", "artifact", "planner", "thread"] },
+          targetKind: { type: "string", enum: ["artifact", "plannerItem", "chat", "workspaceItem", "result"] },
+          targetId: { type: "string" },
+          metadata: { type: "object", additionalProperties: true },
+        },
+        required: ["title", "summary"],
+        additionalProperties: false,
+      },
+    },
+  },
   update_widget: {
     type: "function",
     function: {
@@ -408,6 +432,7 @@ export function getAllowedAiToolNames(assignmentLevel: AssignmentLevel): AiToolN
       "dismiss_memory",
       "create_note",
       "update_planner",
+      "surface_result",
       "search_web",
       "switch_mode",
     ];
@@ -422,6 +447,7 @@ export function getAllowedAiToolNames(assignmentLevel: AssignmentLevel): AiToolN
     "update_planner",
     "create_workstream",
     "create_widget",
+    "surface_result",
     "update_widget",
     "move_widget",
     "attach_items_to_workstream",

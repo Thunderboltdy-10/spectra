@@ -101,3 +101,17 @@ export const TYPE_GROUP_LABELS: Record<string, { label: string; types: Canonical
   threads: { label: "Threads", types: ["thread"] },
   planning: { label: "Planning", types: ["planner"] },
 };
+
+
+export type HubVisibility = "hidden" | "collapsed" | "expanded";
+export type BackgroundMode = "dots" | "blank" | "grid";
+export type HubEdge = "top" | "bottom" | "left" | "right";
+
+export type HubSurfaceState = {
+  id: string;
+  edge: HubEdge;
+  order: number;
+  locked: boolean;
+  expanded: boolean;
+  pinned?: boolean;
+};

@@ -171,6 +171,9 @@ export const create = mutation({
       artifactCount: args.artifactCount ?? 0,
       threadCount: 0,
       lastActivityAt: args.lastActivityAt,
+      workspaceRevision: now,
+      workspaceRevisionKey: `init:${now}`,
+      lastWorkspaceMutationId: undefined,
       completedAt: status === "completed" ? now : undefined,
       createdAt: now,
       updatedAt: now,
@@ -322,7 +325,7 @@ export const remove = mutation({
     await assertWorkstreamOwnership(ctx, actor, args.workstreamId);
     const now = Date.now();
 
-    const [chats, artifacts, plannerItems, notes, memoryRows, userMemoryEntries] = await Promise.all([
+    const [chats, artifacts, plannerItems, notes, memoryRows, userMemoryEntries, workspaceItems, workspaceMutations, ghostSuggestions, workspaceTopicClusters] = await Promise.all([
       ctx.db
         .query("chats")
         .withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId))
@@ -346,6 +349,22 @@ export const remove = mutation({
       ctx.db
         .query("userMemoryEntries")
         .withIndex("by_user_org", (q) => q.eq("userId", actor._id).eq("orgId", actor.orgId))
+        .collect(),
+      ctx.db
+        .query("workspaceItems")
+        .withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId))
+        .collect(),
+      ctx.db
+        .query("workspaceMutations")
+        .withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId))
+        .collect(),
+      ctx.db
+        .query("ghostSuggestions")
+        .withIndex("by_workstream_status", (q) => q.eq("workstreamId", args.workstreamId))
+        .collect(),
+      ctx.db
+        .query("workspaceTopicClusters")
+        .withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId))
         .collect(),
     ]);
 
@@ -376,6 +395,30 @@ export const remove = mutation({
 
     for (const row of memoryRows) {
       await ctx.db.delete(row._id);
+    }
+
+    for (const item of workspaceItems) {
+      await ctx.db.patch(item._id, {
+        status: "archived",
+        updatedAt: now,
+      });
+    }
+
+    for (const mutation of workspaceMutations) {
+      await ctx.db.patch(mutation._id, {
+        workstreamId: undefined,
+        targetWorkstreamId: mutation.targetWorkstreamId === args.workstreamId ? undefined : mutation.targetWorkstreamId,
+        updatedAt: now,
+        status: mutation.status === "reverted" ? "reverted" : "applied",
+      });
+    }
+
+    for (const suggestion of ghostSuggestions) {
+      await ctx.db.delete(suggestion._id);
+    }
+
+    for (const cluster of workspaceTopicClusters) {
+      await ctx.db.delete(cluster._id);
     }
 
     await ctx.db.delete(args.workstreamId);

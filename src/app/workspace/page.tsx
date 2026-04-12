@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { useCallback, useEffect, useMemo } from "react";
+import { AnimatePresence } from "framer-motion";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { WorkspaceCanvas } from "@/components/workspace/workspace-canvas";
 import { CommandBar } from "@/components/workspace/command-bar";
@@ -14,25 +14,10 @@ import {
   PlannerEdge,
   type PlannerTask,
 } from "@/components/workspace/planner-edge";
-import { TintZone } from "@/components/workspace/tint-zone";
-import {
-  GlanceCard,
-  type GlanceCardData,
-} from "@/components/workspace/glance-cards";
-import { FocusPanel } from "@/components/workspace/focus-panel";
+import { DeepEditSurface } from "@/components/workspace/deep-edit-surface";
 import type { WorkspaceData, WorkspaceItemData } from "@/lib/workspace/contracts";
-import { TYPE_TO_TINT, TYPE_GROUP_LABELS } from "@/lib/workspace/contracts";
-import { cn } from "@/lib/utils";
-import {
-  ChevronLeft,
-  LayoutGrid,
-  Clock,
-  Rows3,
-  FileText,
-  Search,
-} from "lucide-react";
 
-/* u2500u2500u2500 Demo Data (replaced by real queries in Wave 2) u2500u2500u2500 */
+/* u2500u2500u2500 Demo Data (replaced by real queries when backend is wired) u2500u2500u2500 */
 
 const DEMO_ITEMS: WorkspaceItemData[] = [
   {
@@ -212,224 +197,24 @@ const DEMO_PLANNER_TASKS: PlannerTask[] = [
   },
 ];
 
-/* u2500u2500u2500 Committed Workspace Interior View u2500u2500u2500 */
-
-function WorkspaceInterior({
-  workspace,
-  onBack,
-  onItemClick,
-  selectedItemId,
-}: {
-  workspace: WorkspaceData;
-  onBack: () => void;
-  onItemClick: (item: WorkspaceItemData) => void;
-  selectedItemId: string | null;
-}) {
-  const viewMode = useWorkspaceStore((s) => s.viewMode);
-  const setViewMode = useWorkspaceStore((s) => s.setViewMode);
-  const [filterQuery, setFilterQuery] = useState("");
-  const [filterOpen, setFilterOpen] = useState(false);
-
-  // Group items by type
-  const groups = useMemo(() => {
-    const result: { key: string; label: string; variant: string; items: GlanceCardData[] }[] = [];
-    for (const [key, group] of Object.entries(TYPE_GROUP_LABELS)) {
-      let items = workspace.items
-        .filter((i) => (group.types as readonly string[]).includes(i.itemType));
-
-      // Apply text filter
-      if (filterQuery.trim()) {
-        const query = filterQuery.toLowerCase();
-        items = items.filter((i) =>
-          i.title.toLowerCase().includes(query) ||
-          i.preview?.toLowerCase().includes(query),
-        );
-      }
-
-      const glanceItems = items.map(
-        (i): GlanceCardData => ({
-          id: i.id,
-          type: i.itemType as GlanceCardData["type"],
-          title: i.title,
-          preview: i.preview,
-          status:
-            i.status === "active"
-              ? "active"
-              : i.status === "completed"
-                ? "completed"
-                : "idle",
-          meta: i.meta,
-          updatedAt: i.updatedAt,
-        }),
-      );
-      if (glanceItems.length > 0) {
-        const tintVariant = TYPE_TO_TINT[group.types[0]];
-        result.push({ key, label: group.label, variant: tintVariant, items: glanceItems });
-      }
-    }
-    return result;
-  }, [workspace.items, filterQuery]);
-
-  // Keyboard navigation: Escape to exit workspace
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        onBack();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onBack]);
-
-  return (
-    <motion.div
-      className="flex h-full flex-col"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.2 }}
-    >
-      {/* Interior header */}
-      <div className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--border-default)]/30 px-5">
-        <button
-          type="button"
-          onClick={onBack}
-          className="flex h-8 w-8 items-center justify-center rounded-xl text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-          aria-label="Back to all workspaces"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </button>
-        <span className="text-xl leading-none">{workspace.emoji}</span>
-        <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
-          {workspace.name}
-        </h2>
-        <span className="text-[11px] text-[var(--text-tertiary)]">
-          {workspace.itemCount} items
-        </span>
-
-        {/* Search toggle */}
-        <div className="ml-auto flex items-center gap-2">
-          <div className={cn(
-            "flex items-center gap-1.5 overflow-hidden rounded-xl border transition-all duration-200",
-            filterOpen
-              ? "w-[200px] border-[var(--border-default)]/60 bg-[var(--bg-secondary)] px-2.5 py-1.5"
-              : "w-8 border-transparent",
-          )}>
-            <button
-              type="button"
-              onClick={() => setFilterOpen(!filterOpen)}
-              className="flex h-5 w-5 shrink-0 items-center justify-center text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-            >
-              <Search className="h-3.5 w-3.5" />
-            </button>
-            {filterOpen && (
-              <input
-                type="text"
-                value={filterQuery}
-                onChange={(e) => setFilterQuery(e.target.value)}
-                placeholder="Filter items..."
-                className="min-w-0 flex-1 bg-transparent text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
-              />
-            )}
-          </div>
-
-          {/* View mode tabs */}
-          <div className="flex items-center gap-0.5 rounded-xl bg-[var(--bg-secondary)] p-0.5">
-            {[
-              { mode: "byType" as const, icon: LayoutGrid, label: "By Type" },
-              { mode: "byTopic" as const, icon: Rows3, label: "By Topic" },
-              { mode: "timeline" as const, icon: Clock, label: "Timeline" },
-            ].map(({ mode, icon: ModeIcon, label }) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => setViewMode(mode)}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-all duration-150",
-                  viewMode === mode
-                    ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_6px_-4px_rgba(0,0,0,0.12)]"
-                    : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]",
-                )}
-                aria-label={label}
-              >
-                <ModeIcon className="h-3.5 w-3.5" />
-                <span>{label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Interior content with tint zones */}
-      <div className="flex-1 overflow-y-auto p-6">
-        <div className="mx-auto flex max-w-[1200px] flex-col gap-5">
-          {groups.map((group, groupIdx) => (
-            <motion.div
-              key={group.key}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2, delay: groupIdx * 0.04 }}
-            >
-              <TintZone
-                label={group.label}
-                variant={group.variant as "warm" | "cool" | "neutral" | "accent" | "muted"}
-                itemCount={group.items.length}
-              >
-                {group.items.map((card) => (
-                  <button
-                    key={card.id}
-                    type="button"
-                    onClick={() => {
-                      const originalItem = workspace.items.find(
-                        (i) => i.id === card.id,
-                      );
-                      if (originalItem) onItemClick(originalItem);
-                    }}
-                    className={cn(
-                      "text-left transition-all duration-150",
-                      selectedItemId === card.id && "ring-1 ring-[var(--accent-cyan)]/25 rounded-[16px]",
-                    )}
-                  >
-                    <GlanceCard item={card} />
-                  </button>
-                ))}
-              </TintZone>
-            </motion.div>
-          ))}
-
-          {groups.length === 0 && (
-            <div className="flex h-60 flex-col items-center justify-center text-center">
-              <FileText className="mb-3 h-10 w-10 text-[var(--text-tertiary)] opacity-20" />
-              <p className="text-[13px] text-[var(--text-tertiary)]">
-                {filterQuery
-                  ? "No items match your filter."
-                  : "This workspace is empty. Use the command bar to create items."}
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
-    </motion.div>
-  );
-}
-
 /* u2500u2500u2500 Main Workspace Page u2500u2500u2500 */
 
 export default function WorkspacePage() {
   const {
     committedWorkspaceId,
     commitToWorkspace,
-    panelOpen,
-    openPanel,
-    closePanel,
     setWorkspaces,
     workspaces,
     setFocusedItem,
+    openDeepEdit,
+    closeDeepEdit,
+    toggleDeepEditLock,
+    toggleDeepEditPin,
+    deepEditTargets,
+    closeAllDeepEdits,
   } = useWorkspaceStore();
 
-  const [selectedItem, setSelectedItem] = useState<WorkspaceItemData | null>(null);
-
-  // Load demo data on mount (replaced by real Convex queries in Wave 2)
+  // Load demo data on mount
   useEffect(() => {
     setWorkspaces(DEMO_WORKSPACES);
   }, [setWorkspaces]);
@@ -459,22 +244,16 @@ export default function WorkspacePage() {
 
   const handleBack = useCallback(() => {
     commitToWorkspace(null);
-    closePanel();
-    setSelectedItem(null);
+    closeAllDeepEdits();
     setFocusedItem(null);
-  }, [commitToWorkspace, closePanel, setFocusedItem]);
+  }, [commitToWorkspace, closeAllDeepEdits, setFocusedItem]);
 
   const handleItemClick = useCallback(
     (item: WorkspaceItemData) => {
-      setSelectedItem(item);
       setFocusedItem(item.id);
-      openPanel({
-        type: item.itemType === "thread" ? "chat" : "artifact",
-        id: item.id,
-        workspaceId: item.workspaceId,
-      });
+      openDeepEdit(item);
     },
-    [openPanel, setFocusedItem],
+    [openDeepEdit, setFocusedItem],
   );
 
   const handleCanvasNodeClick = useCallback(
@@ -493,10 +272,35 @@ export default function WorkspacePage() {
     [workspaces, handleItemClick],
   );
 
-  // Command bar handlers (stubs for now, wire to real actions in Wave 2)
+  // Command bar action handler — uses result card stack, not thread-first
+  const pushResultCard = useWorkspaceStore.getState().pushResultCard;
+  const updateResultCard = useWorkspaceStore.getState().updateResultCard;
+
   const handleSendMessage = useCallback((message: string) => {
-    console.log("[workspace] Quick chat:", message);
-  }, []);
+    const cardId = `rc-${Date.now()}`;
+    // Determine action type from message heuristic
+    const actionType = message.startsWith("/")
+      ? "created" as const
+      : message.startsWith("?")
+        ? "searched" as const
+        : "answered" as const;
+
+    // Push a loading result card
+    pushResultCard({
+      id: cardId,
+      state: "loading",
+      promptSnippet: message,
+      actionType,
+    });
+
+    // Simulate completion after delay (will be replaced by real backend)
+    setTimeout(() => {
+      updateResultCard(cardId, {
+        state: "done",
+        summary: `AI processed: "${message.slice(0, 60)}${message.length > 60 ? "..." : ""}"`,
+      });
+    }, 1800);
+  }, [pushResultCard, updateResultCard]);
 
   const noop = useCallback(() => {}, []);
 
@@ -514,81 +318,63 @@ export default function WorkspacePage() {
     console.log("[workspace] Toggle task:", taskId);
   }, []);
 
-  // Handle panel close with item deselect
-  const handlePanelClose = useCallback(() => {
-    closePanel();
-    setFocusedItem(null);
-  }, [closePanel, setFocusedItem]);
-
-  // Global keyboard: Escape to exit workspace or close panel
+  // Global keyboard: Escape closes deep edits
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
-        if (panelOpen) {
-          handlePanelClose();
+        if (deepEditTargets.length > 0) {
+          const last = deepEditTargets[deepEditTargets.length - 1];
+          closeDeepEdit(last.item.id);
+        } else if (committedWorkspaceId) {
+          handleBack();
         }
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [panelOpen, handlePanelClose]);
+  }, [deepEditTargets, closeDeepEdit, committedWorkspaceId, handleBack]);
 
   return (
     <div className="relative flex h-dvh w-full overflow-hidden bg-[var(--bg-primary)]">
-      {/* Main content area */}
-      <div
-        className={cn(
-          "flex flex-1 flex-col overflow-hidden transition-all duration-300",
-          panelOpen && "mr-0",
-        )}
-      >
-        <AnimatePresence mode="wait">
-          {committedWorkspace ? (
-            /* Interior view when committed to a workspace */
-            <WorkspaceInterior
-              key={committedWorkspace.id}
-              workspace={committedWorkspace}
-              onBack={handleBack}
-              onItemClick={handleItemClick}
-              selectedItemId={selectedItem?.id ?? null}
-            />
-          ) : (
-            /* Canvas view showing all workspaces */
-            <motion.div
-              key="canvas"
-              className="flex-1"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-            >
-              <WorkspaceCanvas
-                onNodeClick={handleCanvasNodeClick}
-                onItemClick={handleCanvasItemClick}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
+      {/* Continuous canvas u2014 always present, never replaced */}
+      <div className="flex-1">
+        <WorkspaceCanvas
+          onNodeClick={handleCanvasNodeClick}
+          onItemClick={handleCanvasItemClick}
+        />
       </div>
 
-      {/* Right panel (deep edit / focus panel) */}
+      {/* Hub ecology: Right-edge deep-edit surfaces */}
       <AnimatePresence>
-        {panelOpen && selectedItem && (
-          <FocusPanel
-            item={selectedItem}
-            onClose={handlePanelClose}
+        {deepEditTargets.map((target) => (
+          <DeepEditSurface
+            key={target.item.id}
+            item={target.item}
+            locked={target.locked}
+            pinned={target.pinned}
+            onClose={() => closeDeepEdit(target.item.id)}
+            onToggleLock={() => toggleDeepEditLock(target.item.id)}
+            onTogglePin={() => toggleDeepEditPin(target.item.id)}
           />
-        )}
+        ))}
       </AnimatePresence>
 
-      {/* Hub: Left-edge workspace dock */}
+      {/* Hub ecology: Left-edge planner (above dock) */}
+      <PlannerEdge
+        tasks={DEMO_PLANNER_TASKS}
+        onTaskClick={handleTaskClick}
+        onToggleTask={handleToggleTask}
+      />
+
+      {/* Hub ecology: Left-edge workspace dock */}
       <WorkspaceDock
         workspaces={dockItems}
         onSelect={handleWorkspaceSelect}
         onCreateNew={noop}
+        onGoHome={handleBack}
       />
 
-      {/* Hub: Bottom-center unified command bar */}
+      {/* Hub ecology: Bottom-center unified command bar with result cards */}
       <CommandBar
         workspaceName={committedWorkspace?.name}
         onSendMessage={handleSendMessage}
@@ -600,15 +386,8 @@ export default function WorkspacePage() {
         onCreateWithAi={noop}
       />
 
-      {/* Hub: Bottom-right timer */}
+      {/* Hub ecology: Bottom-right timer */}
       <TimerWidget />
-
-      {/* Hub: Right-edge planner */}
-      <PlannerEdge
-        tasks={DEMO_PLANNER_TASKS}
-        onTaskClick={handleTaskClick}
-        onToggleTask={handleToggleTask}
-      />
     </div>
   );
 }

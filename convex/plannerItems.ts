@@ -2,7 +2,7 @@ import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/s
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { getUserByClerkId } from "./helpers";
-import { computeWorkspaceItemDefaultFrame, recordWorkspaceMutation } from "./workspaceHelpers";
+import { buildWorkspaceSearchText, computeWorkspaceItemDefaultFrame, recordWorkspaceMutation } from "./workspaceHelpers";
 
 const vPlannerType = v.union(v.literal("deadline"), v.literal("milestone"), v.literal("goal"), v.literal("reminder"));
 const vPlannerPriority = v.union(v.literal("low"), v.literal("medium"), v.literal("high"));
@@ -127,6 +127,7 @@ async function syncWorkspaceItemForPlannerItem(
     renderMode: params.type,
     title: params.title,
     contentSummary: normalizeString(params.description),
+    searchText: buildWorkspaceSearchText(params.title, normalizeString(params.description), params.type, "planner"),
     category: "planner" as const,
     status: "active" as const,
     updatedAt: now,
@@ -155,6 +156,7 @@ async function syncWorkspaceItemForPlannerItem(
     renderMode: params.type,
     title: params.title,
     contentSummary: normalizeString(params.description),
+    searchText: buildWorkspaceSearchText(params.title, normalizeString(params.description), params.type, "planner"),
     x: frame.x,
     y: frame.y,
     width: frame.width,

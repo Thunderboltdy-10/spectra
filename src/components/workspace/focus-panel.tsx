@@ -60,7 +60,8 @@ function formatTime(timestamp?: number): string {
   return `${Math.floor(diff / 86_400_000)}d ago`;
 }
 
-function ThreadContent({ item }: { item: WorkspaceItemData }) {
+/* eslint-disable-next-line @typescript-eslint/no-unused-vars */
+function ThreadContent(_props: { item: WorkspaceItemData }) {
   const [message, setMessage] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 

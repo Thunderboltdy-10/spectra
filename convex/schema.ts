@@ -390,6 +390,8 @@ export default defineSchema({
     source: v.union(v.literal("user"), v.literal("ai"), v.literal("system")),
     summary: v.optional(v.string()),
     targetItemIds: v.optional(v.array(v.id("workspaceItems"))),
+    affectedWorkstreamIds: v.optional(v.array(v.id("workstreams"))),
+    revisionKey: v.optional(v.string()),
     before: v.optional(v.any()),
     after: v.optional(v.any()),
     revertData: v.optional(v.any()),
@@ -401,6 +403,47 @@ export default defineSchema({
     .index("by_owner", ["ownerUserId"])
     .index("by_workstream", ["workstreamId"])
     .index("by_target_workstream", ["targetWorkstreamId"]),
+
+  workspaceCommandResults: defineTable({
+    orgId: v.id("orgs"),
+    ownerUserId: v.id("users"),
+    workstreamId: v.id("workstreams"),
+    sourceChatId: v.optional(v.id("chats")),
+    sourceMessageId: v.optional(v.id("messages")),
+    intent: v.union(
+      v.literal("note"),
+      v.literal("planner"),
+      v.literal("thread"),
+      v.literal("result"),
+      v.literal("widget"),
+    ),
+    status: v.union(v.literal("processing"), v.literal("completed"), v.literal("dismissed")),
+    title: v.string(),
+    summary: v.string(),
+    detail: v.optional(v.string()),
+    variant: v.optional(v.union(
+      v.literal("summary"),
+      v.literal("answer"),
+      v.literal("artifact"),
+      v.literal("planner"),
+      v.literal("thread"),
+    )),
+    targetKind: v.optional(v.union(
+      v.literal("artifact"),
+      v.literal("plannerItem"),
+      v.literal("chat"),
+      v.literal("workspaceItem"),
+      v.literal("result"),
+    )),
+    targetId: v.optional(v.string()),
+    metadata: v.optional(v.any()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    dismissedAt: v.optional(v.number()),
+  })
+    .index("by_workstream_status", ["workstreamId", "status"])
+    .index("by_workstream_updated", ["workstreamId", "updatedAt"])
+    .index("by_chat", ["sourceChatId"]),
 
   workstreams: defineTable({
     ownerUserId: v.id("users"),
@@ -426,6 +469,9 @@ export default defineSchema({
     artifactCount: v.optional(v.number()),
     threadCount: v.optional(v.number()),
     lastActivityAt: v.optional(v.number()),
+    workspaceRevision: v.optional(v.number()),
+    workspaceRevisionKey: v.optional(v.string()),
+    lastWorkspaceMutationId: v.optional(v.id("workspaceMutations")),
     completedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),

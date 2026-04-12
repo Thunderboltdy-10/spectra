@@ -438,7 +438,7 @@ export const createChat = mutation({
       updatedAt: now,
     });
 
-    await recordWorkspaceMutation(ctx, {
+    const mutationId = await recordWorkspaceMutation(ctx, {
       orgId: actor.orgId,
       ownerUserId: actor._id,
       workstreamId: args.workstreamId,
@@ -462,7 +462,7 @@ export const createChat = mutation({
     });
     await adjustWorkstreamThreadCount(ctx, args.workstreamId, 1);
 
-    return { chatId };
+    return { chatId, mutationId };
   },
 });
 
@@ -558,7 +558,7 @@ export const getOrCreateArtifactThread = mutation({
       updatedAt: now,
     });
 
-    await recordWorkspaceMutation(ctx, {
+    const mutationId = await recordWorkspaceMutation(ctx, {
       orgId: actor.orgId,
       ownerUserId: actor._id,
       workstreamId: args.workstreamId,
@@ -582,7 +582,7 @@ export const getOrCreateArtifactThread = mutation({
     });
     await adjustWorkstreamThreadCount(ctx, args.workstreamId, 1);
 
-    return { chatId, created: true };
+    return { chatId, created: true, mutationId };
   },
 });
 

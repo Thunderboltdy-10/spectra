@@ -1201,6 +1201,13 @@ button:disabled {
   animation: spin-slow 20s linear infinite;
 }
 
+@keyframes fadeInOut {
+  0% { opacity: 0; transform: translateX(-50%) translateY(-4px); }
+  15% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  70% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-4px); }
+}
+
 @keyframes energy-arrive {
   0% { box-shadow: 0 0 0 0 transparent; }
   30% { box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand-primary) 45%, transparent), 0 0 18px 0 color-mix(in oklab, var(--brand-primary) 25%, transparent); }

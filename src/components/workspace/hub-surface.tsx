@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Pin, PinOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { HubEdge } from "@/lib/workspace/contracts";
@@ -19,6 +19,11 @@ type HubSurfaceProps = {
   onToggleLock?: () => void;
   onTogglePin?: () => void;
 };
+
+/** Debounce delay before expanding on hover (ms) u2014 prevents jitter */
+const HOVER_ENTER_DELAY = 180;
+/** Debounce delay before collapsing after mouse leaves (ms) */
+const HOVER_LEAVE_DELAY = 280;
 
 function edgeClasses(edge: HubEdge) {
   switch (edge) {
@@ -61,8 +66,39 @@ export function HubSurface({
   onTogglePin,
 }: HubSurfaceProps) {
   const [hovered, setHovered] = useState(false);
+  const enterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const expanded = locked || hovered;
   const classes = useMemo(() => edgeClasses(edge), [edge]);
+
+  const handleMouseEnter = useCallback(() => {
+    // Cancel any pending leave
+    if (leaveTimerRef.current) {
+      clearTimeout(leaveTimerRef.current);
+      leaveTimerRef.current = null;
+    }
+    // Debounce enter
+    if (!hovered && !locked) {
+      enterTimerRef.current = setTimeout(() => {
+        setHovered(true);
+      }, HOVER_ENTER_DELAY);
+    } else {
+      setHovered(true);
+    }
+  }, [hovered, locked]);
+
+  const handleMouseLeave = useCallback(() => {
+    // Cancel any pending enter
+    if (enterTimerRef.current) {
+      clearTimeout(enterTimerRef.current);
+      enterTimerRef.current = null;
+    }
+    // Debounce leave
+    leaveTimerRef.current = setTimeout(() => {
+      setHovered(false);
+    }, HOVER_LEAVE_DELAY);
+  }, []);
 
   if (hidden) return null;
 
@@ -70,23 +106,36 @@ export function HubSurface({
     <div
       data-hub-surface-id={id}
       className={cn("z-50", classes.wrapper, className)}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
       <div className="relative">
-        <div className={cn("transition-all duration-200", expanded ? "pointer-events-none opacity-0 scale-95" : "opacity-100 scale-100", collapsedClassName)}>
+        {/* Collapsed state */}
+        <div
+          className={cn(
+            "transition-all duration-250 ease-[var(--ease-standard)]",
+            expanded
+              ? "pointer-events-none opacity-0 scale-95"
+              : "opacity-100 scale-100",
+            collapsedClassName,
+          )}
+        >
           {collapsed}
         </div>
 
+        {/* Expanded state */}
         <div
           className={cn(
-            "absolute transition-all duration-200 ease-[var(--ease-standard)]",
+            "absolute transition-all duration-250 ease-[var(--ease-standard)]",
             classes.expanded,
-            expanded ? "pointer-events-auto opacity-100 scale-100" : "pointer-events-none opacity-0 scale-95",
+            expanded
+              ? "pointer-events-auto opacity-100 scale-100"
+              : "pointer-events-none opacity-0 scale-[0.97]",
             expandedClassName,
           )}
         >
           <div className="relative overflow-hidden rounded-[22px] border border-[var(--border-default)]/45 bg-[var(--bg-elevated)]/96 backdrop-blur-xl shadow-[0_18px_44px_-18px_rgba(8,22,40,0.28)]">
+            {/* Lock/Pin controls */}
             {(onToggleLock || onTogglePin) && (
               <div className="absolute right-2 top-2 z-10 flex items-center gap-1">
                 {onTogglePin ? (

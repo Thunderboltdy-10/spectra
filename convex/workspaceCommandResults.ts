@@ -89,6 +89,7 @@ export const listForWorkstream = query({
     actorClerkId: v.string(),
     workstreamId: v.id("workstreams"),
     status: v.optional(vStatus),
+    includeDismissed: v.optional(v.boolean()),
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -99,10 +100,39 @@ export const listForWorkstream = query({
       .query("workspaceCommandResults")
       .withIndex("by_workstream_updated", (q) => q.eq("workstreamId", args.workstreamId))
       .order("desc")
-      .take(limit);
+      .take(args.status || args.includeDismissed ? limit : Math.min(limit * 3, 300));
     rows = rows.filter((row) => row.ownerUserId === actor._id && row.orgId === actor.orgId);
-    if (args.status) rows = rows.filter((row) => row.status === args.status);
+    if (args.status) {
+      rows = rows.filter((row) => row.status === args.status);
+    } else if (!args.includeDismissed) {
+      rows = rows.filter((row) => row.status !== "dismissed");
+    }
     return rows.slice(0, limit);
+  },
+});
+
+export const getForTarget = query({
+  args: {
+    actorClerkId: v.string(),
+    workstreamId: v.id("workstreams"),
+    targetKind: v.union(v.literal("artifact"), v.literal("plannerItem"), v.literal("chat"), v.literal("workspaceItem"), v.literal("result")),
+    targetId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    await validateWorkstream(ctx, actor, args.workstreamId);
+    const rows = await ctx.db
+      .query("workspaceCommandResults")
+      .withIndex("by_workstream_updated", (q) => q.eq("workstreamId", args.workstreamId))
+      .order("desc")
+      .take(200);
+
+    return rows.find((row) =>
+      row.ownerUserId === actor._id
+      && row.orgId === actor.orgId
+      && row.targetKind === args.targetKind
+      && row.targetId === args.targetId,
+    ) ?? null;
   },
 });
 
@@ -122,6 +152,55 @@ export const dismiss = mutation({
       status: "dismissed",
       dismissedAt: now,
       updatedAt: now,
+    });
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: row.workstreamId,
+      mutationType: "dismiss_workspace_command_result",
+      source: "user",
+      entity: "workspace-result",
+      action: "updated",
+      includeHub: true,
+      refreshHub: true,
+      summary: `Dismissed workspace result ${row.title}`,
+      before: { resultId: row._id, status: row.status },
+      after: { resultId: row._id, status: "dismissed" },
+    });
+    return { success: true };
+  },
+});
+
+export const reopen = mutation({
+  args: {
+    actorClerkId: v.string(),
+    resultId: v.id("workspaceCommandResults"),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    const row = await ctx.db.get(args.resultId);
+    if (!row || row.ownerUserId !== actor._id || row.orgId !== actor.orgId) {
+      throw new Error("Workspace result not found");
+    }
+    const now = Date.now();
+    await ctx.db.patch(args.resultId, {
+      status: "completed",
+      dismissedAt: undefined,
+      updatedAt: now,
+    });
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: row.workstreamId,
+      mutationType: "reopen_workspace_command_result",
+      source: "user",
+      entity: "workspace-result",
+      action: "updated",
+      includeHub: true,
+      refreshHub: true,
+      summary: `Reopened workspace result ${row.title}`,
+      before: { resultId: row._id, status: row.status },
+      after: { resultId: row._id, status: "completed" },
     });
     return { success: true };
   },

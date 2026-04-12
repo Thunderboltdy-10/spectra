@@ -8,9 +8,9 @@ import type {
   WorkspaceData,
   WorkspaceItemData,
 } from "@/lib/workspace/contracts";
-import { zoomTierForLevel, VIEWPORT } from "@/lib/workspace/contracts";
+import { zoomTierForLevel, zoomTierProgress, VIEWPORT } from "@/lib/workspace/contracts";
 
-type DeepEditTarget = {
+export type DeepEditTarget = {
   item: WorkspaceItemData;
   locked: boolean;
   pinned: boolean;
@@ -21,11 +21,15 @@ import type { ResultCardData } from "@/components/workspace/result-card";
 type WorkspaceState = {
   zoom: number;
   zoomTier: ZoomTier;
+  /** 0-1 progress within the current zoom tier for smooth interpolation */
+  zoomProgress: number;
   viewportX: number;
   viewportY: number;
 
   activeWorkspaceId: string | null;
   committedWorkspaceId: string | null;
+  /** Workspace closest to viewport center u2013 used for auto-entry */
+  nearestWorkspaceId: string | null;
   viewMode: ViewMode;
   focusedItemId: string | null;
 
@@ -55,10 +59,15 @@ type WorkspaceState = {
   setViewport: (x: number, y: number, zoom: number) => void;
   setActiveWorkspace: (id: string | null) => void;
   commitToWorkspace: (id: string | null) => void;
+  setNearestWorkspace: (id: string | null) => void;
   setViewMode: (mode: ViewMode) => void;
   setFocusedItem: (id: string | null) => void;
 
-  /** Deep edit surface management */
+  /**
+   * Deep edit surface management.
+   * openDeepEdit uses replacement semantics: opening a surface of the same
+   * itemType as an existing unlocked surface replaces it rather than stacking.
+   */
   openDeepEdit: (item: WorkspaceItemData) => void;
   closeDeepEdit: (itemId: string) => void;
   toggleDeepEditLock: (itemId: string) => void;
@@ -100,11 +109,13 @@ const HUB_VISIBILITY_ORDER: HubVisibility[] = ["collapsed", "expanded", "hidden"
 export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   zoom: VIEWPORT.DEFAULT_ZOOM,
   zoomTier: zoomTierForLevel(VIEWPORT.DEFAULT_ZOOM),
+  zoomProgress: zoomTierProgress(VIEWPORT.DEFAULT_ZOOM),
   viewportX: 0,
   viewportY: 0,
 
   activeWorkspaceId: null,
   committedWorkspaceId: null,
+  nearestWorkspaceId: null,
   viewMode: "byType",
   focusedItemId: null,
 
@@ -121,21 +132,36 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   workspaces: [],
 
   setZoom: (zoom) =>
-    set({ zoom, zoomTier: zoomTierForLevel(zoom) }),
+    set({
+      zoom,
+      zoomTier: zoomTierForLevel(zoom),
+      zoomProgress: zoomTierProgress(zoom),
+    }),
 
   setViewport: (x, y, zoom) =>
     set((state) => {
       const nextTier = zoomTierForLevel(zoom);
+      const progress = zoomTierProgress(zoom);
       let committedWorkspaceId = state.committedWorkspaceId;
-      if (committedWorkspaceId && zoom < VIEWPORT.AUTO_ENTRY_THRESHOLD * 0.45) {
+
+      // Auto-exit: zoom out below exit threshold
+      if (committedWorkspaceId && zoom < VIEWPORT.AUTO_EXIT_THRESHOLD) {
         committedWorkspaceId = null;
       }
+
+      // Auto-entry: zoom in past threshold when near a workspace
+      if (!committedWorkspaceId && zoom >= VIEWPORT.AUTO_ENTRY_THRESHOLD && state.nearestWorkspaceId) {
+        committedWorkspaceId = state.nearestWorkspaceId;
+      }
+
       return {
         viewportX: x,
         viewportY: y,
         zoom,
         zoomTier: nextTier,
+        zoomProgress: progress,
         committedWorkspaceId,
+        activeWorkspaceId: committedWorkspaceId ?? state.activeWorkspaceId,
       };
     }),
 
@@ -143,7 +169,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
     set({ activeWorkspaceId: id }),
 
   commitToWorkspace: (id) =>
-    set({ committedWorkspaceId: id, activeWorkspaceId: id }),
+    set({ committedWorkspaceId: id, activeWorkspaceId: id, nearestWorkspaceId: id }),
+
+  setNearestWorkspace: (id) =>
+    set({ nearestWorkspaceId: id }),
 
   setViewMode: (mode) =>
     set({ viewMode: mode }),
@@ -155,13 +184,29 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
 
   openDeepEdit: (item) =>
     set((state) => {
+      // Already open u2014 just focus it
       const exists = state.deepEditTargets.find((t) => t.item.id === item.id);
-      if (exists) return state;
-      return {
-        deepEditTargets: [
+      if (exists) return { focusedItemId: item.id };
+
+      // Replacement semantics: if thereu2019s an unlocked surface of the
+      // same itemType, replace it instead of spawning a sibling.
+      const sameTypeUnlockedIdx = state.deepEditTargets.findIndex(
+        (t) => t.item.itemType === item.itemType && !t.locked && !t.pinned,
+      );
+
+      let nextTargets: DeepEditTarget[];
+      if (sameTypeUnlockedIdx >= 0) {
+        nextTargets = [...state.deepEditTargets];
+        nextTargets[sameTypeUnlockedIdx] = { item, locked: false, pinned: false };
+      } else {
+        nextTargets = [
           ...state.deepEditTargets,
           { item, locked: false, pinned: false },
-        ],
+        ];
+      }
+
+      return {
+        deepEditTargets: nextTargets,
         focusedItemId: item.id,
       };
     }),

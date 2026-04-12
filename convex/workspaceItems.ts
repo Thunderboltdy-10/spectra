@@ -156,6 +156,87 @@ export const getWorkspaceContent = query({
   },
 });
 
+export const getWorkspacePageData = query({
+  args: {
+    actorClerkId: v.string(),
+    workstreamId: v.id("workstreams"),
+    includeDismissedResults: v.optional(v.boolean()),
+    commandResultLimit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    const workstream = await requireOwnedWorkstream(ctx, actor, args.workstreamId);
+    const commandResultLimit = Math.max(1, Math.min(args.commandResultLimit ?? 25, 100));
+
+    const [items, artifacts, plannerItems, chats, latestMutation, commandResults] = await Promise.all([
+      ctx.db.query("workspaceItems").withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId)).collect(),
+      ctx.db.query("artifacts").withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId)).collect(),
+      ctx.db.query("plannerItems").withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId)).collect(),
+      ctx.db.query("chats").withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId)).collect(),
+      ctx.db.query("workspaceMutations").withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId)).order("desc").first(),
+      ctx.db
+        .query("workspaceCommandResults")
+        .withIndex("by_workstream_updated", (q) => q.eq("workstreamId", args.workstreamId))
+        .order("desc")
+        .take(args.includeDismissedResults ? commandResultLimit : Math.min(commandResultLimit * 3, 300)),
+    ]);
+
+    const activeItems = items
+      .filter((item) => item.ownerUserId === actor._id && item.orgId === actor.orgId && item.status === "active")
+      .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0) || a.createdAt - b.createdAt)
+      .map((item) => ({ ...item, workspaceType: workspaceFacingTypeForItem(item) }));
+    const liveArtifacts = artifacts.filter((artifact) => artifact.ownerUserId === actor._id && artifact.orgId === actor.orgId && artifact.status === "active");
+    const livePlannerItems = plannerItems.filter((item) => item.ownerUserId === actor._id && item.orgId === actor.orgId && item.status !== "cancelled");
+    const liveChats = chats.filter((chat) => isActiveThreadChat(chat, actor._id, actor.orgId, args.workstreamId));
+    const visibleCommandResults = commandResults
+      .filter((row) => row.ownerUserId === actor._id && row.orgId === actor.orgId)
+      .filter((row) => args.includeDismissedResults ? true : row.status !== "dismissed")
+      .slice(0, commandResultLimit);
+
+    const itemByArtifactId = new Map(activeItems.filter((item) => item.sourceArtifactId).map((item) => [item.sourceArtifactId, item]));
+    const itemByPlannerId = new Map(activeItems.filter((item) => item.sourcePlannerItemId).map((item) => [item.sourcePlannerItemId, item]));
+    const itemByChatId = new Map(activeItems.filter((item) => item.sourceChatId).map((item) => [item.sourceChatId, item]));
+    const itemById = new Map(activeItems.map((item) => [item._id, item]));
+    const artifactById = new Map(liveArtifacts.map((artifact) => [artifact._id, artifact]));
+    const plannerById = new Map(livePlannerItems.map((item) => [item._id, item]));
+    const chatById = new Map(liveChats.map((chat) => [chat._id, chat]));
+
+    return {
+      workstream,
+      items: activeItems,
+      artifacts: liveArtifacts,
+      plannerItems: livePlannerItems,
+      chats: liveChats,
+      commandResults: visibleCommandResults.map((row) => ({
+        ...row,
+        targetRecord:
+          row.targetKind === "artifact" && row.targetId
+            ? artifactById.get(row.targetId as Id<"artifacts">) ?? null
+            : row.targetKind === "plannerItem" && row.targetId
+              ? plannerById.get(row.targetId as Id<"plannerItems">) ?? null
+              : row.targetKind === "chat" && row.targetId
+                ? chatById.get(row.targetId as Id<"chats">) ?? null
+                : row.targetKind === "workspaceItem" && row.targetId
+                  ? itemById.get(row.targetId as Id<"workspaceItems">) ?? null
+                  : null,
+        relatedWorkspaceItem:
+          row.targetKind === "artifact" && row.targetId
+            ? itemByArtifactId.get(row.targetId as Id<"artifacts">) ?? null
+            : row.targetKind === "plannerItem" && row.targetId
+              ? itemByPlannerId.get(row.targetId as Id<"plannerItems">) ?? null
+              : row.targetKind === "chat" && row.targetId
+                ? itemByChatId.get(row.targetId as Id<"chats">) ?? null
+                : row.targetKind === "workspaceItem" && row.targetId
+                  ? itemById.get(row.targetId as Id<"workspaceItems">) ?? null
+                  : null,
+      })),
+      revision: workstream.workspaceRevision ?? latestMutation?.updatedAt ?? workstream.updatedAt,
+      revisionKey: workstream.workspaceRevisionKey ?? latestMutation?.revisionKey ?? `${args.workstreamId}:${workstream.updatedAt}`,
+      lastMutationId: workstream.lastWorkspaceMutationId ?? latestMutation?._id,
+    };
+  },
+});
+
 export const updateItemLayout = mutation({
   args: {
     actorClerkId: v.string(),

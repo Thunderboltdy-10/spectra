@@ -14,6 +14,8 @@ import {
   ArrowUp,
   Zap,
   Layers,
+  Sparkles,
+  Command,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { HubSurface } from "@/components/workspace/hub-surface";
@@ -25,7 +27,6 @@ type MenuItem = {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   shortcut?: string;
-  /** Secondary items appear after a divider */
   secondary?: boolean;
 };
 
@@ -63,7 +64,7 @@ function ModeIndicator({ mode }: { mode: CommandMode }) {
 
   return (
     <div
-      className="flex items-center gap-1 rounded-md px-1.5 py-0.5 transition-all duration-200"
+      className="flex items-center gap-1 rounded-lg px-2 py-1 transition-all duration-200"
       style={{
         backgroundColor: `color-mix(in oklab, ${config.color} 8%, transparent)`,
       }}
@@ -75,6 +76,40 @@ function ModeIndicator({ mode }: { mode: CommandMode }) {
       >
         {config.label}
       </span>
+    </div>
+  );
+}
+
+/* u2500u2500u2500 Suggestion Chips u2500u2500u2500 */
+
+function SuggestionChips({
+  workspaceName,
+  hasContext,
+  onSelect,
+}: {
+  workspaceName?: string;
+  hasContext: boolean;
+  onSelect: (text: string) => void;
+}) {
+  const suggestions = hasContext
+    ? ["Summarize this", "Expand section", "Create flashcards", "Quiz me"]
+    : workspaceName
+      ? [`Review ${workspaceName}`, "Create a note", "Plan my study", "Search"]
+      : ["Create a workspace", "Ask a question", "Plan my study"];
+
+  return (
+    <div className="flex items-center gap-1.5 px-1 overflow-x-auto scrollbar-none">
+      {suggestions.map((s) => (
+        <button
+          key={s}
+          type="button"
+          onClick={() => onSelect(s)}
+          className="flex items-center gap-1 whitespace-nowrap rounded-full border border-[var(--border-default)]/30 bg-[var(--bg-secondary)]/60 px-2.5 py-1 text-[11px] font-medium text-[var(--text-tertiary)] transition-all duration-150 hover:border-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--border-default))] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]"
+        >
+          <Sparkles className="h-2.5 w-2.5 opacity-50" />
+          {s}
+        </button>
+      ))}
     </div>
   );
 }
@@ -91,6 +126,10 @@ type CommandBarProps = {
   onCreateTask: () => void;
   onCreateThread: () => void;
   onCreateWithAi: () => void;
+  /** External dismiss handler (wired to backend when live) */
+  onDismissResultCard?: (cardId: string) => void;
+  /** External reopen handler (wired to backend when live) */
+  onReopenResultCard?: (cardId: string) => void;
   isStreaming?: boolean;
   disabled?: boolean;
   className?: string;
@@ -105,15 +144,20 @@ export function CommandBar({
   onCreateVisual,
   onCreateTask,
   onCreateThread,
+  onDismissResultCard,
+  onReopenResultCard,
   onCreateWithAi,
   isStreaming = false,
   disabled = false,
   className,
 }: CommandBarProps) {
   const resultCards = useWorkspaceStore((s) => s.resultCards);
-  const dismissResultCard = useWorkspaceStore((s) => s.dismissResultCard);
-  const reopenResultCard = useWorkspaceStore((s) => s.reopenResultCard);
+  const storeDismissResultCard = useWorkspaceStore((s) => s.dismissResultCard);
+  const storeReopenResultCard = useWorkspaceStore((s) => s.reopenResultCard);
   const pendingResultCard = useWorkspaceStore((s) => s.pendingResultCard);
+  // Use external handlers when provided (backend-wired), otherwise fall back to store
+  const dismissResultCard = onDismissResultCard ?? storeDismissResultCard;
+  const reopenResultCard = onReopenResultCard ?? storeReopenResultCard;
   const focusedItemId = useWorkspaceStore((s) => s.focusedItemId);
 
   const [locked, setLocked] = useState(false);
@@ -121,9 +165,22 @@ export function CommandBar({
   const [menuOpen, setMenuOpen] = useState(false);
   const [focused, setFocused] = useState(false);
   const [highlightedIdx, setHighlightedIdx] = useState(-1);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const mode = detectMode(value);
+  const hasContextualItem = !!focusedItemId;
+
+  // Auto-resize textarea
+  const adjustTextareaHeight = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, []);
+
+  useEffect(() => {
+    adjustTextareaHeight();
+  }, [value, adjustTextareaHeight]);
 
   const handleMenuAction = useCallback((id: string) => {
     setMenuOpen(false);
@@ -136,7 +193,7 @@ export function CommandBar({
       case "thread": onCreateThread(); break;
       case "ai":
         onCreateWithAi();
-        inputRef.current?.focus();
+        textareaRef.current?.focus();
         break;
     }
   }, [onCreateCode, onCreateNote, onCreateTask, onCreateThread, onCreateVisual, onCreateWithAi]);
@@ -148,7 +205,12 @@ export function CommandBar({
     setValue("");
   }, [disabled, onSendMessage, value]);
 
-  // Menu keyboard navigation
+  const handleSuggestionSelect = useCallback((text: string) => {
+    setValue(text);
+    textareaRef.current?.focus();
+  }, []);
+
+  // Keyboard
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (menuOpen) {
       if (e.key === "ArrowDown") {
@@ -174,12 +236,12 @@ export function CommandBar({
     }
   }, [menuOpen, highlightedIdx, handleMenuAction, isStreaming, onStopStreaming, handleSubmit]);
 
-  // Global keyboard shortcut: Cmd/Ctrl+K to focus
+  // Global shortcut: Cmd+K
   useEffect(() => {
     function handleGlobalKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
-        inputRef.current?.focus();
+        textareaRef.current?.focus();
       }
     }
     window.addEventListener("keydown", handleGlobalKey);
@@ -187,18 +249,16 @@ export function CommandBar({
   }, []);
 
   const collapsed = (
-    <div className="flex items-center gap-2 rounded-[18px] border border-[var(--border-default)]/45 bg-[var(--bg-elevated)]/95 px-3 py-2 backdrop-blur-xl shadow-[0_10px_32px_-14px_rgba(8,22,40,0.20)]">
-      <Zap className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
-      <span className="text-[12px] font-medium text-[var(--text-secondary)]">
+    <div className="flex items-center gap-2.5 rounded-[20px] border border-[var(--border-default)]/45 bg-[var(--bg-elevated)]/95 px-4 py-2.5 backdrop-blur-xl shadow-[0_10px_32px_-14px_rgba(8,22,40,0.20)]">
+      <Zap className="h-4 w-4 text-[var(--accent-cyan)]" />
+      <span className="text-[13px] font-medium text-[var(--text-secondary)]">
         Command
       </span>
-      <span className="rounded bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--text-tertiary)]">
-        u2318K
-      </span>
+      <kbd className="flex items-center gap-0.5 rounded-md bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--text-tertiary)]">
+        <Command className="h-2.5 w-2.5" />K
+      </kbd>
     </div>
   );
-
-  const hasContextualItem = !!focusedItemId;
 
   return (
     <HubSurface
@@ -210,8 +270,8 @@ export function CommandBar({
       className={className}
       expandedClassName="left-1/2 -translate-x-1/2 bottom-0"
     >
-      <div className="flex flex-col items-center gap-2 p-2">
-        {/* Result Card Stack u2014 first-class above the input */}
+      <div className="flex flex-col items-center gap-2.5 p-3">
+        {/* Result Card Stack */}
         <ResultCardStack
           cards={resultCards}
           onDismiss={dismissResultCard}
@@ -219,7 +279,7 @@ export function CommandBar({
           maxVisible={3}
         />
 
-        {/* Legacy single pending result card (backward compat) */}
+        {/* Legacy pending result card */}
         {pendingResultCard && resultCards.length === 0 && (
           <div className="flex items-center gap-3 rounded-[16px] border border-[var(--border-default)]/35 bg-[var(--bg-elevated)]/90 px-3.5 py-2.5 shadow-[0_12px_32px_-16px_rgba(8,22,40,0.20)]">
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--bg-secondary))]">
@@ -236,22 +296,30 @@ export function CommandBar({
           </div>
         )}
 
-        {/* Main command input bar */}
+        {/* Suggestion chips u2014 contextual affordance */}
+        {!value && focused && (
+          <SuggestionChips
+            workspaceName={workspaceName}
+            hasContext={hasContextualItem}
+            onSelect={handleSuggestionSelect}
+          />
+        )}
+
+        {/* Main command input */}
         <div
           className={cn(
-            "relative flex h-12 w-[min(580px,calc(100vw-180px))] min-w-[420px] items-center gap-2 rounded-[22px] border pl-2 pr-2.5",
+            "relative flex w-[min(640px,calc(100vw-160px))] min-w-[440px] items-end gap-2 rounded-[22px] border pl-2.5 pr-2.5 py-2",
             "border-[var(--border-default)]/50 bg-[var(--bg-elevated)]/95 backdrop-blur-xl",
             "transition-all duration-200 ease-[var(--ease-standard)]",
             focused
-              ? "shadow-[0_16px_44px_-14px_rgba(8,22,40,0.28),0_4px_16px_-10px_rgba(8,22,40,0.18)] border-[color-mix(in_oklab,var(--accent-cyan)_30%,var(--border-default))]"
+              ? "shadow-[0_18px_48px_-14px_rgba(8,22,40,0.30),0_4px_18px_-10px_rgba(8,22,40,0.20)] border-[color-mix(in_oklab,var(--accent-cyan)_30%,var(--border-default))]"
               : "shadow-[0_10px_32px_-14px_rgba(8,22,40,0.20),0_4px_12px_-10px_rgba(8,22,40,0.14)]",
-            // Active context indicator
             hasContextualItem && focused &&
               "border-[color-mix(in_oklab,var(--accent-cyan)_40%,var(--border-default))]",
           )}
         >
-          {/* Create menu button */}
-          <div className="relative">
+          {/* Create menu */}
+          <div className="relative shrink-0 self-end">
             <button
               type="button"
               onClick={() => {
@@ -259,21 +327,20 @@ export function CommandBar({
                 setHighlightedIdx(-1);
               }}
               className={cn(
-                "flex h-8 w-8 items-center justify-center rounded-xl transition-all duration-150",
+                "flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-150",
                 menuOpen
                   ? "rotate-45 bg-[var(--accent-cyan)]/12 text-[var(--accent-cyan)]"
                   : "bg-[var(--bg-secondary)] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
               )}
             >
-              <Plus className="h-4 w-4" />
+              <Plus className="h-4.5 w-4.5" />
             </button>
 
             {menuOpen ? (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => { setMenuOpen(false); setHighlightedIdx(-1); }} />
-                <div className="absolute bottom-[calc(100%+8px)] left-0 z-50 flex min-w-[196px] flex-col gap-0.5 rounded-2xl border border-[var(--border-default)]/50 bg-[var(--bg-elevated)]/98 p-1.5 shadow-[0_18px_44px_-18px_rgba(8,22,40,0.30)] backdrop-blur-xl">
+                <div className="absolute bottom-[calc(100%+8px)] left-0 z-50 flex min-w-[210px] flex-col gap-0.5 rounded-2xl border border-[var(--border-default)]/50 bg-[var(--bg-elevated)]/98 p-1.5 shadow-[0_18px_44px_-18px_rgba(8,22,40,0.30)] backdrop-blur-xl">
                   {MENU_ITEMS.map((item, idx) => {
-                    // Render divider before secondary items
                     const showDivider = item.secondary && idx > 0 && !MENU_ITEMS[idx - 1].secondary;
                     return (
                       <div key={item.id}>
@@ -285,7 +352,7 @@ export function CommandBar({
                           onClick={() => handleMenuAction(item.id)}
                           onMouseEnter={() => setHighlightedIdx(idx)}
                           className={cn(
-                            "flex items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] font-medium transition-colors",
+                            "flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-colors",
                             highlightedIdx === idx
                               ? item.id === "ai"
                                 ? "bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)] text-[var(--accent-cyan)]"
@@ -315,66 +382,73 @@ export function CommandBar({
 
           {/* Workspace scope badge */}
           {workspaceName ? (
-            <div className="flex items-center gap-1 rounded-lg border border-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_6%,var(--bg-secondary))] px-2 py-0.5">
+            <div className="flex items-center gap-1 self-end rounded-lg border border-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_6%,var(--bg-secondary))] px-2 py-1 mb-0.5">
               <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--accent-cyan)]">{workspaceName}</span>
             </div>
           ) : null}
 
           {/* Mode indicator */}
-          <ModeIndicator mode={mode} />
+          {mode !== "action" && (
+            <div className="self-end mb-0.5">
+              <ModeIndicator mode={mode} />
+            </div>
+          )}
 
-          {/* Input */}
-          <div className="flex flex-1 items-center gap-2">
+          {/* Textarea u2014 multi-line support for premium feel */}
+          <div className="flex min-w-0 flex-1 items-end gap-2">
             {!focused && !value ? (
-              <Zap className="h-3.5 w-3.5 shrink-0 text-[var(--accent-cyan)] opacity-50" />
+              <Zap className="mb-2.5 h-4 w-4 shrink-0 text-[var(--accent-cyan)] opacity-40" />
             ) : (
-              <Search className="h-3.5 w-3.5 shrink-0 text-[var(--text-tertiary)] opacity-40" />
+              <Search className="mb-2.5 h-4 w-4 shrink-0 text-[var(--text-tertiary)] opacity-40" />
             )}
-            <input
-              ref={inputRef}
-              type="text"
+            <textarea
+              ref={textareaRef}
+              rows={1}
               value={value}
-              onChange={(event) => setValue(event.target.value)}
+              onChange={(e) => setValue(e.target.value)}
               onKeyDown={handleKeyDown}
               onFocus={() => setFocused(true)}
               onBlur={() => setFocused(false)}
-              placeholder={hasContextualItem ? "Act on focused item..." : "Command, create, or ask AI..."}
+              placeholder={hasContextualItem ? "Act on focused itemu2026" : "Command, create, or ask AIu2026"}
               disabled={disabled && !isStreaming}
-              className="min-w-0 flex-1 border-none bg-transparent text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+              className="min-w-0 flex-1 resize-none border-none bg-transparent py-1.5 text-[14px] leading-[1.5] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]/60"
+              style={{ maxHeight: 120, minHeight: 24 }}
             />
           </div>
 
-          {/* Keyboard hint */}
+          {/* Keyboard hint when unfocused */}
           {!focused && !value && (
-            <span className="mr-1 text-[10px] text-[var(--text-tertiary)]/40 font-medium">
-              u2318K
-            </span>
+            <kbd className="mb-1.5 flex items-center gap-0.5 rounded-md bg-[var(--bg-secondary)]/80 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--text-tertiary)]/40">
+              <Command className="h-2.5 w-2.5" />K
+            </kbd>
           )}
 
-          {/* Send / stop button */}
-          {isStreaming ? (
-            <button
-              type="button"
-              onClick={onStopStreaming}
-              className="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--accent-coral)]/12 text-[var(--accent-coral)] transition-colors hover:bg-[var(--accent-coral)]/20"
-            >
-              <Square className="h-3 w-3" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={!value.trim() || disabled}
-              className={cn(
-                "flex h-7 w-7 items-center justify-center rounded-lg transition-all duration-150",
-                value.trim()
-                  ? "bg-[var(--accent-cyan)] text-white shadow-[0_4px_10px_-6px_rgba(14,142,232,0.45)]"
-                  : "bg-[var(--bg-secondary)] text-[var(--text-tertiary)]",
-              )}
-            >
-              <ArrowUp className="h-3.5 w-3.5" />
-            </button>
-          )}
+          {/* Send / stop */}
+          <div className="shrink-0 self-end">
+            {isStreaming ? (
+              <button
+                type="button"
+                onClick={onStopStreaming}
+                className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent-coral)]/12 text-[var(--accent-coral)] transition-colors hover:bg-[var(--accent-coral)]/20"
+              >
+                <Square className="h-3.5 w-3.5" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={!value.trim() || disabled}
+                className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-150",
+                  value.trim()
+                    ? "bg-[var(--accent-cyan)] text-white shadow-[0_4px_12px_-6px_rgba(14,142,232,0.50)]"
+                    : "bg-[var(--bg-secondary)] text-[var(--text-tertiary)]",
+                )}
+              >
+                <ArrowUp className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </HubSurface>

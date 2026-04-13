@@ -11,11 +11,11 @@ import type { CanonicalWorkspaceType } from "@/lib/artifact-types";
  */
 export const ZOOM_TIERS = {
   /** Far out – all workspaces visible as territory regions with name/emoji/count */
-  LANDSCAPE: { max: 0.18, label: "landscape" },
+  LANDSCAPE: { max: 0.20, label: "landscape" },
   /** Mid – workspace interior structure and grouped items become visible */
-  SUMMARY: { min: 0.18, max: 0.55, label: "summary" },
+  SUMMARY: { min: 0.20, max: 0.50, label: "summary" },
   /** Deep – content-level detail, inline editing, full item cards */
-  DETAIL: { min: 0.55, label: "detail" },
+  DETAIL: { min: 0.50, label: "detail" },
 } as const;
 
 export type ZoomTier = "landscape" | "summary" | "detail";
@@ -37,10 +37,11 @@ export function zoomTierProgress(zoom: number): number {
   if (zoom < ZOOM_TIERS.SUMMARY.max) {
     const range = ZOOM_TIERS.SUMMARY.max - ZOOM_TIERS.SUMMARY.min;
     const linearProgress = Math.max(0, Math.min(1, (zoom - ZOOM_TIERS.SUMMARY.min) / range));
-    // Ease-in curve for progressive detail revelation
-    return linearProgress * linearProgress;
+    // Smoother ease curve for progressive detail revelation
+    return linearProgress * linearProgress * (3 - 2 * linearProgress);
   }
-  const detailMax = 2.0;
+  // Detail tier: clamp more aggressively to prevent enormous elements
+  const detailMax = 1.5;
   return Math.max(0, Math.min(1, (zoom - ZOOM_TIERS.DETAIL.min) / (detailMax - ZOOM_TIERS.DETAIL.min)));
 }
 

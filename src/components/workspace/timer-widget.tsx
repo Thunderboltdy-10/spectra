@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { HubSurface } from "@/components/workspace/hub-surface";
 import { StudyTimer } from "@/components/study-timer";
-import { Clock3 } from "lucide-react";
+import { Clock3, Pause } from "lucide-react";
 
 export function TimerWidget({ className }: { className?: string }) {
   const [locked, setLocked] = useState(false);
@@ -41,7 +41,7 @@ export function TimerWidget({ className }: { className?: string }) {
   const collapsed = (
     <div
       className={cn(
-        "flex items-center gap-2 rounded-[16px] border px-3 h-11 min-w-[44px]",
+        "flex items-center gap-2.5 rounded-[16px] border px-3.5 h-11 min-w-[48px]",
         "border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/95 backdrop-blur-xl",
         "transition-all duration-200 ease-[var(--ease-standard)] cursor-pointer hover:bg-[var(--bg-hover)]",
         timerState?.isRunning &&
@@ -51,28 +51,31 @@ export function TimerWidget({ className }: { className?: string }) {
         boxShadow: "0 8px 22px -16px rgba(8,22,40,0.14)",
       }}
     >
-      {/* Phase dot indicator */}
+      {/* Phase dot */}
       {timerState?.isRunning && (
         <span
-          className="h-2 w-2 shrink-0 rounded-full"
+          className="h-2.5 w-2.5 shrink-0 rounded-full animate-pulse"
           style={{
             backgroundColor: phaseColor,
-            boxShadow: `0 0 6px ${phaseColor}`,
+            boxShadow: `0 0 8px ${phaseColor}`,
           }}
         />
       )}
-      <Clock3
-        className={cn(
-          "h-4.5 w-4.5 shrink-0 transition-colors",
-          timerState?.isRunning ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]",
-        )}
-      />
+
+      {/* Timer icon or play/pause indicator */}
+      {timerState?.isRunning ? (
+        <Pause className="h-3.5 w-3.5 shrink-0 text-[var(--text-primary)]" />
+      ) : (
+        <Clock3 className="h-4 w-4 shrink-0 text-[var(--text-secondary)]" />
+      )}
+
+      {/* Time display + progress bar always visible when timer active */}
       {timerState ? (
-        <div className="flex flex-col justify-center w-[42px] gap-[3px] shrink-0">
-          <span className="font-mono text-[11px] font-bold tabular-nums text-[var(--text-primary)] leading-none text-center">
+        <div className="flex flex-col justify-center gap-[3px] shrink-0 min-w-[48px]">
+          <span className="font-mono text-[12px] font-bold tabular-nums text-[var(--text-primary)] leading-none text-center">
             {timerState.display}
           </span>
-          <div className="h-[2.5px] w-full overflow-hidden rounded-full bg-[var(--bg-secondary)]">
+          <div className="h-[3px] w-full overflow-hidden rounded-full bg-[var(--bg-secondary)]">
             <div
               className="h-full rounded-full transition-all duration-500"
               style={{
@@ -103,7 +106,8 @@ export function TimerWidget({ className }: { className?: string }) {
       )}
       expandedClassName="right-0 bottom-0"
     >
-      <div className="pointer-events-auto w-[340px] p-2">
+      {/* No extra border/padding wrapper u2014 StudyTimer renders directly */}
+      <div className="pointer-events-auto w-[340px]">
         <StudyTimer
           open={true}
           onOpen={() => {}}

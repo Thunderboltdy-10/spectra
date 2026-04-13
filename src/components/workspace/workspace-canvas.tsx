@@ -37,11 +37,10 @@ import {
 import { ActionMenuContent } from "@/components/workspace/shared-action-menu";
 import { ArtifactContent, ThreadContent } from "./focus-panel";
 
-/* ═══════════════════════════════════════════════════════════════
+/* ===================================================================
    Palette & Helpers
-   ═══════════════════════════════════════════════════════════════ */
+   =================================================================== */
 
-/** Soft pastel palette for workspace territory regions */
 const TERRITORY_COLORS: Record<string, { core: string; mid: string; outer: string; border: string }> = {
   warm: {
     core: "rgba(245, 178, 60, 0.18)",
@@ -79,7 +78,6 @@ function getTerritoryColor(variant: string) {
   return TERRITORY_COLORS[variant] ?? TERRITORY_COLORS.neutral;
 }
 
-/** Determine dominant tint for a workspace from its items */
 function dominantTint(ws: WorkspaceData): string {
   const counts: Record<string, number> = {};
   for (const item of ws.items) {
@@ -116,18 +114,30 @@ function StatusDot({ status, className }: { status: string; className?: string }
 }
 
 /**
- * Compute a counter-scale factor so that content rendered inside the
- * ReactFlow node maintains a stable perceived size across zoom levels.
- * This is the key to semantic zoom: text/icons don't shrink to nothing.
+ * Semantic zoom stable scale.
+ * Maps zoom to a smooth counter-scale that keeps content perceptually stable.
+ * Uses a damped curve instead of linear inverse for smoother progressive reveal.
  */
-function stableScale(zoom: number, targetZoom: number): number {
-  if (zoom >= targetZoom) return 1;
-  return targetZoom / zoom;
+function stableScale(zoom: number, anchorZoom: number): number {
+  if (zoom >= anchorZoom) return 1;
+  // Damped inverse: less dramatic at far zoom, preventing enormous elements
+  const ratio = anchorZoom / zoom;
+  // Clamp with a smooth ease-out curve
+  return Math.min(ratio, 4) * (1 - Math.exp(-ratio * 0.8)) / (1 - Math.exp(-4 * 0.8));
 }
 
-/* ═══════════════════════════════════════════════════════════════
+/**
+ * Smooth interpolation helper for progressive reveal.
+ * Maps a zoom value to a 0-1 range between start and end thresholds.
+ */
+function smoothStep(zoom: number, start: number, end: number): number {
+  const t = Math.max(0, Math.min(1, (zoom - start) / (end - start)));
+  return t * t * (3 - 2 * t); // Hermite smoothstep
+}
+
+/* ===================================================================
    Node Data Types
-   ═══════════════════════════════════════════════════════════════ */
+   =================================================================== */
 
 type WorkspaceNodeData = {
   workspace: WorkspaceData;
@@ -153,105 +163,115 @@ type GroupLabelNodeData = {
   zoom: number;
 };
 
-/* ═══════════════════════════════════════════════════════════════
-   Workspace Territory Node — Semantic Zoom Recomposition
+/* ===================================================================
+   Workspace Territory Node u2014 Semantic Zoom Recomposition
 
-   This node is the key architectural piece. Instead of rendering
-   a simple scaled header, it structurally recomposes based on
-   the current zoom tier:
+   LANDSCAPE: Dominant region with large legible name/emoji.
+              Territory background is strongly visible.
+              No items shown u2014 only identity.
 
-   LANDSCAPE: Large soft pastel region with centered name/emoji/status.
-              Reads as a meaningful envelope from far away.
-              Items are NOT shown — only the territory identity.
+   SUMMARY:   Title transitions to top-left anchored position SMOOTHLY.
+              Group headings begin appearing gradually.
+              Items fade in as compact chips.
+              Territory background softens progressively.
 
-   SUMMARY:   Territory fades to a lighter region.
-              Workspace name stays visible as a floating label.
-              Items begin appearing as compact chips below groups.
-
-   DETAIL:    Territory becomes the lightest wash.
-              Full item cards with previews become available.
-              Workspace label becomes a small anchored header.
-   ═══════════════════════════════════════════════════════════════ */
+   DETAIL:    Full content cards with previews.
+              Territory is lightest wash.
+              Title is a small persistent header.
+   =================================================================== */
 
 function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
-  const { workspace, zoomTier, zoomProgress, zoom, tint } = data;
+  const { workspace, zoom, tint } = data;
   const colors = getTerritoryColor(tint);
 
-  // Counter-scale to keep the identity readable at all zoom levels
-  const identityScale = stableScale(zoom, 0.25);
+  // Smooth transitions between states
+  const landscapeToSummary = smoothStep(zoom, 0.10, 0.22);
+  const summaryToDetail = smoothStep(zoom, 0.35, 0.55);
 
-  // Opacity of territory region increases at landscape, subtle at detail
-  const regionOpacity =
-    zoomTier === "landscape"
-      ? 0.9 + zoomProgress * 0.1
-      : zoomTier === "summary"
-        ? 0.7 - zoomProgress * 0.3
-        : 0.3;
+  // Territory region opacity adapts dynamically with zoom
+  const regionOpacity = 0.3 + (1 - landscapeToSummary) * 0.7;
 
-  // At landscape tier, show a large centered identity.
-  // At summary/detail, show a smaller anchored top-left label.
-  const isLandscape = zoomTier === "landscape";
+  // Identity scale: large at landscape, naturally shrinks as zoom increases
+  // Uses a damped curve to avoid enormously oversized text at far zoom
+  const identityScale = stableScale(zoom, 0.22);
+
+  // Blend between centered (landscape) and anchored (summary+) positioning
+  // via opacity crossfade for smooth transition
+  const showCentered = 1 - landscapeToSummary;
+  const showAnchored = landscapeToSummary;
 
   return (
     <div
       style={{ width: "100%", height: "100%", pointerEvents: "none" }}
       className="relative"
     >
-      {/* ── Soft pastel radial territory region ── */}
+      {/* Adaptive territory background u2014 scales with zoom/space */}
       <div
         className="absolute inset-0 rounded-[80px]"
         style={{
           opacity: regionOpacity,
           background: `
-            radial-gradient(ellipse 90% 80% at 50% 35%, ${colors.core} 0%, ${colors.mid} 40%, ${colors.outer} 70%, transparent 100%)
+            radial-gradient(
+              ellipse ${90 - summaryToDetail * 20}% ${80 - summaryToDetail * 15}% at 50% ${35 + summaryToDetail * 10}%,
+              ${colors.core} 0%,
+              ${colors.mid} ${40 + summaryToDetail * 15}%,
+              ${colors.outer} ${70 + summaryToDetail * 10}%,
+              transparent 100%
+            )
           `,
-          transition: "opacity 0.4s ease",
+          transition: "opacity 0.3s ease",
         }}
       />
 
-      {/* ── Territory boundary — soft dashed border for orientation ── */}
+      {/* Soft blended envelope boundary — no dashed borders per spec */}
       <div
-        className="absolute inset-[12px] rounded-[72px]"
+        className="absolute inset-[6px] rounded-[80px]"
         style={{
-          border: `2px dashed ${colors.border}`,
-          opacity: zoomTier === "landscape" ? 0.5 : zoomTier === "summary" ? 0.3 : 0.15,
+          background: `
+            radial-gradient(
+              ellipse 100% 100% at 50% 50%,
+              transparent 85%,
+              ${colors.mid} 92%,
+              ${colors.outer} 97%,
+              transparent 100%
+            )
+          `,
+          opacity: Math.max(0.08, 0.6 * (1 - landscapeToSummary * 0.5)),
           transition: "opacity 0.4s ease",
         }}
       />
 
-      {/* ── Identity layer ── */}
-      {isLandscape ? (
-        /* LANDSCAPE: Large centered identity */
+      {/* CENTERED identity (landscape) u2014 fades out smoothly */}
+      {showCentered > 0.01 && (
         <div
           className="absolute inset-0 flex flex-col items-center justify-center gap-8"
           style={{
             transform: `scale(${identityScale})`,
             transformOrigin: "center center",
-            transition: "transform 0.15s linear",
+            opacity: showCentered,
+            transition: "opacity 0.2s ease",
           }}
         >
-          {/* Emoji container */}
-          <div className="flex h-[280px] w-[280px] items-center justify-center rounded-[4rem] bg-[var(--bg-elevated)]/40 backdrop-blur-xl border border-[var(--border-default)]/15 shadow-[0_16px_48px_-12px_rgba(7,20,35,0.12)]">
-            <span className="text-[160px] leading-none" style={{ filter: "drop-shadow(0 6px 12px rgba(0,0,0,0.08))" }}>
+          <div className="flex h-[240px] w-[240px] items-center justify-center rounded-[3.5rem] bg-[var(--bg-elevated)]/40 backdrop-blur-xl border border-[var(--border-default)]/15 shadow-[0_16px_48px_-12px_rgba(7,20,35,0.12)]">
+            <span className="text-[120px] leading-none" style={{ filter: "drop-shadow(0 6px 12px rgba(0,0,0,0.08))" }}>
               {workspace.emoji}
             </span>
           </div>
 
-          {/* Name + meta */}
-          <div className="flex flex-col items-center gap-5">
-            <h3 className="font-bold text-[var(--text-primary)] text-[100px] tracking-[-0.02em] text-center max-w-[2400px] leading-[1.1]" style={{ textShadow: "0 3px 16px rgba(0,0,0,0.06)" }}>
+          <div className="flex flex-col items-center gap-4">
+            <h3 className="font-bold text-[var(--text-primary)] text-[80px] tracking-[-0.02em] text-center max-w-[2200px] leading-[1.1]" style={{ textShadow: "0 3px 16px rgba(0,0,0,0.06)" }}>
               {workspace.name}
             </h3>
-            <div className="flex items-center gap-6">
-              <span className="text-[40px] font-medium tracking-wide text-[var(--text-tertiary)] bg-[var(--bg-secondary)]/25 backdrop-blur-md px-10 py-4 rounded-full border border-[var(--border-default)]/15">
+            <div className="flex items-center gap-5">
+              <span className="text-[36px] font-medium tracking-wide text-[var(--text-tertiary)] bg-[var(--bg-secondary)]/25 backdrop-blur-md px-8 py-3 rounded-full border border-[var(--border-default)]/15">
                 {workspace.itemCount} item{workspace.itemCount !== 1 ? "s" : ""}
               </span>
-              <StatusDot status={workspace.status} className="h-8 w-8" />
+              <StatusDot status={workspace.status} className="h-6 w-6" />
             </div>
           </div>
 
-          {/* Landscape-only: item type summary chips */}
-          <div className="flex flex-wrap items-center justify-center gap-4 mt-4 max-w-[2000px]">
+          {/* Landscape summary chips */}
+          <div className="flex flex-wrap items-center justify-center gap-3 mt-2 max-w-[1800px]">
             {Object.entries(TYPE_GROUP_LABELS).map(([key, group]) => {
               const count = workspace.items.filter((i) =>
                 group.types.includes(i.itemType as CanonicalWorkspaceType)
@@ -260,7 +280,7 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
               return (
                 <span
                   key={key}
-                  className="text-[32px] font-medium text-[var(--text-tertiary)]/70 bg-[var(--bg-secondary)]/20 px-8 py-3 rounded-full"
+                  className="text-[28px] font-medium text-[var(--text-tertiary)]/60 bg-[var(--bg-secondary)]/20 px-6 py-2 rounded-full"
                 >
                   {group.label} {count}
                 </span>
@@ -268,36 +288,41 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
             })}
           </div>
         </div>
-      ) : (
-        /* SUMMARY / DETAIL: Smaller anchored top-left label */
+      )}
+
+      {/* ANCHORED identity (summary+) u2014 fades in smoothly */}
+      {showAnchored > 0.01 && (
         <div
-          className="absolute top-[60px] left-[80px] flex items-center gap-6 pointer-events-none z-10"
+          className="absolute top-[60px] left-[80px] flex items-center gap-5 pointer-events-none z-10"
           style={{
             transform: `scale(${stableScale(zoom, 0.35)})`,
             transformOrigin: "top left",
-            transition: "transform 0.15s linear",
+            opacity: showAnchored,
+            transition: "opacity 0.2s ease",
           }}
         >
-          <span className="text-[56px] leading-none">{workspace.emoji}</span>
-          <h3 className="font-semibold text-[var(--text-primary)] text-[52px] tracking-[-0.01em]" style={{ textShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+          <span className="text-[48px] leading-none">{workspace.emoji}</span>
+          <h3 className="font-semibold text-[var(--text-primary)] text-[44px] tracking-[-0.01em]" style={{ textShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
             {workspace.name}
           </h3>
-          <span className="text-[28px] font-medium text-[var(--text-tertiary)]/60 ml-4">
+          <span className="text-[24px] font-medium text-[var(--text-tertiary)]/50 ml-3">
             {workspace.itemCount}
           </span>
-          <StatusDot status={workspace.status} className="h-5 w-5" />
+          <StatusDot status={workspace.status} className="h-4 w-4" />
         </div>
       )}
     </div>
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   Group Label Node — scales stably with zoom
-   ═══════════════════════════════════════════════════════════════ */
+/* ===================================================================
+   Group Label Node u2014 appears gradually during summary tier
+   =================================================================== */
 
 function GroupLabelNode({ data }: { data: GroupLabelNodeData }) {
   const scale = stableScale(data.zoom, 0.35);
+  // Group labels start appearing at summary tier transition
+  const visibility = smoothStep(data.zoom, 0.16, 0.25);
 
   return (
     <div
@@ -305,33 +330,27 @@ function GroupLabelNode({ data }: { data: GroupLabelNodeData }) {
       style={{
         transform: `scale(${scale})`,
         transformOrigin: "left center",
-        transition: "transform 0.1s linear",
+        opacity: visibility,
+        transition: "opacity 0.15s ease",
       }}
     >
-      <span className="text-[52px] font-bold uppercase tracking-[0.14em] text-[var(--text-tertiary)]/50">
+      <span className="text-[44px] font-bold uppercase tracking-[0.14em] text-[var(--text-tertiary)]/50">
         {data.label}
       </span>
-      <span className="text-[38px] tabular-nums text-[var(--text-tertiary)]/35 font-semibold">
+      <span className="text-[32px] tabular-nums text-[var(--text-tertiary)]/30 font-semibold">
         {data.count}
       </span>
-      <div className="flex-1 h-[3px] bg-[var(--border-default)]/25 ml-6" />
+      <div className="flex-1 h-[3px] bg-[var(--border-default)]/20 ml-6" />
     </div>
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   Item Node — structural recomposition by zoom tier
+/* ===================================================================
+   Item Node u2014 progressive structural recomposition
 
-   LANDSCAPE: Items are NOT rendered (territory identity only).
-              This is enforced in buildNodes by not emitting item
-              nodes at landscape tier.
-
-   SUMMARY:   Compact chip — icon + title + status, no preview.
-              Stable perceived size via counter-scaling.
-
-   DETAIL:    Full card — icon, title, preview, meta row.
-              Or inline deep-edit content at very high zoom.
-   ═══════════════════════════════════════════════════════════════ */
+   Items fade in during summary transition, gain detail progressively.
+   At detail level, content expands but never becomes enormous.
+   =================================================================== */
 
 function ItemNode({ data }: { data: ItemNodeData }) {
   const { item, zoomTier, zoomProgress, zoom } = data;
@@ -346,14 +365,23 @@ function ItemNode({ data }: { data: ItemNodeData }) {
 
   const isSummary = zoomTier === "summary";
   const isDetail = zoomTier === "detail";
-  const showPreview = isDetail || (isSummary && zoomProgress > 0.7);
 
-  // Counter-scale to maintain stable perceived size
+  // Progressive reveal thresholds
+  const showPreview = isDetail || (isSummary && zoomProgress > 0.6);
+  const showMeta = isDetail || (isSummary && zoomProgress > 0.4);
+
+  // Item opacity fades in during summary tier
+  const itemVisibility = isSummary
+    ? smoothStep(zoom, 0.16, 0.25)
+    : 1;
+
+  // Counter-scale: clamped more tightly to prevent enormous items at deep zoom
   const scale = stableScale(zoom, 0.4);
 
   const canvasWidth = TERRITORY.ITEM_COL_WIDTH - 20;
+  // Items grow taller at detail level but don't dominate
   const canvasHeight = isDetail && zoomProgress > 0.5
-    ? TERRITORY.ITEM_ROW_HEIGHT * 2.5
+    ? Math.min(TERRITORY.ITEM_ROW_HEIGHT * 2.2, 580)
     : TERRITORY.ITEM_ROW_HEIGHT - 20;
 
   const dynamicBorderWidth = Math.max(1, 1 / zoom);
@@ -372,7 +400,8 @@ function ItemNode({ data }: { data: ItemNodeData }) {
         height: canvasHeight,
         transform: `scale(${scale})`,
         transformOrigin: "top left",
-        transition: "transform 0.12s linear",
+        opacity: itemVisibility,
+        transition: "opacity 0.2s ease",
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -407,30 +436,22 @@ function ItemNode({ data }: { data: ItemNodeData }) {
                   : "bg-[var(--accent-cyan)]/30",
               )}
             />
-            <div
-              className={cn(
-                "h-[2px] transition-all duration-300",
-                isFocused
-                  ? "w-4 bg-[var(--accent-cyan)]/40"
-                  : "w-2 bg-[var(--accent-cyan)]/15",
-              )}
-            />
           </div>
         )}
 
         {isDetail && zoomProgress > 0.5 ? (
-          /* ── DETAIL TIER: Inline deep-edit content ── */
+          /* DETAIL TIER: Inline deep-edit content */
           <div className="flex-1 overflow-hidden w-full h-full pointer-events-auto bg-[var(--bg-elevated)]">
             {item.itemType === "thread" ? <ThreadContent item={item} /> : <ArtifactContent item={item} />}
           </div>
         ) : (
-          /* ── SUMMARY / early DETAIL: Structured card ── */
+          /* SUMMARY / early DETAIL: Structured card */
           <>
             {/* Header row */}
-            <div className={cn("flex items-center gap-4 px-6 pt-6", isSummary && zoomProgress < 0.4 && "pb-6")}>
+            <div className={cn("flex items-center gap-4 px-6 pt-5", isSummary && zoomProgress < 0.4 && "pb-5")}>
               <div
                 className={cn(
-                  "flex h-12 w-12 items-center justify-center rounded-[14px] transition-all duration-200 shrink-0",
+                  "flex h-11 w-11 items-center justify-center rounded-[13px] transition-all duration-200 shrink-0",
                   isFocused && "ring-1 ring-[var(--accent-cyan)]/20",
                 )}
                 style={{
@@ -439,12 +460,12 @@ function ItemNode({ data }: { data: ItemNodeData }) {
               >
                 {Icon && (
                   <Icon
-                    className="h-6 w-6"
+                    className="h-5.5 w-5.5"
                     style={{ color: meta?.color ?? "var(--text-secondary)" }}
                   />
                 )}
               </div>
-              <span className="flex-1 truncate text-xl font-semibold text-[var(--text-primary)] tracking-tight">
+              <span className="flex-1 truncate text-lg font-semibold text-[var(--text-primary)] tracking-tight">
                 {item.title}
               </span>
               <StatusDot
@@ -452,19 +473,19 @@ function ItemNode({ data }: { data: ItemNodeData }) {
               />
             </div>
 
-            {/* Preview + meta — progressively revealed */}
-            {(isSummary ? zoomProgress > 0.3 : true) && (
+            {/* Preview + meta u2014 progressively revealed */}
+            {showMeta && (
               <>
-                <div className="flex-1 flex flex-col justify-center min-h-0 mt-2 px-6">
+                <div className="flex-1 flex flex-col justify-center min-h-0 mt-1 px-6">
                   {showPreview && item.preview && (
-                    <p className="pl-[64px] text-base leading-[1.6] text-[var(--text-tertiary)] line-clamp-3">
+                    <p className="pl-[60px] text-[15px] leading-[1.6] text-[var(--text-tertiary)] line-clamp-3">
                       {item.preview}
                     </p>
                   )}
                 </div>
 
                 {/* Meta row */}
-                <div className="flex items-center justify-between pl-[88px] pr-6 mt-auto shrink-0 pb-6 pt-2">
+                <div className="flex items-center justify-between pl-[80px] pr-6 mt-auto shrink-0 pb-5 pt-1">
                   <span
                     className="rounded-md px-2 py-1 text-sm font-semibold uppercase tracking-[0.1em]"
                     style={{
@@ -491,13 +512,14 @@ function ItemNode({ data }: { data: ItemNodeData }) {
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   Build Nodes — layout engine with semantic zoom awareness
+/* ===================================================================
+   Build Nodes u2014 layout engine with semantic zoom awareness
 
-   Key change: at LANDSCAPE tier, item nodes are NOT emitted.
-   Territory identity (name, emoji, summary chips) is enough.
-   Items appear only at SUMMARY and DETAIL tiers.
-   ═══════════════════════════════════════════════════════════════ */
+   Key changes:
+   - Items appear DURING summary tier transition, not only after
+   - Group labels appear earlier and gradually
+   - Layout is tighter to prevent empty space at deep zoom
+   =================================================================== */
 
 function buildNodes(
   workspaces: WorkspaceData[],
@@ -509,15 +531,20 @@ function buildNodes(
   const nodes: Node[] = [];
   const isLandscape = zoomTier === "landscape";
 
+  // At deep zoom, don't make rows too tall to prevent dominance
   const rowHeight =
-    zoomTier === "detail" ? TERRITORY.ITEM_ROW_HEIGHT * 2.6 : TERRITORY.ITEM_ROW_HEIGHT;
+    zoomTier === "detail"
+      ? Math.min(TERRITORY.ITEM_ROW_HEIGHT * 2.2, 580)
+      : TERRITORY.ITEM_ROW_HEIGHT;
+
+  // Show items earlier: even at late landscape (approaching summary)
+  const showItems = !isLandscape || (isLandscape && zoomProgress > 0.85);
 
   workspaces.forEach((ws, idx) => {
     const col = idx % TERRITORY.COLS;
     const row = Math.floor(idx / TERRITORY.COLS);
     const tint = dominantTint(ws);
 
-    // Compute dynamic territory dimensions based on content
     const grouped: Record<string, WorkspaceItemData[]> = {};
     for (const item of ws.items) {
       const key = item.itemType;
@@ -525,12 +552,12 @@ function buildNodes(
       grouped[key].push(item);
     }
 
-    let requiredHeight = 900; // Header area
+    let requiredHeight = 700; // Header area (smaller to reduce bottom empty space)
     for (const [, group] of Object.entries(TYPE_GROUP_LABELS)) {
       const items = group.types.flatMap((t) => grouped[t] ?? []);
       if (items.length > 0) {
         requiredHeight +=
-          120 + Math.ceil(items.length / TERRITORY.ITEMS_PER_ROW) * rowHeight + 40;
+          100 + Math.ceil(items.length / TERRITORY.ITEMS_PER_ROW) * rowHeight + 30;
       }
     }
     const territoryHeight = Math.max(TERRITORY.HEIGHT, requiredHeight);
@@ -539,7 +566,7 @@ function buildNodes(
       80 + TERRITORY.ITEMS_PER_ROW * TERRITORY.ITEM_COL_WIDTH + 60,
     );
 
-    // Territory node u2014 always present
+    // Territory node
     nodes.push({
       id: `ws-${ws.id}`,
       type: "workspaceTerritory",
@@ -553,22 +580,19 @@ function buildNodes(
       style: { width: territoryWidth, height: territoryHeight, zIndex: 0 },
     });
 
-    // u2500u2500 Items: only emitted at summary+ tiers u2500u2500
-    if (isLandscape) return;
+    // Items: shown during summary+ AND late landscape for gradual reveal
+    if (!showItems) return;
 
-    // u2500u2500 Lens-based layout: byType, byTopic, timeline u2500u2500
     if (viewMode === "timeline") {
-      // Timeline lens: sort all items by updatedAt, layout in a single column
       const sortedItems = [...ws.items].sort(
         (a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0),
       );
 
-      // Timeline header
       nodes.push({
         id: `group-${ws.id}-timeline`,
         type: "groupLabel",
         parentId: `ws-${ws.id}`,
-        position: { x: 80, y: 900 },
+        position: { x: 80, y: 700 },
         data: {
           label: "Recent Activity",
           variant: "neutral",
@@ -589,7 +613,7 @@ function buildNodes(
           parentId: `ws-${ws.id}`,
           position: {
             x: 80 + itemCol * TERRITORY.ITEM_COL_WIDTH,
-            y: 1020 + itemRow * rowHeight,
+            y: 800 + itemRow * rowHeight,
           },
           data: {
             item,
@@ -605,13 +629,11 @@ function buildNodes(
         });
       });
     } else if (viewMode === "byTopic") {
-      // byTopic lens: group by workspace (since items already belong to workspaces)
-      // Within a single workspace, just list all items flat
       nodes.push({
         id: `group-${ws.id}-topic`,
         type: "groupLabel",
         parentId: `ws-${ws.id}`,
-        position: { x: 80, y: 900 },
+        position: { x: 80, y: 700 },
         data: {
           label: ws.name,
           variant: tint,
@@ -632,7 +654,7 @@ function buildNodes(
           parentId: `ws-${ws.id}`,
           position: {
             x: 80 + itemCol * TERRITORY.ITEM_COL_WIDTH,
-            y: 1020 + itemRow * rowHeight,
+            y: 800 + itemRow * rowHeight,
           },
           data: {
             item,
@@ -649,7 +671,7 @@ function buildNodes(
       });
     } else {
       // Default byType lens
-      let groupY = 900;
+      let groupY = 700;
 
       for (const [, group] of Object.entries(TYPE_GROUP_LABELS)) {
         const items = group.types.flatMap((t) => grouped[t] ?? []);
@@ -671,7 +693,7 @@ function buildNodes(
           style: { width: TERRITORY.WIDTH - 160, zIndex: 1 },
         });
 
-        groupY += 120;
+        groupY += 100;
 
         items.forEach((item, itemIdx) => {
           const itemCol = itemIdx % TERRITORY.ITEMS_PER_ROW;
@@ -699,7 +721,7 @@ function buildNodes(
         });
 
         groupY +=
-          Math.ceil(items.length / TERRITORY.ITEMS_PER_ROW) * rowHeight + 40;
+          Math.ceil(items.length / TERRITORY.ITEMS_PER_ROW) * rowHeight + 30;
       }
     }
   });
@@ -707,7 +729,7 @@ function buildNodes(
   return nodes;
 }
 
-/* ── Node Type Registry ── */
+/* --- Node Type Registry --- */
 
 const NODE_TYPES = {
   workspaceTerritory: WorkspaceTerritoryNode,
@@ -715,14 +737,9 @@ const NODE_TYPES = {
   groupLabel: GroupLabelNode,
 };
 
-/* ═══════════════════════════════════════════════════════════════
+/* ===================================================================
    Fixed Screen-Size Background
-
-   The background pattern (dots/grid) must NOT scale with zoom.
-   It uses a CSS overlay that tiles at a fixed pixel size and
-   does NOT respond to viewport transforms. This creates a
-   trustworthy spatial reference system.
-   ═══════════════════════════════════════════════════════════════ */
+   =================================================================== */
 
 function CanvasBackground({ mode }: { mode: "dots" | "blank" | "grid" }) {
   if (mode === "blank") return null;
@@ -742,9 +759,9 @@ function CanvasBackground({ mode }: { mode: "dots" | "blank" | "grid" }) {
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   Canvas Inner — the ReactFlow instance
-   ═══════════════════════════════════════════════════════════════ */
+/* ===================================================================
+   Canvas Inner u2014 the ReactFlow instance
+   =================================================================== */
 
 type WorkspaceCanvasProps = {
   onNodeClick?: (workspaceId: string) => void;
@@ -768,7 +785,7 @@ function WorkspaceCanvasInner({
 
   const { setCenter } = useReactFlow();
 
-  // ── Fly-to-workspace animation (triggered by dock or commitToWorkspace) ──
+  // Fly-to-workspace animation
   const lastFlyToRef = useRef<number>(0);
   useEffect(() => {
     if (!flyToTarget || flyToTarget.requestId === lastFlyToRef.current) return;
@@ -779,7 +796,6 @@ function WorkspaceCanvasInner({
       duration: 700,
     });
 
-    // Clear after animation
     const timer = setTimeout(() => clearFlyToTarget(), 750);
     return () => clearTimeout(timer);
   }, [flyToTarget, setCenter, clearFlyToTarget]);
@@ -859,10 +875,8 @@ function WorkspaceCanvasInner({
 
   return (
     <div className="h-full w-full relative bg-[var(--bg-primary)]">
-      {/* Fixed screen-size background pattern — does not scale with zoom */}
       <CanvasBackground mode={backgroundMode} />
 
-      {/* ReactFlow canvas */}
       <div className="h-full w-full relative z-[1]">
         <ReactFlow
           nodes={nodes}
@@ -889,7 +903,7 @@ function WorkspaceCanvasInner({
         />
       </div>
 
-      {/* Context Menu — shared action menu for pane, item-specific for nodes */}
+      {/* Context Menu */}
       {contextMenu && (
         <div
           className="fixed z-[100] min-w-[180px] rounded-2xl border border-[var(--border-default)]/50 bg-[var(--bg-elevated)]/95 p-1.5 shadow-[0_12px_28px_-12px_rgba(8,22,40,0.30)] backdrop-blur-xl"
@@ -914,7 +928,7 @@ function WorkspaceCanvasInner({
                 className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               >
                 <ExternalLink className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
-                <span className="flex-1 text-left">Open in Right Hub</span>
+                <span className="flex-1 text-left">Open in Deep Edit</span>
               </button>
               <button
                 type="button"

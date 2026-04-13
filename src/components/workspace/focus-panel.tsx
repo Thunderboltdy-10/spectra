@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowUpRight, BookOpen, Clock, Send, Sparkles, X } from "lucide-react";
+import { ArrowUpRight, Clock, Send, Sparkles, X } from "lucide-react";
 import {
   CANONICAL_WORKSPACE_TYPE_META,
   type CanonicalWorkspaceType,
@@ -60,34 +60,32 @@ function formatTime(timestamp?: number): string {
   return `${Math.floor(diff / 86_400_000)}d ago`;
 }
 
-export function ThreadContent({ }: { item: WorkspaceItemData }) {
+export function ThreadContent({ item }: { item: WorkspaceItemData }) {
   const [message, setMessage] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto px-4 py-4">
-        <div className="flex flex-col gap-3">
-          <div className="rounded-2xl bg-[var(--bg-secondary)] px-3.5 py-3">
-            <p className="text-[13px] leading-relaxed text-[var(--text-primary)]">
-              Can you explain centripetal acceleration and how it relates to circular motion?
-            </p>
-            <span className="mt-1.5 block text-[10px] text-[var(--text-tertiary)]">You · 2m ago</span>
-          </div>
-          <div className="rounded-2xl border border-[var(--border-default)]/30 bg-[var(--bg-elevated)] px-3.5 py-3">
-            <div className="mb-1.5 flex items-center gap-1.5">
-              <Sparkles className="h-3 w-3 text-[var(--accent-cyan)]" />
-              <span className="text-[10px] font-medium text-[var(--accent-cyan)]">AI Tutor</span>
+        {item.preview ? (
+          <div className="flex flex-col gap-3">
+            <div className="rounded-2xl border border-[var(--border-default)]/20 bg-[var(--bg-elevated)] px-3.5 py-3">
+              <div className="mb-1.5 flex items-center gap-1.5">
+                <Sparkles className="h-3 w-3 text-[var(--accent-cyan)]" />
+                <span className="text-[10px] font-medium text-[var(--accent-cyan)]">Thread</span>
+              </div>
+              <p className="text-[13px] leading-relaxed text-[var(--text-primary)]">
+                {item.preview}
+              </p>
             </div>
-            <p className="text-[13px] leading-relaxed text-[var(--text-primary)]">
-              Centripetal acceleration is the acceleration directed toward the center of a circular path. For an object moving in a circle of radius r with speed v, the centripetal acceleration is a = v²/r.
-            </p>
-            <p className="mt-2 text-[13px] leading-relaxed text-[var(--text-primary)]">
-              This acceleration doesn&apos;t change the object&apos;s speed — it changes direction. Without centripetal force, the object would continue in a straight line.
-            </p>
-            <span className="mt-1.5 block text-[10px] text-[var(--text-tertiary)]">AI · 2m ago</span>
           </div>
-        </div>
+        ) : (
+          <div className="flex h-40 flex-col items-center justify-center text-center">
+            <Sparkles className="mb-2 h-5 w-5 text-[var(--accent-cyan)] opacity-25" />
+            <span className="text-[12px] text-[var(--text-tertiary)]">No messages yet</span>
+            <span className="mt-1 text-[10px] text-[var(--text-tertiary)]/50">Start a conversation below</span>
+          </div>
+        )}
       </div>
       <div className="shrink-0 border-t border-[var(--border-default)]/30 px-4 py-3">
         <div className="flex items-center gap-2 rounded-xl border border-[var(--border-default)]/50 bg-[var(--bg-secondary)] px-3 py-2">
@@ -151,49 +149,11 @@ export function ArtifactContent({ item }: { item: WorkspaceItemData }) {
         {item.preview ? <p className="mb-4 text-[13px] leading-relaxed text-[var(--text-secondary)]">{item.preview}</p> : null}
 
         <div className="rounded-2xl border border-[var(--border-default)]/30 bg-[var(--bg-secondary)]/40 p-4">
-          {item.itemType === "note" ? (
-            <div className="flex flex-col gap-2">
-              <div className="h-3 w-[85%] rounded bg-[var(--text-primary)]/[0.06]" />
-              <div className="h-3 w-[72%] rounded bg-[var(--text-primary)]/[0.06]" />
-              <div className="h-3 w-[90%] rounded bg-[var(--text-primary)]/[0.06]" />
-              <div className="h-3 w-[60%] rounded bg-[var(--text-primary)]/[0.06]" />
-              <div className="mt-2 h-3 w-[78%] rounded bg-[var(--text-primary)]/[0.06]" />
-              <div className="h-3 w-[66%] rounded bg-[var(--text-primary)]/[0.06]" />
-              <p className="mt-3 text-[11px] text-[var(--text-tertiary)]/60">Rich editor content loads here — connected to artifact in later waves</p>
-            </div>
-          ) : item.itemType === "code" ? (
-            <div className="flex flex-col gap-1.5 font-mono text-[11px] text-[var(--text-secondary)]/60">
-              <span className="text-[var(--accent-cyan)]/50">def</span>
-              <div className="ml-0 h-3 w-[80%] rounded bg-[var(--text-primary)]/[0.05]" />
-              <div className="ml-4 h-3 w-[65%] rounded bg-[var(--text-primary)]/[0.05]" />
-              <div className="ml-4 h-3 w-[70%] rounded bg-[var(--text-primary)]/[0.05]" />
-              <div className="ml-8 h-3 w-[50%] rounded bg-[var(--text-primary)]/[0.05]" />
-              <p className="mt-3 font-sans text-[11px] text-[var(--text-tertiary)]/60">Code editor loads here</p>
-            </div>
-          ) : item.itemType === "flashcard_deck" ? (
-            <div className="flex flex-col items-center gap-3 py-4">
-              <div className="flex h-28 w-48 items-center justify-center rounded-xl border border-[var(--border-default)]/30 bg-[var(--bg-elevated)]/60">
-                <BookOpen className="h-6 w-6 text-[var(--text-tertiary)]/30" />
-              </div>
-              <p className="text-[11px] text-[var(--text-tertiary)]/60">Flashcard review interface loads here</p>
-            </div>
-          ) : item.itemType === "quiz" ? (
-            <div className="flex flex-col gap-3 py-2">
-              <div className="rounded-xl border border-[var(--border-default)]/20 bg-[var(--bg-elevated)]/40 px-3 py-2.5">
-                <div className="mb-2 h-3 w-[70%] rounded bg-[var(--text-primary)]/[0.06]" />
-                <div className="ml-1 flex flex-col gap-1.5">
-                  <div className="h-2.5 w-[55%] rounded bg-[var(--text-primary)]/[0.04]" />
-                  <div className="h-2.5 w-[50%] rounded bg-[var(--text-primary)]/[0.04]" />
-                  <div className="h-2.5 w-[60%] rounded bg-[var(--text-primary)]/[0.04]" />
-                </div>
-              </div>
-              <p className="text-[11px] text-[var(--text-tertiary)]/60">Quiz interface loads here</p>
-            </div>
-          ) : (
-            <p className="text-[12px] text-[var(--text-tertiary)]">
-              Deep edit view for <span className="font-medium text-[var(--text-secondary)]">{meta?.label ?? item.itemType}</span> items loads here.
-            </p>
-          )}
+          <p className="text-[13px] leading-relaxed text-[var(--text-secondary)]">
+            {item.preview || (
+              <span className="text-[var(--text-tertiary)]/50 italic">No content yet</span>
+            )}
+          </p>
         </div>
 
         <div className="mt-4 rounded-2xl border border-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_4%,var(--bg-secondary))] px-3.5 py-3">

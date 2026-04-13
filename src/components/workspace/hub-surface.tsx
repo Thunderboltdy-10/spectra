@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState, useEffect } from "react";
-import { Pin, PinOff, Lock, Unlock } from "lucide-react";
+import { Lock, Unlock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { HubEdge } from "@/lib/workspace/contracts";
 
@@ -158,34 +158,38 @@ export function HubSurface({
             expandedClassName,
           )}
         >
-          <div className="relative overflow-hidden rounded-[28px] border border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/96 backdrop-blur-xl shadow-[0_18px_44px_-18px_rgba(8,22,40,0.28)]">
-            {/* Lock/Pin controls */}
+          <div className="group/hub relative overflow-hidden rounded-[28px] border border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/96 backdrop-blur-xl shadow-[0_18px_44px_-18px_rgba(8,22,40,0.28)]">
+            {/* Single lock control — only shows on hover, no close/pin clutter */}
             {(onToggleLock || onTogglePin) && (
-              <div className="absolute right-2.5 top-2.5 z-[60] flex items-center gap-1">
-                {onTogglePin ? (
+              <div className="absolute right-2.5 top-2.5 z-[60] flex items-center gap-1 opacity-0 group-hover/hub:opacity-100 transition-opacity duration-200">
+                {onTogglePin && (
                   <button
                     type="button"
                     onClick={onTogglePin}
-                    className="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--bg-secondary)]/80 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                  >
-                    {pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
-                  </button>
-                ) : null}
-                {onToggleLock ? (
-                  <button
-                    type="button"
-                    onClick={onToggleLock}
                     className={cn(
-                      "flex h-7 w-7 items-center justify-center rounded-lg transition-colors shadow-sm border border-[var(--border-default)]/20",
-                      locked
+                      "flex h-7 min-w-[36px] items-center justify-center rounded-lg transition-colors shadow-sm border border-[var(--border-default)]/20 px-2 text-[10px] font-semibold",
+                      pinned
                         ? "bg-[var(--bg-elevated)] text-[var(--accent-cyan)] ring-1 ring-[var(--accent-cyan)]/20"
                         : "bg-[var(--bg-elevated)]/80 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
                     )}
-                    title={locked ? "Unlock" : "Lock"}
+                    title={pinned ? "Unpin" : "Pin"}
                   >
-                    {locked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
+                    {pinned ? "Pin" : "Hub"}
                   </button>
-                ) : null}
+                )}
+                <button
+                  type="button"
+                  onClick={onToggleLock}
+                  className={cn(
+                    "flex h-7 w-7 items-center justify-center rounded-lg transition-colors shadow-sm border border-[var(--border-default)]/20",
+                    locked
+                      ? "bg-[var(--bg-elevated)] text-[var(--accent-cyan)] ring-1 ring-[var(--accent-cyan)]/20 !opacity-100"
+                      : "bg-[var(--bg-elevated)]/80 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+                  )}
+                  title={locked ? "Unlock" : "Lock open"}
+                >
+                  {locked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
+                </button>
               </div>
             )}
             {children}

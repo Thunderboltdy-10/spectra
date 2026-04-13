@@ -12,7 +12,7 @@ import {
 import { TimerWidget } from "@/components/workspace/timer-widget";
 import { UtilityHubGroup } from "@/components/workspace/utility-hub-group";
 import { QuickNotesHub } from "@/components/workspace/quick-notes-hub";
-import { LensHub } from "@/components/workspace/lens-hub";
+// LensHub merged into UtilityHubGroup
 import {
   PlannerEdge,
   type PlannerTask,
@@ -24,6 +24,7 @@ import {
   dismissCommandResult,
   reopenCommandResult,
 } from "@/hooks/use-workspace-data";
+import { notifyWorkspaceContentMutated } from "@/lib/workspace/events";
 
 /* ─── Demo Fallback Data ──────────────────────────────── */
 
@@ -68,7 +69,6 @@ export default function WorkspacePage() {
     openDeepEdit,
     closeDeepEdit,
     toggleDeepEditLock,
-    toggleDeepEditPin,
     deepEditTargets,
     closeAllDeepEdits,
     pushResultCard,
@@ -202,12 +202,48 @@ export default function WorkspacePage() {
     [workspaces, handleItemClick],
   );
 
+  const createWorkspaceAction = useCallback(async (payload: { title: string; description?: string; emoji?: string }) => {
+    const response = await fetch("/api/workspace-data", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "createWorkspace",
+        ...payload,
+      }),
+    });
+    if (!response.ok) throw new Error("Failed to create workspace");
+    const data = (await response.json()) as { workstreamId?: string };
+    notifyWorkspaceContentMutated({ refreshWorkstreams: true, refreshHub: true });
+    refreshData();
+    if (data.workstreamId) {
+      flyToWorkspace(data.workstreamId);
+    }
+  }, [flyToWorkspace, refreshData]);
+
+  const createItemAction = useCallback(async (payload: Record<string, unknown>) => {
+    const response = await fetch("/api/workspace-data", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error("Failed workspace command");
+    notifyWorkspaceContentMutated({
+      workstreamId: committedWorkspaceId ?? undefined,
+      refreshHub: true,
+      refreshWorkstreams: true,
+    });
+    refreshData();
+    return response.json();
+  }, [committedWorkspaceId, refreshData]);
+
   /* ─── Command bar: uses result card stack ─── */
-  const handleSendMessage = useCallback((message: string) => {
+  const handleSendMessage = useCallback(async (message: string) => {
     const cardId = `rc-${Date.now()}`;
-    const actionType = message.startsWith("/")
+    const normalized = message.trim();
+    const lowered = normalized.toLowerCase();
+    const actionType = normalized.startsWith("/")
       ? "created" as const
-      : message.startsWith("?")
+      : normalized.startsWith("?")
         ? "searched" as const
         : "answered" as const;
 
@@ -218,14 +254,89 @@ export default function WorkspacePage() {
       actionType,
     });
 
-    // Simulate completion after delay (replaced by real AI backend when connected)
-    setTimeout(() => {
+    try {
+      if (normalized.startsWith("?") || lowered.startsWith("search ") || lowered.startsWith("find ")) {
+        const query = normalized.replace(/^\?/, "").replace(/^(search|find)\s+/i, "").trim();
+        const result = await createItemAction({
+          action: "search",
+          workstreamId: committedWorkspaceId ?? undefined,
+          query,
+          limit: 8,
+        }) as { results?: Array<{ title: string; workspaceTitle?: string }> };
+        updateResultCard(cardId, {
+          state: "done",
+          summary: result.results?.length
+            ? `Found ${result.results.length} result${result.results.length === 1 ? "" : "s"}${result.results[0]?.workspaceTitle ? ` in ${result.results[0].workspaceTitle}` : ""}`
+            : "No matching workspace results",
+        });
+        return;
+      }
+
+      if (lowered.startsWith("/note") || lowered.startsWith("create note")) {
+        if (!committedWorkspaceId) {
+          throw new Error("Open a workspace before creating a note");
+        }
+        const title = normalized.replace(/^\/note\s*/i, "").replace(/^create note\s*/i, "").trim() || "Untitled note";
+        await createItemAction({
+          action: "createNote",
+          workstreamId: committedWorkspaceId,
+          title,
+          content: "",
+        });
+        updateResultCard(cardId, { state: "done", summary: `Created note: ${title}` });
+        return;
+      }
+
+      if (lowered.startsWith("/task") || lowered.startsWith("create task")) {
+        if (!committedWorkspaceId) {
+          throw new Error("Open a workspace before creating a task");
+        }
+        const title = normalized.replace(/^\/task\s*/i, "").replace(/^create task\s*/i, "").trim() || "New task";
+        await createItemAction({
+          action: "createPlannerItem",
+          workstreamId: committedWorkspaceId,
+          title,
+          type: "deadline",
+          priority: "medium",
+        });
+        updateResultCard(cardId, { state: "done", summary: `Added task: ${title}` });
+        return;
+      }
+
+      if (lowered.startsWith("/thread") || lowered.startsWith("create thread")) {
+        if (!committedWorkspaceId) {
+          throw new Error("Open a workspace before creating a thread");
+        }
+        const title = normalized.replace(/^\/thread\s*/i, "").replace(/^create thread\s*/i, "").trim() || "New thread";
+        await createItemAction({
+          action: "createThread",
+          workstreamId: committedWorkspaceId,
+          title,
+        });
+        updateResultCard(cardId, { state: "done", summary: `Created thread: ${title}` });
+        return;
+      }
+
+      if (lowered.startsWith("/workspace") || lowered.startsWith("create workspace")) {
+        const title = normalized.replace(/^\/workspace\s*/i, "").replace(/^create workspace\s*/i, "").trim() || "New workspace";
+        await createWorkspaceAction({ title });
+        updateResultCard(cardId, { state: "done", summary: `Created workspace: ${title}` });
+        return;
+      }
+
       updateResultCard(cardId, {
         state: "done",
-        summary: `AI processed: "${message.slice(0, 60)}${message.length > 60 ? "..." : ""}"`,
+        summary: committedWorkspaceId
+          ? `Workspace command captured for ${committedWorkspace?.name ?? "workspace"}`
+          : `Global command captured`,
       });
-    }, 1800);
-  }, [pushResultCard, updateResultCard]);
+    } catch (error) {
+      updateResultCard(cardId, {
+        state: "done",
+        summary: error instanceof Error ? error.message : "Workspace command failed",
+      });
+    }
+  }, [pushResultCard, updateResultCard, createItemAction, committedWorkspaceId, committedWorkspace?.name, createWorkspaceAction]);
 
   /* ─── Dismiss/reopen: real backend when live, store-only otherwise ─── */
   const handleDismissResultCard = useCallback(
@@ -250,19 +361,45 @@ export default function WorkspacePage() {
 
   const noop = useCallback(() => {}, []);
 
+  const livePlannerTasks = useMemo<PlannerTask[]>(() => {
+    if (!committedWorkspace) return DEMO_PLANNER_TASKS;
+    return committedWorkspace.items
+      .filter((item) => item.itemType === "planner")
+      .map((item, index) => ({
+        id: item.id,
+        title: item.title,
+        workspaceName: committedWorkspace.name,
+        dueDate: undefined,
+        priority: index === 0 ? "high" : "medium",
+        status: item.status === "completed" ? "completed" : item.status === "active" ? "in_progress" : "pending",
+      }));
+  }, [committedWorkspace]);
+
   const handleTaskClick = useCallback(
     (taskId: string) => {
-      const task = DEMO_PLANNER_TASKS.find((t) => t.id === taskId);
-      if (task) {
-        console.log("[workspace] Task clicked:", task.title);
+      const taskItem = workspaces.flatMap((w) => w.items).find((item) => item.id === taskId);
+      if (taskItem) {
+        handleItemClick(taskItem);
       }
     },
-    [],
+    [workspaces, handleItemClick],
   );
 
-  const handleToggleTask = useCallback((taskId: string) => {
-    console.log("[workspace] Toggle task:", taskId);
-  }, []);
+  const handleToggleTask = useCallback(async (taskId: string) => {
+    const workspace = workspaces.find((ws) => ws.items.some((item) => item.id === taskId));
+    const task = workspace?.items.find((item) => item.id === taskId);
+    if (!task || !workspace) return;
+    await fetch("/api/planner-items", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        plannerItemId: taskId,
+        status: task.status === "completed" ? "pending" : "completed",
+      }),
+    }).catch(() => undefined);
+    notifyWorkspaceContentMutated({ workstreamId: workspace.id, refreshHub: true });
+    refreshData();
+  }, [workspaces, refreshData]);
 
   // Global keyboard: Escape closes deep edits
   useEffect(() => {
@@ -319,14 +456,13 @@ export default function WorkspacePage() {
             pinned={target.pinned}
             onClose={() => closeDeepEdit(target.item.id)}
             onToggleLock={() => toggleDeepEditLock(target.item.id)}
-            onTogglePin={() => toggleDeepEditPin(target.item.id)}
           />
         ))}
       </AnimatePresence>
 
       {/* Hub ecology: Left-edge planner (above dock) */}
       <PlannerEdge
-        tasks={DEMO_PLANNER_TASKS}
+        tasks={livePlannerTasks.length > 0 ? livePlannerTasks : DEMO_PLANNER_TASKS}
         onTaskClick={handleTaskClick}
         onToggleTask={handleToggleTask}
       />
@@ -342,8 +478,7 @@ export default function WorkspacePage() {
       {/* Hub ecology: Top-right utility controls (background + hub visibility) */}
       <UtilityHubGroup />
 
-      {/* Hub ecology: Top-center lens switcher */}
-      <LensHub />
+      {/* LensHub merged into UtilityHubGroup above */}
 
       {/* Hub ecology: Left-edge quick notes (~3/4 down) */}
       <QuickNotesHub />
@@ -354,11 +489,27 @@ export default function WorkspacePage() {
         onSendMessage={handleSendMessage}
         onDismissResultCard={handleDismissResultCard}
         onReopenResultCard={handleReopenResultCard}
-        onCreateNote={noop}
-        onCreateCode={noop}
-        onCreateVisual={noop}
-        onCreateTask={noop}
-        onCreateThread={noop}
+        onCreateWorkspace={() => { void createWorkspaceAction({ title: "New workspace" }); }}
+        onCreateNote={() => {
+          if (!committedWorkspaceId) return;
+          void createItemAction({ action: "createNote", workstreamId: committedWorkspaceId, title: "Untitled note", content: "" });
+        }}
+        onCreateCode={() => {
+          if (!committedWorkspaceId) return;
+          void createItemAction({ action: "createArtifact", workstreamId: committedWorkspaceId, type: "code_project", title: "Untitled code", content: "// Start coding\n" });
+        }}
+        onCreateVisual={() => {
+          if (!committedWorkspaceId) return;
+          void createItemAction({ action: "createArtifact", workstreamId: committedWorkspaceId, type: "visualization", title: "Untitled visual", content: "<svg></svg>" });
+        }}
+        onCreateTask={() => {
+          if (!committedWorkspaceId) return;
+          void createItemAction({ action: "createPlannerItem", workstreamId: committedWorkspaceId, title: "New task", type: "deadline", priority: "medium" });
+        }}
+        onCreateThread={() => {
+          if (!committedWorkspaceId) return;
+          void createItemAction({ action: "createThread", workstreamId: committedWorkspaceId, title: "New thread" });
+        }}
         onCreateWithAi={noop}
       />
 

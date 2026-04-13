@@ -10,6 +10,8 @@ import {
   Zap,
   Layers,
   Sparkles,
+  LayoutGrid,
+  FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ResultCardStack } from "@/components/workspace/result-card";
@@ -19,8 +21,12 @@ import {
   ActionMenuContent,
   type ActionMenuItemId,
 } from "@/components/workspace/shared-action-menu";
+import {
+  CANONICAL_WORKSPACE_TYPE_META,
+  type CanonicalWorkspaceType,
+} from "@/lib/artifact-types";
 
-/* u2500u2500u2500 Action Mode Detection u2500u2500u2500 */
+/* --- Action Mode Detection --- */
 
 type CommandMode = "action" | "search" | "create";
 
@@ -31,7 +37,7 @@ function detectMode(value: string): CommandMode {
   return "action";
 }
 
-/* u2500u2500u2500 Mode Indicator u2500u2500u2500 */
+/* --- Mode Indicator --- */
 
 function ModeIndicator({ mode }: { mode: CommandMode }) {
   if (mode === "action") return null;
@@ -61,7 +67,45 @@ function ModeIndicator({ mode }: { mode: CommandMode }) {
   );
 }
 
-/* u2500u2500u2500 Suggestion Chips u2500u2500u2500 */
+/* --- Focus Context Tags (right side, beside send button) --- */
+
+function FocusContextTags() {
+  const committedWorkspaceId = useWorkspaceStore((s) => s.committedWorkspaceId);
+  const workspaces = useWorkspaceStore((s) => s.workspaces);
+  const focusedItemId = useWorkspaceStore((s) => s.focusedItemId);
+  const deepEditTargets = useWorkspaceStore((s) => s.deepEditTargets);
+
+  const workspace = workspaces.find((w) => w.id === committedWorkspaceId);
+  const deepItem = deepEditTargets.length > 0 ? deepEditTargets[deepEditTargets.length - 1]?.item : null;
+  const focusedItem = deepItem ?? (focusedItemId ? workspaces.flatMap((w) => w.items).find((i) => i.id === focusedItemId) : null);
+
+  if (!workspace && !focusedItem) return null;
+
+  return (
+    <div className="flex items-center gap-1 shrink-0">
+      {/* Workspace tag */}
+      {workspace && (
+        <div className="flex items-center gap-1 rounded-lg border border-[var(--border-default)]/25 bg-[var(--bg-secondary)]/50 px-2 py-1 max-w-[100px]">
+          <LayoutGrid className="h-2.5 w-2.5 shrink-0 text-[var(--accent-cyan)]/60" />
+          <span className="text-[9px] font-semibold text-[var(--text-secondary)] truncate">{workspace.emoji} {workspace.name}</span>
+        </div>
+      )}
+      {/* Focused item tag */}
+      {focusedItem && (
+        <div className="flex items-center gap-1 rounded-lg border border-[var(--border-default)]/25 bg-[var(--bg-secondary)]/50 px-2 py-1 max-w-[120px]">
+          {(() => {
+            const meta = CANONICAL_WORKSPACE_TYPE_META[focusedItem.itemType as CanonicalWorkspaceType];
+            const Icon = meta?.icon ?? FileText;
+            return <Icon className="h-2.5 w-2.5 shrink-0" style={{ color: meta?.color ?? 'var(--text-tertiary)' }} />;
+          })()}
+          <span className="text-[9px] font-semibold text-[var(--text-secondary)] truncate">{focusedItem.title}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* --- Suggestion Chips --- */
 
 function SuggestionChips({
   workspaceName,
@@ -95,7 +139,7 @@ function SuggestionChips({
   );
 }
 
-/* u2500u2500u2500 Command Bar Props u2500u2500u2500 */
+/* --- Command Bar Props --- */
 
 type CommandBarProps = {
   workspaceName?: string;
@@ -108,9 +152,7 @@ type CommandBarProps = {
   onCreateTask: () => void;
   onCreateThread: () => void;
   onCreateWithAi: () => void;
-  /** External dismiss handler (wired to backend when live) */
   onDismissResultCard?: (cardId: string) => void;
-  /** External reopen handler (wired to backend when live) */
   onReopenResultCard?: (cardId: string) => void;
   isStreaming?: boolean;
   disabled?: boolean;
@@ -138,7 +180,6 @@ export function CommandBar({
   const storeDismissResultCard = useWorkspaceStore((s) => s.dismissResultCard);
   const storeReopenResultCard = useWorkspaceStore((s) => s.reopenResultCard);
   const pendingResultCard = useWorkspaceStore((s) => s.pendingResultCard);
-  // Use external handlers when provided (backend-wired), otherwise fall back to store
   const dismissResultCard = onDismissResultCard ?? storeDismissResultCard;
   const reopenResultCard = onReopenResultCard ?? storeReopenResultCard;
   const focusedItemId = useWorkspaceStore((s) => s.focusedItemId);
@@ -166,7 +207,6 @@ export function CommandBar({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [menuOpen]);
 
-  // Auto-resize textarea
   const adjustTextareaHeight = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -209,7 +249,6 @@ export function CommandBar({
     textareaRef.current?.focus();
   }, []);
 
-  // Keyboard
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (menuOpen) {
       if (e.key === "ArrowDown") {
@@ -251,11 +290,11 @@ export function CommandBar({
     <div
       className={cn(
         "absolute bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2 transition-all duration-300",
-        !focused && !value ? "w-[min(480px,calc(100vw-160px))]" : "w-[min(640px,calc(100vw-160px))]",
+        !focused && !value ? "w-[min(520px,calc(100vw-160px))]" : "w-[min(680px,calc(100vw-160px))]",
         className
       )}
     >
-      {/* Result Card Stack (floats above command bar) */}
+      {/* Result Card Stack */}
       <div className="w-full px-2">
         <ResultCardStack
           cards={resultCards}
@@ -264,7 +303,6 @@ export function CommandBar({
           maxVisible={3}
         />
 
-        {/* Legacy pending result card */}
         {pendingResultCard && resultCards.length === 0 && (
           <div className="flex items-center gap-3 rounded-[16px] border border-[var(--border-default)]/35 bg-[var(--bg-elevated)]/90 px-3.5 py-2.5 shadow-[0_12px_32px_-16px_rgba(8,22,40,0.20)]">
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--bg-secondary))]">
@@ -282,7 +320,7 @@ export function CommandBar({
         )}
       </div>
 
-      {/* Suggestion chips u2014 contextual affordance */}
+      {/* Suggestion chips */}
       {!value && focused && (
         <div className="mb-1">
           <SuggestionChips
@@ -335,21 +373,14 @@ export function CommandBar({
           ) : null}
         </div>
 
-        {/* Workspace scope badge */}
-        {workspaceName ? (
-          <div className="flex items-center gap-1 self-end rounded-lg border border-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_6%,var(--bg-secondary))] px-2 py-1 mb-0.5">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--accent-cyan)]">{workspaceName}</span>
-          </div>
-        ) : null}
-
-        {/* Mode indicator */}
+        {/* Mode indicator (left side of input) */}
         {mode !== "action" && (
           <div className="self-end mb-0.5">
             <ModeIndicator mode={mode} />
           </div>
         )}
 
-        {/* Textarea u2014 multi-line support for premium feel */}
+        {/* Textarea */}
         <div className="flex min-w-0 flex-1 items-end gap-2">
           {!focused && !value ? (
             <Zap className="mb-2.5 h-4 w-4 shrink-0 text-[var(--accent-cyan)] opacity-40" />
@@ -364,15 +395,16 @@ export function CommandBar({
             onKeyDown={handleKeyDown}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
-            placeholder={hasContextualItem ? "Act on focused item..." : "Ask AI..."}
+            placeholder={hasContextualItem ? "Act on focused item\u2026" : "Ask AI, search, or create\u2026"}
             disabled={disabled && !isStreaming}
             className="min-w-0 flex-1 resize-none border-none bg-transparent py-1.5 text-[14px] leading-[1.5] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]/60"
             style={{ maxHeight: 120, minHeight: 24 }}
           />
         </div>
 
-        {/* Send / stop */}
-        <div className="shrink-0 self-end">
+        {/* Right side: focus context tags + send/stop */}
+        <div className="flex items-end gap-1.5 shrink-0 self-end">
+          <FocusContextTags />
           {isStreaming ? (
             <button
               type="button"

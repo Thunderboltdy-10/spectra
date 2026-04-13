@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   WorkspaceData,
   WorkspaceItemData,
 } from "@/lib/workspace/contracts";
 import type { ResultCardData, ResultActionType } from "@/components/workspace/result-card";
+import { subscribeWorkspaceContentMutated } from "@/lib/workspace/events";
 
 /* ─── Backend Shape (from getWorkspacePageData) ──────── */
 
@@ -216,6 +217,7 @@ export function useWorkspaceData(
   const [isLive, setIsLive] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
+  const cacheRef = useRef<Map<string, WorkspaceData>>(new Map());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -242,11 +244,7 @@ export function useWorkspaceData(
           const items = pageData.items.map((item) =>
             backendItemToFrontend(item, ws._id),
           );
-          // Also extract command results for the active workspace
-          setCommandResultCards(
-            pageData.commandResults.map(backendResultToCard),
-          );
-          return {
+          const fullWorkspace: WorkspaceData = {
             id: ws._id,
             name: ws.title,
             emoji: ws.emoji ?? "📁",
@@ -255,7 +253,31 @@ export function useWorkspaceData(
             lastActivity: ws.lastActivityAt ?? ws.updatedAt,
             items,
           };
+          cacheRef.current.set(ws._id, fullWorkspace);
+          while (cacheRef.current.size > 6) {
+            const firstKey = cacheRef.current.keys().next().value;
+            if (!firstKey) break;
+            cacheRef.current.delete(firstKey);
+          }
+          // Also extract command results for the active workspace
+          setCommandResultCards(
+            pageData.commandResults.map(backendResultToCard),
+          );
+          return fullWorkspace;
         }
+      }
+
+      const cached = cacheRef.current.get(ws._id);
+      if (cached) {
+        cacheRef.current.delete(ws._id);
+        cacheRef.current.set(ws._id, cached);
+        return {
+          ...cached,
+          name: ws.title,
+          emoji: ws.emoji ?? cached.emoji,
+          status: mapWorkspaceStatus(ws.status),
+          lastActivity: ws.lastActivityAt ?? ws.updatedAt,
+        };
       }
 
       // Minimal workspace card (no full page data fetch)
@@ -264,7 +286,7 @@ export function useWorkspaceData(
         name: ws.title,
         emoji: ws.emoji ?? "📁",
         status: mapWorkspaceStatus(ws.status),
-        itemCount: 0,
+        itemCount: ws.artifactCount ?? 0,
         lastActivity: ws.lastActivityAt ?? ws.updatedAt,
         items: [],
       };
@@ -278,6 +300,17 @@ export function useWorkspaceData(
   useEffect(() => {
     load();
   }, [load, refreshKey]);
+
+  useEffect(() => {
+    return subscribeWorkspaceContentMutated((detail) => {
+      if (!detail.refreshHub && !detail.refreshWorkstreams && !detail.workstreamId) {
+        return;
+      }
+      if (!activeWorkstreamId || !detail.workstreamId || detail.workstreamId === activeWorkstreamId || detail.refreshWorkstreams) {
+        setRefreshKey((k) => k + 1);
+      }
+    });
+  }, [activeWorkstreamId]);
 
   const refresh = useCallback(() => {
     setRefreshKey((k) => k + 1);

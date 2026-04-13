@@ -154,22 +154,6 @@ function readPersistedState(): PersistedTimerState | null {
 }
 
 function getInitialTimerState(): PersistedTimerState {
-  if (typeof window === "undefined") {
-    return {
-      phase: "work",
-      remainingMs: DEFAULT_WORK_MINUTES * 60 * 1000,
-      isRunning: false,
-      phaseEndAt: null,
-      phaseStartedAt: null,
-      completedSessions: 0,
-      workMinutes: DEFAULT_WORK_MINUTES,
-      breakMinutes: DEFAULT_BREAK_MINUTES,
-      workColor: "#06b6d4",
-      breakColor: "#22c55e",
-    };
-  }
-  const restored = readPersistedState();
-  if (restored) return restored;
   return {
     phase: "work",
     remainingMs: DEFAULT_WORK_MINUTES * 60 * 1000,
@@ -198,7 +182,7 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
   const [phaseStartedAt, setPhaseStartedAt] = useState<number | null>(initialState.phaseStartedAt);
   const [completedSessions, setCompletedSessions] = useState(initialState.completedSessions);
   const [controlFlash, setControlFlash] = useState<"start" | "pause" | null>(null);
-  const hydratedRef = useRef(true);
+  const hydratedRef = useRef(false);
   const transitionLockRef = useRef(false);
 
   const remainingSeconds = Math.max(0, Math.ceil(remainingMs / 1000));
@@ -245,7 +229,22 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
     );
   }, [display, isRunning, progress, phase]);
 
-  // Hydration now happens synchronously via getInitialTimerState in useState initializers.
+  useEffect(() => {
+    const restored = readPersistedState();
+    if (restored) {
+      setPhase(restored.phase);
+      setWorkMinutes(restored.workMinutes);
+      setBreakMinutes(restored.breakMinutes);
+      setWorkColor(restored.workColor);
+      setBreakColor(restored.breakColor);
+      setRemainingMs(restored.remainingMs);
+      setIsRunning(restored.isRunning);
+      setPhaseEndAt(restored.phaseEndAt);
+      setPhaseStartedAt(restored.phaseStartedAt);
+      setCompletedSessions(restored.completedSessions);
+    }
+    hydratedRef.current = true;
+  }, []);
 
   useEffect(() => {
     if (!hydratedRef.current) return;

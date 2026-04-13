@@ -15,6 +15,7 @@ import { HubSurface } from "@/components/workspace/hub-surface";
 
 export type PlannerTask = {
   id: string;
+  plannerItemId?: string;
   title: string;
   workspaceName: string;
   dueDate?: string;
@@ -26,6 +27,7 @@ type PlannerEdgeProps = {
   tasks: PlannerTask[];
   onTaskClick: (taskId: string) => void;
   onToggleTask: (taskId: string) => void;
+  onTaskEdit?: (task: PlannerTask) => void;
   forceExpanded?: boolean;
   className?: string;
 };
@@ -118,10 +120,12 @@ function TaskRow({
   task,
   onToggle,
   onClick,
+  onEdit,
 }: {
   task: PlannerTask;
   onToggle: () => void;
   onClick: () => void;
+  onEdit?: (task: PlannerTask) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(task.title);
@@ -138,9 +142,11 @@ function TaskRow({
 
   const commitEdit = useCallback(() => {
     setEditing(false);
-    // Would fire mutation when wired to backend
-    console.log("[planner] Title changed:", editValue);
-  }, [editValue]);
+    const trimmed = editValue.trim();
+    if (trimmed && trimmed !== task.title) {
+      onEdit?.({ ...task, title: trimmed });
+    }
+  }, [editValue, onEdit, task]);
 
   return (
     <div
@@ -319,7 +325,7 @@ function saveLocalTasks(tasks: PlannerTask[]) {
   try { window.localStorage.setItem(PLANNER_LOCAL_KEY, JSON.stringify(tasks)); } catch {}
 }
 
-export function PlannerEdge({ tasks, onTaskClick, onToggleTask, forceExpanded, className }: PlannerEdgeProps) {
+export function PlannerEdge({ tasks, onTaskClick, onToggleTask, onTaskEdit, forceExpanded, className }: PlannerEdgeProps) {
   const [locked, setLocked] = useState(false);
   const [activeTab, setActiveTab] = useState<"list" | "calendar">("list");
   const [localTasks, setLocalTasks] = useState<PlannerTask[]>([]);
@@ -373,9 +379,9 @@ export function PlannerEdge({ tasks, onTaskClick, onToggleTask, forceExpanded, c
       forceExpanded={forceExpanded}
       onToggleLock={() => setLocked((value) => !value)}
       className="!top-[140px] !-translate-y-0"
-      expandedClassName="left-0 top-0"
+      expandedClassName="left-4 top-[120px]"
     >
-      <div className="flex h-[min(72vh,720px)] w-[340px] flex-col">
+      <div className="flex h-[min(72vh,720px)] w-[340px] flex-col overflow-hidden rounded-[28px]">
         {/* Header */}
         <div className="flex items-center justify-between px-4 pb-1 pt-4">
           <div className="flex items-center gap-2">
@@ -452,8 +458,9 @@ export function PlannerEdge({ tasks, onTaskClick, onToggleTask, forceExpanded, c
                     <TaskRow
                       key={task.id}
                       task={task}
-                      onToggle={() => onToggleTask(task.id)}
+                      onToggle={() => onToggleTask(task.plannerItemId ?? task.id)}
                       onClick={() => onTaskClick(task.id)}
+                      onEdit={onTaskEdit}
                     />
                   ))}
                 </div>

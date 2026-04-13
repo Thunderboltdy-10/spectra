@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import {
   Grid3X3,
@@ -16,9 +16,10 @@ import {
   LayoutPanelLeft,
   Maximize2,
   Minimize2,
+  Lock,
+  Unlock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { HubSurface } from "@/components/workspace/hub-surface";
 import type { ViewMode } from "@/lib/workspace/contracts";
 
 const LENS_OPTIONS: { mode: ViewMode; label: string; icon: typeof Layers }[] = [
@@ -35,31 +36,59 @@ const LENS_OPTIONS: { mode: ViewMode; label: string; icon: typeof Layers }[] = [
 export function UtilityHubGroup() {
   const { backgroundMode, setBackgroundMode, hubVisibility, setHubVisibility, viewMode, setViewMode } =
     useWorkspaceStore();
+  const [open, setOpen] = useState(false);
   const [locked, setLocked] = useState(false);
 
   const currentLens = LENS_OPTIONS.find((l) => l.mode === viewMode) ?? LENS_OPTIONS[0];
   const CurrentIcon = currentLens.icon;
 
   const collapsed = (
-    <div className="flex h-11 items-center gap-2.5 rounded-[16px] border border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/95 backdrop-blur-xl shadow-[0_8px_22px_-16px_rgba(8,22,40,0.14)] px-3.5 hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-200">
+    <button
+      type="button"
+      onClick={() => setOpen((value) => !value)}
+      className="flex h-11 items-center gap-2.5 rounded-[16px] border border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/95 backdrop-blur-xl shadow-[0_8px_22px_-16px_rgba(8,22,40,0.14)] px-3.5 hover:bg-[var(--bg-hover)] cursor-pointer transition-all duration-200"
+    >
       <CurrentIcon className="h-4 w-4 shrink-0 text-[var(--accent-cyan)]/70" />
       <span className="text-[11px] font-semibold text-[var(--text-secondary)]">{currentLens.label}</span>
       <div className="h-3.5 w-px bg-[var(--border-default)]/30" />
       <Settings2 className="h-3.5 w-3.5 shrink-0 text-[var(--text-tertiary)]" />
-    </div>
+    </button>
   );
 
+  useEffect(() => {
+    if (!(open || locked)) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest?.("[data-workspace-utility-group]")) return;
+      if (!locked) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown, true);
+    return () => document.removeEventListener("mousedown", handlePointerDown, true);
+  }, [open, locked]);
+
   return (
-    <HubSurface
-      id="workspace-utility-group"
-      edge="top"
-      locked={locked}
-      onToggleLock={() => setLocked((l) => !l)}
-      collapsed={collapsed}
-      className="!top-5 !left-auto !right-5 !-translate-x-0 !translate-y-0"
-      expandedClassName="right-0 top-0"
-    >
-      <div className="flex flex-col gap-3 px-4 py-3.5 min-w-[240px]">
+    <div data-workspace-utility-group className="fixed right-5 top-5 z-[65]">
+      {collapsed}
+      {(open || locked) && (
+        <div className="absolute right-0 top-[calc(100%+8px)] min-w-[240px] overflow-hidden rounded-[28px] border border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/96 shadow-[0_18px_44px_-18px_rgba(8,22,40,0.28)] backdrop-blur-xl">
+          <div className="relative flex flex-col gap-3 px-4 py-3.5">
+        <div className="absolute right-2.5 top-2.5 z-[60] flex items-center gap-1 opacity-0 transition-opacity duration-200 hover:opacity-100">
+          <button
+            type="button"
+            onClick={() => setLocked((value) => !value)}
+            className={cn(
+              "flex h-7 w-7 items-center justify-center rounded-lg transition-colors",
+              locked
+                ? "text-[var(--accent-cyan)] ring-1 ring-[var(--accent-cyan)]/20"
+                : "text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+            )}
+            title={locked ? "Unlock" : "Lock open"}
+          >
+            {locked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
+          </button>
+        </div>
         {/* Canvas Lens section */}
         <div className="flex flex-col gap-1.5">
           <span className="text-[10px] uppercase tracking-[0.12em] font-semibold text-[var(--text-tertiary)] flex items-center gap-1.5">
@@ -199,7 +228,9 @@ export function UtilityHubGroup() {
             </button>
           </div>
         </div>
-      </div>
-    </HubSurface>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

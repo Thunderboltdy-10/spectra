@@ -3,8 +3,6 @@
 import {
   Sparkles,
   BookOpen,
-  Copy,
-  Archive,
   Edit3,
   Check,
 } from "lucide-react";
@@ -157,51 +155,6 @@ function ArtifactView({ item }: { item: WorkspaceItemData }) {
   );
 }
 
-/* --- Context Menu --- */
-
-function SurfaceContextMenu({
-  open,
-  onClose,
-  onDuplicate,
-  onArchive,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onDuplicate?: () => void;
-  onArchive?: () => void;
-}) {
-  if (!open) return null;
-
-  return (
-    <>
-      <div className="fixed inset-0 z-40" onClick={onClose} />
-      <div className="absolute right-0 top-[calc(100%+4px)] z-50 min-w-[160px] rounded-xl border border-[var(--border-default)]/50 bg-[var(--bg-elevated)]/98 p-1 shadow-[0_12px_32px_-12px_rgba(8,22,40,0.28)] backdrop-blur-xl">
-        {onDuplicate && (
-          <button
-            type="button"
-            onClick={() => { onDuplicate(); onClose(); }}
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-          >
-            <Copy className="h-3.5 w-3.5" />
-            Duplicate
-          </button>
-        )}
-        <div className="my-0.5 h-px bg-[var(--border-default)]/20" />
-        {onArchive && (
-          <button
-            type="button"
-            onClick={() => { onArchive(); onClose(); }}
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-medium text-[var(--text-tertiary)] transition-colors hover:bg-[color-mix(in_oklab,var(--accent-coral)_6%,var(--bg-hover))] hover:text-[var(--accent-coral)]"
-          >
-            <Archive className="h-3.5 w-3.5" />
-            Archive
-          </button>
-        )}
-      </div>
-    </>
-  );
-}
-
 /* --- Main Deep Edit Surface --- */
 
 export function DeepEditSurface({
@@ -222,6 +175,8 @@ export function DeepEditSurface({
   const focusedItemId = useWorkspaceStore((s) => s.focusedItemId);
   const isFocused = focusedItemId === item.id;
   const isThread = item.itemType === "thread";
+  const workspaces = useWorkspaceStore((s) => s.workspaces);
+  const workspace = workspaces.find((entry) => entry.id === item.workspaceId);
 
   const collapsed = (
     <button
@@ -250,9 +205,32 @@ export function DeepEditSurface({
     </button>
   );
 
-  const handleTitleChange = useCallback((newTitle: string) => {
-    console.log("[deep-edit] Title changed:", newTitle);
-  }, []);
+  const handleTitleChange = useCallback(async (newTitle: string) => {
+    if (workspace) {
+      if (item.itemType === "planner") {
+        await fetch("/api/planner-items", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ plannerItemId: item.id, title: newTitle }),
+        }).catch(() => undefined);
+      } else if (item.itemType === "thread") {
+        await fetch(`/api/chats/${item.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: newTitle }),
+        }).catch(() => undefined);
+      } else {
+        await fetch("/api/artifacts", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "update", artifactId: item.id, title: newTitle }),
+        }).catch(() => undefined);
+      }
+      window.dispatchEvent(new CustomEvent("workspace:content-mutated", {
+        detail: { workstreamId: workspace.id, refreshHub: true, refreshWorkstreams: true },
+      }));
+    }
+  }, [item.id, item.itemType, workspace]);
 
   return (
     <HubSurface
@@ -263,9 +241,9 @@ export function DeepEditSurface({
       pinned={pinned}
       hidden={hidden}
       onToggleLock={onToggleLock}
-      expandedClassName="right-0 top-1/2 -translate-y-1/2"
+      expandedClassName="right-4 top-1/2 -translate-y-1/2"
     >
-      <div className="flex h-[620px] w-[540px] flex-col overflow-hidden">
+      <div className="flex h-[620px] w-[540px] flex-col overflow-hidden rounded-[28px]">
         {/* Surface header — icon + title only, lock handled by HubSurface wrapper */}
         <div
           className={cn(

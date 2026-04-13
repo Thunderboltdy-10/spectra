@@ -24,9 +24,9 @@ type HubSurfaceProps = {
 };
 
 /** Debounce delay before expanding on hover (ms) — less aggressive */
-const HOVER_ENTER_DELAY = 260;
+const HOVER_ENTER_DELAY = 120;
 /** Debounce delay before collapsing after mouse leaves (ms) */
-const HOVER_LEAVE_DELAY = 340;
+const HOVER_LEAVE_DELAY = 220;
 
 function edgeClasses(edge: HubEdge) {
   switch (edge) {

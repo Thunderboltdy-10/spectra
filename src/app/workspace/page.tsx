@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
-import { Home, MessageSquare, Layers, Settings, User } from "lucide-react";
+import { CalendarDays, FileText, Sparkles } from "lucide-react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { WorkspaceCanvas } from "@/components/workspace/workspace-canvas";
 import { CommandBar } from "@/components/workspace/command-bar";
@@ -51,10 +51,10 @@ const DEMO_WORKSPACES: WorkspaceData[] = [
 ];
 
 const DEMO_PLANNER_TASKS: PlannerTask[] = [
-  { id: "t1", title: "Finish momentum notes", workspaceName: "IB Physics HL", dueDate: new Date().toISOString(), priority: "high", status: "in_progress" },
-  { id: "t2", title: "Review flashcard deck", workspaceName: "IB Physics HL", dueDate: new Date().toISOString(), priority: "medium", status: "pending" },
-  { id: "t3", title: "Complete titration exercises", workspaceName: "Chemistry SL", dueDate: new Date(Date.now() + 86_400_000).toISOString(), priority: "medium", status: "pending" },
-  { id: "t4", title: "Macbeth essay first draft", workspaceName: "English Literature", dueDate: new Date(Date.now() + 86_400_000 * 3).toISOString(), priority: "high", status: "pending" },
+  { id: "t1", plannerItemId: "t1", title: "Finish momentum notes", workspaceName: "IB Physics HL", dueDate: new Date().toISOString(), priority: "high", status: "in_progress" },
+  { id: "t2", plannerItemId: "t2", title: "Review flashcard deck", workspaceName: "IB Physics HL", dueDate: new Date().toISOString(), priority: "medium", status: "pending" },
+  { id: "t3", plannerItemId: "t3", title: "Complete titration exercises", workspaceName: "Chemistry SL", dueDate: new Date(Date.now() + 86_400_000).toISOString(), priority: "medium", status: "pending" },
+  { id: "t4", plannerItemId: "t4", title: "Macbeth essay first draft", workspaceName: "English Literature", dueDate: new Date(Date.now() + 86_400_000 * 3).toISOString(), priority: "high", status: "pending" },
 ];
 
 /* ─── Main Workspace Page ─── */
@@ -79,7 +79,17 @@ export default function WorkspacePage() {
     hydratePreferences,
     hasHydratedPreferences,
     hubVisibility,
+    workspaces: storeWorkspaces,
   } = useWorkspaceStore();
+  const [workspacePickerIntent, setWorkspacePickerIntent] = useState<null | {
+    kind: "note" | "code" | "visual" | "task" | "thread";
+    title?: string;
+    content?: string;
+  }>(null);
+  const [plannerEditorTask, setPlannerEditorTask] = useState<PlannerTask | null>(null);
+  const [isEditingWorkspaceName, setIsEditingWorkspaceName] = useState(false);
+  const [workspaceNameDraft, setWorkspaceNameDraft] = useState("");
+  const workspaceNameInputRef = useRef<HTMLInputElement>(null);
 
   const hubHidden = hubVisibility === "hidden";
   const hubForceExpanded = hubVisibility === "expanded";
@@ -109,7 +119,23 @@ export default function WorkspacePage() {
           };
         };
         if (!cancelled && payload.preferences) {
-          hydratePreferences(payload.preferences);
+          const normalizedPreferences = {
+            ...payload.preferences,
+            workspaceHubVisibility:
+              payload.preferences.workspaceHubVisibility === "hidden"
+                ? "expanded"
+                : payload.preferences.workspaceHubVisibility,
+          };
+          if (normalizedPreferences.workspaceHubVisibility !== payload.preferences.workspaceHubVisibility) {
+            void fetch("/api/preferences", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                workspaceHubVisibility: normalizedPreferences.workspaceHubVisibility,
+              }),
+            }).catch(() => undefined);
+          }
+          hydratePreferences(normalizedPreferences);
         }
       } catch {
         // Preference hydration is best-effort.
@@ -159,9 +185,27 @@ export default function WorkspacePage() {
     [workspaces, committedWorkspaceId],
   );
 
+  useEffect(() => {
+    if (!committedWorkspace) {
+      setIsEditingWorkspaceName(false);
+      setWorkspaceNameDraft("");
+      return;
+    }
+    setWorkspaceNameDraft(committedWorkspace.name);
+  }, [committedWorkspace]);
+
+  useEffect(() => {
+    if (isEditingWorkspaceName) {
+      workspaceNameInputRef.current?.focus();
+      workspaceNameInputRef.current?.select();
+    }
+  }, [isEditingWorkspaceName]);
+
   const dockItems: WorkspaceDockItem[] = useMemo(
     () =>
-      workspaces.map((ws) => ({
+      [...workspaces]
+        .sort((a, b) => (b.lastActivity ?? 0) - (a.lastActivity ?? 0))
+        .map((ws) => ({
         id: ws.id,
         name: ws.name,
         emoji: ws.emoji,
@@ -225,6 +269,32 @@ export default function WorkspacePage() {
     }
   }, [flyToWorkspace, refreshData]);
 
+  const renameWorkspaceAction = useCallback(async (workstreamId: string, title: string) => {
+    const response = await fetch("/api/workstreams", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "update",
+        workstreamId,
+        title,
+      }),
+    });
+    if (!response.ok) throw new Error("Failed to rename workspace");
+    notifyWorkspaceContentMutated({ workstreamId, refreshWorkstreams: true, refreshHub: true });
+    refreshData();
+  }, [refreshData]);
+
+  const commitWorkspaceRename = useCallback(async () => {
+    if (!committedWorkspace) return;
+    const trimmed = workspaceNameDraft.trim();
+    setIsEditingWorkspaceName(false);
+    if (!trimmed || trimmed === committedWorkspace.name) {
+      setWorkspaceNameDraft(committedWorkspace.name);
+      return;
+    }
+    await renameWorkspaceAction(committedWorkspace.id, trimmed).catch(() => undefined);
+  }, [committedWorkspace, workspaceNameDraft, renameWorkspaceAction]);
+
   const createItemAction = useCallback(async (payload: Record<string, unknown>) => {
     const response = await fetch("/api/workspace-data", {
       method: "POST",
@@ -240,6 +310,27 @@ export default function WorkspacePage() {
     refreshData();
     return response.json();
   }, [committedWorkspaceId, refreshData]);
+
+  const submitCreationIntent = useCallback(async (workstreamId: string, intent: NonNullable<typeof workspacePickerIntent>) => {
+    switch (intent.kind) {
+      case "note":
+        await createItemAction({ action: "createNote", workstreamId, title: intent.title ?? "Untitled note", content: intent.content ?? "" });
+        break;
+      case "code":
+        await createItemAction({ action: "createArtifact", workstreamId, type: "code_project", title: intent.title ?? "Untitled code", content: intent.content ?? "// Start coding\n" });
+        break;
+      case "visual":
+        await createItemAction({ action: "createArtifact", workstreamId, type: "visualization", title: intent.title ?? "Untitled visual", content: intent.content ?? "<svg></svg>" });
+        break;
+      case "task":
+        await createItemAction({ action: "createPlannerItem", workstreamId, title: intent.title ?? "New task", type: "deadline", priority: "medium" });
+        break;
+      case "thread":
+        await createItemAction({ action: "createThread", workstreamId, title: intent.title ?? "New thread" });
+        break;
+    }
+    setWorkspacePickerIntent(null);
+  }, [createItemAction]);
 
   /* ─── Command bar: uses result card stack ─── */
   const handleSendMessage = useCallback(async (message: string) => {
@@ -329,19 +420,38 @@ export default function WorkspacePage() {
         return;
       }
 
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "general",
+          message: normalized,
+          thinkingLevel: "low",
+          routerMode: "auto",
+          usePersonalResources: true,
+          skipUserMessagePersist: false,
+          workstreamId: committedWorkspaceId ?? undefined,
+          scopeLevel: committedWorkspaceId ? "workspace" : "global",
+        }),
+      });
+      if (!response.ok) {
+        throw new Error("Workspace command failed");
+      }
       updateResultCard(cardId, {
         state: "done",
         summary: committedWorkspaceId
-          ? `Workspace command captured for ${committedWorkspace?.name ?? "workspace"}`
-          : `Global command captured`,
+          ? "Working in this workspace. Open chat for live orchestration details."
+          : "Working globally. Open chat for live orchestration details.",
+        targetId: "workspace-chat",
       });
+      window.dispatchEvent(new CustomEvent("ai-school:open-orchestration"));
     } catch (error) {
       updateResultCard(cardId, {
-        state: "done",
+        state: "error",
         summary: error instanceof Error ? error.message : "Workspace command failed",
       });
     }
-  }, [pushResultCard, updateResultCard, createItemAction, committedWorkspaceId, committedWorkspace?.name, createWorkspaceAction]);
+  }, [pushResultCard, updateResultCard, createItemAction, committedWorkspaceId, createWorkspaceAction]);
 
   /* ─── Dismiss/reopen: real backend when live, store-only otherwise ─── */
   const handleDismissResultCard = useCallback(
@@ -372,6 +482,7 @@ export default function WorkspacePage() {
       .filter((item) => item.itemType === "planner")
       .map((item, index) => ({
         id: item.id,
+        plannerItemId: item.id,
         title: item.title,
         workspaceName: committedWorkspace.name,
         dueDate: undefined,
@@ -391,20 +502,44 @@ export default function WorkspacePage() {
   );
 
   const handleToggleTask = useCallback(async (taskId: string) => {
-    const workspace = workspaces.find((ws) => ws.items.some((item) => item.id === taskId));
-    const task = workspace?.items.find((item) => item.id === taskId);
-    if (!task || !workspace) return;
+    const task = livePlannerTasks.find((entry) => entry.id === taskId || entry.plannerItemId === taskId);
+    const plannerItemId = task?.plannerItemId ?? task?.id;
+    if (!task || !plannerItemId) return;
+    const workspace = workspaces.find((ws) => ws.name === task.workspaceName) ?? committedWorkspace;
     await fetch("/api/planner-items", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        plannerItemId: taskId,
+        plannerItemId,
         status: task.status === "completed" ? "pending" : "completed",
       }),
     }).catch(() => undefined);
-    notifyWorkspaceContentMutated({ workstreamId: workspace.id, refreshHub: true });
+    if (workspace) {
+      notifyWorkspaceContentMutated({ workstreamId: workspace.id, refreshHub: true });
+    }
     refreshData();
-  }, [workspaces, refreshData]);
+  }, [livePlannerTasks, workspaces, committedWorkspace, refreshData]);
+
+  const handlePlannerTaskEdit = useCallback(async (task: PlannerTask) => {
+    const plannerItemId = task.plannerItemId ?? task.id;
+    const dueAt = task.dueDate ? new Date(task.dueDate).getTime() : undefined;
+    await fetch("/api/planner-items", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        plannerItemId,
+        title: task.title,
+        status: task.status,
+        priority: task.priority,
+        dueAt,
+      }),
+    }).catch(() => undefined);
+    const workspace = workspaces.find((ws) => ws.name === task.workspaceName) ?? committedWorkspace;
+    if (workspace) {
+      notifyWorkspaceContentMutated({ workstreamId: workspace.id, refreshHub: true, refreshWorkstreams: true });
+    }
+    refreshData();
+  }, [workspaces, committedWorkspace, refreshData]);
 
   // Clear focused item when switching workspaces
   useEffect(() => {
@@ -430,32 +565,6 @@ export default function WorkspacePage() {
 
   return (
     <div className="relative flex h-dvh w-full overflow-hidden bg-[var(--bg-primary)]">
-      {/* Minimal app navigation rail */}
-      <div className="absolute left-0 top-0 bottom-0 z-[10] w-[48px] flex flex-col items-center justify-between py-4 bg-[var(--bg-primary)] border-r border-[var(--border-default)]/15">
-        <div className="flex flex-col items-center gap-1">
-          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--accent-cyan)]/10 mb-3">
-            <span className="text-[14px] font-bold text-[var(--accent-cyan)]">S</span>
-          </div>
-          <button type="button" onClick={handleBack} className="flex h-9 w-9 items-center justify-center rounded-xl text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-            <Home className="h-4 w-4" />
-          </button>
-          <button type="button" className="flex h-9 w-9 items-center justify-center rounded-xl text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-            <MessageSquare className="h-4 w-4" />
-          </button>
-          <button type="button" className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent-cyan)]/8 text-[var(--accent-cyan)] transition-colors">
-            <Layers className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="flex flex-col items-center gap-1">
-          <button type="button" className="flex h-9 w-9 items-center justify-center rounded-xl text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-            <Settings className="h-4 w-4" />
-          </button>
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--bg-secondary)] text-[var(--text-tertiary)]">
-            <User className="h-4 w-4" />
-          </div>
-        </div>
-      </div>
-
       {/* Loading indicator when fetching real data */}
       {dataLoading && (
         <div className="absolute left-1/2 top-4 z-[60] -translate-x-1/2 rounded-full border border-[var(--border-default)]/30 bg-[var(--bg-elevated)]/95 px-4 py-1.5 backdrop-blur-xl">
@@ -505,6 +614,7 @@ export default function WorkspacePage() {
           tasks={livePlannerTasks.length > 0 ? livePlannerTasks : DEMO_PLANNER_TASKS}
           onTaskClick={handleTaskClick}
           onToggleTask={handleToggleTask}
+          onTaskEdit={setPlannerEditorTask}
           forceExpanded={hubForceExpanded}
         />
       )}
@@ -514,7 +624,7 @@ export default function WorkspacePage() {
         <WorkspaceDock
           workspaces={dockItems}
           onSelect={handleWorkspaceSelect}
-          onCreateNew={noop}
+          onCreateNew={() => { void createWorkspaceAction({ title: "New workspace" }); }}
           onGoHome={handleBack}
         />
       )}
@@ -533,23 +643,38 @@ export default function WorkspacePage() {
         onReopenResultCard={handleReopenResultCard}
         onCreateWorkspace={() => { void createWorkspaceAction({ title: "New workspace" }); }}
         onCreateNote={() => {
-          if (!committedWorkspaceId) return;
+          if (!committedWorkspaceId) {
+            setWorkspacePickerIntent({ kind: "note", title: "Untitled note", content: "" });
+            return;
+          }
           void createItemAction({ action: "createNote", workstreamId: committedWorkspaceId, title: "Untitled note", content: "" });
         }}
         onCreateCode={() => {
-          if (!committedWorkspaceId) return;
+          if (!committedWorkspaceId) {
+            setWorkspacePickerIntent({ kind: "code", title: "Untitled code", content: "// Start coding\n" });
+            return;
+          }
           void createItemAction({ action: "createArtifact", workstreamId: committedWorkspaceId, type: "code_project", title: "Untitled code", content: "// Start coding\n" });
         }}
         onCreateVisual={() => {
-          if (!committedWorkspaceId) return;
+          if (!committedWorkspaceId) {
+            setWorkspacePickerIntent({ kind: "visual", title: "Untitled visual", content: "<svg></svg>" });
+            return;
+          }
           void createItemAction({ action: "createArtifact", workstreamId: committedWorkspaceId, type: "visualization", title: "Untitled visual", content: "<svg></svg>" });
         }}
         onCreateTask={() => {
-          if (!committedWorkspaceId) return;
+          if (!committedWorkspaceId) {
+            setWorkspacePickerIntent({ kind: "task", title: "New task" });
+            return;
+          }
           void createItemAction({ action: "createPlannerItem", workstreamId: committedWorkspaceId, title: "New task", type: "deadline", priority: "medium" });
         }}
         onCreateThread={() => {
-          if (!committedWorkspaceId) return;
+          if (!committedWorkspaceId) {
+            setWorkspacePickerIntent({ kind: "thread", title: "New thread" });
+            return;
+          }
           void createItemAction({ action: "createThread", workstreamId: committedWorkspaceId, title: "New thread" });
         }}
         onCreateWithAi={noop}
@@ -557,6 +682,191 @@ export default function WorkspacePage() {
 
       {/* Hub ecology: Bottom-right timer */}
       {!hubHidden && <TimerWidget forceExpanded={hubForceExpanded} />}
+
+      {committedWorkspace && (
+        <div className="absolute left-[92px] top-5 z-[45] flex items-center gap-3 px-1 py-1">
+          <span className="text-lg leading-none">{committedWorkspace.emoji}</span>
+          {isEditingWorkspaceName ? (
+            <input
+              ref={workspaceNameInputRef}
+              value={workspaceNameDraft}
+              onChange={(event) => setWorkspaceNameDraft(event.target.value)}
+              onBlur={() => { void commitWorkspaceRename(); }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void commitWorkspaceRename();
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setIsEditingWorkspaceName(false);
+                  setWorkspaceNameDraft(committedWorkspace.name);
+                }
+              }}
+              className="max-w-[280px] border-b border-[var(--accent-cyan)]/35 bg-transparent text-[14px] font-semibold text-[var(--text-primary)] outline-none"
+            />
+          ) : (
+            <div
+              className="group/name flex max-w-[320px] cursor-text items-center gap-2"
+              onDoubleClick={() => {
+                setWorkspaceNameDraft(committedWorkspace.name);
+                setIsEditingWorkspaceName(true);
+              }}
+            >
+              <span className="truncate text-left text-[14px] font-semibold text-[var(--text-primary)] transition-colors group-hover/name:text-[var(--accent-cyan)]">
+                {committedWorkspace.name}
+              </span>
+              <span className="text-[10px] text-[var(--text-tertiary)] opacity-0 transition-opacity group-hover/name:opacity-100">
+                rename
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {workspacePickerIntent && storeWorkspaces.length > 0 && (
+        <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/30 backdrop-blur-[2px]">
+          <div className="w-[min(420px,calc(100vw-32px))] rounded-3xl border border-[var(--border-default)]/40 bg-[var(--bg-elevated)] p-5 shadow-[0_28px_60px_-28px_rgba(8,22,40,0.35)]">
+            <div className="mb-4">
+              <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">Choose a workspace</h2>
+              <p className="mt-1 text-[12px] text-[var(--text-secondary)]">Create this {workspacePickerIntent.kind} in one of your workspaces.</p>
+            </div>
+            <div className="flex max-h-[280px] flex-col gap-1 overflow-y-auto">
+              {storeWorkspaces.map((workspace) => (
+                <button
+                  key={workspace.id}
+                  type="button"
+                  onClick={() => { void submitCreationIntent(workspace.id, workspacePickerIntent); }}
+                  className="flex items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors hover:bg-[var(--bg-hover)]"
+                >
+                  <span className="text-lg leading-none">{workspace.emoji}</span>
+                  <div className="min-w-0">
+                    <p className="truncate text-[13px] font-medium text-[var(--text-primary)]">{workspace.name}</p>
+                    <p className="text-[11px] text-[var(--text-tertiary)]">{workspace.itemCount} items</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setWorkspacePickerIntent(null)}
+                className="rounded-xl px-3 py-2 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {plannerEditorTask && (
+        <div className="absolute inset-0 z-[72] flex items-center justify-center bg-black/35 backdrop-blur-[3px]">
+          <div className="w-[min(540px,calc(100vw-32px))] rounded-[28px] border border-[var(--border-default)]/40 bg-[var(--bg-elevated)] p-5 shadow-[0_28px_60px_-28px_rgba(8,22,40,0.35)]">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 text-[var(--accent-cyan)]">
+                  <CalendarDays className="h-4 w-4" />
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.12em]">Planner item</span>
+                </div>
+                <h2 className="mt-2 text-[18px] font-semibold text-[var(--text-primary)]">{plannerEditorTask.title}</h2>
+                <p className="mt-1 text-[12px] text-[var(--text-secondary)]">Edit title, status, priority, and due time.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPlannerEditorTask(null)}
+                className="rounded-xl px-3 py-2 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[11px] font-medium text-[var(--text-secondary)]">Title</span>
+                <input
+                  value={plannerEditorTask.title}
+                  onChange={(event) => setPlannerEditorTask((current) => current ? { ...current, title: event.target.value } : current)}
+                  className="rounded-2xl border border-[var(--border-default)]/35 bg-[var(--bg-secondary)]/40 px-3 py-2.5 text-[13px] text-[var(--text-primary)] outline-none"
+                />
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[11px] font-medium text-[var(--text-secondary)]">Due date & time</span>
+                <input
+                  type="datetime-local"
+                  value={plannerEditorTask.dueDate ? new Date(plannerEditorTask.dueDate).toISOString().slice(0, 16) : ""}
+                  onChange={(event) => setPlannerEditorTask((current) => current ? { ...current, dueDate: event.target.value ? new Date(event.target.value).toISOString() : undefined } : current)}
+                  className="rounded-2xl border border-[var(--border-default)]/35 bg-[var(--bg-secondary)]/40 px-3 py-2.5 text-[13px] text-[var(--text-primary)] outline-none"
+                />
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[11px] font-medium text-[var(--text-secondary)]">Status</span>
+                <select
+                  value={plannerEditorTask.status}
+                  onChange={(event) => setPlannerEditorTask((current) => current ? { ...current, status: event.target.value as PlannerTask["status"] } : current)}
+                  className="rounded-2xl border border-[var(--border-default)]/35 bg-[var(--bg-secondary)]/40 px-3 py-2.5 text-[13px] text-[var(--text-primary)] outline-none"
+                >
+                  <option value="pending">Pending</option>
+                  <option value="in_progress">In progress</option>
+                  <option value="completed">Completed</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[11px] font-medium text-[var(--text-secondary)]">Priority</span>
+                <select
+                  value={plannerEditorTask.priority}
+                  onChange={(event) => setPlannerEditorTask((current) => current ? { ...current, priority: event.target.value as PlannerTask["priority"] } : current)}
+                  className="rounded-2xl border border-[var(--border-default)]/35 bg-[var(--bg-secondary)]/40 px-3 py-2.5 text-[13px] text-[var(--text-primary)] outline-none"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="mt-4 flex items-center gap-2 rounded-2xl border border-[var(--border-default)]/20 bg-[var(--bg-secondary)]/20 px-3 py-3">
+              <Sparkles className="h-4 w-4 text-[var(--accent-cyan)]" />
+              <p className="text-[12px] text-[var(--text-secondary)]">Planner is being upgraded toward a richer scheduling app flow. This editor already persists core changes, including time selection.</p>
+            </div>
+
+            <div className="mt-5 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent("ai-school:set-message", {
+                    detail: { message: `Plan the next steps for ${plannerEditorTask.title}` },
+                  }));
+                  window.dispatchEvent(new CustomEvent("ai-school:focus-composer"));
+                }}
+                className="inline-flex items-center gap-2 rounded-2xl border border-[var(--border-default)]/35 px-3 py-2 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+              >
+                <FileText className="h-3.5 w-3.5" />
+                Send to chat
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPlannerEditorTask(null)}
+                  className="rounded-xl px-3 py-2 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handlePlannerTaskEdit(plannerEditorTask);
+                    setPlannerEditorTask(null);
+                  }}
+                  className="rounded-xl bg-[var(--accent-cyan)] px-3.5 py-2 text-[12px] font-semibold text-white"
+                >
+                  Save changes
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

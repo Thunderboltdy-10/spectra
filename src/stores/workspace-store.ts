@@ -154,7 +154,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
 
   deepEditTargets: [],
 
-  hubVisibility: "collapsed",
+  hubVisibility: "expanded",
   backgroundMode: "dots",
   plannerOpen: false,
   openSurfaces: {},

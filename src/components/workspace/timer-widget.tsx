@@ -6,7 +6,7 @@ import { HubSurface } from "@/components/workspace/hub-surface";
 import { StudyTimer } from "@/components/study-timer";
 import { Clock3, Pause } from "lucide-react";
 
-export function TimerWidget({ className }: { className?: string }) {
+export function TimerWidget({ className, forceExpanded }: { className?: string; forceExpanded?: boolean }) {
   const [locked, setLocked] = useState(false);
   const [timerState, setTimerState] = useState<{
     display: string;
@@ -99,6 +99,7 @@ export function TimerWidget({ className }: { className?: string }) {
       edge="bottom"
       collapsed={collapsed}
       locked={locked}
+      forceExpanded={forceExpanded}
       onToggleLock={handleToggleLock}
       className={cn(
         "!left-auto !right-6 !translate-x-0 !bottom-6 z-[100]",
@@ -106,8 +107,7 @@ export function TimerWidget({ className }: { className?: string }) {
       )}
       expandedClassName="right-0 bottom-0"
     >
-      {/* No extra border/padding wrapper u2014 StudyTimer renders directly */}
-      <div className="pointer-events-auto w-[340px]">
+      <div className="pointer-events-auto w-[340px] overflow-hidden [&>*]:border-0 [&>*]:rounded-none">
         <StudyTimer
           open={true}
           onOpen={() => {}}

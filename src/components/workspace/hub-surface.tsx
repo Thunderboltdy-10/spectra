@@ -13,6 +13,7 @@ type HubSurfaceProps = {
   locked?: boolean;
   pinned?: boolean;
   hidden?: boolean;
+  forceExpanded?: boolean;
   /** When true, outside-click closes this surface even when locked (for drawers/menus) */
   dismissOnOutsideClick?: boolean;
   className?: string;
@@ -61,6 +62,7 @@ export function HubSurface({
   locked = false,
   pinned = false,
   hidden = false,
+  forceExpanded = false,
   dismissOnOutsideClick = false,
   className,
   collapsedClassName,
@@ -72,7 +74,7 @@ export function HubSurface({
   const enterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const expanded = locked || hovered;
+  const expanded = forceExpanded || locked || hovered;
 
   /**
    * Outside-click semantics:
@@ -167,10 +169,10 @@ export function HubSurface({
                     type="button"
                     onClick={onTogglePin}
                     className={cn(
-                      "flex h-7 min-w-[36px] items-center justify-center rounded-lg transition-colors shadow-sm border border-[var(--border-default)]/20 px-2 text-[10px] font-semibold",
+                      "flex h-7 min-w-[36px] items-center justify-center rounded-lg transition-colors px-2 text-[10px] font-semibold",
                       pinned
-                        ? "bg-[var(--bg-elevated)] text-[var(--accent-cyan)] ring-1 ring-[var(--accent-cyan)]/20"
-                        : "bg-[var(--bg-elevated)]/80 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+                        ? "text-[var(--accent-cyan)] ring-1 ring-[var(--accent-cyan)]/20"
+                        : "text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
                     )}
                     title={pinned ? "Unpin" : "Pin"}
                   >
@@ -181,10 +183,10 @@ export function HubSurface({
                   type="button"
                   onClick={onToggleLock}
                   className={cn(
-                    "flex h-7 w-7 items-center justify-center rounded-lg transition-colors shadow-sm border border-[var(--border-default)]/20",
+                    "flex h-7 w-7 items-center justify-center rounded-lg transition-colors",
                     locked
-                      ? "bg-[var(--bg-elevated)] text-[var(--accent-cyan)] ring-1 ring-[var(--accent-cyan)]/20 !opacity-100"
-                      : "bg-[var(--bg-elevated)]/80 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+                      ? "text-[var(--accent-cyan)] ring-1 ring-[var(--accent-cyan)]/20 !opacity-100"
+                      : "text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
                   )}
                   title={locked ? "Unlock" : "Lock open"}
                 >

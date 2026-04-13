@@ -35,7 +35,6 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { ActionMenuContent } from "@/components/workspace/shared-action-menu";
-import { ArtifactContent, ThreadContent } from "./focus-panel";
 
 /* ===================================================================
    Palette & Helpers
@@ -114,16 +113,16 @@ function StatusDot({ status, className }: { status: string; className?: string }
 }
 
 /**
- * Semantic zoom stable scale.
- * Maps zoom to a smooth counter-scale that keeps content perceptually stable.
- * Uses a damped curve instead of linear inverse for smoother progressive reveal.
+ * Perceptually stable scale.
+ * Keeps items at a stable perceived size on screen by counter-scaling.
+ * Uses an asymptotic curve that approaches maxScale rather than growing infinitely.
+ * At anchorZoom, scale=1. Below anchorZoom, scale grows but caps at maxScale.
  */
-function stableScale(zoom: number, anchorZoom: number): number {
+function stableScale(zoom: number, anchorZoom: number, maxScale: number = 3.5): number {
   if (zoom >= anchorZoom) return 1;
-  // Damped inverse: less dramatic at far zoom, preventing enormous elements
   const ratio = anchorZoom / zoom;
-  // Clamp with a smooth ease-out curve
-  return Math.min(ratio, 4) * (1 - Math.exp(-ratio * 0.8)) / (1 - Math.exp(-4 * 0.8));
+  // Asymptotic approach: grows toward maxScale but never exceeds it
+  return 1 + (maxScale - 1) * (1 - Math.exp(-(ratio - 1) * 1.2));
 }
 
 /**
@@ -320,13 +319,12 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
    =================================================================== */
 
 function GroupLabelNode({ data }: { data: GroupLabelNodeData }) {
-  const scale = stableScale(data.zoom, 0.35);
-  // Group labels start appearing at summary tier transition
+  const scale = stableScale(data.zoom, 0.35, 3);
   const visibility = smoothStep(data.zoom, 0.16, 0.25);
 
   return (
     <div
-      className="flex items-center gap-8 px-6 select-none pointer-events-none w-full"
+      className="flex items-center gap-6 px-6 select-none pointer-events-none"
       style={{
         transform: `scale(${scale})`,
         transformOrigin: "left center",
@@ -340,7 +338,7 @@ function GroupLabelNode({ data }: { data: GroupLabelNodeData }) {
       <span className="text-[32px] tabular-nums text-[var(--text-tertiary)]/30 font-semibold">
         {data.count}
       </span>
-      <div className="flex-1 h-[3px] bg-[var(--border-default)]/20 ml-6" />
+      <div className="w-[40px] h-[3px] rounded-full bg-[var(--border-default)]/20 ml-4" />
     </div>
   );
 }
@@ -353,9 +351,8 @@ function GroupLabelNode({ data }: { data: GroupLabelNodeData }) {
    =================================================================== */
 
 function ItemNode({ data }: { data: ItemNodeData }) {
-  const { item, zoomTier, zoomProgress, zoom } = data;
-  const meta =
-    CANONICAL_WORKSPACE_TYPE_META[item.itemType as CanonicalWorkspaceType];
+  const { item, zoom } = data;
+  const meta = CANONICAL_WORKSPACE_TYPE_META[item.itemType as CanonicalWorkspaceType];
   const Icon = meta?.icon;
   const [hovered, setHovered] = useState(false);
   const focusedItemId = useWorkspaceStore((s) => s.focusedItemId);
@@ -363,26 +360,26 @@ function ItemNode({ data }: { data: ItemNodeData }) {
   const isFocused = focusedItemId === item.id;
   const isOpenInDeepEdit = deepEditTargets.some((t) => t.item.id === item.id);
 
-  const isSummary = zoomTier === "summary";
-  const isDetail = zoomTier === "detail";
+  // Semantic zoom representation tiers for items:
+  // chip: 0.20-0.35 — compact icon+title chip
+  // card: 0.35-0.50 — small card with title, status, preview appearing
+  // detail: >0.50 — full card with type-specific touch content
+  const chipToCard = smoothStep(zoom, 0.28, 0.38);
+  const cardToDetail = smoothStep(zoom, 0.42, 0.55);
+  const itemAppear = smoothStep(zoom, 0.22, 0.30);
 
-  // Progressive reveal thresholds
-  const showPreview = isDetail || (isSummary && zoomProgress > 0.6);
-  const showMeta = isDetail || (isSummary && zoomProgress > 0.4);
+  const isChip = chipToCard < 0.3;
+  const isDetail = cardToDetail > 0.5;
 
-  // Item opacity fades in during summary tier
-  const itemVisibility = isSummary
-    ? smoothStep(zoom, 0.16, 0.25)
-    : 1;
-
-  // Counter-scale: clamped more tightly to prevent enormous items at deep zoom
-  const scale = stableScale(zoom, 0.4);
+  // Perceptually stable counter-scale: items stay ~280-350px on screen max
+  const scale = stableScale(zoom, 0.4, 3);
 
   const canvasWidth = TERRITORY.ITEM_COL_WIDTH - 20;
-  // Items grow taller at detail level but don't dominate
-  const canvasHeight = isDetail && zoomProgress > 0.5
-    ? Math.min(TERRITORY.ITEM_ROW_HEIGHT * 2.2, 580)
-    : TERRITORY.ITEM_ROW_HEIGHT - 20;
+  const canvasHeight = isDetail
+    ? Math.min(TERRITORY.ITEM_ROW_HEIGHT * 2, 520)
+    : isChip
+      ? 80
+      : TERRITORY.ITEM_ROW_HEIGHT - 20;
 
   const dynamicBorderWidth = Math.max(1, 1 / zoom);
   const borderColor = isFocused
@@ -400,7 +397,7 @@ function ItemNode({ data }: { data: ItemNodeData }) {
         height: canvasHeight,
         transform: `scale(${scale})`,
         transformOrigin: "top left",
-        opacity: itemVisibility,
+        opacity: itemAppear,
         transition: "opacity 0.2s ease",
       }}
       onMouseEnter={() => setHovered(true)}
@@ -409,9 +406,10 @@ function ItemNode({ data }: { data: ItemNodeData }) {
     >
       <div
         className={cn(
-          "group relative flex flex-col gap-2 rounded-[20px] overflow-hidden w-full h-full",
+          "group relative flex overflow-hidden w-full h-full",
           "bg-[var(--bg-elevated)]/92",
           "transition-all duration-300 ease-[var(--ease-standard)]",
+          isChip ? "rounded-[14px] flex-row items-center gap-3 px-4" : "rounded-[20px] flex-col gap-2",
           isOpenInDeepEdit && !isFocused && "opacity-80",
         )}
         style={{
@@ -425,83 +423,70 @@ function ItemNode({ data }: { data: ItemNodeData }) {
                 : "0 6px 18px -14px rgba(7,20,35,0.12)",
         }}
       >
-        {/* Active connection indicator */}
         {isOpenInDeepEdit && (
           <div className="absolute -right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 pointer-events-none">
-            <div
-              className={cn(
-                "h-8 w-[4px] rounded-full transition-all duration-300",
-                isFocused
-                  ? "bg-[var(--accent-cyan)] shadow-[0_0_8px_2px_rgba(14,142,232,0.35)]"
-                  : "bg-[var(--accent-cyan)]/30",
-              )}
-            />
+            <div className={cn(
+              "h-8 w-[4px] rounded-full transition-all duration-300",
+              isFocused ? "bg-[var(--accent-cyan)] shadow-[0_0_8px_2px_rgba(14,142,232,0.35)]" : "bg-[var(--accent-cyan)]/30",
+            )} />
           </div>
         )}
 
-        {isDetail && zoomProgress > 0.5 ? (
-          /* DETAIL TIER: Inline deep-edit content */
-          <div className="flex-1 overflow-hidden w-full h-full pointer-events-auto bg-[var(--bg-elevated)]">
-            {item.itemType === "thread" ? <ThreadContent item={item} /> : <ArtifactContent item={item} />}
+        {isChip ? (
+          /* CHIP TIER: icon + title, compact */
+          <>
+            {Icon && (
+              <div
+                className="flex h-8 w-8 items-center justify-center rounded-[10px] shrink-0"
+                style={{ backgroundColor: `color-mix(in oklab, ${meta?.color ?? "#637083"} 10%, var(--bg-secondary))` }}
+              >
+                <Icon className="h-4 w-4" style={{ color: meta?.color ?? "var(--text-secondary)" }} />
+              </div>
+            )}
+            <span className="flex-1 truncate text-[15px] font-medium text-[var(--text-primary)] tracking-tight">
+              {item.title}
+            </span>
+            <StatusDot status={item.status === "completed" ? "completed" : item.status === "active" ? "active" : "idle"} />
+          </>
+        ) : isDetail ? (
+          /* DETAIL TIER: Type-specific touch content */
+          <div className="flex-1 overflow-hidden w-full h-full pointer-events-auto">
+            <TouchContent item={item} />
           </div>
         ) : (
-          /* SUMMARY / early DETAIL: Structured card */
+          /* CARD TIER: title, status, preview */
           <>
-            {/* Header row */}
-            <div className={cn("flex items-center gap-4 px-6 pt-5", isSummary && zoomProgress < 0.4 && "pb-5")}>
+            <div className="flex items-center gap-4 px-6 pt-5">
               <div
                 className={cn(
-                  "flex h-11 w-11 items-center justify-center rounded-[13px] transition-all duration-200 shrink-0",
+                  "flex h-11 w-11 items-center justify-center rounded-[13px] shrink-0",
                   isFocused && "ring-1 ring-[var(--accent-cyan)]/20",
                 )}
-                style={{
-                  backgroundColor: `color-mix(in oklab, ${meta?.color ?? "#637083"} ${isFocused ? "14" : "10"}%, var(--bg-secondary))`,
-                }}
+                style={{ backgroundColor: `color-mix(in oklab, ${meta?.color ?? "#637083"} ${isFocused ? "14" : "10"}%, var(--bg-secondary))` }}
               >
-                {Icon && (
-                  <Icon
-                    className="h-5.5 w-5.5"
-                    style={{ color: meta?.color ?? "var(--text-secondary)" }}
-                  />
-                )}
+                {Icon && <Icon className="h-5 w-5" style={{ color: meta?.color ?? "var(--text-secondary)" }} />}
               </div>
-              <span className="flex-1 truncate text-lg font-semibold text-[var(--text-primary)] tracking-tight">
-                {item.title}
-              </span>
-              <StatusDot
-                status={item.status === "completed" ? "completed" : item.status === "active" ? "active" : "idle"}
-              />
+              <span className="flex-1 truncate text-lg font-semibold text-[var(--text-primary)] tracking-tight">{item.title}</span>
+              <StatusDot status={item.status === "completed" ? "completed" : item.status === "active" ? "active" : "idle"} />
             </div>
-
-            {/* Preview + meta u2014 progressively revealed */}
-            {showMeta && (
+            {chipToCard > 0.5 && (
               <>
                 <div className="flex-1 flex flex-col justify-center min-h-0 mt-1 px-6">
-                  {showPreview && item.preview && (
-                    <p className="pl-[60px] text-[15px] leading-[1.6] text-[var(--text-tertiary)] line-clamp-3">
-                      {item.preview}
-                    </p>
+                  {cardToDetail > 0.2 && item.preview && (
+                    <p className="pl-[60px] text-[15px] leading-[1.6] text-[var(--text-tertiary)] line-clamp-3">{item.preview}</p>
                   )}
                 </div>
-
-                {/* Meta row */}
                 <div className="flex items-center justify-between pl-[80px] pr-6 mt-auto shrink-0 pb-5 pt-1">
                   <span
                     className="rounded-md px-2 py-1 text-sm font-semibold uppercase tracking-[0.1em]"
                     style={{
-                      backgroundColor: isFocused
-                        ? `color-mix(in oklab, ${meta?.color ?? "var(--text-tertiary)"} 8%, transparent)`
-                        : "transparent",
+                      backgroundColor: isFocused ? `color-mix(in oklab, ${meta?.color ?? "var(--text-tertiary)"} 8%, transparent)` : "transparent",
                       color: `color-mix(in oklab, ${meta?.color ?? "var(--text-tertiary)"} ${isFocused ? "80" : "50"}%, transparent)`,
                     }}
                   >
                     {meta?.label ?? item.itemType}
                   </span>
-                  {item.meta && (
-                    <span className="text-sm font-medium text-[var(--text-secondary)]">
-                      {item.meta}
-                    </span>
-                  )}
+                  {item.meta && <span className="text-sm font-medium text-[var(--text-secondary)]">{item.meta}</span>}
                 </div>
               </>
             )}
@@ -513,13 +498,296 @@ function ItemNode({ data }: { data: ItemNodeData }) {
 }
 
 /* ===================================================================
-   Build Nodes u2014 layout engine with semantic zoom awareness
-
-   Key changes:
-   - Items appear DURING summary tier transition, not only after
-   - Group labels appear earlier and gradually
-   - Layout is tighter to prevent empty space at deep zoom
+   TouchContent u2014 Type-specific detail-tier rendering
    =================================================================== */
+
+function TouchContent({ item }: { item: WorkspaceItemData }) {
+  const meta = CANONICAL_WORKSPACE_TYPE_META[item.itemType as CanonicalWorkspaceType];
+  const Icon = meta?.icon;
+
+  switch (item.itemType) {
+    case "note":
+      return (
+        <div className="p-5 h-full overflow-hidden">
+          <div className="flex items-center gap-2 mb-3">
+            {Icon && <Icon className="h-4 w-4" style={{ color: meta?.color }} />}
+            <span className="text-[14px] font-semibold text-[var(--text-primary)] truncate">{item.title}</span>
+          </div>
+          <div className="text-[14px] leading-[1.8] text-[var(--text-secondary)] font-[var(--font-manrope)]">
+            {(item.preview ?? "").split(/\. /).map((sentence, i) => (
+              <p key={i} className="mb-2">{sentence}{i < (item.preview ?? "").split(/\. /).length - 1 ? "." : ""}</p>
+            ))}
+          </div>
+        </div>
+      );
+
+    case "code":
+      return (
+        <div className="h-full flex flex-col overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-[var(--border-default)]/20">
+            {Icon && <Icon className="h-4 w-4" style={{ color: meta?.color }} />}
+            <span className="text-[13px] font-semibold text-[var(--text-primary)] truncate">{item.title}</span>
+          </div>
+          <div className="flex-1 bg-[#1e1e2e] p-4 overflow-hidden">
+            <pre className="font-mono text-[12px] leading-[1.7] text-[#cdd6f4] whitespace-pre-wrap">{item.preview ?? "// No code yet"}</pre>
+          </div>
+        </div>
+      );
+
+    case "visual":
+      return (
+        <div className="h-full flex flex-col items-center justify-center" style={{ background: `linear-gradient(135deg, color-mix(in oklab, ${meta?.color ?? "#1f9fb2"} 15%, var(--bg-elevated)), color-mix(in oklab, ${meta?.color ?? "#1f9fb2"} 5%, var(--bg-elevated)))` }}>
+          {Icon && <Icon className="h-12 w-12 mb-3" style={{ color: `color-mix(in oklab, ${meta?.color ?? "#1f9fb2"} 30%, transparent)` }} />}
+          <span className="text-[14px] font-semibold text-[var(--text-primary)]">{item.title}</span>
+          {item.preview && <p className="text-[12px] text-[var(--text-tertiary)] mt-1 px-6 text-center line-clamp-2">{item.preview}</p>}
+        </div>
+      );
+
+    case "thread":
+      return (
+        <div className="h-full flex flex-col p-4 gap-2 overflow-hidden">
+          <div className="flex items-center gap-2 mb-1">
+            {Icon && <Icon className="h-4 w-4" style={{ color: meta?.color }} />}
+            <span className="text-[13px] font-semibold text-[var(--text-primary)] truncate">{item.title}</span>
+          </div>
+          {item.preview ? (
+            <div className="flex flex-col gap-2">
+              <div className="self-end max-w-[80%] rounded-2xl rounded-br-md bg-[var(--bg-secondary)] px-3 py-2 text-[12px] text-[var(--text-primary)]">
+                {item.preview.slice(0, 80)}
+              </div>
+              <div className="self-start max-w-[80%] rounded-2xl rounded-bl-md bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-secondary))] px-3 py-2 text-[12px] text-[var(--text-primary)]">
+                {item.preview.slice(80) || "..."}
+              </div>
+            </div>
+          ) : (
+            <span className="text-[12px] text-[var(--text-tertiary)]">No messages yet</span>
+          )}
+        </div>
+      );
+
+    case "flashcard_deck":
+      return (
+        <div className="h-full flex flex-col items-center justify-center p-5">
+          <div className="relative w-[160px] h-[100px] mb-4">
+            <div className="absolute inset-0 translate-x-2 translate-y-2 rounded-xl bg-[var(--bg-secondary)]/60 border border-[var(--border-default)]/20" />
+            <div className="absolute inset-0 translate-x-1 translate-y-1 rounded-xl bg-[var(--bg-secondary)]/80 border border-[var(--border-default)]/20" />
+            <div className="absolute inset-0 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-default)]/30 flex items-center justify-center">
+              {Icon && <Icon className="h-8 w-8" style={{ color: meta?.color }} />}
+            </div>
+          </div>
+          <span className="text-[14px] font-semibold text-[var(--text-primary)]">{item.title}</span>
+          {item.meta && <span className="text-[13px] font-medium text-[var(--accent-cyan)] mt-1">{item.meta}</span>}
+          <button type="button" className="mt-3 px-4 py-1.5 rounded-lg bg-[var(--accent-cyan)]/10 text-[12px] font-semibold text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/20 transition-colors">Review</button>
+        </div>
+      );
+
+    case "quiz":
+      return (
+        <div className="h-full flex flex-col items-center justify-center p-5">
+          {Icon && <Icon className="h-10 w-10 mb-3" style={{ color: meta?.color }} />}
+          <span className="text-[14px] font-semibold text-[var(--text-primary)]">{item.title}</span>
+          {item.meta ? (
+            <span className="text-[16px] font-bold mt-2" style={{ color: meta?.color }}>{item.meta}</span>
+          ) : (
+            <span className="text-[13px] text-[var(--text-tertiary)] mt-1">Not attempted</span>
+          )}
+          <button type="button" className="mt-3 px-4 py-1.5 rounded-lg bg-[color-mix(in_oklab,${meta?.color}_10%,var(--bg-secondary))] text-[12px] font-semibold hover:opacity-80 transition-opacity" style={{ color: meta?.color }}>
+            {item.status === "completed" ? "Review" : "Start"}
+          </button>
+        </div>
+      );
+
+    case "planner":
+      return (
+        <div className="h-full flex flex-col p-5">
+          <div className="flex items-center gap-2 mb-3">
+            {Icon && <Icon className="h-4 w-4" style={{ color: meta?.color }} />}
+            <span className="text-[13px] font-semibold text-[var(--text-primary)] truncate">{item.title}</span>
+          </div>
+          <div className="flex items-center gap-3 py-2">
+            <div className="h-5 w-5 rounded-md border-2 border-[var(--accent-cyan)]/40 flex items-center justify-center">
+              {item.status === "completed" && <div className="h-2.5 w-2.5 rounded-sm bg-[var(--success)]" />}
+            </div>
+            <span className="text-[13px] text-[var(--text-primary)]">{item.title}</span>
+          </div>
+          <div className="flex items-center gap-2 mt-auto">
+            <div className="h-2 w-2 rounded-full bg-[var(--accent-coral)]" />
+            <span className="text-[11px] text-[var(--text-tertiary)]">{item.meta ?? "No due date"}</span>
+          </div>
+        </div>
+      );
+
+    case "export":
+      return (
+        <div className="h-full flex flex-col items-center justify-center p-5" style={{ background: "linear-gradient(135deg, var(--bg-secondary)/30, var(--bg-elevated))" }}>
+          <div className="w-[80px] h-[100px] rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-default)]/30 flex flex-col items-center justify-center mb-3 shadow-sm">
+            {Icon && <Icon className="h-6 w-6" style={{ color: meta?.color }} />}
+            <div className="mt-2 w-10 h-[2px] rounded-full bg-[var(--border-default)]/30" />
+            <div className="mt-1 w-8 h-[2px] rounded-full bg-[var(--border-default)]/20" />
+          </div>
+          <span className="text-[13px] font-semibold text-[var(--text-primary)]">{item.title}</span>
+        </div>
+      );
+
+    case "board":
+      return (
+        <div className="h-full flex flex-col p-4">
+          <div className="flex items-center gap-2 mb-3">
+            {Icon && <Icon className="h-4 w-4" style={{ color: meta?.color }} />}
+            <span className="text-[13px] font-semibold text-[var(--text-primary)] truncate">{item.title}</span>
+          </div>
+          <div className="flex-1 grid grid-cols-3 gap-2">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="rounded-lg bg-[var(--bg-secondary)]/40 border border-[var(--border-default)]/15" />
+            ))}
+          </div>
+        </div>
+      );
+
+    default:
+      return (
+        <div className="h-full flex flex-col p-5">
+          <div className="flex items-center gap-2 mb-3">
+            {Icon && <Icon className="h-4 w-4" style={{ color: meta?.color }} />}
+            <span className="text-[14px] font-semibold text-[var(--text-primary)]">{item.title}</span>
+          </div>
+          {item.preview && <p className="text-[13px] leading-relaxed text-[var(--text-secondary)]">{item.preview}</p>}
+        </div>
+      );
+  }
+}
+
+/* ===================================================================
+   Build Nodes u2014 layout engine with semantic zoom awareness
+   =================================================================== */
+
+/* ===================================================================
+   Heuristic Topic Grouping (Issue 4)
+   =================================================================== */
+
+const STOPWORDS = new Set(["the", "a", "an", "in", "on", "of", "for", "to", "and", "or", "is", "it", "at", "by", "with", "from"]);
+
+function heuristicTopicGroups(items: WorkspaceItemData[]): { label: string; items: WorkspaceItemData[] }[] {
+  const wordMap: Record<string, WorkspaceItemData[]> = {};
+  const itemWords: Map<string, string[]> = new Map();
+
+  for (const item of items) {
+    const words = item.title
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, "")
+      .split(/\s+/)
+      .filter((w) => w.length > 2 && !STOPWORDS.has(w));
+    itemWords.set(item.id, words);
+    for (const w of words) {
+      if (!wordMap[w]) wordMap[w] = [];
+      wordMap[w].push(item);
+    }
+  }
+
+  // Find keywords shared by 2+ items
+  const clusters: { keyword: string; items: Set<string> }[] = [];
+  const assigned = new Set<string>();
+
+  const sortedKeywords = Object.entries(wordMap)
+    .filter(([, arr]) => arr.length >= 2)
+    .sort((a, b) => b[1].length - a[1].length);
+
+  for (const [keyword, keywordItems] of sortedKeywords) {
+    const unassigned = keywordItems.filter((it) => !assigned.has(it.id));
+    if (unassigned.length < 2) continue;
+    const cluster = { keyword, items: new Set(unassigned.map((it) => it.id)) };
+    for (const id of cluster.items) assigned.add(id);
+    clusters.push(cluster);
+  }
+
+  // Remaining unassigned items group by type+status
+  const remaining = items.filter((it) => !assigned.has(it.id));
+  const groups: { label: string; items: WorkspaceItemData[] }[] = [];
+
+  for (const cluster of clusters) {
+    const clusterItems = items.filter((it) => cluster.items.has(it.id));
+    const label = cluster.keyword.charAt(0).toUpperCase() + cluster.keyword.slice(1);
+    groups.push({ label, items: clusterItems });
+  }
+
+  if (remaining.length > 0) {
+    const byType: Record<string, WorkspaceItemData[]> = {};
+    for (const it of remaining) {
+      const key = it.itemType;
+      if (!byType[key]) byType[key] = [];
+      byType[key].push(it);
+    }
+    for (const [type, typeItems] of Object.entries(byType)) {
+      const meta = CANONICAL_WORKSPACE_TYPE_META[type as CanonicalWorkspaceType];
+      groups.push({ label: meta?.label ?? type, items: typeItems });
+    }
+  }
+
+  return groups.length > 0 ? groups : [{ label: "All Items", items }];
+}
+
+/* ===================================================================
+   Timeline Date Grouping (Issue 5)
+   =================================================================== */
+
+function timelineDateGroups(items: WorkspaceItemData[]): { label: string; items: WorkspaceItemData[] }[] {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const yesterday = today - 86_400_000;
+  const startOfWeek = today - now.getDay() * 86_400_000;
+  const startOfLastWeek = startOfWeek - 7 * 86_400_000;
+
+  const buckets: { label: string; items: WorkspaceItemData[] }[] = [
+    { label: "Today", items: [] },
+    { label: "Yesterday", items: [] },
+    { label: "This Week", items: [] },
+    { label: "Last Week", items: [] },
+  ];
+  const monthBuckets: Record<string, WorkspaceItemData[]> = {};
+
+  const sorted = [...items].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+
+  for (const item of sorted) {
+    const ts = item.updatedAt ?? 0;
+    if (ts >= today) {
+      buckets[0].items.push(item);
+    } else if (ts >= yesterday) {
+      buckets[1].items.push(item);
+    } else if (ts >= startOfWeek) {
+      buckets[2].items.push(item);
+    } else if (ts >= startOfLastWeek) {
+      buckets[3].items.push(item);
+    } else {
+      const d = new Date(ts);
+      const key = d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+      if (!monthBuckets[key]) monthBuckets[key] = [];
+      monthBuckets[key].push(item);
+    }
+  }
+
+  const result = buckets.filter((b) => b.items.length > 0);
+  for (const [label, monthItems] of Object.entries(monthBuckets)) {
+    result.push({ label, items: monthItems });
+  }
+  return result.length > 0 ? result : [{ label: "All", items: sorted }];
+}
+
+/* ===================================================================
+   Build Nodes u2014 layout engine with semantic zoom awareness
+   =================================================================== */
+
+const ITEMS_PER_COL = 3;
+const GROUP_COL_WIDTH = 1800;
+const ROW_HEIGHT = 300;
+
+function computeTerritorySize(itemCount: number): { w: number; h: number } {
+  const minW = 3000;
+  const minH = 2400;
+  const perItem = 400;
+  const w = Math.max(minW, Math.min(6000, 2000 + Math.ceil(itemCount / 3) * 1200));
+  const h = Math.max(minH, Math.min(5000, 1200 + itemCount * perItem));
+  return { w, h };
+}
 
 function buildNodes(
   workspaces: WorkspaceData[],
@@ -530,43 +798,14 @@ function buildNodes(
 ): Node[] {
   const nodes: Node[] = [];
   const isLandscape = zoomTier === "landscape";
-
-  // At deep zoom, don't make rows too tall to prevent dominance
-  const rowHeight =
-    zoomTier === "detail"
-      ? Math.min(TERRITORY.ITEM_ROW_HEIGHT * 2.2, 580)
-      : TERRITORY.ITEM_ROW_HEIGHT;
-
-  // Show items earlier: even at late landscape (approaching summary)
   const showItems = !isLandscape || (isLandscape && zoomProgress > 0.85);
 
   workspaces.forEach((ws, idx) => {
     const col = idx % TERRITORY.COLS;
     const row = Math.floor(idx / TERRITORY.COLS);
     const tint = dominantTint(ws);
+    const { w: territoryWidth, h: territoryHeight } = computeTerritorySize(ws.items.length);
 
-    const grouped: Record<string, WorkspaceItemData[]> = {};
-    for (const item of ws.items) {
-      const key = item.itemType;
-      if (!grouped[key]) grouped[key] = [];
-      grouped[key].push(item);
-    }
-
-    let requiredHeight = 700; // Header area (smaller to reduce bottom empty space)
-    for (const [, group] of Object.entries(TYPE_GROUP_LABELS)) {
-      const items = group.types.flatMap((t) => grouped[t] ?? []);
-      if (items.length > 0) {
-        requiredHeight +=
-          100 + Math.ceil(items.length / TERRITORY.ITEMS_PER_ROW) * rowHeight + 30;
-      }
-    }
-    const territoryHeight = Math.max(TERRITORY.HEIGHT, requiredHeight);
-    const territoryWidth = Math.max(
-      TERRITORY.WIDTH,
-      80 + TERRITORY.ITEMS_PER_ROW * TERRITORY.ITEM_COL_WIDTH + 60,
-    );
-
-    // Territory node
     nodes.push({
       id: `ws-${ws.id}`,
       type: "workspaceTerritory",
@@ -580,148 +819,114 @@ function buildNodes(
       style: { width: territoryWidth, height: territoryHeight, zIndex: 0 },
     });
 
-    // Items: shown during summary+ AND late landscape for gradual reveal
     if (!showItems) return;
 
+    // Build groups based on viewMode
+    let groups: { label: string; variant: string; items: WorkspaceItemData[] }[];
+
     if (viewMode === "timeline") {
-      const sortedItems = [...ws.items].sort(
-        (a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0),
-      );
-
-      nodes.push({
-        id: `group-${ws.id}-timeline`,
-        type: "groupLabel",
-        parentId: `ws-${ws.id}`,
-        position: { x: 80, y: 700 },
-        data: {
-          label: "Recent Activity",
-          variant: "neutral",
-          count: sortedItems.length,
-          zoom,
-        } satisfies GroupLabelNodeData,
-        draggable: false,
-        selectable: false,
-        style: { width: TERRITORY.WIDTH - 160, zIndex: 1 },
-      });
-
-      sortedItems.forEach((item, itemIdx) => {
-        const itemCol = itemIdx % TERRITORY.ITEMS_PER_ROW;
-        const itemRow = Math.floor(itemIdx / TERRITORY.ITEMS_PER_ROW);
-        nodes.push({
-          id: `item-${item.id}`,
-          type: "itemNode",
-          parentId: `ws-${ws.id}`,
-          position: {
-            x: 80 + itemCol * TERRITORY.ITEM_COL_WIDTH,
-            y: 800 + itemRow * rowHeight,
-          },
-          data: {
-            item,
-            zoomTier,
-            zoomProgress,
-            zoom,
-            groupLabel: "Recent Activity",
-            isFirst: itemIdx === 0,
-          } satisfies ItemNodeData,
-          draggable: true,
-          selectable: true,
-          style: { zIndex: 2 },
-        });
-      });
+      const dateGroups = timelineDateGroups(ws.items);
+      groups = dateGroups.map((g) => ({ label: g.label, variant: "neutral", items: g.items }));
     } else if (viewMode === "byTopic") {
-      nodes.push({
-        id: `group-${ws.id}-topic`,
-        type: "groupLabel",
-        parentId: `ws-${ws.id}`,
-        position: { x: 80, y: 700 },
-        data: {
-          label: ws.name,
-          variant: tint,
-          count: ws.items.length,
-          zoom,
-        } satisfies GroupLabelNodeData,
-        draggable: false,
-        selectable: false,
-        style: { width: TERRITORY.WIDTH - 160, zIndex: 1 },
-      });
-
-      ws.items.forEach((item, itemIdx) => {
-        const itemCol = itemIdx % TERRITORY.ITEMS_PER_ROW;
-        const itemRow = Math.floor(itemIdx / TERRITORY.ITEMS_PER_ROW);
-        nodes.push({
-          id: `item-${item.id}`,
-          type: "itemNode",
-          parentId: `ws-${ws.id}`,
-          position: {
-            x: 80 + itemCol * TERRITORY.ITEM_COL_WIDTH,
-            y: 800 + itemRow * rowHeight,
-          },
-          data: {
-            item,
-            zoomTier,
-            zoomProgress,
-            zoom,
-            groupLabel: ws.name,
-            isFirst: itemIdx === 0,
-          } satisfies ItemNodeData,
-          draggable: true,
-          selectable: true,
-          style: { zIndex: 2 },
-        });
-      });
+      const topicGroups = heuristicTopicGroups(ws.items);
+      groups = topicGroups.map((g) => ({ label: g.label, variant: tint, items: g.items }));
     } else {
-      // Default byType lens
-      let groupY = 700;
-
+      const typeGrouped: Record<string, WorkspaceItemData[]> = {};
+      for (const item of ws.items) {
+        const key = item.itemType;
+        if (!typeGrouped[key]) typeGrouped[key] = [];
+        typeGrouped[key].push(item);
+      }
+      groups = [];
       for (const [, group] of Object.entries(TYPE_GROUP_LABELS)) {
-        const items = group.types.flatMap((t) => grouped[t] ?? []);
-        if (items.length === 0) continue;
+        const items = group.types.flatMap((t) => typeGrouped[t] ?? []);
+        if (items.length > 0) {
+          groups.push({ label: group.label, variant: TYPE_TO_TINT[group.types[0]], items });
+        }
+      }
+    }
 
+    // Layout: distribute groups across 2 columns to spread content
+    const headerY = 500;
+    const groupsPerColumn = Math.ceil(groups.length / 2);
+    const colOffsets = [120, territoryWidth / 2 + 60];
+
+    if (viewMode === "timeline") {
+      // Timeline: horizontal layout (left-to-right)
+      let groupX = 120;
+      for (let gi = 0; gi < groups.length; gi++) {
+        const g = groups[gi];
         nodes.push({
-          id: `group-${ws.id}-${group.label}`,
+          id: `group-${ws.id}-${g.label}-${gi}`,
           type: "groupLabel",
           parentId: `ws-${ws.id}`,
-          position: { x: 80, y: groupY },
-          data: {
-            label: group.label,
-            variant: TYPE_TO_TINT[group.types[0]],
-            count: items.length,
-            zoom,
-          } satisfies GroupLabelNodeData,
+          position: { x: groupX, y: headerY },
+          data: { label: g.label, variant: g.variant, count: g.items.length, zoom } satisfies GroupLabelNodeData,
           draggable: false,
           selectable: false,
-          style: { width: TERRITORY.WIDTH - 160, zIndex: 1 },
+          style: { width: 1200, zIndex: 1 },
         });
 
-        groupY += 100;
+        let itemY = headerY + 120;
+        for (let ii = 0; ii < g.items.length; ii++) {
+          const item = g.items[ii];
+          nodes.push({
+            id: `item-${item.id}`,
+            type: "itemNode",
+            parentId: `ws-${ws.id}`,
+            position: { x: groupX, y: itemY },
+            data: { item, zoomTier, zoomProgress, zoom, groupLabel: g.label, isFirst: ii === 0 } satisfies ItemNodeData,
+            draggable: true,
+            selectable: true,
+            style: { zIndex: 2 },
+          });
+          itemY += ROW_HEIGHT;
+        }
+        groupX += 1400;
+      }
+    } else {
+      // byType / byTopic: 2-column layout
+      const colYCursors = [headerY, headerY];
 
-        items.forEach((item, itemIdx) => {
-          const itemCol = itemIdx % TERRITORY.ITEMS_PER_ROW;
-          const itemRow = Math.floor(itemIdx / TERRITORY.ITEMS_PER_ROW);
+      for (let gi = 0; gi < groups.length; gi++) {
+        const g = groups[gi];
+        const colIdx = gi < groupsPerColumn ? 0 : 1;
+        const x = colOffsets[colIdx];
+        let y = colYCursors[colIdx];
+
+        nodes.push({
+          id: `group-${ws.id}-${g.label}-${gi}`,
+          type: "groupLabel",
+          parentId: `ws-${ws.id}`,
+          position: { x, y },
+          data: { label: g.label, variant: g.variant, count: g.items.length, zoom } satisfies GroupLabelNodeData,
+          draggable: false,
+          selectable: false,
+          style: { width: Math.min(territoryWidth / 2 - 140, 2400), zIndex: 1 },
+        });
+        y += 120;
+
+        const itemsPerRow = Math.min(3, TERRITORY.ITEMS_PER_ROW);
+        for (let ii = 0; ii < g.items.length; ii++) {
+          const item = g.items[ii];
+          const itemCol = ii % itemsPerRow;
+          const itemRow = Math.floor(ii / itemsPerRow);
           nodes.push({
             id: `item-${item.id}`,
             type: "itemNode",
             parentId: `ws-${ws.id}`,
             position: {
-              x: item.canvasX ?? 80 + itemCol * TERRITORY.ITEM_COL_WIDTH,
-              y: item.canvasY ?? groupY + itemRow * rowHeight,
+              x: item.canvasX ?? x + itemCol * TERRITORY.ITEM_COL_WIDTH,
+              y: item.canvasY ?? y + itemRow * ROW_HEIGHT,
             },
-            data: {
-              item,
-              zoomTier,
-              zoomProgress,
-              zoom,
-              groupLabel: group.label,
-              isFirst: itemIdx === 0,
-            } satisfies ItemNodeData,
+            data: { item, zoomTier, zoomProgress, zoom, groupLabel: g.label, isFirst: ii === 0 } satisfies ItemNodeData,
             draggable: true,
             selectable: true,
             style: { zIndex: 2 },
           });
-        });
+        }
 
-        groupY +=
-          Math.ceil(items.length / TERRITORY.ITEMS_PER_ROW) * rowHeight + 30;
+        colYCursors[colIdx] = y + Math.ceil(g.items.length / itemsPerRow) * ROW_HEIGHT + 80;
       }
     }
   });
@@ -750,10 +955,10 @@ function CanvasBackground({ mode }: { mode: "dots" | "blank" | "grid" }) {
       className="absolute inset-0 pointer-events-none z-0"
       style={{
         backgroundImage: isDots
-          ? "radial-gradient(circle, var(--border-default) 1px, transparent 1px)"
+          ? "radial-gradient(circle, var(--border-default) 1.2px, transparent 1.2px)"
           : "linear-gradient(var(--border-default) 0.5px, transparent 0.5px), linear-gradient(90deg, var(--border-default) 0.5px, transparent 0.5px)",
         backgroundSize: isDots ? "28px 28px" : "40px 40px",
-        opacity: isDots ? 0.35 : 0.2,
+        opacity: isDots ? 0.55 : 0.2,
       }}
     />
   );

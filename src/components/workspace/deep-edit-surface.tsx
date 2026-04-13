@@ -3,11 +3,8 @@
 import {
   Sparkles,
   BookOpen,
-  Lock,
-  Unlock,
   Copy,
   Archive,
-  MoreHorizontal,
   Edit3,
   Check,
 } from "lucide-react";
@@ -140,7 +137,7 @@ function ArtifactView({ item }: { item: WorkspaceItemData }) {
                 "w-full h-full min-h-[280px] resize-none rounded-2xl p-5 transition-all duration-200",
                 "bg-[var(--bg-secondary)]/10 hover:bg-[var(--bg-secondary)]/20",
                 "focus:bg-[var(--bg-secondary)]/25 focus:ring-1 focus:ring-[var(--accent-cyan)]/15",
-                "text-[14px] leading-[1.7] text-[var(--text-primary)] outline-none",
+                "text-[15px] leading-[1.75] text-[var(--text-primary)] outline-none font-[var(--font-manrope)]",
                 "placeholder:text-[var(--text-tertiary)]/40",
                 isCode && "font-mono text-[13px] leading-[1.6]",
               )}
@@ -224,7 +221,6 @@ export function DeepEditSurface({
   );
   const focusedItemId = useWorkspaceStore((s) => s.focusedItemId);
   const isFocused = focusedItemId === item.id;
-  const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const isThread = item.itemType === "thread";
 
   const collapsed = (
@@ -269,20 +265,20 @@ export function DeepEditSurface({
       onToggleLock={onToggleLock}
       expandedClassName="right-0 top-1/2 -translate-y-1/2"
     >
-      <div className="flex h-[620px] w-[460px] flex-col overflow-hidden">
-        {/* Surface header u2014 clean, minimal: type icon + title + single lock */}
+      <div className="flex h-[620px] w-[540px] flex-col overflow-hidden">
+        {/* Surface header — icon + title only, lock handled by HubSurface wrapper */}
         <div
           className={cn(
-            "flex h-11 shrink-0 items-center justify-between border-b px-4 transition-colors duration-200",
+            "flex h-14 shrink-0 items-center justify-between border-b px-5 transition-colors duration-200",
             isFocused
               ? "border-[color-mix(in_oklab,var(--accent-cyan)_15%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_2%,transparent)]"
               : "border-[var(--border-default)]/20",
           )}
         >
-          <div className="flex min-w-0 items-center gap-2.5">
+          <div className="flex min-w-0 items-center gap-3">
             <div
               className={cn(
-                "flex h-7 w-7 items-center justify-center rounded-lg transition-all duration-200",
+                "flex h-8 w-8 items-center justify-center rounded-xl transition-all duration-200",
                 isFocused && "ring-1 ring-[var(--accent-cyan)]/20",
               )}
               style={{
@@ -290,49 +286,12 @@ export function DeepEditSurface({
               }}
             >
               {meta?.icon ? (
-                <meta.icon className="h-3.5 w-3.5" style={{ color: meta.color }} />
+                <meta.icon className="h-4 w-4" style={{ color: meta.color }} />
               ) : null}
             </div>
             <div className="min-w-0 flex-1">
               <EditableTitle title={item.title} onChange={handleTitleChange} />
-              <span
-                className="text-[9px] font-semibold uppercase tracking-[0.1em]"
-                style={{ color: `color-mix(in oklab, ${meta?.color ?? "var(--text-tertiary)"} 60%, transparent)` }}
-              >
-                {meta?.label ?? item.itemType}
-              </span>
             </div>
-          </div>
-
-          {/* Controls u2014 only lock + more menu */}
-          <div className="relative flex items-center gap-0.5">
-            <button
-              type="button"
-              onClick={onToggleLock}
-              className={cn(
-                "flex h-7 w-7 items-center justify-center rounded-lg transition-colors",
-                locked
-                  ? "text-[var(--accent-cyan)] hover:bg-[color-mix(in_oklab,var(--accent-cyan)_8%,transparent)]"
-                  : "text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
-              )}
-              aria-label={locked ? "Unlock" : "Lock open"}
-            >
-              {locked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
-            </button>
-            <button
-              type="button"
-              onClick={() => setContextMenuOpen((v) => !v)}
-              className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              aria-label="More actions"
-            >
-              <MoreHorizontal className="h-3.5 w-3.5" />
-            </button>
-            <SurfaceContextMenu
-              open={contextMenuOpen}
-              onClose={() => setContextMenuOpen(false)}
-              onDuplicate={() => console.log("[deep-edit] Duplicate", item.id)}
-              onArchive={() => console.log("[deep-edit] Archive", item.id)}
-            />
           </div>
         </div>
 

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Manrope, IBM_Plex_Mono, Fraunces } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { getClerkPublishableKey } from "@/lib/clerk-config";
@@ -96,7 +97,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   const content = (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        <Script id="theme-init" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className={`${manrope.variable} ${fraunces.variable} ${plexMono.variable} antialiased`}>
         <a

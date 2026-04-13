@@ -35,9 +35,14 @@ function saveNotes(notes: QuickNote[]) {
  * Bullet-point style, direct inline editing, dismiss downward when done.
  * Feels like a quick capture scratchpad, not a card system.
  */
-export function QuickNotesHub({ className }: { className?: string }) {
+export function QuickNotesHub({ className, forceExpanded }: { className?: string; forceExpanded?: boolean }) {
   const [locked, setLocked] = useState(false);
-  const [notes, setNotes] = useState<QuickNote[]>(loadNotes);
+  const [notes, setNotes] = useState<QuickNote[]>([]);
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    setNotes(loadNotes());
+    setHydrated(true);
+  }, []);
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -45,8 +50,8 @@ export function QuickNotesHub({ className }: { className?: string }) {
   const editRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    saveNotes(notes);
-  }, [notes]);
+    if (hydrated) saveNotes(notes);
+  }, [notes, hydrated]);
 
   useEffect(() => {
     if (editingId && editRef.current) {
@@ -110,16 +115,19 @@ export function QuickNotesHub({ className }: { className?: string }) {
     <button
       type="button"
       className={cn(
-        "flex items-center gap-2 rounded-r-[18px] border border-l-0 py-2.5 pl-2 pr-3",
+        "flex flex-col items-center justify-center gap-2 rounded-r-[14px] border border-l-0 w-[36px] h-[100px] py-3",
         "border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/95 backdrop-blur-xl",
         "shadow-[0_8px_22px_-16px_rgba(8,22,40,0.14)] transition-all duration-200",
         "hover:bg-[var(--bg-hover)] cursor-pointer",
         className,
       )}
     >
-      <StickyNote className="h-4 w-4 text-[var(--text-secondary)]" />
+      <StickyNote className="h-4 w-4 shrink-0 text-[var(--text-secondary)]" />
+      <span className="text-[10px] font-semibold text-[var(--text-secondary)]" style={{ writingMode: "vertical-rl", textOrientation: "mixed" }}>
+        Notes
+      </span>
       {activeNotes.length > 0 && (
-        <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[var(--warning,#f59f0a)] px-1.5 text-[10px] font-bold text-white">
+        <span className="flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-[var(--warning,#f59f0a)] px-1 text-[8px] font-bold text-white">
           {activeNotes.length}
         </span>
       )}
@@ -132,6 +140,7 @@ export function QuickNotesHub({ className }: { className?: string }) {
       edge="left"
       collapsed={collapsed}
       locked={locked}
+      forceExpanded={forceExpanded}
       onToggleLock={() => setLocked((l) => !l)}
       className="!top-auto !translate-y-0 !bottom-[25vh]"
       expandedClassName="left-0 bottom-0"
@@ -153,7 +162,7 @@ export function QuickNotesHub({ className }: { className?: string }) {
         {/* Input u2014 bullet-point style */}
         <div className="px-4 pb-2">
           <div className="flex items-center gap-2">
-            <span className="text-[var(--warning,#f59f0a)]/60 text-[14px] font-bold">u2022</span>
+            <span className="text-[var(--warning,#f59f0a)]/70 text-[16px] font-bold leading-none">•</span>
             <input
               ref={inputRef}
               value={draft}
@@ -164,7 +173,7 @@ export function QuickNotesHub({ className }: { className?: string }) {
                   addNote();
                 }
               }}
-              placeholder="Type a note and press Enteru2026"
+              placeholder="Type a note and press Enter2026"
               className="min-w-0 flex-1 bg-transparent text-[13px] leading-relaxed text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]/40"
             />
           </div>
@@ -180,23 +189,24 @@ export function QuickNotesHub({ className }: { className?: string }) {
               </span>
             </div>
           ) : (
-            <div className="flex flex-col gap-0.5">
-              {notes.map((note) => (
-                <div
-                  key={note.id}
-                  className={cn(
-                    "group/note flex items-start gap-2 rounded-lg px-1 py-1.5 transition-all duration-200",
-                    note.completed && "opacity-40 translate-x-2",
-                  )}
-                >
+            <div className="flex flex-col gap-0">
+              {notes.map((note, noteIdx) => (
+                <div key={note.id}>
+                  {noteIdx > 0 && <div className="h-px bg-[var(--border-default)]/10 mx-2 my-0.5" />}
+                  <div
+                    className={cn(
+                      "group/note flex items-start gap-2 rounded-lg px-1 py-1.5 transition-all duration-200",
+                      note.completed && "opacity-40 translate-x-2",
+                    )}
+                  >
                   {/* Bullet / dismiss action */}
                   <button
                     type="button"
                     onClick={() => completeNote(note.id)}
-                    className="mt-[3px] shrink-0 text-[14px] font-bold text-[var(--text-tertiary)]/30 transition-colors hover:text-[var(--success)] leading-none"
+                    className="mt-[2px] shrink-0 text-[16px] font-bold text-[var(--text-tertiary)]/40 transition-colors hover:text-[var(--success)] leading-none"
                     title="Done u2014 dismiss downward"
                   >
-                    u2022
+                    •
                   </button>
 
                   {/* Content u2014 inline editable */}
@@ -234,6 +244,7 @@ export function QuickNotesHub({ className }: { className?: string }) {
                       <ChevronDown className="h-3 w-3" />
                     </button>
                   )}
+                  </div>
                 </div>
               ))}
             </div>

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { AnimatePresence } from "framer-motion";
+import { Home, MessageSquare, Layers, Settings, User } from "lucide-react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { WorkspaceCanvas } from "@/components/workspace/workspace-canvas";
 import { CommandBar } from "@/components/workspace/command-bar";
@@ -77,7 +78,11 @@ export default function WorkspacePage() {
     reopenResultCard: storeReopenResultCard,
     hydratePreferences,
     hasHydratedPreferences,
+    hubVisibility,
   } = useWorkspaceStore();
+
+  const hubHidden = hubVisibility === "hidden";
+  const hubForceExpanded = hubVisibility === "expanded";
 
   /* ─── Real data hook: fetches from backend, falls back to demo ─── */
   const {
@@ -401,6 +406,12 @@ export default function WorkspacePage() {
     refreshData();
   }, [workspaces, refreshData]);
 
+  // Clear focused item when switching workspaces
+  useEffect(() => {
+    setFocusedItem(null);
+    closeAllDeepEdits();
+  }, [committedWorkspaceId, setFocusedItem, closeAllDeepEdits]);
+
   // Global keyboard: Escape closes deep edits
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -419,6 +430,32 @@ export default function WorkspacePage() {
 
   return (
     <div className="relative flex h-dvh w-full overflow-hidden bg-[var(--bg-primary)]">
+      {/* Minimal app navigation rail */}
+      <div className="absolute left-0 top-0 bottom-0 z-[10] w-[48px] flex flex-col items-center justify-between py-4 bg-[var(--bg-primary)] border-r border-[var(--border-default)]/15">
+        <div className="flex flex-col items-center gap-1">
+          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--accent-cyan)]/10 mb-3">
+            <span className="text-[14px] font-bold text-[var(--accent-cyan)]">S</span>
+          </div>
+          <button type="button" onClick={handleBack} className="flex h-9 w-9 items-center justify-center rounded-xl text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+            <Home className="h-4 w-4" />
+          </button>
+          <button type="button" className="flex h-9 w-9 items-center justify-center rounded-xl text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+            <MessageSquare className="h-4 w-4" />
+          </button>
+          <button type="button" className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent-cyan)]/8 text-[var(--accent-cyan)] transition-colors">
+            <Layers className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex flex-col items-center gap-1">
+          <button type="button" className="flex h-9 w-9 items-center justify-center rounded-xl text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+            <Settings className="h-4 w-4" />
+          </button>
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--bg-secondary)] text-[var(--text-tertiary)]">
+            <User className="h-4 w-4" />
+          </div>
+        </div>
+      </div>
+
       {/* Loading indicator when fetching real data */}
       {dataLoading && (
         <div className="absolute left-1/2 top-4 z-[60] -translate-x-1/2 rounded-full border border-[var(--border-default)]/30 bg-[var(--bg-elevated)]/95 px-4 py-1.5 backdrop-blur-xl">
@@ -447,41 +484,46 @@ export default function WorkspacePage() {
       </div>
 
       {/* Hub ecology: Right-edge deep-edit surfaces */}
-      <AnimatePresence>
-        {deepEditTargets.map((target) => (
-          <DeepEditSurface
-            key={target.item.id}
-            item={target.item}
-            locked={target.locked}
-            pinned={target.pinned}
-            onClose={() => closeDeepEdit(target.item.id)}
-            onToggleLock={() => toggleDeepEditLock(target.item.id)}
-          />
-        ))}
-      </AnimatePresence>
+      {!hubHidden && (
+        <AnimatePresence>
+          {deepEditTargets.map((target) => (
+            <DeepEditSurface
+              key={target.item.id}
+              item={target.item}
+              locked={target.locked}
+              pinned={target.pinned}
+              onClose={() => closeDeepEdit(target.item.id)}
+              onToggleLock={() => toggleDeepEditLock(target.item.id)}
+            />
+          ))}
+        </AnimatePresence>
+      )}
 
       {/* Hub ecology: Left-edge planner (above dock) */}
-      <PlannerEdge
-        tasks={livePlannerTasks.length > 0 ? livePlannerTasks : DEMO_PLANNER_TASKS}
-        onTaskClick={handleTaskClick}
-        onToggleTask={handleToggleTask}
-      />
+      {!hubHidden && (
+        <PlannerEdge
+          tasks={livePlannerTasks.length > 0 ? livePlannerTasks : DEMO_PLANNER_TASKS}
+          onTaskClick={handleTaskClick}
+          onToggleTask={handleToggleTask}
+          forceExpanded={hubForceExpanded}
+        />
+      )}
 
       {/* Hub ecology: Left-edge workspace dock */}
-      <WorkspaceDock
-        workspaces={dockItems}
-        onSelect={handleWorkspaceSelect}
-        onCreateNew={noop}
-        onGoHome={handleBack}
-      />
+      {!hubHidden && (
+        <WorkspaceDock
+          workspaces={dockItems}
+          onSelect={handleWorkspaceSelect}
+          onCreateNew={noop}
+          onGoHome={handleBack}
+        />
+      )}
 
-      {/* Hub ecology: Top-right utility controls (background + hub visibility) */}
+      {/* Hub ecology: Top-right utility controls (always visible for settings access) */}
       <UtilityHubGroup />
 
-      {/* LensHub merged into UtilityHubGroup above */}
-
       {/* Hub ecology: Left-edge quick notes (~3/4 down) */}
-      <QuickNotesHub />
+      {!hubHidden && <QuickNotesHub forceExpanded={hubForceExpanded} />}
 
       {/* Hub ecology: Bottom-center unified command bar with result cards */}
       <CommandBar
@@ -514,7 +556,7 @@ export default function WorkspacePage() {
       />
 
       {/* Hub ecology: Bottom-right timer */}
-      <TimerWidget />
+      {!hubHidden && <TimerWidget forceExpanded={hubForceExpanded} />}
     </div>
   );
 }

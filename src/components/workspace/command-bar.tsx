@@ -74,6 +74,8 @@ function FocusContextTags() {
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const focusedItemId = useWorkspaceStore((s) => s.focusedItemId);
   const deepEditTargets = useWorkspaceStore((s) => s.deepEditTargets);
+  const setFocusedItem = useWorkspaceStore((s) => s.setFocusedItem);
+  const closeDeepEdit = useWorkspaceStore((s) => s.closeDeepEdit);
 
   const workspace = workspaces.find((w) => w.id === committedWorkspaceId);
   const deepItem = deepEditTargets.length > 0 ? deepEditTargets[deepEditTargets.length - 1]?.item : null;
@@ -83,23 +85,37 @@ function FocusContextTags() {
 
   return (
     <div className="flex items-center gap-1 shrink-0">
-      {/* Workspace tag */}
       {workspace && (
-        <div className="flex items-center gap-1 rounded-lg border border-[var(--border-default)]/25 bg-[var(--bg-secondary)]/50 px-2 py-1 max-w-[100px]">
-          <LayoutGrid className="h-2.5 w-2.5 shrink-0 text-[var(--accent-cyan)]/60" />
-          <span className="text-[9px] font-semibold text-[var(--text-secondary)] truncate">{workspace.emoji} {workspace.name}</span>
+        <div className={cn(
+          "flex items-center gap-1 rounded-lg border border-[var(--border-default)]/25 bg-[var(--bg-secondary)]/50 py-1",
+          focusedItem ? "px-1.5" : "px-2 max-w-[100px]",
+        )}>
+          {focusedItem ? (
+            <span className="text-[11px]">{workspace.emoji}</span>
+          ) : (
+            <>
+              <LayoutGrid className="h-2.5 w-2.5 shrink-0 text-[var(--accent-cyan)]/60" />
+              <span className="text-[9px] font-semibold text-[var(--text-secondary)] truncate">{workspace.emoji} {workspace.name}</span>
+            </>
+          )}
         </div>
       )}
-      {/* Focused item tag */}
       {focusedItem && (
-        <div className="flex items-center gap-1 rounded-lg border border-[var(--border-default)]/25 bg-[var(--bg-secondary)]/50 px-2 py-1 max-w-[120px]">
+        <button
+          type="button"
+          onClick={() => {
+            setFocusedItem(null);
+            closeDeepEdit(focusedItem.id);
+          }}
+          className="flex items-center gap-1 rounded-lg border border-[var(--border-default)]/25 bg-[var(--bg-secondary)]/50 px-2 py-1 max-w-[120px] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
+        >
           {(() => {
             const meta = CANONICAL_WORKSPACE_TYPE_META[focusedItem.itemType as CanonicalWorkspaceType];
-            const Icon = meta?.icon ?? FileText;
-            return <Icon className="h-2.5 w-2.5 shrink-0" style={{ color: meta?.color ?? 'var(--text-tertiary)' }} />;
+            const FocusIcon = meta?.icon ?? FileText;
+            return <FocusIcon className="h-2.5 w-2.5 shrink-0" style={{ color: meta?.color ?? 'var(--text-tertiary)' }} />;
           })()}
           <span className="text-[9px] font-semibold text-[var(--text-secondary)] truncate">{focusedItem.title}</span>
-        </div>
+        </button>
       )}
     </div>
   );
@@ -403,7 +419,7 @@ export function CommandBar({
         </div>
 
         {/* Right side: focus context tags + send/stop */}
-        <div className="flex items-end gap-1.5 shrink-0 self-end">
+        <div className="flex items-center gap-1.5 shrink-0 self-end">
           <FocusContextTags />
           {isStreaming ? (
             <button

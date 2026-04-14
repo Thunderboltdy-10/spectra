@@ -98,6 +98,18 @@ type OrgSoulOverview = {
   sections: string[];
 };
 
+type AssignAdminResponse = {
+  joinUrl?: string;
+  invitationId?: string;
+  transferred?: boolean;
+  invitationCreated?: boolean;
+  invitationUpdated?: boolean;
+  emailStatus?: string;
+  emailAccepted?: string[];
+  emailRejected?: string[];
+  emailEnvelopeFrom?: string;
+};
+
 type TabId = "all" | "overview" | "members" | "usage" | "settings" | "soul";
 
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
@@ -206,8 +218,21 @@ function MembersTab({ members, orgId, onChanged }: { members: Member[]; orgId: s
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "assignAdmin", email }),
       });
-      if (!response.ok) throw new Error(await response.text());
-      toast.success("Admin assigned");
+      const payload = (await response.json().catch(() => null)) as AssignAdminResponse | { error?: { message?: string } } | null;
+      if (!response.ok) {
+        throw new Error(payload && "error" in payload ? (payload.error?.message ?? "Failed to assign admin") : "Failed to assign admin");
+      }
+
+      const result = payload as AssignAdminResponse | null;
+      if (result?.transferred) {
+        toast.success("Existing member promoted to admin");
+      } else {
+        if (result?.emailStatus !== "sent") {
+          throw new Error("Admin invitation email was not sent.");
+        }
+        const acceptedTarget = result.emailAccepted?.[0] ?? email;
+        toast.success(`Admin invitation sent to ${acceptedTarget}`);
+      }
       setAdminEmail("");
       onChanged();
     } catch (error) {

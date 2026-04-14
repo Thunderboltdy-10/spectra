@@ -481,6 +481,46 @@ describe("super-admin school route integration", () => {
 
     expect(response.status).toBe(502);
   });
+
+  it("sends admin assignment email when a pending invitation is upgraded to admin", async () => {
+    const requireSuperAdmin = vi.fn().mockResolvedValue({ clerkId: "super_admin_1" });
+    const convexMutation = vi.fn().mockResolvedValue({
+      invitationId: "invite_admin_1",
+      invitationUpdated: true,
+      token: "tok_existing_1",
+    });
+    const convexQuery = vi.fn().mockResolvedValue({ org: { name: "Alpha School" } });
+    const sendInvitationEmail = vi.fn().mockResolvedValue({
+      status: "sent",
+      accepted: ["admin@example.com"],
+      rejected: [],
+      response: "250 ok",
+      envelopeFrom: "owner@example.com",
+    });
+
+    vi.doMock("@/lib/auth-server", () => ({ requireSuperAdmin }));
+    vi.doMock("@/lib/convex-server", () => ({ convexMutation, convexQuery }));
+    vi.doMock("@/lib/invitations", () => ({ sendInvitationEmail }));
+
+    process.env.NEXT_PUBLIC_APP_URL = "https://spectra.test";
+
+    const route = await import("@/app/api/super-admin/schools/[id]/route");
+    const response = await route.PATCH(
+      new NextRequest("http://localhost/api/super-admin/schools/org_1", {
+        method: "PATCH",
+        body: JSON.stringify({ action: "assignAdmin", email: "admin@example.com" }),
+      }),
+      { params: Promise.resolve({ id: "org_1" }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(sendInvitationEmail).toHaveBeenCalledWith({
+      to: "admin@example.com",
+      role: "admin",
+      joinUrl: "https://spectra.test/join?token=tok_existing_1",
+      orgName: "Alpha School",
+    });
+  });
 });
 
 describe("request-access route integration", () => {

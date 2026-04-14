@@ -9,6 +9,7 @@ import { AlertTriangle, CheckCircle2, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SpectraLogo } from "@/components/spectra-logo";
 import { hasClerkPublishableKey } from "@/lib/clerk-config";
+import { getAppUrl } from "@/lib/app-url";
 
 type InvitationData = {
   email: string;
@@ -38,6 +39,24 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
 
   const [state, setState] = useState<PageState>({ status: "loading" });
   const [redeeming, setRedeeming] = useState(false);
+  const [viewerEmail, setViewerEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isLoaded || !userId) {
+      setViewerEmail(null);
+      return;
+    }
+
+    void (async () => {
+      try {
+        const response = await fetch("/api/auth/access-state?includeIdentity=1", { cache: "no-store" });
+        const payload = (await response.json().catch(() => null)) as { email?: string } | null;
+        setViewerEmail(payload?.email ?? null);
+      } catch {
+        setViewerEmail(null);
+      }
+    })();
+  }, [isLoaded, userId]);
 
   useEffect(() => {
     if (!token) {
@@ -175,10 +194,17 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
 
   function handleJoin() {
     const signUpUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up";
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? (typeof window !== "undefined" ? window.location.origin : "");
+    const appUrl = getAppUrl(typeof window !== "undefined" ? window.location.origin : undefined);
     const redirect = encodeURIComponent(`${appUrl}/join?token=${encodeURIComponent(token ?? "")}`);
     const emailParam = `email_address=${encodeURIComponent(data.email)}`;
     window.location.href = `${signUpUrl}?${emailParam}&redirect_url=${redirect}`;
+  }
+
+  function handleSignIn() {
+    const signInUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in";
+    const appUrl = getAppUrl(typeof window !== "undefined" ? window.location.origin : undefined);
+    const redirect = encodeURIComponent(`${appUrl}/join?token=${encodeURIComponent(token ?? "")}`);
+    window.location.href = `${signInUrl}?redirect_url=${redirect}`;
   }
 
   return (
@@ -241,24 +267,35 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
           <div className="mb-4 flex items-center gap-2 rounded-xl border border-[color-mix(in_oklab,var(--success)_30%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_6%,transparent)] px-4 py-3">
             <CheckCircle2 className="h-4 w-4 shrink-0 text-[var(--success)]" />
             <p className="text-xs text-[var(--success)]">
-              This is a valid invitation. Create an account to join.
+              {userId ? "This invitation will only be accepted by the invited email address." : "This is a valid invitation. Sign in or create an account using the invited email address."}
             </p>
           </div>
 
+          {userId && viewerEmail && viewerEmail.toLowerCase() !== data.email.toLowerCase() ? (
+            <div className="mb-4 rounded-xl border border-[color-mix(in_oklab,var(--warning)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_8%,transparent)] px-4 py-3 text-xs text-[var(--warning)]">
+              You are signed in as {viewerEmail}, but this invitation is for {data.email}. Sign out and continue with the invited account.
+            </div>
+          ) : null}
+
           {/* CTA */}
-          <Button
-            onClick={handleJoin}
-            className="w-full cursor-pointer"
-            disabled={redeeming}
-          >
-            {redeeming ? "Joining..." : `Join ${data.orgName ?? "School"}`}
-          </Button>
-          <p className="mt-3 text-center text-xs text-[var(--text-secondary)]">
-            Already have an account?{" "}
-            <Link href="/sign-in" className="text-[var(--accent-cyan)] hover:underline">
-              Sign in
-            </Link>
-          </p>
+          <div className="space-y-3">
+            <Button
+              onClick={userId ? undefined : handleJoin}
+              className="w-full cursor-pointer"
+              disabled={redeeming || Boolean(userId)}
+            >
+              {redeeming ? "Joining..." : userId ? "Checking invitation..." : `Sign up to join ${data.orgName ?? "School"}`}
+            </Button>
+            {!userId ? (
+              <Button onClick={handleSignIn} variant="secondary" className="w-full cursor-pointer">
+                Sign in with existing account
+              </Button>
+            ) : viewerEmail && viewerEmail.toLowerCase() !== data.email.toLowerCase() ? (
+              <Button variant="secondary" className="w-full cursor-pointer" onClick={handleSignIn}>
+                Switch account
+              </Button>
+            ) : null}
+          </div>
         </div>
       </div>
     </div>

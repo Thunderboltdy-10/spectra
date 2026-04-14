@@ -3,6 +3,8 @@ import { requireSuperAdmin } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
+import { sendInvitationEmail } from "@/lib/invitations";
+import { buildJoinUrl } from "@/lib/app-url";
 
 export async function GET(
   _request: NextRequest,
@@ -61,8 +63,25 @@ export async function PATCH(
         actorClerkId: actor.clerkId,
         orgId: id,
         email: body.email.trim(),
-      });
-      return ok(result);
+      }) as { token?: string; [key: string]: unknown };
+      const token = result.token;
+      const joinUrl = token ? buildJoinUrl(token, new URL(request.url).origin) : undefined;
+      if (joinUrl) {
+        const detail = await convexQuery<{ actorClerkId: string; orgId: string }, { org?: { name?: string } } | null>(
+          "superAdmin:getOrgDetail",
+          { actorClerkId: actor.clerkId, orgId: id },
+        );
+        const emailResult = await sendInvitationEmail({
+          to: body.email.trim(),
+          role: "admin",
+          joinUrl,
+          orgName: detail?.org?.name,
+        });
+        if (emailResult.status === "failed") {
+          throw new Error(`INVITATION_EMAIL_FAILED: ${emailResult.reason}`);
+        }
+      }
+      return ok({ ...result, joinUrl });
     }
 
     if (body.action === "updateMemberRole") {

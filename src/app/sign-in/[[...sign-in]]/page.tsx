@@ -1,7 +1,15 @@
 import Link from "next/link";
 import { SignIn } from "@clerk/nextjs";
 
-export default function SignInPage() {
+function getSearchParam(
+  value: string | string[] | undefined,
+) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function SignInCard({ redirectUrl }: { redirectUrl?: string }) {
+  const invitationFlow = redirectUrl?.includes("/join?token=") ?? false;
+
   return (
     <main className="grid min-h-screen place-items-center bg-[var(--bg-primary)] px-4 py-8">
       <div className="w-full max-w-4xl">
@@ -23,13 +31,28 @@ export default function SignInPage() {
             <p className="mt-2 text-sm text-[var(--text-secondary)]">
               Continue learning with multiple AI models, custom classroom agents, and guided study workflows.
             </p>
+            {invitationFlow ? (
+              <div className="mt-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 text-sm text-[var(--text-secondary)]">
+                Sign in with the exact email address that received the invitation. After sign-in, the invitation will be completed automatically.
+              </div>
+            ) : null}
           </section>
 
           <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
-            <SignIn />
+            <SignIn forceRedirectUrl={redirectUrl} />
           </section>
         </div>
       </div>
     </main>
   );
+}
+
+export default async function SignInPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const redirectUrl = getSearchParam(params.redirect_url);
+  return <SignInCard redirectUrl={redirectUrl} />;
 }

@@ -4,6 +4,7 @@ import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
 import { sendInvitationEmail } from "@/lib/invitations";
 import { withRouteErrorHandling } from "@/lib/route-handler";
+import { buildJoinUrl } from "@/lib/app-url";
 
 const SCHOOL_MANAGED_ROLES = new Set(["student", "teacher"]);
 
@@ -87,8 +88,7 @@ export async function POST(request: NextRequest) {
       throw err;
     }
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
-    const joinUrl = result.token ? `${appUrl}/join?token=${encodeURIComponent(result.token)}` : undefined;
+    const joinUrl = result.token ? buildJoinUrl(result.token, new URL(request.url).origin) : undefined;
     const emailResult = joinUrl
       ? await sendInvitationEmail({
           to: body.email.trim(),
@@ -154,8 +154,7 @@ export async function PATCH(request: NextRequest) {
         actorClerkId: actor.clerkId,
         invitationId: body.invitationId,
       });
-       const appUrl = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
-       const joinUrl = result.token ? `${appUrl}/join?token=${encodeURIComponent(result.token)}` : undefined;
+       const joinUrl = result.token ? buildJoinUrl(result.token, new URL(request.url).origin) : undefined;
        const emailResult =
          result.email && result.role && joinUrl
            ? await sendInvitationEmail({
@@ -200,8 +199,7 @@ export async function PATCH(request: NextRequest) {
         role: body.role,
       });
 
-       const appUrl = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
-       const joinUrl = result.token ? `${appUrl}/join?token=${encodeURIComponent(result.token)}` : undefined;
+       const joinUrl = result.token ? buildJoinUrl(result.token, new URL(request.url).origin) : undefined;
       const emailResult = joinUrl
         ? await sendInvitationEmail({
             to: accessRequest.email,

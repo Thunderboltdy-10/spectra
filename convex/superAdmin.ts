@@ -1124,7 +1124,7 @@ export const assignOrgAdmin = mutation({
         targetId: pendingForOrg._id,
         details: `orgId=${args.orgId};email=${normalizedEmail};path=update_pending_invitation`,
       });
-      return { invitationId: pendingForOrg._id, invitationUpdated: true };
+      return { invitationId: pendingForOrg._id, invitationUpdated: true, token: pendingForOrg.token };
     }
 
     for (const inv of existingInvitation) {
@@ -1158,7 +1158,7 @@ export const assignOrgAdmin = mutation({
       details: `orgId=${args.orgId};email=${normalizedEmail};path=create_invitation`,
     });
 
-    return { invitationId, invitationCreated: true };
+    return { invitationId, invitationCreated: true, token };
   },
 });
 

@@ -6,6 +6,24 @@ import { withRouteErrorHandling } from "@/lib/route-handler";
 import { sendInvitationEmail } from "@/lib/invitations";
 import { buildJoinUrl } from "@/lib/app-url";
 
+function inviteDeliveryMetadata(result: {
+  status: string;
+  reason?: string;
+  accepted?: string[];
+  rejected?: string[];
+  response?: string;
+  envelopeFrom?: string;
+}) {
+  return {
+    emailStatus: result.status,
+    emailReason: result.reason,
+    emailAccepted: result.accepted,
+    emailRejected: result.rejected,
+    emailResponse: result.response,
+    emailEnvelopeFrom: result.envelopeFrom,
+  };
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -77,9 +95,10 @@ export async function PATCH(
           joinUrl,
           orgName: detail?.org?.name,
         });
-        if (emailResult.status === "failed") {
+        if (emailResult.status !== "sent") {
           throw new Error(`INVITATION_EMAIL_FAILED: ${emailResult.reason}`);
         }
+        return ok({ ...result, joinUrl, ...inviteDeliveryMetadata(emailResult) });
       }
       return ok({ ...result, joinUrl });
     }

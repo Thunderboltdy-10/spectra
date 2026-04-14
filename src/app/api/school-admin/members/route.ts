@@ -15,6 +15,24 @@ function inviteDeliveryErrorMessage(reason?: string) {
   return `Invitation email could not be sent: ${reason}`;
 }
 
+function inviteDeliveryMetadata(result: {
+  status: string;
+  reason?: string;
+  accepted?: string[];
+  rejected?: string[];
+  response?: string;
+  envelopeFrom?: string;
+}) {
+  return {
+    emailStatus: result.status,
+    emailReason: result.reason,
+    emailAccepted: result.accepted,
+    emailRejected: result.rejected,
+    emailResponse: result.response,
+    emailEnvelopeFrom: result.envelopeFrom,
+  };
+}
+
 async function loadOrgSettingsName(actorClerkId: string) {
   try {
     const result = (await convexQuery("admin:getOrgSettings", {
@@ -97,15 +115,14 @@ export async function POST(request: NextRequest) {
           orgName: orgSettings.org?.name,
         })
       : { status: "skipped" as const, reason: "Invitation token was not generated." };
-    if (emailResult.status === "failed") {
+    if (emailResult.status !== "sent") {
       return badRequest(inviteDeliveryErrorMessage(emailResult.reason), 502);
     }
 
     return ok({
       invitationId: result.invitationId,
       joinUrl,
-      emailStatus: emailResult.status,
-      emailReason: "reason" in emailResult ? emailResult.reason : undefined,
+      ...inviteDeliveryMetadata(emailResult),
     });
   });
 }
@@ -164,14 +181,13 @@ export async function PATCH(request: NextRequest) {
                orgName: orgSettings.org?.name,
              })
            : { status: "skipped" as const, reason: "Invitation token was not generated." };
-       if (emailResult.status === "failed") {
+       if (emailResult.status !== "sent") {
          return badRequest(inviteDeliveryErrorMessage(emailResult.reason), 502);
        }
       return ok({
         ok: true,
         joinUrl,
-        emailStatus: emailResult.status,
-        emailReason: "reason" in emailResult ? emailResult.reason : undefined,
+        ...inviteDeliveryMetadata(emailResult),
       });
     }
 
@@ -208,7 +224,7 @@ export async function PATCH(request: NextRequest) {
             orgName: orgSettings.org?.name,
           })
         : { status: "skipped" as const, reason: "Invitation token was not generated." };
-       if (emailResult.status === "failed") {
+       if (emailResult.status !== "sent") {
          return badRequest(inviteDeliveryErrorMessage(emailResult.reason), 502);
        }
 
@@ -219,7 +235,7 @@ export async function PATCH(request: NextRequest) {
         role: body.role,
       });
 
-      return ok({ ok: true, invitationId: result.invitationId, joinUrl });
+      return ok({ ok: true, invitationId: result.invitationId, joinUrl, ...inviteDeliveryMetadata(emailResult) });
     }
 
     if (body.action === "rejectAccessRequest" && body.requestId) {

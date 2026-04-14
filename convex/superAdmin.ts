@@ -25,6 +25,15 @@ const MIN_RESOURCE_FILE_SIZE_BYTES = 1 * 1024 * 1024;
 const MAX_RESOURCE_FILE_SIZE_BYTES = 100 * 1024 * 1024;
 const PLATFORM_STATS_SINGLETON = "global";
 
+function randomToken(length = 48) {
+  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let token = "";
+  for (let i = 0; i < length; i++) {
+    token += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return token;
+}
+
 function normalizeMaxResourceFileSizeBytes(value: number | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return DEFAULT_MAX_RESOURCE_FILE_SIZE_BYTES;
@@ -1113,10 +1122,13 @@ export const assignOrgAdmin = mutation({
     );
     
     if (pendingForOrg) {
+      const ensuredToken = pendingForOrg.token || randomToken();
       await ctx.db.patch(pendingForOrg._id, {
         role: "admin",
+        token: ensuredToken,
         expiresAt: now + 7 * 24 * 60 * 60 * 1000,
       });
+      const refreshedInvitation = await ctx.db.get(pendingForOrg._id);
       await ctx.runMutation(internal.auditLog.logAction, {
         actorUserId: actor._id as Id<"users">,
         action: "super_admin.assign_org_admin",
@@ -1124,7 +1136,11 @@ export const assignOrgAdmin = mutation({
         targetId: pendingForOrg._id,
         details: `orgId=${args.orgId};email=${normalizedEmail};path=update_pending_invitation`,
       });
-      return { invitationId: pendingForOrg._id, invitationUpdated: true, token: pendingForOrg.token };
+      return {
+        invitationId: pendingForOrg._id,
+        invitationUpdated: true,
+        token: refreshedInvitation?.token ?? ensuredToken,
+      };
     }
 
     for (const inv of existingInvitation) {
@@ -1133,11 +1149,7 @@ export const assignOrgAdmin = mutation({
       }
     }
 
-    const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    let token = "";
-    for (let i = 0; i < 48; i++) {
-      token += chars[Math.floor(Math.random() * chars.length)];
-    }
+    const token = randomToken();
 
     const invitationId = await ctx.db.insert("schoolInvitations", {
       orgId: args.orgId,

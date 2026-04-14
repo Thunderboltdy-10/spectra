@@ -8,9 +8,35 @@ type InviteEmailParams = {
 };
 
 export type InviteEmailResult =
-  | { status: "sent"; providerId?: string }
+  | { status: "sent"; providerId?: string; envelopeFrom?: string; accepted?: string[]; rejected?: string[]; response?: string }
   | { status: "skipped"; reason: string }
   | { status: "failed"; reason: string };
+
+function normalizeMailbox(value?: string | null) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function normalizeSmtpSecret(value?: string | null) {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/^['"]|['"]$/g, "");
+}
+
+function resolveEnvelopeFrom() {
+  const smtpUser = normalizeMailbox(process.env.SMTP_USER);
+  const configuredFrom = normalizeMailbox(process.env.SMTP_FROM_EMAIL);
+  if (!smtpUser) return null;
+  if (!configuredFrom) return smtpUser;
+  if (configuredFrom.toLowerCase() !== smtpUser.toLowerCase()) {
+    console.warn("[invite-email] SMTP_FROM_EMAIL differs from SMTP_USER; using authenticated mailbox as sender", {
+      smtpUser,
+      configuredFrom,
+    });
+    return smtpUser;
+  }
+  return configuredFrom;
+}
 
 function inviteEmailHtml(params: InviteEmailParams) {
   const schoolName = params.orgName?.trim() || "Spectra";
@@ -39,11 +65,11 @@ function inviteEmailHtml(params: InviteEmailParams) {
 export async function sendInvitationEmail(params: InviteEmailParams): Promise<InviteEmailResult> {
   const smtpHost = process.env.SMTP_HOST;
   const smtpPort = parseInt(process.env.SMTP_PORT || "587", 10);
-  const smtpUser = process.env.SMTP_USER;
-  const smtpPass = process.env.SMTP_PASS;
-  const smtpFrom = process.env.SMTP_FROM_EMAIL || smtpUser;
+  const smtpUser = normalizeMailbox(process.env.SMTP_USER);
+  const smtpPass = normalizeSmtpSecret(process.env.SMTP_PASS);
+  const smtpFrom = resolveEnvelopeFrom();
 
-  if (!smtpHost || !smtpUser || !smtpPass) {
+  if (!smtpHost || !smtpUser || !smtpPass || !smtpFrom) {
     return {
       status: "skipped",
       reason: "SMTP email environment is not configured.",
@@ -61,16 +87,31 @@ export async function sendInvitationEmail(params: InviteEmailParams): Promise<In
       },
     });
 
-    await transporter.sendMail({
+    await transporter.verify();
+
+    const info = await transporter.sendMail({
       from: smtpFrom,
       to: params.to,
       subject: `Your ${params.orgName?.trim() || "Spectra"} invitation`,
       html: inviteEmailHtml(params),
     });
 
+    const accepted = Array.isArray(info.accepted) ? info.accepted.map(String) : [];
+    const rejected = Array.isArray(info.rejected) ? info.rejected.map(String) : [];
+    if (accepted.length === 0 || rejected.length > 0) {
+      return {
+        status: "failed",
+        reason: `SMTP delivery not accepted. accepted=${accepted.join(",") || "none"} rejected=${rejected.join(",") || "none"} response=${info.response || "none"}`,
+      };
+    }
+
     return {
       status: "sent",
       providerId: "smtp",
+      envelopeFrom: smtpFrom,
+      accepted,
+      rejected,
+      response: info.response,
     };
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Unknown email transport failure";

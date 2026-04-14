@@ -1,10 +1,21 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { currentUser } from "@clerk/nextjs/server";
 import { requireActor } from '@/lib/auth-server';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    await requireActor();
-    return NextResponse.json({ status: 'ok' as const }, { status: 200 });
+    const actor = await requireActor();
+    const includeIdentity = new URL(request.url).searchParams.get("includeIdentity") === "1";
+    const profile = includeIdentity ? await currentUser().catch(() => null) : null;
+    return NextResponse.json({
+      status: 'ok' as const,
+      ...(includeIdentity
+        ? {
+            email: profile?.emailAddresses?.[0]?.emailAddress ?? actor.email,
+            userId: actor.clerkId,
+          }
+        : {}),
+    }, { status: 200 });
   } catch (error) {
     const message = error instanceof Error ? error.message : '';
     if (message.startsWith('AUTH_NO_ACCESS')) {

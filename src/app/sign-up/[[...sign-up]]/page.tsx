@@ -1,7 +1,13 @@
 import Link from "next/link";
+import { Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { SignUp } from "@clerk/nextjs";
 
-export default function SignUpPage() {
+function SignUpCard() {
+  const searchParams = useSearchParams();
+  const redirectUrl = searchParams.get("redirect_url") ?? undefined;
+  const invitationFlow = redirectUrl?.includes("/join?token=") ?? false;
+
   return (
     <main className="grid min-h-screen place-items-center bg-[var(--bg-primary)] px-4 py-8">
       <div className="w-full max-w-4xl">
@@ -24,19 +30,33 @@ export default function SignUpPage() {
               Join your school workspace to chat with AI, use curriculum resources, and build subject-specific agents.
             </p>
             <div className="mt-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 text-sm text-[var(--text-secondary)]">
-              School access is invitation-based. If your school has not invited you yet, submit an access request first.
-              {" "}
-              <Link href="/request-access" className="text-[var(--accent-cyan)] hover:underline">
-                Request access
-              </Link>
+              {invitationFlow ? (
+                <>Create the account using the exact email address that received the invitation. After sign-up, the invitation will be completed automatically.</>
+              ) : (
+                <>
+                  School access is invitation-based. If your school has not invited you yet, submit an access request first.
+                  {" "}
+                  <Link href="/request-access" className="text-[var(--accent-cyan)] hover:underline">
+                    Request access
+                  </Link>
+                </>
+              )}
             </div>
           </section>
 
           <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
-            <SignUp />
+            <SignUp forceRedirectUrl={redirectUrl} />
           </section>
         </div>
       </div>
     </main>
+  );
+}
+
+export default function SignUpPage() {
+  return (
+    <Suspense>
+      <SignUpCard />
+    </Suspense>
   );
 }

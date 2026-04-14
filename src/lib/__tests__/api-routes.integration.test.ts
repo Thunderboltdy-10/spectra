@@ -461,6 +461,26 @@ describe("super-admin school route integration", () => {
 
     expect(response.status).toBe(502);
   });
+
+  it("fails admin assignment when invitation token is missing", async () => {
+    const requireSuperAdmin = vi.fn().mockResolvedValue({ clerkId: "super_admin_1" });
+    const convexMutation = vi.fn().mockResolvedValue({ invitationId: "invite_admin_1", invitationCreated: true });
+
+    vi.doMock("@/lib/auth-server", () => ({ requireSuperAdmin }));
+    vi.doMock("@/lib/convex-server", () => ({ convexMutation, convexQuery: vi.fn() }));
+    vi.doMock("@/lib/invitations", () => ({ sendInvitationEmail: vi.fn() }));
+
+    const route = await import("@/app/api/super-admin/schools/[id]/route");
+    const response = await route.PATCH(
+      new NextRequest("http://localhost/api/super-admin/schools/org_1", {
+        method: "PATCH",
+        body: JSON.stringify({ action: "assignAdmin", email: "admin@example.com" }),
+      }),
+      { params: Promise.resolve({ id: "org_1" }) },
+    );
+
+    expect(response.status).toBe(502);
+  });
 });
 
 describe("request-access route integration", () => {

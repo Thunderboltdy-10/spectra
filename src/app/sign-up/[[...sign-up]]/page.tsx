@@ -1,11 +1,13 @@
 import Link from "next/link";
-import { Suspense } from "react";
-import { useSearchParams } from "next/navigation";
 import { SignUp } from "@clerk/nextjs";
 
-function SignUpCard() {
-  const searchParams = useSearchParams();
-  const redirectUrl = searchParams.get("redirect_url") ?? undefined;
+function getSearchParam(
+  value: string | string[] | undefined,
+) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function SignUpCard({ redirectUrl }: { redirectUrl?: string }) {
   const invitationFlow = redirectUrl?.includes("/join?token=") ?? false;
 
   return (
@@ -53,10 +55,12 @@ function SignUpCard() {
   );
 }
 
-export default function SignUpPage() {
-  return (
-    <Suspense>
-      <SignUpCard />
-    </Suspense>
-  );
+export default async function SignUpPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const redirectUrl = getSearchParam(params.redirect_url);
+  return <SignUpCard redirectUrl={redirectUrl} />;
 }

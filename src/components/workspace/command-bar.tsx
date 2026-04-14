@@ -4,7 +4,6 @@ import { useCallback, useRef, useState, useEffect } from "react";
 import {
   Plus,
   Square,
-  Wand2,
   Search,
   ArrowUp,
   Zap,
@@ -12,10 +11,12 @@ import {
   Sparkles,
   LayoutGrid,
   FileText,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ResultCardStack } from "@/components/workspace/result-card";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { createCommandResult, updateCommandResult } from "@/hooks/use-workspace-data";
 import {
   ACTION_MENU_ITEMS,
   ActionMenuContent,
@@ -171,6 +172,7 @@ type CommandBarProps = {
   onDismissResultCard?: (cardId: string) => void;
   onReopenResultCard?: (cardId: string) => void;
   isStreaming?: boolean;
+  isProcessing?: boolean;
   disabled?: boolean;
   className?: string;
 };
@@ -189,13 +191,13 @@ export function CommandBar({
   onReopenResultCard,
   onCreateWithAi,
   isStreaming = false,
+  isProcessing = false,
   disabled = false,
   className,
 }: CommandBarProps) {
   const resultCards = useWorkspaceStore((s) => s.resultCards);
   const storeDismissResultCard = useWorkspaceStore((s) => s.dismissResultCard);
   const storeReopenResultCard = useWorkspaceStore((s) => s.reopenResultCard);
-  const pendingResultCard = useWorkspaceStore((s) => s.pendingResultCard);
   const dismissResultCard = onDismissResultCard ?? storeDismissResultCard;
   const reopenResultCard = onReopenResultCard ?? storeReopenResultCard;
   const focusedItemId = useWorkspaceStore((s) => s.focusedItemId);
@@ -219,8 +221,8 @@ export function CommandBar({
         setHighlightedIdx(-1);
       }
     }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside, true);
+    return () => document.removeEventListener("mousedown", handleClickOutside, true);
   }, [menuOpen]);
 
   const adjustTextareaHeight = useCallback(() => {
@@ -311,29 +313,20 @@ export function CommandBar({
       )}
     >
       {/* Result Card Stack */}
-      <div className="w-full px-2">
+      <div className="w-full">
         <ResultCardStack
           cards={resultCards}
           onDismiss={dismissResultCard}
           onReopen={reopenResultCard}
+          onCardClick={(card) => {
+            if (card.targetId && card.targetId !== "workspace-chat") {
+              window.dispatchEvent(
+                new CustomEvent("workspace:open-item", { detail: { itemId: card.targetId, itemType: card.targetItemType } })
+              );
+            }
+          }}
           maxVisible={3}
         />
-
-        {pendingResultCard && resultCards.length === 0 && (
-          <div className="flex items-center gap-3 rounded-[16px] border border-[var(--border-default)]/35 bg-[var(--bg-elevated)]/90 px-3.5 py-2.5 shadow-[0_12px_32px_-16px_rgba(8,22,40,0.20)]">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--bg-secondary))]">
-              <Wand2 className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
-            </div>
-            <div className="min-w-0">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--accent-cyan)]/80">
-                {pendingResultCard.state === "loading" ? "Processing" : "Done"}
-              </span>
-              <p className="truncate text-[12px] font-medium text-[var(--text-primary)]">
-                {pendingResultCard.promptSnippet}
-              </p>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Suggestion chips */}
@@ -398,7 +391,9 @@ export function CommandBar({
 
         {/* Textarea */}
         <div className="flex min-w-0 flex-1 items-end gap-2">
-          {!focused && !value ? (
+          {isProcessing ? (
+            <Loader2 className="mb-2.5 h-4 w-4 shrink-0 animate-spin text-[var(--accent-cyan)] opacity-70" />
+          ) : !focused && !value ? (
             <Zap className="mb-2.5 h-4 w-4 shrink-0 text-[var(--accent-cyan)] opacity-40" />
           ) : (
             <Search className="mb-2.5 h-4 w-4 shrink-0 text-[var(--text-tertiary)] opacity-40" />
@@ -412,7 +407,7 @@ export function CommandBar({
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
             placeholder={hasContextualItem ? "Act on focused item\u2026" : "Ask AI, search, or create\u2026"}
-            disabled={disabled && !isStreaming}
+            disabled={(disabled || isProcessing) && !isStreaming}
             className="min-w-0 flex-1 resize-none border-none bg-transparent py-1.5 text-[14px] leading-[1.5] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]/60"
             style={{ maxHeight: 120, minHeight: 24 }}
           />

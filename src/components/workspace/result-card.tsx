@@ -3,17 +3,17 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Check,
-  ChevronDown,
-  ChevronUp,
   Loader2,
   RotateCcw,
-  Sparkles,
   X,
   FileText,
   Code2,
-  Image,
   CalendarCheck,
   Wand2,
+  Search,
+  MessageSquare,
+  AlertCircle,
+  ExternalLink,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -30,35 +30,35 @@ export type ResultActionType =
 
 const ACTION_META: Record<
   ResultActionType,
-  { label: string; icon: LucideIcon; tint: string }
+  { verb: string; icon: LucideIcon; tint: string }
 > = {
   created: {
-    label: "Created",
+    verb: "Created",
     icon: FileText,
     tint: "var(--accent-cyan)",
   },
   modified: {
-    label: "Modified",
+    verb: "Modified",
     icon: Wand2,
     tint: "var(--accent-orange, #f59f0a)",
   },
   answered: {
-    label: "Answered",
-    icon: Sparkles,
-    tint: "var(--accent-cyan)",
+    verb: "Sent to thread",
+    icon: MessageSquare,
+    tint: "var(--text-secondary)",
   },
   generated: {
-    label: "Generated",
+    verb: "Generated",
     icon: Code2,
-    tint: "color-mix(in oklab, var(--accent-cyan) 70%, #ba4f26)",
+    tint: "var(--accent-cyan)",
   },
   searched: {
-    label: "Found",
-    icon: Image,
+    verb: "Found",
+    icon: Search,
     tint: "var(--accent-mint, #20b8b2)",
   },
   planned: {
-    label: "Planned",
+    verb: "Planned",
     icon: CalendarCheck,
     tint: "var(--success, #158f72)",
   },
@@ -75,6 +75,8 @@ export type ResultCardData = {
   summary?: string;
   actionType?: ResultActionType;
   targetId?: string;
+  /** If set, the target item type for navigating to it */
+  targetItemType?: string;
   createdAt: number;
 };
 
@@ -84,47 +86,14 @@ type ResultCardProps = {
   promptSnippet: string;
   summary?: string;
   actionType?: ResultActionType;
+  targetId?: string;
+  targetItemType?: string;
   onClick?: () => void;
-  onDoubleClick?: () => void;
   onDismiss?: () => void;
   onReopen?: () => void;
   className?: string;
-  /** When true the card renders in compact stacked mode */
   stacked?: boolean;
 };
-
-/* ─── Progress Shimmer ────────────────────────────────── */
-
-function LoadingShimmer() {
-  return (
-    <div className="absolute inset-0 overflow-hidden rounded-[18px] pointer-events-none">
-      <div
-        className="absolute inset-0 -translate-x-full animate-[shimmer_2s_ease-in-out_infinite]"
-        style={{
-          background:
-            "linear-gradient(90deg, transparent 0%, color-mix(in oklab, var(--accent-cyan) 6%, transparent) 40%, color-mix(in oklab, var(--accent-cyan) 12%, transparent) 50%, color-mix(in oklab, var(--accent-cyan) 6%, transparent) 60%, transparent 100%)",
-        }}
-      />
-    </div>
-  );
-}
-
-/* ─── Completion Checkmark ────────────────────────────── */
-
-function CompletionCheck({ visible }: { visible: boolean }) {
-  return (
-    <div
-      className={cn(
-        "absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full transition-all duration-300",
-        visible
-          ? "scale-100 opacity-100 bg-[var(--success,#158f72)] shadow-[0_2px_8px_-2px_rgba(21,143,114,0.5)]"
-          : "scale-0 opacity-0 bg-transparent",
-      )}
-    >
-      <Check className="h-2.5 w-2.5 text-white" strokeWidth={3} />
-    </div>
-  );
-}
 
 /* ─── Main Result Card ────────────────────────────────── */
 
@@ -134,8 +103,9 @@ export function ResultCard({
   promptSnippet,
   summary,
   actionType = "answered",
+  targetId,
+  targetItemType,
   onClick,
-  onDoubleClick,
   onDismiss,
   onReopen,
   className,
@@ -144,13 +114,11 @@ export function ResultCard({
   const meta = ACTION_META[actionType];
   const ActionIcon = meta.icon;
   const [justCompleted, setJustCompleted] = useState(false);
-  const [expanded, setExpanded] = useState(false);
 
-  // Brief highlight flash when transitioning from loading → done
   useEffect(() => {
     if (state === "done") {
       setJustCompleted(true);
-      const timeout = setTimeout(() => setJustCompleted(false), 1200);
+      const timeout = setTimeout(() => setJustCompleted(false), 800);
       return () => clearTimeout(timeout);
     }
   }, [state]);
@@ -163,168 +131,114 @@ export function ResultCard({
     [onDismiss],
   );
 
-  const handleExpand = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      setExpanded((prev) => !prev);
-    },
-    [],
-  );
-
   if (state === "dismissed") {
-    // Dismissed card — compact reopen pill
     return (
       <button
         type="button"
         onClick={onReopen}
         className={cn(
-          "flex items-center gap-2 rounded-full border px-3 py-1.5",
-          "border-[var(--border-default)]/30 bg-[var(--bg-elevated)]/80 backdrop-blur-lg",
-          "text-[11px] font-medium text-[var(--text-tertiary)] transition-all duration-200",
-          "hover:border-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--border-default))] hover:text-[var(--text-secondary)] hover:shadow-[0_6px_16px_-10px_rgba(8,22,40,0.16)]",
+          "flex items-center gap-1.5 rounded-full border px-2.5 py-1",
+          "border-[var(--border-default)]/25 bg-[var(--bg-elevated)]/80 backdrop-blur-lg",
+          "text-[10px] font-medium text-[var(--text-tertiary)] transition-all duration-200",
+          "hover:border-[var(--border-default)]/40 hover:text-[var(--text-secondary)]",
           className,
         )}
       >
-        <RotateCcw className="h-3 w-3" />
-        <span className="max-w-[160px] truncate">{promptSnippet}</span>
+        <RotateCcw className="h-2.5 w-2.5" />
+        <span className="max-w-[140px] truncate">{summary || promptSnippet}</span>
       </button>
     );
   }
 
+  const isClickable = state === "done" && targetId && targetId !== "workspace-chat";
+  const isError = state === "error";
+  const isLoading = state === "loading";
+
   return (
     <div
-      role="button"
-      tabIndex={0}
+      role={isClickable ? "button" : undefined}
+      tabIndex={isClickable ? 0 : undefined}
       data-result-card-id={id}
-      onClick={onClick}
-      onDoubleClick={onDoubleClick}
+      onClick={isClickable ? onClick : undefined}
       onKeyDown={(e) => {
-        if (e.key === "Enter") onClick?.();
+        if (isClickable && e.key === "Enter") onClick?.();
       }}
       className={cn(
-        "group relative flex items-start gap-3 rounded-[18px] border text-left",
-        "border-[var(--border-default)]/45 bg-[var(--bg-elevated)]/96 backdrop-blur-xl",
-        "transition-all duration-300 ease-[var(--ease-standard)]",
-        // Sizing
-        stacked
-          ? "w-[min(480px,calc(100vw-240px))] px-3 py-2"
-          : "w-[min(540px,calc(100vw-220px))] px-4 py-3.5",
-        // Hover lift
-        "hover:-translate-y-0.5 hover:shadow-[0_20px_48px_-20px_rgba(8,22,40,0.28)]",
-        // Loading subtle pulse border
-        state === "loading" &&
-          "border-[color-mix(in_oklab,var(--accent-cyan)_18%,var(--border-default))]",
+        "group relative flex items-center gap-2.5 rounded-2xl border text-left transition-all duration-200",
+        "border-[var(--border-default)]/35 bg-[var(--bg-elevated)]/95 backdrop-blur-xl",
+        stacked ? "px-3 py-2" : "px-3.5 py-2.5",
+        "w-[min(480px,calc(100vw-200px))]",
+        // Loading state
+        isLoading && "border-[color-mix(in_oklab,var(--accent-cyan)_12%,var(--border-default))]",
         // Completion flash
-        justCompleted &&
-          "border-[color-mix(in_oklab,var(--success,#158f72)_30%,var(--border-default))] shadow-[0_20px_48px_-20px_rgba(21,143,114,0.18)]",
-        // Normal done state
-        state === "done" &&
-          !justCompleted &&
-          "shadow-[0_16px_40px_-20px_rgba(8,22,40,0.24)]",
+        justCompleted && "border-[color-mix(in_oklab,var(--success,#158f72)_20%,var(--border-default))]",
         // Error state
-        state === "error" &&
-          "border-[color-mix(in_oklab,var(--accent-coral,#e8553e)_25%,var(--border-default))]",
+        isError && "border-[color-mix(in_oklab,var(--accent-coral,#e8553e)_20%,var(--border-default))]",
+        // Clickable hover
+        isClickable && "cursor-pointer hover:border-[var(--border-default)]/50 hover:shadow-[0_8px_20px_-12px_rgba(8,22,40,0.18)]",
         className,
       )}
     >
-      {/* Loading shimmer overlay */}
-      {state === "loading" && <LoadingShimmer />}
-
-      {/* Completion check badge */}
-      <CompletionCheck visible={justCompleted} />
-
-      {/* Action icon */}
-      <div
-        className={cn(
-          "relative mt-0.5 flex shrink-0 items-center justify-center rounded-xl transition-all duration-300",
-          stacked ? "h-7 w-7" : "h-8 w-8",
-        )}
-        style={{
-          backgroundColor: `color-mix(in oklab, ${meta.tint} 10%, var(--bg-secondary))`,
-          color: meta.tint,
-        }}
-      >
-        {state === "loading" ? (
-          <Loader2
-            className={cn(
-              "animate-spin",
-              stacked ? "h-3.5 w-3.5" : "h-4 w-4",
-            )}
-          />
+      {/* Status icon — small and meaningful */}
+      <div className="flex h-5 w-5 shrink-0 items-center justify-center">
+        {isLoading ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]/70" />
+        ) : isError ? (
+          <AlertCircle className="h-3.5 w-3.5 text-[var(--accent-coral,#e8553e)]" />
+        ) : justCompleted ? (
+          <Check className="h-3.5 w-3.5 text-[var(--success,#158f72)]" />
         ) : (
-          <ActionIcon
-            className={cn(stacked ? "h-3.5 w-3.5" : "h-4 w-4")}
-          />
+          <ActionIcon className="h-3.5 w-3.5" style={{ color: meta.tint }} />
         )}
       </div>
 
-      {/* Content */}
+      {/* Content — compact two-line max */}
       <div className="min-w-0 flex-1">
-        {/* Action badge + status */}
-        <div className="flex items-center gap-2">
-          <span
-            className="text-[10px] font-semibold uppercase tracking-[0.12em]"
-            style={{ color: `color-mix(in oklab, ${meta.tint} 80%, transparent)` }}
-          >
-            {state === "loading" ? "Processing" : state === "error" ? "Failed" : meta.label}
-          </span>
-          {state === "done" && (
-            <span className="text-[9px] text-[var(--text-tertiary)]/40 font-medium">
-              just now
-            </span>
-          )}
-        </div>
-
-        {/* Prompt snippet */}
-        <div
-          className={cn(
-            "mt-0.5 font-medium text-[var(--text-primary)]",
-            stacked ? "truncate text-[12px]" : "line-clamp-1 text-[13px]",
-          )}
-        >
-          {promptSnippet}
-        </div>
-
-        {/* Summary — expandable */}
-        {summary && (
-          <p
-            className={cn(
-              "mt-1 text-[12px] leading-relaxed text-[var(--text-secondary)] transition-all duration-200",
-              expanded ? "" : "line-clamp-2",
-            )}
-          >
-            {summary}
+        <p className={cn(
+          "truncate text-[12px] font-medium",
+          isError ? "text-[var(--accent-coral,#e8553e)]" : "text-[var(--text-primary)]",
+        )}>
+          {isLoading ? promptSnippet : (summary || promptSnippet)}
+        </p>
+        {isLoading && (
+          <p className="mt-0.5 text-[10px] text-[var(--text-tertiary)]/60">
+            Processing…
+          </p>
+        )}
+        {state === "done" && summary && summary !== promptSnippet && (
+          <p className="mt-0.5 truncate text-[10px] text-[var(--text-tertiary)]">
+            {promptSnippet}
           </p>
         )}
       </div>
 
-      {/* Card controls (visible on hover) */}
-      <div className="flex shrink-0 flex-col items-center gap-1 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-        {onDismiss && state === "done" && (
+      {/* Actions — inline, minimal */}
+      <div className="flex shrink-0 items-center gap-0.5">
+        {isClickable && (
+          <span className="flex h-5 w-5 items-center justify-center rounded-md text-[var(--text-tertiary)] opacity-0 transition-opacity group-hover:opacity-100">
+            <ExternalLink className="h-3 w-3" />
+          </span>
+        )}
+        {onDismiss && (state === "done" || isError) && (
           <button
             type="button"
             onClick={handleDismiss}
-            className="flex h-6 w-6 items-center justify-center rounded-lg text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            className="flex h-5 w-5 items-center justify-center rounded-md text-[var(--text-tertiary)]/0 transition-colors group-hover:text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
             aria-label="Dismiss"
           >
             <X className="h-3 w-3" />
           </button>
         )}
-        {summary && summary.length > 100 && (
-          <button
-            type="button"
-            onClick={handleExpand}
-            className="flex h-6 w-6 items-center justify-center rounded-lg text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-            aria-label={expanded ? "Collapse" : "Expand"}
-          >
-            {expanded ? (
-              <ChevronUp className="h-3 w-3" />
-            ) : (
-              <ChevronDown className="h-3 w-3" />
-            )}
-          </button>
-        )}
       </div>
+
+      {/* Subtle loading bar at bottom edge */}
+      {isLoading && (
+        <div className="absolute bottom-0 left-3 right-3 h-[1.5px] overflow-hidden rounded-full">
+          <div
+            className="h-full w-1/3 animate-[slideRight_1.5s_ease-in-out_infinite] rounded-full bg-[var(--accent-cyan)]/30"
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -334,7 +248,6 @@ export function ResultCard({
 type ResultCardStackProps = {
   cards: ResultCardData[];
   onCardClick?: (card: ResultCardData) => void;
-  onCardDoubleClick?: (card: ResultCardData) => void;
   onDismiss?: (cardId: string) => void;
   onReopen?: (cardId: string) => void;
   maxVisible?: number;
@@ -343,7 +256,6 @@ type ResultCardStackProps = {
 export function ResultCardStack({
   cards,
   onCardClick,
-  onCardDoubleClick,
   onDismiss,
   onReopen,
   maxVisible = 3,
@@ -356,56 +268,40 @@ export function ResultCardStack({
   const overflow = visibleCards.length - maxVisible;
 
   return (
-    <div className="flex flex-col items-center gap-1.5">
-      {/* Stacked visible cards */}
-      {shown.map((card, idx) => (
-        <div
+    <div className="flex flex-col items-center gap-1">
+      {shown.map((card) => (
+        <ResultCard
           key={card.id}
-          className="transition-all duration-300"
-          style={{
-            // Subtle stacking depth effect
-            transform:
-              idx > 0
-                ? `scale(${1 - idx * 0.015})`
-                : undefined,
-            opacity: idx > 1 ? 0.85 : 1,
-          }}
-        >
-          <ResultCard
-            id={card.id}
-            state={card.state}
-            promptSnippet={card.promptSnippet}
-            summary={card.summary}
-            actionType={card.actionType}
-            stacked={shown.length > 1}
-            onClick={() => onCardClick?.(card)}
-            onDoubleClick={() => onCardDoubleClick?.(card)}
-            onDismiss={onDismiss ? () => onDismiss(card.id) : undefined}
-            onReopen={onReopen ? () => onReopen(card.id) : undefined}
-          />
-        </div>
+          id={card.id}
+          state={card.state}
+          promptSnippet={card.promptSnippet}
+          summary={card.summary}
+          actionType={card.actionType}
+          targetId={card.targetId}
+          targetItemType={card.targetItemType}
+          stacked={shown.length > 1}
+          onClick={() => onCardClick?.(card)}
+          onDismiss={onDismiss ? () => onDismiss(card.id) : undefined}
+          onReopen={onReopen ? () => onReopen(card.id) : undefined}
+        />
       ))}
 
-      {/* Overflow indicator */}
-      {overflow > 0 && (
-        <span className="text-[10px] font-medium text-[var(--text-tertiary)]/50">
-          +{overflow} more
-        </span>
+      {/* Dismissed pills — only show the most recent */}
+      {dismissedCards.length > 0 && visibleCards.length === 0 && (
+        <ResultCard
+          key={dismissedCards[0].id}
+          id={dismissedCards[0].id}
+          state="dismissed"
+          promptSnippet={dismissedCards[0].promptSnippet}
+          summary={dismissedCards[0].summary}
+          onReopen={onReopen ? () => onReopen(dismissedCards[0].id) : undefined}
+        />
       )}
 
-      {/* Dismissed card reopeners */}
-      {dismissedCards.length > 0 && (
-        <div className="flex items-center gap-1.5">
-          {dismissedCards.slice(0, 3).map((card) => (
-            <ResultCard
-              key={card.id}
-              id={card.id}
-              state="dismissed"
-              promptSnippet={card.promptSnippet}
-              onReopen={onReopen ? () => onReopen(card.id) : undefined}
-            />
-          ))}
-        </div>
+      {overflow > 0 && (
+        <span className="text-[9px] font-medium text-[var(--text-tertiary)]/40">
+          +{overflow} more
+        </span>
       )}
     </div>
   );

@@ -72,7 +72,7 @@ export function UtilityHubGroup() {
     <div data-workspace-utility-group className="fixed right-5 top-5 z-[65]">
       {collapsed}
       {(open || locked) && (
-        <div className="absolute right-0 top-[calc(100%+8px)] min-w-[240px] overflow-hidden rounded-[28px] border border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/96 shadow-[0_18px_44px_-18px_rgba(8,22,40,0.28)] backdrop-blur-xl">
+        <div className="absolute right-0 top-[calc(100%+8px)] w-max overflow-hidden rounded-[28px] border border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/96 shadow-[0_18px_44px_-18px_rgba(8,22,40,0.28)] backdrop-blur-xl">
           <div className="relative flex flex-col gap-3 px-4 py-3.5">
         <div className="absolute right-2.5 top-2.5 z-[60] flex items-center gap-1 opacity-0 transition-opacity duration-200 hover:opacity-100">
           <button
@@ -95,7 +95,7 @@ export function UtilityHubGroup() {
             <Eye className="h-3 w-3" />
             Canvas View
           </span>
-          <div className="flex flex-col gap-0.5">
+          <div className="flex items-center gap-1">
             {LENS_OPTIONS.map((option) => {
               const Icon = option.icon;
               const isActive = viewMode === option.mode;
@@ -105,10 +105,10 @@ export function UtilityHubGroup() {
                   type="button"
                   onClick={() => setViewMode(option.mode)}
                   className={cn(
-                    "flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition-all duration-150 w-full",
+                    "flex items-center gap-1.5 px-2.5 h-8 rounded-xl transition-all duration-200 text-xs font-medium",
                     isActive
-                      ? "bg-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--bg-secondary))] text-[var(--text-primary)]"
-                      : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+                      ? "bg-[var(--bg-secondary)] text-[var(--text-primary)]"
+                      : "text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]",
                   )}
                 >
                   <Icon
@@ -117,10 +117,7 @@ export function UtilityHubGroup() {
                       isActive ? "text-[var(--accent-cyan)]" : "text-[var(--text-tertiary)]",
                     )}
                   />
-                  <span className="text-[12px] font-medium flex-1">{option.label}</span>
-                  {isActive && (
-                    <div className="h-1.5 w-1.5 rounded-full bg-[var(--accent-cyan)] shrink-0" />
-                  )}
+                  <span>{option.label}</span>
                 </button>
               );
             })}

@@ -17,7 +17,9 @@ const EMPTY_DOC = {
   content: [{ type: "paragraph" }],
 };
 
-export default function ArtifactsPage() {
+import { Suspense } from "react";
+
+function ArtifactsPageInner() {
   const router = useRouter();
   const params = useSearchParams();
   const noteId = params.get("id") ?? params.get("note") ?? undefined;
@@ -240,5 +242,13 @@ export default function ArtifactsPage() {
         onCreate={(type, title, tags, template) => void handleCreateFromDialog(type, title, tags, template)}
       />
     </AppShell>
+  );
+}
+
+export default function ArtifactsPage() {
+  return (
+    <Suspense>
+      <ArtifactsPageInner />
+    </Suspense>
   );
 }

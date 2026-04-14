@@ -29,6 +29,7 @@ type BackendWorkspaceItem = {
   sourceArtifactId?: string;
   sourceChatId?: string;
   sourcePlannerItemId?: string;
+  topicCluster?: string;
 };
 
 type BackendCommandResult = {
@@ -58,6 +59,7 @@ type BackendWorkstream = {
   description?: string;
   lastActivityAt?: number;
   updatedAt: number;
+  artifactCount?: number;
 };
 
 type BackendPageData = {
@@ -109,6 +111,10 @@ function backendItemToFrontend(
     canvasY: item.y,
     updatedAt: item.updatedAt ?? item.createdAt,
     meta: timeAgoMeta(item.updatedAt),
+    topicCluster: item.topicCluster,
+    sourceChatId: item.sourceChatId,
+    sourceArtifactId: item.sourceArtifactId,
+    sourcePlannerItemId: item.sourcePlannerItemId,
   };
 }
 
@@ -174,6 +180,33 @@ export async function dismissCommandResult(resultId: string): Promise<boolean> {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "dismissResult", resultId }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function createCommandResult(payload: any): Promise<{ resultId: string } | null> {
+  try {
+    const res = await fetch("/api/workspace-data", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "createResult", ...payload }),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function updateCommandResult(payload: any): Promise<boolean> {
+  try {
+    const res = await fetch("/api/workspace-data", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "updateResult", ...payload }),
     });
     return res.ok;
   } catch {

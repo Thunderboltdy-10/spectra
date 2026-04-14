@@ -136,6 +136,37 @@ export const getForTarget = query({
   },
 });
 
+export const update = mutation({
+  args: {
+    actorClerkId: v.string(),
+    resultId: v.id("workspaceCommandResults"),
+    status: v.optional(vStatus),
+    summary: v.optional(v.string()),
+    detail: v.optional(v.string()),
+    targetKind: v.optional(v.union(v.literal("artifact"), v.literal("plannerItem"), v.literal("chat"), v.literal("workspaceItem"), v.literal("result"))),
+    targetId: v.optional(v.string()),
+    variant: v.optional(v.union(v.literal("summary"), v.literal("answer"), v.literal("artifact"), v.literal("planner"), v.literal("thread"))),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    const row = await ctx.db.get(args.resultId);
+    if (!row || row.ownerUserId !== actor._id || row.orgId !== actor.orgId) {
+      throw new Error("Workspace result not found");
+    }
+    const now = Date.now();
+    await ctx.db.patch(args.resultId, {
+      status: args.status ?? row.status,
+      summary: args.summary ? args.summary.trim() : row.summary,
+      detail: args.detail ? args.detail.trim() : row.detail,
+      targetKind: args.targetKind ?? row.targetKind,
+      targetId: args.targetId ?? row.targetId,
+      variant: args.variant ?? row.variant,
+      updatedAt: now,
+    });
+    return { success: true };
+  },
+});
+
 export const dismiss = mutation({
   args: {
     actorClerkId: v.string(),

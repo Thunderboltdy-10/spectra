@@ -4,11 +4,12 @@ import type {
   HubSurfaceState,
   HubVisibility,
   ZoomTier,
+  ZoomSignals,
   ViewMode,
   WorkspaceData,
   WorkspaceItemData,
 } from "@/lib/workspace/contracts";
-import { zoomTierForLevel, zoomTierProgress, VIEWPORT, computeWorkspaceEnvelope } from "@/lib/workspace/contracts";
+import { zoomTierForLevel, zoomTierProgress, computeZoomSignals, VIEWPORT, computeWorkspaceEnvelope } from "@/lib/workspace/contracts";
 
 export type DeepEditTarget = {
   item: WorkspaceItemData;
@@ -49,9 +50,13 @@ type WorkspaceState = {
   zoomTier: ZoomTier;
   /** 0-1 progress within the current zoom tier for smooth interpolation */
   zoomProgress: number;
+  /** Continuous semantic zoom signals for progressive rendering */
+  zoomSignals: ZoomSignals;
   viewportX: number;
   viewportY: number;
 
+  /** Smoothed workspace proximity: 0=far from any, 1=deeply inside one */
+  workspaceProximity: number;
   activeWorkspaceId: string | null;
   committedWorkspaceId: string | null;
   /** Workspace closest to viewport center u2013 used for auto-entry */
@@ -79,6 +84,9 @@ type WorkspaceState = {
   /** Stacking result cards above command bar */
   resultCards: ResultCardData[];
 
+
+  /** Active thread selected in threads hub for inline preview */
+  activeThreadId: string | null;
   workspaces: WorkspaceData[];
   hasHydratedPreferences: boolean;
 
@@ -128,6 +136,10 @@ type WorkspaceState = {
   reopenResultCard: (cardId: string) => void;
   clearResultCards: () => void;
 
+  /** Thread hub management */
+  openThreadInHub: (threadId: string) => void;
+  closeThreadInHub: () => void;
+
   setWorkspaces: (workspaces: WorkspaceData[]) => void;
   hydratePreferences: (preferences: WorkspacePreferencesPayload) => void;
 
@@ -143,9 +155,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   zoom: VIEWPORT.DEFAULT_ZOOM,
   zoomTier: zoomTierForLevel(VIEWPORT.DEFAULT_ZOOM),
   zoomProgress: zoomTierProgress(VIEWPORT.DEFAULT_ZOOM),
+  zoomSignals: computeZoomSignals(VIEWPORT.DEFAULT_ZOOM),
   viewportX: 0,
   viewportY: 0,
 
+  workspaceProximity: 0,
   activeWorkspaceId: null,
   committedWorkspaceId: null,
   nearestWorkspaceId: null,
@@ -161,6 +175,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   pinnedHubItemIds: [],
   pendingResultCard: null,
   resultCards: [],
+  activeThreadId: null,
 
   workspaces: [],
   hasHydratedPreferences: false,
@@ -171,13 +186,76 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
       zoom,
       zoomTier: zoomTierForLevel(zoom),
       zoomProgress: zoomTierProgress(zoom),
+      zoomSignals: computeZoomSignals(zoom),
     }),
 
   setViewport: (x, y, zoom) =>
     set((state) => {
       const nextTier = zoomTierForLevel(zoom);
       const progress = zoomTierProgress(zoom);
-      const committedWorkspaceId = state.committedWorkspaceId;
+      const signals = computeZoomSignals(zoom);
+
+      // Compute viewport center in world coordinates
+      const screenW = typeof window !== "undefined" ? window.innerWidth : 1400;
+      const screenH = typeof window !== "undefined" ? window.innerHeight : 900;
+      const worldCenterX = (-x + screenW / 2) / zoom;
+      const worldCenterY = (-y + screenH / 2) / zoom;
+
+      let nearestId = state.nearestWorkspaceId;
+      let minDistance = Infinity;
+
+      state.workspaces.forEach((ws, idx) => {
+        const env = computeWorkspaceEnvelope(idx, ws.itemCount);
+        const dx = env.centerX - worldCenterX;
+        const dy = env.centerY - worldCenterY;
+        const dist = dx * dx + dy * dy;
+        if (dist < minDistance) {
+          minDistance = dist;
+          nearestId = ws.id;
+        }
+      });
+
+      // Continuous workspace proximity inference.
+      // Uses the zoom signals (structureReveal, contentDepth) instead of
+      // raw zoom to drive proximity. This means commitment responds to
+      // the semantic meaning of the zoom level, not just the numeric value.
+      // Hysteresis prevents flickering at boundary transitions.
+      const commitThreshold = 0.48;
+      const uncommitThreshold = 0.22;
+
+      // Proximity combines zoom signals (semantic depth) with spatial
+      // closeness to the nearest workspace center.
+      let proximity = 0;
+      if (nearestId && state.workspaces.length > 0) {
+        const nearestIdx = state.workspaces.findIndex((w) => w.id === nearestId);
+        if (nearestIdx >= 0) {
+          const env = computeWorkspaceEnvelope(nearestIdx, state.workspaces[nearestIdx].itemCount);
+          const dx = env.centerX - worldCenterX;
+          const dy = env.centerY - worldCenterY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          // Normalize distance: 0 when at center, 1 when at ~2x envelope radius
+          const envRadius = Math.max(env.width, env.height) * 0.6;
+          const spatialCloseness = Math.max(0, 1 - dist / (envRadius * 2));
+          // Semantic zoom depth: uses continuous signals instead of raw zoom.
+          // structureReveal = items becoming visible (entering workspace interior)
+          // contentDepth = detail/touch tier (deeply inside workspace)
+          const semanticDepth = Math.max(signals.structureReveal, signals.contentDepth);
+          proximity = spatialCloseness * 0.35 + semanticDepth * 0.65;
+        }
+      }
+
+      let autoWorkspaceId = state.committedWorkspaceId;
+      if (state.committedWorkspaceId) {
+        // Already committed: only uncommit when proximity drops below lower threshold
+        if (proximity < uncommitThreshold) {
+          autoWorkspaceId = null;
+        }
+      } else {
+        // Not committed: only commit when proximity exceeds upper threshold
+        if (proximity >= commitThreshold) {
+          autoWorkspaceId = nearestId;
+        }
+      }
 
       return {
         viewportX: x,
@@ -185,8 +263,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
         zoom,
         zoomTier: nextTier,
         zoomProgress: progress,
-        committedWorkspaceId,
-        activeWorkspaceId: committedWorkspaceId ?? state.activeWorkspaceId,
+        zoomSignals: signals,
+        workspaceProximity: proximity,
+        nearestWorkspaceId: nearestId,
+        committedWorkspaceId: autoWorkspaceId,
+        activeWorkspaceId: autoWorkspaceId ?? state.activeWorkspaceId,
       };
     }),
 
@@ -358,6 +439,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
 
   clearResultCards: () =>
     set({ resultCards: [] }),
+
+  openThreadInHub: (threadId) =>
+    set({ activeThreadId: threadId }),
+
+  closeThreadInHub: () =>
+    set({ activeThreadId: null }),
 
   setWorkspaces: (workspaces) =>
     set({ workspaces }),

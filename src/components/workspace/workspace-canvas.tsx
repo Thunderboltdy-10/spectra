@@ -19,6 +19,7 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import {
   VIEWPORT as VP,
   TERRITORY,
+  computeZoomSignals,
   type WorkspaceData,
   type WorkspaceItemData,
 } from "@/lib/workspace/contracts";
@@ -33,8 +34,12 @@ import {
   Trash2,
   Link,
   ExternalLink,
+  Pencil,
+  Maximize2,
+  Copy,
 } from "lucide-react";
 import { ActionMenuContent } from "@/components/workspace/shared-action-menu";
+import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 
 /* ===================================================================
    Palette & Helpers
@@ -121,17 +126,32 @@ function StatusDot({ status, className }: { status: string; className?: string }
 function stableScale(zoom: number, anchorZoom: number, maxScale: number = 3.5): number {
   if (zoom >= anchorZoom) return 1;
   const ratio = anchorZoom / zoom;
-  // Asymptotic approach: grows toward maxScale but never exceeds it
   return 1 + (maxScale - 1) * (1 - Math.exp(-(ratio - 1) * 1.2));
 }
 
 /**
- * Smooth interpolation helper for progressive reveal.
- * Maps a zoom value to a 0-1 range between start and end thresholds.
+ * Interpolate between two values based on a 0-1 signal.
  */
-function smoothStep(zoom: number, start: number, end: number): number {
-  const t = Math.max(0, Math.min(1, (zoom - start) / (end - start)));
-  return t * t * (3 - 2 * t); // Hermite smoothstep
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+
+/**
+ * Reads the current zoom level from ReactFlow's viewport reactively.
+ * Since @xyflow/react v12 has TypeScript resolution issues with useStore/useViewport
+ * in Turbopack, we use the onViewportChange callback pattern instead, which is
+ * always available and type-safe.
+ *
+ * The zoom value is tracked via a state that updates on every viewport change,
+ * giving us frame-rate-level reactivity for smooth semantic zoom interpolation.
+ */
+function useFlowZoom(): number {
+  // This hook is called inside ReactFlowProvider context.
+  // The zoom value is actually maintained by the parent component via
+  // onViewportChange and passed through the workspace store.
+  // For components that need zoom inside the canvas, they read it from the store.
+  return useWorkspaceStore((s) => s.zoom);
 }
 
 /* ===================================================================
@@ -140,17 +160,11 @@ function smoothStep(zoom: number, start: number, end: number): number {
 
 type WorkspaceNodeData = {
   workspace: WorkspaceData;
-  zoomTier: "landscape" | "summary" | "detail";
-  zoomProgress: number;
-  zoom: number;
   tint: string;
 };
 
 type ItemNodeData = {
   item: WorkspaceItemData;
-  zoomTier: "landscape" | "summary" | "detail";
-  zoomProgress: number;
-  zoom: number;
   groupLabel?: string;
   isFirst?: boolean;
 };
@@ -159,8 +173,12 @@ type GroupLabelNodeData = {
   label: string;
   variant: string;
   count: number;
-  zoom: number;
+  viewMode?: "byType" | "byTopic" | "timeline";
 };
+
+// Zoom/tier data is NOT passed in node data. Nodes read zoom directly
+// from ReactFlow's internal store via useReactFlowStore for frame-rate
+// responsiveness without triggering full node tree rebuilds.
 
 /* ===================================================================
    Workspace Territory Node u2014 Semantic Zoom Recomposition
@@ -180,24 +198,55 @@ type GroupLabelNodeData = {
    =================================================================== */
 
 function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
-  const { workspace, zoom, tint } = data;
+  const { workspace, tint } = data;
+  const zoom = useFlowZoom();
   const colors = getTerritoryColor(tint);
 
-  // Smooth transitions between states
-  const landscapeToSummary = smoothStep(zoom, 0.10, 0.22);
-  const summaryToDetail = smoothStep(zoom, 0.35, 0.55);
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftName, setDraftName] = useState(workspace.name);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  // Territory region opacity adapts dynamically with zoom
-  const regionOpacity = 0.3 + (1 - landscapeToSummary) * 0.7;
+  useEffect(() => {
+    setDraftName(workspace.name);
+  }, [workspace.name]);
+
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+
+  const commitRename = async () => {
+    setIsEditing(false);
+    const trimmed = draftName.trim();
+    if (!trimmed || trimmed === workspace.name) {
+      setDraftName(workspace.name);
+      return;
+    }
+    await fetch("/api/workstreams", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "update", workstreamId: workspace.id, title: trimmed }),
+    }).catch(() => undefined);
+    window.dispatchEvent(new CustomEvent("workspace:content-mutated", {
+      detail: { workstreamId: workspace.id, refreshWorkstreams: true, refreshHub: true },
+    }));
+  };
+
+  // Continuous zoom signals — no discrete tier boundaries
+  const sig = computeZoomSignals(zoom);
+  const { identityAnchor, territoryFade, structureReveal } = sig;
+
+  // Territory region: strong when landscape, fades as detail increases
+  const regionOpacity = lerp(1.0, 0.25, territoryFade);
 
   // Identity scale: large at landscape, naturally shrinks as zoom increases
-  // Uses a damped curve to avoid enormously oversized text at far zoom
   const identityScale = stableScale(zoom, 0.22);
 
-  // Blend between centered (landscape) and anchored (summary+) positioning
-  // via opacity crossfade for smooth transition
-  const showCentered = 1 - landscapeToSummary;
-  const showAnchored = landscapeToSummary;
+  // Centered (landscape) vs anchored (summary+): continuous crossfade
+  const showCentered = 1 - identityAnchor;
+  const showAnchored = identityAnchor;
 
   return (
     <div
@@ -211,14 +260,13 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
           opacity: regionOpacity,
           background: `
             radial-gradient(
-              ellipse ${90 - summaryToDetail * 20}% ${80 - summaryToDetail * 15}% at 50% ${35 + summaryToDetail * 10}%,
+              ellipse ${lerp(90, 70, territoryFade)}% ${lerp(80, 65, territoryFade)}% at 50% ${lerp(35, 45, territoryFade)}%,
               ${colors.core} 0%,
-              ${colors.mid} ${40 + summaryToDetail * 15}%,
-              ${colors.outer} ${70 + summaryToDetail * 10}%,
+              ${colors.mid} ${lerp(40, 55, territoryFade)}%,
+              ${colors.outer} ${lerp(70, 80, territoryFade)}%,
               transparent 100%
             )
           `,
-          transition: "opacity 0.3s ease",
         }}
       />
 
@@ -235,8 +283,7 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
               transparent 100%
             )
           `,
-          opacity: Math.max(0.08, 0.6 * (1 - landscapeToSummary * 0.5)),
-          transition: "opacity 0.4s ease",
+          opacity: lerp(0.6, 0.08, identityAnchor * 0.5 + territoryFade * 0.5),
         }}
       />
 
@@ -248,7 +295,6 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
             transform: `scale(${identityScale})`,
             transformOrigin: "center center",
             opacity: showCentered,
-            transition: "opacity 0.2s ease",
           }}
         >
           <div className="flex h-[240px] w-[240px] items-center justify-center rounded-[3.5rem] bg-[var(--bg-elevated)]/40 backdrop-blur-xl border border-[var(--border-default)]/15 shadow-[0_16px_48px_-12px_rgba(7,20,35,0.12)]">
@@ -257,10 +303,29 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
             </span>
           </div>
 
-          <div className="flex flex-col items-center gap-4">
-            <h3 className="font-bold text-[var(--text-primary)] text-[80px] tracking-[-0.02em] text-center max-w-[2200px] leading-[1.1]" style={{ textShadow: "0 3px 16px rgba(0,0,0,0.06)" }}>
-              {workspace.name}
-            </h3>
+          <div className="flex flex-col items-center gap-4 pointer-events-auto">
+            {isEditing ? (
+              <input
+                ref={inputRef}
+                value={draftName}
+                onChange={(e) => setDraftName(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitRename();
+                  if (e.key === "Escape") { setDraftName(workspace.name); setIsEditing(false); }
+                }}
+                className="font-bold text-[var(--text-primary)] text-[80px] tracking-[-0.02em] text-center max-w-[2200px] leading-[1.1] bg-transparent border-b border-[var(--accent-cyan)] outline-none"
+                style={{ textShadow: "0 3px 16px rgba(0,0,0,0.06)" }}
+              />
+            ) : (
+              <h3 
+                onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
+                className="font-bold text-[var(--text-primary)] text-[80px] tracking-[-0.02em] text-center max-w-[2200px] leading-[1.1] cursor-text hover:text-[var(--accent-cyan)] transition-colors" 
+                style={{ textShadow: "0 3px 16px rgba(0,0,0,0.06)" }}
+              >
+                {workspace.name}
+              </h3>
+            )}
             <div className="flex items-center gap-5">
               <span className="text-[36px] font-medium tracking-wide text-[var(--text-tertiary)] bg-[var(--bg-secondary)]/25 backdrop-blur-md px-8 py-3 rounded-full border border-[var(--border-default)]/15">
                 {workspace.itemCount} item{workspace.itemCount !== 1 ? "s" : ""}
@@ -269,8 +334,11 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
             </div>
           </div>
 
-          {/* Landscape summary chips */}
-          <div className="flex flex-wrap items-center justify-center gap-3 mt-2 max-w-[1800px]">
+          {/* Landscape summary chips u2014 fade as structure reveals */}
+          <div
+            className="flex flex-wrap items-center justify-center gap-3 mt-2 max-w-[1800px]"
+            style={{ opacity: Math.max(0, 1 - structureReveal * 1.5) }}
+          >
             {Object.entries(TYPE_GROUP_LABELS).map(([key, group]) => {
               const count = workspace.items.filter((i) =>
                 group.types.includes(i.itemType as CanonicalWorkspaceType)
@@ -292,19 +360,37 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
       {/* ANCHORED identity (summary+) u2014 fades in smoothly */}
       {showAnchored > 0.01 && (
         <div
-          className="absolute top-[60px] left-[80px] flex items-center gap-5 pointer-events-none z-10"
+          className="absolute top-[60px] left-[80px] flex items-center gap-5 pointer-events-auto z-10"
           style={{
             transform: `scale(${stableScale(zoom, 0.35)})`,
             transformOrigin: "top left",
             opacity: showAnchored,
-            transition: "opacity 0.2s ease",
           }}
         >
-          <span className="text-[48px] leading-none">{workspace.emoji}</span>
-          <h3 className="font-semibold text-[var(--text-primary)] text-[44px] tracking-[-0.01em]" style={{ textShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-            {workspace.name}
-          </h3>
-          <span className="text-[24px] font-medium text-[var(--text-tertiary)]/50 ml-3">
+          <span className="text-[48px] leading-none pointer-events-none">{workspace.emoji}</span>
+          {isEditing ? (
+            <input
+              ref={inputRef}
+              value={draftName}
+              onChange={(e) => setDraftName(e.target.value)}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitRename();
+                if (e.key === "Escape") { setDraftName(workspace.name); setIsEditing(false); }
+              }}
+              className="font-semibold text-[var(--text-primary)] text-[44px] tracking-[-0.01em] bg-transparent border-b border-[var(--accent-cyan)] outline-none min-w-[200px]"
+              style={{ textShadow: "0 2px 8px rgba(0,0,0,0.04)" }}
+            />
+          ) : (
+            <h3 
+              onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
+              className="font-semibold text-[var(--text-primary)] text-[44px] tracking-[-0.01em] cursor-text hover:text-[var(--accent-cyan)] transition-colors" 
+              style={{ textShadow: "0 2px 8px rgba(0,0,0,0.04)" }}
+            >
+              {workspace.name}
+            </h3>
+          )}
+          <span className="text-[24px] font-medium text-[var(--text-tertiary)]/50 ml-3 pointer-events-none">
             {workspace.itemCount}
           </span>
           <StatusDot status={workspace.status} className="h-4 w-4" />
@@ -319,67 +405,129 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
    =================================================================== */
 
 function GroupLabelNode({ data }: { data: GroupLabelNodeData }) {
-  const scale = stableScale(data.zoom, 0.35, 3);
-  const visibility = smoothStep(data.zoom, 0.16, 0.25);
+  const zoom = useFlowZoom();
+  const sig = computeZoomSignals(zoom);
+  const scale = stableScale(zoom, 0.35, 3);
+
+  // Group labels use the continuous groupReveal signal.
+  // They also progressively gain weight/size as detail increases.
+  const labelSize = lerp(44, 38, sig.contentDepth);
+  const countSize = lerp(32, 26, sig.contentDepth);
+
+  const colors = getTerritoryColor(data.variant);
+
+  if (data.viewMode === "timeline") {
+    return (
+      <div
+        className="flex flex-col select-none pointer-events-none relative"
+        style={{
+          transform: `scale(${scale})`,
+          transformOrigin: "left center",
+          opacity: sig.groupReveal,
+        }}
+      >
+        {/* Timeline Axis Line */}
+        <div className="absolute top-[28px] left-0 w-[2000px] h-[4px] bg-[var(--border-default)]/20" />
+        {/* Timeline Node Point */}
+        <div 
+          className="absolute top-[21px] left-[24px] w-[18px] h-[18px] rounded-full border-4 border-[var(--bg-primary)] z-10"
+          style={{ backgroundColor: colors.border }}
+        />
+        
+        <div className="flex items-center gap-4 pl-[64px] pt-[8px]">
+          <span
+            className="font-bold uppercase tracking-[0.14em] text-[var(--text-primary)]"
+            style={{ fontSize: `${labelSize}px` }}
+          >
+            {data.label}
+          </span>
+          <span
+            className="tabular-nums text-[var(--text-tertiary)]/50 font-semibold"
+            style={{ fontSize: `${countSize}px` }}
+          >
+            {data.count}
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
-      className="flex items-center gap-6 px-6 select-none pointer-events-none"
+      className="flex items-center gap-6 px-6 py-4 rounded-[24px] select-none pointer-events-none"
       style={{
         transform: `scale(${scale})`,
         transformOrigin: "left center",
-        opacity: visibility,
-        transition: "opacity 0.15s ease",
+        opacity: sig.groupReveal,
+        backgroundColor: colors.outer,
+        border: `1px solid ${colors.border}`,
       }}
     >
-      <span className="text-[44px] font-bold uppercase tracking-[0.14em] text-[var(--text-tertiary)]/50">
+      <span
+        className="font-bold uppercase tracking-[0.14em]"
+        style={{ fontSize: `${labelSize}px`, color: colors.border }}
+      >
         {data.label}
       </span>
-      <span className="text-[32px] tabular-nums text-[var(--text-tertiary)]/30 font-semibold">
+      <span
+        className="tabular-nums text-[var(--text-tertiary)]/40 font-semibold"
+        style={{ fontSize: `${countSize}px` }}
+      >
         {data.count}
       </span>
-      <div className="w-[40px] h-[3px] rounded-full bg-[var(--border-default)]/20 ml-4" />
+      <div
+        className="h-[3px] rounded-full ml-4"
+        style={{ width: `${lerp(40, 60, sig.cardDetail)}px`, backgroundColor: colors.border }}
+      />
     </div>
   );
 }
 
 /* ===================================================================
-   Item Node u2014 progressive structural recomposition
+   Item Node — progressive structural recomposition
 
-   Items fade in during summary transition, gain detail progressively.
-   At detail level, content expands but never becomes enormous.
+   GLANCE: Compact chip with icon, title, status dot. Minimal height.
+           No interaction affordances — pure information density.
+
+   TOUCH:  Expanded card with preview content, type badge, and
+           ACTION BAR (Edit, Open in Deep Edit, Copy). Focus ring
+           activates. The card becomes a working surface, not just
+           a preview. This is the key differentiator from Glance.
+
+   DEEP:   Content fills the card with type-specific TouchContent.
+           Item is connected to its deep-edit surface via a visual
+           bridge indicator on the right edge.
    =================================================================== */
 
 function ItemNode({ data }: { data: ItemNodeData }) {
-  const { item, zoom } = data;
+  const { item } = data;
+  const zoom = useFlowZoom();
   const meta = CANONICAL_WORKSPACE_TYPE_META[item.itemType as CanonicalWorkspaceType];
   const Icon = meta?.icon;
   const [hovered, setHovered] = useState(false);
   const focusedItemId = useWorkspaceStore((s) => s.focusedItemId);
   const deepEditTargets = useWorkspaceStore((s) => s.deepEditTargets);
+  const openDeepEdit = useWorkspaceStore((s) => s.openDeepEdit);
+  const setFocusedItem = useWorkspaceStore((s) => s.setFocusedItem);
   const isFocused = focusedItemId === item.id;
   const isOpenInDeepEdit = deepEditTargets.some((t) => t.item.id === item.id);
 
-  // Semantic zoom representation tiers for items:
-  // chip: 0.20-0.35 — compact icon+title chip
-  // card: 0.35-0.50 — small card with title, status, preview appearing
-  // detail: >0.50 — full card with type-specific touch content
-  const chipToCard = smoothStep(zoom, 0.28, 0.38);
-  const cardToDetail = smoothStep(zoom, 0.42, 0.55);
-  const itemAppear = smoothStep(zoom, 0.22, 0.30);
+  // Continuous zoom signals for progressive item recomposition
+  const sig = computeZoomSignals(zoom);
 
-  const isChip = chipToCard < 0.3;
-  const isDetail = cardToDetail > 0.5;
+  // Items use structureReveal for appearance, cardDetail for chip→card,
+  // contentDepth for card→detail. All continuous, no discrete boundaries.
+  const itemAppear = sig.structureReveal;
+  const chipToCard = sig.cardDetail;
+  const cardToDetail = sig.contentDepth;
 
   // Perceptually stable counter-scale: items stay ~280-350px on screen max
   const scale = stableScale(zoom, 0.4, 3);
 
   const canvasWidth = TERRITORY.ITEM_COL_WIDTH - 20;
-  const canvasHeight = isDetail
-    ? Math.min(TERRITORY.ITEM_ROW_HEIGHT * 2, 520)
-    : isChip
-      ? 80
-      : TERRITORY.ITEM_ROW_HEIGHT - 20;
+  // Height interpolates continuously from chip (80px) through card to detail
+  const canvasHeight = lerp(80, lerp(TERRITORY.ITEM_ROW_HEIGHT - 20, TERRITORY.ITEM_ROW_HEIGHT + 220, cardToDetail), Math.max(chipToCard, cardToDetail));
+  const borderRadius = lerp(14, 20, chipToCard);
 
   const dynamicBorderWidth = Math.max(1, 1 / zoom);
   const borderColor = isFocused
@@ -390,111 +538,317 @@ function ItemNode({ data }: { data: ItemNodeData }) {
         ? "color-mix(in oklab, var(--accent-cyan) 22%, var(--border-default))"
         : "color-mix(in srgb, var(--border-default) 50%, transparent)";
 
+  // Background opacity: subtle at chip, stronger at detail
+  const bgOpacity = lerp(0.88, 0.95, cardToDetail);
+
+  // Touch-tier action bar visibility: appears when cardDetail is sufficient
+  // and contentDepth hasn't taken over entirely
+  const actionBarOpacity = Math.min(
+    Math.max(0, (chipToCard - 0.25) * 4),   // fade in as card develops
+    Math.max(0, 1 - (cardToDetail - 0.7) * 5) // fade out as detail fills
+  );
+
   return (
     <div
       style={{
         width: canvasWidth,
         height: canvasHeight,
         transform: `scale(${scale})`,
-        transformOrigin: "top left",
+        transformOrigin: "center center",
         opacity: itemAppear,
-        transition: "opacity 0.2s ease",
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className="relative"
+      className="relative flex items-center justify-center"
     >
       <div
         className={cn(
           "group relative flex overflow-hidden w-full h-full",
-          "bg-[var(--bg-elevated)]/92",
-          "transition-all duration-300 ease-[var(--ease-standard)]",
-          isChip ? "rounded-[14px] flex-row items-center gap-3 px-4" : "rounded-[20px] flex-col gap-2",
+          "transition-[box-shadow] duration-300 ease-[var(--ease-standard)]",
           isOpenInDeepEdit && !isFocused && "opacity-80",
         )}
         style={{
+          borderRadius: `${borderRadius}px`,
           border: `${dynamicBorderWidth}px solid ${borderColor}`,
+          backgroundColor: `rgba(var(--bg-elevated-rgb, 30, 30, 36), ${bgOpacity})`,
           boxShadow: isFocused
             ? "0 12px 30px -14px rgba(14,142,232,0.22), 0 0 0 1px color-mix(in oklab, var(--accent-cyan) 20%, transparent)"
             : isOpenInDeepEdit
               ? "0 8px 22px -14px rgba(14,142,232,0.12)"
               : hovered
                 ? "0 10px 26px -16px rgba(7,20,35,0.18)"
-                : "0 6px 18px -14px rgba(7,20,35,0.12)",
+                : `0 ${lerp(4, 8, chipToCard)}px ${lerp(12, 22, chipToCard)}px -14px rgba(7,20,35,${lerp(0.08, 0.14, chipToCard)})`,
         }}
       >
+        {/* Focus ring — visible at Touch and Detail tiers when focused */}
+        {isFocused && chipToCard > 0.15 && (
+          <div
+            className="absolute inset-0 rounded-[inherit] pointer-events-none"
+            style={{
+              boxShadow: `inset 0 0 0 ${Math.max(2, 2 / zoom)}px color-mix(in oklab, var(--accent-cyan) 30%, transparent)`,
+              opacity: lerp(0.4, 1, chipToCard),
+              zIndex: 10,
+            }}
+          />
+        )}
+
+        {/* Deep Edit connector — visual bridge on right edge */}
         {isOpenInDeepEdit && (
-          <div className="absolute -right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 pointer-events-none">
+          <div className="absolute -right-3 top-1/2 -translate-y-1/2 flex items-center pointer-events-none z-20">
+            {/* Connector line */}
             <div className={cn(
-              "h-8 w-[4px] rounded-full transition-all duration-300",
-              isFocused ? "bg-[var(--accent-cyan)] shadow-[0_0_8px_2px_rgba(14,142,232,0.35)]" : "bg-[var(--accent-cyan)]/30",
+              "h-[2px] w-3 transition-all duration-300",
+              isFocused ? "bg-[var(--accent-cyan)]" : "bg-[var(--accent-cyan)]/30",
+            )} />
+            {/* Connector dot */}
+            <div className={cn(
+              "h-3 w-3 rounded-full transition-all duration-300 border-2 border-[var(--bg-primary)]",
+              isFocused
+                ? "bg-[var(--accent-cyan)] shadow-[0_0_8px_2px_rgba(14,142,232,0.35)]"
+                : "bg-[var(--accent-cyan)]/40",
             )} />
           </div>
         )}
 
-        {isChip ? (
-          /* CHIP TIER: icon + title, compact */
-          <>
+        {/*
+          Progressive content recomposition:
+          Instead of 3 separate absolute-positioned layers with threshold-based
+          visibility, we render a SINGLE adaptive layout that continuously
+          morphs its structure based on zoom signals.
+        */}
+
+        {/* Unified adaptive content: morphs from chip → card → detail */}
+        <div className="absolute inset-0 flex flex-col">
+          {/* Header row: always present, grows with detail */}
+          <div
+            className="flex items-center shrink-0"
+            style={{
+              padding: `${lerp(8, 20, chipToCard)}px ${lerp(12, 24, chipToCard)}px`,
+              gap: `${lerp(8, 16, chipToCard)}px`,
+            }}
+          >
             {Icon && (
               <div
-                className="flex h-8 w-8 items-center justify-center rounded-[10px] shrink-0"
-                style={{ backgroundColor: `color-mix(in oklab, ${meta?.color ?? "#637083"} 10%, var(--bg-secondary))` }}
+                className={cn(
+                  "flex items-center justify-center shrink-0 transition-all duration-200",
+                  isFocused && chipToCard > 0.3 && "ring-2 ring-[var(--accent-cyan)]/25",
+                )}
+                style={{
+                  width: `${lerp(28, 44, chipToCard)}px`,
+                  height: `${lerp(28, 44, chipToCard)}px`,
+                  borderRadius: `${lerp(8, 13, chipToCard)}px`,
+                  backgroundColor: `color-mix(in oklab, ${meta?.color ?? "#637083"} ${lerp(8, 12, chipToCard)}%, var(--bg-secondary))`,
+                }}
               >
-                <Icon className="h-4 w-4" style={{ color: meta?.color ?? "var(--text-secondary)" }} />
+                <Icon
+                  style={{
+                    width: `${lerp(14, 20, chipToCard)}px`,
+                    height: `${lerp(14, 20, chipToCard)}px`,
+                    color: meta?.color ?? "var(--text-secondary)",
+                  }}
+                />
               </div>
             )}
-            <span className="flex-1 truncate text-[15px] font-medium text-[var(--text-primary)] tracking-tight">
+            <span
+              className="flex-1 truncate font-medium text-[var(--text-primary)] tracking-tight"
+              style={{
+                fontSize: `${lerp(14, 17, chipToCard)}px`,
+                fontWeight: chipToCard > 0.4 ? 600 : 500,
+              }}
+            >
               {item.title}
             </span>
             <StatusDot status={item.status === "completed" ? "completed" : item.status === "active" ? "active" : "idle"} />
-          </>
-        ) : isDetail ? (
-          /* DETAIL TIER: Type-specific touch content */
-          <div className="flex-1 overflow-hidden w-full h-full pointer-events-auto">
-            <TouchContent item={item} />
           </div>
-        ) : (
-          /* CARD TIER: title, status, preview */
-          <>
-            <div className="flex items-center gap-4 px-6 pt-5">
-              <div
-                className={cn(
-                  "flex h-11 w-11 items-center justify-center rounded-[13px] shrink-0",
-                  isFocused && "ring-1 ring-[var(--accent-cyan)]/20",
-                )}
-                style={{ backgroundColor: `color-mix(in oklab, ${meta?.color ?? "#637083"} ${isFocused ? "14" : "10"}%, var(--bg-secondary))` }}
+
+          {/* Preview text: fades in with card detail, fades out when touch content takes over */}
+          {item.preview && chipToCard > 0.1 && cardToDetail < 0.9 && (
+            <div
+              className="flex-1 min-h-0 overflow-hidden"
+              style={{
+                opacity: Math.min(chipToCard * 2.5, 1 - cardToDetail),
+                padding: `0 ${lerp(12, 24, chipToCard)}px`,
+              }}
+            >
+              <p
+                className="text-[var(--text-tertiary)] leading-[1.6]"
+                style={{
+                  fontSize: `${lerp(12, 15, chipToCard)}px`,
+                  paddingLeft: `${lerp(0, 60, chipToCard)}px`,
+                  display: "-webkit-box",
+                  WebkitLineClamp: chipToCard > 0.6 ? 3 : 2,
+                  WebkitBoxOrient: "vertical" as const,
+                  overflow: "hidden",
+                }}
               >
-                {Icon && <Icon className="h-5 w-5" style={{ color: meta?.color ?? "var(--text-secondary)" }} />}
-              </div>
-              <span className="flex-1 truncate text-lg font-semibold text-[var(--text-primary)] tracking-tight">{item.title}</span>
-              <StatusDot status={item.status === "completed" ? "completed" : item.status === "active" ? "active" : "idle"} />
+                {item.preview}
+              </p>
             </div>
-            {chipToCard > 0.5 && (
-              <>
-                <div className="flex-1 flex flex-col justify-center min-h-0 mt-1 px-6">
-                  {cardToDetail > 0.2 && item.preview && (
-                    <p className="pl-[60px] text-[15px] leading-[1.6] text-[var(--text-tertiary)] line-clamp-3">{item.preview}</p>
-                  )}
-                </div>
-                <div className="flex items-center justify-between pl-[80px] pr-6 mt-auto shrink-0 pb-5 pt-1">
-                  <span
-                    className="rounded-md px-2 py-1 text-sm font-semibold uppercase tracking-[0.1em]"
-                    style={{
-                      backgroundColor: isFocused ? `color-mix(in oklab, ${meta?.color ?? "var(--text-tertiary)"} 8%, transparent)` : "transparent",
-                      color: `color-mix(in oklab, ${meta?.color ?? "var(--text-tertiary)"} ${isFocused ? "80" : "50"}%, transparent)`,
-                    }}
-                  >
-                    {meta?.label ?? item.itemType}
-                  </span>
-                  {item.meta && <span className="text-sm font-medium text-[var(--text-secondary)]">{item.meta}</span>}
-                </div>
-              </>
-            )}
-          </>
-        )}
+          )}
+
+          {/* Type badge and meta: progressively visible */}
+          {chipToCard > 0.3 && cardToDetail < 0.85 && (
+            <div
+              className="flex items-center justify-between mt-auto shrink-0"
+              style={{
+                opacity: Math.min((chipToCard - 0.3) * 3, 1 - cardToDetail),
+                padding: `${lerp(4, 8, chipToCard)}px ${lerp(12, 24, chipToCard)}px ${lerp(8, 20, chipToCard)}px`,
+                paddingLeft: `${lerp(12, 80, chipToCard)}px`,
+              }}
+            >
+              <span
+                className="rounded-md px-2 py-1 text-sm font-semibold uppercase tracking-[0.1em]"
+                style={{
+                  backgroundColor: isFocused ? `color-mix(in oklab, ${meta?.color ?? "var(--text-tertiary)"} 8%, transparent)` : "transparent",
+                  color: `color-mix(in oklab, ${meta?.color ?? "var(--text-tertiary)"} ${isFocused ? "80" : "50"}%, transparent)`,
+                }}
+              >
+                {meta?.label ?? item.itemType}
+              </span>
+              {item.meta && <span className="text-sm font-medium text-[var(--text-secondary)]">{item.meta}</span>}
+            </div>
+          )}
+
+          {/* ═══════════════════════════════════════════════════════════
+              TOUCH-TIER ACTION BAR — the key differentiator from Glance
+
+              This action bar makes Touch tier a real interaction layer,
+              not just "enlarged Glance cards". It provides:
+              - Edit button (opens inline editing via focus)
+              - Expand button (opens Deep Edit surface)
+              - Copy button (copies content to clipboard)
+
+              The bar fades in continuously with cardDetail and fades out
+              as contentDepth takes over (where TouchContent handles editing).
+              ═══════════════════════════════════════════════════════════ */}
+          {actionBarOpacity > 0.01 && (
+            <div
+              className="flex items-center gap-1.5 shrink-0 pointer-events-auto"
+              style={{
+                opacity: actionBarOpacity,
+                padding: `0 ${lerp(12, 24, chipToCard)}px ${lerp(6, 12, chipToCard)}px`,
+                paddingLeft: `${lerp(12, 80, chipToCard)}px`,
+              }}
+            >
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setFocusedItem(item.id);
+                }}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5",
+                  "text-[11px] font-semibold transition-all duration-150",
+                  isFocused
+                    ? "bg-[var(--accent-cyan)]/12 text-[var(--accent-cyan)]"
+                    : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]",
+                )}
+                title="Edit inline"
+              >
+                <Pencil className="h-3 w-3" />
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openDeepEdit(item);
+                }}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5",
+                  "text-[11px] font-semibold transition-all duration-150",
+                  isOpenInDeepEdit
+                    ? "bg-[var(--accent-cyan)]/12 text-[var(--accent-cyan)]"
+                    : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]",
+                )}
+                title="Open in Deep Edit"
+              >
+                <Maximize2 className="h-3 w-3" />
+                {isOpenInDeepEdit ? "Open" : "Expand"}
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigator.clipboard.writeText(item.preview ?? item.title).catch(() => {});
+                }}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5",
+                  "text-[11px] font-semibold transition-all duration-150",
+                  "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]",
+                )}
+                title="Copy content"
+              >
+                <Copy className="h-3 w-3" />
+                Copy
+              </button>
+            </div>
+          )}
+
+          {/* Touch content: fades in continuously as contentDepth increases */}
+          {cardToDetail > 0.05 && (
+            <div
+              className="absolute inset-0 overflow-hidden pointer-events-auto"
+              style={{ opacity: cardToDetail }}
+            >
+              <TouchContent item={item} />
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
+}
+
+/** Detect programming language from item meta, title suffix, or content shebang/keywords */
+function detectCodeLanguage(item: WorkspaceItemData): string {
+  // Check meta field first (may contain language tag like "python", "js", etc.)
+  if (item.meta) {
+    const langMap: Record<string, string> = {
+      "python": "python", "py": "python",
+      "javascript": "javascript", "js": "javascript",
+      "typescript": "typescript", "ts": "typescript",
+      "jsx": "jsx", "tsx": "tsx",
+      "html": "html", "css": "css",
+      "rust": "rust", "go": "go",
+      "java": "java", "c": "c", "cpp": "cpp",
+      "ruby": "ruby", "php": "php",
+      "sql": "sql", "bash": "bash", "sh": "bash",
+      "swift": "swift", "kotlin": "kotlin",
+      "dart": "dart", "yaml": "yaml", "json": "json",
+      "markdown": "markdown", "md": "markdown",
+    };
+    const metaLower = item.meta.toLowerCase().trim();
+    if (langMap[metaLower]) return langMap[metaLower];
+  }
+
+  // Check title for common language extensions
+  const titleLower = item.title.toLowerCase();
+  const extMatch = titleLower.match(/\.(py|js|ts|jsx|tsx|html|css|rs|go|java|c|cpp|rb|php|sql|sh|swift|kt|dart|yaml|yml|json|md)$/);
+  if (extMatch) {
+    const extMap: Record<string, string> = {
+      "py": "python", "js": "javascript", "ts": "typescript",
+      "jsx": "jsx", "tsx": "tsx", "html": "html", "css": "css",
+      "rs": "rust", "go": "go", "java": "java", "c": "c", "cpp": "cpp",
+      "rb": "ruby", "php": "php", "sql": "sql", "sh": "bash",
+      "swift": "swift", "kt": "kotlin", "dart": "dart",
+      "yaml": "yaml", "yml": "yaml", "json": "json", "md": "markdown",
+    };
+    if (extMap[extMatch[1]]) return extMap[extMatch[1]];
+  }
+
+  // Check content for shebang or common patterns
+  const code = item.preview ?? "";
+  if (code.startsWith("#!/usr/bin/env python") || code.startsWith("#!/usr/bin/python")) return "python";
+  if (code.startsWith("#!/bin/bash") || code.startsWith("#!/bin/sh")) return "bash";
+  if (code.startsWith("<!DOCTYPE") || code.startsWith("<html")) return "html";
+  if (code.match(/^import\s+(React|{\s*useState)/m)) return "typescript";
+  if (code.match(/^(def |import |from )/m)) return "python";
+  if (code.match(/^(func |package )/m)) return "go";
+  if (code.match(/^(fn |let mut |impl )/m)) return "rust";
+  if (code.match(/^(public class |private |protected )/m)) return "java";
+
+  return "";
 }
 
 /* ===================================================================
@@ -504,35 +858,89 @@ function ItemNode({ data }: { data: ItemNodeData }) {
 function TouchContent({ item }: { item: WorkspaceItemData }) {
   const meta = CANONICAL_WORKSPACE_TYPE_META[item.itemType as CanonicalWorkspaceType];
   const Icon = meta?.icon;
+  const [isEditing, setIsEditing] = useState(false);
+  const [content, setContent] = useState(item.preview ?? "");
+
+  useEffect(() => {
+    setContent(item.preview ?? "");
+  }, [item.preview]);
+
+  const handleBlur = () => {
+    setIsEditing(false);
+    if (content !== item.preview) {
+      void fetch("/api/artifacts", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ artifactId: item.id, content }),
+      }).catch(() => undefined);
+    }
+  };
 
   switch (item.itemType) {
     case "note":
       return (
-        <div className="p-5 h-full overflow-hidden">
-          <div className="flex items-center gap-2 mb-3">
+        <div 
+          className="p-5 h-full overflow-hidden flex flex-col" 
+          onClick={() => !isEditing && setIsEditing(true)}
+        >
+          <div className="flex items-center gap-2 mb-3 shrink-0">
             {Icon && <Icon className="h-4 w-4" style={{ color: meta?.color }} />}
             <span className="text-[14px] font-semibold text-[var(--text-primary)] truncate">{item.title}</span>
           </div>
-          <div className="text-[14px] leading-[1.8] text-[var(--text-secondary)] font-[var(--font-manrope)]">
-            {(item.preview ?? "").split(/\. /).map((sentence, i) => (
-              <p key={i} className="mb-2">{sentence}{i < (item.preview ?? "").split(/\. /).length - 1 ? "." : ""}</p>
-            ))}
-          </div>
+          {isEditing ? (
+            <textarea
+              autoFocus
+              className="flex-1 w-full resize-none bg-transparent text-[14px] leading-[1.8] text-[var(--text-primary)] outline-none border border-[var(--accent-cyan)]/50 rounded-lg p-2 font-[var(--font-manrope)]"
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              onBlur={handleBlur}
+            />
+          ) : (
+            <div className="flex-1 overflow-y-auto cursor-text">
+              <MarkdownRenderer content={content}  />
+            </div>
+          )}
         </div>
       );
 
-    case "code":
+    case "code": {
+      const codeLang = detectCodeLanguage(item);
+      const fencedContent = codeLang
+        ? "```" + codeLang + "\n" + (content || "// No code yet") + "\n```"
+        : "```\n" + (content || "// No code yet") + "\n```";
+      const lineCount = (content || "").split("\n").length;
       return (
-        <div className="h-full flex flex-col overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-3 border-b border-[var(--border-default)]/20">
-            {Icon && <Icon className="h-4 w-4" style={{ color: meta?.color }} />}
-            <span className="text-[13px] font-semibold text-[var(--text-primary)] truncate">{item.title}</span>
+        <div 
+          className="h-full flex flex-col overflow-hidden"
+          onClick={() => !isEditing && setIsEditing(true)}
+        >
+          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[var(--border-default)]/20 shrink-0 bg-[#1e1e2e]">
+            {Icon && <Icon className="h-3.5 w-3.5" style={{ color: meta?.color }} />}
+            <span className="text-[12px] font-semibold text-[var(--text-primary)] truncate flex-1">{item.title}</span>
+            {codeLang && (
+              <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--text-tertiary)]/60 bg-[var(--bg-elevated)]/50 px-2 py-0.5 rounded">{codeLang}</span>
+            )}
+            <span className="text-[10px] text-[var(--text-tertiary)]/40 tabular-nums">{lineCount}L</span>
           </div>
-          <div className="flex-1 bg-[#1e1e2e] p-4 overflow-hidden">
-            <pre className="font-mono text-[12px] leading-[1.7] text-[#cdd6f4] whitespace-pre-wrap">{item.preview ?? "// No code yet"}</pre>
+          <div className="flex-1 bg-[#1e1e2e] overflow-hidden flex flex-col">
+            {isEditing ? (
+              <textarea
+                autoFocus
+                className="flex-1 w-full resize-none bg-transparent text-[#cdd6f4] font-mono text-[12px] leading-[1.7] outline-none p-4 border-l-2 border-[var(--accent-cyan)]/30"
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                onBlur={handleBlur}
+                spellCheck={false}
+              />
+            ) : (
+              <div className="flex-1 overflow-y-auto p-4 [&_.markdown-body]:!bg-transparent [&_.markdown-body]:!text-[12px] [&_.markdown-body_pre]:!bg-transparent [&_.markdown-body_pre]:!m-0 [&_.markdown-body_pre]:!p-0 [&_.markdown-body_code]:!text-[12px] [&_.markdown-body_code]:!leading-[1.7] [&_.markdown-body_pre_code]:!font-mono [&_.markdown-body_pre_code]:!bg-transparent [&_.markdown-body]:!leading-[1.7] [&_button]:!hidden">
+                <MarkdownRenderer content={fencedContent} />
+              </div>
+            )}
           </div>
         </div>
       );
+    }
 
     case "visual":
       return (
@@ -619,13 +1027,22 @@ function TouchContent({ item }: { item: WorkspaceItemData }) {
 
     case "export":
       return (
-        <div className="h-full flex flex-col items-center justify-center p-5" style={{ background: "linear-gradient(135deg, var(--bg-secondary)/30, var(--bg-elevated))" }}>
-          <div className="w-[80px] h-[100px] rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-default)]/30 flex flex-col items-center justify-center mb-3 shadow-sm">
-            {Icon && <Icon className="h-6 w-6" style={{ color: meta?.color }} />}
-            <div className="mt-2 w-10 h-[2px] rounded-full bg-[var(--border-default)]/30" />
-            <div className="mt-1 w-8 h-[2px] rounded-full bg-[var(--border-default)]/20" />
+        <div className="h-full flex flex-col overflow-hidden" style={{ background: "linear-gradient(135deg, var(--bg-secondary)/30, var(--bg-elevated))" }}>
+          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[var(--border-default)]/20 shrink-0">
+            {Icon && <Icon className="h-3.5 w-3.5" style={{ color: meta?.color }} />}
+            <span className="text-[12px] font-semibold text-[var(--text-primary)] truncate flex-1">{item.title}</span>
+            <span className="text-[10px] font-medium text-[var(--text-tertiary)]/50 uppercase tracking-wider">Document</span>
           </div>
-          <span className="text-[13px] font-semibold text-[var(--text-primary)]">{item.title}</span>
+          {content ? (
+            <div className="flex-1 overflow-y-auto p-4 [&_.markdown-body]:!text-[12px] [&_.markdown-body]:!leading-[1.6] [&_.markdown-body_p]:!mb-1 [&_.markdown-body_h1]:!text-[16px] [&_.markdown-body_h1]:!mb-1 [&_.markdown-body_h2]:!text-[14px] [&_.markdown-body_h2]:!mb-1 [&_.markdown-body_h3]:!text-[13px] [&_.markdown-body_h3]:!mb-1 [&_.markdown-body_ul]:!mb-1 [&_.markdown-body_ol]:!mb-1 [&_.markdown-body_blockquote]:!mb-1 [&_.markdown-body_pre]:!mb-1 [&_button]:!hidden">
+              <MarkdownRenderer content={content} mode="document" />
+            </div>
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center gap-2">
+              {Icon && <Icon className="h-8 w-8" style={{ color: `color-mix(in oklab, ${meta?.color ?? "#1f9fb2"} 30%, transparent)` }} />}
+              <span className="text-[12px] text-[var(--text-tertiary)]">Empty document</span>
+            </div>
+          )}
         </div>
       );
 
@@ -665,6 +1082,34 @@ function TouchContent({ item }: { item: WorkspaceItemData }) {
    Heuristic Topic Grouping (Issue 4)
    =================================================================== */
 
+function getTopicGroups(items: WorkspaceItemData[]): { label: string; items: WorkspaceItemData[] }[] {
+  // Use backend topicCluster if available
+  const clusterMap: Record<string, WorkspaceItemData[]> = {};
+  const unclustered: WorkspaceItemData[] = [];
+
+  for (const item of items) {
+    if (item.topicCluster) {
+      if (!clusterMap[item.topicCluster]) clusterMap[item.topicCluster] = [];
+      clusterMap[item.topicCluster].push(item);
+    } else {
+      unclustered.push(item);
+    }
+  }
+
+  // If no backend clusters at all, fallback to heuristic
+  if (Object.keys(clusterMap).length === 0 && unclustered.length > 0) {
+    return heuristicTopicGroups(unclustered);
+  }
+
+  const groups = Object.entries(clusterMap).map(([label, clusterItems]) => ({ label, items: clusterItems }));
+
+  if (unclustered.length > 0) {
+    groups.push({ label: "Uncategorized", items: unclustered });
+  }
+
+  return groups;
+}
+
 const STOPWORDS = new Set(["the", "a", "an", "in", "on", "of", "for", "to", "and", "or", "is", "it", "at", "by", "with", "from"]);
 
 function heuristicTopicGroups(items: WorkspaceItemData[]): { label: string; items: WorkspaceItemData[] }[] {
@@ -672,13 +1117,14 @@ function heuristicTopicGroups(items: WorkspaceItemData[]): { label: string; item
   const itemWords: Map<string, string[]> = new Map();
 
   for (const item of items) {
-    const words = item.title
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, "")
-      .split(/\s+/)
-      .filter((w) => w.length > 2 && !STOPWORDS.has(w));
-    itemWords.set(item.id, words);
-    for (const w of words) {
+    const textToAnalyze = `${item.title} ${item.preview ?? ""}`.toLowerCase().replace(/[^a-z0-9\s]/g, "");
+    const words = textToAnalyze.split(/\s+/).filter((w) => w.length > 3 && !STOPWORDS.has(w));
+    
+    // De-duplicate words for the item
+    const uniqueWords = Array.from(new Set(words));
+    itemWords.set(item.id, uniqueWords);
+    
+    for (const w of uniqueWords) {
       if (!wordMap[w]) wordMap[w] = [];
       wordMap[w].push(item);
     }
@@ -700,7 +1146,7 @@ function heuristicTopicGroups(items: WorkspaceItemData[]): { label: string; item
     clusters.push(cluster);
   }
 
-  // Remaining unassigned items group by type+status
+  // Remaining unassigned items group by type
   const remaining = items.filter((it) => !assigned.has(it.id));
   const groups: { label: string; items: WorkspaceItemData[] }[] = [];
 
@@ -711,16 +1157,7 @@ function heuristicTopicGroups(items: WorkspaceItemData[]): { label: string; item
   }
 
   if (remaining.length > 0) {
-    const byType: Record<string, WorkspaceItemData[]> = {};
-    for (const it of remaining) {
-      const key = it.itemType;
-      if (!byType[key]) byType[key] = [];
-      byType[key].push(it);
-    }
-    for (const [type, typeItems] of Object.entries(byType)) {
-      const meta = CANONICAL_WORKSPACE_TYPE_META[type as CanonicalWorkspaceType];
-      groups.push({ label: meta?.label ?? type, items: typeItems });
-    }
+    groups.push({ label: "Other", items: remaining });
   }
 
   return groups.length > 0 ? groups : [{ label: "All Items", items }];
@@ -776,8 +1213,6 @@ function timelineDateGroups(items: WorkspaceItemData[]): { label: string; items:
    Build Nodes u2014 layout engine with semantic zoom awareness
    =================================================================== */
 
-const ITEMS_PER_COL = 3;
-const GROUP_COL_WIDTH = 1800;
 const ROW_HEIGHT = 300;
 
 function computeTerritorySize(itemCount: number): { w: number; h: number } {
@@ -797,8 +1232,14 @@ function buildNodes(
   viewMode: "byType" | "byTopic" | "timeline" = "byType",
 ): Node[] {
   const nodes: Node[] = [];
-  const isLandscape = zoomTier === "landscape";
-  const showItems = !isLandscape || (isLandscape && zoomProgress > 0.85);
+  const sig = computeZoomSignals(zoom);
+
+  // Progressive layout density: item spacing responds to zoom signals.
+  // At landscape (structureReveal ~0), items are spread far apart.
+  // As zoom increases, items pack tighter for more content density.
+  // At detail level, items are close together for efficient scanning.
+  const densityFactor = lerp(1.6, 0.75, Math.max(sig.structureReveal, sig.cardDetail));
+  const rowGap = Math.round(ROW_HEIGHT * densityFactor);
 
   workspaces.forEach((ws, idx) => {
     const col = idx % TERRITORY.COLS;
@@ -813,13 +1254,15 @@ function buildNodes(
         x: col * TERRITORY.SPACING_X,
         y: row * TERRITORY.SPACING_Y,
       },
-      data: { workspace: ws, zoomTier, zoomProgress, zoom, tint } satisfies WorkspaceNodeData,
+      data: { workspace: ws, tint } satisfies WorkspaceNodeData,
       draggable: false,
       selectable: true,
       style: { width: territoryWidth, height: territoryHeight, zIndex: 0 },
     });
 
-    if (!showItems) return;
+    // Items are ALWAYS included in the node tree. They control their own
+    // visibility via continuous opacity from structureReveal signal.
+    // No discrete threshold — eliminates abrupt show/hide viewport jumps.
 
     // Build groups based on viewMode
     let groups: { label: string; variant: string; items: WorkspaceItemData[] }[];
@@ -828,8 +1271,13 @@ function buildNodes(
       const dateGroups = timelineDateGroups(ws.items);
       groups = dateGroups.map((g) => ({ label: g.label, variant: "neutral", items: g.items }));
     } else if (viewMode === "byTopic") {
-      const topicGroups = heuristicTopicGroups(ws.items);
-      groups = topicGroups.map((g) => ({ label: g.label, variant: tint, items: g.items }));
+      const topicGroups = getTopicGroups(ws.items);
+      const colorVariants = ["accent", "warm", "cool", "neutral", "muted"];
+      groups = topicGroups.map((g, i) => ({ 
+        label: g.label, 
+        variant: colorVariants[i % colorVariants.length], 
+        items: g.items 
+      }));
     } else {
       const typeGrouped: Record<string, WorkspaceItemData[]> = {};
       for (const item of ws.items) {
@@ -846,11 +1294,9 @@ function buildNodes(
       }
     }
 
-    // Layout: distribute groups across 2 columns to spread content
+    // Layout Engine
     const headerY = 500;
-    const groupsPerColumn = Math.ceil(groups.length / 2);
-    const colOffsets = [120, territoryWidth / 2 + 60];
-
+    
     if (viewMode === "timeline") {
       // Timeline: horizontal layout (left-to-right)
       let groupX = 120;
@@ -861,31 +1307,96 @@ function buildNodes(
           type: "groupLabel",
           parentId: `ws-${ws.id}`,
           position: { x: groupX, y: headerY },
-          data: { label: g.label, variant: g.variant, count: g.items.length, zoom } satisfies GroupLabelNodeData,
+          data: { label: g.label, variant: g.variant, count: g.items.length, viewMode: "timeline" } satisfies GroupLabelNodeData,
           draggable: false,
           selectable: false,
           style: { width: 1200, zIndex: 1 },
         });
 
-        let itemY = headerY + 120;
+        let itemY = headerY + 160; // Extra spacing for the timeline axis
         for (let ii = 0; ii < g.items.length; ii++) {
           const item = g.items[ii];
           nodes.push({
             id: `item-${item.id}`,
             type: "itemNode",
             parentId: `ws-${ws.id}`,
-            position: { x: groupX, y: itemY },
-            data: { item, zoomTier, zoomProgress, zoom, groupLabel: g.label, isFirst: ii === 0 } satisfies ItemNodeData,
+            position: { x: groupX + 64, y: itemY }, // Indented slightly relative to axis
+            data: { item, groupLabel: g.label, isFirst: ii === 0 } satisfies ItemNodeData,
             draggable: true,
             selectable: true,
             style: { zIndex: 2 },
           });
-          itemY += ROW_HEIGHT;
+          itemY += rowGap + 40; // More vertical spacing for a chronological feel
         }
-        groupX += 1400;
+        groupX += 1200; // Closer together horizontally than before to make timeline cohesive
       }
+    } else if (viewMode === "byTopic") {
+      // By Topic: Semantic Spatial Packing (simulated with 3 columns, more scattered y spacing)
+      const colCount = 3;
+      const colWidth = territoryWidth / colCount;
+      const colOffsets = Array.from({ length: colCount }, (_, i) => 120 + i * colWidth);
+      const colYCursors = Array.from({ length: colCount }, () => headerY + 100);
+
+      // Sort groups by size to balance columns
+      const sortedGroups = [...groups].sort((a, b) => b.items.length - a.items.length);
+
+      for (let gi = 0; gi < sortedGroups.length; gi++) {
+        const g = sortedGroups[gi];
+        // Find shortest column
+        let minColIdx = 0;
+        let minY = colYCursors[0];
+        for (let i = 1; i < colCount; i++) {
+          if (colYCursors[i] < minY) {
+            minY = colYCursors[i];
+            minColIdx = i;
+          }
+        }
+
+        const colIdx = minColIdx;
+        const x = colOffsets[colIdx];
+        let y = colYCursors[colIdx];
+
+        nodes.push({
+          id: `group-${ws.id}-${g.label}-${gi}`,
+          type: "groupLabel",
+          parentId: `ws-${ws.id}`,
+          position: { x, y },
+          data: { label: g.label, variant: g.variant, count: g.items.length, viewMode: "byTopic" } satisfies GroupLabelNodeData,
+          draggable: false,
+          selectable: false,
+          style: { width: Math.min(colWidth - 140, 2400), zIndex: 1 },
+        });
+        y += 140;
+
+        const itemsPerRow = 2; // Tighter clusters for topics
+        for (let ii = 0; ii < g.items.length; ii++) {
+          const item = g.items[ii];
+          const itemCol = ii % itemsPerRow;
+          const itemRow = Math.floor(ii / itemsPerRow);
+          // Apply slight randomness/stagger to make it feel organic and clustered
+          const staggerY = (itemCol % 2) * 40;
+          nodes.push({
+            id: `item-${item.id}`,
+            type: "itemNode",
+            parentId: `ws-${ws.id}`,
+            position: {
+              x: x + itemCol * (TERRITORY.ITEM_COL_WIDTH + 60),
+              y: y + itemRow * (rowGap + 60) + staggerY,
+            },
+            data: { item, groupLabel: g.label, isFirst: ii === 0 } satisfies ItemNodeData,
+            draggable: true,
+            selectable: true,
+            style: { zIndex: 2 },
+          });
+        }
+
+        colYCursors[colIdx] = y + Math.ceil(g.items.length / itemsPerRow) * (rowGap + 60) + 180; // More space between topics
+      }
+
     } else {
-      // byType / byTopic: 2-column layout
+      // By Type: Structured 2-column layout (Default)
+      const groupsPerColumn = Math.ceil(groups.length / 2);
+      const colOffsets = [120, territoryWidth / 2 + 60];
       const colYCursors = [headerY, headerY];
 
       for (let gi = 0; gi < groups.length; gi++) {
@@ -899,7 +1410,7 @@ function buildNodes(
           type: "groupLabel",
           parentId: `ws-${ws.id}`,
           position: { x, y },
-          data: { label: g.label, variant: g.variant, count: g.items.length, zoom } satisfies GroupLabelNodeData,
+          data: { label: g.label, variant: g.variant, count: g.items.length, viewMode: "byType" } satisfies GroupLabelNodeData,
           draggable: false,
           selectable: false,
           style: { width: Math.min(territoryWidth / 2 - 140, 2400), zIndex: 1 },
@@ -917,16 +1428,16 @@ function buildNodes(
             parentId: `ws-${ws.id}`,
             position: {
               x: item.canvasX ?? x + itemCol * TERRITORY.ITEM_COL_WIDTH,
-              y: item.canvasY ?? y + itemRow * ROW_HEIGHT,
+              y: item.canvasY ?? y + itemRow * rowGap,
             },
-            data: { item, zoomTier, zoomProgress, zoom, groupLabel: g.label, isFirst: ii === 0 } satisfies ItemNodeData,
+            data: { item, groupLabel: g.label, isFirst: ii === 0 } satisfies ItemNodeData,
             draggable: true,
             selectable: true,
             style: { zIndex: 2 },
           });
         }
 
-        colYCursors[colIdx] = y + Math.ceil(g.items.length / itemsPerRow) * ROW_HEIGHT + 80;
+        colYCursors[colIdx] = y + Math.ceil(g.items.length / itemsPerRow) * rowGap + 80;
       }
     }
   });
@@ -946,10 +1457,18 @@ const NODE_TYPES = {
    Fixed Screen-Size Background
    =================================================================== */
 
-function CanvasBackground({ mode }: { mode: "dots" | "blank" | "grid" }) {
+function CanvasBackground({ mode, zoom }: { mode: "dots" | "blank" | "grid"; zoom: number }) {
   if (mode === "blank") return null;
 
   const isDots = mode === "dots";
+  const sig = computeZoomSignals(zoom);
+
+  // Background responds to zoom: subtler at landscape (territory backgrounds dominate),
+  // more present at detail level where the canvas is the working surface.
+  // Dot/grid size stays fixed on screen (CSS pattern, not transformed).
+  const baseOpacity = isDots ? 0.55 : 0.2;
+  const zoomOpacity = lerp(baseOpacity * 0.3, baseOpacity, sig.structureReveal);
+
   return (
     <div
       className="absolute inset-0 pointer-events-none z-0"
@@ -958,7 +1477,7 @@ function CanvasBackground({ mode }: { mode: "dots" | "blank" | "grid" }) {
           ? "radial-gradient(circle, var(--border-default) 1.2px, transparent 1.2px)"
           : "linear-gradient(var(--border-default) 0.5px, transparent 0.5px), linear-gradient(90deg, var(--border-default) 0.5px, transparent 0.5px)",
         backgroundSize: isDots ? "28px 28px" : "40px 40px",
-        opacity: isDots ? 0.55 : 0.2,
+        opacity: zoomOpacity,
       }}
     />
   );
@@ -1005,7 +1524,12 @@ function WorkspaceCanvasInner({
     return () => clearTimeout(timer);
   }, [flyToTarget, setCenter, clearFlyToTarget]);
 
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // RAF-based viewport tracking: zoom updates immediately for smooth
+  // semantic interpolation, full viewport (position + proximity) updates
+  // on animation frames to avoid excessive store computation.
+  const rafRef = useRef<number>(0);
+  const lastVpRef = useRef<Viewport>({ x: 0, y: 0, zoom: 0 });
+  const setZoom = useWorkspaceStore((s) => s.setZoom);
 
   const nodes = useMemo(
     () => buildNodes(workspaces, zoomTier, zoomProgress, zoom, viewMode),
@@ -1016,12 +1540,21 @@ function WorkspaceCanvasInner({
 
   const handleViewportChange = useCallback(
     (vp: Viewport) => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        setViewport(vp.x, vp.y, vp.zoom);
-      }, 30);
+      lastVpRef.current = vp;
+      // Immediately update zoom for smooth visual interpolation
+      // (no debounce — this is cheap and drives all signal computation)
+      setZoom(vp.zoom);
+      // Throttle full viewport update (includes proximity computation)
+      // to one per animation frame
+      if (!rafRef.current) {
+        rafRef.current = requestAnimationFrame(() => {
+          rafRef.current = 0;
+          const current = lastVpRef.current;
+          setViewport(current.x, current.y, current.zoom);
+        });
+      }
     },
-    [setViewport],
+    [setZoom, setViewport],
   );
 
   const handleNodeClick = useCallback(
@@ -1080,7 +1613,7 @@ function WorkspaceCanvasInner({
 
   return (
     <div className="h-full w-full relative bg-[var(--bg-primary)]">
-      <CanvasBackground mode={backgroundMode} />
+      <CanvasBackground mode={backgroundMode} zoom={zoom} />
 
       <div className="h-full w-full relative z-[1]">
         <ReactFlow

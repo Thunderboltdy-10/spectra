@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
-import { CalendarDays, FileText, Sparkles } from "lucide-react";
+// lucide-react icons removed (CalendarDays, FileText, Sparkles) — unused after result card cleanup
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { WorkspaceCanvas } from "@/components/workspace/workspace-canvas";
 import { CommandBar } from "@/components/workspace/command-bar";
@@ -14,16 +14,16 @@ import { TimerWidget } from "@/components/workspace/timer-widget";
 import { UtilityHubGroup } from "@/components/workspace/utility-hub-group";
 import { QuickNotesHub } from "@/components/workspace/quick-notes-hub";
 // LensHub merged into UtilityHubGroup
-import {
-  PlannerEdge,
-  type PlannerTask,
-} from "@/components/workspace/planner-edge";
+import { PlannerEdge } from "@/components/workspace/planner-edge";
 import { DeepEditSurface } from "@/components/workspace/deep-edit-surface";
+import { ThreadsHub } from "@/components/workspace/threads-hub";
 import type { WorkspaceData, WorkspaceItemData } from "@/lib/workspace/contracts";
 import {
   useWorkspaceData,
   dismissCommandResult,
   reopenCommandResult,
+  createCommandResult,
+  updateCommandResult,
 } from "@/hooks/use-workspace-data";
 import { notifyWorkspaceContentMutated } from "@/lib/workspace/events";
 
@@ -50,12 +50,7 @@ const DEMO_WORKSPACES: WorkspaceData[] = [
   { id: "ws3", name: "English Literature", emoji: "📚", status: "quiet", itemCount: 2, lastActivity: Date.now() - 600_000, items: DEMO_ITEMS.filter((i) => i.workspaceId === "ws3") },
 ];
 
-const DEMO_PLANNER_TASKS: PlannerTask[] = [
-  { id: "t1", plannerItemId: "t1", title: "Finish momentum notes", workspaceName: "IB Physics HL", dueDate: new Date().toISOString(), priority: "high", status: "in_progress" },
-  { id: "t2", plannerItemId: "t2", title: "Review flashcard deck", workspaceName: "IB Physics HL", dueDate: new Date().toISOString(), priority: "medium", status: "pending" },
-  { id: "t3", plannerItemId: "t3", title: "Complete titration exercises", workspaceName: "Chemistry SL", dueDate: new Date(Date.now() + 86_400_000).toISOString(), priority: "medium", status: "pending" },
-  { id: "t4", plannerItemId: "t4", title: "Macbeth essay first draft", workspaceName: "English Literature", dueDate: new Date(Date.now() + 86_400_000 * 3).toISOString(), priority: "high", status: "pending" },
-];
+
 
 /* ─── Main Workspace Page ─── */
 
@@ -79,6 +74,7 @@ export default function WorkspacePage() {
     hydratePreferences,
     hasHydratedPreferences,
     hubVisibility,
+    openThreadInHub,
     workspaces: storeWorkspaces,
   } = useWorkspaceStore();
   const [workspacePickerIntent, setWorkspacePickerIntent] = useState<null | {
@@ -86,7 +82,6 @@ export default function WorkspacePage() {
     title?: string;
     content?: string;
   }>(null);
-  const [plannerEditorTask, setPlannerEditorTask] = useState<PlannerTask | null>(null);
   const [isEditingWorkspaceName, setIsEditingWorkspaceName] = useState(false);
   const [workspaceNameDraft, setWorkspaceNameDraft] = useState("");
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
@@ -230,9 +225,13 @@ export default function WorkspacePage() {
   const handleItemClick = useCallback(
     (item: WorkspaceItemData) => {
       setFocusedItem(item.id);
-      openDeepEdit(item);
+      if (item.itemType === "thread") {
+        openThreadInHub(item.id);
+      } else {
+        openDeepEdit(item);
+      }
     },
-    [openDeepEdit, setFocusedItem],
+    [openDeepEdit, openThreadInHub, setFocusedItem],
   );
 
   const handleCanvasNodeClick = useCallback(
@@ -333,91 +332,194 @@ export default function WorkspacePage() {
   }, [createItemAction]);
 
   /* ─── Command bar: uses result card stack ─── */
+  const [isProcessingCommand, setIsProcessingCommand] = useState(false);
+
   const handleSendMessage = useCallback(async (message: string) => {
-    const cardId = `rc-${Date.now()}`;
     const normalized = message.trim();
     const lowered = normalized.toLowerCase();
-    const actionType = normalized.startsWith("/")
-      ? "created" as const
-      : normalized.startsWith("?")
-        ? "searched" as const
-        : "answered" as const;
 
-    pushResultCard({
-      id: cardId,
-      state: "loading",
-      promptSnippet: message,
-      actionType,
-    });
+    // Determine intent from command prefix
+    const isSearch = normalized.startsWith("?") || lowered.startsWith("search ") || lowered.startsWith("find ");
+    const isNoteCmd = lowered.startsWith("/note") || lowered.startsWith("create note");
+    const isTaskCmd = lowered.startsWith("/task") || lowered.startsWith("create task");
+    const isThreadCmd = lowered.startsWith("/thread") || lowered.startsWith("create thread");
+    const isWorkspaceCmd = lowered.startsWith("/workspace") || lowered.startsWith("create workspace");
+
+    setIsProcessingCommand(true);
+
+    let createdResultId: string | undefined;
 
     try {
-      if (normalized.startsWith("?") || lowered.startsWith("search ") || lowered.startsWith("find ")) {
+      /* ── Search ── */
+      if (isSearch) {
         const query = normalized.replace(/^\?/, "").replace(/^(search|find)\s+/i, "").trim();
+        const res = await createCommandResult({
+          workstreamId: committedWorkspaceId ?? undefined,
+          intent: "result",
+          title: normalized.length > 60 ? normalized.slice(0, 57) + "\u2026" : normalized,
+          status: "processing",
+        });
+        createdResultId = res?.resultId;
+
         const result = await createItemAction({
           action: "search",
           workstreamId: committedWorkspaceId ?? undefined,
           query,
           limit: 8,
-        }) as { results?: Array<{ title: string; workspaceTitle?: string }> };
-        updateResultCard(cardId, {
-          state: "done",
-          summary: result.results?.length
-            ? `Found ${result.results.length} result${result.results.length === 1 ? "" : "s"}${result.results[0]?.workspaceTitle ? ` in ${result.results[0].workspaceTitle}` : ""}`
-            : "No matching workspace results",
-        });
+        }) as { results?: Array<{ title: string; workspaceTitle?: string; _id?: string }> };
+        const count = result.results?.length ?? 0;
+        
+        if (createdResultId) {
+          await updateCommandResult({
+            resultId: createdResultId,
+            status: "completed",
+            summary: count > 0
+              ? `${count} result${count === 1 ? "" : "s"} for \u201c${query}\u201d`
+              : `No results for \u201c${query}\u201d`,
+          });
+          refreshData();
+        }
         return;
       }
 
-      if (lowered.startsWith("/note") || lowered.startsWith("create note")) {
-        if (!committedWorkspaceId) {
-          throw new Error("Open a workspace before creating a note");
-        }
+      /* ── Create note ── */
+      if (isNoteCmd) {
+        if (!committedWorkspaceId) throw new Error("Enter a workspace first");
         const title = normalized.replace(/^\/note\s*/i, "").replace(/^create note\s*/i, "").trim() || "Untitled note";
-        await createItemAction({
-          action: "createNote",
-          workstreamId: committedWorkspaceId,
-          title,
-          content: "",
+        // Push optimistic result card for immediate feedback
+        const optimisticId = `optimistic-note-${Date.now()}`;
+        pushResultCard({
+          id: optimisticId,
+          state: "loading",
+          promptSnippet: `Creating note\u2026`,
+          actionType: "created",
+          targetItemType: "note",
         });
-        updateResultCard(cardId, { state: "done", summary: `Created note: ${title}` });
+        try {
+          await createItemAction({
+            action: "createNote",
+            workstreamId: committedWorkspaceId,
+            title,
+            content: "",
+          });
+          // Backend result card will be synced by refreshData() inside createItemAction
+          // Mark optimistic card as done; the real backend card will appear alongside it
+          updateResultCard(optimisticId, {
+            state: "done",
+            summary: `Note \u201c${title}\u201d created`,
+          });
+        } catch (err) {
+          updateResultCard(optimisticId, {
+            state: "error",
+            summary: err instanceof Error ? err.message : "Failed to create note",
+          });
+          throw err;
+        }
         return;
       }
 
-      if (lowered.startsWith("/task") || lowered.startsWith("create task")) {
-        if (!committedWorkspaceId) {
-          throw new Error("Open a workspace before creating a task");
-        }
+      /* ── Create task ── */
+      if (isTaskCmd) {
+        if (!committedWorkspaceId) throw new Error("Enter a workspace first");
         const title = normalized.replace(/^\/task\s*/i, "").replace(/^create task\s*/i, "").trim() || "New task";
-        await createItemAction({
-          action: "createPlannerItem",
-          workstreamId: committedWorkspaceId,
-          title,
-          type: "deadline",
-          priority: "medium",
+        // Push optimistic result card for immediate feedback
+        const optimisticId = `optimistic-task-${Date.now()}`;
+        pushResultCard({
+          id: optimisticId,
+          state: "loading",
+          promptSnippet: `Creating task\u2026`,
+          actionType: "planned",
+          targetItemType: "planner",
         });
-        updateResultCard(cardId, { state: "done", summary: `Added task: ${title}` });
-        return;
-      }
-
-      if (lowered.startsWith("/thread") || lowered.startsWith("create thread")) {
-        if (!committedWorkspaceId) {
-          throw new Error("Open a workspace before creating a thread");
+        try {
+          await createItemAction({
+            action: "createPlannerItem",
+            workstreamId: committedWorkspaceId,
+            title,
+            type: "deadline",
+            priority: "medium",
+          });
+          updateResultCard(optimisticId, {
+            state: "done",
+            summary: `Task \u201c${title}\u201d created`,
+          });
+        } catch (err) {
+          updateResultCard(optimisticId, {
+            state: "error",
+            summary: err instanceof Error ? err.message : "Failed to create task",
+          });
+          throw err;
         }
-        const title = normalized.replace(/^\/thread\s*/i, "").replace(/^create thread\s*/i, "").trim() || "New thread";
-        await createItemAction({
-          action: "createThread",
-          workstreamId: committedWorkspaceId,
-          title,
-        });
-        updateResultCard(cardId, { state: "done", summary: `Created thread: ${title}` });
         return;
       }
 
-      if (lowered.startsWith("/workspace") || lowered.startsWith("create workspace")) {
-        const title = normalized.replace(/^\/workspace\s*/i, "").replace(/^create workspace\s*/i, "").trim() || "New workspace";
-        await createWorkspaceAction({ title });
-        updateResultCard(cardId, { state: "done", summary: `Created workspace: ${title}` });
+      /* ── Create thread ── */
+      if (isThreadCmd) {
+        if (!committedWorkspaceId) throw new Error("Enter a workspace first");
+        const title = normalized.replace(/^\/thread\s*/i, "").replace(/^create thread\s*/i, "").trim() || "New thread";
+        // Push optimistic result card for immediate feedback
+        const optimisticId = `optimistic-thread-${Date.now()}`;
+        pushResultCard({
+          id: optimisticId,
+          state: "loading",
+          promptSnippet: `Creating thread\u2026`,
+          actionType: "answered",
+          targetItemType: "thread",
+        });
+        try {
+          await createItemAction({
+            action: "createThread",
+            workstreamId: committedWorkspaceId,
+            title,
+          });
+          updateResultCard(optimisticId, {
+            state: "done",
+            summary: `Thread \u201c${title}\u201d created`,
+          });
+        } catch (err) {
+          updateResultCard(optimisticId, {
+            state: "error",
+            summary: err instanceof Error ? err.message : "Failed to create thread",
+          });
+          throw err;
+        }
         return;
+      }
+
+      /* ── Create workspace ── */
+      if (isWorkspaceCmd) {
+        const title = normalized.replace(/^\/workspace\s*/i, "").replace(/^create workspace\s*/i, "").trim() || "New workspace";
+        const res = await createCommandResult({
+          workstreamId: committedWorkspaceId ?? undefined, // wait, we don't know the new workstream ID yet
+          intent: "result",
+          title: "Create workspace",
+          status: "processing",
+        });
+        createdResultId = res?.resultId;
+
+        await createWorkspaceAction({ title });
+        
+        if (createdResultId) {
+          await updateCommandResult({
+            resultId: createdResultId,
+            status: "completed",
+            summary: `Workspace \u201c${title}\u201d created`,
+          });
+        }
+        return;
+      }
+
+      /* ── General AI message → routed to chat pipeline ── */
+      // Create backend processing result first
+      if (committedWorkspaceId) {
+        const res = await createCommandResult({
+          workstreamId: committedWorkspaceId,
+          intent: "result",
+          title: normalized.length > 60 ? normalized.slice(0, 57) + "\u2026" : normalized,
+          status: "processing",
+        });
+        createdResultId = res?.resultId;
+        refreshData();
       }
 
       const response = await fetch("/api/chat", {
@@ -435,23 +537,74 @@ export default function WorkspacePage() {
         }),
       });
       if (!response.ok) {
-        throw new Error("Workspace command failed");
+        const errText = await response.text().catch(() => "");
+        throw new Error(errText || "Request failed");
       }
-      updateResultCard(cardId, {
-        state: "done",
-        summary: committedWorkspaceId
-          ? "Working in this workspace. Open chat for live orchestration details."
-          : "Working globally. Open chat for live orchestration details.",
-        targetId: "workspace-chat",
-      });
-      window.dispatchEvent(new CustomEvent("ai-school:open-orchestration"));
+
+      let chatId: string | undefined;
+      let threadTitle: string | undefined;
+      let createdArtifacts: Array<{ id: string; title: string; type: string }> = [];
+      try {
+        const data = await response.json() as {
+          chatId?: string;
+          threadTitle?: string;
+          artifacts?: Array<{ id: string; title: string; type: string }>;
+        };
+        chatId = data.chatId;
+        threadTitle = data.threadTitle;
+        createdArtifacts = data.artifacts ?? [];
+      } catch {
+        // Response might be streaming or non-JSON — that's ok
+      }
+
+      if (createdResultId) {
+        if (createdArtifacts.length > 0) {
+          const first = createdArtifacts[0];
+          const summary = createdArtifacts.length === 1
+            ? `Created ${first.type}: \u201c${first.title}\u201d`
+            : `Created ${createdArtifacts.length} items`;
+          await updateCommandResult({
+            resultId: createdResultId,
+            status: "completed",
+            summary,
+            targetKind: "artifact",
+            targetId: first.id,
+            variant: "artifact",
+          });
+        } else if (chatId) {
+          await updateCommandResult({
+            resultId: createdResultId,
+            status: "completed",
+            summary: threadTitle
+              ? `Replied in \u201c${threadTitle}\u201d`
+              : "Sent to chat thread",
+            targetKind: "chat",
+            targetId: chatId,
+            variant: "thread",
+          });
+        } else {
+          await updateCommandResult({
+            resultId: createdResultId,
+            status: "completed",
+            summary: "Response sent to chat",
+          });
+        }
+      }
+
+      refreshData();
     } catch (error) {
-      updateResultCard(cardId, {
-        state: "error",
-        summary: error instanceof Error ? error.message : "Workspace command failed",
-      });
+      if (createdResultId) {
+        await updateCommandResult({
+          resultId: createdResultId,
+          status: "error", 
+          summary: error instanceof Error ? error.message : "Command failed",
+        });
+        refreshData();
+      }
+    } finally {
+      setIsProcessingCommand(false);
     }
-  }, [pushResultCard, updateResultCard, createItemAction, committedWorkspaceId, createWorkspaceAction]);
+  }, [committedWorkspaceId, createWorkspaceAction, refreshData, createItemAction, pushResultCard, updateResultCard]);
 
   /* ─── Dismiss/reopen: real backend when live, store-only otherwise ─── */
   const handleDismissResultCard = useCallback(
@@ -476,21 +629,6 @@ export default function WorkspacePage() {
 
   const noop = useCallback(() => {}, []);
 
-  const livePlannerTasks = useMemo<PlannerTask[]>(() => {
-    if (!committedWorkspace) return DEMO_PLANNER_TASKS;
-    return committedWorkspace.items
-      .filter((item) => item.itemType === "planner")
-      .map((item, index) => ({
-        id: item.id,
-        plannerItemId: item.id,
-        title: item.title,
-        workspaceName: committedWorkspace.name,
-        dueDate: undefined,
-        priority: index === 0 ? "high" : "medium",
-        status: item.status === "completed" ? "completed" : item.status === "active" ? "in_progress" : "pending",
-      }));
-  }, [committedWorkspace]);
-
   const handleTaskClick = useCallback(
     (taskId: string) => {
       const taskItem = workspaces.flatMap((w) => w.items).find((item) => item.id === taskId);
@@ -501,51 +639,30 @@ export default function WorkspacePage() {
     [workspaces, handleItemClick],
   );
 
-  const handleToggleTask = useCallback(async (taskId: string) => {
-    const task = livePlannerTasks.find((entry) => entry.id === taskId || entry.plannerItemId === taskId);
-    const plannerItemId = task?.plannerItemId ?? task?.id;
-    if (!task || !plannerItemId) return;
-    const workspace = workspaces.find((ws) => ws.name === task.workspaceName) ?? committedWorkspace;
-    await fetch("/api/planner-items", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        plannerItemId,
-        status: task.status === "completed" ? "pending" : "completed",
-      }),
-    }).catch(() => undefined);
-    if (workspace) {
-      notifyWorkspaceContentMutated({ workstreamId: workspace.id, refreshHub: true });
-    }
-    refreshData();
-  }, [livePlannerTasks, workspaces, committedWorkspace, refreshData]);
-
-  const handlePlannerTaskEdit = useCallback(async (task: PlannerTask) => {
-    const plannerItemId = task.plannerItemId ?? task.id;
-    const dueAt = task.dueDate ? new Date(task.dueDate).getTime() : undefined;
-    await fetch("/api/planner-items", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        plannerItemId,
-        title: task.title,
-        status: task.status,
-        priority: task.priority,
-        dueAt,
-      }),
-    }).catch(() => undefined);
-    const workspace = workspaces.find((ws) => ws.name === task.workspaceName) ?? committedWorkspace;
-    if (workspace) {
-      notifyWorkspaceContentMutated({ workstreamId: workspace.id, refreshHub: true, refreshWorkstreams: true });
-    }
-    refreshData();
-  }, [workspaces, committedWorkspace, refreshData]);
-
   // Clear focused item when switching workspaces
   useEffect(() => {
     setFocusedItem(null);
     closeAllDeepEdits();
   }, [committedWorkspaceId, setFocusedItem, closeAllDeepEdits]);
+
+  // Auto-dismiss completed result cards after 12s to keep UI clean
+  const resultCards = useWorkspaceStore((s) => s.resultCards);
+  useEffect(() => {
+    const doneCards = resultCards.filter(
+      (c) => c.state === "done" || c.state === "error",
+    );
+    if (doneCards.length === 0) return;
+
+    const timers = doneCards.map((card) => {
+      const age = Date.now() - card.createdAt;
+      const remainingMs = Math.max(0, 30_000 - age);
+      return setTimeout(() => {
+        storeDismissResultCard(card.id);
+      }, remainingMs);
+    });
+
+    return () => timers.forEach(clearTimeout);
+  }, [resultCards, storeDismissResultCard]);
 
   // Global keyboard: Escape closes deep edits
   useEffect(() => {
@@ -562,6 +679,60 @@ export default function WorkspacePage() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [deepEditTargets, closeDeepEdit, committedWorkspaceId, handleBack]);
+
+  // Handle open-item events from result cards and other surfaces
+  useEffect(() => {
+    const handleOpenItem = (e: Event) => {
+      const customEvent = e as CustomEvent<{ itemId: string; itemType?: string }>;
+      const { itemId, itemType } = customEvent.detail ?? {};
+      if (!itemId) return;
+
+      // First try to find by direct workspace item ID
+      const allItems = workspaces.flatMap((w) => w.items);
+      let item = allItems.find((i) => i.id === itemId);
+
+      // If not found, the targetId may be a source entity ID (chatId, artifactId, etc.)
+      // Workspace items sometimes have a different ID from their source entity
+      if (!item) {
+        // Try matching by source entity IDs first (more precise than type-only fallback)
+        item = allItems.find((i) =>
+          i.sourceChatId === itemId ||
+          i.sourceArtifactId === itemId ||
+          i.sourcePlannerItemId === itemId
+        );
+      }
+
+      // Last resort: match by type if itemId is clearly not a database ID
+      // (prevents false positives from matching ANY item of the same type)
+      if (!item && itemType) {
+        // Only use type fallback if the itemId doesn't look like a Convex ID
+        const isConvexId = itemId.length > 16;
+        if (!isConvexId) {
+          item = allItems.find((i) => i.itemType === itemType);
+        }
+      }
+
+      if (item) {
+        handleItemClick(item);
+      } else {
+        // Item not yet in workspace items (may still be syncing).
+        // Refresh data and try again after a short delay.
+        refreshData();
+        setTimeout(() => {
+          const freshItems = useWorkspaceStore.getState().workspaces.flatMap((w) => w.items);
+          const freshItem = freshItems.find((i) =>
+            i.id === itemId ||
+            i.sourceChatId === itemId ||
+            i.sourceArtifactId === itemId ||
+            i.sourcePlannerItemId === itemId
+          );
+          if (freshItem) handleItemClick(freshItem);
+        }, 1200);
+      }
+    };
+    window.addEventListener("workspace:open-item", handleOpenItem);
+    return () => window.removeEventListener("workspace:open-item", handleOpenItem);
+  }, [workspaces, handleItemClick, refreshData]);
 
   return (
     <div className="relative flex h-dvh w-full overflow-hidden bg-[var(--bg-primary)]">
@@ -608,13 +779,13 @@ export default function WorkspacePage() {
         </AnimatePresence>
       )}
 
+      {/* Hub ecology: Right-edge threads hub */}
+      {!hubHidden && <ThreadsHub forceExpanded={hubForceExpanded} />}
+
       {/* Hub ecology: Left-edge planner (above dock) */}
       {!hubHidden && (
         <PlannerEdge
-          tasks={livePlannerTasks.length > 0 ? livePlannerTasks : DEMO_PLANNER_TASKS}
           onTaskClick={handleTaskClick}
-          onToggleTask={handleToggleTask}
-          onTaskEdit={setPlannerEditorTask}
           forceExpanded={hubForceExpanded}
         />
       )}
@@ -641,6 +812,7 @@ export default function WorkspacePage() {
         onSendMessage={handleSendMessage}
         onDismissResultCard={handleDismissResultCard}
         onReopenResultCard={handleReopenResultCard}
+        isProcessing={isProcessingCommand}
         onCreateWorkspace={() => { void createWorkspaceAction({ title: "New workspace" }); }}
         onCreateNote={() => {
           if (!committedWorkspaceId) {
@@ -755,114 +927,6 @@ export default function WorkspacePage() {
               >
                 Cancel
               </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {plannerEditorTask && (
-        <div className="absolute inset-0 z-[72] flex items-center justify-center bg-black/35 backdrop-blur-[3px]">
-          <div className="w-[min(540px,calc(100vw-32px))] rounded-[28px] border border-[var(--border-default)]/40 bg-[var(--bg-elevated)] p-5 shadow-[0_28px_60px_-28px_rgba(8,22,40,0.35)]">
-            <div className="mb-4 flex items-start justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2 text-[var(--accent-cyan)]">
-                  <CalendarDays className="h-4 w-4" />
-                  <span className="text-[11px] font-semibold uppercase tracking-[0.12em]">Planner item</span>
-                </div>
-                <h2 className="mt-2 text-[18px] font-semibold text-[var(--text-primary)]">{plannerEditorTask.title}</h2>
-                <p className="mt-1 text-[12px] text-[var(--text-secondary)]">Edit title, status, priority, and due time.</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setPlannerEditorTask(null)}
-                className="rounded-xl px-3 py-2 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="flex flex-col gap-1.5">
-                <span className="text-[11px] font-medium text-[var(--text-secondary)]">Title</span>
-                <input
-                  value={plannerEditorTask.title}
-                  onChange={(event) => setPlannerEditorTask((current) => current ? { ...current, title: event.target.value } : current)}
-                  className="rounded-2xl border border-[var(--border-default)]/35 bg-[var(--bg-secondary)]/40 px-3 py-2.5 text-[13px] text-[var(--text-primary)] outline-none"
-                />
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className="text-[11px] font-medium text-[var(--text-secondary)]">Due date & time</span>
-                <input
-                  type="datetime-local"
-                  value={plannerEditorTask.dueDate ? new Date(plannerEditorTask.dueDate).toISOString().slice(0, 16) : ""}
-                  onChange={(event) => setPlannerEditorTask((current) => current ? { ...current, dueDate: event.target.value ? new Date(event.target.value).toISOString() : undefined } : current)}
-                  className="rounded-2xl border border-[var(--border-default)]/35 bg-[var(--bg-secondary)]/40 px-3 py-2.5 text-[13px] text-[var(--text-primary)] outline-none"
-                />
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className="text-[11px] font-medium text-[var(--text-secondary)]">Status</span>
-                <select
-                  value={plannerEditorTask.status}
-                  onChange={(event) => setPlannerEditorTask((current) => current ? { ...current, status: event.target.value as PlannerTask["status"] } : current)}
-                  className="rounded-2xl border border-[var(--border-default)]/35 bg-[var(--bg-secondary)]/40 px-3 py-2.5 text-[13px] text-[var(--text-primary)] outline-none"
-                >
-                  <option value="pending">Pending</option>
-                  <option value="in_progress">In progress</option>
-                  <option value="completed">Completed</option>
-                </select>
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className="text-[11px] font-medium text-[var(--text-secondary)]">Priority</span>
-                <select
-                  value={plannerEditorTask.priority}
-                  onChange={(event) => setPlannerEditorTask((current) => current ? { ...current, priority: event.target.value as PlannerTask["priority"] } : current)}
-                  className="rounded-2xl border border-[var(--border-default)]/35 bg-[var(--bg-secondary)]/40 px-3 py-2.5 text-[13px] text-[var(--text-primary)] outline-none"
-                >
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                </select>
-              </label>
-            </div>
-
-            <div className="mt-4 flex items-center gap-2 rounded-2xl border border-[var(--border-default)]/20 bg-[var(--bg-secondary)]/20 px-3 py-3">
-              <Sparkles className="h-4 w-4 text-[var(--accent-cyan)]" />
-              <p className="text-[12px] text-[var(--text-secondary)]">Planner is being upgraded toward a richer scheduling app flow. This editor already persists core changes, including time selection.</p>
-            </div>
-
-            <div className="mt-5 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => {
-                  window.dispatchEvent(new CustomEvent("ai-school:set-message", {
-                    detail: { message: `Plan the next steps for ${plannerEditorTask.title}` },
-                  }));
-                  window.dispatchEvent(new CustomEvent("ai-school:focus-composer"));
-                }}
-                className="inline-flex items-center gap-2 rounded-2xl border border-[var(--border-default)]/35 px-3 py-2 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-              >
-                <FileText className="h-3.5 w-3.5" />
-                Send to chat
-              </button>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPlannerEditorTask(null)}
-                  className="rounded-xl px-3 py-2 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handlePlannerTaskEdit(plannerEditorTask);
-                    setPlannerEditorTask(null);
-                  }}
-                  className="rounded-xl bg-[var(--accent-cyan)] px-3.5 py-2 text-[12px] font-semibold text-white"
-                >
-                  Save changes
-                </button>
-              </div>
             </div>
           </div>
         </div>

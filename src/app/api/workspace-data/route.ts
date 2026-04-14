@@ -54,6 +54,38 @@ export async function POST(request: NextRequest) {
       return ok(result);
     }
 
+    if (action === "createResult") {
+      const workstreamId = body.workstreamId as string | undefined;
+      if (!workstreamId) return badRequest("workstreamId is required");
+      const result = await convexMutation("workspaceCommandResults:create", {
+        actorClerkId: actor.clerkId,
+        workstreamId,
+        intent: (body.intent as any) || "result",
+        status: (body.status as any) || "processing",
+        title: sanitizeTitle(body.title, "Command"),
+        summary: body.summary as string || "Processing...",
+        targetKind: body.targetKind as any,
+        targetId: body.targetId as string,
+        variant: body.variant as any,
+      });
+      return ok(result);
+    }
+
+    if (action === "updateResult") {
+      const resultId = body.resultId as string;
+      if (!resultId) return badRequest("resultId is required");
+      const result = await convexMutation("workspaceCommandResults:update", {
+        actorClerkId: actor.clerkId,
+        resultId,
+        status: body.status as any,
+        summary: body.summary as string,
+        targetKind: body.targetKind as any,
+        targetId: body.targetId as string,
+        variant: body.variant as any,
+      });
+      return ok(result);
+    }
+
     if (action === "reopenResult") {
       const resultId = body.resultId as string;
       if (!resultId) return badRequest("resultId is required");

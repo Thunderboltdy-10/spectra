@@ -5,6 +5,8 @@ import {
   BookOpen,
   Edit3,
   Check,
+  Eye,
+  Pencil,
 } from "lucide-react";
 import { useCallback, useMemo, useRef, useState, useEffect } from "react";
 import { HubSurface } from "@/components/workspace/hub-surface";
@@ -15,6 +17,7 @@ import {
 } from "@/lib/artifact-types";
 import { cn } from "@/lib/utils";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 
 type DeepEditSurfaceProps = {
   item: WorkspaceItemData;
@@ -117,36 +120,171 @@ function EditableTitle({
 
 /* --- Artifact Content View --- */
 
+/** Detect language from meta, title extension, or content patterns */
+function detectCodeLanguage(item: WorkspaceItemData): string {
+  if (item.meta) {
+    const langMap: Record<string, string> = {
+      "python": "python", "py": "python",
+      "javascript": "javascript", "js": "javascript",
+      "typescript": "typescript", "ts": "typescript",
+      "jsx": "jsx", "tsx": "tsx",
+      "html": "html", "css": "css",
+      "rust": "rust", "go": "go",
+      "java": "java", "c": "c", "cpp": "cpp",
+      "ruby": "ruby", "php": "php",
+      "sql": "sql", "bash": "bash", "sh": "bash",
+      "swift": "swift", "kotlin": "kotlin",
+      "dart": "dart", "yaml": "yaml", "json": "json",
+      "markdown": "markdown", "md": "markdown",
+    };
+    const metaLower = item.meta.toLowerCase().trim();
+    if (langMap[metaLower]) return langMap[metaLower];
+  }
+  const titleLower = item.title.toLowerCase();
+  const extMatch = titleLower.match(/\.(py|js|ts|jsx|tsx|html|css|rs|go|java|c|cpp|rb|php|sql|sh|swift|kt|dart|yaml|yml|json|md)$/);
+  if (extMatch) {
+    const extMap: Record<string, string> = {
+      "py": "python", "js": "javascript", "ts": "typescript",
+      "jsx": "jsx", "tsx": "tsx", "html": "html", "css": "css",
+      "rs": "rust", "go": "go", "java": "java", "c": "c", "cpp": "cpp",
+      "rb": "ruby", "php": "php", "sql": "sql", "sh": "bash",
+      "swift": "swift", "kt": "kotlin", "dart": "dart",
+      "yaml": "yaml", "yml": "yaml", "json": "json", "md": "markdown",
+    };
+    if (extMap[extMatch[1]]) return extMap[extMatch[1]];
+  }
+  const code = item.preview ?? "";
+  if (code.startsWith("#!/usr/bin/env python") || code.startsWith("#!/usr/bin/python")) return "python";
+  if (code.startsWith("#!/bin/bash") || code.startsWith("#!/bin/sh")) return "bash";
+  if (code.startsWith("<!DOCTYPE") || code.startsWith("<html")) return "html";
+  if (code.match(/^import\s+(React|{\s*useState)/m)) return "typescript";
+  if (code.match(/^(def |import |from )/m)) return "python";
+  if (code.match(/^(func |package )/m)) return "go";
+  if (code.match(/^(fn |let mut |impl )/m)) return "rust";
+  return "";
+}
+
 function ArtifactView({ item }: { item: WorkspaceItemData }) {
   const isEditable = ["note", "code", "export"].includes(item.itemType);
   const isCode = item.itemType === "code";
+  const isExport = item.itemType === "export";
   const [content, setContent] = useState(item.preview ?? "");
+  const [isEditing, setIsEditing] = useState(false);
+  const codeLang = isCode ? detectCodeLanguage(item) : "";
+
+  useEffect(() => {
+    setContent(item.preview ?? "");
+  }, [item.preview]);
+
+  const handleBlur = () => {
+    if (content !== item.preview) {
+      void fetch("/api/artifacts", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ artifactId: item.id, content }),
+      }).catch(() => undefined);
+    }
+  };
+
+  // Build fenced code block for syntax highlighting
+  const fencedCode = isCode
+    ? codeLang
+      ? `${"```"}${codeLang}\n${content || "// No code yet"}\n${"```"}`
+      : `${"```"}\n${content || "// No code yet"}\n${"```"}`
+    : "";
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
+      {/* Preview/Edit toggle for all editable types including code */}
+      {isEditable && (
+        <div className="flex items-center justify-between px-5 pt-3 pb-1 shrink-0">
+          {/* Language badge for code */}
+          {isCode && codeLang && !isEditing ? (
+            <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--text-tertiary)]/60 bg-[var(--bg-elevated)]/50 px-2 py-0.5 rounded">{codeLang}</span>
+          ) : isExport ? (
+            <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-tertiary)]/50">Document</span>
+          ) : (
+            <span />
+          )}
+          <div className="flex items-center rounded-lg bg-[var(--bg-secondary)]/30 p-1">
+            <button
+              onClick={() => setIsEditing(false)}
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-semibold transition-all",
+                !isEditing ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-sm" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+              )}
+            >
+              <Eye className="h-3.5 w-3.5" />
+              Preview
+            </button>
+            <button
+              onClick={() => setIsEditing(true)}
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-semibold transition-all",
+                isEditing ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-sm" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+              )}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Edit
+            </button>
+          </div>
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto">
         <div className="px-5 py-4 h-full">
-          {isEditable ? (
+          {isCode && isEditing ? (
+            /* Code editing — dark editor textarea with active-line indicator */
+            <div className="relative h-full min-h-[280px]">
+              <textarea
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                onBlur={handleBlur}
+                spellCheck={false}
+                placeholder="// Start coding here\u2026"
+                className={cn(
+                  "w-full h-full resize-none rounded-2xl p-5 pl-6 transition-all duration-200",
+                  "bg-[#1e1e2e] text-[#cdd6f4] hover:bg-[#1e1e2e]/90",
+                  "focus:ring-1 focus:ring-[var(--accent-cyan)]/30 focus:bg-[#1e1e2e]",
+                  "outline-none font-mono text-[13px] leading-[1.6]",
+                  "placeholder:text-[#cdd6f4]/40 border-l-2 border-[var(--accent-cyan)]/20",
+                  "focus:border-l-[var(--accent-cyan)]/40"
+                )}
+              />
+            </div>
+          ) : isCode && !isEditing ? (
+            /* Code preview — syntax-highlighted via MarkdownRenderer */
+            <div className="min-h-[240px] rounded-2xl bg-[#1e1e2e] p-5 overflow-auto [&_.markdown-body]:!bg-transparent [&_.markdown-body]:!text-[13px] [&_.markdown-body_pre]:!bg-transparent [&_.markdown-body_pre]:!m-0 [&_.markdown-body_pre]:!p-0 [&_.markdown-body_code]:!text-[13px] [&_.markdown-body_code]:!leading-[1.6] [&_.markdown-body_pre_code]:!font-mono [&_.markdown-body_pre_code]:!bg-transparent [&_.markdown-body]:!leading-[1.6] [&_button]:hidden">
+              <MarkdownRenderer content={fencedCode} />
+            </div>
+          ) : isEditable && isEditing ? (
+            /* Note/Export editing textarea */
             <textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              placeholder={isCode ? "// Start coding here\u2026" : "Start writing here\u2026"}
+              onBlur={handleBlur}
+              placeholder="Start writing here\u2026"
               className={cn(
                 "w-full h-full min-h-[280px] resize-none rounded-2xl p-5 transition-all duration-200",
                 "bg-[var(--bg-secondary)]/10 hover:bg-[var(--bg-secondary)]/20",
                 "focus:bg-[var(--bg-secondary)]/25 focus:ring-1 focus:ring-[var(--accent-cyan)]/15",
                 "text-[15px] leading-[1.75] text-[var(--text-primary)] outline-none font-[var(--font-manrope)]",
                 "placeholder:text-[var(--text-tertiary)]/40",
-                isCode && "font-mono text-[13px] leading-[1.6]",
+                isExport && "border border-[var(--border-default)]/10 bg-white/[0.02]"
               )}
             />
           ) : (
-            <div className="min-h-[240px] rounded-2xl bg-[var(--bg-secondary)]/10 p-5">
-              <p className="text-[14px] leading-[1.7] text-[var(--text-primary)]">
-                {item.preview || (
-                  <span className="text-[var(--text-tertiary)]/50">No content yet</span>
-                )}
-              </p>
+            /* Note/Export preview — rendered markdown */
+            <div className={cn(
+              "min-h-[240px] rounded-2xl p-5",
+              isExport
+                ? "bg-white/[0.02] border border-[var(--border-default)]/10 shadow-[inset_0_1px_3px_rgba(0,0,0,0.03)]"
+                : "bg-[var(--bg-secondary)]/10"
+            )}>
+              {content ? (
+                <MarkdownRenderer content={content} mode={isExport ? "document" : undefined} />
+              ) : (
+                <span className="text-[var(--text-tertiary)]/50">No content yet</span>
+              )}
             </div>
           )}
         </div>
@@ -182,24 +320,24 @@ export function DeepEditSurface({
     <button
       type="button"
       className={cn(
-        "flex items-center gap-3 rounded-l-[22px] border border-r-0 py-3 pl-3 pr-3 backdrop-blur-xl transition-all duration-200",
+        "flex flex-col items-center justify-center gap-2 rounded-[14px] border w-[36px] min-h-[100px] py-3 backdrop-blur-xl transition-all duration-200",
         isFocused
           ? "border-[color-mix(in_oklab,var(--accent-cyan)_25%,var(--border-default))] bg-[var(--bg-elevated)]/98 shadow-[0_10px_24px_-16px_rgba(14,142,232,0.18)]"
           : "border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/95 shadow-[0_10px_24px_-16px_rgba(8,22,40,0.14)]",
       )}
     >
       {isFocused && (
-        <div className="absolute -left-0.5 top-1/2 h-8 w-[3px] -translate-y-1/2 rounded-full bg-[var(--accent-cyan)]/60" />
+        <div className="absolute top-1 left-1/2 w-8 h-[3px] -translate-x-1/2 rounded-full bg-[var(--accent-cyan)]/60" />
       )}
       {meta?.icon ? (
         <meta.icon
-          className="h-4.5 w-4.5 shrink-0"
+          className="h-4 w-4 shrink-0"
           style={{ color: meta.color }}
         />
       ) : (
-        <BookOpen className="h-4.5 w-4.5 text-[var(--text-secondary)]" />
+        <BookOpen className="h-4 w-4 text-[var(--text-secondary)]" />
       )}
-      <span className="max-w-[100px] truncate text-[11px] font-semibold text-[var(--text-secondary)]">
+      <span className="text-[10px] font-semibold text-[var(--text-secondary)]" style={{ writingMode: "vertical-rl", textOrientation: "mixed" }}>
         {item.title}
       </span>
     </button>
@@ -232,6 +370,10 @@ export function DeepEditSurface({
     }
   }, [item.id, item.itemType, workspace]);
 
+  const expandedClassName = isThread 
+    ? "right-4 top-[55%] -translate-y-1/2" 
+    : "right-4 top-[40%] -translate-y-1/2";
+
   return (
     <HubSurface
       id={`deep-edit-${item.id}`}
@@ -241,7 +383,7 @@ export function DeepEditSurface({
       pinned={pinned}
       hidden={hidden}
       onToggleLock={onToggleLock}
-      expandedClassName="right-4 top-1/2 -translate-y-1/2"
+      expandedClassName={expandedClassName}
     >
       <div className="flex h-[620px] w-[540px] flex-col overflow-hidden rounded-[28px]">
         {/* Surface header — icon + title only, lock handled by HubSurface wrapper */}

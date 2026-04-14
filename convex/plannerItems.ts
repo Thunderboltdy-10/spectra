@@ -252,7 +252,7 @@ export const listHubItems = query({
       .collect();
 
     const hubItems = rows
-      .filter((row) => row.workstreamId === undefined)
+      .filter((row) => row.status !== "completed" && row.status !== "cancelled")
       .sort((a, b) => {
         const dueA = a.dueAt ?? Number.MAX_SAFE_INTEGER;
         const dueB = b.dueAt ?? Number.MAX_SAFE_INTEGER;

@@ -115,9 +115,9 @@ export function QuickNotesHub({ className, forceExpanded }: { className?: string
     <button
       type="button"
       className={cn(
-        "flex flex-col items-center justify-center gap-2 rounded-r-[14px] border border-l-0 w-[36px] h-[100px] py-3",
+        "flex flex-col items-center justify-center gap-2 rounded-[14px] border w-[36px] min-h-[100px] py-3",
         "border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/95 backdrop-blur-xl",
-        "shadow-[0_8px_22px_-16px_rgba(8,22,40,0.14)] transition-all duration-200",
+        "shadow-[0_10px_24px_-16px_rgba(8,22,40,0.14)] transition-all duration-200",
         "hover:bg-[var(--bg-hover)] cursor-pointer",
         className,
       )}
@@ -145,7 +145,7 @@ export function QuickNotesHub({ className, forceExpanded }: { className?: string
       className="!top-auto !translate-y-0 !bottom-[25vh]"
       expandedClassName="left-4 bottom-[18vh]"
     >
-      <div className="flex h-[min(60vh,520px)] w-[320px] flex-col overflow-hidden rounded-[28px]">
+      <div className="flex h-[min(60vh,520px)] w-[360px] flex-col overflow-hidden rounded-[28px]">
         {/* Header */}
         <div className="flex items-center gap-2 px-4 pt-4 pb-2">
           <StickyNote className="h-4 w-4 text-[var(--warning,#f59f0a)]" />

@@ -1,14 +1,35 @@
 import type { CanonicalWorkspaceType } from "@/lib/artifact-types";
 
-/* ─── Zoom Tiers ──────────────────────────────────────── */
+/* ─── Continuous Semantic Zoom ─────────────────────────── */
 
 /**
- * Semantic zoom tiers with refined thresholds.
+ * Semantic zoom is modeled as a CONTINUOUS signal, not discrete tiers.
  *
- * The canvas starts at landscape level showing all workspaces as meaningful
- * territory regions. Zooming in progressively reveals structure, then detail.
- * Thresholds tuned so ~3 scroll ticks transitions between tiers.
+ * Instead of abrupt tier boundaries, the system exposes a set of
+ * continuous interpolation signals that components read directly.
+ * Each signal is a 0→1 value representing how far a particular
+ * semantic layer has been revealed. Components blend these signals
+ * to produce progressive structural recomposition.
+ *
+ * The tier labels remain for logging/debugging/workspace-commitment
+ * logic, but rendering code should use the continuous signals.
  */
+
+export const ZOOM_ANCHORS = {
+  /** Below this: pure landscape identity view */
+  LANDSCAPE_FULL: 0.08,
+  /** Transition zone: landscape → summary begins */
+  SUMMARY_ENTER: 0.12,
+  /** Summary is fully established */
+  SUMMARY_FULL: 0.25,
+  /** Transition zone: summary → detail begins */
+  DETAIL_ENTER: 0.35,
+  /** Detail is fully established */
+  DETAIL_FULL: 0.55,
+  /** Deep editing comfort zone */
+  DEEP_EDIT: 0.80,
+} as const;
+
 export const ZOOM_TIERS = {
   /** Far out – all workspaces visible as territory regions with name/emoji/count */
   LANDSCAPE: { max: 0.20, label: "landscape" },
@@ -27,8 +48,52 @@ export function zoomTierForLevel(zoom: number): ZoomTier {
 }
 
 /**
+ * Hermite smoothstep: maps a value to 0-1 with smooth acceleration/deceleration.
+ */
+export function smoothStep(value: number, edge0: number, edge1: number): number {
+  const t = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * Continuous semantic zoom signals.
+ *
+ * Each signal is a 0-1 value representing how revealed that semantic
+ * layer is at the current zoom level. Components interpolate these
+ * for progressive structural recomposition.
+ */
+export type ZoomSignals = {
+  /** 0 = landscape identity only, 1 = items/structure fully visible */
+  structureReveal: number;
+  /** 0 = compact chips only, 1 = full cards with metadata */
+  cardDetail: number;
+  /** 0 = no content preview, 1 = full touch-tier content */
+  contentDepth: number;
+  /** 0 = landscape centered identity, 1 = identity anchored to corner */
+  identityAnchor: number;
+  /** 0 = strong territory background, 1 = subtle wash only */
+  territoryFade: number;
+  /** 0 = group labels hidden, 1 = fully visible */
+  groupReveal: number;
+  /** Raw zoom for any linear calculations */
+  raw: number;
+};
+
+export function computeZoomSignals(zoom: number): ZoomSignals {
+  return {
+    structureReveal: smoothStep(zoom, ZOOM_ANCHORS.SUMMARY_ENTER, ZOOM_ANCHORS.SUMMARY_FULL),
+    cardDetail: smoothStep(zoom, ZOOM_ANCHORS.SUMMARY_FULL, ZOOM_ANCHORS.DETAIL_ENTER),
+    contentDepth: smoothStep(zoom, ZOOM_ANCHORS.DETAIL_ENTER, ZOOM_ANCHORS.DETAIL_FULL),
+    identityAnchor: smoothStep(zoom, ZOOM_ANCHORS.SUMMARY_ENTER, ZOOM_ANCHORS.SUMMARY_FULL - 0.02),
+    territoryFade: smoothStep(zoom, ZOOM_ANCHORS.SUMMARY_FULL, ZOOM_ANCHORS.DETAIL_FULL),
+    groupReveal: smoothStep(zoom, ZOOM_ANCHORS.SUMMARY_ENTER + 0.02, ZOOM_ANCHORS.SUMMARY_FULL),
+    raw: zoom,
+  };
+}
+
+/**
  * Returns a continuous 0-1 progress value within the current tier.
- * Useful for smooth interpolation of representation changes.
+ * Kept for backward compatibility — prefer ZoomSignals for rendering.
  */
 export function zoomTierProgress(zoom: number): number {
   if (zoom < ZOOM_TIERS.LANDSCAPE.max) {
@@ -37,10 +102,8 @@ export function zoomTierProgress(zoom: number): number {
   if (zoom < ZOOM_TIERS.SUMMARY.max) {
     const range = ZOOM_TIERS.SUMMARY.max - ZOOM_TIERS.SUMMARY.min;
     const linearProgress = Math.max(0, Math.min(1, (zoom - ZOOM_TIERS.SUMMARY.min) / range));
-    // Smoother ease curve for progressive detail revelation
     return linearProgress * linearProgress * (3 - 2 * linearProgress);
   }
-  // Detail tier: clamp more aggressively to prevent enormous elements
   const detailMax = 1.5;
   return Math.max(0, Math.min(1, (zoom - ZOOM_TIERS.DETAIL.min) / (detailMax - ZOOM_TIERS.DETAIL.min)));
 }
@@ -140,6 +203,10 @@ export type WorkspaceItemData = {
   canvasY?: number;
   updatedAt?: number;
   meta?: string;
+  topicCluster?: string;
+  sourceChatId?: string;
+  sourceArtifactId?: string;
+  sourcePlannerItemId?: string;
 };
 
 /* ─── Workspace Shape ────────────────────────────────── */

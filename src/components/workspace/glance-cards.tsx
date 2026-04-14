@@ -121,7 +121,7 @@ export function GlanceCard({ item, className }: { item: GlanceCardData; classNam
   return (
     <div
       className={cn(
-        "group relative flex flex-col gap-1.5 min-w-[220px] max-w-[280px] rounded-[14px] border px-3.5 py-3",
+        "group relative flex flex-col gap-1.5 w-full rounded-[14px] border px-3.5 py-3",
         "border-[var(--border-default)]/50 bg-[var(--bg-elevated)]/92",
         "transition-all duration-200 ease-[var(--ease-standard)]",
         "hover:-translate-y-0.5 hover:border-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--border-default))]",

@@ -63,34 +63,25 @@ export function HubSurface({
   pinned = false,
   hidden = false,
   forceExpanded = false,
-  dismissOnOutsideClick = false,
+  dismissOnOutsideClick = true,
   className,
   collapsedClassName,
   expandedClassName,
   onToggleLock,
   onTogglePin,
 }: HubSurfaceProps) {
-  const [hovered, setHovered] = useState(false);
-  const enterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [clickedOpen, setClickedOpen] = useState(false);
 
-  const expanded = forceExpanded || locked || hovered;
+  const expanded = forceExpanded || locked || clickedOpen;
 
-  /**
-   * Outside-click semantics:
-   * - Locked/open surfaces stay fixed — do NOT close on outside press.
-   * - Only surfaces with `dismissOnOutsideClick` close on outside press.
-   * This prevents accidental closure of locked hub items while allowing
-   * menus/drawers to dismiss naturally.
-   */
   useEffect(() => {
     if (!expanded) return;
-    // Only dismiss on outside click for surfaces that explicitly opt in
     if (!dismissOnOutsideClick) return;
     function handleClickOutside(e: MouseEvent) {
       const target = e.target as HTMLElement;
       const surface = document.querySelector(`[data-hub-surface-id="${id}"]`);
       if (surface && !surface.contains(target)) {
+        setClickedOpen(false);
         if (locked && onToggleLock) {
           onToggleLock();
         }
@@ -102,29 +93,13 @@ export function HubSurface({
 
   const classes = useMemo(() => edgeClasses(edge), [edge]);
 
-  const handleMouseEnter = useCallback(() => {
-    if (leaveTimerRef.current) {
-      clearTimeout(leaveTimerRef.current);
-      leaveTimerRef.current = null;
-    }
-    if (!hovered && !locked) {
-      enterTimerRef.current = setTimeout(() => {
-        setHovered(true);
-      }, HOVER_ENTER_DELAY);
+  const handleToggleOpen = useCallback(() => {
+    if (locked && onToggleLock) {
+      onToggleLock();
     } else {
-      setHovered(true);
+      setClickedOpen((prev) => !prev);
     }
-  }, [hovered, locked]);
-
-  const handleMouseLeave = useCallback(() => {
-    if (enterTimerRef.current) {
-      clearTimeout(enterTimerRef.current);
-      enterTimerRef.current = null;
-    }
-    leaveTimerRef.current = setTimeout(() => {
-      setHovered(false);
-    }, HOVER_LEAVE_DELAY);
-  }, []);
+  }, [locked, onToggleLock]);
 
   if (hidden) return null;
 
@@ -132,14 +107,13 @@ export function HubSurface({
     <div
       data-hub-surface-id={id}
       className={cn("z-50", classes.wrapper, className)}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
     >
       <div className="relative">
         {/* Collapsed state */}
         <div
+          onClick={handleToggleOpen}
           className={cn(
-            "transition-all duration-250 ease-[var(--ease-standard)]",
+            "transition-all duration-250 ease-[var(--ease-standard)] cursor-pointer",
             expanded
               ? "pointer-events-none opacity-0 scale-95"
               : "opacity-100 scale-100",
@@ -161,7 +135,6 @@ export function HubSurface({
           )}
         >
           <div className="group/hub relative overflow-hidden rounded-[28px] border border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/96 backdrop-blur-xl shadow-[0_18px_44px_-18px_rgba(8,22,40,0.28)]">
-            {/* Single lock control — only shows on hover, no close/pin clutter */}
             {(onToggleLock || onTogglePin) && (
               <div className="absolute right-2.5 top-2.5 z-[60] flex items-center gap-1 opacity-0 group-hover/hub:opacity-100 transition-opacity duration-200">
                 {onTogglePin && (
@@ -181,7 +154,7 @@ export function HubSurface({
                 )}
                 <button
                   type="button"
-                  onClick={onToggleLock}
+                  onClick={handleToggleOpen}
                   className={cn(
                     "flex h-7 w-7 items-center justify-center rounded-lg transition-colors",
                     locked

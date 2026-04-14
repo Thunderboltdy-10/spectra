@@ -12,6 +12,7 @@ function normalizeErrorStatus(message: string) {
   if (message.startsWith("AUTH_MISCONFIGURED")) return 500;
   if (message.startsWith("AUTH_PROFILE_UNAVAILABLE")) return 500;
   if (message.startsWith("AUTH_BOOTSTRAP_FAILED")) return 500;
+  if (message.startsWith("INVITATION_EMAIL_FAILED")) return 502;
   if (lower.includes("unauthorized") || lower.includes("sign in")) return 401;
   if (lower.includes("super admin")) return 403;
   if (lower.includes("only admin") || lower.includes("only teacher") || lower.includes("permission")) return 403;

@@ -2,7 +2,7 @@ import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/s
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { getUserByClerkId } from "./helpers";
-import { recordWorkspaceMutation } from "./workspaceHelpers";
+import { buildWorkspaceSearchText, computeWorkspaceItemDefaultFrame, recordWorkspaceMutation } from "./workspaceHelpers";
 
 const vPlannerType = v.union(v.literal("deadline"), v.literal("milestone"), v.literal("goal"), v.literal("reminder"));
 const vPlannerPriority = v.union(v.literal("low"), v.literal("medium"), v.literal("high"));
@@ -127,6 +127,7 @@ async function syncWorkspaceItemForPlannerItem(
     renderMode: params.type,
     title: params.title,
     contentSummary: normalizeString(params.description),
+    searchText: buildWorkspaceSearchText(params.title, normalizeString(params.description), params.type, "planner"),
     category: "planner" as const,
     status: "active" as const,
     updatedAt: now,
@@ -136,6 +137,12 @@ async function syncWorkspaceItemForPlannerItem(
     await ctx.db.patch(existing._id, fields);
     return existing._id;
   }
+
+  const frame = computeWorkspaceItemDefaultFrame({
+    itemType: "planner",
+    renderMode: params.type,
+    pinned: true,
+  });
 
   return await ctx.db.insert("workspaceItems", {
     orgId: params.orgId,
@@ -149,10 +156,11 @@ async function syncWorkspaceItemForPlannerItem(
     renderMode: params.type,
     title: params.title,
     contentSummary: normalizeString(params.description),
-    x: 80,
-    y: 220,
-    width: 280,
-    height: 160,
+    searchText: buildWorkspaceSearchText(params.title, normalizeString(params.description), params.type, "planner"),
+    x: frame.x,
+    y: frame.y,
+    width: frame.width,
+    height: frame.height,
     category: "planner",
     status: "active",
     pinned: true,
@@ -244,7 +252,7 @@ export const listHubItems = query({
       .collect();
 
     const hubItems = rows
-      .filter((row) => row.workstreamId === undefined)
+      .filter((row) => row.status !== "completed" && row.status !== "cancelled")
       .sort((a, b) => {
         const dueA = a.dueAt ?? Number.MAX_SAFE_INTEGER;
         const dueB = b.dueAt ?? Number.MAX_SAFE_INTEGER;

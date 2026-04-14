@@ -143,6 +143,7 @@ export type AiToolName =
   | "list_merge_candidates"
   | "update_workstream_layout"
   | "suggest_workspace_from_topic"
+  | "surface_result"
   | "fork_thread"
   | "search_web"
   | "switch_mode";
@@ -163,7 +164,7 @@ export type WorkstreamAssignment = {
 };
 
 export type ThreadStrategy = {
-  action: "continue" | "fork" | "new_chat";
+  action: "continue" | "fork" | "new_chat" | "defer_to_workspace_action";
   confidence: number;
   reason: string;
   contextWindowPressure: number;
@@ -171,6 +172,42 @@ export type ThreadStrategy = {
   timeGapHours?: number;
   turnsSinceCompaction?: number;
 };
+
+export type WorkspaceActionIntent = "note" | "planner" | "thread" | "result" | "widget";
+
+export type WorkspaceActionTarget =
+  | {
+    type: "note";
+    title?: string;
+    content?: string;
+  }
+  | {
+    type: "planner";
+    title?: string;
+    description?: string;
+    priority?: "low" | "medium" | "high";
+    status?: "pending" | "in_progress" | "completed" | "cancelled";
+    dueAt?: number;
+  }
+  | {
+    type: "thread";
+    title?: string;
+    reason: string;
+  }
+  | {
+    type: "result";
+    title: string;
+    summary: string;
+    status: "processing" | "completed";
+    variant?: "summary" | "answer" | "artifact" | "planner" | "thread";
+    detail?: string;
+  }
+  | {
+    type: "widget";
+    title?: string;
+    widgetType?: string;
+    summary?: string;
+  };
 
 export type ContextWindowStrategy = {
   estimatedInputTokens: number;
@@ -253,6 +290,12 @@ export type RoutePlan = {
   intentSignals?: {
     requestedModelPhrase?: string;
     requestedOrchestration?: boolean;
+  };
+  workspaceAction?: {
+    intent: WorkspaceActionIntent;
+    confidence: number;
+    reason: string;
+    target: WorkspaceActionTarget;
   };
   searchPlan?: {
     strategy: "none" | "search" | "search_extract" | "extract_url" | "crawl" | "research";

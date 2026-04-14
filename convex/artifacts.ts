@@ -715,7 +715,7 @@ export const update = mutation({
           ? artifact.workstreamId
           : (args.workstreamId ?? undefined),
       status: artifact.status,
-      title: args.title === undefined ? artifact.title : normalizeString(args.title),
+      title: args.title === undefined ? artifact.title : (normalizeString(args.title) ?? artifact.title),
       artifactType: artifact.type,
       contentPlaintext:
         args.contentPlaintext === undefined

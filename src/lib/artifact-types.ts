@@ -12,6 +12,7 @@ import {
   PenLine,
   Shapes,
   Spline,
+  MessageSquare,
   type LucideIcon,
 } from "lucide-react";
 
@@ -245,7 +246,7 @@ export const CANONICAL_WORKSPACE_TYPE_META: Record<
   thread: {
     label: "Thread",
     color: "#0e8ee8",
-    icon: FileText,
+    icon: MessageSquare,
   },
   planner: {
     label: "Planner",

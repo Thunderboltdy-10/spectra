@@ -1,166 +1,92 @@
+/* eslint-disable @typescript-eslint/no-unsafe-function-type, @typescript-eslint/no-explicit-any */
 import type { Doc, Id } from "./_generated/dataModel";
-import type { MutationCtx } from "./_generated/server";
 import {
+  buildWorkspaceSearchText,
+  computeWorkspaceItemDefaultFrame,
   resolveCanonicalWorkspaceItemType,
   resolveWorkspaceCategory,
-  resolveWorkspaceSourceId,
-  resolveWorkspaceSourceKind,
 } from "./workspaceHelpers";
 
-function normalizeTitle(value: string | undefined) {
-  const trimmed = value?.trim();
-  return trimmed && trimmed.length > 0 ? trimmed : "Untitled";
+function normalizeSummary(value: string | null | undefined) {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim().replace(/\s+/g, " ");
+  return trimmed.length > 0 ? trimmed.slice(0, 280) : undefined;
 }
 
-function summarizeContent(value: string | undefined, max = 180) {
-  const compact = value?.replace(/\s+/g, " ").trim();
-  if (!compact) return undefined;
-  return compact.length <= max ? compact : `${compact.slice(0, max - 1)}…`;
-}
-
-export function workspaceItemTypeForArtifact(
+function workspaceLegacyTypeForArtifact(
   artifactType: string,
 ): Doc<"workspaceItems">["type"] {
   switch (artifactType) {
-    case "note":
-    case "study_plan":
-    case "flashcard_deck":
-    case "code_project":
-      return "document";
-    case "document":
-    case "bookmark":
-    case "collection":
-      return "reference";
-    case "timetable":
-      return "planner";
-    case "visualization":
-    case "concept_map":
-    case "quiz":
-      return "visualization";
-    case "image":
-    case "diagram":
-      return "media";
-    case "whiteboard":
-    case "code_output":
-    default:
-      return "custom";
-  }
-}
-
-export function workspaceCategoryForArtifact(
-  artifactType: string,
-): Doc<"workspaceItems">["category"] {
-  switch (artifactType) {
-    case "note":
-    case "study_plan":
-    case "flashcard_deck":
-    case "code_project":
-      return "documents";
-    case "document":
-    case "bookmark":
-    case "collection":
-      return "references";
-    case "timetable":
-      return "planner";
-    case "visualization":
-    case "concept_map":
-    case "quiz":
-    case "code_output":
-    case "whiteboard":
-      return "visualizations";
-    case "image":
-    case "diagram":
-      return "media";
-    default:
-      return "custom";
-  }
-}
-
-export function canonicalWorkspaceItemTypeForArtifact(): Doc<"workspaceItems">["itemType"] {
-  return "artifact";
-}
-
-export function canonicalRenderModeForArtifact(artifactType: string) {
-  switch (artifactType) {
-    case "study_plan":
-      return "note";
-    case "timetable":
-      return "planner";
-    case "document":
-    case "bookmark":
-    case "collection":
-    case "custom":
-      return "export";
-    case "code_project":
-    case "code_output":
-      return "code";
-    case "diagram":
-    case "image":
-    case "visualization":
-    case "concept_map":
-      return "visual";
-    case "whiteboard":
+    case "board":
       return "board";
+    case "diagram":
+    case "concept_map":
+    case "timeline":
+    case "image":
+    case "visualization":
+      return "visualization";
+    case "bookmark":
+    case "reference":
+      return "reference";
+    case "audio":
+    case "video":
+    case "media":
+      return "media";
     default:
-      return artifactType;
+      return "document";
   }
 }
 
 async function findWorkspaceItemForArtifact(
-  ctx: Pick<MutationCtx, "db">,
+  ctx: { db: { query: Function } },
   artifactId: Id<"artifacts">,
   ownerUserId: Id<"users">,
   orgId: Id<"orgs">,
 ) {
   const rows = await ctx.db
     .query("workspaceItems")
-    .withIndex("by_source_artifact", (q) => q.eq("sourceArtifactId", artifactId))
+    .withIndex("by_source_artifact", (q: any) => q.eq("sourceArtifactId", artifactId))
     .collect();
 
-  return rows.find((row) => row.ownerUserId === ownerUserId && row.orgId === orgId) ?? null;
+  return rows.find((row: Doc<"workspaceItems">) => row.ownerUserId === ownerUserId && row.orgId === orgId) ?? null;
 }
 
-async function resolveDefaultWidgetPosition(
-  ctx: Pick<MutationCtx, "db">,
-  workstreamId: Id<"workstreams">,
+async function findWorkspaceItemForChat(
+  ctx: { db: { query: Function } },
+  chatId: Id<"chats">,
+  ownerUserId: Id<"users">,
+  orgId: Id<"orgs">,
 ) {
-  const items = await ctx.db
+  const rows = await ctx.db
     .query("workspaceItems")
-    .withIndex("by_workstream", (q) => q.eq("workstreamId", workstreamId))
+    .withIndex("by_source_chat", (q: any) => q.eq("sourceChatId", chatId))
     .collect();
 
-  const activeCount = items.filter((item) => item.status === "active").length;
-  const column = activeCount % 2;
-  const row = Math.floor(activeCount / 2);
-
-  return {
-    x: 80 + column * 320,
-    y: 220 + row * 220,
-  };
+  return rows.find((row: Doc<"workspaceItems">) => row.ownerUserId === ownerUserId && row.orgId === orgId) ?? null;
 }
 
-export async function syncWorkspaceItemForArtifact(
-  ctx: Pick<MutationCtx, "db">,
-  params: {
-    artifactId: Id<"artifacts">;
+export async function syncWorkspaceItemForChat(
+  ctx: { db: { patch: Function; insert: Function; query: Function } },
+  args: {
+    chatId: Id<"chats">;
     ownerUserId: Id<"users">;
     orgId: Id<"orgs">;
     workstreamId?: Id<"workstreams">;
-    status: Doc<"artifacts">["status"];
-    title?: string;
-    artifactType: string;
-    contentPlaintext?: string;
+    deletedAt?: number;
+    title: string;
+    latestUserPrompt?: string;
+    contextSummary?: string;
+    createdAt: number;
+    updatedAt: number;
+    provenanceSource?: Doc<"workspaceItems">["provenanceSource"];
   },
-) {
-  const existing = await findWorkspaceItemForArtifact(
-    ctx,
-    params.artifactId,
-    params.ownerUserId,
-    params.orgId,
-  );
+): Promise<void> {
+  const existing = await findWorkspaceItemForChat(ctx, args.chatId, args.ownerUserId, args.orgId);
+  const shouldArchive = Boolean(args.deletedAt) || !args.workstreamId;
+  const contentSummary = normalizeSummary(args.latestUserPrompt ?? args.contextSummary);
   const now = Date.now();
 
-  if (!params.workstreamId || params.status !== "active") {
+  if (shouldArchive) {
     if (existing && existing.status !== "archived") {
       await ctx.db.patch(existing._id, {
         status: "archived",
@@ -170,95 +96,182 @@ export async function syncWorkspaceItemForArtifact(
     return;
   }
 
-  const nextFields = {
-    workstreamId: params.workstreamId,
-    type: workspaceItemTypeForArtifact(params.artifactType),
-    itemType: resolveCanonicalWorkspaceItemType({
-      legacyType: workspaceItemTypeForArtifact(params.artifactType),
-      itemType: canonicalWorkspaceItemTypeForArtifact(),
-      sourceArtifactId: params.artifactId,
-    }),
-    sourceKind: resolveWorkspaceSourceKind({
-      sourceArtifactId: params.artifactId,
-      itemType: canonicalWorkspaceItemTypeForArtifact(),
-    }),
-    sourceId: resolveWorkspaceSourceId({
-      sourceArtifactId: params.artifactId,
-    }),
-    renderMode: canonicalRenderModeForArtifact(params.artifactType),
-    sourceArtifactId: params.artifactId,
-    title: normalizeTitle(params.title),
-    contentSummary: summarizeContent(params.contentPlaintext),
-    category: resolveWorkspaceCategory({
-      legacyType: workspaceItemTypeForArtifact(params.artifactType),
-      renderMode: canonicalRenderModeForArtifact(params.artifactType),
-      itemType: canonicalWorkspaceItemTypeForArtifact(),
-      explicitCategory: workspaceCategoryForArtifact(params.artifactType),
-    }),
+  const fields = {
+    workstreamId: args.workstreamId,
+    type: "thread" as const,
+    itemType: "thread" as const,
+    sourceKind: "chat" as const,
+    sourceId: args.chatId as unknown as string,
+    sourceChatId: args.chatId,
+    renderMode: "thread",
+    title: args.title,
+    contentSummary,
+    searchText: buildWorkspaceSearchText(args.title, contentSummary, "thread", "threads"),
+    category: "threads" as const,
+    status: "active" as const,
+    updatedAt: args.updatedAt,
+  };
+
+  if (existing) {
+    await ctx.db.patch(existing._id, fields);
+    return;
+  }
+
+  const frame = computeWorkspaceItemDefaultFrame({
+    itemType: "thread",
+    renderMode: "thread",
+  });
+
+  await ctx.db.insert("workspaceItems", {
+    orgId: args.orgId,
+    ownerUserId: args.ownerUserId,
+    workstreamId: args.workstreamId,
+    type: "thread",
+    itemType: "thread",
+    sourceKind: "chat",
+    sourceId: args.chatId as unknown as string,
+    sourceChatId: args.chatId,
+    renderMode: "thread",
+    title: args.title,
+    contentSummary,
+    searchText: buildWorkspaceSearchText(args.title, contentSummary, "thread", "threads"),
+    x: frame.x,
+    y: frame.y,
+    width: frame.width,
+    height: frame.height,
+    zIndex: 0,
+    category: "threads",
+    status: "active",
+    pinned: false,
+    collapsed: false,
+    hidden: false,
+    provenanceSource: args.provenanceSource ?? "user",
+    createdAt: args.createdAt,
+    updatedAt: args.updatedAt,
+  });
+}
+
+export async function removeWorkspaceItemForChat(
+  ctx: { db: { patch: Function; query: Function } },
+  args: {
+    chatId: Id<"chats">;
+    ownerUserId: Id<"users">;
+    orgId: Id<"orgs">;
+  },
+): Promise<void> {
+  const existing = await findWorkspaceItemForChat(ctx, args.chatId, args.ownerUserId, args.orgId);
+  if (!existing) return;
+  await ctx.db.patch(existing._id, {
+    status: "archived",
+    updatedAt: Date.now(),
+  });
+}
+
+export async function syncWorkspaceItemForArtifact(
+  ctx: { db: { patch: Function; insert: Function; query: Function } },
+  args: {
+    artifactId: Id<"artifacts">;
+    ownerUserId: Id<"users">;
+    orgId: Id<"orgs">;
+    workstreamId?: Id<"workstreams">;
+    status: "active" | "archived";
+    title: string;
+    artifactType: string;
+    contentPlaintext?: string;
+  },
+): Promise<void> {
+  const existing = await findWorkspaceItemForArtifact(ctx, args.artifactId, args.ownerUserId, args.orgId);
+  const now = Date.now();
+  const shouldArchive = args.status !== "active" || !args.workstreamId;
+
+  if (shouldArchive) {
+    if (existing && existing.status !== "archived") {
+      await ctx.db.patch(existing._id, {
+        status: "archived",
+        updatedAt: now,
+      });
+    }
+    return;
+  }
+
+  const legacyType = workspaceLegacyTypeForArtifact(args.artifactType);
+  const itemType = resolveCanonicalWorkspaceItemType({
+    itemType: "artifact",
+    legacyType,
+    sourceArtifactId: args.artifactId,
+  });
+  const category = resolveWorkspaceCategory({
+    itemType,
+    renderMode: args.artifactType,
+    legacyType,
+  });
+
+  const fields = {
+    workstreamId: args.workstreamId,
+    type: legacyType,
+    itemType,
+    sourceKind: "artifact" as const,
+    sourceId: args.artifactId as unknown as string,
+    sourceArtifactId: args.artifactId,
+    renderMode: args.artifactType,
+    title: args.title,
+    contentSummary: normalizeSummary(args.contentPlaintext),
+    searchText: buildWorkspaceSearchText(args.title, normalizeSummary(args.contentPlaintext), args.artifactType, category),
+    category,
     status: "active" as const,
     updatedAt: now,
   };
 
   if (existing) {
-    await ctx.db.patch(existing._id, nextFields);
+    await ctx.db.patch(existing._id, fields);
     return;
   }
 
-  const position = await resolveDefaultWidgetPosition(ctx, params.workstreamId);
+  const frame = computeWorkspaceItemDefaultFrame({
+    itemType,
+    renderMode: args.artifactType,
+  });
   await ctx.db.insert("workspaceItems", {
-    orgId: params.orgId,
-    ownerUserId: params.ownerUserId,
-    workstreamId: params.workstreamId,
-    type: workspaceItemTypeForArtifact(params.artifactType),
-    renderMode: params.artifactType,
-    sourceArtifactId: params.artifactId,
-    itemType: resolveCanonicalWorkspaceItemType({
-      legacyType: workspaceItemTypeForArtifact(params.artifactType),
-      itemType: canonicalWorkspaceItemTypeForArtifact(),
-      sourceArtifactId: params.artifactId,
-    }),
-    sourceKind: resolveWorkspaceSourceKind({
-      sourceArtifactId: params.artifactId,
-      itemType: canonicalWorkspaceItemTypeForArtifact(),
-    }),
-    sourceId: resolveWorkspaceSourceId({
-      sourceArtifactId: params.artifactId,
-    }),
-    title: normalizeTitle(params.title),
-    contentSummary: summarizeContent(params.contentPlaintext),
-    category: resolveWorkspaceCategory({
-      legacyType: workspaceItemTypeForArtifact(params.artifactType),
-      renderMode: params.artifactType,
-      itemType: canonicalWorkspaceItemTypeForArtifact(),
-      explicitCategory: workspaceCategoryForArtifact(params.artifactType),
-    }),
-    x: position.x,
-    y: position.y,
-    width: 280,
-    height: 160,
+    orgId: args.orgId,
+    ownerUserId: args.ownerUserId,
+    workstreamId: args.workstreamId,
+    type: legacyType,
+    itemType,
+    sourceKind: "artifact",
+    sourceId: args.artifactId as unknown as string,
+    sourceArtifactId: args.artifactId,
+    renderMode: args.artifactType,
+    title: args.title,
+    contentSummary: normalizeSummary(args.contentPlaintext),
+    searchText: buildWorkspaceSearchText(args.title, normalizeSummary(args.contentPlaintext), args.artifactType, category),
+    x: frame.x,
+    y: frame.y,
+    width: frame.width,
+    height: frame.height,
+    zIndex: 0,
+    category,
     status: "active",
-    pinned: true,
+    pinned: false,
+    collapsed: false,
+    hidden: false,
+    provenanceSource: "user",
     createdAt: now,
     updatedAt: now,
   });
 }
 
 export async function removeWorkspaceItemForArtifact(
-  ctx: Pick<MutationCtx, "db">,
-  params: {
+  ctx: { db: { patch: Function; query: Function } },
+  args: {
     artifactId: Id<"artifacts">;
     ownerUserId: Id<"users">;
     orgId: Id<"orgs">;
   },
-) {
-  const existing = await findWorkspaceItemForArtifact(
-    ctx,
-    params.artifactId,
-    params.ownerUserId,
-    params.orgId,
-  );
-
-  if (existing) {
-    await ctx.db.delete(existing._id);
-  }
+): Promise<void> {
+  const existing = await findWorkspaceItemForArtifact(ctx, args.artifactId, args.ownerUserId, args.orgId);
+  if (!existing) return;
+  await ctx.db.patch(existing._id, {
+    status: "archived",
+    updatedAt: Date.now(),
+  });
 }

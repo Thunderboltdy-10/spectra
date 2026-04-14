@@ -5,6 +5,9 @@ import { getUserByClerkId } from "./helpers";
 
 const vDefaultLanding = v.union(v.literal("smart"), v.literal("workspace"), v.literal("chat"));
 const vEditorMode = v.union(v.literal("agentic"), v.literal("notion"), v.literal("simple"));
+const vWorkspaceViewMode = v.union(v.literal("byType"), v.literal("byTopic"), v.literal("timeline"));
+const vWorkspaceBackgroundMode = v.union(v.literal("dots"), v.literal("blank"), v.literal("grid"));
+const vWorkspaceHubVisibility = v.union(v.literal("hidden"), v.literal("collapsed"), v.literal("expanded"));
 const vWorkspaceLayout = v.object({
   x: v.number(),
   y: v.number(),
@@ -40,6 +43,9 @@ export const get = query({
       orgId: actor.orgId,
       defaultLanding: current?.defaultLanding ?? "smart",
       workspaceLayout: current?.workspaceLayout,
+      workspaceViewMode: current?.workspaceViewMode,
+      workspaceBackgroundMode: current?.workspaceBackgroundMode,
+      workspaceHubVisibility: current?.workspaceHubVisibility,
       editorDefaultMode: current?.editorDefaultMode,
       updatedAt: current?.updatedAt,
       preferenceId: current?._id,
@@ -52,6 +58,9 @@ export const upsert = mutation({
     actorClerkId: v.string(),
     defaultLanding: v.optional(vDefaultLanding),
     workspaceLayout: v.optional(v.union(vWorkspaceLayout, v.null())),
+    workspaceViewMode: v.optional(v.union(vWorkspaceViewMode, v.null())),
+    workspaceBackgroundMode: v.optional(v.union(vWorkspaceBackgroundMode, v.null())),
+    workspaceHubVisibility: v.optional(v.union(vWorkspaceHubVisibility, v.null())),
     editorDefaultMode: v.optional(v.union(vEditorMode, v.null())),
   },
   handler: async (ctx, args) => {
@@ -66,6 +75,9 @@ export const upsert = mutation({
 
     if (args.defaultLanding !== undefined) patch.defaultLanding = args.defaultLanding;
     if (args.workspaceLayout !== undefined) patch.workspaceLayout = args.workspaceLayout ?? undefined;
+    if (args.workspaceViewMode !== undefined) patch.workspaceViewMode = args.workspaceViewMode ?? undefined;
+    if (args.workspaceBackgroundMode !== undefined) patch.workspaceBackgroundMode = args.workspaceBackgroundMode ?? undefined;
+    if (args.workspaceHubVisibility !== undefined) patch.workspaceHubVisibility = args.workspaceHubVisibility ?? undefined;
     if (args.editorDefaultMode !== undefined) patch.editorDefaultMode = args.editorDefaultMode ?? undefined;
 
     if (!current) {
@@ -74,6 +86,9 @@ export const upsert = mutation({
         orgId: actor.orgId,
         defaultLanding: args.defaultLanding ?? "smart",
         workspaceLayout: args.workspaceLayout ?? undefined,
+        workspaceViewMode: args.workspaceViewMode ?? undefined,
+        workspaceBackgroundMode: args.workspaceBackgroundMode ?? undefined,
+        workspaceHubVisibility: args.workspaceHubVisibility ?? undefined,
         editorDefaultMode: args.editorDefaultMode ?? undefined,
         updatedAt: now,
       });

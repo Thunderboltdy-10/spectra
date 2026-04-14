@@ -1,458 +1,481 @@
-"use client";
-
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
-import {
-  DEFAULT_UTILITY_ZONES,
-  type WorkspaceUtilityType,
-  type WorkspaceUtilityZone,
+import type {
+  BackgroundMode,
+  HubSurfaceState,
+  HubVisibility,
+  ZoomTier,
+  ZoomSignals,
+  ViewMode,
+  WorkspaceData,
+  WorkspaceItemData,
 } from "@/lib/workspace/contracts";
-import {
-  resolveWorkspaceState,
-  type WorkspaceCanvasState,
-  type WorkspaceState,
-} from "@/lib/workspace/state-machine";
+import { zoomTierForLevel, zoomTierProgress, computeZoomSignals, VIEWPORT, computeWorkspaceEnvelope } from "@/lib/workspace/contracts";
 
-export type WorkspaceCameraState = {
-  x: number;
-  y: number;
-  z: number;
+export type DeepEditTarget = {
+  item: WorkspaceItemData;
+  locked: boolean;
+  pinned: boolean;
 };
 
-export type CardBounds = {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
+import type { ResultCardData } from "@/components/workspace/result-card";
+
+type WorkspacePreferencesPayload = {
+  workspaceViewMode?: ViewMode;
+  workspaceBackgroundMode?: BackgroundMode;
+  workspaceHubVisibility?: HubVisibility;
 };
 
-export type WorkspaceBackgroundMode = "dots" | "grid" | "blank";
+let persistWorkspacePreferencesTimer: ReturnType<typeof setTimeout> | null = null;
 
-export type WorkspaceViewMode = "byType" | "byTopic" | "timeline";
+function scheduleWorkspacePreferencesPersist(patch: WorkspacePreferencesPayload) {
+  if (typeof window === "undefined") return;
 
-/** Zoom bands are still used as a presentation hint by the legacy canvas renderer. */
-export type ZoomBand = "overview" | "summary" | "detail" | "internal";
-
-/** Panel types for the right push-panel */
-export type PanelType = "chat" | "note" | "artifact" | "planner" | "route-trace";
-
-type PanelState = {
-  type: PanelType;
-  id: string; // threadId, noteId, artifactId, etc.
-};
-
-type WorkspaceStoreState = {
-  camera: WorkspaceCameraState;
-  selectedWorkstreamId?: string;
-  showArchived: boolean;
-  showConnections: boolean;
-  backgroundMode: WorkspaceBackgroundMode;
-  isCreateDialogOpen: boolean;
-
-  // Semantic zoom — primary focus plus any visible internal workstreams
-  primaryWorkstreamId?: string;
-  visibleWorkstreamIds: string[];
-  zoomBand: ZoomBand;
-  workspaceState: WorkspaceState;
-  lastCanvasState: WorkspaceCanvasState;
-  commandModeOpen: boolean;
-  utilityRevealOpen: boolean;
-
-  // View mode per committed workstream
-  viewMode: WorkspaceViewMode;
-  viewModeByWorkstream: Record<string, WorkspaceViewMode>;
-
-  // Right push-panel
-  panel?: PanelState;
-
-  // Initial chat query when entering a workstream via quick chat
-  openChatQuery?: string;
-  openChatScopeCleared?: boolean;
-
-  // Previous viewport for zoom-out restoration
-  previousViewport?: { x: number; y: number; zoom: number };
-
-  // Focus timer
-  timerState: {
-    active: boolean;
-    sessionMinutes: number;
-    elapsed: number; // seconds elapsed in current session
-    sessionsCompleted: number;
-    workstreamId?: string;
-    workstreamTitle?: string;
-  };
-
-  edgeUtilityZones: Partial<Record<WorkspaceUtilityType, WorkspaceUtilityZone>>;
-  utilityVisible: Partial<Record<WorkspaceUtilityType, boolean>>;
-  utilityPositions: Partial<Record<WorkspaceUtilityType, { x: number; y: number }>>;
-  commandBarAnimating: boolean;
-
-  // Actions
-  setCamera: (camera: WorkspaceCameraState) => void;
-  setZoomBand: (band: ZoomBand) => void;
-  setWorkspaceState: (workspaceState: WorkspaceState) => void;
-  enterCommandMode: () => void;
-  exitCommandMode: () => void;
-  setUtilityRevealOpen: (open: boolean) => void;
-  setUtilityZone: (utility: WorkspaceUtilityType, zone: WorkspaceUtilityZone) => void;
-  setUtilityPosition: (utility: WorkspaceUtilityType, position: { x: number; y: number }) => void;
-  setUtilityVisible: (utility: WorkspaceUtilityType, visible: boolean) => void;
-  setCommandBarAnimating: (animating: boolean) => void;
-  setSelectedWorkstreamId: (workstreamId?: string) => void;
-  setShowArchived: (showArchived: boolean) => void;
-  setShowConnections: (showConnections: boolean) => void;
-  setBackgroundMode: (backgroundMode: WorkspaceBackgroundMode) => void;
-  openCreateDialog: () => void;
-  closeCreateDialog: () => void;
-
-  // Semantic zoom commitment
-  commitWorkstream: (workstreamId: string) => void;
-  commitWorkstreamWithChat: (workstreamId: string, query?: string) => void;
-  setPrimaryWorkstreamId: (workstreamId?: string) => void;
-  setVisibleWorkstreamIds: (workstreamIds: string[]) => void;
-  exitWorkstream: () => void;
-  setPreviousViewport: (viewport: { x: number; y: number; zoom: number }) => void;
-
-  // View modes
-  setViewMode: (mode: WorkspaceViewMode, workstreamId?: string) => void;
-
-  // Push panel
-  openPanel: (type: PanelType, id: string) => void;
-  closePanel: () => void;
-  setOpenChatQuery: (query?: string) => void;
-  setOpenChatScopeCleared: (cleared: boolean) => void;
-  clearOpenChatQuery: () => void;
-
-  // Timer
-  setTimerMinutes: (minutes: number) => void;
-  startTimer: (sessionMinutes?: number, workstreamId?: string, workstreamTitle?: string) => void;
-  pauseTimer: () => void;
-  resetTimer: () => void;
-  tickTimer: () => void;
-  completeTimerSession: () => void;
-
-  reset: () => void;
-};
-
-const DEFAULT_CAMERA: WorkspaceCameraState = {
-  x: 0,
-  y: 0,
-  z: 1,
-};
-
-function normalizeWorkspaceViewMode(
-  value: unknown,
-): WorkspaceViewMode {
-  switch (value) {
-    case "byType":
-    case "byTopic":
-    case "timeline":
-      return value;
-    case "structured":
-      return "byType";
-    case "columns":
-      return "byTopic";
-    case "graph":
-      return "timeline";
-    default:
-      return "byType";
+  if (persistWorkspacePreferencesTimer) {
+    clearTimeout(persistWorkspacePreferencesTimer);
   }
+
+  persistWorkspacePreferencesTimer = setTimeout(() => {
+    void fetch("/api/preferences", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    }).catch(() => {
+      // Preference sync is best-effort; avoid breaking workspace interactions.
+    });
+  }, 120);
 }
 
-export const useWorkspaceStore = create<WorkspaceStoreState>()(
-  persist(
-    (set) => ({
-      camera: DEFAULT_CAMERA,
-      setZoomBand: (band) => set({ zoomBand: band }),
-      selectedWorkstreamId: undefined,
-      showArchived: true,
-      showConnections: true,
-      backgroundMode: "dots",
-      isCreateDialogOpen: false,
-      primaryWorkstreamId: undefined,
-      visibleWorkstreamIds: [],
-      zoomBand: "summary",
-      workspaceState: "world_overview",
-      lastCanvasState: "world_overview",
-      commandModeOpen: false,
-      utilityRevealOpen: false,
-      viewMode: "byType",
-      viewModeByWorkstream: {},
-      panel: undefined,
-      openChatQuery: undefined,
-      openChatScopeCleared: false,
-      previousViewport: undefined,
-      timerState: {
-        active: false,
-        sessionMinutes: 25,
-        elapsed: 0,
-        sessionsCompleted: 0,
-      },
-      edgeUtilityZones: { ...DEFAULT_UTILITY_ZONES },
-      utilityVisible: {},
-      utilityPositions: {},
-      commandBarAnimating: false,
+type WorkspaceState = {
+  zoom: number;
+  zoomTier: ZoomTier;
+  /** 0-1 progress within the current zoom tier for smooth interpolation */
+  zoomProgress: number;
+  /** Continuous semantic zoom signals for progressive rendering */
+  zoomSignals: ZoomSignals;
+  viewportX: number;
+  viewportY: number;
 
-      setCamera: (camera) => set({ camera }),
-      setWorkspaceState: (workspaceState) =>
-        set((state) => resolveWorkspaceState({
-          activeWorkstreamId: state.primaryWorkstreamId,
-          panelOpen: !!state.panel,
-          commandModeOpen: workspaceState === "command_mode",
-          utilityRevealOpen: workspaceState === "utility_reveal",
-          lastCanvasState: state.lastCanvasState,
-        })),
-      enterCommandMode: () =>
-        set((state) => resolveWorkspaceState({
-          activeWorkstreamId: state.primaryWorkstreamId,
-          panelOpen: !!state.panel,
-          commandModeOpen: state.workspaceState !== "deep_work",
-          utilityRevealOpen: false,
-          lastCanvasState: state.lastCanvasState,
-        })),
-      exitCommandMode: () =>
-        set((state) => resolveWorkspaceState({
-          activeWorkstreamId: state.primaryWorkstreamId,
-          panelOpen: !!state.panel,
-          commandModeOpen: false,
-          utilityRevealOpen: state.utilityRevealOpen,
-          lastCanvasState: state.lastCanvasState,
-        })),
-      setUtilityRevealOpen: (open) =>
-        set((state) => resolveWorkspaceState({
-          activeWorkstreamId: state.primaryWorkstreamId,
-          panelOpen: !!state.panel,
-          commandModeOpen: open ? false : state.commandModeOpen,
-          utilityRevealOpen: open,
-          lastCanvasState: state.lastCanvasState,
-        })),
-      setUtilityZone: (utility, zone) =>
-        set((state) => ({
-          edgeUtilityZones: {
-            ...state.edgeUtilityZones,
-            [utility]: zone,
-          },
-        })),
-      setUtilityPosition: (utility, position) =>
-        set((state) => ({
-          utilityPositions: {
-            ...state.utilityPositions,
-            [utility]: position,
-          },
-        })),
-      setUtilityVisible: (utility, visible) =>
-        set((state) => ({
-          utilityVisible: {
-            ...state.utilityVisible,
-            [utility]: visible,
-          },
-        })),
-      setCommandBarAnimating: (commandBarAnimating) => set({ commandBarAnimating }),
-      setSelectedWorkstreamId: (selectedWorkstreamId) => set({ selectedWorkstreamId }),
-      setShowArchived: (showArchived) => set({ showArchived }),
-      setShowConnections: (showConnections) => set({ showConnections }),
-      setBackgroundMode: (backgroundMode) => set({ backgroundMode }),
-      openCreateDialog: () => set({ isCreateDialogOpen: true }),
-      closeCreateDialog: () => set({ isCreateDialogOpen: false }),
+  /** Smoothed workspace proximity: 0=far from any, 1=deeply inside one */
+  workspaceProximity: number;
+  activeWorkspaceId: string | null;
+  committedWorkspaceId: string | null;
+  /** Workspace closest to viewport center u2013 used for auto-entry */
+  nearestWorkspaceId: string | null;
+  viewMode: ViewMode;
+  focusedItemId: string | null;
 
-      commitWorkstream: (workstreamId) =>
-        set((state) => ({
-          primaryWorkstreamId: workstreamId,
-          visibleWorkstreamIds: [workstreamId],
-          viewMode: state.viewModeByWorkstream[workstreamId] ?? state.viewMode,
-          openChatQuery: undefined,
-          openChatScopeCleared: false,
-          panel: undefined,
-          ...resolveWorkspaceState({
-            activeWorkstreamId: workstreamId,
-            panelOpen: false,
-            commandModeOpen: false,
-            utilityRevealOpen: false,
-            lastCanvasState: state.lastCanvasState,
-          }),
-        })),
-      commitWorkstreamWithChat: (workstreamId, query) =>
-        set((state) => ({
-          primaryWorkstreamId: workstreamId,
-          visibleWorkstreamIds: [workstreamId],
-          viewMode: state.viewModeByWorkstream[workstreamId] ?? state.viewMode,
-          openChatQuery: query,
-          openChatScopeCleared: false,
-          panel: query ? { type: "chat", id: "new" } : undefined,
-          ...resolveWorkspaceState({
-            activeWorkstreamId: workstreamId,
-            panelOpen: !!query,
-            commandModeOpen: false,
-            utilityRevealOpen: false,
-            lastCanvasState: state.lastCanvasState,
-          }),
-        })),
-      setPrimaryWorkstreamId: (primaryWorkstreamId) =>
-        set((state) => ({
-          primaryWorkstreamId,
-          viewMode: primaryWorkstreamId
-            ? state.viewModeByWorkstream[primaryWorkstreamId] ?? state.viewMode
-            : state.viewMode,
-        })),
-      setVisibleWorkstreamIds: (visibleWorkstreamIds) => set({ visibleWorkstreamIds }),
-      exitWorkstream: () =>
-        set((state) => ({
-          primaryWorkstreamId: undefined,
-          visibleWorkstreamIds: [],
-          openChatQuery: undefined,
-          openChatScopeCleared: false,
-          panel: undefined,
-          ...resolveWorkspaceState({
-            activeWorkstreamId: undefined,
-            panelOpen: false,
-            commandModeOpen: false,
-            utilityRevealOpen: false,
-            lastCanvasState: state.lastCanvasState,
-          }),
-        })),
-      setPreviousViewport: (viewport) => set({ previousViewport: viewport }),
+  /** Deep-edit surfaces open on right edge (hub ecology, not panel) */
+  deepEditTargets: DeepEditTarget[];
 
-      setViewMode: (viewMode, workstreamId) =>
-        set((state) => {
-          const normalized = normalizeWorkspaceViewMode(viewMode);
-          const targetWorkstreamId = workstreamId ?? state.primaryWorkstreamId;
-          if (!targetWorkstreamId) {
-            return { viewMode: normalized };
-          }
-          return {
-            viewMode: normalized,
-            viewModeByWorkstream: {
-              ...state.viewModeByWorkstream,
-              [targetWorkstreamId]: normalized,
-            },
-          };
-        }),
+  hubVisibility: HubVisibility;
+  backgroundMode: BackgroundMode;
+  plannerOpen: boolean;
+  openSurfaces: Record<string, HubSurfaceState>;
+  pinnedHubItemIds: string[];
+  pendingResultCard:
+    | {
+        state: "loading" | "done";
+        promptSnippet: string;
+        summary?: string;
+        targetId?: string;
+      }
+    | null;
 
-      openPanel: (type, id) =>
-        set((state) => ({
-          panel: { type, id },
-          ...resolveWorkspaceState({
-            activeWorkstreamId: state.primaryWorkstreamId,
-            panelOpen: true,
-            commandModeOpen: false,
-            utilityRevealOpen: false,
-            lastCanvasState: state.lastCanvasState,
-          }),
-        })),
-      closePanel: () =>
-        set((state) => ({
-          panel: undefined,
-          ...resolveWorkspaceState({
-            activeWorkstreamId: state.primaryWorkstreamId,
-            panelOpen: false,
-            commandModeOpen: false,
-            utilityRevealOpen: state.utilityRevealOpen,
-            lastCanvasState: state.lastCanvasState,
-          }),
-        })),
-      setOpenChatQuery: (query) => set({ openChatQuery: query }),
-      setOpenChatScopeCleared: (openChatScopeCleared) => set({ openChatScopeCleared }),
-      clearOpenChatQuery: () => set({ openChatQuery: undefined, openChatScopeCleared: false }),
+  /** Stacking result cards above command bar */
+  resultCards: ResultCardData[];
 
-      setTimerMinutes: (minutes) =>
-        set((state) => ({
-          timerState: { ...state.timerState, sessionMinutes: minutes, elapsed: 0 },
-        })),
-      startTimer: (sessionMinutes, workstreamId, workstreamTitle) => {
-        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("ai-school:timer-start"));
-        set((state) => ({
-          timerState: {
-            ...state.timerState,
-            active: true,
-            sessionMinutes: sessionMinutes ?? state.timerState.sessionMinutes,
-            workstreamId: workstreamId ?? state.timerState.workstreamId,
-            workstreamTitle: workstreamTitle ?? state.timerState.workstreamTitle,
-          },
-        }));
-      },
-      pauseTimer: () => {
-        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("ai-school:timer-pause"));
-        set((state) => ({
-          timerState: { ...state.timerState, active: false },
-        }));
-      },
-      resetTimer: () => {
-        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("ai-school:timer-reset"));
-        set((state) => ({
-          timerState: { ...state.timerState, active: false, elapsed: 0 },
-        }));
-      },
-      tickTimer: () =>
-        set((state) => ({
-          timerState: { ...state.timerState, elapsed: state.timerState.elapsed + 1 },
-        })),
-      completeTimerSession: () =>
-        set((state) => ({
-          timerState: {
-            ...state.timerState,
-            active: false,
-            elapsed: 0,
-            sessionsCompleted: state.timerState.sessionsCompleted + 1,
-          },
-        })),
 
-      reset: () =>
-        set({
-          camera: DEFAULT_CAMERA,
-          selectedWorkstreamId: undefined,
-          showArchived: true,
-          showConnections: true,
-          backgroundMode: "dots",
-          isCreateDialogOpen: false,
-          primaryWorkstreamId: undefined,
-          visibleWorkstreamIds: [],
-          openChatQuery: undefined,
-          openChatScopeCleared: false,
-          zoomBand: "summary",
-          workspaceState: "world_overview",
-          lastCanvasState: "world_overview",
-          commandModeOpen: false,
-          utilityRevealOpen: false,
-          viewMode: "byType",
-          viewModeByWorkstream: {},
-          panel: undefined,
-          previousViewport: undefined,
-          edgeUtilityZones: { ...DEFAULT_UTILITY_ZONES },
-          timerState: {
-            active: false,
-            sessionMinutes: 25,
-            elapsed: 0,
-            sessionsCompleted: 0,
-          },
-        }),
+  /** Active thread selected in threads hub for inline preview */
+  activeThreadId: string | null;
+  workspaces: WorkspaceData[];
+  hasHydratedPreferences: boolean;
+
+  setZoom: (zoom: number) => void;
+  setViewport: (x: number, y: number, zoom: number) => void;
+  setActiveWorkspace: (id: string | null) => void;
+  commitToWorkspace: (id: string | null) => void;
+  setNearestWorkspace: (id: string | null) => void;
+  setViewMode: (mode: ViewMode) => void;
+  setFocusedItem: (id: string | null) => void;
+
+  /**
+   * Deep edit surface management.
+   * openDeepEdit uses replacement semantics: opening a surface of the same
+   * itemType as an existing unlocked surface replaces it rather than stacking.
+   */
+  openDeepEdit: (item: WorkspaceItemData) => void;
+  closeDeepEdit: (itemId: string) => void;
+  toggleDeepEditLock: (itemId: string) => void;
+  toggleDeepEditPin: (itemId: string) => void;
+  closeAllDeepEdits: () => void;
+
+  setHubVisibility: (visibility: HubVisibility) => void;
+  cycleHubVisibility: () => void;
+  setBackgroundMode: (mode: BackgroundMode) => void;
+  togglePlanner: () => void;
+  openSurface: (surface: HubSurfaceState) => void;
+  closeSurface: (id: string) => void;
+  toggleSurfaceLocked: (id: string) => void;
+  pinHubItem: (id: string) => void;
+  unpinHubItem: (id: string) => void;
+  setPendingResultCard: (
+    card:
+      | {
+          state: "loading" | "done";
+          promptSnippet: string;
+          summary?: string;
+          targetId?: string;
+        }
+      | null,
+  ) => void;
+
+  /** Result card stack management */
+  pushResultCard: (card: Omit<ResultCardData, "createdAt">) => void;
+  updateResultCard: (cardId: string, updates: Partial<ResultCardData>) => void;
+  dismissResultCard: (cardId: string) => void;
+  reopenResultCard: (cardId: string) => void;
+  clearResultCards: () => void;
+
+  /** Thread hub management */
+  openThreadInHub: (threadId: string) => void;
+  closeThreadInHub: () => void;
+
+  setWorkspaces: (workspaces: WorkspaceData[]) => void;
+  hydratePreferences: (preferences: WorkspacePreferencesPayload) => void;
+
+  /** Computed fly-to target for dock navigation */
+  flyToTarget: { centerX: number; centerY: number; zoom: number; requestId: number } | null;
+  flyToWorkspace: (id: string) => void;
+  clearFlyToTarget: () => void;
+};
+
+const HUB_VISIBILITY_ORDER: HubVisibility[] = ["collapsed", "expanded", "hidden"];
+
+export const useWorkspaceStore = create<WorkspaceState>((set) => ({
+  zoom: VIEWPORT.DEFAULT_ZOOM,
+  zoomTier: zoomTierForLevel(VIEWPORT.DEFAULT_ZOOM),
+  zoomProgress: zoomTierProgress(VIEWPORT.DEFAULT_ZOOM),
+  zoomSignals: computeZoomSignals(VIEWPORT.DEFAULT_ZOOM),
+  viewportX: 0,
+  viewportY: 0,
+
+  workspaceProximity: 0,
+  activeWorkspaceId: null,
+  committedWorkspaceId: null,
+  nearestWorkspaceId: null,
+  viewMode: "byType",
+  focusedItemId: null,
+
+  deepEditTargets: [],
+
+  hubVisibility: "expanded",
+  backgroundMode: "dots",
+  plannerOpen: false,
+  openSurfaces: {},
+  pinnedHubItemIds: [],
+  pendingResultCard: null,
+  resultCards: [],
+  activeThreadId: null,
+
+  workspaces: [],
+  hasHydratedPreferences: false,
+  flyToTarget: null,
+
+  setZoom: (zoom) =>
+    set({
+      zoom,
+      zoomTier: zoomTierForLevel(zoom),
+      zoomProgress: zoomTierProgress(zoom),
+      zoomSignals: computeZoomSignals(zoom),
     }),
-    {
-      name: "workspace-storage",
-      storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({
-        utilityPositions: state.utilityPositions,
-        edgeUtilityZones: state.edgeUtilityZones,
-        backgroundMode: state.backgroundMode,
-        showConnections: state.showConnections,
-        showArchived: state.showArchived,
-        viewMode: state.viewMode,
-        viewModeByWorkstream: state.viewModeByWorkstream,
-      }),
-      merge: (persistedState, currentState) => {
-        const persisted = (persistedState ?? {}) as Partial<WorkspaceStoreState>;
-        const persistedViewModeByWorkstream = Object.fromEntries(
-          Object.entries(persisted.viewModeByWorkstream ?? {}).map(([workstreamId, mode]) => [
-            workstreamId,
-            normalizeWorkspaceViewMode(mode),
-          ]),
-        );
-        return {
-          ...currentState,
-          ...persisted,
-          viewMode: normalizeWorkspaceViewMode(persisted.viewMode),
-          viewModeByWorkstream: persistedViewModeByWorkstream,
-        };
+
+  setViewport: (x, y, zoom) =>
+    set((state) => {
+      const nextTier = zoomTierForLevel(zoom);
+      const progress = zoomTierProgress(zoom);
+      const signals = computeZoomSignals(zoom);
+
+      // Compute viewport center in world coordinates
+      const screenW = typeof window !== "undefined" ? window.innerWidth : 1400;
+      const screenH = typeof window !== "undefined" ? window.innerHeight : 900;
+      const worldCenterX = (-x + screenW / 2) / zoom;
+      const worldCenterY = (-y + screenH / 2) / zoom;
+
+      let nearestId = state.nearestWorkspaceId;
+      let minDistance = Infinity;
+
+      state.workspaces.forEach((ws, idx) => {
+        const env = computeWorkspaceEnvelope(idx, ws.itemCount);
+        const dx = env.centerX - worldCenterX;
+        const dy = env.centerY - worldCenterY;
+        const dist = dx * dx + dy * dy;
+        if (dist < minDistance) {
+          minDistance = dist;
+          nearestId = ws.id;
+        }
+      });
+
+      // Continuous workspace proximity inference.
+      // Uses the zoom signals (structureReveal, contentDepth) instead of
+      // raw zoom to drive proximity. This means commitment responds to
+      // the semantic meaning of the zoom level, not just the numeric value.
+      // Hysteresis prevents flickering at boundary transitions.
+      const commitThreshold = 0.48;
+      const uncommitThreshold = 0.22;
+
+      // Proximity combines zoom signals (semantic depth) with spatial
+      // closeness to the nearest workspace center.
+      let proximity = 0;
+      if (nearestId && state.workspaces.length > 0) {
+        const nearestIdx = state.workspaces.findIndex((w) => w.id === nearestId);
+        if (nearestIdx >= 0) {
+          const env = computeWorkspaceEnvelope(nearestIdx, state.workspaces[nearestIdx].itemCount);
+          const dx = env.centerX - worldCenterX;
+          const dy = env.centerY - worldCenterY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          // Normalize distance: 0 when at center, 1 when at ~2x envelope radius
+          const envRadius = Math.max(env.width, env.height) * 0.6;
+          const spatialCloseness = Math.max(0, 1 - dist / (envRadius * 2));
+          // Semantic zoom depth: uses continuous signals instead of raw zoom.
+          // structureReveal = items becoming visible (entering workspace interior)
+          // contentDepth = detail/touch tier (deeply inside workspace)
+          const semanticDepth = Math.max(signals.structureReveal, signals.contentDepth);
+          proximity = spatialCloseness * 0.35 + semanticDepth * 0.65;
+        }
+      }
+
+      let autoWorkspaceId = state.committedWorkspaceId;
+      if (state.committedWorkspaceId) {
+        // Already committed: only uncommit when proximity drops below lower threshold
+        if (proximity < uncommitThreshold) {
+          autoWorkspaceId = null;
+        }
+      } else {
+        // Not committed: only commit when proximity exceeds upper threshold
+        if (proximity >= commitThreshold) {
+          autoWorkspaceId = nearestId;
+        }
+      }
+
+      return {
+        viewportX: x,
+        viewportY: y,
+        zoom,
+        zoomTier: nextTier,
+        zoomProgress: progress,
+        zoomSignals: signals,
+        workspaceProximity: proximity,
+        nearestWorkspaceId: nearestId,
+        committedWorkspaceId: autoWorkspaceId,
+        activeWorkspaceId: autoWorkspaceId ?? state.activeWorkspaceId,
+      };
+    }),
+
+  setActiveWorkspace: (id) =>
+    set({ activeWorkspaceId: id }),
+
+  commitToWorkspace: (id) =>
+    set({ committedWorkspaceId: id, activeWorkspaceId: id, nearestWorkspaceId: id }),
+
+  setNearestWorkspace: (id) =>
+    set({ nearestWorkspaceId: id }),
+
+  setViewMode: (mode) =>
+    set(() => {
+      scheduleWorkspacePreferencesPersist({ workspaceViewMode: mode });
+      return { viewMode: mode };
+    }),
+
+  setFocusedItem: (id) =>
+    set({ focusedItemId: id }),
+
+  /* ── Deep Edit Surface Management ── */
+
+  openDeepEdit: (item) =>
+    set((state) => {
+      // Already open u2014 just focus it
+      const exists = state.deepEditTargets.find((t) => t.item.id === item.id);
+      if (exists) return { focusedItemId: item.id };
+
+      // Replacement semantics: if there's an unlocked surface, replace it
+      // rather than stacking, to keep the UI clean as a single active deep edit.
+      const unlockedIdx = state.deepEditTargets.findIndex(
+        (t) => !t.locked && !t.pinned,
+      );
+
+      let nextTargets: DeepEditTarget[];
+      if (unlockedIdx >= 0) {
+        nextTargets = [...state.deepEditTargets];
+        nextTargets[unlockedIdx] = { item, locked: false, pinned: false };
+      } else {
+        nextTargets = [
+          ...state.deepEditTargets,
+          { item, locked: false, pinned: false },
+        ];
+      }
+
+      return {
+        deepEditTargets: nextTargets,
+        focusedItemId: item.id,
+      };
+    }),
+
+  closeDeepEdit: (itemId) =>
+    set((state) => ({
+      deepEditTargets: state.deepEditTargets.filter((t) => t.item.id !== itemId),
+      focusedItemId: state.focusedItemId === itemId ? null : state.focusedItemId,
+    })),
+
+  toggleDeepEditLock: (itemId) =>
+    set((state) => ({
+      deepEditTargets: state.deepEditTargets.map((t) =>
+        t.item.id === itemId ? { ...t, locked: !t.locked } : t,
+      ),
+    })),
+
+  toggleDeepEditPin: (itemId) =>
+    set((state) => ({
+      deepEditTargets: state.deepEditTargets.map((t) =>
+        t.item.id === itemId ? { ...t, pinned: !t.pinned } : t,
+      ),
+    })),
+
+  closeAllDeepEdits: () =>
+    set({ deepEditTargets: [], focusedItemId: null }),
+
+  /* ── Hub Visibility ── */
+
+  setHubVisibility: (visibility) =>
+    set(() => {
+      scheduleWorkspacePreferencesPersist({ workspaceHubVisibility: visibility });
+      return { hubVisibility: visibility };
+    }),
+
+  cycleHubVisibility: () =>
+    set((state) => ({
+      hubVisibility:
+        HUB_VISIBILITY_ORDER[(HUB_VISIBILITY_ORDER.indexOf(state.hubVisibility) + 1) % HUB_VISIBILITY_ORDER.length],
+    })),
+
+  setBackgroundMode: (mode) =>
+    set(() => {
+      scheduleWorkspacePreferencesPersist({ workspaceBackgroundMode: mode });
+      return { backgroundMode: mode };
+    }),
+
+  togglePlanner: () =>
+    set((state) => ({ plannerOpen: !state.plannerOpen })),
+
+  openSurface: (surface) =>
+    set((state) => ({
+      openSurfaces: {
+        ...state.openSurfaces,
+        [surface.id]: surface,
       },
-    }
-  )
-);
+    })),
+
+  closeSurface: (id) =>
+    set((state) => {
+      const next = { ...state.openSurfaces };
+      delete next[id];
+      return { openSurfaces: next };
+    }),
+
+  toggleSurfaceLocked: (id) =>
+    set((state) => {
+      const surface = state.openSurfaces[id];
+      if (!surface) return state;
+      return {
+        openSurfaces: {
+          ...state.openSurfaces,
+          [id]: { ...surface, locked: !surface.locked, expanded: surface.locked ? surface.expanded : true },
+        },
+      };
+    }),
+
+  pinHubItem: (id) =>
+    set((state) => ({
+      pinnedHubItemIds: state.pinnedHubItemIds.includes(id) ? state.pinnedHubItemIds : [...state.pinnedHubItemIds, id],
+    })),
+
+  unpinHubItem: (id) =>
+    set((state) => ({
+      pinnedHubItemIds: state.pinnedHubItemIds.filter((entry) => entry !== id),
+    })),
+
+  setPendingResultCard: (card) =>
+    set({ pendingResultCard: card }),
+
+  /* u2500u2500 Result Card Stack Management u2500u2500 */
+
+  pushResultCard: (card) =>
+    set((state) => ({
+      resultCards: [
+        { ...card, createdAt: Date.now() },
+        ...state.resultCards,
+      ],
+    })),
+
+  updateResultCard: (cardId, updates) =>
+    set((state) => ({
+      resultCards: state.resultCards.map((c) =>
+        c.id === cardId ? { ...c, ...updates } : c,
+      ),
+    })),
+
+  dismissResultCard: (cardId) =>
+    set((state) => ({
+      resultCards: state.resultCards.map((c) =>
+        c.id === cardId ? { ...c, state: "dismissed" as const } : c,
+      ),
+    })),
+
+  reopenResultCard: (cardId) =>
+    set((state) => ({
+      resultCards: state.resultCards.map((c) =>
+        c.id === cardId ? { ...c, state: "done" as const } : c,
+      ),
+    })),
+
+  clearResultCards: () =>
+    set({ resultCards: [] }),
+
+  openThreadInHub: (threadId) =>
+    set({ activeThreadId: threadId }),
+
+  closeThreadInHub: () =>
+    set({ activeThreadId: null }),
+
+  setWorkspaces: (workspaces) =>
+    set({ workspaces }),
+
+  hydratePreferences: (preferences) =>
+    set((state) => ({
+      viewMode: preferences.workspaceViewMode ?? state.viewMode,
+      backgroundMode: preferences.workspaceBackgroundMode ?? state.backgroundMode,
+      hubVisibility: preferences.workspaceHubVisibility ?? state.hubVisibility,
+      hasHydratedPreferences: true,
+    })),
+
+  flyToWorkspace: (id) =>
+    set((state) => {
+      const idx = state.workspaces.findIndex((w) => w.id === id);
+      if (idx < 0) return state;
+      const ws = state.workspaces[idx];
+      const envelope = computeWorkspaceEnvelope(idx, ws.itemCount);
+      return {
+        committedWorkspaceId: id,
+        activeWorkspaceId: id,
+        nearestWorkspaceId: id,
+        flyToTarget: {
+          centerX: envelope.centerX,
+          centerY: envelope.centerY,
+          zoom: envelope.fitZoom,
+          requestId: Date.now(),
+        },
+      };
+    }),
+
+  clearFlyToTarget: () =>
+    set({ flyToTarget: null }),
+}));

@@ -16,15 +16,18 @@ Execution rules:
 
 ## 2.1 Workspace Surface Architecture
 
+The workspace is one continuous canvas. `byType`, `byTopic`, and `timeline` are same-canvas lenses, not separate boxed subviews. In `/workspace`, Deep Edit happens through expanded hub/edge surfaces rather than a right-panel mental model.
+
+
 ```mermaid
 flowchart TD
   L[Landscape View] --> W[Workspace Region]
   W --> G[Glance Tier]
   W --> T[Touch Tier]
-  T --> D[Deep Edit Panel]
+  T --> D[Deep Edit Surfaces]
   H[Hub Edge Items] --> L
   H --> W
-  Q[Quick Chat] --> T
+  Q[Unified Command Bar] --> T
   Q --> D
 ```
 
@@ -33,7 +36,7 @@ Legend:
 - `Workspace Region` = large spatial territory for one workspace
 - `Glance Tier` = preview-only workspace item rendering
 - `Touch Tier` = direct inline interaction layer
-- `Deep Edit Panel` = right-side escalated editing surface
+- `Deep Edit Surfaces` = expanded workspace editing surfaces that remain part of the hub ecology
 - `Hub Edge Items` = persistent edge-bound UI
 
 ### ASCII topology sketch
@@ -70,8 +73,8 @@ flowchart LR
 1. Entity truth changes first.
 2. Workspace mutation is recorded where action is undo-relevant.
 3. Workspace projection updates immediately.
-4. Event dispatch occurs after projection state is safe.
-5. UI invalidates and refreshes visible content.
+4. Revision/event invalidation occurs after projection state is safe.
+5. UI invalidates and refreshes visible content through the authoritative batched workspace content contract.
 
 ---
 
@@ -175,7 +178,7 @@ flowchart LR
 # Wave 1 — Foundation: Canonical Surface, Projection Correctness, Spatial Rebuild
 
 ## Objective
-Establish the minimal truthful substrate required for the redesign: canonical artifact taxonomy, immediate projection behavior, larger workspace geometry, LRU content caching, new workspace state semantics, and default hub primitives.
+Establish the minimal truthful substrate required for the redesign: canonical artifact taxonomy, immediate projection behavior, larger workspace geometry, LRU content caching, new workspace state semantics, default hub primitives, planner-left/workspace-selector-left command ecology, and the abandonment of the `/workspace` right-panel Deep Edit mental model.
 
 ## Why this wave exists
 All later work depends on three things being true:
@@ -196,6 +199,8 @@ All later work depends on three things being true:
 - Workspace geometry and zoom band recalibration
 - Glance-tier renderer system
 - Hub primitive shells
+- Right-edge deep-edit surface foundations
+- Unified command/result card foundations
 - Undo entry point via workspace mutations
 - AI discard flow fix path defined and implemented for persisted behavior
 
@@ -343,6 +348,8 @@ Wave 1 passes only when all are true:
 - Cache no longer grows unbounded.
 - Undo entry point is operational.
 - Hub primitives render consistently across workspace contexts.
+- Planner is present as a real operating layer on the left edge above the selector.
+- The workspace architecture no longer assumes right-panel Deep Edit as truth.
 - No hard zoom boundary traps or route-like transitions exist.
 
 ### Proof-of-done checklist

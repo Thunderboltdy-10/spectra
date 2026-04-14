@@ -519,6 +519,67 @@ export async function executeOrchestratorTool(params: {
     };
   }
 
+  if (params.name === "surface_result") {
+    const workstreamId = compactText(args.workstreamId, 128) || context.activeWorkstreamId;
+    const title = compactText(args.title, 160) || "Workspace result";
+    const summary = compactText(args.summary, 320) || title;
+    if (!workstreamId) {
+      return {
+        name: params.name,
+        summary: "Workspace result was skipped because no workstream was active.",
+        modelPayload: { created: false },
+        eventPayload: { created: false },
+      };
+    }
+
+    const result = await convexMutation<
+      {
+        actorClerkId: string;
+        workstreamId: string;
+        sourceChatId?: string;
+        intent: "note" | "planner" | "thread" | "result" | "widget";
+        status: "processing" | "completed" | "dismissed";
+        title: string;
+        summary: string;
+        detail?: string;
+        variant?: "summary" | "answer" | "artifact" | "planner" | "thread";
+        targetKind?: "artifact" | "plannerItem" | "chat" | "workspaceItem" | "result";
+        targetId?: string;
+        metadata?: Record<string, unknown>;
+      },
+      { resultId: string }
+    >("workspaceCommandResults:create", {
+      actorClerkId: context.actorClerkId,
+      workstreamId,
+      sourceChatId: context.chatId,
+      intent:
+        args.intent === "note" || args.intent === "planner" || args.intent === "thread" || args.intent === "widget"
+          ? args.intent
+          : "result",
+      status: args.status === "completed" || args.status === "dismissed" ? args.status : "processing",
+      title,
+      summary,
+      detail: compactText(args.detail, 1_000) || undefined,
+      variant:
+        args.variant === "answer" || args.variant === "artifact" || args.variant === "planner" || args.variant === "thread"
+          ? args.variant
+          : "summary",
+      targetKind:
+        args.targetKind === "artifact" || args.targetKind === "plannerItem" || args.targetKind === "chat" || args.targetKind === "workspaceItem"
+          ? args.targetKind
+          : "result",
+      targetId: compactText(args.targetId, 160) || undefined,
+      metadata: typeof args.metadata === "object" && args.metadata ? args.metadata as Record<string, unknown> : undefined,
+    });
+
+    return {
+      name: params.name,
+      summary: `Surfaced workspace result: ${title}.`,
+      modelPayload: { resultId: result.resultId, title, summary, workstreamId },
+      eventPayload: { resultId: result.resultId, title, summary, workstreamId },
+    };
+  }
+
   if (params.name === "update_planner") {
     const plannerItemId = compactText(args.plannerItemId, 128);
     const title = compactText(args.title, 160);

@@ -61,6 +61,14 @@ declare module "@xyflow/react" {
 
   export const ReactFlowProvider: FC<{ children?: ReactNode }>;
   export const ReactFlow: FC<Record<string, unknown>>;
+  export function useReactFlow(): {
+    setCenter: (x: number, y: number, options?: { zoom?: number; duration?: number }) => void;
+    fitView: (options?: Record<string, unknown>) => void;
+    getViewport: () => { x: number; y: number; zoom: number };
+    setViewport: (vp: { x: number; y: number; zoom: number }, options?: { duration?: number }) => void;
+    zoomIn: (options?: { duration?: number }) => void;
+    zoomOut: (options?: { duration?: number }) => void;
+  };
   export const Background: FC<Record<string, unknown>>;
   export const Controls: FC<Record<string, unknown>>;
   export const ControlButton: FC<HTMLAttributes<HTMLButtonElement>>;

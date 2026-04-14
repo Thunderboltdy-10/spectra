@@ -54,6 +54,7 @@ import type * as usage from "../usage.js";
 import type * as userLifecycle from "../userLifecycle.js";
 import type * as userPreferences from "../userPreferences.js";
 import type * as users from "../users.js";
+import type * as workspaceCommandResults from "../workspaceCommandResults.js";
 import type * as workspaceHelpers from "../workspaceHelpers.js";
 import type * as workspaceItemSync from "../workspaceItemSync.js";
 import type * as workspaceItems from "../workspaceItems.js";
@@ -115,6 +116,7 @@ declare const fullApi: ApiFromModules<{
   userLifecycle: typeof userLifecycle;
   userPreferences: typeof userPreferences;
   users: typeof users;
+  workspaceCommandResults: typeof workspaceCommandResults;
   workspaceHelpers: typeof workspaceHelpers;
   workspaceItemSync: typeof workspaceItemSync;
   workspaceItems: typeof workspaceItems;

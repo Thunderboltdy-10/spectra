@@ -106,7 +106,15 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
   }, [token]);
 
   useEffect(() => {
-    if (!isLoaded || !userId || !token || state.status !== "valid" || redeeming) {
+    const hasMatchingEmail = state.status === "valid"
+      ? viewerEmails.some((email) => email.toLowerCase() === state.data.email.toLowerCase())
+      : false;
+
+    if (!isLoaded || !userId || !token || state.status !== "valid" || redeeming || viewerEmails.length === 0) {
+      return;
+    }
+
+    if (!hasMatchingEmail) {
       return;
     }
 
@@ -134,7 +142,7 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
         setRedeeming(false);
       }
     })();
-  }, [isLoaded, redeeming, state, token, userId]);
+  }, [isLoaded, redeeming, state, token, userId, viewerEmails]);
 
   const viewerHasMatchingEmail = state.status === "valid"
     ? viewerEmails.some((email) => email.toLowerCase() === state.data.email.toLowerCase())

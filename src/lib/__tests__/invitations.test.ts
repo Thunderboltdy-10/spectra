@@ -47,4 +47,22 @@ describe("sendInvitationEmail", () => {
       accepted: ["student@example.com"],
     });
   });
+  it("renders invitation headings with explicit visible colors", async () => {
+    const { sendInvitationEmail } = await import("@/lib/invitations");
+
+    await sendInvitationEmail({
+      to: "student@example.com",
+      role: "student",
+      joinUrl: "https://spectra.test/join?token=tok_1",
+      orgName: "Alpha School",
+    });
+
+    const html = sendMail.mock.calls[0]?.[0]?.html as string;
+    expect(html).toContain('background:#0f766e;color:#fffaf1;');
+    expect(html).toContain('text-transform:uppercase;color:#fffaf1;">Spectra</div>');
+    expect(html).toContain('font-weight:700;color:#fffaf1;">You have been invited to Alpha School</h1>');
+    expect(html).not.toContain('linear-gradient');
+    expect(html).not.toContain('opacity:0.8');
+  });
+
 });

@@ -24,9 +24,10 @@ type RequestAccessFormProps = {
   isLoaded: boolean;
   userId: string | null;
   userEmail: string | null;
+  userEmails: string[];
 };
 
-function RequestAccessForm({ isLoaded, userId, userEmail }: RequestAccessFormProps) {
+function RequestAccessForm({ isLoaded, userId, userEmail, userEmails }: RequestAccessFormProps) {
   const [query, setQuery] = useState("");
   const [schools, setSchools] = useState<SchoolMatch[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState("");
@@ -35,6 +36,7 @@ function RequestAccessForm({ isLoaded, userId, userEmail }: RequestAccessFormPro
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<RequestResult | null>(null);
+  const [selectedEmail, setSelectedEmail] = useState<string>(userEmail ?? userEmails[0] ?? "");
 
   useEffect(() => {
     let cancelled = false;
@@ -78,6 +80,10 @@ function RequestAccessForm({ isLoaded, userId, userEmail }: RequestAccessFormPro
     };
   }, [query, selectedOrgId]);
 
+  useEffect(() => {
+    setSelectedEmail(userEmail ?? userEmails[0] ?? "");
+  }, [userEmail, userEmails]);
+
   const selectedSchool = useMemo(
     () => schools.find((school) => school._id === selectedOrgId),
     [schools, selectedOrgId],
@@ -94,6 +100,7 @@ function RequestAccessForm({ isLoaded, userId, userEmail }: RequestAccessFormPro
         body: JSON.stringify({
           orgId: selectedOrgId,
           message,
+          email: selectedEmail || undefined,
         }),
       });
       if (!response.ok) {
@@ -138,11 +145,28 @@ function RequestAccessForm({ isLoaded, userId, userEmail }: RequestAccessFormPro
 
             <div className="mt-6 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 text-sm">
               <p className="font-medium text-[var(--text-primary)]">Your account</p>
-                <p className="mt-1 text-[var(--text-secondary)]">
-                  {userId
+              <p className="mt-1 text-[var(--text-secondary)]">
+                {userId
                   ? (userEmail ?? "Signed in")
                   : "Sign in first to request access."}
-                </p>
+              </p>
+              {userEmails.length > 1 ? (
+                <div className="mt-3">
+                  <label className="mb-2 block text-xs font-medium uppercase tracking-[0.08em] text-[var(--text-secondary)]">Request access with</label>
+                  <select
+                    value={selectedEmail}
+                    onChange={(event) => setSelectedEmail(event.target.value)}
+                    className="h-10 w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-sm text-[var(--text-primary)] outline-none"
+                  >
+                    {userEmails.map((email) => (
+                      <option key={email} value={email}>
+                        {email}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-2 text-xs text-[var(--text-secondary)]">Choose the exact email that the school should invite.</p>
+                </div>
+              ) : null}
             </div>
 
             {!userId ? (
@@ -283,6 +307,7 @@ function RequestAccessFormWithClerk() {
       isLoaded={isLoaded}
       userId={userId ?? null}
       userEmail={user?.primaryEmailAddress?.emailAddress ?? null}
+      userEmails={(user?.emailAddresses ?? []).map((entry) => entry.emailAddress).filter(Boolean)}
     />
   );
 }
@@ -292,5 +317,5 @@ export default function RequestAccessPage() {
     return <RequestAccessFormWithClerk />;
   }
 
-  return <RequestAccessForm isLoaded userId={null} userEmail={null} />;
+  return <RequestAccessForm isLoaded userId={null} userEmail={null} userEmails={[]} />;
 }

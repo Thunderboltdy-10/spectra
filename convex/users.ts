@@ -5,6 +5,10 @@ import { getOrCreateDefaultOrg, getUserByClerkId } from "./helpers";
 import { api } from "./_generated/api";
 import { addUserToPlatformStats, updateUserInPlatformStats } from "./platformStatsAggregates";
 
+function normalizeEmail(value: string) {
+  return value.trim().toLowerCase();
+}
+
 function normalizeRole(inputRole?: string): "student" | "teacher" | "admin" {
   if (inputRole === "teacher" || inputRole === "admin") {
     return inputRole;
@@ -97,22 +101,35 @@ async function upsertUserFromInvitation(params: {
 }) {
   const { ctx, clerkId, email, name, invitation } = params;
   const now = Date.now();
+  const normalizedEmail = normalizeEmail(email);
   const existing = await getUserByClerkId(ctx, clerkId);
+  const existingByEmail = await ctx.db
+    .query("users")
+    .withIndex("by_org", (q) => q.eq("orgId", invitation.orgId))
+    .collect()
+    .then((users) => users.find((user) => normalizeEmail(user.email) === normalizedEmail) ?? null);
 
-  await ensureSeatAvailableForRole(ctx, invitation.orgId, invitation.role, existing?._id);
+  const targetUser = existingByEmail ?? existing;
 
-  let userId = existing?._id;
-  if (existing) {
-    const previous = { _id: existing._id, role: existing.role };
-    await ctx.db.patch(existing._id, {
-      email,
+  if (existing && existingByEmail && existing._id !== existingByEmail._id) {
+    throw new Error("INVITATION_ACCOUNT_CONFLICT: This email already belongs to another account in the school.");
+  }
+
+  await ensureSeatAvailableForRole(ctx, invitation.orgId, invitation.role, targetUser?._id);
+
+  let userId = targetUser?._id;
+  if (targetUser) {
+    const previous = { _id: targetUser._id, role: targetUser.role };
+    await ctx.db.patch(targetUser._id, {
+      clerkId,
+      email: normalizedEmail,
       name,
       role: invitation.role,
       orgId: invitation.orgId,
       invitedAt: now,
       updatedAt: now,
     });
-    await updateUserInPlatformStats(ctx, previous, { _id: existing._id, role: invitation.role });
+    await updateUserInPlatformStats(ctx, previous, { _id: targetUser._id, role: invitation.role });
   } else {
     userId = await ctx.db.insert("users", {
       clerkId,

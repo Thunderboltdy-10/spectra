@@ -62,7 +62,7 @@ export async function PATCH(
     const actor = await requireSuperAdmin();
     const { id } = await params;
     const body = (await request.json()) as {
-      action?: "assignAdmin" | "updateMemberRole" | "removeMember" | "updateBudget";
+      action?: "assignAdmin" | "updateMemberRole" | "removeMember" | "updateBudget" | "deleteSchool";
       email?: string;
       userId?: string;
       role?: "student" | "teacher" | "admin";
@@ -127,6 +127,14 @@ export async function PATCH(
         actorClerkId: actor.clerkId,
         orgId: id,
         userId: body.userId,
+      });
+      return ok({ ok: true });
+    }
+
+    if (body.action === "deleteSchool") {
+      await convexMutation("superAdmin:deleteOrg", {
+        actorClerkId: actor.clerkId,
+        orgId: id,
       });
       return ok({ ok: true });
     }

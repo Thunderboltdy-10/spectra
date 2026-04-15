@@ -40,6 +40,7 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
   const [state, setState] = useState<PageState>({ status: "loading" });
   const [redeeming, setRedeeming] = useState(false);
   const [viewerEmail, setViewerEmail] = useState<string | null>(null);
+  const [viewerEmails, setViewerEmails] = useState<string[]>([]);
 
   useEffect(() => {
     if (!isLoaded || !userId) {
@@ -50,10 +51,12 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
     void (async () => {
       try {
         const response = await fetch("/api/auth/access-state?includeIdentity=1", { cache: "no-store" });
-        const payload = (await response.json().catch(() => null)) as { email?: string } | null;
+        const payload = (await response.json().catch(() => null)) as { email?: string; emails?: string[] } | null;
         setViewerEmail(payload?.email ?? null);
+        setViewerEmails(payload?.emails ?? (payload?.email ? [payload.email] : []));
       } catch {
         setViewerEmail(null);
+        setViewerEmails([]);
       }
     })();
   }, [isLoaded, userId]);
@@ -132,6 +135,10 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
       }
     })();
   }, [isLoaded, redeeming, state, token, userId]);
+
+  const viewerHasMatchingEmail = state.status === "valid"
+    ? viewerEmails.some((email) => email.toLowerCase() === state.data.email.toLowerCase())
+    : false;
 
   if (state.status === "loading") {
     return (
@@ -271,9 +278,9 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
             </p>
           </div>
 
-          {userId && viewerEmail && viewerEmail.toLowerCase() !== data.email.toLowerCase() ? (
+          {userId && viewerEmail && !viewerHasMatchingEmail ? (
             <div className="mb-4 rounded-xl border border-[color-mix(in_oklab,var(--warning)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_8%,transparent)] px-4 py-3 text-xs text-[var(--warning)]">
-              You are signed in as {viewerEmail}, but this invitation is for {data.email}. Sign out and continue with the invited account.
+              You are signed in as {viewerEmail}, but this invitation is for {data.email}. Switch to an account that has that email attached.
             </div>
           ) : null}
 
@@ -290,7 +297,7 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
               <Button onClick={handleSignIn} variant="secondary" className="w-full cursor-pointer">
                 Sign in with existing account
               </Button>
-            ) : viewerEmail && viewerEmail.toLowerCase() !== data.email.toLowerCase() ? (
+            ) : viewerEmail && !viewerHasMatchingEmail ? (
               <Button variant="secondary" className="w-full cursor-pointer" onClick={handleSignIn}>
                 Switch account
               </Button>

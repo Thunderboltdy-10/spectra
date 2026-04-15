@@ -208,9 +208,12 @@ export async function requireActor(): Promise<SessionActor> {
     );
   }
 
-  const email = user.emailAddresses[0]?.emailAddress ?? "unknown@example.com";
+  const emails = user.emailAddresses
+    .map((entry) => entry.emailAddress?.trim().toLowerCase())
+    .filter((value): value is string => Boolean(value));
+  const email = emails[0] ?? "unknown@example.com";
   const name = user.fullName ?? user.firstName ?? "Student";
-  const bootstrapAdmin = getAdminEmails().has(email.toLowerCase()) || isSuperAdminEmail(email);
+  const bootstrapAdmin = emails.some((candidate) => getAdminEmails().has(candidate) || isSuperAdminEmail(candidate));
 
   if (bootstrapAdmin) {
     return bootstrapActor({
@@ -223,12 +226,27 @@ export async function requireActor(): Promise<SessionActor> {
 
   const invitationToken = (await cookies()).get(INVITATION_TOKEN_COOKIE)?.value;
   if (invitationToken) {
-    await convexMutation("users:acceptInvitationByToken", {
-      clerkId: userId,
-      email,
-      name,
-      token: invitationToken,
-    });
+    let accepted = false;
+    for (const candidateEmail of emails) {
+      try {
+        await convexMutation("users:acceptInvitationByToken", {
+          clerkId: userId,
+          email: candidateEmail,
+          name,
+          token: invitationToken,
+        });
+        accepted = true;
+        break;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        if (!message.startsWith("INVITATION_EMAIL_MISMATCH")) {
+          throw error;
+        }
+      }
+    }
+    if (!accepted) {
+      throw new Error("AUTH_NO_ACCESS: This invitation belongs to a different email address.");
+    }
 
     const provisioned = await convexQuery<
       { clerkId: string },

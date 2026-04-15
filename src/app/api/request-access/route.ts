@@ -24,14 +24,22 @@ export async function POST(request: NextRequest) {
     }
 
     const profile = await currentUser();
-    const email = profile?.emailAddresses[0]?.emailAddress?.trim();
+    const emails = (profile?.emailAddresses ?? [])
+      .map((entry) => entry.emailAddress?.trim().toLowerCase())
+      .filter((value): value is string => Boolean(value));
     const name = profile?.fullName ?? profile?.firstName ?? "Student";
-    if (!email) {
+    if (emails.length === 0) {
       throw new Error("AUTH_PROFILE_UNAVAILABLE: Signed-in Clerk user profile could not be loaded. Retry sign-in.");
     }
 
-    const body = (await request.json().catch(() => null)) as { orgId?: string; message?: string } | null;
+    const body = (await request.json().catch(() => null)) as { orgId?: string; message?: string; email?: string } | null;
     if (!body?.orgId) return badRequest("orgId is required");
+
+    const selectedEmail = body.email?.trim().toLowerCase();
+    const email = selectedEmail ?? emails[0];
+    if (!email || !emails.includes(email)) {
+      return badRequest("Select one of your signed-in email addresses");
+    }
 
     const result = await convexMutation("accessRequests:createAccessRequest", {
       requesterClerkId: userId,

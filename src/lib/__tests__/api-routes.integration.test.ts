@@ -426,6 +426,74 @@ describe("invitation redeem route integration", () => {
   });
 });
 
+describe("request access route email selection", () => {
+  it("allows multi-email users to request access with a selected attached email", async () => {
+    const convexMutation = vi.fn().mockResolvedValue({ status: "requested", orgName: "Northfield Academy" });
+
+    vi.doMock("@clerk/nextjs/server", () => ({
+      auth: vi.fn().mockResolvedValue({ userId: "clerk_req_multi" }),
+      currentUser: vi.fn().mockResolvedValue({
+        emailAddresses: [
+          { emailAddress: "personal@example.com" },
+          { emailAddress: "school@example.com" },
+        ],
+        fullName: "Student Example",
+        firstName: "Student",
+      }),
+    }));
+    vi.doMock("@/lib/convex-server", () => ({ convexMutation, convexQuery: vi.fn() }));
+
+    const route = await import("@/app/api/request-access/route");
+    const response = await route.POST(
+      new NextRequest("http://localhost/api/request-access", {
+        method: "POST",
+        body: JSON.stringify({ orgId: "org_1", email: "school@example.com", message: "Please approve." }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(convexMutation).toHaveBeenCalledWith("accessRequests:createAccessRequest", {
+      requesterClerkId: "clerk_req_multi",
+      orgId: "org_1",
+      email: "school@example.com",
+      name: "Student Example",
+      message: "Please approve.",
+    });
+  });
+});
+
+describe("join page guarded redeem flow", () => {
+  it("keeps the viewerHasMatchingEmail guard in the auto-redeem effect", async () => {
+    const source = await import("node:fs/promises").then((fs) => fs.readFile("/home/thunderboltdy/spectra/src/app/join/page.tsx", "utf8"));
+    expect(source).toContain("if (!hasMatchingEmail) {");
+  });
+});
+
+describe("invitation proxy middleware", () => {
+  it("stores the invitation token cookie when visiting the join page", async () => {
+    vi.doMock("@/lib/clerk-config", () => ({ hasClerkServerConfig: () => true }));
+    vi.doMock("@clerk/nextjs/server", async () => {
+      const actual = await vi.importActual<typeof import("@clerk/nextjs/server")>("@clerk/nextjs/server");
+      return {
+        ...actual,
+        clerkMiddleware: (handler: (auth: () => Promise<{ userId: string | null }>, req: Request) => Promise<Response>) =>
+          async (req: Request) => handler(async () => ({ userId: null }), req),
+        createRouteMatcher: (patterns: string[]) => (req: { nextUrl?: URL; url?: string }) => {
+          const pathname = req.nextUrl?.pathname ?? new URL(req.url ?? "http://localhost").pathname;
+          return patterns.some((pattern) => pattern === "/join(.*)" && pathname.startsWith("/join"));
+        },
+      };
+    });
+
+    const proxyModule = await import("@/proxy");
+    const request = new NextRequest("https://spectrastudio.vercel.app/join?token=test_token_123");
+    const response = await proxyModule.default(request, {} as never);
+    const setCookieHeader = response?.headers.get("set-cookie") ?? "";
+
+    expect(setCookieHeader).toContain("ai-school-invitation-token=test_token_123");
+  });
+});
+
 describe("school-admin members route integration", () => {
   it("fails the invite request when email delivery is skipped or fails", async () => {
     const requireActor = vi.fn().mockResolvedValue({ clerkId: "admin_members", role: "admin" });

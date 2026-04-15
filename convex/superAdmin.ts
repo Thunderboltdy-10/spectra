@@ -10,6 +10,7 @@ import {
   addOrgToPlatformStats,
   countPlatformStats,
   rebuildPlatformStatsAggregates,
+  removeOrgFromPlatformStats,
   updateUserInPlatformStats,
 } from "./platformStatsAggregates";
 
@@ -1000,6 +1001,133 @@ export const updateOrgBudget = mutation({
 /**
  * Deactivate an org (sets isActive to false)
  */
+
+export const deleteOrg = mutation({
+  args: {
+    actorClerkId: v.string(),
+    orgId: v.id("orgs"),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireSuperAdmin(ctx, args.actorClerkId);
+
+    const org = await ctx.db.get(args.orgId);
+    if (!org) throw new Error("Org not found");
+
+    const users = await ctx.db
+      .query("users")
+      .withIndex("by_org", (q) => q.eq("orgId", args.orgId))
+      .collect();
+    if (users.length > 0) {
+      throw new Error("Cannot delete a school that still has members. Remove members first.");
+    }
+
+    const now = Date.now();
+
+    const invitationBatches = await Promise.all([
+      ctx.db.query("schoolInvitations").withIndex("by_org_status", (q) => q.eq("orgId", args.orgId).eq("status", "pending")).collect(),
+      ctx.db.query("schoolInvitations").withIndex("by_org_status", (q) => q.eq("orgId", args.orgId).eq("status", "accepted")).collect(),
+      ctx.db.query("schoolInvitations").withIndex("by_org_status", (q) => q.eq("orgId", args.orgId).eq("status", "expired")).collect(),
+    ]);
+    for (const invitation of invitationBatches.flat()) {
+      await ctx.db.delete(invitation._id);
+    }
+
+    const accessRequestBatches = await Promise.all([
+      ctx.db.query("accessRequests").withIndex("by_org_status", (q) => q.eq("orgId", args.orgId).eq("status", "pending")).collect(),
+      ctx.db.query("accessRequests").withIndex("by_org_status", (q) => q.eq("orgId", args.orgId).eq("status", "invited")).collect(),
+      ctx.db.query("accessRequests").withIndex("by_org_status", (q) => q.eq("orgId", args.orgId).eq("status", "rejected")).collect(),
+    ]);
+    for (const request of accessRequestBatches.flat()) {
+      await ctx.db.delete(request._id);
+    }
+
+    const packs = await ctx.db.query("packs").withIndex("by_org", (q) => q.eq("orgId", args.orgId)).collect();
+    for (const pack of packs) {
+      await ctx.db.delete(pack._id);
+    }
+
+    const resources = await ctx.db.query("resources").withIndex("by_org_updated", (q) => q.eq("orgId", args.orgId)).collect();
+    for (const resource of resources) {
+      if (resource.storageId) {
+        await ctx.storage.delete(resource.storageId).catch(() => {});
+      }
+      await ctx.db.delete(resource._id);
+    }
+
+    const agents = await ctx.db.query("agents").withIndex("by_org", (q) => q.eq("orgId", args.orgId)).collect();
+    for (const agent of agents) {
+      await ctx.db.delete(agent._id);
+    }
+
+    const orgSoulDocs = await ctx.db.query("orgSoulDocs").withIndex("by_org", (q) => q.eq("orgId", args.orgId)).collect();
+    for (const doc of orgSoulDocs) {
+      await ctx.db.delete(doc._id);
+    }
+
+    const usageDailyRows = await ctx.db.query("usageDaily").withIndex("by_org_day", (q) => q.eq("orgId", args.orgId)).collect();
+    for (const row of usageDailyRows) {
+      await ctx.db.delete(row._id);
+    }
+
+    const usageEvents = await ctx.db.query("usageEvents").withIndex("by_org_day", (q) => q.eq("orgId", args.orgId)).collect();
+    for (const event of usageEvents) {
+      await ctx.db.delete(event._id);
+    }
+
+    const modelCatalogRows = await ctx.db.query("modelCatalog").withIndex("by_org", (q) => q.eq("orgId", args.orgId)).collect();
+    for (const row of modelCatalogRows) {
+      await ctx.db.delete(row._id);
+    }
+
+    const modelRuntimeStatsRows = await ctx.db.query("modelRuntimeStats").withIndex("by_org", (q) => q.eq("orgId", args.orgId)).collect();
+    for (const row of modelRuntimeStatsRows) {
+      await ctx.db.delete(row._id);
+    }
+
+    const studentAnalyticsRows = await ctx.db.query("studentAnalytics").withIndex("by_org_day", (q) => q.eq("orgId", args.orgId)).collect();
+    for (const row of studentAnalyticsRows) {
+      await ctx.db.delete(row._id);
+    }
+
+    const weeklySummariesRows = await ctx.db.query("weeklySummaries").withIndex("by_org_week", (q) => q.eq("orgId", args.orgId)).collect();
+    for (const row of weeklySummariesRows) {
+      await ctx.db.delete(row._id);
+    }
+
+    const nudgesRows = await ctx.db.query("nudges").withIndex("by_org", (q) => q.eq("orgId", args.orgId)).collect();
+    for (const row of nudgesRows) {
+      await ctx.db.delete(row._id);
+    }
+
+    const userSoulPreferencesRows = await ctx.db.query("userSoulPreferences").withIndex("by_org", (q) => q.eq("orgId", args.orgId)).collect();
+    for (const row of userSoulPreferencesRows) {
+      await ctx.db.delete(row._id);
+    }
+
+    const workstreamsRows = await ctx.db.query("workstreams").withIndex("by_org", (q) => q.eq("orgId", args.orgId)).collect();
+    for (const row of workstreamsRows) {
+      await ctx.db.delete(row._id);
+    }
+
+    if (org.logoStorageId) {
+      await ctx.storage.delete(org.logoStorageId).catch(() => {});
+    }
+
+    await ctx.db.delete(args.orgId);
+    await removeOrgFromPlatformStats(ctx, args.orgId);
+
+    await ctx.runMutation(internal.auditLog.logAction, {
+      actorUserId: actor._id as Id<"users">,
+      action: "super_admin.delete_org",
+      targetType: "org",
+      targetId: args.orgId,
+      details: `name=${org.name};slug=${org.slug};deletedAt=${now}`,
+    });
+
+    return { ok: true };
+  },
+});
+
 export const deactivateOrg = mutation({
   args: {
     actorClerkId: v.string(),

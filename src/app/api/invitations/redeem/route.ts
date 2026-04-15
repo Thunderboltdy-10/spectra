@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { auth, currentUser } from "@clerk/nextjs/server";
+import { cookies } from "next/headers";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
@@ -12,9 +13,12 @@ export async function POST(request: NextRequest) {
     }
 
     const profile = await currentUser();
-    const email = profile?.emailAddresses[0]?.emailAddress?.trim();
+    const emails = (profile?.emailAddresses ?? [])
+      .map((entry) => entry.emailAddress?.trim().toLowerCase())
+      .filter((value): value is string => Boolean(value));
+    const primaryEmail = emails[0];
     const name = profile?.fullName ?? profile?.firstName ?? "Student";
-    if (!email) {
+    if (!primaryEmail || emails.length === 0) {
       throw new Error("AUTH_PROFILE_UNAVAILABLE: Signed-in Clerk user profile could not be loaded. Retry sign-in.");
     }
 
@@ -47,21 +51,27 @@ export async function POST(request: NextRequest) {
       return ok({ alreadyAccepted: true, orgName: invitation.orgName });
     }
 
-    if (invitation.email.toLowerCase() !== email.toLowerCase()) {
+    const normalizedInvitationEmail = invitation.email.toLowerCase();
+    const matchingEmail = emails.find((value) => value === normalizedInvitationEmail);
+    if (!matchingEmail) {
       return badRequest("This invitation was sent to a different email address", 403);
     }
 
     await convexMutation("users:acceptInvitationByToken", {
       clerkId: userId,
-      email,
+      email: matchingEmail,
       name,
       token,
     });
+
+    const cookieStore = await cookies();
+    cookieStore.delete("ai-school-invitation-token");
 
     return ok({
       success: true,
       orgName: invitation.orgName,
       role: invitation.role,
+      email: matchingEmail,
     });
   });
 }

@@ -380,6 +380,52 @@ describe("legacy admin user route integration", () => {
   });
 });
 
+describe("invitation redeem route integration", () => {
+  it("accepts an invitation when any signed-in Clerk email matches", async () => {
+    const auth = vi.fn().mockResolvedValue({ userId: "clerk_multi_1" });
+    const currentUser = vi.fn().mockResolvedValue({
+      emailAddresses: [
+        { emailAddress: "primary@example.com" },
+        { emailAddress: "invite@example.com" },
+      ],
+      fullName: "Multi Email User",
+      firstName: "Multi",
+    });
+    const convexQuery = vi.fn().mockResolvedValue({
+      _id: "invite_1",
+      status: "pending",
+      email: "invite@example.com",
+      role: "teacher",
+      orgId: "org_1",
+      expiresAt: Date.now() + 60_000,
+      orgName: "Alpha School",
+    });
+    const convexMutation = vi.fn().mockResolvedValue({ ok: true });
+
+    vi.doMock("@clerk/nextjs/server", () => ({ auth, currentUser }));
+    vi.doMock("next/headers", () => ({
+      cookies: vi.fn().mockResolvedValue({ delete: vi.fn() }),
+    }));
+    vi.doMock("@/lib/convex-server", () => ({ convexMutation, convexQuery }));
+
+    const route = await import("@/app/api/invitations/redeem/route");
+    const response = await route.POST(
+      new NextRequest("http://localhost/api/invitations/redeem", {
+        method: "POST",
+        body: JSON.stringify({ token: "tok_1" }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(convexMutation).toHaveBeenCalledWith("users:acceptInvitationByToken", {
+      clerkId: "clerk_multi_1",
+      email: "invite@example.com",
+      name: "Multi Email User",
+      token: "tok_1",
+    });
+  });
+});
+
 describe("school-admin members route integration", () => {
   it("fails the invite request when email delivery is skipped or fails", async () => {
     const requireActor = vi.fn().mockResolvedValue({ clerkId: "admin_members", role: "admin" });

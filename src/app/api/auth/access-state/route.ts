@@ -7,11 +7,18 @@ export async function GET(request: NextRequest) {
     const actor = await requireActor();
     const includeIdentity = new URL(request.url).searchParams.get("includeIdentity") === "1";
     const profile = includeIdentity ? await currentUser().catch(() => null) : null;
+    const identityEmails = includeIdentity
+      ? (profile?.emailAddresses ?? [])
+          .map((entry) => entry.emailAddress?.trim().toLowerCase())
+          .filter((value): value is string => Boolean(value))
+      : [];
+
     return NextResponse.json({
       status: 'ok' as const,
       ...(includeIdentity
         ? {
-            email: profile?.emailAddresses?.[0]?.emailAddress ?? actor.email,
+            email: identityEmails[0] ?? actor.email,
+            emails: identityEmails.length > 0 ? identityEmails : [actor.email],
             userId: actor.clerkId,
           }
         : {}),

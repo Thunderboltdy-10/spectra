@@ -36,6 +36,34 @@ function NoAccessPageContent({ isLoaded, isSignedIn }: NoAccessPageContentProps)
   }>({ status: "idle" });
 
   useEffect(() => {
+    if (!isLoaded || !isSignedIn) return;
+
+    let cancelled = false;
+    const recheck = async () => {
+      try {
+        const response = await fetch("/api/auth/access-state", { cache: "no-store" });
+        if (cancelled || !response.ok) return;
+        const payload = (await response.json().catch(() => null)) as { status?: string } | null;
+        if (payload?.status === "ok") {
+          window.location.href = "/chat";
+        }
+      } catch {
+        // Ignore transient check failures and retry on next interval.
+      }
+    };
+
+    void recheck();
+    const interval = window.setInterval(() => {
+      void recheck();
+    }, 4000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [isLoaded, isSignedIn]);
+
+  useEffect(() => {
     if (isLoaded && !isSignedIn) {
       setSchools([]);
       return;

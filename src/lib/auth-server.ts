@@ -91,6 +91,37 @@ async function assertActiveOrgAccess(clerkId: string) {
   }
 }
 
+async function acceptInvitationFromCookie(params: {
+  clerkId: string;
+  emails: string[];
+  name: string;
+}) {
+  const invitationToken = (await cookies()).get(INVITATION_TOKEN_COOKIE)?.value;
+  if (!invitationToken) {
+    return "missing" as const;
+  }
+
+  for (const candidateEmail of params.emails) {
+    try {
+      await convexMutation("users:acceptInvitationByToken", {
+        clerkId: params.clerkId,
+        email: candidateEmail,
+        name: params.name,
+        token: invitationToken,
+      });
+      (await cookies()).delete(INVITATION_TOKEN_COOKIE);
+      return "accepted" as const;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (!message.startsWith("INVITATION_EMAIL_MISMATCH")) {
+        throw error;
+      }
+    }
+  }
+
+  return "mismatch" as const;
+}
+
 export async function requireActor(): Promise<SessionActor> {
   if (!hasClerkServerConfig()) {
     return bootstrapActor({
@@ -134,14 +165,21 @@ export async function requireActor(): Promise<SessionActor> {
     let current = existing;
     let syncedEmail = existing.email;
     let syncedName = existing.name;
+    let profileEmails: string[] = [existing.email];
 
     // Clerk can update primary email after initial signup. When that happens,
     // re-check super-admin eligibility against the live Clerk profile so
     // super-admin routes do not fail due to stale email in Convex.
     if (existing.role !== "admin" && !isSuperAdminEmail(existing.email)) {
       const profile = await currentUser();
-      const profileEmail = profile?.emailAddresses[0]?.emailAddress;
+      const emails = (profile?.emailAddresses ?? [])
+        .map((entry) => entry.emailAddress?.trim().toLowerCase())
+        .filter((value): value is string => Boolean(value));
+      const profileEmail = emails[0];
       const profileName = profile?.fullName ?? profile?.firstName;
+      if (emails.length > 0) {
+        profileEmails = emails;
+      }
       if (profileEmail) {
         syncedEmail = profileEmail;
       }
@@ -190,6 +228,32 @@ export async function requireActor(): Promise<SessionActor> {
       }
     }
 
+    if (!current.orgId) {
+      const invitationResult = await acceptInvitationFromCookie({
+        clerkId: userId,
+        emails: profileEmails,
+        name: syncedName,
+      });
+      if (invitationResult === "accepted") {
+        const refreshed = await convexQuery<
+          { clerkId: string },
+          {
+            _id: string;
+            role: Role;
+            orgId: string;
+            email: string;
+            name: string;
+            onboardingComplete?: boolean;
+          } | null
+        >("users:me", {
+          clerkId: userId,
+        });
+        if (refreshed) {
+          current = refreshed;
+        }
+      }
+    }
+
     if (!isSuperAdminEmail(current.email)) {
       await assertActiveOrgAccess(userId);
     }
@@ -228,32 +292,12 @@ export async function requireActor(): Promise<SessionActor> {
     });
   }
 
-  const invitationToken = (await cookies()).get(INVITATION_TOKEN_COOKIE)?.value;
-  if (invitationToken) {
-    let accepted = false;
-    for (const candidateEmail of emails) {
-      try {
-        await convexMutation("users:acceptInvitationByToken", {
-          clerkId: userId,
-          email: candidateEmail,
-          name,
-          token: invitationToken,
-        });
-        accepted = true;
-        break;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "";
-        if (!message.startsWith("INVITATION_EMAIL_MISMATCH")) {
-          throw error;
-        }
-      }
-    }
-    if (!accepted) {
-      throw new Error("AUTH_NO_ACCESS: This invitation belongs to a different email address.");
-    }
-
-    (await cookies()).delete(INVITATION_TOKEN_COOKIE);
-
+  const invitationResult = await acceptInvitationFromCookie({
+    clerkId: userId,
+    emails,
+    name,
+  });
+  if (invitationResult === "accepted") {
     const provisioned = await convexQuery<
       { clerkId: string },
       {
@@ -282,6 +326,9 @@ export async function requireActor(): Promise<SessionActor> {
         onboardingComplete: Boolean(provisioned.onboardingComplete),
       };
     }
+  }
+  if (invitationResult === "mismatch") {
+    throw new Error("AUTH_NO_ACCESS: This invitation belongs to a different email address.");
   }
 
   throw new Error("AUTH_NO_ACCESS: Your account isn't linked to a school. Contact your school administrator.");

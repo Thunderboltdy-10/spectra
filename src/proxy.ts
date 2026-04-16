@@ -23,20 +23,26 @@ const INVITATION_TOKEN_MAX_AGE = 60 * 60 * 24;
 const authMiddleware = clerkMiddleware(async (auth, req) => {
   const url = new URL(req.url);
   const invitationToken = url.searchParams.get("token") ?? url.searchParams.get("invitation");
+  const cookieToken = req.cookies.get(INVITATION_TOKEN_COOKIE)?.value;
 
-    if (invitationToken) {
-      const response = url.pathname.startsWith("/join")
-        ? NextResponse.next()
-        : NextResponse.redirect(new URL("/sign-up", req.url));
-      response.cookies.set(INVITATION_TOKEN_COOKIE, invitationToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: INVITATION_TOKEN_MAX_AGE,
-        path: "/",
-      });
-      return response;
-    }
+  if (invitationToken) {
+    const response = url.pathname.startsWith("/join")
+      ? NextResponse.next()
+      : NextResponse.redirect(new URL("/sign-up", req.url));
+    response.cookies.set(INVITATION_TOKEN_COOKIE, invitationToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: INVITATION_TOKEN_MAX_AGE,
+      path: "/",
+    });
+    return response;
+  }
+
+  const isApiRoute = url.pathname.startsWith("/api/") || url.pathname.startsWith("/trpc");
+  if (cookieToken && !url.pathname.startsWith("/join") && !isApiRoute) {
+    return NextResponse.redirect(new URL(`/join?token=${cookieToken}`, req.url));
+  }
 
   if (isPublicRoute(req)) {
     return NextResponse.next();
@@ -63,20 +69,8 @@ const authMiddleware = clerkMiddleware(async (auth, req) => {
     return NextResponse.redirect(signInUrl);
   }
 
-  const cookieToken = req.cookies.get(INVITATION_TOKEN_COOKIE)?.value;
-  if (cookieToken && !url.pathname.startsWith("/join")) {
-    const joinUrl = new URL(`/join?token=${cookieToken}`, req.url);
-    if (url.search === joinUrl.search) {
-      const response = NextResponse.next();
-      response.cookies.delete(INVITATION_TOKEN_COOKIE);
-      return response;
-    }
-    return NextResponse.redirect(joinUrl);
-  }
-
   const shouldCheckAccess =
-    !url.pathname.startsWith("/api/")
-    && !url.pathname.startsWith("/trpc")
+    !isApiRoute
     && !url.pathname.startsWith("/no-access");
 
   if (shouldCheckAccess) {

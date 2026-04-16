@@ -81,7 +81,7 @@ export function isTextChatCapableModel(model: CatalogModelEntry) {
   }
 
   const blob = `${textBlob(model)} ${modalityBlob(model)}`;
-  if (/\b(whisper|transcrib|transcript|tts|text-to-speech|speech-to-text|speech|audio-only|lyra)\b/.test(blob)) {
+  if (/\b(whisper|transcrib|transcript|tts|text-to-speech|speech-to-text|speech|audio-only|lyra|text-to-video|video[-_ ]gen|veo|sora)\b/.test(blob)) {
     return false;
   }
   return true;
@@ -101,6 +101,7 @@ type RankParams = {
   avoidModels?: string[];
   preferredModelIds?: string[];
   runtimeStats?: Record<string, ModelRuntimeStat>;
+  allowStaleModels?: boolean;
 };
 
 type RankedModel = {
@@ -190,6 +191,39 @@ function effectiveOutputCost(model: CatalogModelEntry) {
 
 function isImageGenerationModel(model: CatalogModelEntry) {
   return modelSupportsCapability(model, "image_generation");
+}
+
+function recencyScore(model: CatalogModelEntry) {
+  const timestamp = model.createdAt
+    ?? (model.releaseDate ? Date.parse(model.releaseDate) : Number.NaN);
+  if (!Number.isFinite(timestamp)) return 0.45;
+  const ageDays = (Date.now() - timestamp) / (1000 * 60 * 60 * 24);
+  if (ageDays <= 14) return 1;
+  if (ageDays <= 30) return 0.95;
+  if (ageDays <= 60) return 0.72;
+  if (ageDays <= 90) return 0.45;
+  return 0.1;
+}
+
+function modelAgeDays(model: CatalogModelEntry) {
+  const timestamp = model.createdAt
+    ?? (model.releaseDate ? Date.parse(model.releaseDate) : Number.NaN);
+  if (!Number.isFinite(timestamp)) return undefined;
+  return (Date.now() - timestamp) / (1000 * 60 * 60 * 24);
+}
+
+function parameterSizeBillions(model: CatalogModelEntry) {
+  const blob = `${model.modelId} ${model.name ?? ""}`.toLowerCase();
+  const match = blob.match(/(\d+(?:\.\d+)?)\s*b\b/);
+  if (!match) return undefined;
+  const value = Number.parseFloat(match[1]);
+  if (!Number.isFinite(value) || value <= 0) return undefined;
+  return value;
+}
+
+function isVideoGenerationModel(model: CatalogModelEntry) {
+  const blob = `${textBlob(model)} ${modalityBlob(model)}`;
+  return /\b(video|text-to-video|video[-_ ]gen|veo|sora|wan[-_ ]video)\b/.test(blob);
 }
 
 export function isModelTooExpensivePerMillion(model: CatalogModelEntry) {
@@ -320,12 +354,25 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
 
   const required = params.requiredCapabilities ?? [];
   const preferredCapabilities = params.preferredCapabilities ?? [];
+  const imageTurn = (params.mode ?? "").toLowerCase() === "image" || required.includes("image_generation");
+  const complexTurn =
+    (params.messageLength ?? 0) >= 650
+    || (params.mode === "research" || params.mode === "marker" || params.mode === "exam" || params.mode === "draft_coach")
+    || required.includes("reasoning")
+    || required.includes("code");
 
   const rows: RankedModel[] = [];
   for (const model of params.catalog) {
     if (!model?.modelId || avoid.has(model.modelId)) continue;
     if (!isModelAllowedInTier(model, params.tier)) continue;
-    if (!isImageGenerationModel(model) && !isTextChatCapableModel(model)) continue;
+    const imageGenerationModel = isImageGenerationModel(model);
+    const textChatCapable = isTextChatCapableModel(model);
+    const modelAge = modelAgeDays(model);
+    const staleModel = typeof modelAge === "number" && modelAge > 90;
+    if (!params.allowStaleModels && staleModel) continue;
+    if (isVideoGenerationModel(model)) continue;
+    if (!imageTurn && imageGenerationModel && !textChatCapable) continue;
+    if (!imageGenerationModel && !textChatCapable) continue;
 
     let missingRequired = false;
     for (const capability of required) {
@@ -348,6 +395,8 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
     const reasoning = reasoningScore(model);
     const mode = modeScore(params.mode, model);
     const context = contextScore(model, params.messageLength);
+    const recency = recencyScore(model);
+    const freeLike = Boolean(model.isFree || model.modelId.includes(":free") || effectiveInputCost(model) === 0);
 
     score += reliability * 0.22;
     score += latency * 0.08;
@@ -356,6 +405,7 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
     score += reasoning * 0.12;
     score += mode * 0.2;
     score += context * 0.1;
+    score += recency * 0.05;
 
     // Encourage diversity over very frequently used models so routing does not collapse
     // into one repeated option when similarly strong alternatives exist.
@@ -377,8 +427,7 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
       score += cost * 0.06;
     }
     if (params.preferFree) {
-      const freeLike = Boolean(model.isFree || model.modelId.includes(":free") || effectiveInputCost(model) === 0);
-      if (freeLike) score += 0.18;
+      if (freeLike) score += 0.12;
     }
 
     for (const capability of preferredCapabilities) {
@@ -393,9 +442,21 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
       reasons.push("preferred-model");
     }
 
-    if (model.modelId.includes(":free")) {
-      score += 0.03;
-      reasons.push("free-tier-friendly");
+    if (params.tier === "normal" && !freeLike) {
+      score += 0.05;
+      reasons.push("paid-option-allowed");
+    }
+
+    if (complexTurn && params.tier === "normal") {
+      if (freeLike) {
+        score -= 0.08;
+        reasons.push("complexity-penalizes-free");
+      }
+      const sizeB = parameterSizeBillions(model);
+      if (typeof sizeB === "number" && sizeB <= 30) {
+        score -= 0.1;
+        reasons.push("small-parameter-penalty");
+      }
     }
 
     rows.push({
@@ -410,7 +471,13 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
 }
 
 export function pickModelAndFallbacks(params: RankParams & { maxFallbacks?: number }) {
-  const ranked = rankCatalogModels(params);
+  let ranked = rankCatalogModels(params);
+  if (ranked.length === 0 && !params.allowStaleModels) {
+    ranked = rankCatalogModels({
+      ...params,
+      allowStaleModels: true,
+    });
+  }
   const selected = ranked[0]?.model;
   const fallbackCount = Math.max(1, params.maxFallbacks ?? 4);
   const fallbacks = ranked.slice(1, fallbackCount + 1).map((row) => row.model.modelId);

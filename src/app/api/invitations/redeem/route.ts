@@ -5,6 +5,20 @@ import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 
+const INVITATION_TOKEN_COOKIE = "ai-school-invitation-token";
+
+// Escape hatch for the client. The invitation cookie is httpOnly so pages
+// can't delete it on their own. This endpoint is called from the /join page
+// when the user hits a terminal state (expired, wrong email, already-used)
+// so they can navigate away without the middleware snapping them back.
+export async function DELETE() {
+  return withRouteErrorHandling(async () => {
+    const cookieStore = await cookies();
+    cookieStore.delete(INVITATION_TOKEN_COOKIE);
+    return ok({ cleared: true });
+  });
+}
+
 export async function POST(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const { userId } = await auth();
@@ -65,7 +79,7 @@ export async function POST(request: NextRequest) {
     });
 
     const cookieStore = await cookies();
-    cookieStore.delete("ai-school-invitation-token");
+    cookieStore.delete(INVITATION_TOKEN_COOKIE);
 
     return ok({
       success: true,

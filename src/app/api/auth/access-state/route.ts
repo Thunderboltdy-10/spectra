@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { requireActor } from '@/lib/auth-server';
 
+const INVITATION_TOKEN_COOKIE = "ai-school-invitation-token";
+
 export async function GET(request: NextRequest) {
   const includeIdentity = new URL(request.url).searchParams.get("includeIdentity") === "1";
   if (includeIdentity) {
@@ -26,12 +28,17 @@ export async function GET(request: NextRequest) {
   try {
     const actor = await requireActor();
 
-    return NextResponse.json({
+    // Clear any stale invitation cookie now that access is confirmed. This
+    // makes every successful access check self-heal users who still have a
+    // cookie from a prior failed or already-redeemed invitation.
+    const response = NextResponse.json({
       status: 'ok' as const,
       email: actor.email,
       emails: [actor.email],
       userId: actor.clerkId,
     }, { status: 200 });
+    response.cookies.delete(INVITATION_TOKEN_COOKIE);
+    return response;
   } catch (error) {
     const message = error instanceof Error ? error.message : '';
     if (message.startsWith('AUTH_NO_ACCESS')) {

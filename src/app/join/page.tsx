@@ -4,7 +4,6 @@ import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 import Image from "next/image";
-import Link from "next/link";
 import { AlertTriangle, CheckCircle2, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SpectraLogo } from "@/components/spectra-logo";
@@ -20,11 +19,13 @@ type InvitationData = {
   orgName?: string;
   orgWelcomeMessage?: string;
   orgLogoUrl?: string;
+  alreadyAccepted?: boolean;
 };
 
 type PageState =
   | { status: "loading" }
   | { status: "valid"; data: InvitationData }
+  | { status: "accepted"; data: InvitationData }
   | { status: "expired"; reason: string }
   | { status: "error"; message: string };
 
@@ -38,6 +39,17 @@ type RedeemState = {
   alreadyAccepted?: boolean;
 };
 
+// Fire-and-forget: tell the server to drop the invitation cookie so the user
+// can navigate away from /join without the middleware snapping them back.
+async function clearInvitationCookie() {
+  try {
+    await fetch("/api/invitations/redeem", { method: "DELETE" });
+  } catch {
+    // Best-effort. The access-state endpoint also clears the cookie whenever
+    // the user has access, so a missed DELETE isn't catastrophic.
+  }
+}
+
 function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
   const searchParams = useSearchParams();
   const token = searchParams.get("token");
@@ -50,26 +62,49 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
   const [redeemState, setRedeemState] = useState<RedeemState>({ message: null });
 
   useEffect(() => {
-    if (!isLoaded || !userId) {
+    if (!isLoaded) {
+      return;
+    }
+    if (!userId) {
       setViewerEmail(null);
       setViewerEmails([]);
-      setIdentityLoaded(!userId);
+      setIdentityLoaded(true);
       return;
     }
 
+    let cancelled = false;
+
     void (async () => {
-      try {
-        const response = await fetch("/api/auth/access-state?includeIdentity=1", { cache: "no-store" });
-        const payload = (await response.json().catch(() => null)) as { email?: string; emails?: string[] } | null;
-        setViewerEmail(payload?.email ?? null);
-        setViewerEmails(payload?.emails ?? (payload?.email ? [payload.email] : []));
-      } catch {
-        setViewerEmail(null);
-        setViewerEmails([]);
-      } finally {
+      // Clerk's /api/auth/access-state?includeIdentity=1 occasionally returns
+      // an empty emails array right after session refresh. Retry a few times
+      // before giving up so auto-redeem doesn't silently stall.
+      for (let attempt = 0; attempt < 3 && !cancelled; attempt += 1) {
+        try {
+          const response = await fetch("/api/auth/access-state?includeIdentity=1", { cache: "no-store" });
+          const payload = (await response.json().catch(() => null)) as { email?: string; emails?: string[] } | null;
+          const emails = payload?.emails ?? (payload?.email ? [payload.email] : []);
+          if (emails.length > 0) {
+            if (!cancelled) {
+              setViewerEmail(payload?.email ?? emails[0] ?? null);
+              setViewerEmails(emails);
+            }
+            break;
+          }
+        } catch {
+          // Retry.
+        }
+        if (attempt < 2) {
+          await new Promise((resolve) => setTimeout(resolve, 400));
+        }
+      }
+      if (!cancelled) {
         setIdentityLoaded(true);
       }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [isLoaded, userId]);
 
   useEffect(() => {
@@ -86,47 +121,72 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
           setState({ status: "expired", reason: "This invitation has expired." });
           return;
         }
-        if (response.status === 409) {
-          setState({ status: "expired", reason: "This invitation has already been accepted." });
-          return;
-        }
         if (response.status === 404) {
           setState({ status: "error", message: "Invitation not found. Please ask your school admin for a new link." });
           return;
         }
-     if (!response.ok) {
-           const text = await response.text();
-           // Try to parse as JSON first, fallback to text
-           let errorMessage = text || "Failed to load invitation.";
-           try {
-             const json = JSON.parse(text);
-             errorMessage = json.error?.message || json.message || errorMessage;
-           } catch {
-             // Keep original text if not JSON
-           }
-           setState({ status: "error", message: errorMessage });
-           return;
-         }
+        if (!response.ok) {
+          const text = await response.text();
+          let errorMessage = text || "Failed to load invitation.";
+          try {
+            const json = JSON.parse(text);
+            errorMessage = json.error?.message || json.message || errorMessage;
+          } catch {
+            // Keep original text if not JSON
+          }
+          setState({ status: "error", message: errorMessage });
+          return;
+        }
 
         const data = (await response.json()) as InvitationData;
         setRedeemState({ message: null });
-        setState({ status: "valid", data });
+        if (data.alreadyAccepted) {
+          setState({ status: "accepted", data });
+        } else {
+          setState({ status: "valid", data });
+        }
       } catch {
         setState({ status: "error", message: "Could not verify invitation. Please try again." });
       }
     })();
   }, [token]);
 
+  // Whenever we land on a state where the invitation can't help the current
+  // user anymore, proactively clear the cookie so any subsequent navigation
+  // (Continue, Switch account, manual URL change) isn't redirected back here.
   useEffect(() => {
-    const hasMatchingEmail = state.status === "valid"
-      ? viewerEmails.some((email) => email.toLowerCase() === state.data.email.toLowerCase())
-      : false;
+    if (state.status === "expired" || state.status === "error") {
+      void clearInvitationCookie();
+    }
+  }, [state.status]);
 
-    if (!isLoaded || !userId || !token || state.status !== "valid" || redeeming || !identityLoaded || viewerEmails.length === 0) {
+  useEffect(() => {
+    if (!isLoaded || !userId || !token || !identityLoaded) {
+      return;
+    }
+    if (state.status !== "valid" && state.status !== "accepted") {
       return;
     }
 
-    if (!hasMatchingEmail) {
+    const hasMatchingEmail = viewerEmails.some(
+      (email) => email.toLowerCase() === state.data.email.toLowerCase(),
+    );
+
+    // Already-accepted invitation: if the signed-in viewer matches, this is
+    // an idempotent self-heal — just send them to the app. If they don't
+    // match, drop the cookie so they can use the Switch-account CTA without
+    // getting looped back here.
+    if (state.status === "accepted") {
+      if (hasMatchingEmail) {
+        void clearInvitationCookie();
+        window.location.replace("/chat");
+      } else {
+        void clearInvitationCookie();
+      }
+      return;
+    }
+
+    if (redeeming || !hasMatchingEmail) {
       return;
     }
 
@@ -148,7 +208,7 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
         if (payload?.alreadyAccepted) {
           setRedeemState({ message: null, alreadyAccepted: true });
         }
-        window.location.href = "/";
+        window.location.replace("/chat");
       } catch (error) {
         setRedeemState({
           message: error instanceof Error ? error.message : "Could not accept invitation.",
@@ -159,9 +219,20 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
     })();
   }, [identityLoaded, isLoaded, redeeming, state, token, userId, viewerEmails]);
 
-  const viewerHasMatchingEmail = state.status === "valid"
+  const viewerHasMatchingEmail = (state.status === "valid" || state.status === "accepted")
     ? viewerEmails.some((email) => email.toLowerCase() === state.data.email.toLowerCase())
     : false;
+
+  async function goToSignIn() {
+    await clearInvitationCookie();
+    const signInUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in";
+    window.location.href = signInUrl;
+  }
+
+  async function goHomeAfterClear(destination: string) {
+    await clearInvitationCookie();
+    window.location.href = destination;
+  }
 
   if (state.status === "loading") {
     return (
@@ -186,11 +257,13 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
           <p className="mt-3 text-xs text-[var(--text-secondary)]">
             Contact your school administrator for a fresh invitation link.
           </p>
-          <Link href={userId ? "/no-access" : "/sign-in"}>
-            <Button variant="secondary" className="mt-6 w-full cursor-pointer">
-              Continue
-            </Button>
-          </Link>
+          <Button
+            variant="secondary"
+            className="mt-6 w-full cursor-pointer"
+            onClick={() => void goHomeAfterClear(userId ? "/no-access" : "/sign-in")}
+          >
+            Continue
+          </Button>
         </div>
       </div>
     );
@@ -205,11 +278,52 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
           </div>
           <h1 className="mb-2 text-xl font-semibold text-[var(--text-primary)]">Invalid Invitation</h1>
           <p className="text-sm text-[var(--text-secondary)]">{state.message}</p>
-          <Link href={userId ? "/no-access" : "/sign-in"}>
-            <Button variant="secondary" className="mt-6 w-full cursor-pointer">
-              Continue
+          <Button
+            variant="secondary"
+            className="mt-6 w-full cursor-pointer"
+            onClick={() => void goHomeAfterClear(userId ? "/no-access" : "/sign-in")}
+          >
+            Continue
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (state.status === "accepted") {
+    const { data } = state;
+    if (viewerHasMatchingEmail) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)]">
+          <div className="flex flex-col items-center gap-4">
+            <SpectraLogo size={56} showTile className="animate-pulse" />
+            <p className="text-sm text-[var(--text-secondary)]">Redirecting you to your workspace...</p>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)] px-4">
+        <div className="w-full max-w-sm rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 text-center shadow-[var(--shadow-soft)]">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[color-mix(in_oklab,var(--success)_12%,transparent)]">
+            <CheckCircle2 className="h-7 w-7 text-[var(--success)]" />
+          </div>
+          <h1 className="mb-2 text-xl font-semibold text-[var(--text-primary)]">Invitation already used</h1>
+          <p className="text-sm text-[var(--text-secondary)]">
+            This invitation has already been accepted. Sign in with {data.email} to continue.
+          </p>
+          <div className="mt-6 space-y-3">
+            <Button className="w-full cursor-pointer" onClick={() => void goToSignIn()}>
+              Switch account
             </Button>
-          </Link>
+            <Button
+              variant="secondary"
+              className="w-full cursor-pointer"
+              onClick={() => void goHomeAfterClear(userId ? "/no-access" : "/")}
+            >
+              {userId ? "Back to access page" : "Back to homepage"}
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -235,6 +349,13 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
     const appUrl = getAppUrl(typeof window !== "undefined" ? window.location.origin : undefined);
     const redirect = encodeURIComponent(`${appUrl}/join?token=${encodeURIComponent(token ?? "")}`);
     window.location.href = `${signInUrl}?redirect_url=${redirect}`;
+  }
+
+  async function handleSwitchAccount() {
+    // The user needs to leave /join and authenticate as someone else.
+    // Clear the cookie first so the middleware doesn't drag them back.
+    await clearInvitationCookie();
+    handleSignIn();
   }
 
   return (
@@ -321,7 +442,11 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
                 Sign in with existing account
               </Button>
             ) : viewerEmail && !viewerHasMatchingEmail ? (
-              <Button variant="secondary" className="w-full cursor-pointer" onClick={handleSignIn}>
+              <Button
+                variant="secondary"
+                className="w-full cursor-pointer"
+                onClick={() => void handleSwitchAccount()}
+              >
                 Switch account
               </Button>
             ) : null}

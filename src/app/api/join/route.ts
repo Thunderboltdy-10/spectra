@@ -26,10 +26,10 @@ export async function GET(request: NextRequest) {
     if (invitation.status === "expired" || Date.now() > invitation.expiresAt) {
       return badRequest("This invitation has expired", 410);
     }
-    if (invitation.status === "accepted") {
-      return badRequest("This invitation has already been accepted", 409);
-    }
 
-    return ok(invitation);
+    // Accepted invitations are NOT an error: the signed-in user may be the
+    // original invitee revisiting the link. The client decides what to do
+    // based on whether the viewer's email matches.
+    return ok({ ...invitation, alreadyAccepted: invitation.status === "accepted" });
   });
 }

@@ -20,11 +20,53 @@ const isPublicRoute = createRouteMatcher([
 const INVITATION_TOKEN_COOKIE = "ai-school-invitation-token";
 const INVITATION_TOKEN_MAX_AGE = 60 * 60 * 24;
 
+// Routes the user must always be able to reach even when an invitation cookie
+// is set. Without this, a signed-in user whose cookie points at an invitation
+// they can no longer redeem (already accepted, wrong email, etc.) has no way
+// to reach sign-in to switch accounts — they get looped back to /join.
+const SAFE_EXIT_PREFIXES = [
+  "/join",
+  "/sign-in",
+  "/sign-up",
+  "/sign-out",
+  "/no-access",
+];
+
+function isSafeExitPath(pathname: string) {
+  return SAFE_EXIT_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
+
+type AccessStatePayload = {
+  status?: "ok" | "no_access" | "org_inactive" | "signed_out";
+};
+
+async function fetchAccessState(req: NextRequest): Promise<{
+  status: number;
+  payload: AccessStatePayload | null;
+} | null> {
+  try {
+    const response = await fetch(new URL("/api/auth/access-state", req.url), {
+      method: "GET",
+      headers: {
+        cookie: req.headers.get("cookie") ?? "",
+      },
+      cache: "no-store",
+    });
+    const payload = (await response.json().catch(() => null)) as AccessStatePayload | null;
+    return { status: response.status, payload };
+  } catch {
+    return null;
+  }
+}
+
 const authMiddleware = clerkMiddleware(async (auth, req) => {
   const url = new URL(req.url);
   const invitationToken = url.searchParams.get("token") ?? url.searchParams.get("invitation");
   const cookieToken = req.cookies.get(INVITATION_TOKEN_COOKIE)?.value;
+  const isApiRoute = url.pathname.startsWith("/api/") || url.pathname.startsWith("/trpc");
 
+  // Persist ?token=... into a cookie so that the post-signup flow (where the
+  // token is no longer in the URL) can still redeem it server-side.
   if (invitationToken) {
     const response = url.pathname.startsWith("/join")
       ? NextResponse.next()
@@ -39,17 +81,40 @@ const authMiddleware = clerkMiddleware(async (auth, req) => {
     return response;
   }
 
-  const isApiRoute = url.pathname.startsWith("/api/") || url.pathname.startsWith("/trpc");
-  if (cookieToken && !url.pathname.startsWith("/join") && !isApiRoute) {
-    return NextResponse.redirect(new URL(`/join?token=${cookieToken}`, req.url));
+  const { userId } = await auth();
+
+  // If the user is signed in and carrying an invitation cookie, only use it to
+  // shepherd them to /join when they genuinely lack access. Once access is
+  // confirmed (or the workspace is inactive), the cookie has served its purpose
+  // and is deleted so the user isn't trapped.
+  let cachedAccess: Awaited<ReturnType<typeof fetchAccessState>> = null;
+  if (userId && cookieToken && !isApiRoute) {
+    cachedAccess = await fetchAccessState(req);
+    if (cachedAccess) {
+      if (cachedAccess.status === 200) {
+        // User has access; invitation cookie is moot. Clear it and continue.
+        const response = NextResponse.next();
+        response.cookies.delete(INVITATION_TOKEN_COOKIE);
+        return response;
+      }
+      if (cachedAccess.status === 403 && cachedAccess.payload?.status === "org_inactive") {
+        const destination = new URL("/no-access", req.url);
+        destination.searchParams.set("reason", "inactive");
+        const response = NextResponse.redirect(destination);
+        response.cookies.delete(INVITATION_TOKEN_COOKIE);
+        return response;
+      }
+      if (cachedAccess.status === 403 && !isSafeExitPath(url.pathname)) {
+        return NextResponse.redirect(new URL(`/join?token=${cookieToken}`, req.url));
+      }
+      // 401 signed_out / safe-exit path / unknown: fall through to normal routing.
+    }
   }
 
   if (isPublicRoute(req)) {
     return NextResponse.next();
   }
 
-  const { userId } = await auth();
-  
   if (!userId) {
     if (req.nextUrl.pathname.startsWith("/api/") || req.nextUrl.pathname.startsWith("/trpc")) {
       return NextResponse.json(
@@ -74,24 +139,14 @@ const authMiddleware = clerkMiddleware(async (auth, req) => {
     && !url.pathname.startsWith("/no-access");
 
   if (shouldCheckAccess) {
-    try {
-      const accessResponse = await fetch(new URL("/api/auth/access-state", req.url), {
-        method: "GET",
-        headers: {
-          cookie: req.headers.get("cookie") ?? "",
-        },
-        cache: "no-store",
-      });
-      if (accessResponse.status === 403) {
-        const payload = (await accessResponse.json().catch(() => null)) as { status?: string } | null;
-        const destination = new URL("/no-access", req.url);
-        if (payload?.status === "org_inactive") {
-          destination.searchParams.set("reason", "inactive");
-        }
-        return NextResponse.redirect(destination);
+    // Reuse the access-state we already fetched above when possible.
+    const access = cachedAccess ?? (await fetchAccessState(req));
+    if (access?.status === 403) {
+      const destination = new URL("/no-access", req.url);
+      if (access.payload?.status === "org_inactive") {
+        destination.searchParams.set("reason", "inactive");
       }
-    } catch {
-      // Fail open in middleware; route handlers and page guards still enforce access.
+      return NextResponse.redirect(destination);
     }
   }
 

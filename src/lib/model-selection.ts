@@ -57,6 +57,36 @@ export type ModelCapability =
   | "search"
   | "image_generation";
 
+function normalizeModalities(values?: string[]) {
+  return new Set((values ?? []).map((value) => value.trim().toLowerCase()).filter(Boolean));
+}
+
+function modalityBlob(model: CatalogModelEntry) {
+  return `${(model.inputModalities ?? []).join(" ")} ${(model.outputModalities ?? []).join(" ")}`.toLowerCase();
+}
+
+function hasExplicitTextChatModalities(model: CatalogModelEntry) {
+  const input = normalizeModalities(model.inputModalities);
+  const output = normalizeModalities(model.outputModalities);
+  if (input.size === 0 && output.size === 0) return null;
+  const inputSupportsText = input.has("text");
+  const outputSupportsText = output.has("text");
+  return inputSupportsText && outputSupportsText;
+}
+
+export function isTextChatCapableModel(model: CatalogModelEntry) {
+  const explicit = hasExplicitTextChatModalities(model);
+  if (explicit !== null) {
+    return explicit;
+  }
+
+  const blob = `${textBlob(model)} ${modalityBlob(model)}`;
+  if (/\b(whisper|transcrib|transcript|tts|text-to-speech|speech-to-text|speech|audio-only|lyra)\b/.test(blob)) {
+    return false;
+  }
+  return true;
+}
+
 type RankParams = {
   catalog: CatalogModelEntry[];
   tier: SpendingTier;
@@ -295,6 +325,7 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
   for (const model of params.catalog) {
     if (!model?.modelId || avoid.has(model.modelId)) continue;
     if (!isModelAllowedInTier(model, params.tier)) continue;
+    if (!isImageGenerationModel(model) && !isTextChatCapableModel(model)) continue;
 
     let missingRequired = false;
     for (const capability of required) {

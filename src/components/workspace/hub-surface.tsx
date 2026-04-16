@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, useEffect } from "react";
+import { useCallback, useMemo, useState, useEffect } from "react";
 import { Lock, Unlock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { HubEdge } from "@/lib/workspace/contracts";
@@ -22,11 +22,6 @@ type HubSurfaceProps = {
   onToggleLock?: () => void;
   onTogglePin?: () => void;
 };
-
-/** Debounce delay before expanding on hover (ms) — less aggressive */
-const HOVER_ENTER_DELAY = 120;
-/** Debounce delay before collapsing after mouse leaves (ms) */
-const HOVER_LEAVE_DELAY = 220;
 
 function edgeClasses(edge: HubEdge) {
   switch (edge) {

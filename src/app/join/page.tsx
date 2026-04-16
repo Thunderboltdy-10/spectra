@@ -33,6 +33,11 @@ type JoinPageContentProps = {
   userId: string | null;
 };
 
+type RedeemState = {
+  message: string | null;
+  alreadyAccepted?: boolean;
+};
+
 function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
   const searchParams = useSearchParams();
   const token = searchParams.get("token");
@@ -41,10 +46,14 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
   const [redeeming, setRedeeming] = useState(false);
   const [viewerEmail, setViewerEmail] = useState<string | null>(null);
   const [viewerEmails, setViewerEmails] = useState<string[]>([]);
+  const [identityLoaded, setIdentityLoaded] = useState(false);
+  const [redeemState, setRedeemState] = useState<RedeemState>({ message: null });
 
   useEffect(() => {
     if (!isLoaded || !userId) {
       setViewerEmail(null);
+      setViewerEmails([]);
+      setIdentityLoaded(!userId);
       return;
     }
 
@@ -57,6 +66,8 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
       } catch {
         setViewerEmail(null);
         setViewerEmails([]);
+      } finally {
+        setIdentityLoaded(true);
       }
     })();
   }, [isLoaded, userId]);
@@ -98,6 +109,7 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
          }
 
         const data = (await response.json()) as InvitationData;
+        setRedeemState({ message: null });
         setState({ status: "valid", data });
       } catch {
         setState({ status: "error", message: "Could not verify invitation. Please try again." });
@@ -110,7 +122,7 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
       ? viewerEmails.some((email) => email.toLowerCase() === state.data.email.toLowerCase())
       : false;
 
-    if (!isLoaded || !userId || !token || state.status !== "valid" || redeeming || viewerEmails.length === 0) {
+    if (!isLoaded || !userId || !token || state.status !== "valid" || redeeming || !identityLoaded || viewerEmails.length === 0) {
       return;
     }
 
@@ -119,6 +131,7 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
     }
 
     setRedeeming(true);
+    setRedeemState({ message: null });
     void (async () => {
       try {
         const response = await fetch("/api/invitations/redeem", {
@@ -126,23 +139,25 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ token }),
         });
+        const payload = (await response.json().catch(() => null)) as
+          | { error?: { message?: string }; alreadyAccepted?: boolean }
+          | null;
         if (!response.ok) {
-          const payload = (await response.json().catch(() => null)) as
-            | { error?: { message?: string } }
-            | null;
           throw new Error(payload?.error?.message ?? "Could not accept invitation.");
+        }
+        if (payload?.alreadyAccepted) {
+          setRedeemState({ message: null, alreadyAccepted: true });
         }
         window.location.href = "/";
       } catch (error) {
-        setState({
-          status: "error",
+        setRedeemState({
           message: error instanceof Error ? error.message : "Could not accept invitation.",
         });
       } finally {
         setRedeeming(false);
       }
     })();
-  }, [isLoaded, redeeming, state, token, userId, viewerEmails]);
+  }, [identityLoaded, isLoaded, redeeming, state, token, userId, viewerEmails]);
 
   const viewerHasMatchingEmail = state.status === "valid"
     ? viewerEmails.some((email) => email.toLowerCase() === state.data.email.toLowerCase())
@@ -311,6 +326,12 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
               </Button>
             ) : null}
           </div>
+
+          {redeemState.message ? (
+            <div className="mt-4 rounded-xl border border-[color-mix(in_oklab,var(--warning)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_8%,transparent)] px-4 py-3 text-xs text-[var(--warning)]">
+              {redeemState.message}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

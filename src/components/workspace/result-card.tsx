@@ -104,7 +104,6 @@ export function ResultCard({
   summary,
   actionType = "answered",
   targetId,
-  targetItemType,
   onClick,
   onDismiss,
   onReopen,

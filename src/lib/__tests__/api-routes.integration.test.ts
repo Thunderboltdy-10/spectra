@@ -1,9 +1,42 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
+function authServerMock(overrides: Record<string, unknown>) {
+  return {
+    isAdminLikeActor: () => true,
+    ...overrides,
+  };
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.resetModules();
+});
+
+describe("auth access-state route integration", () => {
+  it("returns identity without requiring org access when includeIdentity=1", async () => {
+    vi.doMock("@clerk/nextjs/server", () => ({
+      auth: vi.fn().mockResolvedValue({ userId: "clerk_1" }),
+      currentUser: vi.fn().mockResolvedValue({
+        emailAddresses: [{ emailAddress: "student@example.com" }, { emailAddress: "alias@example.com" }],
+      }),
+    }));
+    vi.doMock("@/lib/auth-server", () => authServerMock({
+      requireActor: vi.fn().mockRejectedValue(new Error("AUTH_NO_ACCESS: missing org")),
+    }));
+
+    const route = await import("@/app/api/auth/access-state/route");
+    const response = await route.GET(new NextRequest("http://localhost/api/auth/access-state?includeIdentity=1"));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({
+      status: "ok",
+      email: "student@example.com",
+      emails: ["student@example.com", "alias@example.com"],
+      userId: "clerk_1",
+    });
+  });
 });
 
 describe("feedback route integration", () => {
@@ -73,7 +106,7 @@ describe("bookmarks route integration", () => {
     const convexQuery = vi.fn().mockResolvedValue([{ messageId: "m_1" }]);
     const convexMutation = vi.fn().mockResolvedValue({ added: true });
 
-    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/auth-server", () => authServerMock({ requireActor }));
     vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
 
     const route = await import("@/app/api/bookmarks/route");
@@ -107,7 +140,7 @@ describe("personal resources route integration", () => {
     const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_files" });
     const convexMutation = vi.fn().mockResolvedValue({ ok: true });
 
-    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/auth-server", () => authServerMock({ requireActor }));
     vi.doMock("@/lib/convex-server", () => ({ convexMutation, convexQuery: vi.fn() }));
 
     const route = await import("@/app/api/personal-resources/route");
@@ -140,7 +173,7 @@ describe("personal resources route integration", () => {
       .mockResolvedValueOnce({ ok: true })
       .mockRejectedValueOnce(new Error("Resource already exhausted retries"));
 
-    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/auth-server", () => authServerMock({ requireActor }));
     vi.doMock("@/lib/convex-server", () => ({ convexMutation, convexQuery: vi.fn() }));
 
     const route = await import("@/app/api/personal-resources/route");
@@ -250,7 +283,7 @@ describe("school admin notifications route integration", () => {
     const requireActor = vi.fn().mockResolvedValue({ clerkId: "admin_1", role: "admin" });
     const convexMutation = vi.fn();
 
-    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/auth-server", () => authServerMock({ requireActor }));
     vi.doMock("@/lib/convex-server", () => ({ convexMutation, convexQuery: vi.fn() }));
 
     const route = await import("@/app/api/school-admin/notifications/route");
@@ -286,7 +319,7 @@ describe("gamification route integration", () => {
       return null;
     });
 
-    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/auth-server", () => authServerMock({ requireActor }));
     vi.doMock("@/lib/convex-server", () => ({ convexQuery }));
 
     const route = await import("@/app/api/gamification/route");
@@ -311,7 +344,7 @@ describe("manual compact route integration", () => {
     const requireActor = vi.fn().mockResolvedValue({ clerkId: "user_compact" });
     const convexAction = vi.fn().mockResolvedValue({ ok: true, compactedMessages: 12 });
 
-    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/auth-server", () => authServerMock({ requireActor }));
     vi.doMock("@/lib/convex-server", () => ({ convexAction, convexMutation: vi.fn(), convexQuery: vi.fn() }));
 
     const route = await import("@/app/api/chats/[id]/route");
@@ -334,7 +367,7 @@ describe("manual compact route integration", () => {
 
 describe("school-admin notification route integration", () => {
   it("rejects invalid role filters instead of broadening audience", async () => {
-    vi.doMock("@/lib/auth-server", () => ({
+    vi.doMock("@/lib/auth-server", () => authServerMock({
       requireActor: vi.fn().mockResolvedValue({ clerkId: "admin_1", role: "admin" }),
     }));
     vi.doMock("@/lib/convex-server", () => ({
@@ -364,7 +397,7 @@ describe("legacy admin user route integration", () => {
     const requireActor = vi.fn().mockResolvedValue({ clerkId: "admin_legacy", role: "admin" });
     const convexMutation = vi.fn();
 
-    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/auth-server", () => authServerMock({ requireActor }));
     vi.doMock("@/lib/convex-server", () => ({ convexMutation, convexQuery: vi.fn() }));
 
     const route = await import("@/app/api/admin/users/route");
@@ -500,7 +533,7 @@ describe("school-admin members route integration", () => {
     const convexMutation = vi.fn().mockResolvedValue({ invitationId: "invite_1", token: "tok_1" });
     const convexQuery = vi.fn().mockResolvedValue({});
 
-    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/auth-server", () => authServerMock({ requireActor }));
     vi.doMock("@/lib/convex-server", () => ({ convexMutation, convexQuery }));
     vi.doMock("@/lib/invitations", () => ({
       sendInvitationEmail: vi.fn().mockResolvedValue({
@@ -528,7 +561,7 @@ describe("super-admin school route integration", () => {
     const convexQuery = vi.fn().mockResolvedValue({ org: { name: "Alpha School" } });
     const sendInvitationEmail = vi.fn().mockResolvedValue({ status: "sent" });
 
-    vi.doMock("@/lib/auth-server", () => ({ requireSuperAdmin }));
+    vi.doMock("@/lib/auth-server", () => authServerMock({ requireSuperAdmin }));
     vi.doMock("@/lib/convex-server", () => ({ convexMutation, convexQuery }));
     vi.doMock("@/lib/invitations", () => ({ sendInvitationEmail }));
 
@@ -558,7 +591,7 @@ describe("super-admin school route integration", () => {
     const convexQuery = vi.fn().mockResolvedValue({ org: { name: "Alpha School" } });
     const sendInvitationEmail = vi.fn().mockResolvedValue({ status: "skipped", reason: "SMTP email environment is not configured." });
 
-    vi.doMock("@/lib/auth-server", () => ({ requireSuperAdmin }));
+    vi.doMock("@/lib/auth-server", () => authServerMock({ requireSuperAdmin }));
     vi.doMock("@/lib/convex-server", () => ({ convexMutation, convexQuery }));
     vi.doMock("@/lib/invitations", () => ({ sendInvitationEmail }));
 
@@ -580,7 +613,7 @@ describe("super-admin school route integration", () => {
     const requireSuperAdmin = vi.fn().mockResolvedValue({ clerkId: "super_admin_1" });
     const convexMutation = vi.fn().mockResolvedValue({ invitationId: "invite_admin_1", invitationCreated: true });
 
-    vi.doMock("@/lib/auth-server", () => ({ requireSuperAdmin }));
+    vi.doMock("@/lib/auth-server", () => authServerMock({ requireSuperAdmin }));
     vi.doMock("@/lib/convex-server", () => ({ convexMutation, convexQuery: vi.fn() }));
     vi.doMock("@/lib/invitations", () => ({ sendInvitationEmail: vi.fn() }));
 
@@ -612,7 +645,7 @@ describe("super-admin school route integration", () => {
       envelopeFrom: "owner@example.com",
     });
 
-    vi.doMock("@/lib/auth-server", () => ({ requireSuperAdmin }));
+    vi.doMock("@/lib/auth-server", () => authServerMock({ requireSuperAdmin }));
     vi.doMock("@/lib/convex-server", () => ({ convexMutation, convexQuery }));
     vi.doMock("@/lib/invitations", () => ({ sendInvitationEmail }));
 

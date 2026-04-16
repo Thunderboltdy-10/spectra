@@ -73,6 +73,27 @@ export default defineSchema({
   })
     .index("by_slug", ["slug"]),
 
+  managebacUserLinks: defineTable({
+    orgId: v.id("orgs"),
+    userId: v.id("users"),
+    clerkId: v.string(),
+    email: v.string(),
+    managebacStudentId: v.optional(v.string()),
+    managebacStudentName: v.optional(v.string()),
+    managebacGradeLevel: v.optional(v.string()),
+    resolutionStatus: v.union(v.literal("resolved"), v.literal("not_found"), v.literal("ambiguous"), v.literal("error")),
+    resolutionCheckedAt: v.number(),
+    resolutionError: v.optional(v.string()),
+    lastHydratedAt: v.optional(v.number()),
+    lastHydrationStatus: v.optional(v.union(v.literal("idle"), v.literal("success"), v.literal("error"))),
+    lastHydrationError: v.optional(v.string()),
+    updatedAt: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_org_email", ["orgId", "email"])
+    .index("by_org_student_id", ["orgId", "managebacStudentId"]),
+
   users: defineTable({
     clerkId: v.string(),
     email: v.string(),

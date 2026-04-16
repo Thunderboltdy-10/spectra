@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { requireActor } from "@/lib/auth-server";
+import { isAdminLikeActor, requireActor } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
 import { sendInvitationEmail } from "@/lib/invitations";
@@ -47,7 +47,7 @@ async function loadOrgSettingsName(actorClerkId: string) {
 export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();
-    if (actor.role !== "admin") return badRequest("Admin access required", 403);
+    if (!isAdminLikeActor(actor)) return badRequest("Admin access required", 403);
 
     const { searchParams } = new URL(request.url);
     const search = searchParams.get("search") ?? undefined;
@@ -74,7 +74,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();
-    if (actor.role !== "admin") return badRequest("Admin access required", 403);
+    if (!isAdminLikeActor(actor)) return badRequest("Admin access required", 403);
 
     const body = (await request.json()) as { email?: string; role?: string };
     if (!body.email?.trim()) return badRequest("email is required");
@@ -130,7 +130,7 @@ export async function POST(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();
-    if (actor.role !== "admin") return badRequest("Admin access required", 403);
+    if (!isAdminLikeActor(actor)) return badRequest("Admin access required", 403);
 
     const body = (await request.json()) as {
       userId?: string;

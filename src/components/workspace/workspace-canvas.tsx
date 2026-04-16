@@ -570,7 +570,7 @@ function ItemNode({ data }: { data: ItemNodeData }) {
         style={{
           borderRadius: `${borderRadius}px`,
           border: `${dynamicBorderWidth}px solid ${borderColor}`,
-          backgroundColor: `rgba(var(--bg-elevated-rgb, 30, 30, 36), ${bgOpacity})`,
+          backgroundColor: `color-mix(in oklab, var(--bg-elevated) ${Math.round(bgOpacity * 100)}%, transparent)`,
           boxShadow: isFocused
             ? "0 12px 30px -14px rgba(14,142,232,0.22), 0 0 0 1px color-mix(in oklab, var(--accent-cyan) 20%, transparent)"
             : isOpenInDeepEdit
@@ -914,7 +914,7 @@ function TouchContent({ item }: { item: WorkspaceItemData }) {
           className="h-full flex flex-col overflow-hidden"
           onClick={() => !isEditing && setIsEditing(true)}
         >
-          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[var(--border-default)]/20 shrink-0 bg-[#1e1e2e]">
+          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[var(--border-default)]/20 shrink-0 bg-[var(--bg-code-editor)]">
             {Icon && <Icon className="h-3.5 w-3.5" style={{ color: meta?.color }} />}
             <span className="text-[12px] font-semibold text-[var(--text-primary)] truncate flex-1">{item.title}</span>
             {codeLang && (
@@ -922,11 +922,11 @@ function TouchContent({ item }: { item: WorkspaceItemData }) {
             )}
             <span className="text-[10px] text-[var(--text-tertiary)]/40 tabular-nums">{lineCount}L</span>
           </div>
-          <div className="flex-1 bg-[#1e1e2e] overflow-hidden flex flex-col">
+          <div className="flex-1 bg-[var(--bg-code-editor)] overflow-hidden flex flex-col">
             {isEditing ? (
               <textarea
                 autoFocus
-                className="flex-1 w-full resize-none bg-transparent text-[#cdd6f4] font-mono text-[12px] leading-[1.7] outline-none p-4 border-l-2 border-[var(--accent-cyan)]/30"
+                className="flex-1 w-full resize-none bg-transparent text-[var(--text-code-editor)] font-mono text-[12px] leading-[1.7] outline-none p-4 border-l-2 border-[var(--accent-cyan)]/30"
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
                 onBlur={handleBlur}

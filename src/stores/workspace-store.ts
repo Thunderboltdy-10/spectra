@@ -23,6 +23,7 @@ type WorkspacePreferencesPayload = {
   workspaceViewMode?: ViewMode;
   workspaceBackgroundMode?: BackgroundMode;
   workspaceHubVisibility?: HubVisibility;
+  workspaceAutoSelectContext?: boolean;
 };
 
 let persistWorkspacePreferencesTimer: ReturnType<typeof setTimeout> | null = null;
@@ -89,6 +90,7 @@ type WorkspaceState = {
   activeThreadId: string | null;
   workspaces: WorkspaceData[];
   hasHydratedPreferences: boolean;
+  autoSelectContext: boolean;
 
   setZoom: (zoom: number) => void;
   setViewport: (x: number, y: number, zoom: number) => void;
@@ -142,6 +144,7 @@ type WorkspaceState = {
 
   setWorkspaces: (workspaces: WorkspaceData[]) => void;
   hydratePreferences: (preferences: WorkspacePreferencesPayload) => void;
+  setAutoSelectContext: (enabled: boolean) => void;
 
   /** Computed fly-to target for dock navigation */
   flyToTarget: { centerX: number; centerY: number; zoom: number; requestId: number } | null;
@@ -179,6 +182,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
 
   workspaces: [],
   hasHydratedPreferences: false,
+  autoSelectContext: false,
   flyToTarget: null,
 
   setZoom: (zoom) =>
@@ -245,15 +249,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
       }
 
       let autoWorkspaceId = state.committedWorkspaceId;
-      if (state.committedWorkspaceId) {
-        // Already committed: only uncommit when proximity drops below lower threshold
-        if (proximity < uncommitThreshold) {
-          autoWorkspaceId = null;
-        }
-      } else {
-        // Not committed: only commit when proximity exceeds upper threshold
-        if (proximity >= commitThreshold) {
-          autoWorkspaceId = nearestId;
+      if (state.autoSelectContext) {
+        if (state.committedWorkspaceId) {
+          // Already committed: only uncommit when proximity drops below lower threshold
+          if (proximity < uncommitThreshold) {
+            autoWorkspaceId = null;
+          }
+        } else {
+          // Not committed: only commit when proximity exceeds upper threshold
+          if (proximity >= commitThreshold) {
+            autoWorkspaceId = nearestId;
+          }
         }
       }
 
@@ -454,8 +460,22 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
       viewMode: preferences.workspaceViewMode ?? state.viewMode,
       backgroundMode: preferences.workspaceBackgroundMode ?? state.backgroundMode,
       hubVisibility: preferences.workspaceHubVisibility ?? state.hubVisibility,
+      autoSelectContext: preferences.workspaceAutoSelectContext ?? state.autoSelectContext,
       hasHydratedPreferences: true,
     })),
+
+  setAutoSelectContext: (enabled) =>
+    set((state) => {
+      scheduleWorkspacePreferencesPersist({ workspaceAutoSelectContext: enabled });
+      return enabled
+        ? { autoSelectContext: true }
+        : {
+            autoSelectContext: false,
+            committedWorkspaceId: null,
+            activeWorkspaceId:
+              state.activeWorkspaceId === state.committedWorkspaceId ? null : state.activeWorkspaceId,
+          };
+    }),
 
   flyToWorkspace: (id) =>
     set((state) => {

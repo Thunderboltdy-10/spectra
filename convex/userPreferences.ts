@@ -46,6 +46,7 @@ export const get = query({
       workspaceViewMode: current?.workspaceViewMode,
       workspaceBackgroundMode: current?.workspaceBackgroundMode,
       workspaceHubVisibility: current?.workspaceHubVisibility,
+      workspaceAutoSelectContext: current?.workspaceAutoSelectContext ?? false,
       editorDefaultMode: current?.editorDefaultMode,
       updatedAt: current?.updatedAt,
       preferenceId: current?._id,
@@ -61,6 +62,7 @@ export const upsert = mutation({
     workspaceViewMode: v.optional(v.union(vWorkspaceViewMode, v.null())),
     workspaceBackgroundMode: v.optional(v.union(vWorkspaceBackgroundMode, v.null())),
     workspaceHubVisibility: v.optional(v.union(vWorkspaceHubVisibility, v.null())),
+    workspaceAutoSelectContext: v.optional(v.union(v.boolean(), v.null())),
     editorDefaultMode: v.optional(v.union(vEditorMode, v.null())),
   },
   handler: async (ctx, args) => {
@@ -78,6 +80,7 @@ export const upsert = mutation({
     if (args.workspaceViewMode !== undefined) patch.workspaceViewMode = args.workspaceViewMode ?? undefined;
     if (args.workspaceBackgroundMode !== undefined) patch.workspaceBackgroundMode = args.workspaceBackgroundMode ?? undefined;
     if (args.workspaceHubVisibility !== undefined) patch.workspaceHubVisibility = args.workspaceHubVisibility ?? undefined;
+    if (args.workspaceAutoSelectContext !== undefined) patch.workspaceAutoSelectContext = args.workspaceAutoSelectContext ?? undefined;
     if (args.editorDefaultMode !== undefined) patch.editorDefaultMode = args.editorDefaultMode ?? undefined;
 
     if (!current) {
@@ -89,6 +92,7 @@ export const upsert = mutation({
         workspaceViewMode: args.workspaceViewMode ?? undefined,
         workspaceBackgroundMode: args.workspaceBackgroundMode ?? undefined,
         workspaceHubVisibility: args.workspaceHubVisibility ?? undefined,
+        workspaceAutoSelectContext: args.workspaceAutoSelectContext ?? false,
         editorDefaultMode: args.editorDefaultMode ?? undefined,
         updatedAt: now,
       });

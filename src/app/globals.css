@@ -21,9 +21,12 @@
   --bg-user-bubble: #f0f7ff;
 
   --bg-elevated: #ffffff;
+  --bg-elevated-rgb: 255, 255, 255;
   --bg-hover: #e8e3db;
   --bg-overlay: rgba(12, 18, 28, 0.22);
   --bg-code: #eae7e0;
+  --bg-code-editor: #2a2a3c;
+  --text-code-editor: #cdd6f4;
 
   --text-primary: #1a1510;
   --text-secondary: #6b5f52;
@@ -83,10 +86,13 @@
   --bg-sidebar: #0e0e0d;
   --bg-user-bubble: #1e2530;
 
-  --bg-elevated: #111218;
+  --bg-elevated: #1e1e24;
+  --bg-elevated-rgb: 30, 30, 36;
   --bg-hover: #1c1d25;
   --bg-overlay: rgba(0, 0, 0, 0.72);
   --bg-code: #0a0a0c;
+  --bg-code-editor: #1e1e2e;
+  --text-code-editor: #cdd6f4;
 
   --text-primary: #EEEBE7;
   --text-secondary: #B5AFA8;
@@ -129,6 +135,7 @@
   --bg-tertiary: #273549;
   --bg-sidebar: #111c2e;
   --bg-elevated: #192033;
+  --bg-elevated-rgb: 25, 32, 51;
   --bg-hover: #334155;
   --border-default: #334155;
   --text-secondary: #94a3b8;
@@ -152,6 +159,7 @@
   --bg-tertiary: #27272a;
   --bg-sidebar: #0e0e11;
   --bg-elevated: #1f1f22;
+  --bg-elevated-rgb: 31, 31, 34;
   --bg-hover: #3f3f46;
   --border-default: #3f3f46;
   --text-secondary: #a1a1aa;
@@ -175,6 +183,7 @@
   --bg-tertiary: #2a0d1a;
   --bg-sidebar: #150811;
   --bg-elevated: #1a0a13;
+  --bg-elevated-rgb: 26, 10, 19;
   --bg-hover: #3f1226;
   --border-default: #54182e;
   --text-secondary: #fda4af;

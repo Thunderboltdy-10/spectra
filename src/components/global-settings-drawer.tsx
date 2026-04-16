@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { rightPanelSurfaceClassName } from "@/components/ui/right-panel-surface";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { hasClerkPublishableKey } from "@/lib/clerk-config";
+import { useWorkspaceStore } from "@/stores/workspace-store";
 
 type DrawerBodyProps = {
   open: boolean;
@@ -16,6 +17,8 @@ type DrawerBodyProps = {
 };
 
 function DrawerBody({ open, onClose, onManageAccount, onSignOut }: DrawerBodyProps) {
+  const autoSelectContext = useWorkspaceStore((state) => state.autoSelectContext);
+  const setAutoSelectContext = useWorkspaceStore((state) => state.setAutoSelectContext);
   if (!open) return null;
 
   return (
@@ -38,6 +41,24 @@ function DrawerBody({ open, onClose, onManageAccount, onSignOut }: DrawerBodyPro
           <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5">
             <p className="text-sm text-[var(--text-primary)]">Theme</p>
             <ThemeToggle />
+          </div>
+
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5">
+            <div>
+              <p className="text-sm text-[var(--text-primary)]">Auto-select workspace context</p>
+              <p className="text-xs text-[var(--text-secondary)]">Automatically enter the nearest workspace while navigating the canvas.</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autoSelectContext}
+              onClick={() => setAutoSelectContext(!autoSelectContext)}
+              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${autoSelectContext ? "bg-[var(--accent-cyan)]" : "bg-[var(--border-default)]"}`}
+            >
+              <span
+                className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${autoSelectContext ? "translate-x-5" : "translate-x-1"}`}
+              />
+            </button>
           </div>
 
           {onManageAccount && onSignOut ? (

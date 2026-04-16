@@ -1133,11 +1133,11 @@ export function useChatState() {
 
         const data = (await response.json()) as ChatDetailResponse;
         setMode(data.chat.mode);
-        setRouterMode(data.chat.routerMode);
+        setRouterMode(data.chat.mode === "image" ? "auto" : data.chat.routerMode);
         setThinkingLevel(data.chat.thinkingLevel);
         setUsePersonalResources(data.chat.usePersonalResources);
         setSelectedAgentId(data.chat.agentId);
-        if (data.chat.manualModel) {
+        if (data.chat.mode !== "image" && data.chat.manualModel) {
           setManualModel(data.chat.manualModel);
         }
         const messagesWithPreviews = data.messages.map((msg) => {
@@ -1705,8 +1705,8 @@ export function useChatState() {
         agentId: selectedAgentId,
         mode: requestedMode,
         thinkingLevel,
-        routerMode,
-        manualModel: routerMode === "manual" ? manualModel : undefined,
+        routerMode: requestedMode === "image" ? "auto" : routerMode,
+        manualModel: requestedMode === "image" ? undefined : routerMode === "manual" ? manualModel : undefined,
         usePersonalResources,
       }),
     });
@@ -1884,8 +1884,8 @@ export function useChatState() {
     const isRegenerate = Boolean(options?.regenerate);
     const skipLocalUser = Boolean(options?.skipLocalUser);
     const skipServerUserPersist = Boolean(options?.skipServerUserPersist);
-    const effectiveRouterMode = requestedRouterMode;
-    const effectiveManualModel = requestedManualModel;
+    const effectiveRouterMode = requestedMode === "image" ? "auto" : requestedRouterMode;
+    const effectiveManualModel = requestedMode === "image" ? "" : requestedManualModel;
     const messageCountBeforeSend = messages.filter((item) => item.role !== "system").length;
 
     // Capture which chat this stream belongs to

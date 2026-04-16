@@ -111,6 +111,7 @@ export default function WorkspacePage() {
             workspaceViewMode?: "byType" | "byTopic" | "timeline";
             workspaceBackgroundMode?: "dots" | "blank" | "grid";
             workspaceHubVisibility?: "hidden" | "collapsed" | "expanded";
+            workspaceAutoSelectContext?: boolean;
           };
         };
         if (!cancelled && payload.preferences) {

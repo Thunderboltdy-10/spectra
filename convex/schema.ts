@@ -127,6 +127,7 @@ export default defineSchema({
     workspaceViewMode: v.optional(v.union(v.literal("byType"), v.literal("byTopic"), v.literal("timeline"))),
     workspaceBackgroundMode: v.optional(v.union(v.literal("dots"), v.literal("blank"), v.literal("grid"))),
     workspaceHubVisibility: v.optional(v.union(v.literal("hidden"), v.literal("collapsed"), v.literal("expanded"))),
+    workspaceAutoSelectContext: v.optional(v.boolean()),
     editorDefaultMode: v.optional(v.union(v.literal("agentic"), v.literal("notion"), v.literal("simple"))),
     updatedAt: v.number(),
   }).index("by_user", ["userId"]),

@@ -498,7 +498,11 @@ describe("request access route email selection", () => {
 describe("join page guarded redeem flow", () => {
   it("keeps the viewerHasMatchingEmail guard in the auto-redeem effect", async () => {
     const source = await import("node:fs/promises").then((fs) => fs.readFile("src/app/join/page.tsx", "utf8"));
-    expect(source).toContain("if (!hasMatchingEmail) {");
+    // The auto-redeem POST must be gated by an email-match check. Any
+    // refactor that removes this guard would let mismatched users redeem
+    // somebody else's invitation.
+    expect(source).toContain("!hasMatchingEmail");
+    expect(source).toMatch(/fetch\(\s*["']\/api\/invitations\/redeem["']/);
   });
 });
 

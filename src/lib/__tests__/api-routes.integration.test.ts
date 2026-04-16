@@ -497,7 +497,7 @@ describe("request access route email selection", () => {
 
 describe("join page guarded redeem flow", () => {
   it("keeps the viewerHasMatchingEmail guard in the auto-redeem effect", async () => {
-    const source = await import("node:fs/promises").then((fs) => fs.readFile("/home/thunderboltdy/spectra/src/app/join/page.tsx", "utf8"));
+    const source = await import("node:fs/promises").then((fs) => fs.readFile("src/app/join/page.tsx", "utf8"));
     expect(source).toContain("if (!hasMatchingEmail) {");
   });
 });

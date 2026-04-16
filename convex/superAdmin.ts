@@ -45,6 +45,14 @@ function normalizeMaxResourceFileSizeBytes(value: number | undefined) {
   );
 }
 
+function isSuperAdminEmail(email: string) {
+  return SUPER_ADMIN_EMAILS.has(email.trim().toLowerCase());
+}
+
+function isSeatCountedMember(email: string) {
+  return !isSuperAdminEmail(email);
+}
+
 async function getOrgMemberCapacity(
   ctx: Parameters<typeof getUserByClerkId>[0],
   orgId: Id<"orgs">,
@@ -62,7 +70,7 @@ async function getOrgMemberCapacity(
       : null;
   return {
     maxMembers,
-    memberCount: members.length,
+    memberCount: members.filter((member) => isSeatCountedMember(member.email)).length,
   };
 }
 
@@ -90,8 +98,8 @@ async function ensureOrgHasCapacityForMember(
     return;
   }
   const currentMembers = options?.excludingUserId
-    ? members.filter((member) => member._id !== options.excludingUserId).length
-    : members.length;
+    ? members.filter((member) => member._id !== options.excludingUserId && isSeatCountedMember(member.email)).length
+    : members.filter((member) => isSeatCountedMember(member.email)).length;
   if (currentMembers >= maxMembers) {
     throw new Error("SEAT_LIMIT_REACHED: School member allocation is full.");
   }
@@ -395,13 +403,19 @@ export const getUsageOverview = query({
     const days = Math.max(7, Math.min(args.days ?? 30, 180));
     const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-    const [events, users, orgs, catalog] = await Promise.all([
-      ctx.db.query("usageEvents").collect(),
+    const [users, orgs, catalog] = await Promise.all([
       ctx.db.query("users").collect(),
       ctx.db.query("orgs").collect(),
       ctx.db.query("modelCatalog").collect(),
     ]);
-    const filtered = events.filter((event) => event.day >= cutoff);
+    const filtered = [];
+    for (const org of orgs) {
+      const rows = await ctx.db
+        .query("usageEvents")
+        .withIndex("by_org_day", (q) => q.eq("orgId", org._id).gte("day", cutoff))
+        .collect();
+      filtered.push(...rows);
+    }
     const pricingByOrgModel = new Map(
       catalog.map((row) => [
         `${String(row.orgId)}::${row.modelId}`,

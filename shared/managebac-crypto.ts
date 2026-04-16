@@ -1,4 +1,5 @@
 const MANAGEBAC_SECRET_ENV = "MANAGEBAC_CONFIG_SECRET";
+const MANAGEBAC_FALLBACK_SECRET_ENVS = ["CLERK_SECRET_KEY", "OPENROUTER_API_KEY", "CONVEX_DEPLOYMENT"] as const;
 
 function base64Encode(bytes: Uint8Array) {
   if (typeof btoa === "function") {
@@ -27,9 +28,21 @@ async function deriveKey(secret: string) {
   return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt", "decrypt"]);
 }
 
+function fallbackManagebacConfigSecret() {
+  if (typeof process === "undefined") return undefined;
+  for (const envName of MANAGEBAC_FALLBACK_SECRET_ENVS) {
+    const value = process.env[envName]?.trim();
+    if (value && value.length >= 16) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 function resolveManagebacConfigSecret(secret?: string) {
   const resolved = secret?.trim()
-    || (typeof process !== "undefined" ? process.env.MANAGEBAC_CONFIG_SECRET?.trim() : undefined);
+    || (typeof process !== "undefined" ? process.env.MANAGEBAC_CONFIG_SECRET?.trim() : undefined)
+    || fallbackManagebacConfigSecret();
   if (!resolved) {
     throw new Error(`${MANAGEBAC_SECRET_ENV} is required for ManageBac token encryption and sync.`);
   }

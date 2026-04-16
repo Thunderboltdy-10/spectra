@@ -1,5 +1,6 @@
 import type { ThinkingLevel } from "@/lib/contracts/studyModes";
 import {
+  isTextChatCapableModel,
   isModelAllowedInTier,
   isModelTooExpensivePerMillion,
   modelSupportsCapability,
@@ -546,6 +547,9 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
   const scored: ScoredCandidate[] = [];
   for (const model of catalog) {
     if (!isModelAllowedInTier(model, input.spendingTier)) continue;
+    if (input.mode !== "image" && !modelSupportsCapability(model, "image_generation") && !isTextChatCapableModel(model)) {
+      continue;
+    }
     const freshnessMultiplierValue = freshnessMultiplier(model);
     if (freshnessMultiplierValue <= 0) continue;
 

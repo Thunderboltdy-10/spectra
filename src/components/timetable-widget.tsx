@@ -33,14 +33,20 @@ type AnnouncementEntry = {
 
 type ManagebacPayload = {
   configured?: boolean;
-  deferred?: boolean;
+  available?: boolean;
+  resolutionStatus?: string;
   message?: string;
-  source?: "live" | "fallback";
-  warning?: string;
-  fetchedAt?: string;
-  timetable?: TimetableEntry[];
-  cas?: CasEntry[];
+  student?: {
+    id?: string;
+    name?: string;
+    gradeLevel?: string;
+    email?: string;
+  };
+  workstreams?: TimetableEntry[];
+  plannerItems?: CasEntry[];
   announcements?: AnnouncementEntry[];
+  lastHydratedAt?: number;
+  lastHydrationError?: string;
 };
 
 function formatDateLabel(value?: string) {
@@ -72,7 +78,7 @@ export function TimetableWidget({ className }: TimetableWidgetProps) {
     else setLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/managebac", { cache: "no-store" });
+      const response = await fetch(`/api/managebac${background ? "?refresh=1" : ""}`, { cache: "no-store" });
       if (!response.ok) {
         throw new Error(await response.text());
       }
@@ -90,8 +96,8 @@ export function TimetableWidget({ className }: TimetableWidgetProps) {
     void load();
   }, [load]);
 
-  const timetableItems = useMemo(() => (data?.timetable ?? []).slice(0, 4), [data?.timetable]);
-  const casItems = useMemo(() => (data?.cas ?? []).slice(0, 2), [data?.cas]);
+  const timetableItems = useMemo(() => (data?.workstreams ?? []).slice(0, 4), [data?.workstreams]);
+  const casItems = useMemo(() => (data?.plannerItems ?? []).slice(0, 2), [data?.plannerItems]);
   const announcementItems = useMemo(
     () => (data?.announcements ?? []).slice(0, 2),
     [data?.announcements],
@@ -140,7 +146,13 @@ export function TimetableWidget({ className }: TimetableWidgetProps) {
         </p>
       ) : null}
 
-      {!loading && !error && data?.configured !== false ? (
+      {!loading && !error && data?.configured !== false && data?.available === false ? (
+        <p className="rounded-xl border border-[var(--warning)]/35 bg-[var(--warning)]/10 px-3 py-2 text-xs text-[var(--text-secondary)]">
+          {data.message ?? "ManageBac is unavailable for this account."}
+        </p>
+      ) : null}
+
+      {!loading && !error && data?.configured !== false && data?.available !== false ? (
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] p-3">
             <p className="mb-2 inline-flex items-center gap-1 text-[11px] uppercase tracking-[0.1em] text-[var(--text-secondary)]">
@@ -214,12 +226,12 @@ export function TimetableWidget({ className }: TimetableWidgetProps) {
         </div>
       ) : null}
 
-      {data?.warning ? (
-        <p className="mt-3 text-[11px] text-[var(--text-secondary)]">Sync note: {data.warning}</p>
+      {data?.lastHydrationError ? (
+        <p className="mt-3 text-[11px] text-[var(--text-secondary)]">Sync note: {data.lastHydrationError}</p>
       ) : null}
-      {data?.fetchedAt ? (
+      {data?.lastHydratedAt ? (
         <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
-          Last update: {new Date(data.fetchedAt).toLocaleTimeString()}
+          Last update: {new Date(data.lastHydratedAt).toLocaleTimeString()}
         </p>
       ) : null}
     </section>

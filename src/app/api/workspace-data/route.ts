@@ -4,6 +4,31 @@ import { convexQuery, convexMutation } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 
+type WorkspaceResultIntent = "note" | "planner" | "thread" | "result" | "widget";
+type WorkspaceResultStatus = "processing" | "completed" | "dismissed";
+type WorkspaceResultVariant = "summary" | "answer" | "artifact" | "planner" | "thread";
+type WorkspaceResultTargetKind = "artifact" | "plannerItem" | "chat" | "workspaceItem" | "result";
+
+function parseIntent(value: unknown): WorkspaceResultIntent {
+  return value === "note" || value === "planner" || value === "thread" || value === "widget" ? value : "result";
+}
+
+function parseStatus(value: unknown, fallback: WorkspaceResultStatus): WorkspaceResultStatus {
+  return value === "processing" || value === "completed" || value === "dismissed" ? value : fallback;
+}
+
+function parseVariant(value: unknown): WorkspaceResultVariant | undefined {
+  return value === "summary" || value === "answer" || value === "artifact" || value === "planner" || value === "thread"
+    ? value
+    : undefined;
+}
+
+function parseTargetKind(value: unknown): WorkspaceResultTargetKind | undefined {
+  return value === "artifact" || value === "plannerItem" || value === "chat" || value === "workspaceItem" || value === "result"
+    ? value
+    : undefined;
+}
+
 function sanitizeTitle(value: unknown, fallback: string) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
 }
@@ -60,13 +85,13 @@ export async function POST(request: NextRequest) {
       const result = await convexMutation("workspaceCommandResults:create", {
         actorClerkId: actor.clerkId,
         workstreamId,
-        intent: (body.intent as any) || "result",
-        status: (body.status as any) || "processing",
+        intent: parseIntent(body.intent),
+        status: parseStatus(body.status, "processing"),
         title: sanitizeTitle(body.title, "Command"),
         summary: body.summary as string || "Processing...",
-        targetKind: body.targetKind as any,
+        targetKind: parseTargetKind(body.targetKind),
         targetId: body.targetId as string,
-        variant: body.variant as any,
+        variant: parseVariant(body.variant),
       });
       return ok(result);
     }
@@ -77,11 +102,11 @@ export async function POST(request: NextRequest) {
       const result = await convexMutation("workspaceCommandResults:update", {
         actorClerkId: actor.clerkId,
         resultId,
-        status: body.status as any,
+        status: parseStatus(body.status, "completed"),
         summary: body.summary as string,
-        targetKind: body.targetKind as any,
+        targetKind: parseTargetKind(body.targetKind),
         targetId: body.targetId as string,
-        variant: body.variant as any,
+        variant: parseVariant(body.variant),
       });
       return ok(result);
     }

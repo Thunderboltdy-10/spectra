@@ -1,4 +1,4 @@
-import { requireActor } from "@/lib/auth-server";
+import { isAdminLikeActor, requireActor } from "@/lib/auth-server";
 import { convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
@@ -6,7 +6,7 @@ import { withRouteErrorHandling } from "@/lib/route-handler";
 export async function GET() {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();
-    if (actor.role !== "admin") {
+    if (!isAdminLikeActor(actor)) {
       return badRequest("Admin access required", 403);
     }
 

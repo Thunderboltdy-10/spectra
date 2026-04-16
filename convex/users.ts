@@ -2,8 +2,19 @@ import { mutation, query, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { getOrCreateDefaultOrg, getUserByClerkId } from "./helpers";
+import type { Role } from "./helpers";
 import { api } from "./_generated/api";
 import { addUserToPlatformStats, updateUserInPlatformStats } from "./platformStatsAggregates";
+const SUPER_ADMIN_EMAILS = new Set(
+  (process.env.SUPER_ADMIN_EMAILS ?? "pablo.martinez.dovale@gmail.com")
+    .split(/[,\s;]+/)
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean),
+);
+
+function isAdminLike(actor: { role: Role; email: string }) {
+  return actor.role === "admin" || SUPER_ADMIN_EMAILS.has(actor.email.trim().toLowerCase());
+}
 
 function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
@@ -202,7 +213,7 @@ export const ensureUser = mutation({
       const nextRole = existing.role === "admin" ? "admin" : role;
       const previous = { _id: existing._id, role: existing.role };
       await ctx.db.patch(existing._id, {
-        email: args.email,
+        email: normalizeEmail(args.email),
         name: args.name,
         role: nextRole,
         orgId,
@@ -229,7 +240,7 @@ export const ensureUser = mutation({
 
     const userId = await ctx.db.insert("users", {
       clerkId: args.clerkId,
-      email: args.email,
+      email: normalizeEmail(args.email),
       name: args.name,
       role,
       orgId,
@@ -251,7 +262,7 @@ export const ensureUser = mutation({
     return {
       _id: userId,
       clerkId: args.clerkId,
-      email: args.email,
+      email: normalizeEmail(args.email),
       name: args.name,
       role,
       orgId,
@@ -302,7 +313,7 @@ export const syncFromWebhook = mutation({
 
     if (existing) {
       await ctx.db.patch(existing._id, {
-        email: args.email,
+        email: normalizeEmail(args.email),
         name: args.name,
         updatedAt: now,
       });
@@ -363,7 +374,7 @@ export const listUsersInOrg = query({
   args: { actorClerkId: v.string() },
   handler: async (ctx, args) => {
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
-    if (!actor || actor.role !== "admin") {
+    if (!actor || !isAdminLike(actor)) {
       throw new Error("Only admin can list users");
     }
 
@@ -382,7 +393,7 @@ export const updateRole = mutation({
   },
   handler: async (ctx, args) => {
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
-    if (!actor || actor.role !== "admin") {
+    if (!actor || !isAdminLike(actor)) {
       throw new Error("Only admin can update roles");
     }
     if (args.role === "admin") {

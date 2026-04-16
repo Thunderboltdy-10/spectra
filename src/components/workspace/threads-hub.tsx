@@ -103,14 +103,16 @@ function ThreadListItem({
   thread,
   isActive,
   onClick,
+  now,
 }: {
   thread: WorkspaceItemData;
   isActive: boolean;
   onClick: () => void;
+  now: number;
 }) {
   const timeAgo = useMemo(() => {
     if (!thread.updatedAt) return null;
-    const diffMs = Date.now() - thread.updatedAt;
+    const diffMs = now - thread.updatedAt;
     const mins = Math.floor(diffMs / 60_000);
     if (mins < 1) return "Just now";
     if (mins < 60) return `${mins}m ago`;
@@ -118,7 +120,7 @@ function ThreadListItem({
     if (hrs < 24) return `${hrs}h ago`;
     const days = Math.floor(hrs / 24);
     return `${days}d ago`;
-  }, [thread.updatedAt]);
+  }, [now, thread.updatedAt]);
 
   return (
     <button
@@ -164,6 +166,12 @@ function ThreadListItem({
 export function ThreadsHub({ className, forceExpanded }: { className?: string; forceExpanded?: boolean }) {
   const [locked, setLocked] = useState(false);
   const [localSelectedId, setLocalSelectedId] = useState<string | null>(null);
+  const [renderNow, setRenderNow] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = window.setInterval(() => setRenderNow(Date.now()), 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
 
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const committedWorkspaceId = useWorkspaceStore((s) => s.committedWorkspaceId);
@@ -285,11 +293,12 @@ export function ThreadsHub({ className, forceExpanded }: { className?: string; f
             ) : (
               <div className="flex flex-col gap-1">
                 {threads.map((thread) => (
-                  <ThreadListItem
+                <ThreadListItem
                     key={thread.id}
                     thread={thread}
                     isActive={thread.id === effectiveSelectedId}
                     onClick={() => handleThreadClick(thread)}
+                  now={renderNow}
                   />
                 ))}
               </div>

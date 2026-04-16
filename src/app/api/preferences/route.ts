@@ -26,6 +26,7 @@ export async function PATCH(request: NextRequest) {
       workspaceViewMode: body.workspaceViewMode as "byType" | "byTopic" | "timeline" | null | undefined,
       workspaceBackgroundMode: body.workspaceBackgroundMode as "dots" | "blank" | "grid" | null | undefined,
       workspaceHubVisibility: body.workspaceHubVisibility as "hidden" | "collapsed" | "expanded" | null | undefined,
+      workspaceAutoSelectContext: body.workspaceAutoSelectContext as boolean | null | undefined,
       editorDefaultMode: body.editorDefaultMode as "agentic" | "notion" | "simple" | null | undefined,
     });
 

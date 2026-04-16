@@ -187,7 +187,27 @@ export async function dismissCommandResult(resultId: string): Promise<boolean> {
   }
 }
 
-export async function createCommandResult(payload: any): Promise<{ resultId: string } | null> {
+type CreateCommandResultPayload = {
+  workstreamId: string;
+  intent?: "note" | "planner" | "thread" | "result" | "widget";
+  status?: "processing" | "completed" | "dismissed";
+  title?: string;
+  summary?: string;
+  targetKind?: "artifact" | "plannerItem" | "chat" | "workspaceItem" | "result";
+  targetId?: string;
+  variant?: "summary" | "answer" | "artifact" | "planner" | "thread";
+};
+
+type UpdateCommandResultPayload = {
+  resultId: string;
+  status?: "processing" | "completed" | "dismissed";
+  summary?: string;
+  targetKind?: "artifact" | "plannerItem" | "chat" | "workspaceItem" | "result";
+  targetId?: string;
+  variant?: "summary" | "answer" | "artifact" | "planner" | "thread";
+};
+
+export async function createCommandResult(payload: CreateCommandResultPayload): Promise<{ resultId: string } | null> {
   try {
     const res = await fetch("/api/workspace-data", {
       method: "POST",
@@ -201,7 +221,7 @@ export async function createCommandResult(payload: any): Promise<{ resultId: str
   }
 }
 
-export async function updateCommandResult(payload: any): Promise<boolean> {
+export async function updateCommandResult(payload: UpdateCommandResultPayload): Promise<boolean> {
   try {
     const res = await fetch("/api/workspace-data", {
       method: "POST",

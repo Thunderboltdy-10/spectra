@@ -243,17 +243,17 @@ function ArtifactView({ item }: { item: WorkspaceItemData }) {
                 placeholder="// Start coding here\u2026"
                 className={cn(
                   "w-full h-full resize-none rounded-2xl p-5 pl-6 transition-all duration-200",
-                  "bg-[#1e1e2e] text-[#cdd6f4] hover:bg-[#1e1e2e]/90",
-                  "focus:ring-1 focus:ring-[var(--accent-cyan)]/30 focus:bg-[#1e1e2e]",
+                  "bg-[var(--bg-code-editor)] text-[var(--text-code-editor)] hover:bg-[var(--bg-code-editor)]/90",
+                  "focus:ring-1 focus:ring-[var(--accent-cyan)]/30 focus:bg-[var(--bg-code-editor)]",
                   "outline-none font-mono text-[13px] leading-[1.6]",
-                  "placeholder:text-[#cdd6f4]/40 border-l-2 border-[var(--accent-cyan)]/20",
+                  "placeholder:text-[var(--text-code-editor)]/40 border-l-2 border-[var(--accent-cyan)]/20",
                   "focus:border-l-[var(--accent-cyan)]/40"
                 )}
               />
             </div>
           ) : isCode && !isEditing ? (
             /* Code preview — syntax-highlighted via MarkdownRenderer */
-            <div className="min-h-[240px] rounded-2xl bg-[#1e1e2e] p-5 overflow-auto [&_.markdown-body]:!bg-transparent [&_.markdown-body]:!text-[13px] [&_.markdown-body_pre]:!bg-transparent [&_.markdown-body_pre]:!m-0 [&_.markdown-body_pre]:!p-0 [&_.markdown-body_code]:!text-[13px] [&_.markdown-body_code]:!leading-[1.6] [&_.markdown-body_pre_code]:!font-mono [&_.markdown-body_pre_code]:!bg-transparent [&_.markdown-body]:!leading-[1.6] [&_button]:hidden">
+            <div className="min-h-[240px] rounded-2xl bg-[var(--bg-code-editor)] p-5 overflow-auto [&_.markdown-body]:!bg-transparent [&_.markdown-body]:!text-[13px] [&_.markdown-body_pre]:!bg-transparent [&_.markdown-body_pre]:!m-0 [&_.markdown-body_pre]:!p-0 [&_.markdown-body_code]:!text-[13px] [&_.markdown-body_code]:!leading-[1.6] [&_.markdown-body_pre_code]:!font-mono [&_.markdown-body_pre_code]:!bg-transparent [&_.markdown-body]:!leading-[1.6] [&_button]:hidden">
               <MarkdownRenderer content={fencedCode} />
             </div>
           ) : isEditable && isEditing ? (

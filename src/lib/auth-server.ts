@@ -26,6 +26,10 @@ export function isSuperAdminEmail(email: string) {
   return SUPER_ADMIN_EMAILS.has(email.trim().toLowerCase());
 }
 
+export function isAdminLikeActor(actor: Pick<SessionActor, "role" | "email"> | { role: Role; email: string }) {
+  return actor.role === "admin" || isSuperAdminEmail(actor.email);
+}
+
 const INVITATION_TOKEN_COOKIE = "ai-school-invitation-token";
 
 async function bootstrapActor(params: {
@@ -247,6 +251,8 @@ export async function requireActor(): Promise<SessionActor> {
     if (!accepted) {
       throw new Error("AUTH_NO_ACCESS: This invitation belongs to a different email address.");
     }
+
+    (await cookies()).delete(INVITATION_TOKEN_COOKIE);
 
     const provisioned = await convexQuery<
       { clerkId: string },

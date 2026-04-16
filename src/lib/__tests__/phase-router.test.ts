@@ -272,6 +272,36 @@ describe("phase-router", () => {
     expect(challenger?.scoreBreakdown?.join(" ")).toContain("challenger_state deprioritized");
   });
 
+  it("excludes speech-only models from text routing", () => {
+    const decision = selectModelForPhase({
+      phaseId: "analysis",
+      phaseLabel: "Primary response",
+      mode: "general",
+      routerMode: "auto",
+      spendingTier: "normal",
+      thinkingLevel: "medium",
+      stakes: "medium",
+      messageLength: 120,
+      modelCatalog: [
+        ...baseCatalog().filter((model) => model.modelId !== "delta/expensive"),
+        {
+          modelId: "google/lyra-voice",
+          provider: "google",
+          name: "Google Lyra Voice",
+          inputCostPerM: 1,
+          outputCostPerM: 1,
+          inputModalities: ["audio"],
+          outputModalities: ["audio"],
+          capabilities: { reasoning: 9, creative: 4, code: 1, vision: 0, speed: 9 },
+        },
+      ],
+      seedKey: "exclude-speech",
+    });
+
+    expect(decision.selectedModel).not.toBe("google/lyra-voice");
+    expect(decision.candidates.some((candidate) => candidate.modelId === "google/lyra-voice")).toBe(false);
+  });
+
   it("prefers models that fit the desired context window on L4 routes", () => {
     const decision = selectModelForPhase({
       phaseId: "analysis",

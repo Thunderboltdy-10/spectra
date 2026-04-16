@@ -14,7 +14,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { useSidebar } from "@/context/sidebar-context";
-import { buildManagebacMappingState, buildManagebacStudentMappings } from "@/lib/managebac/admin-config";
 import { cn } from "@/lib/utils";
 
 type OrgSettings = { name?: string; description?: string; schoolType?: string; timezone?: string; maxStudents?: number; maxResourceFileSizeBytes?: number; monthlyBudgetCentsPerUser?: number; budgetMarginPercent?: number; soulEnabled?: boolean; orchestratorV2Enabled?: boolean; adaptiveQuizEnabled?: boolean; spacedRepetitionEnabled?: boolean; agentModelBoostEnabled?: boolean };
@@ -119,8 +118,6 @@ function AdminPageContent() {
   const [sendingNotif, setSendingNotif] = useState(false);
   const [managebac, setManagebac] = useState<ManagebacAdminConfig | null>(null);
   const [managebacToken, setManagebacToken] = useState("");
-  const [managebacProbeStudentId, setManagebacProbeStudentId] = useState("");
-  const [managebacMappings, setManagebacMappings] = useState<Record<string, string>>({});
   const [managebacDiscovering, setManagebacDiscovering] = useState(false);
   const [managebacSaving, setManagebacSaving] = useState(false);
   const [managebacSyncing, setManagebacSyncing] = useState(false);
@@ -167,9 +164,6 @@ function AdminPageContent() {
   const seatUsed = members.length;
   const pendingInvites = invitations.filter((item) => item.status === "pending").length;
 
-  useEffect(() => {
-    setManagebacMappings(buildManagebacMappingState(managebac?.studentMappings ?? []));
-  }, [managebac]);
 
   async function completeOnboarding() {
     const response = await fetch("/api/personal-soul", { method: "PATCH" });
@@ -311,7 +305,6 @@ function AdminPageContent() {
           action: "discover",
           baseUrl: MANAGEBAC_API_URL,
           token: managebacToken.trim(),
-          studentId: managebacProbeStudentId.trim() || undefined,
         }),
       });
       setManagebac((prev) => ({
@@ -344,7 +337,15 @@ function AdminPageContent() {
         body: JSON.stringify({
           baseUrl: MANAGEBAC_API_URL,
           token: managebacToken.trim() || undefined,
-          studentMappings: buildManagebacStudentMappings(members, managebacMappings),
+          studentMappings: members
+            .filter((member) => member.role === "student")
+            .map((member) => ({
+              clerkId: member.clerkId,
+              email: member.email,
+              managebacStudentId:
+                managebac?.studentMappings?.find((mapping) => mapping.clerkId === member.clerkId)?.managebacStudentId,
+            }))
+            .filter((mapping) => Boolean(mapping.managebacStudentId)),
           syncEnabled: managebac?.syncEnabled ?? false,
           syncFrequencyHours: managebac?.syncFrequencyHours ?? 24,
           availableEndpoints: managebac?.availableEndpoints ?? [],
@@ -464,14 +465,10 @@ function AdminPageContent() {
           </div>
           <p className="mb-5 mt-1 text-sm text-[var(--text-secondary)]">Configure ManageBac discovery, student mapping, and sync.</p>
 
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-1">
             <label className="space-y-1.5">
               <span className="text-xs text-[var(--text-secondary)]">API token</span>
               <Input value={managebacToken} onChange={(event) => setManagebacToken(event.target.value)} placeholder={managebac?.tokenLastFour ? `Stored token ••••${managebac.tokenLastFour}` : "Paste token"} type="password" />
-            </label>
-            <label className="space-y-1.5">
-              <span className="text-xs text-[var(--text-secondary)]">Probe student ID</span>
-              <Input value={managebacProbeStudentId} onChange={(event) => setManagebacProbeStudentId(event.target.value)} placeholder="Used for timetable / assignments discovery" />
             </label>
           </div>
 
@@ -527,7 +524,7 @@ function AdminPageContent() {
 
           <div className="mt-5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <p className="text-sm font-medium">Student mapping</p>
+              <p className="text-sm font-medium">Sync status</p>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-[var(--text-secondary)]">Daily sync</span>
                 <Switch
@@ -536,21 +533,14 @@ function AdminPageContent() {
                 />
               </div>
             </div>
-            <div className="space-y-2">
-              {members.filter((member) => member.role === "student").map((member) => (
-                <div key={member._id} className="grid gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 sm:grid-cols-[minmax(0,1fr)_220px]">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-[var(--text-primary)]">{member.name}</p>
-                    <p className="text-xs text-[var(--text-secondary)]">{member.email}</p>
-                  </div>
-                  <Input
-                    value={managebacMappings[member.clerkId] ?? ""}
-                    onChange={(event) => setManagebacMappings((prev) => ({ ...prev, [member.clerkId]: event.target.value }))}
-                    placeholder="ManageBac student ID"
-                  />
-                </div>
-              ))}
-            </div>
+            <p className="text-sm text-[var(--text-secondary)]">
+              Paste your token, discover endpoints, then save. Spectra will use any existing automatic student matches and sync the available ManageBac data without requiring manual probe IDs.
+            </p>
+            {(managebac?.studentMappings?.length ?? 0) > 0 ? (
+              <p className="mt-3 text-xs text-[var(--text-secondary)]">
+                Auto-matched students: {managebac?.studentMappings?.length ?? 0}
+              </p>
+            ) : null}
           </div>
 
           {managebac?.lastSyncDetails ? (

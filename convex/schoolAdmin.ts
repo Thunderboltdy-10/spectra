@@ -6,6 +6,12 @@ import { dayKey, getUserByClerkId } from "./helpers";
 import { vRole } from "./shared";
 import { purgeUserData } from "./userLifecycle";
 import { addUserToPlatformStats, updateUserInPlatformStats } from "./platformStatsAggregates";
+const SUPER_ADMIN_EMAILS = new Set(
+  (process.env.SUPER_ADMIN_EMAILS ?? "pablo.martinez.dovale@gmail.com")
+    .split(/[,\s;]+/)
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean),
+);
 
 function randomToken(): string {
   const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -22,8 +28,12 @@ const INVITATION_RATE_LIMIT_MAX = 50;
 async function requireAdmin(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string) {
   const actor = await getUserByClerkId(ctx, actorClerkId);
   if (!actor) throw new Error("Unauthorized");
-  if (actor.role !== "admin") throw new Error("Admin access required");
+  if (actor.role !== "admin" && !SUPER_ADMIN_EMAILS.has(actor.email.trim().toLowerCase())) throw new Error("Admin access required");
   return actor;
+}
+
+function isSeatCountedMember(email: string) {
+  return !SUPER_ADMIN_EMAILS.has(email.trim().toLowerCase());
 }
 
 async function getMemberSeatSnapshot(ctx: Parameters<typeof getUserByClerkId>[0], orgId: Id<"orgs">) {
@@ -66,7 +76,7 @@ async function getMemberSeatSnapshotWithExclusions(
 
   return {
     maxMembers,
-    currentMembers: members.length,
+    currentMembers: members.filter((member) => isSeatCountedMember(member.email)).length,
     pendingInvitations: pendingInvitations.length,
   };
 }
@@ -159,12 +169,13 @@ export const getSchoolDashboard = query({
       ctx.db.get(actor.orgId),
     ]);
 
-    const studentCount = members.filter((m) => m.role === "student").length;
-    const teacherCount = members.filter((m) => m.role === "teacher").length;
-    const adminCount = members.filter((m) => m.role === "admin").length;
+    const countableMembers = members.filter((member) => isSeatCountedMember(member.email));
+    const studentCount = countableMembers.filter((m) => m.role === "student").length;
+    const teacherCount = countableMembers.filter((m) => m.role === "teacher").length;
+    const adminCount = countableMembers.filter((m) => m.role === "admin").length;
 
     return {
-      memberCount: members.length,
+      memberCount: countableMembers.length,
       studentCount,
       teacherCount,
       adminCount,

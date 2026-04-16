@@ -65,9 +65,13 @@ const authMiddleware = clerkMiddleware(async (auth, req) => {
 
   const cookieToken = req.cookies.get(INVITATION_TOKEN_COOKIE)?.value;
   if (cookieToken && !url.pathname.startsWith("/join")) {
-    const response = NextResponse.redirect(new URL(`/join?token=${cookieToken}`, req.url));
-    response.cookies.delete(INVITATION_TOKEN_COOKIE);
-    return response;
+    const joinUrl = new URL(`/join?token=${cookieToken}`, req.url);
+    if (url.search === joinUrl.search) {
+      const response = NextResponse.next();
+      response.cookies.delete(INVITATION_TOKEN_COOKIE);
+      return response;
+    }
+    return NextResponse.redirect(joinUrl);
   }
 
   const shouldCheckAccess =

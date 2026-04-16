@@ -51,12 +51,6 @@ const PRIORITY_DOT: Record<PlannerTask["priority"], string> = {
   high: "bg-rose-400",
 };
 
-const PRIORITY_COLORS: Record<PlannerTask["priority"], string> = {
-  low: "text-[var(--text-tertiary)]",
-  medium: "text-amber-400",
-  high: "text-rose-400",
-};
-
 const TYPE_LABELS: Record<PlannerTask["type"], string> = {
   deadline: "Deadline",
   milestone: "Milestone",
@@ -432,7 +426,7 @@ function QuickAddBar({ onExpand }: { onExpand: () => void }) {
 
 function TaskEditForm({
   task,
-  workspaces,
+  workspaces: _workspaces,
   onSaved,
   onCancel,
   onDelete,
@@ -444,6 +438,7 @@ function TaskEditForm({
   onDelete: () => void;
 }) {
   const [title, setTitle] = useState(task.title);
+  void _workspaces;
   const [dueDate, setDueDate] = useState(() => {
     const ms = task.dueAt ?? (task.dueDate ? new Date(task.dueDate).getTime() : undefined);
     if (!ms) return "";
@@ -603,18 +598,20 @@ function TaskRow({
   onToggle,
   onClick,
   onRefresh,
+  now,
 }: {
   task: PlannerTask;
   workspaces: { id: string; name: string; emoji: string }[];
   onToggle: () => void;
   onClick: () => void;
   onRefresh: () => void;
+  now: number;
 }) {
   const [editing, setEditing] = useState(false);
   const isCompleted = task.status === "completed";
   const isInProgress = task.status === "in_progress";
   const dueMs = task.dueAt ?? (task.dueDate ? new Date(task.dueDate).getTime() : undefined);
-  const isOverdue = dueMs ? dueMs < Date.now() && !isCompleted : false;
+  const isOverdue = dueMs ? dueMs < now && !isCompleted : false;
   const dur = parseDuration(task.description);
   const timeStr = formatTimeShort(dueMs);
 
@@ -719,6 +716,7 @@ function DayDetailView({
   onClick,
   onRefresh,
   onBack,
+  now,
 }: {
   date: Date;
   tasks: PlannerTask[];
@@ -727,6 +725,7 @@ function DayDetailView({
   onClick: (taskId: string) => void;
   onRefresh: () => void;
   onBack: () => void;
+  now: number;
 }) {
   const dayStr = date.toDateString();
   const dayTasks = tasks.filter((t) => {
@@ -802,7 +801,7 @@ function DayDetailView({
               <span className="text-[9px] font-bold uppercase tracking-[0.1em] text-[var(--text-tertiary)]/40 px-1">All Day</span>
               <div className="flex flex-col gap-0.5 mt-1">
                 {hourBlocks.noTimeTasks.map((t) => (
-                  <TaskRow key={t.id} task={t} workspaces={workspaces}
+                  <TaskRow key={t.id} task={t} workspaces={workspaces} now={now}
                     onToggle={() => onToggle(t.plannerItemId ?? t.id)}
                     onClick={() => onClick(t.id)} onRefresh={onRefresh} />
                 ))}
@@ -818,7 +817,7 @@ function DayDetailView({
               </span>
               <div className="flex flex-col gap-0.5 mt-0.5 border-l-2 border-[var(--accent-cyan)]/10 ml-2 pl-2">
                 {hTasks.map((t) => (
-                  <TaskRow key={t.id} task={t} workspaces={workspaces}
+                  <TaskRow key={t.id} task={t} workspaces={workspaces} now={now}
                     onToggle={() => onToggle(t.plannerItemId ?? t.id)}
                     onClick={() => onClick(t.id)} onRefresh={onRefresh} />
                 ))}
@@ -839,12 +838,14 @@ function CalendarView({
   onTaskClick,
   onToggle,
   onRefresh,
+  now,
 }: {
   tasks: PlannerTask[];
   workspaces: { id: string; name: string; emoji: string }[];
   onTaskClick: (taskId: string) => void;
   onToggle: (taskId: string) => void;
   onRefresh: () => void;
+  now: number;
 }) {
   const [viewDate, setViewDate] = useState(() => new Date());
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
@@ -856,7 +857,7 @@ function CalendarView({
   const today = new Date();
   const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month;
 
-  const tasksByDay = useMemo(() => {
+  const tasksByDay = (() => {
     const map: Record<number, PlannerTask[]> = {};
     for (const task of tasks) {
       if (task.status === "completed" || task.status === "cancelled") continue;
@@ -870,7 +871,7 @@ function CalendarView({
       }
     }
     return map;
-  }, [tasks, year, month]);
+  })();
 
   if (selectedDay) {
     return (
@@ -882,6 +883,7 @@ function CalendarView({
         onClick={onTaskClick}
         onRefresh={onRefresh}
         onBack={() => setSelectedDay(null)}
+        now={now}
       />
     );
   }
@@ -953,12 +955,12 @@ function CalendarView({
             .filter((t) => t.status !== "completed" && t.status !== "cancelled")
             .filter((t) => {
               const ms = t.dueAt ?? (t.dueDate ? new Date(t.dueDate).getTime() : undefined);
-              return ms && ms >= Date.now();
+              return Boolean(ms && ms >= now);
             })
             .sort((a, b) => (a.dueAt ?? 0) - (b.dueAt ?? 0))
             .slice(0, 5)
             .map((t) => (
-              <TaskRow key={t.id} task={t} workspaces={workspaces}
+              <TaskRow key={t.id} task={t} workspaces={workspaces} now={now}
                 onToggle={() => onToggle(t.plannerItemId ?? t.id)}
                 onClick={() => onTaskClick(t.id)} onRefresh={onRefresh} />
             ))}
@@ -976,12 +978,14 @@ function CompletedSection({
   onToggle,
   onClick,
   onRefresh,
+  now,
 }: {
   tasks: PlannerTask[];
   workspaces: { id: string; name: string; emoji: string }[];
   onToggle: (taskId: string) => void;
   onClick: (taskId: string) => void;
   onRefresh: () => void;
+  now: number;
 }) {
   const [show, setShow] = useState(false);
   const completed = tasks.filter((t) => t.status === "completed");
@@ -998,7 +1002,7 @@ function CompletedSection({
       {show && (
         <div className="flex flex-col gap-0.5 mt-1">
           {completed.slice(0, 10).map((t) => (
-            <TaskRow key={t.id} task={t} workspaces={workspaces}
+            <TaskRow key={t.id} task={t} workspaces={workspaces} now={now}
               onToggle={() => onToggle(t.plannerItemId ?? t.id)}
               onClick={() => onClick(t.id)} onRefresh={onRefresh} />
           ))}
@@ -1010,13 +1014,15 @@ function CompletedSection({
 
 /* ─── Main Planner Edge ───────────────────────────────── */
 
-export function PlannerEdge({ tasks: externalTasks, onTaskClick, onToggleTask, onTaskEdit, forceExpanded, className }: PlannerEdgeProps) {
+export function PlannerEdge({ tasks: externalTasks, onTaskClick, onToggleTask, onTaskEdit: _onTaskEdit, forceExpanded, className }: PlannerEdgeProps) {
   const [locked, setLocked] = useState(false);
   const [activeTab, setActiveTab] = useState<"list" | "calendar">("list");
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [backendTasks, setBackendTasks] = useState<PlannerTask[]>([]);
   const [fetchedOnce, setFetchedOnce] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [renderNow, setRenderNow] = useState(() => Date.now());
+  void _onTaskEdit;
 
   const committedWorkspaceId = useWorkspaceStore((s) => s.committedWorkspaceId);
   const workspaces = useWorkspaceStore((s) => s.workspaces);
@@ -1030,6 +1036,11 @@ export function PlannerEdge({ tasks: externalTasks, onTaskClick, onToggleTask, o
     workspaces.map((ws) => ({ id: ws.id, name: ws.name, emoji: ws.emoji })),
     [workspaces],
   );
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setRenderNow(Date.now()), 60_000);
+    return () => window.clearInterval(interval);
+  }, [setRenderNow]);
 
   // Fetch real planner items from backend
   useEffect(() => {
@@ -1204,6 +1215,7 @@ export function PlannerEdge({ tasks: externalTasks, onTaskClick, onToggleTask, o
               onTaskClick={handleTaskClick}
               onToggle={handleToggle}
               onRefresh={handleRefresh}
+              now={renderNow}
             />
           ) : groups.length === 0 && completedCount === 0 ? (
             <div className="flex h-32 flex-col items-center justify-center text-center">
@@ -1231,6 +1243,7 @@ export function PlannerEdge({ tasks: externalTasks, onTaskClick, onToggleTask, o
                         onToggle={() => handleToggle(task.plannerItemId ?? task.id)}
                         onClick={() => handleTaskClick(task.id)}
                         onRefresh={handleRefresh}
+                        now={renderNow}
                       />
                     ))}
                   </div>
@@ -1243,6 +1256,7 @@ export function PlannerEdge({ tasks: externalTasks, onTaskClick, onToggleTask, o
                 onToggle={handleToggle}
                 onClick={handleTaskClick}
                 onRefresh={handleRefresh}
+                now={renderNow}
               />
             </>
           )}

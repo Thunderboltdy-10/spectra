@@ -111,6 +111,7 @@ export default function WorkspacePage() {
             workspaceViewMode?: "byType" | "byTopic" | "timeline";
             workspaceBackgroundMode?: "dots" | "blank" | "grid";
             workspaceHubVisibility?: "hidden" | "collapsed" | "expanded";
+            workspaceAutoSelectContext?: boolean;
           };
         };
         if (!cancelled && payload.preferences) {
@@ -354,7 +355,7 @@ export default function WorkspacePage() {
       if (isSearch) {
         const query = normalized.replace(/^\?/, "").replace(/^(search|find)\s+/i, "").trim();
         const res = await createCommandResult({
-          workstreamId: committedWorkspaceId ?? undefined,
+          workstreamId: committedWorkspaceId ?? "",
           intent: "result",
           title: normalized.length > 60 ? normalized.slice(0, 57) + "\u2026" : normalized,
           status: "processing",
@@ -363,7 +364,7 @@ export default function WorkspacePage() {
 
         const result = await createItemAction({
           action: "search",
-          workstreamId: committedWorkspaceId ?? undefined,
+          workstreamId: committedWorkspaceId ?? "",
           query,
           limit: 8,
         }) as { results?: Array<{ title: string; workspaceTitle?: string; _id?: string }> };
@@ -490,7 +491,7 @@ export default function WorkspacePage() {
       if (isWorkspaceCmd) {
         const title = normalized.replace(/^\/workspace\s*/i, "").replace(/^create workspace\s*/i, "").trim() || "New workspace";
         const res = await createCommandResult({
-          workstreamId: committedWorkspaceId ?? undefined, // wait, we don't know the new workstream ID yet
+          workstreamId: committedWorkspaceId ?? "", // wait, we don't know the new workstream ID yet
           intent: "result",
           title: "Create workspace",
           status: "processing",
@@ -513,7 +514,7 @@ export default function WorkspacePage() {
       // Create backend processing result first
       if (committedWorkspaceId) {
         const res = await createCommandResult({
-          workstreamId: committedWorkspaceId,
+          workstreamId: committedWorkspaceId ?? "",
           intent: "result",
           title: normalized.length > 60 ? normalized.slice(0, 57) + "\u2026" : normalized,
           status: "processing",
@@ -532,7 +533,7 @@ export default function WorkspacePage() {
           routerMode: "auto",
           usePersonalResources: true,
           skipUserMessagePersist: false,
-          workstreamId: committedWorkspaceId ?? undefined,
+          workstreamId: committedWorkspaceId,
           scopeLevel: committedWorkspaceId ? "workspace" : "global",
         }),
       });
@@ -596,7 +597,7 @@ export default function WorkspacePage() {
       if (createdResultId) {
         await updateCommandResult({
           resultId: createdResultId,
-          status: "error", 
+          status: "completed", 
           summary: error instanceof Error ? error.message : "Command failed",
         });
         refreshData();

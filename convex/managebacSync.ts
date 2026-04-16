@@ -1,9 +1,12 @@
 import { action, internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { adjustWorkstreamArtifactCount, getUserByClerkId } from "./helpers";
 import { internal } from "./_generated/api";
 import { decryptManagebacToken } from "../shared/managebac-crypto";
+import { fetchManagebacJson } from "../src/lib/managebac/client";
+import { normalizeManagebacStudentProfile } from "../src/lib/managebac/normalizer";
 import { prepareManagebacSyncPayload } from "../src/lib/managebac/sync";
 import {
   mapAnnouncementsToCache,
@@ -14,12 +17,148 @@ import {
   matchManagebacTimetableForClass,
   shouldCreateCasReflectionNote,
 } from "../src/lib/managebac/mapper";
+const SUPER_ADMIN_EMAILS = new Set(
+  (process.env.SUPER_ADMIN_EMAILS ?? "pablo.martinez.dovale@gmail.com")
+    .split(/[,\s;]+/)
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean),
+);
 
 function requireAdmin(actor: Doc<"users"> | null) {
-  if (!actor || actor.role !== "admin") {
+  if (!actor || (actor.role !== "admin" && !SUPER_ADMIN_EMAILS.has(actor.email.trim().toLowerCase()))) {
     throw new Error("Only admin can manage ManageBac integration");
   }
   return actor;
+}
+
+const MANAGEBAC_RESOLUTION_TTL_MS = 12 * 60 * 60 * 1000;
+const MANAGEBAC_HYDRATION_TTL_MS = 15 * 60 * 1000;
+
+function normalizeEmail(value: string) {
+  return value.trim().toLowerCase();
+}
+
+async function getManagebacConfigForOrg(ctx: Parameters<typeof getUserByClerkId>[0], orgId: Id<"orgs">) {
+  const org = await ctx.db.get(orgId);
+  if (!org?.managebacConfig?.encryptedToken || !org.managebacConfig.baseUrl) {
+    return null;
+  }
+  const token = await decryptManagebacToken(org.managebacConfig.encryptedToken);
+  return {
+    org,
+    baseUrl: org.managebacConfig.baseUrl,
+    token,
+    availableEndpoints: org.managebacConfig.availableEndpoints ?? [],
+    announcementsCache: org.managebacConfig.announcementsCache ?? [],
+  };
+}
+
+export const getManagebacConfigFullInternal = internalQuery({
+  args: { orgId: v.id("orgs") },
+  handler: async (ctx, args) => getManagebacConfigForOrg(ctx, args.orgId),
+});
+
+export const resolveManagebacUserLinkInternal = internalMutation({
+  args: {
+    actorId: v.id("users"),
+    actorOrgId: v.id("orgs"),
+    actorClerkId: v.string(),
+    actorEmail: v.string(),
+    managebacStudentId: v.optional(v.string()),
+    managebacStudentName: v.optional(v.string()),
+    managebacGradeLevel: v.optional(v.string()),
+    resolutionStatus: v.union(v.literal("resolved"), v.literal("not_found"), v.literal("ambiguous"), v.literal("error")),
+    resolutionError: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    return upsertManagebacUserLink(ctx, {
+      actor: {
+        _id: args.actorId,
+        orgId: args.actorOrgId,
+        clerkId: args.actorClerkId,
+        email: args.actorEmail,
+      } as Doc<"users">,
+      managebacStudentId: args.managebacStudentId,
+      managebacStudentName: args.managebacStudentName,
+      managebacGradeLevel: args.managebacGradeLevel,
+      resolutionStatus: args.resolutionStatus,
+      resolutionError: args.resolutionError,
+    });
+  },
+});
+
+type ManagebacDbReaderCtx = Pick<QueryCtx, "db"> | Pick<MutationCtx, "db">;
+type ManagebacDbWriterCtx = Pick<MutationCtx, "db">;
+
+type ManagebacResolutionStatus =
+  | "not_configured"
+  | "not_found"
+  | "ambiguous"
+  | "resolved"
+  | "error";
+
+type ManagebacResolutionResult = {
+  configured: boolean;
+  available: boolean;
+  resolutionStatus: ManagebacResolutionStatus;
+  message?: string;
+  announcements?: unknown[];
+};
+
+type ManagebacUserSnapshot = ManagebacResolutionResult & {
+  student?: {
+    id?: string;
+    name?: string;
+    gradeLevel?: string;
+    email: string;
+  };
+  workstreams?: unknown[];
+  plannerItems?: unknown[];
+  artifacts?: unknown[];
+  lastHydratedAt?: number;
+  lastHydrationStatus?: "idle" | "success" | "error";
+  lastHydrationError?: string;
+};
+
+async function upsertManagebacUserLink(ctx: ManagebacDbWriterCtx, args: {
+  actor: Doc<"users">;
+  managebacStudentId?: string;
+  managebacStudentName?: string;
+  managebacGradeLevel?: string;
+  resolutionStatus: "resolved" | "not_found" | "ambiguous" | "error";
+  resolutionError?: string;
+  hydrated?: boolean;
+  hydrationError?: string;
+}) {
+  const existing = await ctx.db
+    .query("managebacUserLinks")
+    .withIndex("by_user", (q) => q.eq("userId", args.actor._id))
+    .unique();
+  const now = Date.now();
+  const patch = {
+    orgId: args.actor.orgId,
+    userId: args.actor._id,
+    clerkId: args.actor.clerkId,
+    email: normalizeEmail(args.actor.email),
+    managebacStudentId: args.managebacStudentId,
+    managebacStudentName: args.managebacStudentName,
+    managebacGradeLevel: args.managebacGradeLevel,
+    resolutionStatus: args.resolutionStatus,
+    resolutionCheckedAt: now,
+    resolutionError: args.resolutionError,
+    lastHydratedAt: args.hydrated ? now : existing?.lastHydratedAt,
+    lastHydrationStatus: args.hydrated ? (args.hydrationError ? "error" : "success") : (existing?.lastHydrationStatus ?? "idle"),
+    lastHydrationError: args.hydrationError ?? existing?.lastHydrationError,
+    updatedAt: now,
+  } as const;
+  if (existing) {
+    await ctx.db.patch(existing._id, patch);
+    return existing._id;
+  }
+  return ctx.db.insert("managebacUserLinks", {
+    ...patch,
+    createdAt: now,
+  });
 }
 
 function plainTextDoc(text: string) {
@@ -53,12 +192,12 @@ type ManagebacStudentMapping = {
   email?: string;
 };
 
-async function getActor(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string) {
+async function getActor(ctx: QueryCtx | MutationCtx, actorClerkId: string) {
   return getUserByClerkId(ctx, actorClerkId);
 }
 
 async function resolveMappedUserFromOrg(
-  ctx: { db: Parameters<typeof getUserByClerkId>[0]["db"] },
+  ctx: { db: ManagebacDbReaderCtx["db"] },
   orgId: Id<"orgs">,
   mappingClerkId: string,
 ) {
@@ -82,7 +221,7 @@ async function resolveMappedUserFromOrg(
 }
 
 async function normalizeStudentMappingsForOrg(
-  ctx: { db: Parameters<typeof getUserByClerkId>[0]["db"] },
+  ctx: { db: ManagebacDbReaderCtx["db"] },
   orgId: Id<"orgs">,
   mappings: ManagebacStudentMapping[] | undefined,
 ) {
@@ -175,47 +314,96 @@ export const saveAdminConfig = mutation({
   },
 });
 
-export const getUserSnapshot = query({
-  args: { actorClerkId: v.string() },
-  handler: async (ctx, args) => {
-    const actor = await getActor(ctx, args.actorClerkId);
+export const getUserSnapshot = action({
+  args: { actorClerkId: v.string(), forceRefresh: v.optional(v.boolean()) },
+  handler: async (ctx, args): Promise<ManagebacUserSnapshot> => {
+    const actor = await ctx.runQuery(internal.managebacSync.getSyncActor, { actorClerkId: args.actorClerkId });
     if (!actor) throw new Error("Unauthorized");
-    const org = await ctx.db.get(actor.orgId);
-    const config = org?.managebacConfig;
-    const studentMappings = await normalizeStudentMappingsForOrg(ctx, actor.orgId, config?.studentMappings);
-    const mapping = studentMappings.find((item) => item.clerkId === actor.clerkId);
-    const announcements = config?.announcementsCache ?? [];
-    const workstreams = await ctx.db
-      .query("workstreams")
-      .withIndex("by_owner", (q) => q.eq("ownerUserId", actor._id))
-      .collect();
-    const plannerItems = await ctx.db
-      .query("plannerItems")
-      .withIndex("by_owner", (q) => q.eq("ownerUserId", actor._id))
-      .collect();
-    const artifacts = await ctx.db
-      .query("artifacts")
-      .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id))
-      .collect();
+
+    const config = await ctx.runQuery(internal.managebacSync.getOrgManagebacConfigInternal, { orgId: actor.orgId });
+    if (!config?.configured) {
+      return {
+        configured: false,
+        available: false,
+        resolutionStatus: "not_configured",
+        message: "ManageBac is not configured for this school.",
+      };
+    }
+
+    const existingLink = await ctx.runQuery(internal.managebacSync.getManagebacUserLinkInternal, { userId: actor._id });
+    const now = Date.now();
+    const shouldResolve = args.forceRefresh
+      || !existingLink
+      || now - existingLink.resolutionCheckedAt > MANAGEBAC_RESOLUTION_TTL_MS
+      || existingLink.resolutionStatus === "error";
+    const shouldHydrate = args.forceRefresh
+      || !existingLink?.lastHydratedAt
+      || now - existingLink.lastHydratedAt > MANAGEBAC_HYDRATION_TTL_MS
+      || existingLink.lastHydrationStatus === "error";
+
+    let resolved = existingLink;
+    if (shouldResolve) {
+      const resolution: ManagebacResolutionResult = await ctx.runAction(internal.managebacSync.resolveAndHydrateCurrentUserInternal, {
+        actorClerkId: args.actorClerkId,
+        hydrate: shouldHydrate,
+      });
+      if (!resolution.available) {
+        return resolution;
+      }
+      resolved = await ctx.runQuery(internal.managebacSync.getManagebacUserLinkInternal, { userId: actor._id });
+    } else if (shouldHydrate && resolved?.managebacStudentId) {
+      const hydration: ManagebacResolutionResult = await ctx.runAction(internal.managebacSync.resolveAndHydrateCurrentUserInternal, {
+        actorClerkId: args.actorClerkId,
+        hydrate: true,
+        skipResolution: true,
+      });
+      if (!hydration.available && hydration.resolutionStatus !== "resolved") {
+        return hydration;
+      }
+      resolved = await ctx.runQuery(internal.managebacSync.getManagebacUserLinkInternal, { userId: actor._id });
+    }
+
+    const [workstreams, plannerItems, artifacts, org] = await Promise.all([
+      ctx.runQuery(internal.managebacSync.getManagebacWorkstreamsInternal, { userId: actor._id }),
+      ctx.runQuery(internal.managebacSync.getManagebacPlannerItemsInternal, { userId: actor._id }),
+      ctx.runQuery(internal.managebacSync.getManagebacArtifactsInternal, { userId: actor._id }),
+      ctx.runQuery(internal.managebacSync.getOrgManagebacConfigInternal, { orgId: actor.orgId }),
+    ]);
+
     return {
-      configured: Boolean(config?.encryptedToken),
-      mapped: Boolean(mapping),
-      announcements,
-      workstreams: workstreams.filter((item) => Boolean(item.managebacClassId || item.managebacContext)).slice(0, 20),
-      plannerItems: plannerItems.filter((item) => item.sourceType === "managebac_sync").slice(0, 50),
-      artifacts: artifacts.filter((item) => item.sourceType === "managebac_sync").slice(0, 50),
-      lastSyncAt: config?.lastSyncAt,
-      lastSyncStatus: config?.lastSyncStatus ?? "idle",
-      lastSyncError: config?.lastSyncError,
+      configured: true,
+      available: resolved?.resolutionStatus === "resolved",
+      resolutionStatus: resolved?.resolutionStatus ?? "not_found",
+      message:
+        resolved?.resolutionStatus === "resolved"
+          ? undefined
+          : resolved?.resolutionStatus === "ambiguous"
+            ? "Multiple ManageBac students matched this account email."
+            : "ManageBac is not available for this account.",
+      student: resolved?.resolutionStatus === "resolved"
+        ? {
+            id: resolved.managebacStudentId,
+            name: resolved.managebacStudentName,
+            gradeLevel: resolved.managebacGradeLevel,
+            email: actor.email,
+          }
+        : undefined,
+      announcements: org?.announcementsCache ?? [],
+      workstreams,
+      plannerItems,
+      artifacts,
+      lastHydratedAt: resolved?.lastHydratedAt,
+      lastHydrationStatus: resolved?.lastHydrationStatus ?? "idle",
+      lastHydrationError: resolved?.lastHydrationError,
     };
   },
 });
 
-export const manualSync: ReturnType<typeof action> = action({
+export const manualSync = action({
   args: { actorClerkId: v.string() },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<unknown> => {
     const actor = await ctx.runQuery(internal.managebacSync.getSyncActor, { actorClerkId: args.actorClerkId });
-    if (!actor || actor.role !== "admin") {
+    if (!actor || (actor.role !== "admin" && !SUPER_ADMIN_EMAILS.has(actor.email.trim().toLowerCase()))) {
       throw new Error("Only admin can trigger manual sync");
     }
     return ctx.runAction(internal.managebacSync.runOrgSyncInternal, { orgId: actor.orgId });
@@ -544,7 +732,7 @@ export const applyPreparedSync = internalMutation({
               type: "document",
               content: plainTextDoc(mappedNote.plaintext),
               contentPlaintext: mappedNote.plaintext,
-              editorMode: "standard",
+              editorMode: "simple",
               sourceType: "managebac_sync",
               sourceDeleted: false,
               sourceUpdatedAt: mappedNote.sourceUpdatedAt,
@@ -572,7 +760,7 @@ export const applyPreparedSync = internalMutation({
             title: mappedNote.title,
             content: plainTextDoc(mappedNote.plaintext),
             contentPlaintext: mappedNote.plaintext,
-            editorMode: "standard",
+            editorMode: "simple",
             sourceType: "managebac_sync",
             managebacItemId: mappedNote.managebacItemId,
             sourceDeleted: false,
@@ -743,5 +931,203 @@ export const runScheduledSync: ReturnType<typeof internalAction> = internalActio
       results.push(await ctx.runAction(internal.managebacSync.runOrgSyncInternal, { orgId: target.orgId }));
     }
     return { ok: true, count: results.length };
+  },
+});
+
+export const getOrgManagebacConfigInternal = internalQuery({
+  args: { orgId: v.id("orgs") },
+  handler: async (ctx, args) => {
+    const org = await ctx.db.get(args.orgId);
+    return org?.managebacConfig
+      ? {
+          configured: Boolean(org.managebacConfig.encryptedToken && org.managebacConfig.baseUrl),
+          announcementsCache: org.managebacConfig.announcementsCache ?? [],
+        }
+      : { configured: false, announcementsCache: [] };
+  },
+});
+
+export const getManagebacUserLinkInternal = internalQuery({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    return ctx.db.query("managebacUserLinks").withIndex("by_user", (q) => q.eq("userId", args.userId)).unique();
+  },
+});
+
+export const getManagebacWorkstreamsInternal = internalQuery({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    const rows = await ctx.db.query("workstreams").withIndex("by_owner", (q) => q.eq("ownerUserId", args.userId)).collect();
+    return rows.filter((item) => Boolean(item.managebacClassId || item.managebacContext)).slice(0, 20);
+  },
+});
+
+export const getManagebacPlannerItemsInternal = internalQuery({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    const rows = await ctx.db.query("plannerItems").withIndex("by_owner", (q) => q.eq("ownerUserId", args.userId)).collect();
+    return rows.filter((item) => item.sourceType === "managebac_sync").slice(0, 50);
+  },
+});
+
+export const getManagebacArtifactsInternal = internalQuery({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    const rows = await ctx.db.query("artifacts").withIndex("by_owner_updated", (q) => q.eq("ownerUserId", args.userId)).collect();
+    return rows.filter((item) => item.sourceType === "managebac_sync").slice(0, 50);
+  },
+});
+
+export const resolveAndHydrateCurrentUserInternal = internalAction({
+  args: { actorClerkId: v.string(), hydrate: v.optional(v.boolean()), skipResolution: v.optional(v.boolean()) },
+  handler: async (ctx, args): Promise<ManagebacResolutionResult> => {
+    const actor = await ctx.runQuery(internal.managebacSync.getSyncActor, { actorClerkId: args.actorClerkId });
+    if (!actor) throw new Error("Unauthorized");
+
+    let link = await ctx.runQuery(internal.managebacSync.getManagebacUserLinkInternal, { userId: actor._id });
+    if (!args.skipResolution || !link?.managebacStudentId) {
+      const config = await ctx.runQuery(internal.managebacSync.getManagebacConfigFullInternal, { orgId: actor.orgId });
+      if (!config) {
+        return {
+          configured: false,
+          available: false,
+          resolutionStatus: "not_configured",
+          message: "ManageBac is not configured for this school.",
+        };
+      }
+      const studentsPayload = await fetchManagebacJson({
+        baseUrl: config.baseUrl,
+        token: config.token,
+        path: "/api/v2/students",
+      });
+      const rows = Array.isArray((studentsPayload as { data?: unknown } | null)?.data)
+        ? ((studentsPayload as { data?: unknown[] }).data ?? [])
+        : Array.isArray(studentsPayload)
+          ? studentsPayload as unknown[]
+          : [];
+      const targetEmail = normalizeEmail(actor.email);
+      const matches = rows
+        .map((row) => normalizeManagebacStudentProfile(row))
+        .filter((row): row is NonNullable<typeof row> => Boolean(row) && normalizeEmail(row?.email ?? "") === targetEmail);
+
+      if (matches.length === 0) {
+        await ctx.runMutation(internal.managebacSync.resolveManagebacUserLinkInternal, {
+          actorId: actor._id,
+          actorOrgId: actor.orgId,
+          actorClerkId: actor.clerkId,
+          actorEmail: actor.email,
+          resolutionStatus: "not_found",
+        });
+        return {
+          configured: true,
+          available: false,
+          resolutionStatus: "not_found",
+          message: "ManageBac is not available for this account.",
+          announcements: config.announcementsCache ?? [],
+        };
+      }
+      if (matches.length > 1) {
+        await ctx.runMutation(internal.managebacSync.resolveManagebacUserLinkInternal, {
+          actorId: actor._id,
+          actorOrgId: actor.orgId,
+          actorClerkId: actor.clerkId,
+          actorEmail: actor.email,
+          resolutionStatus: "ambiguous",
+          resolutionError: "Multiple ManageBac students matched this email.",
+        });
+        return {
+          configured: true,
+          available: false,
+          resolutionStatus: "ambiguous",
+          message: "Multiple ManageBac students matched this account email.",
+          announcements: config.announcementsCache ?? [],
+        };
+      }
+      const match = matches[0];
+      await ctx.runMutation(internal.managebacSync.resolveManagebacUserLinkInternal, {
+        actorId: actor._id,
+        actorOrgId: actor.orgId,
+        actorClerkId: actor.clerkId,
+        actorEmail: actor.email,
+        managebacStudentId: match.id,
+        managebacStudentName: match.name,
+        managebacGradeLevel: match.gradeLevel,
+        resolutionStatus: "resolved",
+      });
+      link = await ctx.runQuery(internal.managebacSync.getManagebacUserLinkInternal, { userId: actor._id });
+    }
+
+    if (!args.hydrate || !link?.managebacStudentId) {
+      return { configured: true, available: true, resolutionStatus: "resolved" };
+    }
+
+    const managebacConfig = await ctx.runQuery(internal.managebacSync.getManagebacConfigFullInternal, { orgId: actor.orgId });
+    if (!managebacConfig) {
+      return {
+        configured: false,
+        available: false,
+        resolutionStatus: "not_configured",
+        message: "ManageBac is not configured for this school.",
+      };
+    }
+
+    try {
+      const payload = await prepareManagebacSyncPayload({
+        baseUrl: managebacConfig.baseUrl,
+        token: managebacConfig.token,
+        studentId: link.managebacStudentId,
+        endpoints: managebacConfig.availableEndpoints,
+      });
+      await ctx.runMutation(internal.managebacSync.applyPreparedSync, {
+        orgId: actor.orgId,
+        userId: actor._id,
+        payload,
+      });
+      await ctx.runMutation(internal.managebacSync.markSyncState, {
+        orgId: actor.orgId,
+        status: "success",
+        lastSyncDetails: {
+          syncedStudents: 1,
+          warnings: payload.warnings,
+        },
+        announcementsCache: mapAnnouncementsToCache(payload.announcements),
+      });
+      await ctx.runMutation(internal.managebacSync.upsertManagebacUserLinkHydrationInternal, {
+        userId: actor._id,
+        hydrationStatus: "success",
+      });
+      return { configured: true, available: true, resolutionStatus: "resolved" };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "ManageBac hydration failed.";
+      await ctx.runMutation(internal.managebacSync.upsertManagebacUserLinkHydrationInternal, {
+        userId: actor._id,
+        hydrationStatus: "error",
+        hydrationError: message,
+      });
+      return {
+        configured: true,
+        available: false,
+        resolutionStatus: "error",
+        message,
+      };
+    }
+  },
+});
+
+export const upsertManagebacUserLinkHydrationInternal = internalMutation({
+  args: {
+    userId: v.id("users"),
+    hydrationStatus: v.union(v.literal("success"), v.literal("error")),
+    hydrationError: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db.query("managebacUserLinks").withIndex("by_user", (q) => q.eq("userId", args.userId)).unique();
+    if (!existing) return;
+    await ctx.db.patch(existing._id, {
+      lastHydratedAt: args.hydrationStatus === "success" ? Date.now() : existing.lastHydratedAt,
+      lastHydrationStatus: args.hydrationStatus,
+      lastHydrationError: args.hydrationError,
+      updatedAt: Date.now(),
+    });
   },
 });

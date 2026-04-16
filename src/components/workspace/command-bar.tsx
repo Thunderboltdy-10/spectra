@@ -16,7 +16,6 @@ import {
 import { cn } from "@/lib/utils";
 import { ResultCardStack } from "@/components/workspace/result-card";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import { createCommandResult, updateCommandResult } from "@/hooks/use-workspace-data";
 import {
   ACTION_MENU_ITEMS,
   ActionMenuContent,

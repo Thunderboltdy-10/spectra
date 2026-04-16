@@ -1,12 +1,20 @@
 import { NextRequest } from "next/server";
 import { convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
+import {
+  deriveInvitationAuthState,
+  getInvitationCookies,
+  normalizeInvitation,
+  persistInvitationHandoff,
+} from "@/lib/invitation-flow";
 import { withRouteErrorHandling } from "@/lib/route-handler";
+import { auth, currentUser } from "@clerk/nextjs/server";
 
 export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const { searchParams } = new URL(request.url);
-    const token = searchParams.get("token");
+    const { token: cookieToken, handoffToken } = await getInvitationCookies();
+    const token = searchParams.get("token") ?? cookieToken ?? handoffToken;
     if (!token) return badRequest("token is required");
 
     const invitation = await convexQuery<{ token: string }, {
@@ -21,15 +29,28 @@ export async function GET(request: NextRequest) {
     } | null>("schoolAdmin:getInvitationByToken", { token });
 
     if (!invitation) {
-      return badRequest("Invitation not found or has expired", 404);
-    }
-    if (invitation.status === "expired" || Date.now() > invitation.expiresAt) {
-      return badRequest("This invitation has expired", 410);
+      return ok(deriveInvitationAuthState({
+        invitation: null,
+        userId: null,
+        emails: [],
+        handoffToken,
+      }));
     }
 
-    // Accepted invitations are NOT an error: the signed-in user may be the
-    // original invitee revisiting the link. The client decides what to do
-    // based on whether the viewer's email matches.
-    return ok({ ...invitation, alreadyAccepted: invitation.status === "accepted" });
+    const normalizedInvitation = normalizeInvitation(invitation, token);
+    const { userId } = await auth();
+    const profile = userId ? await currentUser().catch(() => null) : null;
+    const emails = (profile?.emailAddresses ?? [])
+      .map((entry) => entry.emailAddress?.trim().toLowerCase())
+      .filter((value): value is string => Boolean(value));
+
+    await persistInvitationHandoff(token);
+
+    return ok(deriveInvitationAuthState({
+      invitation: normalizedInvitation,
+      userId,
+      emails,
+      handoffToken,
+    }));
   });
 }

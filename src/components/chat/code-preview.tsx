@@ -11,11 +11,18 @@ type CodePreviewProps = {
 
 export function CodePreview({ code, language }: CodePreviewProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [debouncedCode, setDebouncedCode] = useState(code);
   const mermaidMode = language === "mermaid";
   const pythonMode = language === "python" || language === "py";
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedCode(code), 800);
+    return () => clearTimeout(timer);
+  }, [code]);
+
   const estimatedHeight = useMemo(
-    () => (mermaidMode ? Math.max(200, code.split("\n").length * 24) : 200),
-    [code, mermaidMode],
+    () => (mermaidMode ? Math.max(200, debouncedCode.split("\n").length * 24) : 200),
+    [debouncedCode, mermaidMode],
   );
   const [height, setHeight] = useState(estimatedHeight);
   const [error, setError] = useState<string | null>(null);
@@ -24,13 +31,19 @@ export function CodePreview({ code, language }: CodePreviewProps) {
   const [key, setKey] = useState(0);
   const frameId = useId();
 
-  const srcdoc = buildSrcdoc(code, language, frameId);
+  const srcdoc = buildSrcdoc(debouncedCode, language, frameId);
 
   const handleMessage = useCallback((event: MessageEvent) => {
     const data = event.data as Record<string, unknown>;
     if (data?.frameId !== frameId) return;
-    if (data?.type === "spectra-sandbox-resize" && typeof data.height === "number") {
-      setHeight(Math.min(Math.max(100, data.height + 24), expanded ? 800 : 480));
+    if (data?.type === "spectra-sandbox-resize") {
+      const nextHeight = typeof data.height === "number" ? data.height : null;
+      if (nextHeight === null) return;
+      setHeight((prev) => {
+        const next = Math.min(Math.max(100, nextHeight + 24), expanded ? 800 : 480);
+        if (Math.abs(prev - next) < 10) return prev; // Prevent tiny layout loops
+        return next;
+      });
       setRendering(false);
     }
     if (data?.type === "spectra-sandbox-error" && typeof data.message === "string") {
@@ -48,7 +61,7 @@ export function CodePreview({ code, language }: CodePreviewProps) {
     setError(null);
     setHeight(estimatedHeight);
     setRendering(mermaidMode);
-  }, [estimatedHeight, mermaidMode, code, language]);
+  }, [estimatedHeight, mermaidMode, debouncedCode, language]);
 
   return (
     <div

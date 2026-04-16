@@ -1,5 +1,6 @@
 import type { OpenRouterToolDefinition } from "@/lib/openrouter";
 import type { AiToolName, AssignmentLevel } from "@/types";
+import type { StudyMode } from "@/lib/contracts/studyModes";
 
 const TOOL_DEFINITIONS: Record<AiToolName, OpenRouterToolDefinition> = {
   recall_memory: {
@@ -458,6 +459,63 @@ export function getAllowedAiToolNames(assignmentLevel: AssignmentLevel): AiToolN
     "search_web",
     "switch_mode",
   ];
+}
+
+export type CapabilityContractParams = {
+  toolNames: AiToolName[];
+  recursiveExecutionAllowed: boolean;
+  allowConversationForking: boolean;
+  availableSkills?: string[];
+  availableSurfaces?: string[];
+  activeMode?: StudyMode;
+  assignmentLevel?: AssignmentLevel;
+  allowedToolBundles?: string[];
+  retrievalScopes?: string[];
+  availableAgents?: Array<{ id: string; name: string; reason?: string }>;
+  activeAgent?: { id: string; name: string } | null;
+  sourceGrounding?: {
+    attachmentIds?: string[];
+    attachmentRequirement?: "required" | "preferred" | "not_applicable";
+    sourceKinds?: string[];
+  };
+};
+
+export function buildCapabilityContract(params: CapabilityContractParams) {
+  const surfaces = params.availableSurfaces?.length ? params.availableSurfaces.join(", ") : "chat";
+  const skills = params.availableSkills?.length ? params.availableSkills.join(", ") : "none";
+  const tools = params.toolNames.length ? params.toolNames.join(", ") : "none";
+  const bundles = params.allowedToolBundles?.length ? params.allowedToolBundles.join(", ") : "none";
+  const retrievalScopes = params.retrievalScopes?.length ? params.retrievalScopes.join(", ") : "none";
+  const activeAgent = params.activeAgent?.name ? `${params.activeAgent.name} (${params.activeAgent.id})` : "none";
+  const candidateAgents = params.availableAgents?.length
+    ? params.availableAgents.slice(0, 5).map((agent) => `${agent.name} (${agent.id})${agent.reason ? ` — ${agent.reason}` : ""}`).join("; ")
+    : "none";
+  const attachmentIds = params.sourceGrounding?.attachmentIds?.length ? params.sourceGrounding.attachmentIds.join(", ") : "none";
+  const sourceKinds = params.sourceGrounding?.sourceKinds?.length ? params.sourceGrounding.sourceKinds.join(", ") : "none";
+  const attachmentRequirement = params.sourceGrounding?.attachmentRequirement ?? "not_applicable";
+  return [
+    "=== RUNTIME CAPABILITY CONTRACT ===",
+    `Active mode: ${params.activeMode ?? "general"}.`,
+    `Assignment level: ${params.assignmentLevel ?? "L0"}.`,
+    `Tool bundles approved by route: ${bundles}.`,
+    `Tools available now: ${tools}.`,
+    `Skills available now: ${skills}.`,
+    `Surfaces available: ${surfaces}.`,
+    `Retrieval scopes: ${retrievalScopes}.`,
+    `Active agent: ${activeAgent}.`,
+    `Agent candidates for this turn: ${candidateAgents}.`,
+    `Attachment/source grounding requirement: ${attachmentRequirement}.`,
+    `Attachment ids in scope: ${attachmentIds}.`,
+    `Grounding source kinds in scope: ${sourceKinds}.`,
+    `Recursive execution: ${params.recursiveExecutionAllowed ? "allowed when necessary" : "not allowed"}.`,
+    `Thread/workstream fork creation: ${params.allowConversationForking ? "allowed when isolation is clearly beneficial" : "not allowed"}.`,
+    "Use only route-approved tools and surfaces. If a capability is not listed here, treat it as unavailable.",
+    "Never call tools speculatively; use them only when they improve correctness, grounding, continuity, or persistence.",
+    "When attachment grounding is required, stay anchored to the listed attachments and do not generalize beyond supported source evidence.",
+    "If retrieval/search results are already provided in prompt context, synthesize from them instead of claiming the capability is missing.",
+    "Honor modality constraints and stop once the response contract is satisfied.",
+    "=== END RUNTIME CAPABILITY CONTRACT ===",
+  ].join("\n");
 }
 
 export function getOpenRouterToolsForAssignmentLevel(assignmentLevel: AssignmentLevel) {

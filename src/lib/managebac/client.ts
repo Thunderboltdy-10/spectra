@@ -190,3 +190,197 @@ export async function fetchManagebacDataset(params: {
     assignments,
   };
 }
+
+export type ManagebacRetrievalItemKind =
+  | "student"
+  | "class"
+  | "assignment"
+  | "announcement"
+  | "cas"
+  | "timetable";
+
+export type ManagebacRetrievalItem = {
+  kind: ManagebacRetrievalItemKind;
+  id: string;
+  title: string;
+  summary: string;
+  score: number;
+  url?: string;
+  dueAt?: number;
+  payload: Record<string, unknown>;
+};
+
+export type ManagebacRuntimeRetrievalResult = {
+  available: boolean;
+  reason: string;
+  student?: {
+    id?: string;
+    name?: string;
+    gradeLevel?: string;
+    email?: string;
+  };
+  items: ManagebacRetrievalItem[];
+  sourceBlock: string;
+};
+
+function compactText(value: unknown, max = 240) {
+  return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+function tokenize(value: string) {
+  return value
+    .toLowerCase()
+    .split(/[^a-z0-9]+/i)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2);
+}
+
+function lexicalScore(query: string, text: string) {
+  const queryTokens = Array.from(new Set(tokenize(query)));
+  if (queryTokens.length === 0) return 0;
+  const haystack = new Set(tokenize(text));
+  if (haystack.size === 0) return 0;
+  let overlap = 0;
+  for (const token of queryTokens) {
+    if (haystack.has(token)) overlap += 1;
+  }
+  return overlap / queryTokens.length;
+}
+
+export function retrieveManagebacRuntimeContext(params: {
+  message: string;
+  snapshot: unknown;
+  limit?: number;
+}): ManagebacRuntimeRetrievalResult {
+  const snapshot = params.snapshot as {
+    available?: boolean;
+    resolutionStatus?: string;
+    message?: string;
+    student?: { id?: string; name?: string; gradeLevel?: string; email?: string };
+    workstreams?: Array<Record<string, unknown> & { managebacContext?: Record<string, unknown>; subjectCode?: string; managebacClassId?: string }>;
+    plannerItems?: Array<Record<string, unknown>>;
+    artifacts?: Array<Record<string, unknown>>;
+    announcements?: Array<Record<string, unknown>>;
+  } | null;
+
+  if (!snapshot?.available) {
+    return {
+      available: false,
+      reason: compactText(snapshot?.message ?? snapshot?.resolutionStatus ?? "ManageBac unavailable."),
+      items: [],
+      sourceBlock: "",
+    };
+  }
+
+  const limit = Math.max(1, Math.min(8, Math.round(params.limit ?? 5)));
+  const candidates: ManagebacRetrievalItem[] = [];
+  const push = (item: ManagebacRetrievalItem | null) => { if (item) candidates.push(item); };
+
+  const student = snapshot.student;
+  if (student?.name || student?.gradeLevel || student?.email) {
+    const text = [student.name, student.gradeLevel, student.email].filter(Boolean).join(" ");
+    push({
+      kind: "student",
+      id: String(student.id ?? "student"),
+      title: student.name ?? "ManageBac student",
+      summary: compactText(`Student profile. ${student.gradeLevel ? `Grade ${student.gradeLevel}. ` : ""}${student.email ?? ""}`),
+      score: lexicalScore(params.message, text) + 0.12,
+      payload: { ...student },
+    });
+  }
+
+  for (const row of snapshot.workstreams ?? []) {
+    const title = compactText(row.title ?? row.name ?? 'ManageBac class', 120);
+    const description = compactText(row.description ?? row.syncConflictSummary ?? '', 220);
+    const subjectCode = compactText(row.subjectCode ?? row.managebacContext?.subjectCode ?? '', 80);
+    const score = lexicalScore(params.message, `${title} ${description} ${subjectCode}`);
+    push({
+      kind: 'class',
+      id: String(row._id ?? row.managebacClassId ?? title),
+      title,
+      summary: compactText(`${subjectCode ? `${subjectCode} — ` : ''}${description || 'ManageBac class workspace.'}`),
+      score,
+      payload: {
+        workstreamId: row._id,
+        managebacClassId: row.managebacClassId,
+        subjectCode: row.subjectCode ?? row.managebacContext?.subjectCode,
+      },
+    });
+  }
+
+  for (const row of snapshot.plannerItems ?? []) {
+    const title = compactText(row.title ?? 'Assignment', 120);
+    const description = compactText(row.description ?? '', 220);
+    const dueAt = typeof row.dueAt === 'number' ? row.dueAt : undefined;
+    const score = lexicalScore(params.message, `${title} ${description}`) + (dueAt ? 0.04 : 0);
+    push({
+      kind: 'assignment',
+      id: String(row._id ?? row.managebacItemId ?? title),
+      title,
+      summary: compactText(`${description}${dueAt ? ` Due ${new Date(dueAt).toISOString().slice(0, 10)}.` : ''}`),
+      dueAt,
+      score,
+      payload: {
+        plannerItemId: row._id,
+        managebacItemId: row.managebacItemId,
+        status: row.status,
+        dueAt,
+      },
+    });
+  }
+
+  for (const row of snapshot.artifacts ?? []) {
+    const title = compactText(row.title ?? 'ManageBac note', 120);
+    const description = compactText(row.description ?? row.summary ?? '', 220);
+    const itemKind = /cas/i.test(`${row.title ?? ''} ${row.description ?? ''}`) ? 'cas' : /timetable/i.test(`${row.title ?? ''}`) ? 'timetable' : 'assignment';
+    const score = lexicalScore(params.message, `${title} ${description}`);
+    push({
+      kind: itemKind as ManagebacRetrievalItemKind,
+      id: String(row._id ?? row.managebacItemId ?? title),
+      title,
+      summary: description || 'ManageBac synced artifact.',
+      score,
+      payload: {
+        artifactId: row._id,
+        managebacItemId: row.managebacItemId,
+        workstreamId: row.workstreamId,
+      },
+    });
+  }
+
+  for (const row of snapshot.announcements ?? []) {
+    const title = compactText(row.title ?? 'Announcement', 120);
+    const summary = compactText(row.summary ?? row.body ?? '', 220);
+    const url = typeof row.url === 'string' ? row.url : undefined;
+    const score = lexicalScore(params.message, `${title} ${summary}`);
+    push({
+      kind: 'announcement',
+      id: String(row.id ?? title),
+      title,
+      summary,
+      url,
+      score,
+      payload: { url },
+    });
+  }
+
+  const items = candidates
+    .filter((item) => item.score > 0 || item.kind === 'student')
+    .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title))
+    .slice(0, limit);
+
+  return {
+    available: true,
+    reason: items.length > 0 ? 'ManageBac context retrieved.' : 'ManageBac available but no strongly relevant records matched.',
+    student: snapshot.student,
+    items,
+    sourceBlock: items.length > 0
+      ? [
+          '=== MANAGEBAC CONTEXT ===',
+          ...items.map((item, index) => `${index + 1}. [${item.kind.toUpperCase()}] ${item.title}${item.dueAt ? ` | due ${new Date(item.dueAt).toISOString().slice(0, 10)}` : ''}
+${item.summary}`),
+          '=== END MANAGEBAC CONTEXT ===',
+        ].join('\n\n')
+      : '',
+  };
+}

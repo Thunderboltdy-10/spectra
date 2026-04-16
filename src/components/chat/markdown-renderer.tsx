@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -56,9 +56,7 @@ function CodeBlock({
   const codeText = useMemo(() => normalizeCode(children).trim(), [children]);
   const canOpenCanvas = !disableCanvas && Boolean(onOpenCanvas) && codeText.split("\n").length > 10;
   const previewable = !disablePreview && canPreview(language);
-  const splitContainerRef = useRef<HTMLDivElement | null>(null);
-  const draggingRef = useRef(false);
-  const [splitRatio, setSplitRatio] = useState(0.5);
+  const [viewMode, setViewMode] = useState<"preview" | "code">(previewable ? "preview" : "code");
 
   function handleCopy() {
     void navigator.clipboard.writeText(codeText);
@@ -66,35 +64,34 @@ function CodeBlock({
     setTimeout(() => setCopied(false), 1500);
   }
 
-  useEffect(() => {
-    const onPointerMove = (event: PointerEvent) => {
-      if (!draggingRef.current || !splitContainerRef.current) return;
-      const rect = splitContainerRef.current.getBoundingClientRect();
-      if (!rect.width) return;
-      const relative = (event.clientX - rect.left) / rect.width;
-      setSplitRatio(Math.min(0.8, Math.max(0.2, relative)));
-    };
-    const onPointerUp = () => {
-      draggingRef.current = false;
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    };
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-    return () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-    };
-  }, []);
-
   return (
     <div className="group relative my-4 flex flex-col rounded-xl border border-[var(--border-default)] bg-[var(--bg-code)] shadow-sm">
       <div className="flex items-center justify-between rounded-t-xl border-b border-[var(--border-default)] bg-[var(--bg-tertiary)] px-3 py-1.5">
-        <span className="font-mono text-[11px] font-medium uppercase tracking-wider text-[var(--text-secondary)]">
-          {language ? language.charAt(0).toUpperCase() + language.slice(1) : "Code"}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[11px] font-medium uppercase tracking-wider text-[var(--text-secondary)]">
+            {language ? language.charAt(0).toUpperCase() + language.slice(1) : "Code"}
+          </span>
+          {previewable ? (
+            <div className="ml-2 flex items-center overflow-hidden rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)]">
+              <button
+                type="button"
+                onClick={() => setViewMode("preview")}
+                className={`px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider transition ${viewMode === "preview" ? "bg-[var(--bg-primary)] text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`}
+              >
+                Preview
+              </button>
+              <div className="h-3 w-px bg-[var(--border-default)]" />
+              <button
+                type="button"
+                onClick={() => setViewMode("code")}
+                className={`px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider transition ${viewMode === "code" ? "bg-[var(--bg-primary)] text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`}
+              >
+                Code
+              </button>
+            </div>
+          ) : null}
+        </div>
         <div className="flex items-center gap-1">
-          {previewable ? <span className="px-2 py-1 text-[10px] text-[var(--text-secondary)]">Split preview</span> : null}
           <button
             type="button"
             onClick={handleCopy}
@@ -123,33 +120,9 @@ function CodeBlock({
           ) : null}
         </div>
       </div>
-      {previewable ? (
-        <div
-          ref={splitContainerRef}
-          className="relative flex min-h-[260px] rounded-b-xl overflow-hidden"
-        >
-          <div
-            className="h-full min-h-0 bg-[var(--bg-code)]"
-            style={{ width: `calc(${Math.round(splitRatio * 100)}% - 1px)` }}
-          >
-            <pre className="h-full !m-0 overflow-x-auto !p-4" {...props}>
-              <code className={className}>{children}</code>
-            </pre>
-          </div>
-          <button
-            type="button"
-            className="absolute inset-y-0 z-10 w-2 cursor-col-resize bg-[color-mix(in_oklab,var(--accent-cyan)_28%,transparent)] hover:bg-[color-mix(in_oklab,var(--accent-cyan)_45%,transparent)] max-md:hidden"
-            style={{ left: `calc(${Math.round(splitRatio * 100)}% - 4px)` }}
-            aria-label="Resize code and preview panes"
-            onPointerDown={() => {
-              draggingRef.current = true;
-              document.body.style.cursor = "col-resize";
-              document.body.style.userSelect = "none";
-            }}
-          />
-          <div className="min-w-0 flex-1">
-            <CodePreview code={codeText} language={language as PreviewLanguage} />
-          </div>
+      {previewable && viewMode === "preview" ? (
+        <div className="relative min-h-[260px] rounded-b-xl overflow-hidden bg-[var(--bg-elevated)] p-1">
+          <CodePreview code={codeText} language={language as PreviewLanguage} />
         </div>
       ) : (
         <pre className="!m-0 overflow-x-auto rounded-b-xl !p-4" {...props}>

@@ -1,4 +1,5 @@
 import { convexAction, convexQuery } from "@/lib/convex-server";
+import { retrieveManagebacRuntimeContext, type ManagebacRuntimeRetrievalResult } from "@/lib/managebac/client";
 import { MODEL_CONFIG } from "@/lib/model-config";
 import { openRouterEmbeddingRequest } from "@/lib/openrouter";
 import { withTimeout } from "@/lib/orchestrator/history";
@@ -1037,6 +1038,32 @@ export async function maybeSearchWeb(
       },
     ],
   };
+}
+
+
+export async function maybeRetrieveManagebac(params: {
+  actorClerkId: string;
+  message: string;
+  enabled: boolean;
+}): Promise<ManagebacRuntimeRetrievalResult> {
+  if (!params.enabled) {
+    return {
+      available: false,
+      reason: "ManageBac retrieval not requested by the route.",
+      items: [],
+      sourceBlock: "",
+    };
+  }
+
+  const snapshot = await convexAction(
+    "managebacSync:getUserSnapshot",
+    { actorClerkId: params.actorClerkId, forceRefresh: false },
+  ).catch(() => null);
+
+  return retrieveManagebacRuntimeContext({
+    message: params.message,
+    snapshot,
+  });
 }
 
 export async function runRagRetrieval(params: {

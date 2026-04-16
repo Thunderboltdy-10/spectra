@@ -1,11 +1,9 @@
 import { NextRequest } from "next/server";
 import { auth, currentUser } from "@clerk/nextjs/server";
-import { cookies } from "next/headers";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
+import { clearInvitationTracking, getInvitationCookies, persistInvitationHandoff } from "@/lib/invitation-flow";
 import { withRouteErrorHandling } from "@/lib/route-handler";
-
-const INVITATION_TOKEN_COOKIE = "ai-school-invitation-token";
 
 // Escape hatch for the client. The invitation cookie is httpOnly so pages
 // can't delete it on their own. This endpoint is called from the /join page
@@ -13,8 +11,7 @@ const INVITATION_TOKEN_COOKIE = "ai-school-invitation-token";
 // so they can navigate away without the middleware snapping them back.
 export async function DELETE() {
   return withRouteErrorHandling(async () => {
-    const cookieStore = await cookies();
-    cookieStore.delete(INVITATION_TOKEN_COOKIE);
+    await clearInvitationTracking();
     return ok({ cleared: true });
   });
 }
@@ -37,7 +34,8 @@ export async function POST(request: NextRequest) {
     }
 
     const body = (await request.json().catch(() => null)) as { token?: string } | null;
-    const token = body?.token?.trim();
+    const cookieState = await getInvitationCookies();
+    const token = body?.token?.trim() ?? cookieState.handoffToken ?? cookieState.token;
 
     if (!token) {
       return badRequest("Token is required");
@@ -54,20 +52,30 @@ export async function POST(request: NextRequest) {
     } | null>("schoolAdmin:getInvitationByToken", { token });
 
     if (!invitation) {
+      await clearInvitationTracking();
       return badRequest("Invitation not found", 404);
     }
 
     if (invitation.status === "expired" || Date.now() > invitation.expiresAt) {
+      await clearInvitationTracking();
       return badRequest("This invitation has expired", 410);
     }
 
     if (invitation.status === "accepted") {
-      return ok({ alreadyAccepted: true, orgName: invitation.orgName });
+      const normalizedInvitationEmail = invitation.email.toLowerCase();
+      const matchingEmail = emails.find((value) => value === normalizedInvitationEmail);
+      if (matchingEmail) {
+        await clearInvitationTracking();
+        return ok({ alreadyAccepted: true, sameUser: true, orgName: invitation.orgName });
+      }
+      await persistInvitationHandoff(token);
+      return ok({ alreadyAccepted: true, sameUser: false, orgName: invitation.orgName });
     }
 
     const normalizedInvitationEmail = invitation.email.toLowerCase();
     const matchingEmail = emails.find((value) => value === normalizedInvitationEmail);
     if (!matchingEmail) {
+      await persistInvitationHandoff(token);
       return badRequest("This invitation was sent to a different email address", 403);
     }
 
@@ -78,8 +86,7 @@ export async function POST(request: NextRequest) {
       token,
     });
 
-    const cookieStore = await cookies();
-    cookieStore.delete(INVITATION_TOKEN_COOKIE);
+    await clearInvitationTracking();
 
     return ok({
       success: true,

@@ -18,11 +18,23 @@ export type TaskNode = {
   prompt: string;
   dependsOn: string[];
   mode?: string;
+  profile?: OrchestrationProfile;
   result?: string;
   tokens?: number;
   durationMs?: number;
   status: "pending" | "running" | "done" | "failed" | "skipped";
 };
+
+export type OrchestrationProfile =
+  | "simple_direct"
+  | "search_synthesis"
+  | "artifact_builder"
+  | "study_transform"
+  | "image_analysis"
+  | "workspace_action"
+  | "agent_delegation"
+  | "teacher_marking"
+  | "long_context_reconstruction";
 
 type BuildTaskGraphContext = {
   hasVision?: boolean;
@@ -31,6 +43,7 @@ type BuildTaskGraphContext = {
   searchBlock?: string;
   includeCritic?: boolean;
   maxSpecialists?: number;
+  profile?: OrchestrationProfile;
 };
 
 type ExecutionLimits = {
@@ -82,8 +95,23 @@ function hasMultipartIntent(prompt: string) {
   return /(^|\n)\s*(\d+\.|-|\*)\s+/.test(prompt) || /\b(first|second|third|then|finally|compare|contrast)\b/.test(lower);
 }
 
+export function resolveOrchestrationProfile(prompt: string, mode: string, context: BuildTaskGraphContext = {}): OrchestrationProfile {
+  if (context.profile) return context.profile;
+  const lower = prompt.toLowerCase();
+  if (context.hasVision) return "image_analysis";
+  if (mode === "marker") return "teacher_marking";
+  if (/\b(flashcards?|quiz|notes from|turn .* into|study guide|transform)\b/.test(lower)) return "study_transform";
+  if (/\b(document|artifact|worksheet|handout|presentation|slides)\b/.test(lower)) return "artifact_builder";
+  if (/\b(workspace|workstream|planner|widget|note)\b/.test(lower)) return "workspace_action";
+  if (/\b(agent|delegate|specialist)\b/.test(lower)) return "agent_delegation";
+  if (context.searchEnabled || mode === "research") return "search_synthesis";
+  if (/\b(reconstruct|summari[sz]e history|restore context|long context)\b/.test(lower)) return "long_context_reconstruction";
+  return "simple_direct";
+}
+
 export function buildTaskGraph(prompt: string, mode: string, context: BuildTaskGraphContext = {}): TaskNode[] {
   const graph: TaskNode[] = [];
+  const profile = resolveOrchestrationProfile(prompt, mode, context);
   const hasSourceContext = Boolean(context.sourceBlock?.trim());
   const hasSearchContext = Boolean(context.searchBlock?.trim());
   const codeIntent = hasCodeIntent(prompt);
@@ -121,6 +149,7 @@ Return:
 Prompt and context:
 ${packedPrompt}`,
       dependsOn: [],
+      profile,
       status: "pending",
     });
   }
@@ -132,6 +161,7 @@ ${packedPrompt}`,
       specialist: "retriever",
       prompt: packedPrompt,
       dependsOn: needsPlanner ? ["planner"] : [],
+      profile,
       status: "pending",
     });
   }
@@ -143,6 +173,7 @@ ${packedPrompt}`,
       specialist: "web_researcher",
       prompt: packedPrompt,
       dependsOn: needsPlanner ? ["planner"] : [],
+      profile,
       status: "pending",
     });
     graph.push({
@@ -150,6 +181,7 @@ ${packedPrompt}`,
       role: "fact_checker",
       specialist: "fact_checker",
       prompt: packedPrompt,
+      profile,
       dependsOn: [
         ...(needsPlanner ? ["planner"] : []),
         ...(hasSearchContext ? ["web"] : []),
@@ -165,6 +197,7 @@ ${packedPrompt}`,
       role: "vision_interpreter",
       specialist: "vision_interpreter",
       prompt: packedPrompt,
+      profile,
       dependsOn: [
         ...(needsPlanner ? ["planner"] : []),
         ...(hasSourceContext ? ["retriever"] : []),
@@ -179,6 +212,7 @@ ${packedPrompt}`,
       role: "code_helper",
       specialist: "code_helper",
       prompt: packedPrompt,
+      profile,
       dependsOn: [
         ...(needsPlanner ? ["planner"] : []),
         ...(hasSourceContext ? ["retriever"] : []),
@@ -193,6 +227,7 @@ ${packedPrompt}`,
       role: "pedagogy_coach",
       specialist: "pedagogy_coach",
       prompt: packedPrompt,
+      profile,
       dependsOn: [
         ...(needsPlanner ? ["planner"] : []),
         ...(hasSourceContext ? ["retriever"] : []),
@@ -207,6 +242,7 @@ ${packedPrompt}`,
       role: "exam_strategist",
       specialist: "exam_strategist",
       prompt: packedPrompt,
+      profile,
       dependsOn: [
         ...(needsPlanner ? ["planner"] : []),
         ...(hasSourceContext ? ["retriever"] : []),
@@ -221,6 +257,7 @@ ${packedPrompt}`,
       role: "curriculum_planner",
       specialist: "curriculum_planner",
       prompt: packedPrompt,
+      profile,
       dependsOn: [
         ...(needsPlanner ? ["planner"] : []),
         ...(hasSourceContext ? ["retriever"] : []),
@@ -259,6 +296,7 @@ ${packedPrompt}`,
       specialist: "pedagogy_coach",
       prompt: packedPrompt,
       dependsOn: [],
+      profile,
       status: "pending",
     });
   }
@@ -278,6 +316,7 @@ ${packedPrompt}`,
       id: "critic",
       role: "critic",
       specialist: "critic",
+      profile,
       prompt: `Audit specialist findings against the original question.
 Return bullets with:
 - confidence (high/medium/low)
@@ -297,6 +336,7 @@ ${packedPrompt}`,
     role: "synthesizer",
     specialist: "synthesizer",
     prompt: packedPrompt,
+    profile,
     dependsOn: includeCritic ? ["critic"] : specialistNodes.map((node) => node.id),
     status: "pending",
   });

@@ -129,6 +129,7 @@ function formatModelName(modelId?: string) {
   const raw = modelId.split("/").pop() ?? modelId;
   return raw
     .replace(/:free$/i, "")
+    .replace(/[\s(_-]*\bfree\b[\s)_-]*/gi, " ")
     .split(/[-_ ]+/)
     .filter(Boolean)
     .map((word) => {

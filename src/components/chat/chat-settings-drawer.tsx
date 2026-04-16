@@ -97,7 +97,7 @@ export function ChatSettingsDrawer({
       ) : null}
 
       <aside
-        className={`right-panel-shell ${rightPanelSurfaceClassName()} pointer-events-auto absolute p-4 shadow-[var(--shadow-soft)] sm:p-5 ${
+        className={`right-panel-shell ${rightPanelSurfaceClassName()} pointer-events-auto absolute flex flex-col shadow-[var(--shadow-soft)] ${
           docked ? "right-panel-shell--docked" : "right-panel-shell--sheet"
         } ${
           compact
@@ -105,7 +105,7 @@ export function ChatSettingsDrawer({
             : "inset-y-0 right-0 w-full max-w-md border-l"
         }`}
       >
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex shrink-0 items-center justify-between px-4 pt-4 sm:px-5 sm:pt-5">
           <h2 className="font-display text-xl">Chat settings</h2>
           <div className="flex items-center gap-1.5">
             {compact ? (
@@ -126,7 +126,7 @@ export function ChatSettingsDrawer({
         </div>
 
         {!collapsed ? (
-          <div className={`right-panel-content ${compact ? "max-h-[calc(78vh-4rem)]" : "max-h-[calc(100vh-6rem)]"} overflow-y-auto pr-1`}>
+          <div className={`right-panel-content ${compact ? "max-h-[calc(78vh-4rem)]" : "max-h-[calc(100vh-6rem)]"} overflow-y-auto px-4 pb-4 sm:px-5 sm:pb-5`}>
             <SettingsView
               models={models}
               routerMode={routerMode}

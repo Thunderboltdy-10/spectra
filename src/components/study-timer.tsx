@@ -272,21 +272,28 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
       const AudioContextCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!AudioContextCtor) return;
       const context = new AudioContextCtor();
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
 
-      oscillator.type = "sine";
-      oscillator.frequency.setValueAtTime(780, context.currentTime);
-      oscillator.frequency.exponentialRampToValueAtTime(540, context.currentTime + 0.22);
-      gain.gain.setValueAtTime(0.0001, context.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.04, context.currentTime + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.24);
+      // Play 3 beeps for an alarm
+      for (let i = 0; i < 3; i++) {
+        const startTime = context.currentTime + i * 0.4;
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
 
-      oscillator.connect(gain);
-      gain.connect(context.destination);
-      oscillator.start();
-      oscillator.stop(context.currentTime + 0.25);
-      void context.close().catch(() => {});
+        oscillator.type = "sine";
+        oscillator.frequency.setValueAtTime(880, startTime);
+        oscillator.frequency.setValueAtTime(1046.5, startTime + 0.1); // Jump to higher note
+
+        gain.gain.setValueAtTime(0, startTime);
+        gain.gain.linearRampToValueAtTime(0.1, startTime + 0.05);
+        gain.gain.linearRampToValueAtTime(0, startTime + 0.25);
+
+        oscillator.connect(gain);
+        gain.connect(context.destination);
+        oscillator.start(startTime);
+        oscillator.stop(startTime + 0.3);
+      }
+
+      setTimeout(() => void context.close().catch(() => {}), 1500);
     } catch {
       // Audio is optional; silently skip if unavailable.
     }

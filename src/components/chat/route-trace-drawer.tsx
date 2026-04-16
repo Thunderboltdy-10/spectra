@@ -90,7 +90,7 @@ export function RouteTraceDrawer({ open, onClose, trace, showCostDetails = false
       ) : null}
 
       <aside
-        className={`right-panel-shell ${rightPanelSurfaceClassName()} pointer-events-auto absolute flex flex-col p-4 shadow-[var(--shadow-soft)] ${
+        className={`right-panel-shell ${rightPanelSurfaceClassName()} pointer-events-auto absolute flex flex-col shadow-[var(--shadow-soft)] ${
           docked ? "right-panel-shell--docked" : "right-panel-shell--sheet"
         } ${
           compact
@@ -98,7 +98,7 @@ export function RouteTraceDrawer({ open, onClose, trace, showCostDetails = false
             : "inset-y-0 right-0 w-[92vw] max-w-xl border-l"
         }`}
       >
-        <div className="mb-4 flex min-h-[72px] items-center justify-between">
+        <div className="mb-4 flex min-h-[72px] shrink-0 items-center justify-between px-4 pt-4 sm:px-5 sm:pt-5">
           <div className="min-w-0">
             <p className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Route Trace</p>
             <h3 className="truncate font-display text-2xl text-[var(--text-primary)]">Model Decision Timeline</h3>
@@ -135,7 +135,7 @@ export function RouteTraceDrawer({ open, onClose, trace, showCostDetails = false
         </div>
 
         {!collapsed ? (
-          <div className="right-panel-content w-full min-w-0 min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-1">
+          <div className="right-panel-content w-full min-w-0 min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 pb-4 sm:px-5 sm:pb-5">
             <section className="mb-5">
           <h4 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Inputs</h4>
           <div className="grid gap-2 sm:grid-cols-2">

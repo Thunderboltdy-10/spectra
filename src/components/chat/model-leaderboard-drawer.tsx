@@ -27,6 +27,14 @@ function formatTokens(value: number) {
   return String(value);
 }
 
+function sanitizeModelName(value: string) {
+  return value
+    .replace(/:free$/i, "")
+    .replace(/[\s(_-]*\bfree\b[\s)_-]*/gi, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 export function ModelLeaderboardDrawer({ open, onClose }: ModelLeaderboardDrawerProps) {
   const compact = useCompactSheet(1024);
   const { docked, panelWidth } = useRightPanelDock({ id: "model-leaderboard", open, compact, maxWidthPx: 420 });
@@ -64,7 +72,7 @@ export function ModelLeaderboardDrawer({ open, onClose }: ModelLeaderboardDrawer
       ) : null}
 
       <aside
-        className={`right-panel-shell ${rightPanelSurfaceClassName()} pointer-events-auto absolute p-4 shadow-[var(--shadow-soft)] sm:p-5 ${
+        className={`right-panel-shell ${rightPanelSurfaceClassName()} pointer-events-auto absolute flex flex-col shadow-[var(--shadow-soft)] ${
           docked ? "right-panel-shell--docked" : "right-panel-shell--sheet"
         } ${
           compact
@@ -72,7 +80,7 @@ export function ModelLeaderboardDrawer({ open, onClose }: ModelLeaderboardDrawer
             : "inset-y-0 right-0 w-full max-w-md border-l"
         }`}
       >
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex shrink-0 items-center justify-between px-4 pt-4 sm:px-5 sm:pt-5">
           <h2 className="inline-flex items-center gap-2 font-display text-xl">
             <Trophy className="h-5 w-5 text-[var(--accent-cyan)]" />
             Model Leaderboard
@@ -82,7 +90,7 @@ export function ModelLeaderboardDrawer({ open, onClose }: ModelLeaderboardDrawer
           </Button>
         </div>
 
-        <div className={`right-panel-content ${compact ? "max-h-[calc(78vh-4rem)]" : "max-h-[calc(100vh-6rem)]"} overflow-y-auto pr-1`}>
+        <div className={`right-panel-content flex-1 ${compact ? "max-h-[calc(78vh-4rem)]" : "max-h-[calc(100vh-6rem)]"} overflow-y-auto px-4 pb-4 sm:px-5 sm:pb-5`}>
           {loading ? (
             <div className="space-y-3">
               {Array.from({ length: 5 }).map((_, i) => (
@@ -105,7 +113,7 @@ export function ModelLeaderboardDrawer({ open, onClose }: ModelLeaderboardDrawer
                   </span>
                   <ProviderLogo provider={entry.provider} modelId={entry.modelId} />
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-[var(--text-primary)]">{entry.name}</p>
+                    <p className="truncate text-sm font-medium text-[var(--text-primary)]">{sanitizeModelName(entry.name)}</p>
                     <p className="text-[11px] text-[var(--text-secondary)]">
                       {formatTokens(entry.totalTokens)} tokens · {entry.usageCount} uses
                     </p>

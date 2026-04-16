@@ -414,18 +414,19 @@ export function ChatMessages({
     if (!element) return;
     scrollContainerRef.current = element;
 
+    const handleUserInteraction = () => {
+      shouldAutoScrollRef.current = false;
+    };
+
     let rafId = 0;
     const onScroll = () => {
       rafId = requestAnimationFrame(() => {
         const scrollTop = element.scrollTop;
         const deltaFromBottom = element.scrollHeight - scrollTop - element.clientHeight;
-        const deltaUp = lastScrollTopRef.current - scrollTop;
         const nearBottom = deltaFromBottom < 100;
 
         if (nearBottom) {
           shouldAutoScrollRef.current = true;
-        } else if (deltaUp > 20) {
-          shouldAutoScrollRef.current = false;
         }
 
         setShowJumpButton(deltaFromBottom > 120);
@@ -435,8 +436,12 @@ export function ChatMessages({
 
     onScroll();
     element.addEventListener("scroll", onScroll);
+    element.addEventListener("wheel", handleUserInteraction, { passive: true });
+    element.addEventListener("touchmove", handleUserInteraction, { passive: true });
     return () => {
       element.removeEventListener("scroll", onScroll);
+      element.removeEventListener("wheel", handleUserInteraction);
+      element.removeEventListener("touchmove", handleUserInteraction);
       if (rafId) cancelAnimationFrame(rafId);
     };
   }, []);
@@ -722,7 +727,16 @@ export function ChatMessages({
 
           {filteredVisibleMessages.map((msg, index) => {
             const isLastAssistant = msg.role === "assistant" && index === filteredVisibleMessages.length - 1;
-            const msgMode = msg.mode ?? mode;
+            const msgMode = (() => {
+              if (msg.mode) return msg.mode;
+              if (msg.role === "assistant") {
+                const closed = hasClosedTag(msg.content);
+                if (closed) return closed;
+                const open = detectOpenTag(msg.content);
+                if (open) return open;
+              }
+              return mode;
+            })();
             const prevMsg = filteredVisibleMessages[index - 1];
             const showModeTransition =
               index > 0 &&

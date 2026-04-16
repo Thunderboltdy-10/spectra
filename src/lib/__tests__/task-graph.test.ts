@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildTaskGraph, executeGraph, shouldUseMultiAgent, synthesize } from "@/lib/orchestrator/task-graph";
+import {
+  buildTaskGraph,
+  executeGraph,
+  resolveOrchestrationProfile,
+  shouldUseMultiAgent,
+  synthesize,
+} from "@/lib/orchestrator/task-graph";
 
 describe("task graph", () => {
   it("enables multi-agent for complex research", () => {
@@ -52,5 +58,16 @@ describe("task graph", () => {
   it("accepts complexity labels for multi-agent decision", () => {
     expect(shouldUseMultiAgent("compare viewpoints and sources", "research", "complex")).toBe(true);
     expect(shouldUseMultiAgent("hello", "general", "simple")).toBe(false);
+  });
+
+  it("assigns profile-based orchestration contracts", () => {
+    expect(resolveOrchestrationProfile("Analyze this uploaded diagram", "general", { hasVision: true })).toBe("image_analysis");
+    expect(resolveOrchestrationProfile("Create flashcards from these notes", "tutor", {})).toBe("study_transform");
+    expect(resolveOrchestrationProfile("Compare current policies with sources", "research", { searchEnabled: true })).toBe("search_synthesis");
+  });
+
+  it("tags generated nodes with the resolved profile", () => {
+    const graph = buildTaskGraph("Create a worksheet artifact", "document", {});
+    expect(graph.every((node) => node.profile === "artifact_builder")).toBe(true);
   });
 });

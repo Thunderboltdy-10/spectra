@@ -72,14 +72,6 @@ function sanitizeModelId(value: string) {
     .trim();
 }
 
-function sanitizeModelLabel(value: string) {
-  return value
-    .replace(/:free$/i, "")
-    .replace(/[\s(_-]*\bfree\b[\s)_-]*/gi, " ")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-}
-
 function providerFromModelId(value: string) {
   const provider = value.split("/")[0] ?? "Unknown";
   if (!provider) return "Unknown";
@@ -262,10 +254,6 @@ function ColorPalettePicker() {
 }
 
 export function SettingsView({
-  models,
-  routerMode,
-  manualModel,
-  activeModelUsed,
   usePersonalResources,
   autoSaveConversationFilesToLibrary,
   personalResources,
@@ -331,22 +319,6 @@ export function SettingsView({
       : percentUsed > 0
           ? "Getting started"
           : "No activity yet";
-  const selectedManualModel = models.find((model) => model.modelId === manualModel);
-  const routedRecentModel = models.find((model) => model.modelId === activeModelUsed);
-  const modelDisplayName =
-    routerMode === "manual"
-      ? sanitizeModelLabel(selectedManualModel?.name ?? manualModel)
-      : "Auto";
-  const modelDisplayProvider =
-    routerMode === "manual"
-      ? selectedManualModel?.provider ?? "Manual selection"
-      : routedRecentModel
-        ? `Recent final model: ${sanitizeModelLabel(routedRecentModel.name)}`
-        : "Live model routing from catalog";
-  const modelTags =
-    routerMode === "manual"
-      ? (selectedManualModel?.tags ?? [])
-      : (routedRecentModel?.tags ?? []);
 
   return (
     <div className="space-y-4">
@@ -365,27 +337,6 @@ export function SettingsView({
               <AutoChoice label="Search" value={autoSearch} onChange={onAutoSearchChange} />
             </div>
           </section>
-
-          <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
-            <p className="text-[11px] text-[var(--text-secondary)]">Current model path</p>
-            <p className="mt-0.5 text-sm font-medium text-[var(--text-primary)]">{modelDisplayName}</p>
-            <p className="text-xs text-[var(--text-secondary)]">{modelDisplayProvider}</p>
-            {modelTags.filter((tag) => !/\bfree\b/i.test(tag)).length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1">
-                {modelTags
-                  .filter((tag) => !/\bfree\b/i.test(tag))
-                  .slice(0, 5)
-                  .map((tag) => (
-                    <span
-                      key={tag}
-                      className="rounded-full border border-[var(--border-default)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]"
-                    >
-                      {tag}
-                    </span>
-                  ))}
-              </div>
-            )}
-          </div>
 
           <div className="space-y-2">
             <div className="flex items-center justify-between rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
@@ -1536,8 +1487,8 @@ export function UnifiedPanel({ settingsProps, orchestrationProps, canvasProps }:
             : mobileOverlay
               ? "absolute inset-0 rounded-none border-0 p-0"
               : compact
-              ? "absolute bottom-3 left-3 right-3 max-h-[78vh] rounded-2xl border p-4"
-              : "absolute inset-y-0 right-0 w-[92vw] border-l p-4"
+              ? "absolute bottom-3 left-3 right-3 max-h-[78vh] rounded-2xl border"
+              : "absolute inset-y-0 right-0 w-[92vw] border-l"
         }`}
         style={{
           ...(docked
@@ -1561,7 +1512,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps, canvasProps }:
         }}
       >
         <div
-          className={`flex items-center justify-between shrink-0 relative after:content-[''] after:absolute after:top-[56px] after:left-0 after:right-0 after:h-px after:bg-[var(--border-default)] ${docked ? "min-h-[56px] px-5 pb-3 pt-2.5" : "min-h-[56px] mb-4"}`}
+          className={`flex items-center justify-between shrink-0 relative after:content-[''] after:absolute after:bottom-0 after:left-0 after:right-0 after:h-px after:bg-[var(--border-default)] ${docked ? "min-h-[56px] px-5 pb-3 pt-2.5" : "min-h-[56px] px-4 pt-4 pb-4 sm:px-5 sm:pt-5 sm:pb-5"}`}
         >
           <div className="min-w-0">
             <p className="text-[9px] uppercase tracking-[0.14em] text-[var(--text-secondary)] truncate">{current.subtitle}</p>
@@ -1586,7 +1537,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps, canvasProps }:
         </div>
 
         {!collapsed ? (
-          <div className={`right-panel-content w-full min-w-0 min-h-0 flex-1 overflow-x-hidden overflow-y-auto ${activeView === "canvas" ? "p-0" : docked ? "px-5 py-4" : "pr-1"}`}>
+          <div className={`right-panel-content w-full min-w-0 min-h-0 flex-1 overflow-x-hidden overflow-y-auto ${activeView === "canvas" ? "p-0" : docked ? "px-5 py-4" : "px-4 pt-4 pb-4 sm:px-5 sm:pb-5"}`}>
             {activeView === "settings" && settingsProps && <SettingsView {...settingsProps} />}
             {activeView === "route-trace" && (
               <RouteTraceView trace={panelData.routeTrace ?? orchestrationProps?.routeTrace} showCostDetails={Boolean(settingsProps?.showCostDetails)} />

@@ -6,6 +6,7 @@ import {
   isFlashcardAppendIntent,
   mergeLearningContexts,
 } from "@/lib/orchestrator/learning-context";
+import { selectRuntimeSkills } from "@/lib/orchestrator/skills";
 
 describe("learning context helpers", () => {
   it("coerces and sanitizes context payloads", () => {
@@ -102,5 +103,19 @@ describe("learning context helpers", () => {
     expect(guidance).toContain("ADD-MORE request");
     expect(guidance).toContain("Existing card fronts to avoid");
     expect(guidance).toContain("Diffusion");
+  });
+
+  it("prefers higher-signal skills for deeper agent-backed turns", () => {
+    const skills = selectRuntimeSkills({
+    message: "Research reliable sources and compare evidence for this policy update.",
+    mode: "research",
+    allowedToolBundles: ["skills", "search"],
+    assignmentLevel: "L4",
+    hasAgent: true,
+    maxSkills: 3,
+  });
+
+    expect(skills[0]?.id).toBe("deep-research");
+    expect(skills.some((skill) => skill.id === "source-reliability")).toBe(true);
   });
 });

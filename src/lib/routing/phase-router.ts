@@ -1,5 +1,6 @@
 import type { ThinkingLevel } from "@/lib/contracts/studyModes";
 import {
+  inferRoutingLane,
   isTextChatCapableModel,
   isModelAllowedInTier,
   isModelTooExpensivePerMillion,
@@ -449,8 +450,17 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
   const manualEntry = input.manualModel
     ? input.modelCatalog.find((model) => model.modelId === input.manualModel)
     : undefined;
-  const manualBlockedByCap = Boolean(manualEntry && isModelTooExpensivePerMillion(manualEntry));
-  const manualAllowedByTier = Boolean(manualEntry && isModelAllowedInTier(manualEntry, input.spendingTier));
+  const lane = inferRoutingLane({
+    mode: input.mode,
+    requiredCapabilities: input.requiredCapabilities,
+    needsSearch: input.needsSearch,
+    preferFast: input.stakes === "low",
+  });
+  const manualBlockedByCap = Boolean(manualEntry && isModelTooExpensivePerMillion(manualEntry, { lane }));
+  const manualAllowedByTier = Boolean(manualEntry && isModelAllowedInTier(manualEntry, input.spendingTier, {
+    lane,
+    allowManualOverride: input.routerMode === "manual",
+  }));
   const manualAllowedWithOverride =
     input.routerMode === "manual"
     && Boolean(input.manualModel)
@@ -502,7 +512,7 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
 
   if (input.routerMode === "openrouter_auto" && input.spendingTier === "normal") {
     const rankedFallbacks = catalog
-      .filter((model) => isModelAllowedInTier(model, input.spendingTier))
+      .filter((model) => isModelAllowedInTier(model, input.spendingTier, { lane }))
       .slice(0, 5)
       .map((model) => model.modelId);
     const routingDurationMs = Math.max(0, Math.round(nowMs() - startedAt));
@@ -546,7 +556,7 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
 
   const scored: ScoredCandidate[] = [];
   for (const model of catalog) {
-    if (!isModelAllowedInTier(model, input.spendingTier)) continue;
+    if (!isModelAllowedInTier(model, input.spendingTier, { lane })) continue;
     if (input.mode !== "image" && !modelSupportsCapability(model, "image_generation") && !isTextChatCapableModel(model)) {
       continue;
     }

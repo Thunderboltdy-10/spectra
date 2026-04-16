@@ -11,6 +11,9 @@ export type RuntimeSkill = {
   sourcePath?: string;
   appliesToModes?: StudyMode[];
   trigger?: RegExp;
+  priority?: number;
+  preferredAssignmentLevels?: string[];
+  audience?: string[];
 };
 
 function toRuntimeSkill(skill: RegisteredSkill): RuntimeSkill {
@@ -24,6 +27,9 @@ function toRuntimeSkill(skill: RegisteredSkill): RuntimeSkill {
     sourcePath: skill.sourcePath,
     appliesToModes: skill.appliesToModes,
     trigger: skill.trigger,
+    priority: skill.priority,
+    preferredAssignmentLevels: skill.preferredAssignmentLevels,
+    audience: skill.audience,
   };
 }
 
@@ -32,12 +38,16 @@ export function selectRuntimeSkills(params: {
   mode: StudyMode;
   preferredSkillIds?: string[];
   allowedToolBundles?: string[];
+  assignmentLevel?: string;
+  hasAgent?: boolean;
   maxSkills?: number;
 }): RuntimeSkill[] {
   const contextual = resolveSkillsForContext({
     message: params.message,
     mode: params.mode,
     allowedToolBundles: params.allowedToolBundles,
+    assignmentLevel: params.assignmentLevel as "L0" | "L1" | "L2" | "L3" | "L4" | undefined,
+    hasAgent: params.hasAgent,
     maxSkills: params.maxSkills,
   });
   const preferredIds = new Set(params.preferredSkillIds ?? []);
@@ -65,6 +75,8 @@ export function formatRuntimeSkillBlock(skills: RuntimeSkill[]) {
         `${index + 1}. ${skill.name} (${skill.id})`,
         `Category: ${skill.category ?? "general"}`,
         `Summary: ${skill.summary}`,
+        `Priority: ${skill.priority ?? 0}` ,
+        `Assignment levels: ${skill.preferredAssignmentLevels?.join(", ") ?? "any"}`,
       ];
       for (const item of skill.guidance) {
         lines.push(`- ${item}`);

@@ -35,7 +35,21 @@ describe("auth access-state route integration", () => {
       email: "student@example.com",
       emails: ["student@example.com", "alias@example.com"],
       userId: "clerk_1",
+      invitationTokenPresent: undefined,
     });
+  });
+
+  it("marks expected no-access states without throwing", async () => {
+    vi.doMock("@/lib/auth-server", () => authServerMock({
+      requireActor: vi.fn().mockRejectedValue(new Error("AUTH_NO_ACCESS: missing org")),
+    }));
+
+    const route = await import("@/app/api/auth/access-state/route");
+    const response = await route.GET(new NextRequest("http://localhost/api/auth/access-state"));
+    const payload = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(payload).toEqual({ status: "no_access", expected: true });
   });
 });
 
@@ -436,9 +450,15 @@ describe("invitation redeem route integration", () => {
     const convexMutation = vi.fn().mockResolvedValue({ ok: true });
 
     vi.doMock("@clerk/nextjs/server", () => ({ auth, currentUser }));
-    vi.doMock("next/headers", () => ({
-      cookies: vi.fn().mockResolvedValue({ delete: vi.fn() }),
-    }));
+    vi.doMock("@/lib/invitation-flow", async () => {
+      const actual = await vi.importActual<typeof import("@/lib/invitation-flow")>("@/lib/invitation-flow");
+      return {
+        ...actual,
+        getInvitationCookies: vi.fn().mockResolvedValue({ token: "tok_1", handoffToken: null }),
+        clearInvitationTracking: vi.fn().mockResolvedValue(undefined),
+        persistInvitationHandoff: vi.fn().mockResolvedValue(undefined),
+      };
+    });
     vi.doMock("@/lib/convex-server", () => ({ convexMutation, convexQuery }));
 
     const route = await import("@/app/api/invitations/redeem/route");
@@ -456,6 +476,354 @@ describe("invitation redeem route integration", () => {
       name: "Multi Email User",
       token: "tok_1",
     });
+  });
+
+  it("uses the handoff cookie token when the client posts without a token after sign-in", async () => {
+    const auth = vi.fn().mockResolvedValue({ userId: "clerk_handoff_1" });
+    const currentUser = vi.fn().mockResolvedValue({
+      emailAddresses: [{ emailAddress: "invite@example.com" }],
+      fullName: "Invite User",
+      firstName: "Invite",
+    });
+    const convexQuery = vi.fn().mockResolvedValue({
+      _id: "invite_1",
+      status: "pending",
+      email: "invite@example.com",
+      role: "student",
+      orgId: "org_1",
+      expiresAt: Date.now() + 60_000,
+      orgName: "Alpha School",
+    });
+    const convexMutation = vi.fn().mockResolvedValue({ ok: true });
+
+    vi.doMock("@clerk/nextjs/server", () => ({ auth, currentUser }));
+    vi.doMock("@/lib/invitation-flow", async () => {
+      const actual = await vi.importActual<typeof import("@/lib/invitation-flow")>("@/lib/invitation-flow");
+      return {
+        ...actual,
+        getInvitationCookies: vi.fn().mockResolvedValue({ token: null, handoffToken: "tok_handoff" }),
+        clearInvitationTracking: vi.fn().mockResolvedValue(undefined),
+        persistInvitationHandoff: vi.fn().mockResolvedValue(undefined),
+      };
+    });
+    vi.doMock("@/lib/convex-server", () => ({ convexMutation, convexQuery }));
+
+    const route = await import("@/app/api/invitations/redeem/route");
+    const response = await route.POST(
+      new NextRequest("http://localhost/api/invitations/redeem", {
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(convexQuery).toHaveBeenCalledWith("schoolAdmin:getInvitationByToken", { token: "tok_handoff" });
+    expect(convexMutation).toHaveBeenCalledWith("users:acceptInvitationByToken", {
+      clerkId: "clerk_handoff_1",
+      email: "invite@example.com",
+      name: "Invite User",
+      token: "tok_handoff",
+    });
+  });
+
+  it("returns alreadyAccepted same-user when the invite was previously redeemed by the same identity", async () => {
+    const auth = vi.fn().mockResolvedValue({ userId: "clerk_same_1" });
+    const currentUser = vi.fn().mockResolvedValue({
+      emailAddresses: [{ emailAddress: "invite@example.com" }],
+      fullName: "Invite User",
+      firstName: "Invite",
+    });
+    const convexQuery = vi.fn().mockResolvedValue({
+      _id: "invite_1",
+      status: "accepted",
+      email: "invite@example.com",
+      role: "student",
+      orgId: "org_1",
+      expiresAt: Date.now() + 60_000,
+      orgName: "Alpha School",
+    });
+
+    const clearInvitationTracking = vi.fn().mockResolvedValue(undefined);
+
+    vi.doMock("@clerk/nextjs/server", () => ({ auth, currentUser }));
+    vi.doMock("@/lib/invitation-flow", async () => {
+      const actual = await vi.importActual<typeof import("@/lib/invitation-flow")>("@/lib/invitation-flow");
+      return {
+        ...actual,
+        getInvitationCookies: vi.fn().mockResolvedValue({ token: "tok_same", handoffToken: null }),
+        clearInvitationTracking,
+        persistInvitationHandoff: vi.fn().mockResolvedValue(undefined),
+      };
+    });
+    vi.doMock("@/lib/convex-server", () => ({ convexMutation: vi.fn(), convexQuery }));
+
+    const route = await import("@/app/api/invitations/redeem/route");
+    const response = await route.POST(
+      new NextRequest("http://localhost/api/invitations/redeem", {
+        method: "POST",
+        body: JSON.stringify({ token: "tok_same" }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      alreadyAccepted: true,
+      sameUser: true,
+      orgName: "Alpha School",
+    });
+    expect(clearInvitationTracking).toHaveBeenCalled();
+  });
+
+  it("preserves handoff when the signed-in identity does not match the invitation email", async () => {
+    const auth = vi.fn().mockResolvedValue({ userId: "clerk_wrong_1" });
+    const currentUser = vi.fn().mockResolvedValue({
+      emailAddresses: [{ emailAddress: "wrong@example.com" }],
+      fullName: "Wrong User",
+      firstName: "Wrong",
+    });
+    const convexQuery = vi.fn().mockResolvedValue({
+      _id: "invite_1",
+      status: "pending",
+      email: "invite@example.com",
+      role: "student",
+      orgId: "org_1",
+      expiresAt: Date.now() + 60_000,
+      orgName: "Alpha School",
+    });
+    const persistInvitationHandoff = vi.fn().mockResolvedValue(undefined);
+
+    vi.doMock("@clerk/nextjs/server", () => ({ auth, currentUser }));
+    vi.doMock("@/lib/invitation-flow", async () => {
+      const actual = await vi.importActual<typeof import("@/lib/invitation-flow")>("@/lib/invitation-flow");
+      return {
+        ...actual,
+        getInvitationCookies: vi.fn().mockResolvedValue({ token: "tok_wrong", handoffToken: null }),
+        clearInvitationTracking: vi.fn().mockResolvedValue(undefined),
+        persistInvitationHandoff,
+      };
+    });
+    vi.doMock("@/lib/convex-server", () => ({ convexMutation: vi.fn(), convexQuery }));
+
+    const route = await import("@/app/api/invitations/redeem/route");
+    const response = await route.POST(
+      new NextRequest("http://localhost/api/invitations/redeem", {
+        method: "POST",
+        body: JSON.stringify({ token: "tok_wrong" }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(persistInvitationHandoff).toHaveBeenCalledWith("tok_wrong");
+  });
+});
+
+describe("join route invitation state machine", () => {
+  it("returns signed-out valid invite state", async () => {
+    const convexQuery = vi.fn().mockResolvedValue({
+      status: "pending",
+      email: "invite@example.com",
+      role: "student",
+      orgId: "org_1",
+      expiresAt: Date.now() + 60_000,
+      orgName: "Alpha School",
+    });
+    const persistInvitationHandoff = vi.fn().mockResolvedValue(undefined);
+
+    vi.doMock("@clerk/nextjs/server", () => ({
+      auth: vi.fn().mockResolvedValue({ userId: null }),
+      currentUser: vi.fn(),
+    }));
+    vi.doMock("@/lib/invitation-flow", async () => {
+      const actual = await vi.importActual<typeof import("@/lib/invitation-flow")>("@/lib/invitation-flow");
+      return {
+        ...actual,
+        getInvitationCookies: vi.fn().mockResolvedValue({ token: null, handoffToken: null }),
+        persistInvitationHandoff,
+      };
+    });
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery }));
+
+    const route = await import("@/app/api/join/route");
+    const response = await route.GET(new NextRequest("http://localhost/api/join?token=tok_1"));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.state).toBe("token_valid_signed_out");
+    expect(payload.canRedeemNow).toBe(false);
+    expect(payload.shouldAutoRedirectToAuth).toBe(true);
+    expect(persistInvitationHandoff).toHaveBeenCalledWith("tok_1");
+  });
+
+  it("returns pending redeem when the signed-in identity matches", async () => {
+    const convexQuery = vi.fn().mockResolvedValue({
+      status: "pending",
+      email: "invite@example.com",
+      role: "teacher",
+      orgId: "org_1",
+      expiresAt: Date.now() + 60_000,
+      orgName: "Alpha School",
+    });
+
+    vi.doMock("@clerk/nextjs/server", () => ({
+      auth: vi.fn().mockResolvedValue({ userId: "clerk_1" }),
+      currentUser: vi.fn().mockResolvedValue({
+        emailAddresses: [{ emailAddress: "invite@example.com" }],
+      }),
+    }));
+    vi.doMock("@/lib/invitation-flow", async () => {
+      const actual = await vi.importActual<typeof import("@/lib/invitation-flow")>("@/lib/invitation-flow");
+      return {
+        ...actual,
+        getInvitationCookies: vi.fn().mockResolvedValue({ token: null, handoffToken: null }),
+        persistInvitationHandoff: vi.fn().mockResolvedValue(undefined),
+      };
+    });
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery }));
+
+    const route = await import("@/app/api/join/route");
+    const response = await route.GET(new NextRequest("http://localhost/api/join?token=tok_2"));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.state).toBe("token_valid_signed_in_match_pending_redeem");
+    expect(payload.canRedeemNow).toBe(true);
+  });
+
+  it("returns wrong identity state when the signed-in viewer does not match", async () => {
+    const convexQuery = vi.fn().mockResolvedValue({
+      status: "pending",
+      email: "invite@example.com",
+      role: "teacher",
+      orgId: "org_1",
+      expiresAt: Date.now() + 60_000,
+      orgName: "Alpha School",
+    });
+
+    vi.doMock("@clerk/nextjs/server", () => ({
+      auth: vi.fn().mockResolvedValue({ userId: "clerk_1" }),
+      currentUser: vi.fn().mockResolvedValue({
+        emailAddresses: [{ emailAddress: "wrong@example.com" }],
+      }),
+    }));
+    vi.doMock("@/lib/invitation-flow", async () => {
+      const actual = await vi.importActual<typeof import("@/lib/invitation-flow")>("@/lib/invitation-flow");
+      return {
+        ...actual,
+        getInvitationCookies: vi.fn().mockResolvedValue({ token: null, handoffToken: null }),
+        persistInvitationHandoff: vi.fn().mockResolvedValue(undefined),
+      };
+    });
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery }));
+
+    const route = await import("@/app/api/join/route");
+    const response = await route.GET(new NextRequest("http://localhost/api/join?token=tok_3"));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.state).toBe("token_valid_signed_in_wrong_identity");
+    expect(payload.shouldAutoRedirectToAuth).toBe(true);
+  });
+
+  it("returns already redeemed same-user and other-user terminal states", async () => {
+    const acceptedInvite = {
+      status: "accepted",
+      email: "invite@example.com",
+      role: "teacher",
+      orgId: "org_1",
+      expiresAt: Date.now() + 60_000,
+      orgName: "Alpha School",
+    };
+
+    vi.doMock("@clerk/nextjs/server", () => ({
+      auth: vi.fn().mockResolvedValue({ userId: "clerk_1" }),
+      currentUser: vi.fn().mockResolvedValue({
+        emailAddresses: [{ emailAddress: "invite@example.com" }],
+      }),
+    }));
+    vi.doMock("@/lib/invitation-flow", async () => {
+      const actual = await vi.importActual<typeof import("@/lib/invitation-flow")>("@/lib/invitation-flow");
+      return {
+        ...actual,
+        getInvitationCookies: vi.fn().mockResolvedValue({ token: null, handoffToken: null }),
+        persistInvitationHandoff: vi.fn().mockResolvedValue(undefined),
+      };
+    });
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery: vi.fn().mockResolvedValue(acceptedInvite) }));
+
+    const route = await import("@/app/api/join/route");
+    const sameUserResponse = await route.GET(new NextRequest("http://localhost/api/join?token=tok_4"));
+    const sameUserPayload = await sameUserResponse.json();
+    expect(sameUserPayload.state).toBe("token_already_redeemed_same_user");
+
+    vi.resetModules();
+    vi.doMock("@clerk/nextjs/server", () => ({
+      auth: vi.fn().mockResolvedValue({ userId: "clerk_2" }),
+      currentUser: vi.fn().mockResolvedValue({
+        emailAddresses: [{ emailAddress: "other@example.com" }],
+      }),
+    }));
+    vi.doMock("@/lib/invitation-flow", async () => {
+      const actual = await vi.importActual<typeof import("@/lib/invitation-flow")>("@/lib/invitation-flow");
+      return {
+        ...actual,
+        getInvitationCookies: vi.fn().mockResolvedValue({ token: null, handoffToken: null }),
+        persistInvitationHandoff: vi.fn().mockResolvedValue(undefined),
+      };
+    });
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery: vi.fn().mockResolvedValue(acceptedInvite) }));
+
+    const routeOther = await import("@/app/api/join/route");
+    const otherUserResponse = await routeOther.GET(new NextRequest("http://localhost/api/join?token=tok_4"));
+    const otherUserPayload = await otherUserResponse.json();
+    expect(otherUserPayload.state).toBe("token_already_redeemed_other_user");
+  });
+
+  it("returns irrecoverable invalid and expired token states", async () => {
+    vi.doMock("@clerk/nextjs/server", () => ({
+      auth: vi.fn().mockResolvedValue({ userId: null }),
+      currentUser: vi.fn(),
+    }));
+    vi.doMock("@/lib/invitation-flow", async () => {
+      const actual = await vi.importActual<typeof import("@/lib/invitation-flow")>("@/lib/invitation-flow");
+      return {
+        ...actual,
+        getInvitationCookies: vi.fn().mockResolvedValue({ token: null, handoffToken: null }),
+        persistInvitationHandoff: vi.fn().mockResolvedValue(undefined),
+      };
+    });
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery: vi.fn().mockResolvedValue(null) }));
+
+    const route = await import("@/app/api/join/route");
+    const invalidResponse = await route.GET(new NextRequest("http://localhost/api/join?token=tok_missing"));
+    expect((await invalidResponse.json()).state).toBe("token_invalid");
+
+    vi.resetModules();
+    vi.doMock("@clerk/nextjs/server", () => ({
+      auth: vi.fn().mockResolvedValue({ userId: null }),
+      currentUser: vi.fn(),
+    }));
+    vi.doMock("@/lib/invitation-flow", async () => {
+      const actual = await vi.importActual<typeof import("@/lib/invitation-flow")>("@/lib/invitation-flow");
+      return {
+        ...actual,
+        getInvitationCookies: vi.fn().mockResolvedValue({ token: null, handoffToken: null }),
+        persistInvitationHandoff: vi.fn().mockResolvedValue(undefined),
+      };
+    });
+    vi.doMock("@/lib/convex-server", () => ({
+      convexQuery: vi.fn().mockResolvedValue({
+        status: "expired",
+        email: "invite@example.com",
+        role: "student",
+        orgId: "org_1",
+        expiresAt: Date.now() - 1,
+        orgName: "Alpha School",
+      }),
+    }));
+
+    const routeExpired = await import("@/app/api/join/route");
+    const expiredResponse = await routeExpired.GET(new NextRequest("http://localhost/api/join?token=tok_expired"));
+    expect((await expiredResponse.json()).state).toBe("token_expired");
   });
 });
 
@@ -496,12 +864,10 @@ describe("request access route email selection", () => {
 });
 
 describe("join page guarded redeem flow", () => {
-  it("keeps the viewerHasMatchingEmail guard in the auto-redeem effect", async () => {
+  it("uses the explicit invitation state machine with auto redirect and redeem flow", async () => {
     const source = await import("node:fs/promises").then((fs) => fs.readFile("src/app/join/page.tsx", "utf8"));
-    // The auto-redeem POST must be gated by an email-match check. Any
-    // refactor that removes this guard would let mismatched users redeem
-    // somebody else's invitation.
-    expect(source).toContain("!hasMatchingEmail");
+    expect(source).toContain("payload.shouldAutoRedirectToAuth");
+    expect(source).toContain("payload.canRedeemNow");
     expect(source).toMatch(/fetch\(\s*["']\/api\/invitations\/redeem["']/);
   });
 });

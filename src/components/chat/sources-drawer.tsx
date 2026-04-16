@@ -50,7 +50,7 @@ export function SourcesDrawer({ open, onClose, citations }: SourcesDrawerProps) 
         />
       ) : null}
       <aside
-        className={`right-panel-shell ${rightPanelSurfaceClassName()} pointer-events-auto absolute p-4 shadow-[var(--shadow-soft)] ${
+        className={`right-panel-shell ${rightPanelSurfaceClassName()} pointer-events-auto absolute flex flex-col shadow-[var(--shadow-soft)] ${
           docked ? "right-panel-shell--docked" : "right-panel-shell--sheet"
         } ${
           compact
@@ -58,7 +58,7 @@ export function SourcesDrawer({ open, onClose, citations }: SourcesDrawerProps) 
             : "inset-y-0 right-0 w-[92vw] max-w-xl border-l"
         }`}
       >
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex shrink-0 items-center justify-between px-4 pt-4 sm:px-5 sm:pt-5">
           <div>
             <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Sources</p>
             <h3 className="font-display text-2xl text-[var(--text-primary)]">Citation Details</h3>
@@ -82,7 +82,7 @@ export function SourcesDrawer({ open, onClose, citations }: SourcesDrawerProps) 
         </div>
 
         {!collapsed ? (
-          <div className={`right-panel-content ${compact ? "max-h-[calc(78vh-4rem)]" : "max-h-[calc(100vh-6rem)]"} overflow-y-auto pr-1`}>
+          <div className={`right-panel-content ${compact ? "max-h-[calc(78vh-4rem)]" : "max-h-[calc(100vh-6rem)]"} overflow-y-auto px-4 pb-4 sm:px-5 sm:pb-5`}>
             {citations.length === 0 ? (
               <p className="text-sm text-[var(--text-secondary)]">No sources available for this response.</p>
             ) : (

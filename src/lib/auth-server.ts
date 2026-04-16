@@ -1,8 +1,8 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
-import { cookies } from "next/headers";
 import { getAdminEmails } from "@/lib/env";
 import { hasClerkServerConfig } from "@/lib/clerk-config";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
+import { clearInvitationTracking, getInvitationCookies } from "@/lib/invitation-flow";
 import type { Role } from "@/types";
 
 const SUPER_ADMIN_EMAILS = new Set(
@@ -29,8 +29,6 @@ export function isSuperAdminEmail(email: string) {
 export function isAdminLikeActor(actor: Pick<SessionActor, "role" | "email"> | { role: Role; email: string }) {
   return actor.role === "admin" || isSuperAdminEmail(actor.email);
 }
-
-const INVITATION_TOKEN_COOKIE = "ai-school-invitation-token";
 
 async function bootstrapActor(params: {
   clerkId: string;
@@ -96,7 +94,8 @@ async function acceptInvitationFromCookie(params: {
   emails: string[];
   name: string;
 }) {
-  const invitationToken = (await cookies()).get(INVITATION_TOKEN_COOKIE)?.value;
+  const { handoffToken, token } = await getInvitationCookies();
+  const invitationToken = handoffToken ?? token;
   if (!invitationToken) {
     return "missing" as const;
   }
@@ -109,7 +108,7 @@ async function acceptInvitationFromCookie(params: {
         name: params.name,
         token: invitationToken,
       });
-      (await cookies()).delete(INVITATION_TOKEN_COOKIE);
+      await clearInvitationTracking();
       return "accepted" as const;
     } catch (error) {
       const message = error instanceof Error ? error.message : "";

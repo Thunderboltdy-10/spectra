@@ -25,7 +25,7 @@ import { countFlashcardPairs, isFlashcardDeckStructured, normalizeFlashcardDeck 
 import { safeStudyMode } from "@/lib/contracts/studyModes";
 import { createRequestLogger } from "@/lib/logging";
 import { isModeAvailable } from "@/lib/modes";
-import { isModelTooExpensivePerMillion, modelSupportsCapability, pickModelAndFallbacks } from "@/lib/model-selection";
+import { inferRoutingLane, isModelTooExpensivePerMillion, modelSupportsCapability, pickModelAndFallbacks } from "@/lib/model-selection";
 import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
 import { normalizeAttachments } from "@/lib/attachments/normalizer";
 import { gateCapabilities } from "@/lib/attachments/capability-gate";
@@ -54,6 +54,7 @@ import {
 } from "@/lib/orchestrator/post-process";
 import {
   buildResearchEvidenceBlock,
+  maybeRetrieveManagebac,
   maybeSearchWeb,
   runRagRetrieval,
   type RetrievalResult,
@@ -69,7 +70,7 @@ import {
   type ClassifierDecision,
 } from "@/lib/orchestrator/classifier-contract";
 import { runAssistantStreaming, runCollaborativeStreaming } from "@/lib/orchestrator/streaming";
-import { getOpenRouterToolsForAssignmentLevel, formatToolUsageGuidance } from "@/lib/orchestrator/tool-definitions";
+import { buildCapabilityContract, getOpenRouterToolsForAssignmentLevel, formatToolUsageGuidance } from "@/lib/orchestrator/tool-definitions";
 import { executeOrchestratorTool } from "@/lib/orchestrator/tool-executor";
 import { buildTaskGraph, shouldUseMultiAgent } from "@/lib/orchestrator/task-graph";
 import {
@@ -1582,7 +1583,7 @@ export async function runChatPipeline(request: NextRequest) {
     turnsSinceCompaction: existingSummary ? Math.min(historyForTurn.length, 8) : historyForTurn.length,
     contextWindowUtilization: Math.max(0, Math.min(1, estimatedHistoryTokens / 128_000)),
     lastMessageAt: historyForTurn[historyForTurn.length - 1]?.createdAt,
-    recentMessages: historyForTurn.slice(-6).map((message) => ({
+    recentMessages: historyForTurn.slice(existingSummary ? -10 : -6).map((message) => ({
       role: message.role === "assistant" ? "assistant" : "user",
       content: message.content,
     })),
@@ -1866,6 +1867,8 @@ export async function runChatPipeline(request: NextRequest) {
         mode: effectiveMode,
         preferredSkillIds: classifierDecision.skills,
         allowedToolBundles: routePlan.allowedToolBundles,
+        assignmentLevel: routePlan.assignmentLevel,
+        hasAgent: Boolean(selectedAgent?._id),
         maxSkills: routePlan.responseBudget === "deep" ? 6 : 4,
       })
     : [];
@@ -1909,6 +1912,13 @@ export async function runChatPipeline(request: NextRequest) {
   const hasReusableRecentContext =
     shouldReuseRecentContext
     && Boolean(recentContextCache?.retrieval || recentContextCache?.search);
+
+  const managebacRequested = /\b(managebac|assignment|assignments|cas|timetable|class schedule|ib class|announcement|manage bac)\b/i.test(auto.message);
+  const managebacPromise = maybeRetrieveManagebac({
+    actorClerkId: actor.clerkId,
+    message: auto.message,
+    enabled: managebacRequested,
+  });
 
   const retrievalPromise = hasReusableRecentContext
     ? Promise.resolve({
@@ -2043,11 +2053,12 @@ export async function runChatPipeline(request: NextRequest) {
     ? classifyExplainDepth(auto.message, userMemory.rawMemoryText)
     : undefined;
 
-  const [retrieval, webResult, quizAdaptive, latestDeck] = await Promise.all([
+  const [retrieval, webResult, quizAdaptive, latestDeck, managebacContext] = await Promise.all([
     retrievalPromise,
     searchPromise,
     adaptiveQuizPromise,
     latestDeckPromise,
+    managebacPromise,
   ]);
 
   const searchBlock = webResult.text ?? "";
@@ -2487,7 +2498,13 @@ export async function runChatPipeline(request: NextRequest) {
   const manualModelMeta = routingManualModel
     ? catalog.find((model) => model.modelId === routingManualModel)
     : undefined;
-  const manualModelExceedsCap = Boolean(manualModelMeta && isModelTooExpensivePerMillion(manualModelMeta));
+  const generationLane = inferRoutingLane({
+    mode: effectiveMode,
+    requiredCapabilities: routePlan.candidateModelRequirements.required,
+    needsSearch: routePlan.shouldUseWebSearch || usedRecentContextCache,
+    preferFast: routePlan.responseBudget === "simple",
+  });
+  const manualModelExceedsCap = Boolean(manualModelMeta && isModelTooExpensivePerMillion(manualModelMeta, { lane: generationLane }));
   if (manualLockRequested && routingManualModel && manualModelExceedsCap && !body.confirmExpensiveModel) {
     await rollbackPersistedUserMessage();
     return jsonError(409, {
@@ -2742,6 +2759,11 @@ export async function runChatPipeline(request: NextRequest) {
         ? "web search already run; use the provided web context and do not claim browsing is unavailable"
         : "web search allowed for this route but returned no usable results")
     : "web search not enabled for this route";
+  const managebacStatus = managebacContext.available
+    ? (managebacContext.items.length > 0 ? `available (${managebacContext.items.length} item${managebacContext.items.length === 1 ? "" : "s"})` : "available (no strong match)")
+    : managebacRequested
+      ? `requested but unavailable (${managebacContext.reason})`
+      : "not requested";
   const shouldPlanMemoryRead = memoryEnabled && pipelineController.shouldRun("memoryRead");
   const memoryPlan = shouldPlanMemoryRead
     ? await planMemoryRead({
@@ -2962,6 +2984,7 @@ export async function runChatPipeline(request: NextRequest) {
     ? `forget=${directiveMemorySummary.forgotten}, blockedLinks=${directiveMemorySummary.negativeLinks}, explicitWrites=${directiveMemorySummary.written}`
     : "none";
   const learningContextPrompt = formatLearningContextForPrompt(storedLearningContext);
+  const managebacContextBlock = managebacContext.sourceBlock;
   const modeTransformGuidance = buildModeTransformGuidance({
     mode: effectiveMode,
     message: normalizedMessage,
@@ -3086,6 +3109,7 @@ export async function runChatPipeline(request: NextRequest) {
     `Retrieval: ${retrievalStatus}`,
     `Web search: ${searchStatus}`,
     `Memory profile: ${memoryStatus}`,
+    `ManageBac: ${managebacStatus}`,
     `Workstream routing: ${routePlan.workstreamAssignment.status}${routePlan.workstreamAssignment.title ? ` (${routePlan.workstreamAssignment.title})` : ""}`,
     `Thread strategy: ${routePlan.threadStrategy.action}`,
     `Context strategy: target ${routePlan.contextWindowStrategy.desiredContextTokens.toLocaleString()} tok, pressure ${(routePlan.contextWindowStrategy.contextWindowPressure * 100).toFixed(0)}%`,
@@ -3095,6 +3119,29 @@ export async function runChatPipeline(request: NextRequest) {
   const openRouterTools = getOpenRouterToolsForAssignmentLevel(routePlan.assignmentLevel)
     .filter((tool) => routePlan.allowedAiTools.includes(tool.function.name as typeof routePlan.allowedAiTools[number]));
   const toolUsageGuidance = formatToolUsageGuidance(routePlan.allowedAiTools);
+  const capabilityContract = buildCapabilityContract({
+    toolNames: routePlan.allowedAiTools,
+    recursiveExecutionAllowed: routePlan.allowSubAgents,
+    allowConversationForking: routePlan.threadStrategy.action === "fork" || routePlan.assignmentLevel === "L4",
+    availableSkills: runtimeSkills.map((skill) => skill.id),
+    availableSurfaces: ["chat", activeWorkstream ? "workspace" : undefined, body.artifactId ? "artifact" : undefined, body.packId ? "pack" : undefined, managebacContext.available ? "managebac" : undefined].filter((value): value is string => Boolean(value)),
+    activeMode: effectiveMode,
+    assignmentLevel: routePlan.assignmentLevel,
+    allowedToolBundles: routePlan.allowedToolBundles,
+    retrievalScopes: [...routePlan.retrievalScopes, ...(managebacContext.available ? ["managebac"] : [])],
+    availableAgents: classifierAvailableAgents.slice(0, 5).map((agent) => ({ id: agent._id, name: agent.name })),
+    activeAgent: selectedAgent ? { id: selectedAgent._id, name: selectedAgent.name } : null,
+    sourceGrounding: {
+      attachmentIds: body.attachmentResourceIds ?? [],
+      attachmentRequirement: (body.attachmentResourceIds?.length ?? 0) > 0 && ["document", "flashcard", "quiz", "exam"].includes(effectiveMode) ? "required" : (body.attachmentResourceIds?.length ?? 0) > 0 ? "preferred" : "not_applicable",
+      sourceKinds: Array.from(new Set([
+        ...(retrieval.citations.length > 0 ? ["retrieval"] : []),
+        ...(searchSources.length > 0 ? ["search"] : []),
+        ...(managebacContext.available ? ["managebac"] : []),
+        ...((body.attachmentResourceIds?.length ?? 0) > 0 ? ["attachment"] : []),
+      ])),
+    },
+  });
   const personalSoulExcerpt = buildPersonalSoulExcerpt({
     preferences: null,
     memoryProfile: memoryEnabled ? memoryPlan.profileText : "",
@@ -3265,6 +3312,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     if (toolUsageGuidance) {
       systemPromptParts.push(toolUsageGuidance);
     }
+    systemPromptParts.push(capabilityContract);
   }
   if (includeRichContextBlocks && featureEnabled(orgSettings.org?.soulEnabled) && schoolSoulCapsule.capsule.trim()) {
     systemPromptParts.push(
@@ -3277,6 +3325,10 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
   }
   if (includeRichContextBlocks && researchEvidenceBlock) {
     systemPromptParts.push(researchEvidenceBlock);
+  }
+  if (includeRichContextBlocks && managebacContextBlock) {
+    systemPromptParts.push(managebacContextBlock);
+    route.trace.toolchain.push("managebac_context");
   }
   if (includeRichContextBlocks && imageDescriptionBlock) {
     systemPromptParts.push(`IMAGE DESCRIPTION:\n${imageDescriptionBlock}`);

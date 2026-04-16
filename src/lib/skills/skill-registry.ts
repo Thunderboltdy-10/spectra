@@ -13,6 +13,9 @@ export type RegisteredSkill = {
   prompt?: string;
   appliesToModes?: StudyMode[];
   trigger?: RegExp;
+  priority?: number;
+  audience?: Array<"student" | "teacher" | "admin" | "general">;
+  preferredAssignmentLevels?: Array<"L0" | "L1" | "L2" | "L3" | "L4">;
   requiredToolBundles?: Array<"skills" | "search" | "retrieval" | "memory" | "artifact" | "multi_agent">;
   sourcePath?: string;
 };
@@ -120,6 +123,9 @@ const BUILTIN_SKILLS: RegisteredSkill[] = [
       "Avoid heavy structure unless the user explicitly asks for it.",
     ],
     trigger: /\b(hi|hello|hey|thanks|thank you|ok|okay|cool|nice)\b/i,
+    priority: 1,
+    preferredAssignmentLevels: ["L0", "L1"],
+    audience: ["general"],
   },
   {
     id: "deep-research",
@@ -132,6 +138,9 @@ const BUILTIN_SKILLS: RegisteredSkill[] = [
     ],
     appliesToModes: ["research"],
     requiredToolBundles: ["search"],
+    priority: 5,
+    preferredAssignmentLevels: ["L2", "L3", "L4"],
+    audience: ["student", "teacher", "general"],
   },
   {
     id: "source-reliability",
@@ -143,6 +152,9 @@ const BUILTIN_SKILLS: RegisteredSkill[] = [
       "Call out when a claim depends on lower-confidence sources.",
     ],
     trigger: /\b(source|citation|evidence|reliab|trust|verify)\b/i,
+    priority: 4,
+    preferredAssignmentLevels: ["L1", "L2", "L3", "L4"],
+    audience: ["student", "teacher", "general"],
   },
   {
     id: "doc-polish",
@@ -154,6 +166,9 @@ const BUILTIN_SKILLS: RegisteredSkill[] = [
       "Prefer strong information architecture over filler text.",
     ],
     appliesToModes: ["document"],
+    priority: 3,
+    preferredAssignmentLevels: ["L1", "L2", "L3", "L4"],
+    audience: ["student", "teacher", "general"],
   },
   {
     id: "quiz-quality",
@@ -165,6 +180,9 @@ const BUILTIN_SKILLS: RegisteredSkill[] = [
       "Match question difficulty to the requested level.",
     ],
     appliesToModes: ["quiz", "exam"],
+    priority: 4,
+    preferredAssignmentLevels: ["L1", "L2", "L3"],
+    audience: ["student", "teacher", "general"],
   },
   {
     id: "code-review",
@@ -176,6 +194,9 @@ const BUILTIN_SKILLS: RegisteredSkill[] = [
       "Prefer reproducible checks over speculative advice.",
     ],
     trigger: /\b(code|typescript|javascript|bug|test|refactor|review)\b/i,
+    priority: 4,
+    preferredAssignmentLevels: ["L2", "L3", "L4"],
+    audience: ["teacher", "general"],
   },
 ];
 
@@ -195,6 +216,8 @@ export function resolveSkillsForContext(params: {
   message: string;
   mode: StudyMode;
   allowedToolBundles?: string[];
+  assignmentLevel?: "L0" | "L1" | "L2" | "L3" | "L4";
+  hasAgent?: boolean;
   maxSkills?: number;
 }) {
   const maxSkills = Math.max(1, Math.min(10, params.maxSkills ?? 5));
@@ -206,12 +229,22 @@ export function resolveSkillsForContext(params: {
     return skill.requiredToolBundles.every((bundle) => bundles.has(bundle));
   });
 
-  const modeMatches = filtered.filter((skill) =>
-    skill.appliesToModes?.includes(params.mode)
-    && (skill.id !== "spectra-visual-skill" || hasVisualIntent)
-  );
-  const triggerMatches = filtered.filter((skill) => skill.trigger?.test(params.message));
-  const ordered = [...modeMatches, ...triggerMatches];
+  const assignmentLevel = params.assignmentLevel ?? "L1";
+  const scoreSkill = (skill: RegisteredSkill) => {
+    let score = skill.priority ?? 0;
+    if (skill.appliesToModes?.includes(params.mode) && (skill.id !== "spectra-visual-skill" || hasVisualIntent)) score += 4;
+    if (skill.trigger?.test(params.message)) score += 3;
+    if (skill.preferredAssignmentLevels?.includes(assignmentLevel)) score += 2;
+    if (params.hasAgent && skill.category === "research") score += 1;
+    return score;
+  };
+
+  const ordered = filtered
+    .map((skill) => ({ skill, score: scoreSkill(skill) }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || (b.skill.priority ?? 0) - (a.skill.priority ?? 0) || a.skill.name.localeCompare(b.skill.name))
+    .map((entry) => entry.skill);
+
   const seen = new Set<string>();
   const selected: RegisteredSkill[] = [];
 
@@ -224,7 +257,12 @@ export function resolveSkillsForContext(params: {
 
   if (selected.length > 0) return selected;
 
-  const fallback = filtered.filter((skill) => skill.id === "concise-chat" || skill.id === "community-socratic-dialogue");
+  const fallback = filtered
+    .filter((skill) => skill.id === "concise-chat" || skill.id === "community-socratic-dialogue")
+    .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
   if (fallback.length > 0) return fallback.slice(0, maxSkills);
-  return filtered.slice(0, maxSkills);
+  return filtered
+    .slice()
+    .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0) || a.name.localeCompare(b.name))
+    .slice(0, maxSkills);
 }

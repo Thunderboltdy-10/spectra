@@ -328,19 +328,9 @@ export function ChatLayout() {
       previousPhase === "idle"
       && (currentPhase === "routing" || currentPhase === "searching" || currentPhase === "thinking");
 
-    if (
-      liveProgressAutoOpen
-      && enteredOrchestration
-      && !autoOpenedRouteTraceForSendRef.current
-      && !routeTraceDismissedForSendRef.current
-    ) {
+    // Auto-open is disabled per spec
+    if (enteredOrchestration && !autoOpenedRouteTraceForSendRef.current) {
       autoOpenedRouteTraceForSendRef.current = true;
-      setTimeout(() => {
-        // If still relevant after 2 seconds (e.g., hasn't finished sending or been dismissed)
-        if (autoOpenedRouteTraceForSendRef.current && !routeTraceDismissedForSendRef.current) {
-          openPanel("orchestration");
-        }
-      }, 2000);
     }
 
     previousStreamPhaseRef.current = currentPhase;
@@ -669,25 +659,9 @@ export function ChatLayout() {
             await chat.toggleBookmark(messageId);
           }}
           onSaveAsArtifact={(messageId, content) => {
-            // Toggle: if already saved, remove it
             const existingArtifactId = artifactSavedMessageIds.get(messageId);
             if (existingArtifactId) {
-              void fetch("/api/artifacts", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ action: "delete", artifactId: existingArtifactId }),
-              }).then((res) => {
-                if (res.ok) {
-                  setArtifactSavedMessageIds((prev) => {
-                    const next = new Map(prev);
-                    next.delete(messageId);
-                    return next;
-                  });
-                  toast.success("Artifact removed");
-                } else {
-                  toast.error("Failed to remove artifact");
-                }
-              });
+              window.location.assign("/artifacts");
               return;
             }
             let type = "document";

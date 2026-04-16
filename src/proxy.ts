@@ -1,6 +1,7 @@
 import { NextFetchEvent, NextRequest, NextResponse } from "next/server";
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { hasClerkServerConfig } from "@/lib/clerk-config";
+import { INVITATION_HANDOFF_COOKIE, INVITATION_TOKEN_COOKIE, INVITATION_TOKEN_MAX_AGE } from "@/lib/invitation-flow";
 const isPublicRoute = createRouteMatcher([
   "/",
   "/landing(.*)",
@@ -16,9 +17,6 @@ const isPublicRoute = createRouteMatcher([
   "/api/invitations/(.*)",
   "/api/auth/access-state(.*)",
 ]);
-
-const INVITATION_TOKEN_COOKIE = "ai-school-invitation-token";
-const INVITATION_TOKEN_MAX_AGE = 60 * 60 * 24;
 
 // Routes the user must always be able to reach even when an invitation cookie
 // is set. Without this, a signed-in user whose cookie points at an invitation
@@ -38,6 +36,7 @@ function isSafeExitPath(pathname: string) {
 
 type AccessStatePayload = {
   status?: "ok" | "no_access" | "org_inactive" | "signed_out";
+  expected?: boolean;
 };
 
 async function fetchAccessState(req: NextRequest): Promise<{
@@ -95,6 +94,7 @@ const authMiddleware = clerkMiddleware(async (auth, req) => {
         // User has access; invitation cookie is moot. Clear it and continue.
         const response = NextResponse.next();
         response.cookies.delete(INVITATION_TOKEN_COOKIE);
+        response.cookies.delete(INVITATION_HANDOFF_COOKIE);
         return response;
       }
       if (cachedAccess.status === 403 && cachedAccess.payload?.status === "org_inactive") {
@@ -102,6 +102,7 @@ const authMiddleware = clerkMiddleware(async (auth, req) => {
         destination.searchParams.set("reason", "inactive");
         const response = NextResponse.redirect(destination);
         response.cookies.delete(INVITATION_TOKEN_COOKIE);
+        response.cookies.delete(INVITATION_HANDOFF_COOKIE);
         return response;
       }
       if (cachedAccess.status === 403 && !isSafeExitPath(url.pathname)) {

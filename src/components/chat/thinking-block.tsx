@@ -96,34 +96,26 @@ export function ThinkingBlock({ content, streaming = false }: ThinkingBlockProps
   if (!clean) return null;
 
   return (
-    <div className="mb-3 overflow-hidden rounded-xl border border-[color-mix(in_oklab,var(--accent-cyan)_34%,var(--border-default))] bg-[linear-gradient(180deg,color-mix(in_oklab,var(--accent-cyan)_10%,transparent),transparent)]">
-      {/* Header — non-interactive, shows state only */}
-      <div className="flex w-full items-center justify-between px-3 py-2">
-        <span className="inline-flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.11em] text-[var(--text-secondary)]">
-          <Brain className="h-3.5 w-3.5" />
-          {streaming ? "Thinking…" : "Thinking Process"}
-          {streaming ? (
-            <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px]">
-              <Sparkles className="h-2.5 w-2.5 animate-pulse" />
-              live
-            </span>
-          ) : null}
-        </span>
-      </div>
-      {/* Content — always visible, max-height scroll to prevent fullscreen takeover */}
-      <div className="border-t border-[var(--border-default)] px-3 py-2">
-        <div ref={scrollRef} className="max-h-52 overflow-y-auto pr-1">
-          <div className="relative pl-6">
-            <div className="absolute left-[5px] top-0 bottom-0 w-0.5 bg-[var(--border-default)]" />
-            {segments.map((segment, index) => (
-              <div key={`${index}-${segment.slice(0, 24)}`} className="relative mb-3 text-xs leading-relaxed text-[var(--text-secondary)]">
-                <div className="absolute -left-6 top-1 h-3 w-3 rounded-full border-2 border-[var(--accent-cyan)] bg-[var(--bg-elevated)]" />
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{segment}</ReactMarkdown>
-              </div>
-            ))}
-          </div>
+    <details className="mb-3 group [&_summary::-webkit-details-marker]:hidden">
+      <summary className="flex w-max cursor-pointer items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.11em] text-[var(--text-tertiary)] transition hover:text-[var(--text-secondary)] select-none">
+        <Brain className="h-3 w-3" />
+        {streaming ? "Thinking…" : "Thinking Process"}
+        {streaming ? (
+          <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] ml-1">
+            <Sparkles className="h-2 w-2 animate-pulse" />
+            live
+          </span>
+        ) : null}
+      </summary>
+      <div className="mt-2 ml-1.5 border-l-2 border-[var(--border-default)] pl-3">
+        <div ref={scrollRef} className="max-h-48 overflow-y-auto pr-1 space-y-2 py-1">
+          {segments.map((segment, index) => (
+            <div key={`${index}-${segment.slice(0, 24)}`} className="text-[11px] leading-relaxed text-[var(--text-tertiary)] opacity-90">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{segment}</ReactMarkdown>
+            </div>
+          ))}
         </div>
       </div>
-    </div>
+    </details>
   );
 }

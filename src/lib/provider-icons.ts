@@ -42,6 +42,10 @@ const PROVIDER_PRESETS: Array<{
   { key: "fireworks", match: /fireworks/i, label: "Fireworks", initial: "F", bgLight: "#fff1e8", bgDark: "#31190f", lightFill: "#c05621", darkFill: "#ffd8c4" },
   { key: "deepinfra", match: /deepinfra/i, label: "DeepInfra", initial: "D", bgLight: "#edf4ff", bgDark: "#121b31", lightFill: "#2f4fb0", darkFill: "#d8e4ff" },
   { key: "sambanova", match: /sambanova/i, label: "SambaNova", initial: "S", bgLight: "#f2f7ec", bgDark: "#192515", lightFill: "#406329", darkFill: "#d9ebcb" },
+  { key: "minimax", match: /minimax/i, label: "MiniMax", initial: "M", bgLight: "#f0f1ff", bgDark: "#181a33", lightFill: "#4338ca", darkFill: "#c7d2fe" },
+  { key: "stepfun", match: /stepfun/i, label: "Stepfun", initial: "S", bgLight: "#f5f3ff", bgDark: "#1e1b4b", lightFill: "#4f46e5", darkFill: "#e0e7ff" },
+  { key: "bytedance", match: /bytedance|doubao/i, label: "ByteDance", initial: "B", bgLight: "#fdf4ff", bgDark: "#2e1065", lightFill: "#9333ea", darkFill: "#fae8ff" },
+  { key: "arcee", match: /arcee/i, label: "Arcee", initial: "A", bgLight: "#fff1f2", bgDark: "#4c0519", lightFill: "#e11d48", darkFill: "#ffe4e6" },
 ];
 
 export function inferProviderFromModel(modelId?: string) {

@@ -674,7 +674,7 @@ export function ChatMessage({
                     onClick={onSaveAsArtifact}
                   >
                     <Layers className="h-3.5 w-3.5" />
-                    {isArtifactSaved ? "Saved" : "Artifact"}
+                    {isArtifactSaved ? "View Artifact" : "Save as Artifact"}
                   </Button>
                 ) : null}
 

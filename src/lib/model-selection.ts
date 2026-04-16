@@ -1,5 +1,11 @@
 import type { SpendingTier, StudyMode } from "@/types";
-import { CHEAP_MODEL_COST_PER_MILLION, MAX_MODEL_COST_PER_MILLION } from "@/lib/model-policy";
+import {
+  CHEAP_MODEL_COST_PER_MILLION,
+  DEFAULT_MANUAL_MODEL_COST_CAP_PER_MILLION,
+  MAX_MODEL_COST_PER_MILLION,
+  ROUTING_LANE_COST_CAPS,
+  type RoutingLane,
+} from "@/lib/model-policy";
 
 export type CatalogModelEntry = {
   modelId: string;
@@ -57,6 +63,24 @@ export type ModelCapability =
   | "search"
   | "image_generation";
 
+export function inferRoutingLane(params: {
+  mode?: StudyMode | string;
+  requiredCapabilities?: ModelCapability[];
+  needsSearch?: boolean;
+  preferFast?: boolean;
+}): RoutingLane {
+  const mode = (params.mode ?? "").toLowerCase();
+  const required = new Set(params.requiredCapabilities ?? []);
+  if (required.has("image_generation") || mode === "image") return "image_gen";
+  if (required.has("vision")) return "vision";
+  if (params.needsSearch || required.has("search") || mode === "research") return "search_reasoning";
+  if (required.has("reasoning") || mode === "marker" || mode === "exam") return "deep_reasoning";
+  if (params.preferFast || mode === "tutor" || mode === "general" || mode === "flashcard" || mode === "quiz") {
+    return "fast_chat";
+  }
+  return "utility";
+}
+
 function normalizeModalities(values?: string[]) {
   return new Set((values ?? []).map((value) => value.trim().toLowerCase()).filter(Boolean));
 }
@@ -90,6 +114,7 @@ export function isTextChatCapableModel(model: CatalogModelEntry) {
 type RankParams = {
   catalog: CatalogModelEntry[];
   tier: SpendingTier;
+  lane?: RoutingLane;
   mode?: StudyMode | string;
   messageLength?: number;
   needsSearch?: boolean;
@@ -102,6 +127,11 @@ type RankParams = {
   preferredModelIds?: string[];
   runtimeStats?: Record<string, ModelRuntimeStat>;
   allowStaleModels?: boolean;
+  anchorModelId?: string;
+  anchorModelBias?: number;
+  preserveAnchor?: boolean;
+  allowManualOverride?: boolean;
+  manualCostCap?: number;
 };
 
 type RankedModel = {
@@ -226,7 +256,14 @@ function isVideoGenerationModel(model: CatalogModelEntry) {
   return /\b(video|text-to-video|video[-_ ]gen|veo|sora|wan[-_ ]video)\b/.test(blob);
 }
 
-export function isModelTooExpensivePerMillion(model: CatalogModelEntry) {
+export function isModelTooExpensivePerMillion(
+  model: CatalogModelEntry,
+  options?: {
+    lane?: RoutingLane;
+    allowManualOverride?: boolean;
+    manualCostCap?: number;
+  },
+) {
   if (isImageGenerationModel(model)) return false;
   const freeLike = Boolean(model.isFree || model.modelId.includes(":free"));
   if (freeLike) return false;
@@ -234,9 +271,14 @@ export function isModelTooExpensivePerMillion(model: CatalogModelEntry) {
   const hasKnownOutput = typeof model.outputCostPerM === "number" && Number.isFinite(model.outputCostPerM);
   // Keep policy explicit: unknown-priced paid models are not eligible for runtime routing.
   if (!hasKnownInput || !hasKnownOutput) return true;
+  const cap = options?.allowManualOverride
+    ? (options.manualCostCap ?? DEFAULT_MANUAL_MODEL_COST_CAP_PER_MILLION)
+    : options?.lane
+      ? ROUTING_LANE_COST_CAPS[options.lane]
+      : MAX_MODEL_COST_PER_MILLION;
   return (
-    Math.max(0, model.inputCostPerM as number) > MAX_MODEL_COST_PER_MILLION
-    || Math.max(0, model.outputCostPerM as number) > MAX_MODEL_COST_PER_MILLION
+    Math.max(0, model.inputCostPerM as number) > cap
+    || Math.max(0, model.outputCostPerM as number) > cap
   );
 }
 
@@ -250,8 +292,16 @@ function costScore(model: CatalogModelEntry) {
   return 0.2;
 }
 
-export function isModelAllowedInTier(model: CatalogModelEntry, tier: SpendingTier) {
-  if (isModelTooExpensivePerMillion(model)) {
+export function isModelAllowedInTier(
+  model: CatalogModelEntry,
+  tier: SpendingTier,
+  options?: {
+    lane?: RoutingLane;
+    allowManualOverride?: boolean;
+    manualCostCap?: number;
+  },
+) {
+  if (isModelTooExpensivePerMillion(model, options)) {
     return false;
   }
 
@@ -364,12 +414,17 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
   const rows: RankedModel[] = [];
   for (const model of params.catalog) {
     if (!model?.modelId || avoid.has(model.modelId)) continue;
-    if (!isModelAllowedInTier(model, params.tier)) continue;
+    if (!isModelAllowedInTier(model, params.tier, {
+      lane: params.lane,
+      allowManualOverride: params.allowManualOverride,
+      manualCostCap: params.manualCostCap,
+    })) continue;
     const imageGenerationModel = isImageGenerationModel(model);
     const textChatCapable = isTextChatCapableModel(model);
     const modelAge = modelAgeDays(model);
     const staleModel = typeof modelAge === "number" && modelAge > 90;
     if (!params.allowStaleModels && staleModel) continue;
+    if (!params.allowStaleModels && typeof modelAge === "number" && modelAge > 120) continue;
     if (isVideoGenerationModel(model)) continue;
     if (!imageTurn && imageGenerationModel && !textChatCapable) continue;
     if (!imageGenerationModel && !textChatCapable) continue;
@@ -405,7 +460,7 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
     score += reasoning * 0.12;
     score += mode * 0.2;
     score += context * 0.1;
-    score += recency * 0.05;
+    score += recency * 0.1;
 
     // Encourage diversity over very frequently used models so routing does not collapse
     // into one repeated option when similarly strong alternatives exist.
@@ -428,6 +483,10 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
     }
     if (params.preferFree) {
       if (freeLike) score += 0.12;
+    }
+    if (params.anchorModelId && params.anchorModelId === model.modelId) {
+      score += params.preserveAnchor === false ? 0.03 : (params.anchorModelBias ?? 0.12);
+      reasons.push("anchor-model");
     }
 
     for (const capability of preferredCapabilities) {

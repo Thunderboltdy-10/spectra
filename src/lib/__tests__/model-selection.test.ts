@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { pickModelAndFallbacks } from "@/lib/model-selection";
+import {
+  inferRoutingLane,
+  isModelAllowedInTier,
+  isModelTooExpensivePerMillion,
+  pickModelAndFallbacks,
+} from "@/lib/model-selection";
 
 describe("model selection guardrails", () => {
   it("excludes image-generation models for non-image turns", () => {
@@ -24,6 +29,7 @@ describe("model selection guardrails", () => {
         },
       ],
       tier: "normal",
+      lane: "fast_chat",
       mode: "general",
       messageLength: 300,
       requiredCapabilities: [],
@@ -55,6 +61,7 @@ describe("model selection guardrails", () => {
         },
       ],
       tier: "normal",
+      lane: "deep_reasoning",
       mode: "research",
       messageLength: 1800,
       requiredCapabilities: ["reasoning"],
@@ -85,6 +92,7 @@ describe("model selection guardrails", () => {
         },
       ],
       tier: "normal",
+      lane: "fast_chat",
       mode: "general",
       messageLength: 200,
     });
@@ -111,6 +119,7 @@ describe("model selection guardrails", () => {
         },
       ],
       tier: "normal",
+      lane: "fast_chat",
       mode: "general",
       messageLength: 220,
     });
@@ -130,10 +139,57 @@ describe("model selection guardrails", () => {
         },
       ],
       tier: "normal",
+      lane: "fast_chat",
       mode: "general",
       messageLength: 80,
     });
 
     expect(picked.selected?.modelId).toBe("provider/only-stale");
+  });
+
+  it("preserves a valid anchor model when scores are close", () => {
+    const picked = pickModelAndFallbacks({
+      catalog: [
+        {
+          modelId: "provider/anchor",
+          inputCostPerM: 4,
+          outputCostPerM: 5,
+          reasoningRating: "high",
+          createdAt: Date.now() - 20 * 24 * 60 * 60 * 1000,
+        },
+        {
+          modelId: "provider/challenger",
+          inputCostPerM: 4,
+          outputCostPerM: 5,
+          reasoningRating: "high",
+          createdAt: Date.now() - 18 * 24 * 60 * 60 * 1000,
+        },
+      ],
+      tier: "normal",
+      lane: "deep_reasoning",
+      mode: "research",
+      messageLength: 1200,
+      requiredCapabilities: ["reasoning"],
+      anchorModelId: "provider/anchor",
+    });
+
+    expect(picked.selected?.modelId).toBe("provider/anchor");
+  });
+
+  it("allows manual visibility above router lane caps while keeping routing bounded", () => {
+    const model = {
+      modelId: "provider/premium",
+      inputCostPerM: 55,
+      outputCostPerM: 70,
+    };
+
+    expect(isModelTooExpensivePerMillion(model, { lane: "deep_reasoning" })).toBe(true);
+    expect(isModelAllowedInTier(model, "normal", { allowManualOverride: true })).toBe(true);
+  });
+
+  it("infers routing lanes from modality and search needs", () => {
+    expect(inferRoutingLane({ mode: "research", needsSearch: true })).toBe("search_reasoning");
+    expect(inferRoutingLane({ requiredCapabilities: ["vision"] })).toBe("vision");
+    expect(inferRoutingLane({ mode: "general", preferFast: true })).toBe("fast_chat");
   });
 });

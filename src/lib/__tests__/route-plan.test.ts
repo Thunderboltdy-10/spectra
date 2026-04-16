@@ -256,4 +256,37 @@ describe("buildRoutePlan", () => {
     expect(plan.threadStrategy.action).toBe("continue");
     expect(plan.threadStrategy.contextWindowPressure).toBeLessThan(0.75);
   });
+
+  it("forks stale low-continuity threads when a summary exists and topic changes", () => {
+    const plan = buildRoutePlan({
+      message: "Switch to my chemistry revision plan and ignore the old essay topic.",
+      mode: "general",
+      selectedMode: "general",
+      hasAttachments: false,
+      hasAgent: false,
+      hasPack: false,
+      hasPersonalResources: false,
+      hasAgentResources: false,
+      autoSearchEnabled: false,
+      thinkingLevel: "medium",
+      complexity: "medium",
+      threadContext: {
+        currentChatId: "chat_1",
+        turnCount: 24,
+        turnsSinceCompaction: 18,
+        contextWindowUtilization: 0.81,
+        lastMessageAt: Date.now() - (20 * 60 * 60 * 1000),
+        recentMessages: [
+          { role: "user", content: "Help me improve my English essay conclusion." },
+          { role: "assistant", content: "I suggested a stronger thesis and evidence chain." },
+          { role: "assistant", content: "Summary: essay draft, conclusion rewrite, teacher feedback." },
+        ],
+        explicitlySameThread: false,
+      },
+      schoolSoulVersion: "school-soul-v10",
+    });
+
+    expect(plan.threadStrategy.action).toBe("fork");
+    expect(plan.threadStrategy.reason.toLowerCase()).toContain("context");
+  });
 });

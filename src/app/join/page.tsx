@@ -11,6 +11,7 @@ import { hasClerkPublishableKey } from "@/lib/clerk-config";
 import { getAppUrl } from "@/lib/app-url";
 
 type InvitationData = {
+  token: string;
   email: string;
   role: string;
   status: string;
@@ -22,11 +23,33 @@ type InvitationData = {
   alreadyAccepted?: boolean;
 };
 
+type InvitationMachineState =
+  | "token_missing"
+  | "token_invalid"
+  | "token_expired"
+  | "token_valid_signed_out"
+  | "token_valid_signed_in_wrong_identity"
+  | "token_valid_signed_in_match_pending_redeem"
+  | "token_redeemed"
+  | "token_already_redeemed_same_user"
+  | "token_already_redeemed_other_user";
+
+type JoinStateResponse = {
+  state: InvitationMachineState;
+  invitation: InvitationData | null;
+  invitedEmail: string | null;
+  viewer: {
+    userId: string | null;
+    primaryEmail: string | null;
+    emails: string[];
+  };
+  shouldAutoRedirectToAuth: boolean;
+  canRedeemNow: boolean;
+};
+
 type PageState =
   | { status: "loading" }
-  | { status: "valid"; data: InvitationData }
-  | { status: "accepted"; data: InvitationData }
-  | { status: "expired"; reason: string }
+  | { status: "resolved"; payload: JoinStateResponse }
   | { status: "error"; message: string };
 
 type JoinPageContentProps = {
@@ -34,10 +57,7 @@ type JoinPageContentProps = {
   userId: string | null;
 };
 
-type RedeemState = {
-  message: string | null;
-  alreadyAccepted?: boolean;
-};
+type RedeemState = { message: string | null };
 
 // Fire-and-forget: tell the server to drop the invitation cookie so the user
 // can navigate away from /join without the middleware snapping them back.
@@ -56,75 +76,13 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
 
   const [state, setState] = useState<PageState>({ status: "loading" });
   const [redeeming, setRedeeming] = useState(false);
-  const [viewerEmail, setViewerEmail] = useState<string | null>(null);
-  const [viewerEmails, setViewerEmails] = useState<string[]>([]);
-  const [identityLoaded, setIdentityLoaded] = useState(false);
   const [redeemState, setRedeemState] = useState<RedeemState>({ message: null });
 
   useEffect(() => {
-    if (!isLoaded) {
-      return;
-    }
-    if (!userId) {
-      setViewerEmail(null);
-      setViewerEmails([]);
-      setIdentityLoaded(true);
-      return;
-    }
-
-    let cancelled = false;
-
-    void (async () => {
-      // Clerk's /api/auth/access-state?includeIdentity=1 occasionally returns
-      // an empty emails array right after session refresh. Retry a few times
-      // before giving up so auto-redeem doesn't silently stall.
-      for (let attempt = 0; attempt < 3 && !cancelled; attempt += 1) {
-        try {
-          const response = await fetch("/api/auth/access-state?includeIdentity=1", { cache: "no-store" });
-          const payload = (await response.json().catch(() => null)) as { email?: string; emails?: string[] } | null;
-          const emails = payload?.emails ?? (payload?.email ? [payload.email] : []);
-          if (emails.length > 0) {
-            if (!cancelled) {
-              setViewerEmail(payload?.email ?? emails[0] ?? null);
-              setViewerEmails(emails);
-            }
-            break;
-          }
-        } catch {
-          // Retry.
-        }
-        if (attempt < 2) {
-          await new Promise((resolve) => setTimeout(resolve, 400));
-        }
-      }
-      if (!cancelled) {
-        setIdentityLoaded(true);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isLoaded, userId]);
-
-  useEffect(() => {
-    if (!token) {
-      setState({ status: "error", message: "No invitation token provided." });
-      return;
-    }
-
     void (async () => {
       try {
-        const response = await fetch(`/api/join?token=${encodeURIComponent(token)}`);
-
-        if (response.status === 410) {
-          setState({ status: "expired", reason: "This invitation has expired." });
-          return;
-        }
-        if (response.status === 404) {
-          setState({ status: "error", message: "Invitation not found. Please ask your school admin for a new link." });
-          return;
-        }
+        const path = token ? `/api/join?token=${encodeURIComponent(token)}` : "/api/join";
+        const response = await fetch(path, { cache: "no-store" });
         if (!response.ok) {
           const text = await response.text();
           let errorMessage = text || "Failed to load invitation.";
@@ -138,13 +96,9 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
           return;
         }
 
-        const data = (await response.json()) as InvitationData;
+        const data = (await response.json()) as JoinStateResponse;
         setRedeemState({ message: null });
-        if (data.alreadyAccepted) {
-          setState({ status: "accepted", data });
-        } else {
-          setState({ status: "valid", data });
-        }
+        setState({ status: "resolved", payload: data });
       } catch {
         setState({ status: "error", message: "Could not verify invitation. Please try again." });
       }
@@ -155,38 +109,40 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
   // user anymore, proactively clear the cookie so any subsequent navigation
   // (Continue, Switch account, manual URL change) isn't redirected back here.
   useEffect(() => {
-    if (state.status === "expired" || state.status === "error") {
+    if (state.status === "error") {
       void clearInvitationCookie();
     }
   }, [state.status]);
 
   useEffect(() => {
-    if (!isLoaded || !userId || !token || !identityLoaded) {
-      return;
-    }
-    if (state.status !== "valid" && state.status !== "accepted") {
+    if (!isLoaded || state.status !== "resolved") {
       return;
     }
 
-    const hasMatchingEmail = viewerEmails.some(
-      (email) => email.toLowerCase() === state.data.email.toLowerCase(),
-    );
+    const { payload } = state;
+    const invitationToRedeem = payload.invitation;
 
-    // Already-accepted invitation: if the signed-in viewer matches, this is
-    // an idempotent self-heal — just send them to the app. If they don't
-    // match, drop the cookie so they can use the Switch-account CTA without
-    // getting looped back here.
-    if (state.status === "accepted") {
-      if (hasMatchingEmail) {
-        void clearInvitationCookie();
-        window.location.replace("/chat");
-      } else {
-        void clearInvitationCookie();
+    if (payload.shouldAutoRedirectToAuth) {
+      if (payload.state === "token_valid_signed_in_wrong_identity") {
+        void goToSignIn();
+        return;
+      }
+      if (payload.state === "token_valid_signed_out" || payload.state === "token_already_redeemed_other_user") {
+        const signInUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in";
+        const appUrl = getAppUrl(typeof window !== "undefined" ? window.location.origin : undefined);
+        const redirect = encodeURIComponent(`${appUrl}/join${token ? `?token=${encodeURIComponent(token)}` : ""}`);
+        window.location.href = `${signInUrl}?redirect_url=${redirect}`;
       }
       return;
     }
 
-    if (redeeming || !hasMatchingEmail) {
+    if (payload.state === "token_already_redeemed_same_user" || payload.state === "token_redeemed") {
+      void clearInvitationCookie();
+      window.location.replace("/chat");
+      return;
+    }
+
+    if (!userId || redeeming || !payload.canRedeemNow || !invitationToRedeem) {
       return;
     }
 
@@ -197,16 +153,13 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
         const response = await fetch("/api/invitations/redeem", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token }),
+          body: JSON.stringify({ token: invitationToRedeem.token }),
         });
-        const payload = (await response.json().catch(() => null)) as
-          | { error?: { message?: string }; alreadyAccepted?: boolean }
+        const redeemPayload = (await response.json().catch(() => null)) as
+          | { error?: { message?: string }; alreadyAccepted?: boolean; sameUser?: boolean }
           | null;
         if (!response.ok) {
-          throw new Error(payload?.error?.message ?? "Could not accept invitation.");
-        }
-        if (payload?.alreadyAccepted) {
-          setRedeemState({ message: null, alreadyAccepted: true });
+          throw new Error(redeemPayload?.error?.message ?? "Could not accept invitation.");
         }
         window.location.replace("/chat");
       } catch (error) {
@@ -217,10 +170,14 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
         setRedeeming(false);
       }
     })();
-  }, [identityLoaded, isLoaded, redeeming, state, token, userId, viewerEmails]);
+  }, [isLoaded, redeeming, state, token, userId]);
 
-  const viewerHasMatchingEmail = (state.status === "valid" || state.status === "accepted")
-    ? viewerEmails.some((email) => email.toLowerCase() === state.data.email.toLowerCase())
+  const resolvedPayload = state.status === "resolved" ? state.payload : null;
+  const invitation = resolvedPayload?.invitation ?? null;
+  const viewerEmail = resolvedPayload?.viewer.primaryEmail ?? null;
+  const viewerEmails = resolvedPayload?.viewer.emails ?? [];
+  const viewerHasMatchingEmail = invitation
+    ? viewerEmails.some((email) => email.toLowerCase() === invitation.email.toLowerCase())
     : false;
 
   async function goToSignIn() {
@@ -245,7 +202,7 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
     );
   }
 
-  if (state.status === "expired") {
+  if (state.status === "resolved" && state.payload.state === "token_expired") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)] px-4">
         <div className="w-full max-w-sm rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 text-center shadow-[var(--shadow-soft)]">
@@ -253,7 +210,7 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
             <Clock className="h-7 w-7 text-[var(--warning)]" />
           </div>
           <h1 className="mb-2 text-xl font-semibold text-[var(--text-primary)]">Invitation Expired</h1>
-          <p className="text-sm text-[var(--text-secondary)]">{state.reason}</p>
+          <p className="text-sm text-[var(--text-secondary)]">This invitation has expired.</p>
           <p className="mt-3 text-xs text-[var(--text-secondary)]">
             Contact your school administrator for a fresh invitation link.
           </p>
@@ -269,7 +226,7 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
     );
   }
 
-  if (state.status === "error") {
+  if (state.status === "error" || (state.status === "resolved" && (state.payload.state === "token_invalid" || state.payload.state === "token_missing"))) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)] px-4">
         <div className="w-full max-w-sm rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 text-center shadow-[var(--shadow-soft)]">
@@ -277,7 +234,7 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
             <AlertTriangle className="h-7 w-7 text-[var(--danger)]" />
           </div>
           <h1 className="mb-2 text-xl font-semibold text-[var(--text-primary)]">Invalid Invitation</h1>
-          <p className="text-sm text-[var(--text-secondary)]">{state.message}</p>
+          <p className="text-sm text-[var(--text-secondary)]">{state.status === "error" ? state.message : "Invitation not found. Please ask your school admin for a new link."}</p>
           <Button
             variant="secondary"
             className="mt-6 w-full cursor-pointer"
@@ -290,8 +247,7 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
     );
   }
 
-  if (state.status === "accepted") {
-    const { data } = state;
+  if (state.status === "resolved" && state.payload.state === "token_already_redeemed_same_user") {
     if (viewerHasMatchingEmail) {
       return (
         <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)]">
@@ -302,35 +258,15 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
         </div>
       );
     }
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)] px-4">
-        <div className="w-full max-w-sm rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 text-center shadow-[var(--shadow-soft)]">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[color-mix(in_oklab,var(--success)_12%,transparent)]">
-            <CheckCircle2 className="h-7 w-7 text-[var(--success)]" />
-          </div>
-          <h1 className="mb-2 text-xl font-semibold text-[var(--text-primary)]">Invitation already used</h1>
-          <p className="text-sm text-[var(--text-secondary)]">
-            This invitation has already been accepted. Sign in with {data.email} to continue.
-          </p>
-          <div className="mt-6 space-y-3">
-            <Button className="w-full cursor-pointer" onClick={() => void goToSignIn()}>
-              Switch account
-            </Button>
-            <Button
-              variant="secondary"
-              className="w-full cursor-pointer"
-              onClick={() => void goHomeAfterClear(userId ? "/no-access" : "/")}
-            >
-              {userId ? "Back to access page" : "Back to homepage"}
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
   }
 
-  const { data } = state;
-  const expiryDate = new Date(data.expiresAt).toLocaleDateString("en-GB", {
+  if (!invitation) {
+    return null;
+  }
+
+  const resolvedInvitation = invitation;
+
+  const expiryDate = new Date(resolvedInvitation.expiresAt).toLocaleDateString("en-GB", {
     day: "2-digit",
     month: "long",
     year: "numeric",
@@ -339,15 +275,15 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
   function handleJoin() {
     const signUpUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up";
     const appUrl = getAppUrl(typeof window !== "undefined" ? window.location.origin : undefined);
-    const redirect = encodeURIComponent(`${appUrl}/join?token=${encodeURIComponent(token ?? "")}`);
-    const emailParam = `email_address=${encodeURIComponent(data.email)}`;
+    const redirect = encodeURIComponent(`${appUrl}/join?token=${encodeURIComponent(resolvedInvitation.token)}`);
+    const emailParam = `email_address=${encodeURIComponent(resolvedInvitation.email)}`;
     window.location.href = `${signUpUrl}?${emailParam}&redirect_url=${redirect}`;
   }
 
   function handleSignIn() {
     const signInUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in";
     const appUrl = getAppUrl(typeof window !== "undefined" ? window.location.origin : undefined);
-    const redirect = encodeURIComponent(`${appUrl}/join?token=${encodeURIComponent(token ?? "")}`);
+    const redirect = encodeURIComponent(`${appUrl}/join?token=${encodeURIComponent(resolvedInvitation.token)}`);
     window.location.href = `${signInUrl}?redirect_url=${redirect}`;
   }
 
@@ -372,10 +308,10 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
         <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 shadow-[var(--shadow-hover)]">
           {/* School branding */}
           <div className="mb-6 flex flex-col items-center text-center">
-            {data.orgLogoUrl ? (
+            {invitation.orgLogoUrl ? (
               <Image
-                src={data.orgLogoUrl}
-                alt={data.orgName ?? "School"}
+                src={invitation.orgLogoUrl}
+                alt={invitation.orgName ?? "School"}
                 width={64}
                 height={64}
                 className="mb-3 h-16 w-16 rounded-2xl border border-[var(--border-default)] object-cover shadow-[var(--shadow-card)]"
@@ -384,7 +320,7 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
               <SpectraLogo size={64} showTile className="mb-3" />
             )}
             <h1 className="font-display text-2xl text-[var(--text-primary)]">
-              {data.orgName ?? "Spectra"}
+              {invitation.orgName ?? "Spectra"}
             </h1>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">
               You&apos;ve been invited to join
@@ -392,9 +328,9 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
           </div>
 
           {/* Welcome message */}
-          {data.orgWelcomeMessage && (
+          {invitation.orgWelcomeMessage && (
             <div className="mb-5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
-              <p className="text-sm text-[var(--text-primary)]">{data.orgWelcomeMessage}</p>
+              <p className="text-sm text-[var(--text-primary)]">{invitation.orgWelcomeMessage}</p>
             </div>
           )}
 
@@ -402,11 +338,11 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
           <div className="mb-6 space-y-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
             <div className="flex items-center justify-between text-sm">
               <span className="text-[var(--text-secondary)]">Invited as</span>
-              <span className="font-medium capitalize text-[var(--text-primary)]">{data.role}</span>
+              <span className="font-medium capitalize text-[var(--text-primary)]">{invitation.role}</span>
             </div>
             <div className="flex items-center justify-between text-sm">
               <span className="text-[var(--text-secondary)]">Email</span>
-              <span className="font-medium text-[var(--text-primary)]">{data.email}</span>
+              <span className="font-medium text-[var(--text-primary)]">{invitation.email}</span>
             </div>
             <div className="flex items-center justify-between text-sm">
               <span className="text-[var(--text-secondary)]">Expires</span>
@@ -418,13 +354,13 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
           <div className="mb-4 flex items-center gap-2 rounded-xl border border-[color-mix(in_oklab,var(--success)_30%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_6%,transparent)] px-4 py-3">
             <CheckCircle2 className="h-4 w-4 shrink-0 text-[var(--success)]" />
             <p className="text-xs text-[var(--success)]">
-              {userId ? "This invitation will only be accepted by the invited email address." : "This is a valid invitation. Sign in or create an account using the invited email address."}
+              {userId ? "This invitation will only be accepted by the invited email address." : "Redirecting you to sign in or sign up with the invited email address."}
             </p>
           </div>
 
           {userId && viewerEmail && !viewerHasMatchingEmail ? (
             <div className="mb-4 rounded-xl border border-[color-mix(in_oklab,var(--warning)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_8%,transparent)] px-4 py-3 text-xs text-[var(--warning)]">
-              You are signed in as {viewerEmail}, but this invitation is for {data.email}. Switch to an account that has that email attached.
+              You are signed in as {viewerEmail}, but this invitation is for {invitation.email}. Switch to an account that has that email attached.
             </div>
           ) : null}
 
@@ -435,7 +371,7 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
               className="w-full cursor-pointer"
               disabled={redeeming || Boolean(userId)}
             >
-              {redeeming ? "Joining..." : userId ? "Checking invitation..." : `Sign up to join ${data.orgName ?? "School"}`}
+              {redeeming ? "Joining..." : userId ? "Checking invitation..." : `Continue to join ${invitation.orgName ?? "School"}`}
             </Button>
             {!userId ? (
               <Button onClick={handleSignIn} variant="secondary" className="w-full cursor-pointer">

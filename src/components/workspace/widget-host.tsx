@@ -4,7 +4,7 @@
    WidgetHost — the draggable, resizable, deletable widget shell.
 
    Lives on the canvas in world coordinates. Chrome (borders, buttons)
-   is screen-stable via useScreenSize. Content is delegated to per-kind
+   scales natively. Content is delegated to per-kind
    renderers below.
 
    Widgets are pure-frontend: state lives in zustand + localStorage.
@@ -13,7 +13,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { X, GripHorizontal, ArrowDownRight } from "lucide-react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import { useScreenSize, STABLE } from "@/lib/workspace/zoom";
 import type { WidgetData } from "@/lib/workspace/contracts";
 import {
   WidgetSticky,
@@ -30,12 +29,12 @@ export function WidgetHost({ widget }: { widget: WidgetData }) {
   const removeWidget = useWorkspaceStore((s) => s.removeWidget);
   const updateWidget = useWorkspaceStore((s) => s.updateWidget);
 
-  const radius = useScreenSize(STABLE.RADIUS_MD);
-  const border = useScreenSize(STABLE.BORDER);
-  const pad = useScreenSize(STABLE.PAD_SM);
-  const titleSize = useScreenSize(STABLE.ITEM_META);
-  const iconSize = useScreenSize(STABLE.ICON_SM);
-  const handleSize = useScreenSize(18);
+  const radius = 14;
+  const border = 1;
+  const pad = 8;
+  const titleSize = 11;
+  const iconSize = 12;
+  const handleSize = 18;
 
   const [resizing, setResizing] = useState(false);
   const startRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -97,7 +96,7 @@ export function WidgetHost({ widget }: { widget: WidgetData }) {
           background: "var(--bg-elevated)",
           border: `${border}px solid var(--border-default)`,
           borderRadius: `${radius}px`,
-          boxShadow: `0 ${useScreenSize(8)}px ${useScreenSize(22)}px -${useScreenSize(12)}px rgba(10,14,20,0.12)`,
+          boxShadow: `0 ${8}px ${22}px -${12}px rgba(10,14,20,0.12)`,
           overflow: "hidden",
           display: "flex",
           flexDirection: "column",
@@ -108,8 +107,8 @@ export function WidgetHost({ widget }: { widget: WidgetData }) {
           style={{
             display: "flex",
             alignItems: "center",
-            gap: useScreenSize(8),
-            padding: `${pad}px ${useScreenSize(STABLE.PAD_MD)}px`,
+            gap: 8,
+            padding: `${pad}px ${14}px`,
             borderBottom: `${border}px solid var(--border-default)`,
             background:
               "linear-gradient(to bottom, color-mix(in oklab, var(--bg-elevated) 92%, var(--border-default)), var(--bg-elevated))",
@@ -142,9 +141,9 @@ export function WidgetHost({ widget }: { widget: WidgetData }) {
               removeWidget(widget.id);
             }}
             style={{
-              width: useScreenSize(22),
-              height: useScreenSize(22),
-              borderRadius: useScreenSize(6),
+              width: 22,
+              height: 22,
+              borderRadius: 6,
               background: "transparent",
               border: "none",
               display: "flex",
@@ -166,7 +165,7 @@ export function WidgetHost({ widget }: { widget: WidgetData }) {
             flex: 1,
             minHeight: 0,
             overflow: "auto",
-            padding: useScreenSize(STABLE.PAD_SM),
+            padding: 8,
           }}
         >
           {renderWidget(widget)}
@@ -177,8 +176,8 @@ export function WidgetHost({ widget }: { widget: WidgetData }) {
           onMouseDown={onResizeStart}
           style={{
             position: "absolute",
-            right: useScreenSize(4),
-            bottom: useScreenSize(4),
+            right: 4,
+            bottom: 4,
             width: handleSize,
             height: handleSize,
             cursor: "nwse-resize",

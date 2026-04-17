@@ -1231,6 +1231,10 @@ button:disabled {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(400%); }
 }
+@keyframes islandShimmer {
+  0% { transform: translateX(-150%); }
+  100% { transform: translateX(350%); }
+}
 
 @keyframes energy-arrive {
   0% { box-shadow: 0 0 0 0 transparent; }

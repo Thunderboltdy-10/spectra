@@ -1,15 +1,16 @@
 "use client";
 
 /* ===================================================================
-   WORKSPACE CANVAS — Atlas edition.
+   WORKSPACE CANVAS — Atlas edition v2.
 
-   Everything inside a ReactFlow node is sized via useScreenSize, so
-   card chrome stays the same physical size on screen at every zoom.
-   The zoom signal drives DENSITY and REVEAL, not raw size.
+   ReactFlow scales natively. All node content is sized in CSS pixels
+   and ReactFlow's transform handles zoom. Semantic zoom is achieved
+   through CSS opacity/display transitions driven by ZoomSignals —
+   progressive reveal, not counter-scaling.
 
    Layers (bottom → top):
-     1. CanvasBackground (paper + dots/grid/contour)
-     2. Workspace territory (cartouche at center, contour rings around)
+     1. CanvasBackground (paper + dots/grid)
+     2. Workspace territory (cartouche + subtle wash)
      3. Group latitude-rule headers
      4. Widget hosts (draggable non-item blocks)
      5. Item nodes (chips → cards → detail through zoom signals)
@@ -43,7 +44,6 @@ import {
   type BackgroundMode,
   type WidgetData,
   type WidgetKind,
-  TYPE_TO_TINT,
   TYPE_GROUP_LABELS,
 } from "@/lib/workspace/contracts";
 import {
@@ -52,21 +52,21 @@ import {
 } from "@/lib/artifact-types";
 import { cn } from "@/lib/utils";
 import {
-  useScreenSize,
   useZoom,
   useZoomSignals,
-  smoothStep,
   lerp,
-  STABLE,
 } from "@/lib/workspace/zoom";
 import {
   territoryInk,
-  contourPatternDataUri,
-  coordinateBadge,
   type TerritoryInk,
 } from "@/lib/workspace/atlas-theme";
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { WidgetHost } from "@/components/workspace/widget-host";
+import {
+  ActionMenuContent,
+  ACTION_MENU_ITEMS,
+  type ActionMenuItemId,
+} from "@/components/workspace/shared-action-menu";
 
 /* ===================================================================
    Node data types
@@ -112,13 +112,12 @@ function statusColor(status: string): string {
   }
 }
 
-function StatusDot({ status, screenSize }: { status: string; screenSize: number }) {
-  const worldSize = useScreenSize(screenSize);
+function StatusDot({ status }: { status: string }) {
   return (
     <span
       style={{
-        width: worldSize,
-        height: worldSize,
+        width: 6,
+        height: 6,
         borderRadius: "50%",
         background: statusColor(status),
         display: "inline-block",
@@ -129,54 +128,25 @@ function StatusDot({ status, screenSize }: { status: string; screenSize: number 
 }
 
 /* ===================================================================
-   Workspace Territory — cartouche + contours.
+   Workspace Territory — clean identity display.
 
-   World position is fixed. All visible chrome is screen-stable.
-   At far zoom: big emoji + cartouche name + concentric contour rings.
-   At summary+: cartouche slides to top-left corner as an anchor badge.
-   Contour rings fade out as zoom increases.
+   At far zoom: big emoji + name centered.
+   At summary+: compact badge anchored top-left.
+   Territory wash fades with zoom.
    =================================================================== */
 
 function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
   const { workspace, ink } = data;
   const signals = useZoomSignals();
 
-  // Screen-stable dimensions
-  const emojiFar = useScreenSize(STABLE.WS_EMOJI_FAR);
-  const emojiNear = useScreenSize(STABLE.WS_EMOJI);
-  const nameFar = useScreenSize(STABLE.WS_NAME_FAR);
-  const nameNear = useScreenSize(STABLE.WS_NAME);
-  const metaSize = useScreenSize(STABLE.WS_META);
-  const pad = useScreenSize(STABLE.PAD_LG);
-  const radius = useScreenSize(STABLE.RADIUS_LG);
-
-  // Precompute sizes so hooks are not called conditionally
-  const gap24 = useScreenSize(24);
-  const gap6 = useScreenSize(6);
-  const gap12 = useScreenSize(12);
-  const dotSize = useScreenSize(3);
-  const nearTop = useScreenSize(28);
-  const nearLeft = useScreenSize(36);
-  const nearPadY = useScreenSize(10);
-  const nearPadX = useScreenSize(14);
-  const nearShadowY = useScreenSize(4);
-  const nearShadowBlur = useScreenSize(14);
-  const nearGap = useScreenSize(2);
-  const bgSize = useScreenSize(240);
-
   // Crossfade far ↔ anchored
   const farAlpha = 1 - signals.identityAnchor;
   const nearAlpha = signals.identityAnchor;
-  // Contour rings fade out with detail
-  const contourAlpha = Math.max(0, 1 - signals.territoryFade * 1.1);
-
-  const coord = useMemo(() => coordinateBadge(workspace.id), [workspace.id]);
 
   const lastActivity = useMemo(() => {
     if (!workspace.lastActivity) return null;
-    // eslint-disable-next-line react-hooks/rules-of-hooks, react-hooks/purity
     const diffM = Math.floor((Date.now() - workspace.lastActivity) / 60000);
-    if (diffM < 1) return "active now";
+    if (diffM < 1) return "now";
     if (diffM < 60) return `${diffM}m`;
     const h = Math.floor(diffM / 60);
     if (h < 24) return `${h}h`;
@@ -198,160 +168,133 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
           position: "absolute",
           inset: 0,
           background: ink.fill,
-          opacity: lerp(1, 0.35, signals.territoryFade),
-          borderRadius: `${pad * 2}px`,
-        }}
-      />
-
-      {/* Contour rings — concentric, screen-stable tile */}
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          backgroundImage: contourPatternDataUri(ink.contour, 0.35),
-          backgroundRepeat: "repeat",
-          backgroundSize: `${bgSize}px ${bgSize}px`,
-          opacity: contourAlpha * 0.55,
-          pointerEvents: "none",
-          borderRadius: `${pad * 2}px`,
-          maskImage: `radial-gradient(ellipse at center, black 60%, transparent 100%)`,
-          WebkitMaskImage: `radial-gradient(ellipse at center, black 60%, transparent 100%)`,
+          opacity: lerp(1, 0.25, signals.territoryFade),
+          borderRadius: 40,
         }}
       />
 
       {/* FAR (landscape) identity — centered cartouche */}
-      {farAlpha > 0.01 && (
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexDirection: "column",
+          gap: 24,
+          opacity: farAlpha,
+          pointerEvents: farAlpha > 0.1 ? "auto" : "none",
+          transition: "opacity 200ms ease",
+        }}
+      >
+        <div
+          className="font-display"
+          style={{
+            fontSize: 96,
+            lineHeight: 1,
+            filter: "drop-shadow(0 2px 6px rgba(10,14,20,0.08))",
+          }}
+        >
+          {workspace.emoji}
+        </div>
         <div
           style={{
-            position: "absolute",
-            inset: 0,
             display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
             flexDirection: "column",
-            gap: gap24,
-            opacity: farAlpha,
-            pointerEvents: "auto",
+            alignItems: "center",
+            gap: 6,
           }}
         >
           <div
             className="font-display"
             style={{
-              fontSize: emojiFar,
-              lineHeight: 1,
-              filter: "drop-shadow(0 2px 6px rgba(10,14,20,0.08))",
+              fontSize: 56,
+              fontWeight: 600,
+              letterSpacing: "-0.015em",
+              lineHeight: 1.1,
+              color: ink.ink,
+              textShadow: "0 2px 10px rgba(10,14,20,0.05)",
             }}
           >
-            {workspace.emoji}
+            {workspace.name}
           </div>
           <div
+            className="font-mono"
             style={{
+              fontSize: 12.5,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase" as const,
+              color: ink.accent,
               display: "flex",
-              flexDirection: "column",
               alignItems: "center",
-              gap: gap6,
+              gap: 12,
             }}
           >
-            <div
-              className="font-display"
-              style={{
-                fontSize: nameFar,
-                fontWeight: 600,
-                letterSpacing: "-0.015em",
-                lineHeight: 1.1,
-                color: ink.ink,
-                textShadow: "0 2px 10px rgba(10,14,20,0.05)",
-              }}
-            >
-              {workspace.name}
-            </div>
-            <div
-              className="font-mono"
-              style={{
-                fontSize: metaSize,
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-                color: ink.accent,
-                display: "flex",
-                alignItems: "center",
-                gap: gap12,
-              }}
-            >
-              <span>{coord}</span>
-              <span
-                style={{
-                  width: dotSize,
-                  height: dotSize,
-                  borderRadius: "50%",
-                  background: ink.accent,
-                }}
-              />
-              <span>{workspace.itemCount} ITEMS</span>
-              {lastActivity ? (
-                <>
-                  <span
-                    style={{
-                      width: dotSize,
-                      height: dotSize,
-                      borderRadius: "50%",
-                      background: ink.accent,
-                    }}
-                  />
-                  <span>{lastActivity}</span>
-                </>
-              ) : null}
-            </div>
+            <span>{workspace.itemCount} items</span>
+            {lastActivity ? (
+              <>
+                <span
+                  style={{
+                    width: 3,
+                    height: 3,
+                    borderRadius: "50%",
+                    background: ink.accent,
+                  }}
+                />
+                <span>{lastActivity}</span>
+              </>
+            ) : null}
           </div>
         </div>
-      )}
+      </div>
 
-      {/* NEAR (summary+) — small cartouche anchored top-left */}
-      {nearAlpha > 0.01 && (
-        <div
-          style={{
-            position: "absolute",
-            top: nearTop,
-            left: nearLeft,
-            display: "flex",
-            alignItems: "center",
-            gap: gap12,
-            padding: `${nearPadY}px ${nearPadX}px`,
-            background: "var(--bg-elevated)",
-            border: `1px solid ${ink.contour}`,
-            borderRadius: `${radius}px`,
-            opacity: nearAlpha,
-            pointerEvents: "auto",
-            boxShadow: `0 ${nearShadowY}px ${nearShadowBlur}px rgba(10,14,20,0.08)`,
-          }}
-        >
-          <span style={{ fontSize: emojiNear, lineHeight: 1 }}>{workspace.emoji}</span>
-          <div style={{ display: "flex", flexDirection: "column", gap: nearGap }}>
-            <span
-              className="font-display"
-              style={{
-                fontSize: nameNear,
-                fontWeight: 600,
-                letterSpacing: "-0.01em",
-                color: ink.ink,
-                lineHeight: 1.05,
-              }}
-            >
-              {workspace.name}
-            </span>
-            <span
-              className="font-mono"
-              style={{
-                fontSize: metaSize * 0.9,
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-                color: ink.accent,
-              }}
-            >
-              {coord} · {workspace.itemCount}
-            </span>
-          </div>
+      {/* NEAR (summary+) — compact badge anchored top-left */}
+      <div
+        style={{
+          position: "absolute",
+          top: 28,
+          left: 36,
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "10px 14px",
+          background: "var(--bg-elevated)",
+          border: `1px solid ${ink.contour}`,
+          borderRadius: 14,
+          opacity: nearAlpha,
+          pointerEvents: nearAlpha > 0.1 ? "auto" : "none",
+          boxShadow: "0 4px 14px rgba(10,14,20,0.08)",
+          transition: "opacity 200ms ease",
+        }}
+      >
+        <span style={{ fontSize: 44, lineHeight: 1 }}>{workspace.emoji}</span>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <span
+            className="font-display"
+            style={{
+              fontSize: 38,
+              fontWeight: 600,
+              letterSpacing: "-0.01em",
+              color: ink.ink,
+              lineHeight: 1.05,
+            }}
+          >
+            {workspace.name}
+          </span>
+          <span
+            className="font-mono"
+            style={{
+              fontSize: 11,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase" as const,
+              color: ink.accent,
+            }}
+          >
+            {workspace.itemCount} items{lastActivity ? ` · ${lastActivity}` : ""}
+          </span>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -362,28 +305,25 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
 
 function GroupLabelNode({ data }: { data: GroupLabelNodeData }) {
   const signals = useZoomSignals();
-  const labelSize = useScreenSize(STABLE.GROUP_LABEL);
-  const countSize = useScreenSize(STABLE.GROUP_COUNT);
-  const pad = useScreenSize(STABLE.PAD_MD);
-  const ruleWidth = useScreenSize(80);
 
   return (
     <div
       style={{
         display: "flex",
         alignItems: "center",
-        gap: useScreenSize(10),
-        padding: `${useScreenSize(6)}px 0`,
+        gap: 10,
+        padding: "6px 0",
         opacity: signals.groupReveal,
         pointerEvents: "none",
+        transition: "opacity 200ms ease",
       }}
     >
       <span
         className="font-mono"
         style={{
-          fontSize: labelSize,
+          fontSize: 13,
           letterSpacing: "0.18em",
-          textTransform: "uppercase",
+          textTransform: "uppercase" as const,
           color: data.ink.ink,
           fontWeight: 600,
         }}
@@ -393,14 +333,14 @@ function GroupLabelNode({ data }: { data: GroupLabelNodeData }) {
       <span
         style={{
           height: 1,
-          width: ruleWidth,
+          width: 80,
           background: `linear-gradient(to right, ${data.ink.accent}, transparent)`,
         }}
       />
       <span
         className="font-mono"
         style={{
-          fontSize: countSize,
+          fontSize: 11,
           color: data.ink.accent,
           letterSpacing: "0.04em",
         }}
@@ -412,7 +352,10 @@ function GroupLabelNode({ data }: { data: GroupLabelNodeData }) {
 }
 
 /* ===================================================================
-   Item node — screen-stable card. Density changes with zoom.
+   Item node — native ReactFlow scaling with CSS semantic zoom.
+
+   Content is in CSS pixels; ReactFlow transforms handle zoom.
+   Sub-elements reveal/hide via opacity driven by ZoomSignals.
    =================================================================== */
 
 function ItemNode({ data }: { data: ItemNodeData }) {
@@ -424,75 +367,30 @@ function ItemNode({ data }: { data: ItemNodeData }) {
   const focusedItemId = useWorkspaceStore((s) => s.focusedItemId);
   const isFocused = focusedItemId === item.id;
 
-  // Chip → card → detail through signals
-  const chipAlpha = 1 - signals.cardDetail;
-  const cardAlpha = signals.cardDetail * (1 - signals.contentDepth);
-  const detailAlpha = signals.contentDepth;
-
-  // Interpolate height in screen px then convert to world
-  const screenH = lerp(
-    STABLE.ITEM_CHIP_HEIGHT,
-    lerp(STABLE.ITEM_CARD_HEIGHT, STABLE.ITEM_DETAIL_HEIGHT, signals.contentDepth),
-    signals.cardDetail,
-  );
-  const height = useScreenSize(screenH);
-
-  const screenW = lerp(STABLE.ITEM_CHIP_WIDTH, STABLE.ITEM_DETAIL_WIDTH, signals.cardDetail);
-  const width = useScreenSize(screenW);
-
-  const pad = useScreenSize(STABLE.PAD_MD);
-  const padSm = useScreenSize(STABLE.PAD_SM);
-  const radius = useScreenSize(STABLE.RADIUS_MD);
-  const border = useScreenSize(STABLE.BORDER);
-  const iconSize = useScreenSize(STABLE.ICON_MD);
-  const titleSize = useScreenSize(
-    lerp(STABLE.ITEM_TITLE, STABLE.ITEM_TITLE_CARD, signals.cardDetail),
-  );
-  const metaSize = useScreenSize(STABLE.ITEM_META);
-  const bodySize = useScreenSize(STABLE.ITEM_BODY);
-  const gap = useScreenSize(10);
-  
-  // Precompute sizes for conditional render blocks
-  const shadow12 = useScreenSize(12);
-  const shadow26 = useScreenSize(26);
-  const shadow14 = useScreenSize(14);
-  const shadow4 = useScreenSize(4);
-  const shadow10 = useScreenSize(10);
-  const stripWidth = useScreenSize(3);
-  const headerPadLeft = useScreenSize(18);
-  const headerMinHeight = useScreenSize(STABLE.ITEM_CHIP_HEIGHT - 4);
-  const iconBoxSize = useScreenSize(STABLE.ICON_MD + 8);
-  const iconRadius = useScreenSize(6);
-  const detailLeft = useScreenSize(6);
-  const detailTop = useScreenSize(STABLE.ITEM_CHIP_HEIGHT);
-  const footerPadTop = useScreenSize(4);
-  const dotSize = useScreenSize(2);
-
   const typeColor = meta?.color ?? "var(--text-secondary)";
 
   return (
     <div
       style={{
-        width,
-        height,
+        width: 240,
         position: "relative",
         pointerEvents: "auto",
+        transition: "width 200ms ease",
       }}
     >
       <div
         style={{
-          position: "absolute",
-          inset: 0,
+          position: "relative",
           background: "var(--bg-elevated)",
-          border: `${border}px solid ${isFocused ? ink.accent : "var(--border-default)"}`,
-          borderRadius: `${radius}px`,
+          border: `1px solid ${isFocused ? ink.accent : "var(--border-default)"}`,
+          borderRadius: 14,
           boxShadow: isFocused
-            ? `0 ${shadow12}px ${shadow26}px -${shadow14}px ${ink.contour}`
-            : `0 ${shadow4}px ${shadow12}px -${shadow10}px rgba(10,14,20,0.10)`,
+            ? `0 12px 26px -14px ${ink.contour}`
+            : "0 4px 12px -10px rgba(10,14,20,0.10)",
           overflow: "hidden",
           display: "flex",
           flexDirection: "column",
-          transition: "border-color 160ms ease, box-shadow 200ms ease",
+          transition: "border-color 160ms ease, box-shadow 200ms ease, width 200ms ease",
         }}
       >
         {/* Coloured type strip — left edge */}
@@ -502,7 +400,7 @@ function ItemNode({ data }: { data: ItemNodeData }) {
             top: 0,
             left: 0,
             bottom: 0,
-            width: stripWidth,
+            width: 3,
             background: typeColor,
             opacity: 0.75,
           }}
@@ -513,23 +411,23 @@ function ItemNode({ data }: { data: ItemNodeData }) {
           style={{
             display: "flex",
             alignItems: "center",
-            gap,
-            padding: `${padSm}px ${pad}px`,
-            paddingLeft: headerPadLeft,
+            gap: 10,
+            padding: "8px 14px",
+            paddingLeft: 18,
             borderBottom:
               signals.cardDetail > 0.2
-                ? `${border}px solid color-mix(in oklab, ${typeColor} 10%, var(--border-default))`
+                ? `1px solid color-mix(in oklab, ${typeColor} 10%, var(--border-default))`
                 : "none",
-            minHeight: headerMinHeight,
+            minHeight: 60,
             flexShrink: 0,
           }}
         >
           {Icon ? (
             <div
               style={{
-                width: iconBoxSize,
-                height: iconBoxSize,
-                borderRadius: iconRadius,
+                width: 24,
+                height: 24,
+                borderRadius: 6,
                 background: `color-mix(in oklab, ${typeColor} 12%, transparent)`,
                 display: "flex",
                 alignItems: "center",
@@ -538,14 +436,14 @@ function ItemNode({ data }: { data: ItemNodeData }) {
               }}
             >
               <Icon
-                style={{ width: iconSize, height: iconSize, color: typeColor }}
+                style={{ width: 16, height: 16, color: typeColor }}
               />
             </div>
           ) : null}
           <div
             className="font-body"
             style={{
-              fontSize: titleSize,
+              fontSize: 14,
               fontWeight: 600,
               color: "var(--text-primary)",
               letterSpacing: "-0.005em",
@@ -559,25 +457,27 @@ function ItemNode({ data }: { data: ItemNodeData }) {
           >
             {item.title}
           </div>
-          <StatusDot status={item.status} screenSize={6} />
+          <StatusDot status={item.status} />
         </div>
 
-        {/* Card body — preview */}
-        {item.preview && cardAlpha > 0.01 ? (
+        {/* Card body — preview (revealed via opacity) */}
+        {item.preview && (
           <div
             style={{
               flex: 1,
-              padding: `${padSm}px ${pad}px`,
-              paddingLeft: headerPadLeft,
-              opacity: cardAlpha,
+              padding: "8px 14px",
+              paddingLeft: 18,
+              opacity: signals.cardDetail * (1 - signals.contentDepth),
+              maxHeight: signals.cardDetail > 0.1 ? 80 : 0,
               overflow: "hidden",
-              minHeight: 0,
+              transition: "opacity 200ms ease, max-height 200ms ease",
+              pointerEvents: signals.cardDetail > 0.5 ? "auto" : "none",
             }}
           >
             <div
               className="font-body"
               style={{
-                fontSize: bodySize,
+                fontSize: 12.5,
                 color: "var(--text-secondary)",
                 lineHeight: 1.55,
                 display: "-webkit-box",
@@ -589,128 +489,115 @@ function ItemNode({ data }: { data: ItemNodeData }) {
               {item.preview}
             </div>
           </div>
-        ) : null}
+        )}
 
-        {/* Detail body — full preview / type-specific view */}
-        {detailAlpha > 0.05 ? (
-          <div
-            style={{
-              position: "absolute",
-              left: detailLeft,
-              right: 0,
-              top: detailTop,
-              bottom: 0,
-              opacity: detailAlpha,
-              pointerEvents: detailAlpha > 0.5 ? "auto" : "none",
-              overflow: "hidden",
-            }}
-          >
+        {/* Detail body — full preview (revealed via opacity) */}
+        <div
+          style={{
+            padding: "6px 14px",
+            paddingLeft: 18,
+            opacity: signals.contentDepth,
+            maxHeight: signals.contentDepth > 0.1 ? 200 : 0,
+            overflow: "hidden",
+            pointerEvents: signals.contentDepth > 0.5 ? "auto" : "none",
+            transition: "opacity 200ms ease, max-height 200ms ease",
+          }}
+        >
+          {item.preview ? (
             <DetailBody item={item} typeColor={typeColor} />
-          </div>
-        ) : null}
-
-        {/* Footer meta — mono cartouche */}
-        {signals.cardDetail > 0.15 && signals.contentDepth < 0.6 ? (
-          <div
-            style={{
-              padding: `${footerPadTop}px ${pad}px ${padSm}px`,
-              paddingLeft: headerPadLeft,
-              display: "flex",
-              alignItems: "center",
-              gap,
-              opacity: Math.min(signals.cardDetail * 2, 1 - signals.contentDepth),
-              flexShrink: 0,
-            }}
-          >
-            <span
-              className="font-mono"
+          ) : (
+            <div
               style={{
-                fontSize: metaSize,
-                letterSpacing: "0.1em",
-                textTransform: "uppercase",
-                color: typeColor,
-                fontWeight: 600,
+                color: "var(--text-tertiary)",
+                fontSize: 12.5,
+                fontStyle: "italic",
               }}
             >
-              {meta?.label ?? item.itemType}
-            </span>
-            {item.meta ? (
-              <>
-                <span
-                  style={{
-                    width: dotSize,
-                    height: dotSize,
-                    borderRadius: "50%",
-                    background: "var(--text-tertiary)",
-                  }}
-                />
-                <span
-                  className="font-mono"
-                  style={{
-                    fontSize: metaSize,
-                    color: "var(--text-tertiary)",
-                    letterSpacing: "0.04em",
-                  }}
-                >
-                  {item.meta}
-                </span>
-              </>
-            ) : null}
-          </div>
-        ) : null}
+              Empty
+            </div>
+          )}
+        </div>
 
-        {/* Glance chip suppression border overlay when fully in chip */}
-        {chipAlpha > 0.5 && signals.cardDetail < 0.1 ? null : null}
+        {/* Footer meta — type label */}
+        <div
+          style={{
+            padding: "4px 14px 8px",
+            paddingLeft: 18,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            opacity: Math.min(signals.cardDetail * 2, 1 - signals.contentDepth),
+            flexShrink: 0,
+            transition: "opacity 200ms ease",
+            pointerEvents: signals.cardDetail > 0.3 ? "auto" : "none",
+          }}
+        >
+          <span
+            className="font-mono"
+            style={{
+              fontSize: 11,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase" as const,
+              color: typeColor,
+              fontWeight: 600,
+            }}
+          >
+            {meta?.label ?? item.itemType}
+          </span>
+          {item.meta ? (
+            <>
+              <span
+                style={{
+                  width: 2,
+                  height: 2,
+                  borderRadius: "50%",
+                  background: "var(--text-tertiary)",
+                }}
+              />
+              <span
+                className="font-mono"
+                style={{
+                  fontSize: 11,
+                  color: "var(--text-tertiary)",
+                  letterSpacing: "0.04em",
+                }}
+              >
+                {item.meta}
+              </span>
+            </>
+          ) : null}
+        </div>
       </div>
     </div>
   );
 }
 
 /* ===================================================================
-   Type-specific detail body — code / note / etc.
+   Type-specific detail body
    =================================================================== */
 
 function DetailBody({ item, typeColor }: { item: WorkspaceItemData; typeColor: string }) {
-  const pad = useScreenSize(STABLE.PAD_MD);
-  const bodySize = useScreenSize(STABLE.ITEM_BODY);
-
-  if (!item.preview) {
-    return (
-      <div
-        style={{
-          padding: `${pad}px`,
-          color: "var(--text-tertiary)",
-          fontSize: bodySize,
-          fontStyle: "italic",
-        }}
-      >
-        Empty
-      </div>
-    );
-  }
-
   if (item.itemType === "code") {
     return (
       <div
         style={{
-          padding: `${pad}px`,
+          padding: 14,
           background: "var(--bg-code)",
-          height: "100%",
-          overflow: "hidden",
+          borderRadius: 8,
           color: "var(--text-primary)",
         }}
       >
         <pre
           className="font-mono"
           style={{
-            fontSize: bodySize,
+            fontSize: 12.5,
             whiteSpace: "pre-wrap",
             wordBreak: "break-word",
             margin: 0,
             lineHeight: 1.55,
           }}
         >
-          {item.preview.slice(0, 600)}
+          {item.preview!.slice(0, 600)}
         </pre>
       </div>
     );
@@ -720,15 +607,12 @@ function DetailBody({ item, typeColor }: { item: WorkspaceItemData; typeColor: s
     return (
       <div
         style={{
-          padding: `${pad}px`,
-          height: "100%",
-          overflow: "hidden",
           color: "var(--text-primary)",
-          fontSize: bodySize,
+          fontSize: 12.5,
           lineHeight: 1.65,
         }}
       >
-        <MarkdownRenderer content={item.preview.slice(0, 800)} />
+        <MarkdownRenderer content={item.preview!.slice(0, 800)} />
       </div>
     );
   }
@@ -736,19 +620,18 @@ function DetailBody({ item, typeColor }: { item: WorkspaceItemData; typeColor: s
   return (
     <div
       style={{
-        padding: `${pad}px`,
         color: "var(--text-secondary)",
-        fontSize: bodySize,
+        fontSize: 12.5,
         lineHeight: 1.55,
       }}
     >
-      {item.preview.slice(0, 400)}
+      {item.preview!.slice(0, 400)}
     </div>
   );
 }
 
 /* ===================================================================
-   Widget node (shell — actual widgets live in widget-host.tsx)
+   Widget node
    =================================================================== */
 
 function WidgetNode({ data }: { data: WidgetNodeData }) {
@@ -758,10 +641,8 @@ function WidgetNode({ data }: { data: WidgetNodeData }) {
 /* ===================================================================
    Layout engine.
 
-   Territory size is computed from item count. Groups lay out into
-   rows of items sized exactly to match the STABLE card width at
-   SUMMARY zoom (so at summary, items pack evenly; at detail, they
-   have breathing room since cards grow).
+   Improved: uses a proper masonry-style column packing algorithm
+   to prevent overlaps and adapt dynamically to item count.
    =================================================================== */
 
 const LAYOUT = {
@@ -804,7 +685,6 @@ const STOPWORDS = new Set([
 function groupByTopic(
   items: WorkspaceItemData[],
 ): { label: string; items: WorkspaceItemData[] }[] {
-  // Prefer backend clusters if present
   const byCluster: Record<string, WorkspaceItemData[]> = {};
   const rest: WorkspaceItemData[] = [];
   for (const it of items) {
@@ -821,7 +701,6 @@ function groupByTopic(
     return groups;
   }
 
-  // Heuristic keyword grouping
   const wordToItems = new Map<string, WorkspaceItemData[]>();
   for (const it of items) {
     const text = `${it.title} ${it.preview ?? ""}`.toLowerCase().replace(/[^a-z0-9\s]/g, "");
@@ -920,11 +799,11 @@ function buildNodes(
     const groups = groupsFor(ws.items, viewMode);
     const colWidth = LAYOUT.WORLD_COL_WIDTH;
     const totalColumns = Math.max(1, Math.floor((size.w - LAYOUT.HORIZONTAL_GUTTER * 2) / colWidth));
-    // Column accumulators
+    // Column accumulators — track the Y position for each column
     const colY: number[] = new Array(totalColumns).fill(LAYOUT.HEADER_Y);
 
     groups.forEach((group, gi) => {
-      // Assign group to the shortest column for a balanced layout
+      // Assign group to the shortest column for balanced layout
       let shortest = 0;
       for (let c = 1; c < totalColumns; c++) {
         if (colY[c] < colY[shortest]) shortest = c;
@@ -944,10 +823,14 @@ function buildNodes(
         style: { zIndex: 1 },
       });
 
-      const iy = gy + 120;
+      // Place items in a grid within the group column
+      const itemStartY = gy + 120;
+      const itemColWidth = 440; // world-space width per item slot
+      const itemRowHeight = LAYOUT.WORLD_ROW_GAP;
+
       group.items.forEach((item, ii) => {
-        const ix = gx + (ii % LAYOUT.ITEMS_PER_ROW) * 440;
-        const baseY = iy + Math.floor(ii / LAYOUT.ITEMS_PER_ROW) * LAYOUT.WORLD_ROW_GAP;
+        const ix = gx + (ii % LAYOUT.ITEMS_PER_ROW) * itemColWidth;
+        const baseY = itemStartY + Math.floor(ii / LAYOUT.ITEMS_PER_ROW) * itemRowHeight;
         const override = itemOverrides[item.id];
         const finalX = override ? override.x : ix;
         const finalY = override ? override.y : baseY;
@@ -964,9 +847,9 @@ function buildNodes(
         });
       });
 
+      // Update column accumulator
       const rowsUsed = Math.ceil(group.items.length / LAYOUT.ITEMS_PER_ROW);
-      colY[shortest] =
-        iy + rowsUsed * LAYOUT.WORLD_ROW_GAP + LAYOUT.GROUP_GAP;
+      colY[shortest] = itemStartY + rowsUsed * itemRowHeight + LAYOUT.GROUP_GAP;
     });
   });
 
@@ -1028,6 +911,61 @@ function CanvasBackground({ mode, zoom }: { mode: BackgroundMode; zoom: number }
 }
 
 /* ===================================================================
+   Right-click Context Menu
+   =================================================================== */
+
+function CanvasContextMenu({
+  x,
+  y,
+  onAction,
+  onClose,
+}: {
+  x: number;
+  y: number;
+  onAction: (id: ActionMenuItemId) => void;
+  onClose: () => void;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close on click outside or Escape
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as unknown as globalThis.Node)) {
+        onClose();
+      }
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      ref={menuRef}
+      style={{
+        position: "fixed",
+        left: x,
+        top: y,
+        zIndex: 9999,
+        minWidth: 200,
+      }}
+    >
+      <div
+        className="rounded-2xl border border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/98 backdrop-blur-xl shadow-[0_28px_60px_-28px_rgba(8,22,40,0.35)]"
+      >
+        <ActionMenuContent onAction={(id) => { onAction(id); onClose(); }} />
+      </div>
+    </div>
+  );
+}
+
+/* ===================================================================
    Canvas Inner
    =================================================================== */
 
@@ -1062,6 +1000,9 @@ function WorkspaceCanvasInner({ onNodeClick, onItemClick }: WorkspaceCanvasProps
   const addWidget = useWorkspaceStore((s) => s.addWidget);
 
   const { setCenter, zoomIn, zoomOut, zoomTo, screenToFlowPosition } = useReactFlow();
+
+  // Right-click context menu state
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; flowX: number; flowY: number } | null>(null);
 
   // Fly-to animation
   const lastFlyRef = useRef<number>(0);
@@ -1168,6 +1109,8 @@ function WorkspaceCanvasInner({ onNodeClick, onItemClick }: WorkspaceCanvasProps
 
   const handlePaneClick = useCallback(
     (e: React.MouseEvent) => {
+      // Close context menu if open
+      setContextMenu(null);
       setFocusedItem(null);
       // Place pending widget
       if (widgetPlacementHint) {
@@ -1188,6 +1131,50 @@ function WorkspaceCanvasInner({ onNodeClick, onItemClick }: WorkspaceCanvasProps
       }
     },
     [setFocusedItem, widgetPlacementHint, screenToFlowPosition, addWidget, setWidgetPlacementHint],
+  );
+
+  // Right-click context menu
+  const handlePaneContextMenu = useCallback(
+    (e: React.MouseEvent | MouseEvent) => {
+      e.preventDefault();
+      const flowPos = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      setContextMenu({
+        x: e.clientX,
+        y: e.clientY,
+        flowX: flowPos.x,
+        flowY: flowPos.y,
+      });
+    },
+    [screenToFlowPosition],
+  );
+
+  const handleContextAction = useCallback(
+    (id: ActionMenuItemId) => {
+      switch (id) {
+        case "widget": {
+          useWorkspaceStore.getState().setWidgetPlacementHint({ kind: "sticky", at: "pointer" });
+          break;
+        }
+        case "note":
+        case "code":
+        case "visual":
+        case "task":
+        case "thread":
+        case "ai":
+        case "workspace":
+          // These would route to the command bar creation flow
+          // For now, dispatch a custom event that page.tsx can listen to
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(
+              new CustomEvent("workspace:context-action", {
+                detail: { action: id, flowX: contextMenu?.flowX, flowY: contextMenu?.flowY },
+              }),
+            );
+          }
+          break;
+      }
+    },
+    [contextMenu],
   );
 
   // Resolve background — "contour" mode skips mask pattern since it's on the territory
@@ -1212,10 +1199,11 @@ function WorkspaceCanvasInner({ onNodeClick, onItemClick }: WorkspaceCanvasProps
           onViewportChange={handleViewportChange}
           onNodeClick={handleNodeClick}
           onPaneClick={handlePaneClick}
+          onPaneContextMenu={handlePaneContextMenu}
           panOnScroll={true}
           panOnScrollMode={"free" as unknown as undefined}
           panOnDrag={true}
-          zoomOnScroll={true}
+          zoomOnScroll={false}
           zoomOnPinch={true}
           zoomOnDoubleClick={false}
           minZoom={VP.MIN_ZOOM}
@@ -1229,6 +1217,16 @@ function WorkspaceCanvasInner({ onNodeClick, onItemClick }: WorkspaceCanvasProps
           style={{ background: "transparent" }}
         />
       </div>
+
+      {/* Right-click context menu */}
+      {contextMenu && (
+        <CanvasContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onAction={handleContextAction}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   );
 }

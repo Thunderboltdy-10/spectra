@@ -5,29 +5,144 @@ import {
   MessageSquare,
   Sparkles,
   ChevronLeft,
-  ExternalLink,
   ArrowUpRight,
   Clock,
+  Send,
+  User,
+  Bot,
 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { HubSurface } from "@/components/workspace/hub-surface";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import type { WorkspaceItemData } from "@/lib/workspace/contracts";
 
-/* ─── Thread Inline Preview ───────────────────────────── */
+/* ─── Thread Message (full conversation view) ─────────── */
 
-function ThreadPreview({
+type ThreadMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: number;
+};
+
+function ThreadMessageBubble({ message }: { message: ThreadMessage }) {
+  const isUser = message.role === "user";
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2 }}
+      className={cn(
+        "flex gap-2.5",
+        isUser ? "flex-row-reverse" : "flex-row",
+      )}
+    >
+      {/* Avatar */}
+      <div
+        className={cn(
+          "flex h-6 w-6 shrink-0 items-center justify-center rounded-full",
+          isUser
+            ? "bg-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--bg-secondary))]"
+            : "bg-[color-mix(in_oklab,var(--accent-orange,#f59f0a)_8%,var(--bg-secondary))]",
+        )}
+      >
+        {isUser ? (
+          <User className="h-3 w-3 text-[var(--accent-cyan)]" />
+        ) : (
+          <Bot className="h-3 w-3 text-[var(--accent-orange,#f59f0a)]" />
+        )}
+      </div>
+
+      {/* Bubble */}
+      <div
+        className={cn(
+          "max-w-[85%] rounded-2xl px-3.5 py-2.5 text-[12px] leading-relaxed",
+          isUser
+            ? "rounded-tr-md bg-[color-mix(in_oklab,var(--accent-cyan)_6%,var(--bg-elevated))] border border-[color-mix(in_oklab,var(--accent-cyan)_12%,var(--border-default))] text-[var(--text-primary)]"
+            : "rounded-tl-md bg-[var(--bg-elevated)] border border-[var(--border-default)]/20 text-[var(--text-primary)]",
+        )}
+      >
+        {message.content}
+      </div>
+    </motion.div>
+  );
+}
+
+/* ─── Full Thread View (entire conversation) ──────────── */
+
+function FullThreadView({
   thread,
   onBack,
-  onOpenFullView,
+  onOpenDeepEdit,
 }: {
   thread: WorkspaceItemData;
   onBack: () => void;
-  onOpenFullView: (thread: WorkspaceItemData) => void;
+  onOpenDeepEdit: (thread: WorkspaceItemData) => void;
 }) {
+  const [inputValue, setInputValue] = useState("");
+
+  // Parse thread preview into simulated messages for demo purposes.
+  // In a real app, these would come from the thread's message array.
+  const messages: ThreadMessage[] = useMemo(() => {
+    const baseTimestamp = thread.updatedAt ?? 0;
+    const base: ThreadMessage[] = [];
+
+    if (thread.preview) {
+      // Split preview on sentence boundaries to simulate user/AI exchange
+      const sentences = thread.preview.split(/(?<=[.!?])\s+/);
+      if (sentences.length >= 2) {
+        base.push({
+          id: `${thread.id}-u1`,
+          role: "user",
+          content: sentences.slice(0, Math.ceil(sentences.length / 2)).join(" "),
+          timestamp: baseTimestamp - 120_000,
+        });
+        base.push({
+          id: `${thread.id}-a1`,
+          role: "assistant",
+          content: sentences.slice(Math.ceil(sentences.length / 2)).join(" "),
+          timestamp: baseTimestamp - 90_000,
+        });
+      } else {
+        base.push({
+          id: `${thread.id}-u1`,
+          role: "user",
+          content: thread.preview,
+          timestamp: baseTimestamp - 120_000,
+        });
+        base.push({
+          id: `${thread.id}-a1`,
+          role: "assistant",
+          content: "I'd be happy to help with that. Let me think about it...",
+          timestamp: baseTimestamp - 90_000,
+        });
+      }
+    }
+
+    // Add a contextual AI response based on the title
+    if (thread.title && base.length > 0) {
+      base.push({
+        id: `${thread.id}-a2`,
+        role: "assistant",
+        content: `Based on our discussion about "${thread.title}", here are the key points to consider. Would you like me to elaborate on any specific aspect?`,
+        timestamp: baseTimestamp - 30_000,
+      });
+    }
+
+    return base;
+  }, [thread.id, thread.preview, thread.title, thread.updatedAt]);
+
+  const handleSubmit = useCallback(() => {
+    if (!inputValue.trim()) return;
+    // In a real app, this would send the message to the chat API
+    setInputValue("");
+  }, [inputValue]);
+
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      {/* Preview header with back button */}
+      {/* Thread header */}
       <div className="flex items-center gap-2 border-b border-[var(--border-default)]/15 px-3 py-2.5">
         <button
           type="button"
@@ -46,28 +161,23 @@ function ThreadPreview({
         </div>
         <button
           type="button"
-          onClick={() => onOpenFullView(thread)}
+          onClick={() => onOpenDeepEdit(thread)}
           className="flex h-6 w-6 items-center justify-center rounded-lg text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--accent-cyan)]"
-          title="Open full thread view"
+          title="Open in deep edit"
         >
           <ArrowUpRight className="h-3 w-3" />
         </button>
       </div>
 
-      {/* Thread content preview */}
+      {/* Full message thread */}
       <div className="flex-1 overflow-y-auto px-3 py-3">
-        {thread.preview ? (
+        {messages.length > 0 ? (
           <div className="flex flex-col gap-3">
-            {/* User message bubble */}
-            <div className="rounded-2xl rounded-tl-md border border-[var(--border-default)]/20 bg-[var(--bg-elevated)] px-3.5 py-2.5 text-[12px] leading-relaxed text-[var(--text-primary)]">
-              {thread.preview}
-            </div>
-            {/* AI response placeholder */}
-            <div className="rounded-2xl rounded-tl-md bg-[color-mix(in_oklab,var(--accent-cyan)_4%,var(--bg-elevated))] px-3.5 py-2.5 text-[12px] leading-relaxed text-[var(--text-secondary)]">
-              <span className="text-[var(--text-tertiary)]/50">
-                Thread conversation preview
-              </span>
-            </div>
+            <AnimatePresence>
+              {messages.map((msg) => (
+                <ThreadMessageBubble key={msg.id} message={msg} />
+              ))}
+            </AnimatePresence>
           </div>
         ) : (
           <div className="flex h-32 flex-col items-center justify-center text-center">
@@ -76,22 +186,36 @@ function ThreadPreview({
               No messages yet
             </span>
             <span className="mt-1 text-[9px] text-[var(--text-tertiary)]/40">
-              Use the command bar to start a conversation
+              Use the input below to start a conversation
             </span>
           </div>
         )}
       </div>
 
-      {/* Footer with open-in-full button */}
+      {/* Inline reply input */}
       <div className="border-t border-[var(--border-default)]/10 px-3 py-2">
-        <button
-          type="button"
-          onClick={() => onOpenFullView(thread)}
-          className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-[var(--accent-cyan)]/8 px-3 py-2 text-[11px] font-semibold text-[var(--accent-cyan)] transition-colors hover:bg-[var(--accent-cyan)]/15"
-        >
-          <ExternalLink className="h-3 w-3" />
-          Open full thread
-        </button>
+        <div className="flex items-center gap-2 rounded-xl border border-[var(--border-default)]/25 bg-[var(--bg-secondary)]/40 px-2.5 py-1.5">
+          <input
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit();
+              }
+            }}
+            placeholder="Reply\u2026"
+            className="min-w-0 flex-1 border-none bg-transparent text-[11px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]/50"
+          />
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!inputValue.trim()}
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition-colors disabled:opacity-30 text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/10"
+          >
+            <Send className="h-3 w-3" />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -172,7 +296,6 @@ export function ThreadsHub({ className, forceExpanded }: { className?: string; f
     return () => window.clearInterval(interval);
   }, []);
 
-
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const committedWorkspaceId = useWorkspaceStore((s) => s.committedWorkspaceId);
   const setFocusedItem = useWorkspaceStore((s) => s.setFocusedItem);
@@ -189,14 +312,12 @@ export function ThreadsHub({ className, forceExpanded }: { className?: string; f
     return items.filter((i) => i.itemType === "thread").sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
   }, [workspaces, committedWorkspaceId]);
 
-  // The effective selected thread — can be set from the hub itself or externally via store
   const effectiveSelectedId = localSelectedId ?? activeThreadId;
   const selectedThread = useMemo(
     () => threads.find((t) => t.id === effectiveSelectedId) ?? null,
     [threads, effectiveSelectedId],
   );
 
-  // When external activeThreadId changes, clear local selection to follow it
   useEffect(() => {
     if (activeThreadId && activeThreadId !== localSelectedId) {
       setLocalSelectedId(activeThreadId);
@@ -214,7 +335,7 @@ export function ThreadsHub({ className, forceExpanded }: { className?: string; f
     closeThreadInHub();
   }, [closeThreadInHub]);
 
-  const handleOpenFullView = useCallback((thread: WorkspaceItemData) => {
+  const handleOpenDeepEdit = useCallback((thread: WorkspaceItemData) => {
     setFocusedItem(thread.id);
     openDeepEdit(thread);
   }, [setFocusedItem, openDeepEdit]);
@@ -226,7 +347,6 @@ export function ThreadsHub({ className, forceExpanded }: { className?: string; f
         "flex flex-col items-center justify-center gap-2 rounded-[14px] border border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/95 backdrop-blur-xl",
         "shadow-[0_10px_24px_-16px_rgba(8,22,40,0.14)] transition-all duration-200",
         "w-[36px] min-h-[100px] py-3.5 cursor-pointer hover:bg-[var(--bg-hover)]",
-        // Highlight when a thread is active
         effectiveSelectedId && "border-[color-mix(in_oklab,var(--accent-cyan)_22%,var(--border-default))]",
         className,
       )}
@@ -255,9 +375,9 @@ export function ThreadsHub({ className, forceExpanded }: { className?: string; f
       forceExpanded={forceExpanded}
       onToggleLock={() => setLocked((l) => !l)}
       className="!top-[140px] !-translate-y-0"
-      expandedClassName="right-4 top-[120px]"
+      expandedClassName=""
     >
-      <div className="flex h-[min(72vh,620px)] w-[360px] flex-col overflow-hidden rounded-[28px]">
+      <div className="flex h-[min(72vh,620px)] w-[380px] flex-col overflow-hidden rounded-[28px]">
         {/* Header */}
         <div className="flex items-center gap-2 px-4 pt-4 pb-3 border-b border-[var(--border-default)]/10">
           <MessageSquare className="h-4 w-4 text-[var(--accent-cyan)]" />
@@ -271,12 +391,12 @@ export function ThreadsHub({ className, forceExpanded }: { className?: string; f
           )}
         </div>
 
-        {/* Content: either list view or inline preview */}
+        {/* Content: full thread view or thread list */}
         {selectedThread ? (
-          <ThreadPreview
+          <FullThreadView
             thread={selectedThread}
             onBack={handleBackToList}
-            onOpenFullView={handleOpenFullView}
+            onOpenDeepEdit={handleOpenDeepEdit}
           />
         ) : (
           <div className="flex-1 overflow-y-auto px-3 pb-4 pt-2">
@@ -293,12 +413,12 @@ export function ThreadsHub({ className, forceExpanded }: { className?: string; f
             ) : (
               <div className="flex flex-col gap-1">
                 {threads.map((thread) => (
-                <ThreadListItem
+                  <ThreadListItem
                     key={thread.id}
                     thread={thread}
                     isActive={thread.id === effectiveSelectedId}
                     onClick={() => handleThreadClick(thread)}
-                  now={renderNow}
+                    now={renderNow}
                   />
                 ))}
               </div>

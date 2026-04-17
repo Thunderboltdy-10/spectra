@@ -326,9 +326,7 @@ export function DeepEditSurface({
           : "border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/95 shadow-[0_10px_24px_-16px_rgba(8,22,40,0.14)]",
       )}
     >
-      {isFocused && (
-        <div className="absolute top-1 left-1/2 w-8 h-[3px] -translate-x-1/2 rounded-full bg-[var(--accent-cyan)]/60" />
-      )}
+
       {meta?.icon ? (
         <meta.icon
           className="h-4 w-4 shrink-0"
@@ -370,9 +368,7 @@ export function DeepEditSurface({
     }
   }, [item.id, item.itemType, workspace]);
 
-  const expandedClassName = isThread 
-    ? "right-4 top-[55%] -translate-y-1/2" 
-    : "right-4 top-[40%] -translate-y-1/2";
+  const expandedClassName = "right-0 top-0";
 
   return (
     <HubSurface

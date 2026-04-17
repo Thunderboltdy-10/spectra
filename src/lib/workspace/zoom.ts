@@ -1,26 +1,24 @@
 "use client";
 
 /* ===================================================================
-   Zoom primitives — the foundation of screen-stable semantic zoom.
+   Zoom primitives — semantic zoom foundation.
 
-   CORE PRINCIPLE
-   --------------
-   Every visual element inside a ReactFlow node lives in WORLD coords.
-   Panning and zooming scale those coords. If we want a label to stay
-   the same size on screen regardless of zoom, we must size it in
-   WORLD pixels equal to `desired_screen_px / zoom`.
+   CORE PRINCIPLE (v2)
+   --------------------
+   ReactFlow scales natively. All node content is sized in CSS pixels.
+   Semantic zoom is achieved through CSS opacity/display transitions
+   driven by ZoomSignals — progressive reveal, not counter-scaling.
 
-   `useScreenSize(worldPx)` returns exactly that: a world-pixel value
-   that renders as `worldPx` screen pixels at the current zoom.
-
-   No counter-scale transforms. No wrestling with stacking contexts.
-   Just arithmetic sizing, which the browser does beautifully.
+   DEPRECATED: useScreenSize / useScreenSizes (anti-zoom pattern).
+   These are kept for backward compatibility but should not be used
+   in new code. Prefer CSS pixel values + ZoomSignal-driven transitions.
    =================================================================== */
 
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import type { ZoomSignals } from "@/lib/workspace/contracts";
 
 /**
+ * @deprecated Use CSS pixel values instead. ReactFlow scales natively.
  * Returns a world-space size that renders as `screenPx` screen pixels
  * at the current zoom. Reactive — re-renders the node when zoom changes.
  */
@@ -31,8 +29,8 @@ export function useScreenSize(screenPx: number): number {
 }
 
 /**
+ * @deprecated Use CSS pixel values instead. ReactFlow scales natively.
  * Screen-stable helper that returns multiple sizes in one hook call.
- * Avoids calling `useScreenSize` many times in a single node.
  */
 export function useScreenSizes<T extends Record<string, number>>(
   input: T,
@@ -59,8 +57,8 @@ export function useZoomSignals(): ZoomSignals {
 /* ===================================================================
    Canonical screen-stable sizing constants.
 
-   These are SCREEN pixels — not world. Use `useScreenSize(X)` to get
-   the world-space size. Sizes are tuned for the Atlas aesthetic:
+   These are SCREEN pixels — used directly as CSS pixel values now
+   that ReactFlow scales natively. Sizes are tuned for the Atlas aesthetic:
    generous air, discrete scales, no tiny 11px text anywhere.
    =================================================================== */
 
@@ -122,7 +120,7 @@ export const STABLE_ITEM_SCREEN_WIDTH = STABLE.ITEM_CARD_WIDTH;
 export const STABLE_LABEL_SCREEN_SIZE = STABLE.ITEM_TITLE;
 
 /* ===================================================================
-   Hermite / interpolation helpers (re-exported for convenience)
+   Hermite / interpolation helpers
    =================================================================== */
 
 export function smoothStep(value: number, edge0: number, edge1: number): number {

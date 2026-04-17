@@ -121,7 +121,7 @@ export function HubSurface({
         {/* Expanded state */}
         <div
           className={cn(
-            "absolute transition-all duration-250 ease-[var(--ease-standard)]",
+            "absolute right-0 top-0 transition-all duration-250 ease-[var(--ease-standard)]",
             classes.expanded,
             expanded
               ? "pointer-events-auto opacity-100 scale-100"

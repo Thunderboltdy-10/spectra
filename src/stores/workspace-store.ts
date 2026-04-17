@@ -136,6 +136,8 @@ type WorkspaceState = {
   committedWorkspaceId: string | null;
   /** Workspace closest to viewport center u2013 used for auto-entry */
   nearestWorkspaceId: string | null;
+  /** Workspace the viewport is currently looking at — always updated, used as fallback context for Quick Chat when no workspace is explicitly committed */
+  viewedWorkspaceId: string | null;
   viewMode: ViewMode;
   focusedItemId: string | null;
 
@@ -276,6 +278,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   activeWorkspaceId: null,
   committedWorkspaceId: null,
   nearestWorkspaceId: null,
+  viewedWorkspaceId: null,
   viewMode: "byType",
   focusedItemId: null,
 
@@ -381,6 +384,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
           }
         }
       }
+      // Viewed workspace: always computed regardless of autoSelectContext.
+      // Uses a lower threshold than commitment — just needs the viewport to be
+      // roughly over a workspace territory. This provides fallback context for
+      // Quick Chat when the user has not explicitly committed to a workspace.
+      const viewThreshold = 0.20;
+      const viewedWorkspaceId = proximity >= viewThreshold ? nearestId : state.viewedWorkspaceId;
 
       return {
         viewportX: x,
@@ -392,6 +401,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
         workspaceProximity: proximity,
         nearestWorkspaceId: nearestId,
         committedWorkspaceId: autoWorkspaceId,
+        viewedWorkspaceId,
         activeWorkspaceId: autoWorkspaceId ?? state.activeWorkspaceId,
       };
     }),
@@ -400,7 +410,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
     set({ activeWorkspaceId: id }),
 
   commitToWorkspace: (id) =>
-    set({ committedWorkspaceId: id, activeWorkspaceId: id, nearestWorkspaceId: id }),
+    set({ committedWorkspaceId: id, activeWorkspaceId: id, nearestWorkspaceId: id, viewedWorkspaceId: id }),
 
   setNearestWorkspace: (id) =>
     set({ nearestWorkspaceId: id }),
@@ -607,6 +617,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
         committedWorkspaceId: id,
         activeWorkspaceId: id,
         nearestWorkspaceId: id,
+        viewedWorkspaceId: id,
         flyToTarget: {
           centerX: envelope.centerX,
           centerY: envelope.centerY,

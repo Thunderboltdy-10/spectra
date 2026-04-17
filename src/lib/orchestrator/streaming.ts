@@ -58,6 +58,18 @@ function shouldRunToolLoop(params: {
   if (toolNames.has("switch_mode") && /\b(quiz me|test me|switch to|research mode|tutor mode)\b/.test(content)) {
     return true;
   }
+  if (
+    (toolNames.has("create_note") || toolNames.has("surface_result"))
+    && /\b(create|make|build|generate|draft|produce|save|export)\b.*\b(note|summary|artifact|worksheet|slides|report|handout|document|deck)\b/.test(content)
+  ) {
+    return true;
+  }
+  if (
+    toolNames.has("get_workstream_context")
+    && /\b(workspace|workstream|planner|artifact|notes|results|hub|panel)\b/.test(content)
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -78,6 +90,12 @@ export async function runAssistantStreaming(params: {
   tools?: OpenRouterToolDefinition[];
   executeTool?: (params: { name: string; rawArguments: string }) => Promise<ExecutedToolResult>;
   maxToolRounds?: number;
+  stopWhen?: (state: {
+    toolRounds: number;
+    toolCallsExecuted: number;
+    responseText: string;
+    finishReason?: string;
+  }) => boolean;
   logger?: {
     info: (message: string, context?: Record<string, unknown>) => void;
   };
@@ -124,6 +142,7 @@ export async function runAssistantStreaming(params: {
       const workingMessages = [...params.messages];
       const maxToolRounds = Math.max(1, Math.min(6, params.maxToolRounds ?? 4));
       const allowedToolNames = new Set(params.tools.map((tool) => tool.function.name));
+      let executedToolCalls = 0;
 
       for (let toolRound = 0; toolRound < maxToolRounds; toolRound += 1) {
         const completion = await openRouterChatCompletion({
@@ -191,6 +210,7 @@ export async function runAssistantStreaming(params: {
             name: toolName,
             rawArguments: toolCall.function?.arguments ?? "{}",
           });
+          executedToolCalls += 1;
           if (executed.modeSwitch) {
             await params.send({
               type: "mode_switch",
@@ -220,6 +240,18 @@ export async function runAssistantStreaming(params: {
             name: toolName,
             tool_call_id: callId,
             content: JSON.stringify(executed.modelPayload),
+          });
+        }
+
+        if (params.stopWhen?.({
+          toolRounds: toolRound + 1,
+          toolCallsExecuted: executedToolCalls,
+          responseText,
+          finishReason,
+        })) {
+          workingMessages.push({
+            role: "system",
+            content: "Stop tool use now and produce the final answer using the gathered evidence.",
           });
         }
       }

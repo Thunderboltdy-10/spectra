@@ -3,6 +3,7 @@ import {
   buildModeSuggestions,
   buildModeTransformGuidance,
   coerceLearningContext,
+  formatLearningContextForPrompt,
   isFlashcardAppendIntent,
   mergeLearningContexts,
 } from "@/lib/orchestrator/learning-context";
@@ -91,6 +92,7 @@ describe("learning context helpers", () => {
   it("builds flashcard transform guidance for append requests", () => {
     const context = coerceLearningContext({
       flashcardCandidates: [{ front: "Diffusion", back: "Net movement from high to low concentration" }],
+      transformConstraints: ["Use only the uploaded biology chapter."],
     });
 
     const guidance = buildModeTransformGuidance({
@@ -98,11 +100,44 @@ describe("learning context helpers", () => {
       message: "Add more cards on osmosis",
       learningContext: context,
       existingFlashcardFronts: ["Diffusion", "Osmosis"],
+      sourceTitles: ["Biology Chapter 3.pdf"],
+      sourceRequired: true,
     });
 
     expect(guidance).toContain("ADD-MORE request");
     expect(guidance).toContain("Existing card fronts to avoid");
     expect(guidance).toContain("Diffusion");
+    expect(guidance).toContain("Biology Chapter 3.pdf");
+    expect(guidance).toContain("uploaded biology chapter");
+  });
+
+  it("formats persisted source anchors and constraints for prompts", () => {
+    const prompt = formatLearningContextForPrompt(coerceLearningContext({
+      topics: ["Cell respiration"],
+      sourceAnchors: ["Cell Respiration Notes.pdf"],
+      transformConstraints: ["Do not add facts outside the source."],
+    }));
+
+    expect(prompt).toContain("Source anchors");
+    expect(prompt).toContain("Cell Respiration Notes.pdf");
+    expect(prompt).toContain("Do not add facts outside the source.");
+  });
+
+  it("adds source-grounding requirements for document transforms", () => {
+    const guidance = buildModeTransformGuidance({
+      mode: "document",
+      message: "Turn this source into revision notes",
+      learningContext: coerceLearningContext({
+        transformConstraints: ["Use the teacher packet only."],
+      }),
+      sourceTitles: ["Teacher Packet.pdf"],
+      sourceRequired: true,
+    });
+
+    expect(guidance).toContain("Ground the output in these sources only");
+    expect(guidance).toContain("Teacher Packet.pdf");
+    expect(guidance).toContain("Use the teacher packet only");
+    expect(guidance).toContain("say so instead of inventing material");
   });
 
   it("prefers higher-signal skills for deeper agent-backed turns", () => {

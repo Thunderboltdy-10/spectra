@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildTaskGraph,
   executeGraph,
+  getOrchestrationProfileConfig,
   resolveOrchestrationProfile,
   shouldUseMultiAgent,
   synthesize,
@@ -69,5 +70,18 @@ describe("task graph", () => {
   it("tags generated nodes with the resolved profile", () => {
     const graph = buildTaskGraph("Create a worksheet artifact", "document", {});
     expect(graph.every((node) => node.profile === "artifact_builder")).toBe(true);
+  });
+
+  it("exposes explicit orchestration profile contracts", () => {
+    const config = getOrchestrationProfileConfig("study_transform");
+    expect(config.groundingPolicy).toBe("require_sources");
+    expect(config.verificationChecks).toContain("source_grounding");
+    expect(config.recursionMode).toBe("hybrid");
+  });
+
+  it("limits graph specialists to profile-relevant roles", () => {
+    const graph = buildTaskGraph("Restore context from our long thread and continue", "general", {});
+    expect(graph.every((node) => node.profile === "long_context_reconstruction")).toBe(true);
+    expect(graph.some((node) => node.role === "workflow_planner" || node.role === "critic")).toBe(true);
   });
 });

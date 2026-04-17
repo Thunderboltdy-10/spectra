@@ -38,8 +38,14 @@ export type AgentMatchCandidate = {
   description?: string;
   subjectArea?: string;
   gradeLevel?: string;
+  preferredMode?: string;
   guidelinesSummary?: string;
   guidelinesTopicMap?: string[];
+  guidelinesRubricHints?: string[];
+  guidelinesMisconceptions?: string[];
+  guidelinesVocabulary?: string[];
+  guidelinesExamStructure?: string[];
+  systemPrompt?: string;
   semanticText?: string;
   semanticEmbedding?: number[];
 };
@@ -139,9 +145,15 @@ function buildAgentSemanticText(agent: AgentMatchCandidate) {
     agent.category,
     agent.subjectArea,
     agent.gradeLevel,
+    agent.preferredMode,
     agent.description,
+    agent.systemPrompt,
     agent.guidelinesSummary,
     ...(agent.guidelinesTopicMap ?? []),
+    ...(agent.guidelinesRubricHints ?? []),
+    ...(agent.guidelinesMisconceptions ?? []),
+    ...(agent.guidelinesVocabulary ?? []),
+    ...(agent.guidelinesExamStructure ?? []),
   ]
     .filter((value) => typeof value === "string" && value.trim().length > 0)
     .join("\n");
@@ -179,6 +191,8 @@ export async function matchAgentToMessage(
     threshold?: number;
     linkedAgentId?: string | null;
     embeddingModelAvailable?: boolean;
+    mode?: string;
+    activeWorkstreamLinked?: boolean;
   },
 ): Promise<AgentMatchResult | null> {
   const threshold = options?.threshold ?? 0.3;
@@ -229,10 +243,13 @@ export async function matchAgentToMessage(
       Math.min(1, topicScore * 0.55 + categoryScore * 0.2 + nameScore * 0.15 + descriptionScore * 0.1),
     );
     const metadataBoost = Math.min(
-      0.22,
+      0.34,
       (normalize(agent.subjectArea ?? "") && normalizedMessage.includes(normalize(agent.subjectArea ?? "")) ? 0.08 : 0)
       + (normalize(agent.gradeLevel ?? "") && normalizedMessage.includes(normalize(agent.gradeLevel ?? "")) ? 0.04 : 0)
-      + (normalize(agent.guidelinesSummary ?? "") && normalizedMessage.includes(normalize(agent.guidelinesSummary ?? "").slice(0, 40)) ? 0.1 : 0),
+      + (normalize(agent.guidelinesSummary ?? "") && normalizedMessage.includes(normalize(agent.guidelinesSummary ?? "").slice(0, 40)) ? 0.08 : 0)
+      + (options?.mode && normalize(agent.preferredMode ?? "") === normalize(options.mode) ? 0.07 : 0)
+      + ((options?.mode === "marker" && (agent.guidelinesRubricHints?.length ?? 0) > 0) ? 0.04 : 0)
+      + (options?.activeWorkstreamLinked ? 0.07 : 0),
     );
     const semanticScore =
       queryEmbedding && Array.isArray(agent.semanticEmbedding) && agent.semanticEmbedding.length > 0

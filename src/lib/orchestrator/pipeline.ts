@@ -148,10 +148,15 @@ type AgentSnapshot = {
   avatarIcon?: string;
   preferredModel?: string;
   preferredMode?: StudyMode;
+  allowedTools?: string[];
   modelAllowlist?: string[];
   modelDenylist?: string[];
   guidelinesSummary?: string;
   guidelinesTopicMap?: string[];
+  guidelinesRubricHints?: string[];
+  guidelinesMisconceptions?: string[];
+  guidelinesVocabulary?: string[];
+  guidelinesExamStructure?: string[];
 };
 
 function classifierOutputFormatForRoutePlan(outputFormat: string | undefined, fallback: string) {
@@ -1362,6 +1367,8 @@ export async function runChatPipeline(request: NextRequest) {
         typeof (activeWorkstream as { linkedAgentId?: unknown } | null)?.linkedAgentId === "string"
           ? String((activeWorkstream as { linkedAgentId?: unknown }).linkedAgentId)
           : null,
+      mode: safeMode === "auto" ? effectiveMode : safeMode,
+      activeWorkstreamLinked: Boolean(activeWorkstream && typeof (activeWorkstream as { linkedAgentId?: unknown }).linkedAgentId === "string"),
     });
     if (matched) {
       const matchedScore = Number(matched.score.toFixed(2));
@@ -1567,6 +1574,19 @@ export async function runChatPipeline(request: NextRequest) {
           name: selectedAgent.name,
           preferredModel: selectedAgent.preferredModel,
           preferredMode: selectedAgent.preferredMode,
+          systemPrompt: selectedAgent.systemPrompt,
+          description: selectedAgent.description,
+          subjectArea: selectedAgent.subjectArea,
+          gradeLevel: selectedAgent.gradeLevel,
+          modelAllowlist: selectedAgent.modelAllowlist,
+          modelDenylist: selectedAgent.modelDenylist,
+          allowedTools: selectedAgent.allowedTools,
+          guidelinesSummary: selectedAgent.guidelinesSummary,
+          guidelinesTopicMap: selectedAgent.guidelinesTopicMap,
+          guidelinesRubricHints: selectedAgent.guidelinesRubricHints,
+          guidelinesMisconceptions: selectedAgent.guidelinesMisconceptions,
+          guidelinesVocabulary: selectedAgent.guidelinesVocabulary,
+          guidelinesExamStructure: selectedAgent.guidelinesExamStructure,
         }
       : undefined;
   const buildThreadContext = (): {
@@ -2985,11 +3005,23 @@ export async function runChatPipeline(request: NextRequest) {
     : "none";
   const learningContextPrompt = formatLearningContextForPrompt(storedLearningContext);
   const managebacContextBlock = managebacContext.sourceBlock;
+  const groundedSourceTitles = Array.from(new Set([
+    ...retrieval.citations.map((citation) => citation.filename).filter((value): value is string => Boolean(value)),
+    ...searchSources.map((source) => source.title).filter((value): value is string => Boolean(value)),
+    ...attachments.prepared.map((attachment) => attachment.filename).filter((value): value is string => Boolean(value)),
+  ])).slice(0, 8);
+  const sourceGroundingRequired = Boolean(
+    body.attachmentResourceIds?.length
+    || ((effectiveMode === "document" || effectiveMode === "flashcard" || effectiveMode === "quiz" || effectiveMode === "exam")
+      && (retrieval.citations.length > 0 || attachments.prepared.length > 0)),
+  );
   const modeTransformGuidance = buildModeTransformGuidance({
     mode: effectiveMode,
     message: normalizedMessage,
     learningContext: storedLearningContext,
     existingFlashcardFronts: latestDeck?.cards.map((card) => card.front) ?? [],
+    sourceTitles: groundedSourceTitles,
+    sourceRequired: sourceGroundingRequired,
   });
   const learningContextStatus = storedLearningContext
     ? `topics=${storedLearningContext.topics.length}, facts=${storedLearningContext.keyFacts.length}, cards=${storedLearningContext.flashcardCandidates.length}`
@@ -3294,6 +3326,16 @@ Agent: ${routePlan.agentContract.name ?? "Focused agent"}
 Scope: ${routePlan.agentContract.scope}
 Resource scopes: ${routePlan.agentContract.resourceScopes.join(", ") || "none"}
 Allowed bundles: ${routePlan.agentContract.toolBundles.join(", ") || "none"}
+Preferred mode: ${routePlan.agentContract.preferredMode ?? "none"}
+Preferred model: ${routePlan.agentContract.preferredModel ?? "none"}
+Allowed tools: ${routePlan.agentContract.allowedTools?.join(", ") || "all route-approved"}
+Model allowlist: ${routePlan.agentContract.modelAllowlist?.join(", ") || "none"}
+Model denylist: ${routePlan.agentContract.modelDenylist?.join(", ") || "none"}
+Linked to active workstream: ${routePlan.agentContract.activeWorkstreamLinked ? "yes" : "no"}
+Knowledge signals: ${routePlan.agentContract.knowledgeSignals?.join(" | ") || "none"}
+Summary: ${routePlan.agentContract.promptSummary ?? "none"}
+Prompt guidance:
+${routePlan.agentContract.promptGuidance ?? "none"}
 === END AGENT CONTRACT ===`,
       );
     }
@@ -4870,10 +4912,31 @@ BACK: [answer or definition]`,
         searchSources,
         attachmentCitations,
       );
+      const shouldEnforceGroundedTransform =
+        sourceGroundingRequired
+        && ["document", "flashcard", "quiz", "exam", "research"].includes(effectiveMode);
+      const groundedSourceLower = groundedSourceTitles.map((title) => title.toLowerCase());
+      const responseMentionsGroundedSource = groundedSourceLower.length === 0
+        ? false
+        : groundedSourceLower.some((title) => correctedResponse.toLowerCase().includes(title));
+      const hasGroundedCitations = citations.length > 0;
+      const groundingLooksWeak =
+        shouldEnforceGroundedTransform
+        && groundedSourceTitles.length > 0
+        && !hasGroundedCitations
+        && !responseMentionsGroundedSource;
       const rewrittenResponse = rewriteCitationMarkers(correctedResponse, citations);
       const withInlineMarkers = ensureInlineCitationMarkers(rewrittenResponse, citations);
       // Strip orphan citation markers [N] that have no matching citation.
       let finalizedResponse = stripOrphanCitations(withInlineMarkers, citations);
+      if (groundingLooksWeak) {
+        if (effectiveMode === "research") {
+          finalizedResponse = `${finalizedResponse.trim()}\n\n## Source limits\n- I do not have enough grounded evidence from the provided sources to make stronger claims safely.`;
+        } else {
+          finalizedResponse = `${finalizedResponse.trim()}\n\nSource grounding note: I kept this limited because the available source evidence was too thin to safely add more unsupported details.`;
+        }
+        route.trace.toolchain.push("source_grounding_guard");
+      }
       let generatedArtifactAttachments: string[] | undefined;
       let generatedArtifactResourceIds: string[] | undefined;
       if (effectiveMode === "document" || isGeneratedDocumentContent(finalizedResponse)) {

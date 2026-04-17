@@ -22,6 +22,8 @@ export type LearningContext = {
   difficultyLevel: number;
   uncertaintyGaps: string[];
   nextSteps: string[];
+  sourceAnchors?: string[];
+  transformConstraints?: string[];
 };
 
 export type ModeSuggestion = {
@@ -161,6 +163,12 @@ export function coerceLearningContext(value: unknown): LearningContext | null {
       Array.isArray(row.nextSteps) ? row.nextSteps.map((item) => String(item ?? "")) : [],
       MAX_NEXT_STEPS,
     ),
+    sourceAnchors: uniqueStrings(Array.isArray((row as { sourceAnchors?: unknown }).sourceAnchors)
+      ? ((row as { sourceAnchors?: unknown[] }).sourceAnchors ?? []).map((item) => String(item ?? ""))
+      : [], 8),
+    transformConstraints: uniqueStrings(Array.isArray((row as { transformConstraints?: unknown }).transformConstraints)
+      ? ((row as { transformConstraints?: unknown[] }).transformConstraints ?? []).map((item) => String(item ?? ""))
+      : [], 8),
   };
 }
 
@@ -208,6 +216,8 @@ export function mergeLearningContexts(base: LearningContext | null, incoming: Le
     difficultyLevel,
     uncertaintyGaps: uniqueStrings([...base.uncertaintyGaps, ...incoming.uncertaintyGaps], MAX_UNCERTAINTY_GAPS),
     nextSteps: uniqueStrings([...base.nextSteps, ...incoming.nextSteps], MAX_NEXT_STEPS),
+    sourceAnchors: uniqueStrings([...(base.sourceAnchors ?? []), ...(incoming.sourceAnchors ?? [])], 8),
+    transformConstraints: uniqueStrings([...(base.transformConstraints ?? []), ...(incoming.transformConstraints ?? [])], 8),
   };
 }
 
@@ -242,6 +252,12 @@ export function formatLearningContextForPrompt(value: LearningContext | null) {
   }
   if (value.nextSteps.length > 0) {
     sections.push(`Suggested next steps:\n${value.nextSteps.slice(0, 4).map((entry) => `- ${entry}`).join("\n")}`);
+  }
+  if ((value.sourceAnchors?.length ?? 0) > 0) {
+    sections.push(`Source anchors:\n${(value.sourceAnchors ?? []).slice(0, 6).map((entry) => `- ${entry}`).join("\n")}`);
+  }
+  if ((value.transformConstraints?.length ?? 0) > 0) {
+    sections.push(`Transform constraints:\n${(value.transformConstraints ?? []).slice(0, 6).map((entry) => `- ${entry}`).join("\n")}`);
   }
   sections.push(`Difficulty level (1-5): ${clampDifficulty(value.difficultyLevel)}`);
 
@@ -306,6 +322,8 @@ export function buildModeTransformGuidance(params: {
   message: string;
   learningContext: LearningContext | null;
   existingFlashcardFronts?: string[];
+  sourceTitles?: string[];
+  sourceRequired?: boolean;
 }): string {
   const context = params.learningContext;
   if (!context) return "";
@@ -341,6 +359,24 @@ export function buildModeTransformGuidance(params: {
       for (const pair of context.flashcardCandidates.slice(0, 8)) {
         lines.push(`  - FRONT: ${pair.front} | BACK: ${pair.back}`);
       }
+    }
+  }
+
+  if (params.mode === "flashcard" || params.mode === "quiz" || params.mode === "document" || params.mode === "research") {
+    if ((params.sourceTitles?.length ?? 0) > 0) {
+      lines.push("Source-grounding requirements:");
+      lines.push(`- Ground the output in these sources only: ${params.sourceTitles?.slice(0, 8).join(", ")}.`);
+    }
+    if (params.sourceRequired) {
+      lines.push("- If the provided sources are insufficient, say so instead of inventing material.");
+      lines.push("- Keep facts, questions, and flashcards anchored to the supplied source evidence.");
+    }
+  }
+
+  if ((context.transformConstraints?.length ?? 0) > 0) {
+    lines.push("Persisted transform constraints:");
+    for (const constraint of (context.transformConstraints ?? []).slice(0, 6)) {
+      lines.push(`  - ${constraint}`);
     }
   }
 

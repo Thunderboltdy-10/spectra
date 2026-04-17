@@ -5,6 +5,7 @@ import type {
   ArtifactFormat,
   AssignmentLevel,
   ContextWindowStrategy,
+  OrchestrationProfile,
   ModeContract,
   RoutePlan,
   RetrievalScope,
@@ -33,6 +34,19 @@ type BuildRoutePlanParams = {
     name: string;
     preferredModel?: string;
     preferredMode?: StudyMode;
+    systemPrompt?: string;
+    description?: string;
+    subjectArea?: string;
+    gradeLevel?: string;
+    modelAllowlist?: string[];
+    modelDenylist?: string[];
+    allowedTools?: string[];
+    guidelinesSummary?: string;
+    guidelinesTopicMap?: string[];
+    guidelinesRubricHints?: string[];
+    guidelinesMisconceptions?: string[];
+    guidelinesVocabulary?: string[];
+    guidelinesExamStructure?: string[];
   };
   workstreamContext?: {
     activeWorkstreamId?: string;
@@ -338,54 +352,86 @@ function decideThreadStrategy(params: {
     };
   }
 
-  const explicitFork = /\b(new question|different topic|separate thread|start fresh|new thread)\b/i.test(params.message);
-  const explicitContinue = Boolean(params.threadContext.explicitlySameThread) && !explicitFork;
-  const recentContext = (params.threadContext.recentMessages ?? [])
+  const normalizedMessage = compactText(params.message).toLowerCase();
+  const explicitFork = /\b(new question|different topic|separate thread|start fresh|new thread|fork this|branch this)\b/i.test(params.message);
+  const explicitContinueCue = /\b(continue|carry on|pick up|resume|keep going|same thread|as above|based on that|from the previous|from the prior|tighten|revise|iterate)\b/i.test(params.message);
+  const explicitContinue = Boolean(params.threadContext.explicitlySameThread) || (explicitContinueCue && !explicitFork);
+  const recentMessages = params.threadContext.recentMessages ?? [];
+  const recentContext = recentMessages
     .slice(-6)
     .map((entry) => entry.content)
     .join(" ");
+  const lastUserMessage = [...recentMessages].reverse().find((entry) => entry.role === "user")?.content ?? "";
   const topicContinuity = lexicalSimilarity(params.message, recentContext);
+  const lastUserContinuity = lexicalSimilarity(params.message, lastUserMessage);
   const timeGapHours = params.threadContext.lastMessageAt
     ? Math.max(0, (Date.now() - params.threadContext.lastMessageAt) / (60 * 60 * 1000))
     : undefined;
   const contextWindowPressure = normalizeConfidence(params.threadContext.contextWindowUtilization ?? 0);
   const turnsSinceCompaction = params.threadContext.turnsSinceCompaction ?? 0;
+  const hasSummaryLikeMessage = recentMessages.some((entry) =>
+    entry.role === "assistant" && /\bsummary:|thread snapshot|unresolved tasks|commitments|recent raw turns\b/i.test(entry.content),
+  );
+  const switchIntent = /\b(switch to|instead|ignore the old|move to|now for|let'?s do|let us do|separately focus on)\b/i.test(normalizedMessage);
+  const explicitIgnorePrior = /\b(ignore the old|ignore previous|ignore the prior|forget the old thread)\b/i.test(normalizedMessage);
   const continuityScore = [
     explicitContinue ? 0.42 : 0,
     topicContinuity >= 0.55 ? 0.28 : topicContinuity >= 0.42 ? 0.18 : 0,
+    lastUserContinuity >= 0.5 ? 0.14 : lastUserContinuity >= 0.38 ? 0.08 : 0,
     contextWindowPressure < 0.75 ? 0.12 : 0,
     turnsSinceCompaction < 15 ? 0.08 : 0,
     typeof timeGapHours !== "number" || timeGapHours < 12 ? 0.08 : 0,
   ].reduce((sum, value) => sum + value, 0);
   const forkScore = [
     explicitFork ? 0.52 : 0,
+    switchIntent && !explicitIgnorePrior ? 0.22 : 0,
     contextWindowPressure >= 0.75 ? 0.28 : contextWindowPressure >= 0.68 ? 0.14 : 0,
     turnsSinceCompaction >= 15 ? 0.18 : turnsSinceCompaction >= 12 ? 0.08 : 0,
     typeof timeGapHours === "number" && timeGapHours >= 12 ? 0.16 : 0,
     topicContinuity < 0.3 ? 0.24 : topicContinuity < 0.42 ? 0.1 : 0,
+    lastUserContinuity < 0.22 ? 0.12 : 0,
+    hasSummaryLikeMessage && topicContinuity < 0.35 ? 0.08 : 0,
   ].reduce((sum, value) => sum + value, 0);
+  const shouldStartFresh =
+    !explicitContinue
+    && !explicitFork
+    && switchIntent
+    && topicContinuity < 0.18
+    && lastUserContinuity < 0.14
+    && contextWindowPressure < 0.55
+    && turnsSinceCompaction < 10
+    && (typeof timeGapHours !== "number" || timeGapHours < 8)
+    && params.workstreamAssignment.status !== "assigned";
   const shouldFork =
-    !explicitContinue && (forkScore >= 0.46 || forkScore > continuityScore + 0.12);
+    !shouldStartFresh
+    && !explicitContinue
+    && (forkScore >= 0.46 || forkScore > continuityScore + 0.12);
   return {
-    action: shouldFork ? "fork" : "continue",
-    confidence: shouldFork
-      ? normalizeConfidence(0.5 + (forkScore * 0.4))
-      : normalizeConfidence(0.52 + (continuityScore * 0.38) + (topicContinuity * 0.14)),
-    reason: shouldFork
-      ? explicitFork
-        ? "User explicitly requested a fresh topic/thread."
-        : contextWindowPressure >= 0.75
-          ? "Current thread is approaching context saturation."
-          : turnsSinceCompaction >= 15
-            ? "Thread has run long enough that a clean fork is safer than continuing."
-            : typeof timeGapHours === "number" && timeGapHours >= 12
-              ? "Long gap since the last turn suggests a fresh thread is cleaner."
-              : "Topic continuity with the recent thread is too weak."
+    action: shouldStartFresh ? "new_chat" : shouldFork ? "fork" : "continue",
+    confidence: shouldStartFresh
+      ? normalizeConfidence(0.72 + (switchIntent ? 0.12 : 0) + ((1 - topicContinuity) * 0.08))
+      : shouldFork
+        ? normalizeConfidence(0.5 + (forkScore * 0.4))
+        : normalizeConfidence(0.52 + (continuityScore * 0.38) + (topicContinuity * 0.14)),
+    reason: shouldStartFresh
+      ? "Prompt switches topics sharply while the current thread is still light enough to start a clean new conversation."
+      : shouldFork
+        ? explicitFork
+          ? "User explicitly requested a fresh topic/thread."
+          : contextWindowPressure >= 0.75
+            ? "Current thread is approaching context saturation."
+            : turnsSinceCompaction >= 15
+              ? "Thread has run long enough that a clean fork is safer than continuing."
+              : typeof timeGapHours === "number" && timeGapHours >= 12
+                ? "Long gap since the last turn suggests a fresh thread is cleaner."
+                : switchIntent
+                  ? "Prompt pivots away from the current topic and is safer as a fork."
+                  : "Topic continuity with the recent thread is too weak."
       : explicitContinue
         ? "User is explicitly continuing the active thread and continuity remains acceptable."
         : "Prompt remains aligned with the active thread.",
     contextWindowPressure,
-    topicContinuity,
+    topicContinuity: Math.max(topicContinuity, lastUserContinuity),
     timeGapHours,
     turnsSinceCompaction,
   };
@@ -554,7 +600,7 @@ function isPersonalMessage(message: string) {
 
 function isArtifactRequest(mode: StudyMode, message: string) {
   if (mode === "document") return true;
-  return /\b(pdf|docx|pptx|slides|presentation|study guide|worksheet|handout|document)\b/i.test(message);
+  return /\b(pdf|docx|pptx|slides|presentation|study guide|worksheet|handout|document|artifact|report|deck|one-pager|cheat sheet|revision sheet)\b/i.test(message);
 }
 
 function detectRequestedArtifactFormats(message: string): ArtifactFormat[] {
@@ -672,18 +718,64 @@ function buildAgentContract(params: BuildRoutePlanParams): AgentContract | undef
   if (!params.selectedAgent) return undefined;
   const toolBundles: ToolBundle[] = ["retrieval"];
   const preferredCapabilities: AgentContract["preferredCapabilities"] = [];
+  if (params.hasAttachments) {
+    preferredCapabilities.push("vision");
+  }
   if (params.mode === "research") {
     toolBundles.push("search");
     preferredCapabilities.push("reasoning", "search");
   }
+  if (
+    params.mode === "marker"
+    || (params.selectedAgent.guidelinesRubricHints?.length ?? 0) > 0
+    || (params.selectedAgent.guidelinesExamStructure?.length ?? 0) > 0
+  ) {
+    preferredCapabilities.push("reasoning");
+  }
+  const activeWorkstreamLinked =
+    params.workstreamContext?.activeWorkstream?.linkedAgentId === params.selectedAgent._id;
+  const knowledgeSignals = [
+    params.selectedAgent.subjectArea,
+    params.selectedAgent.gradeLevel,
+    ...(params.selectedAgent.guidelinesTopicMap ?? []).slice(0, 4),
+    ...(params.selectedAgent.guidelinesRubricHints ?? []).slice(0, 2),
+    ...(params.selectedAgent.guidelinesMisconceptions ?? []).slice(0, 2),
+    ...(params.selectedAgent.guidelinesVocabulary ?? []).slice(0, 2),
+    ...(params.selectedAgent.guidelinesExamStructure ?? []).slice(0, 2),
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  const promptSummary = [
+    params.selectedAgent.description,
+    params.selectedAgent.guidelinesSummary,
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0).join(" ");
+  const promptGuidance = [
+    params.selectedAgent.systemPrompt?.replace(/\s+/g, " ").trim().slice(0, 420),
+    (params.selectedAgent.guidelinesRubricHints?.length ?? 0) > 0
+      ? `Rubric focus: ${params.selectedAgent.guidelinesRubricHints?.slice(0, 3).join("; ")}`
+      : undefined,
+    (params.selectedAgent.guidelinesMisconceptions?.length ?? 0) > 0
+      ? `Watch misconceptions: ${params.selectedAgent.guidelinesMisconceptions?.slice(0, 3).join("; ")}`
+      : undefined,
+    (params.selectedAgent.guidelinesVocabulary?.length ?? 0) > 0
+      ? `Preferred vocabulary: ${params.selectedAgent.guidelinesVocabulary?.slice(0, 4).join(", ")}`
+      : undefined,
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0).join("\n");
   return {
     id: params.selectedAgent._id,
     name: params.selectedAgent.name,
     scope: "focused",
-    instructionStyle: "compact",
+    instructionStyle: activeWorkstreamLinked || params.mode === "research" || params.mode === "marker" ? "full" : "compact",
     resourceScopes: ["agent"],
-    toolBundles,
-    preferredCapabilities,
+    toolBundles: Array.from(new Set(toolBundles)),
+    preferredCapabilities: Array.from(new Set(preferredCapabilities)),
+    preferredMode: params.selectedAgent.preferredMode,
+    preferredModel: params.selectedAgent.preferredModel,
+    modelAllowlist: params.selectedAgent.modelAllowlist,
+    modelDenylist: params.selectedAgent.modelDenylist,
+    allowedTools: params.selectedAgent.allowedTools,
+    promptGuidance: promptGuidance || undefined,
+    promptSummary: promptSummary || undefined,
+    knowledgeSignals,
+    activeWorkstreamLinked,
   };
 }
 
@@ -723,6 +815,32 @@ function allowedAiToolsForAssignmentLevel(assignmentLevel: AssignmentLevel): AiT
   ];
 }
 
+function resolveOrchestrationProfile(params: {
+  message: string;
+  mode: StudyMode;
+  hasAttachments: boolean;
+  shouldUseWebSearch: boolean;
+  hasWorkstream: boolean;
+  hasAgent: boolean;
+  threadContext?: BuildRoutePlanParams["threadContext"];
+}) : OrchestrationProfile {
+  const lower = params.message.toLowerCase();
+  if (params.hasAttachments && /\b(image|diagram|screenshot|photo|graph|chart|figure)\b/.test(lower)) return "image_analysis";
+  if (params.mode === "marker") return "teacher_marking";
+  if (/\b(flashcards?|quiz|study guide|turn .* into|notes from|transform)\b/.test(lower)) return "study_transform";
+  if (params.hasWorkstream && /\b(workspace|workstream|planner|note|save|organi[sz]e|attach)\b/.test(lower)) return "workspace_action";
+  if (params.hasAgent && /\b(agent|delegate|specialist|different perspectives|multiple models)\b/.test(lower)) return "agent_delegation";
+  if (params.shouldUseWebSearch || params.mode === "research") return "search_synthesis";
+  if (/\b(document|artifact|worksheet|slides|presentation|handout)\b/.test(lower)) return "artifact_builder";
+  if (
+    /\b(reconstruct|restore context|pick up where we left off|what were we doing|continue prior work)\b/.test(lower)
+    || ((params.threadContext?.contextWindowUtilization ?? 0) >= 0.75 && (params.threadContext?.turnCount ?? 0) >= 14)
+  ) {
+    return "long_context_reconstruction";
+  }
+  return "simple_direct";
+}
+
 export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
   const assignmentLevel =
     params.assignmentLevel
@@ -759,6 +877,15 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
     workspaceActionIntent: workspaceAction?.intent,
   });
   const shouldUseSchoolResources = params.hasPack || params.hasAgentResources || /upload|attached|file|notes|resource|chapter|pack/i.test(lowerMessage);
+  const artifactSignalStrength = [
+    params.mode === "document" ? 0.7 : 0,
+    artifactRequest ? 0.2 : 0,
+    requestedArtifactFormats.length > 0 ? 0.1 : 0,
+    /\b(create|make|build|generate|draft|produce|export|save)\b/i.test(lowerMessage) ? 0.12 : 0,
+    /\b(summary|handout|worksheet|slides|report|guide|brief|deck|artifact)\b/i.test(lowerMessage) ? 0.12 : 0,
+    params.workstreamContext?.focusSurface === "workspace" || params.workstreamContext?.focusSurface === "panel" ? 0.12 : 0,
+  ].reduce((sum, value) => sum + value, 0);
+  const artifactWorthSaving = artifactSignalStrength >= 0.74;
   const researchNeedsSearch =
     params.mode === "research"
     && (
@@ -862,12 +989,27 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
         : "simple";
   const allowedAiTools = allowedAiToolsForAssignmentLevel(assignmentLevel);
   const requestedOrchestration = detectOrchestrationIntent(params.message);
+  const orchestrationProfile = resolveOrchestrationProfile({
+    message: params.message,
+    mode: params.mode,
+    hasAttachments: params.hasAttachments,
+    shouldUseWebSearch,
+    hasWorkstream: workstreamAssignment.status === "assigned",
+    hasAgent: params.hasAgent,
+    threadContext: params.threadContext,
+  });
   const shouldUseMultiStep =
     (
       params.complexity === "complex"
-      && (params.mode === "research" || (artifactRequest && requestedArtifactFormats.includes("pptx")) || (params.hasAgent && shouldUseSchoolResources))
+      && (
+        params.mode === "research"
+        || params.mode === "marker"
+        || (artifactRequest && (requestedArtifactFormats.includes("pptx") || artifactWorthSaving))
+        || (params.hasAgent && (shouldUseSchoolResources || (agentContract?.activeWorkstreamLinked ?? false)))
+      )
     )
-    || requestedOrchestration;
+    || requestedOrchestration
+    || ((agentContract?.activeWorkstreamLinked ?? false) && params.complexity !== "simple" && (artifactWorthSaving || params.mode === "marker"));
   const requestedModelPhrase = detectRequestedModelPhrase(params.message);
 
   const retrievalScopes: RetrievalScope[] = [
@@ -883,7 +1025,7 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
       ...(multimodal ? (["vision"] as ToolBundle[]) : []),
       ...(shouldUseWebSearch ? (["search"] as ToolBundle[]) : []),
       ...(retrievalScopes.length > 0 ? (["retrieval"] as ToolBundle[]) : []),
-      ...(artifactRequest ? (["artifact"] as ToolBundle[]) : []),
+      ...(artifactWorthSaving ? (["artifact"] as ToolBundle[]) : []),
       ...(artifactRequest || params.mode === "research" ? (["skills"] as ToolBundle[]) : []),
       ...(personalTask || assignmentLevel === "L4" ? (["memory"] as ToolBundle[]) : []),
       ...(shouldUseMultiStep ? (["multi_agent"] as ToolBundle[]) : []),
@@ -897,7 +1039,7 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
   const preferred = [
     ...(params.mode === "research" || shouldUseMultiStep || assignmentLevel === "L4" ? ["reasoning" as const] : []),
     ...(shouldUseWebSearch ? ["search" as const] : []),
-    ...(artifactRequest ? ["reasoning" as const] : []),
+    ...(artifactWorthSaving ? ["reasoning" as const] : []),
   ];
 
   return {
@@ -950,6 +1092,7 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
     },
     requestedArtifactFormats,
     allowSubAgents: shouldUseMultiStep && (params.mode === "research" || params.complexity === "complex"),
+    orchestrationProfile,
     modeContract,
     agentContract,
     schoolSoulVersion: params.schoolSoulVersion,

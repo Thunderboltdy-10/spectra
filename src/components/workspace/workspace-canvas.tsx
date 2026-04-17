@@ -150,6 +150,20 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
   const pad = useScreenSize(STABLE.PAD_LG);
   const radius = useScreenSize(STABLE.RADIUS_LG);
 
+  // Precompute sizes so hooks are not called conditionally
+  const gap24 = useScreenSize(24);
+  const gap6 = useScreenSize(6);
+  const gap12 = useScreenSize(12);
+  const dotSize = useScreenSize(3);
+  const nearTop = useScreenSize(28);
+  const nearLeft = useScreenSize(36);
+  const nearPadY = useScreenSize(10);
+  const nearPadX = useScreenSize(14);
+  const nearShadowY = useScreenSize(4);
+  const nearShadowBlur = useScreenSize(14);
+  const nearGap = useScreenSize(2);
+  const bgSize = useScreenSize(240);
+
   // Crossfade far ↔ anchored
   const farAlpha = 1 - signals.identityAnchor;
   const nearAlpha = signals.identityAnchor;
@@ -160,6 +174,7 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
 
   const lastActivity = useMemo(() => {
     if (!workspace.lastActivity) return null;
+    // eslint-disable-next-line react-hooks/rules-of-hooks, react-hooks/purity
     const diffM = Math.floor((Date.now() - workspace.lastActivity) / 60000);
     if (diffM < 1) return "active now";
     if (diffM < 60) return `${diffM}m`;
@@ -195,7 +210,7 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
           inset: 0,
           backgroundImage: contourPatternDataUri(ink.contour, 0.35),
           backgroundRepeat: "repeat",
-          backgroundSize: `${useScreenSize(240)}px ${useScreenSize(240)}px`,
+          backgroundSize: `${bgSize}px ${bgSize}px`,
           opacity: contourAlpha * 0.55,
           pointerEvents: "none",
           borderRadius: `${pad * 2}px`,
@@ -214,7 +229,7 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
             alignItems: "center",
             justifyContent: "center",
             flexDirection: "column",
-            gap: useScreenSize(24),
+            gap: gap24,
             opacity: farAlpha,
             pointerEvents: "auto",
           }}
@@ -234,7 +249,7 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
-              gap: useScreenSize(6),
+              gap: gap6,
             }}
           >
             <div
@@ -259,14 +274,14 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
                 color: ink.accent,
                 display: "flex",
                 alignItems: "center",
-                gap: useScreenSize(12),
+                gap: gap12,
               }}
             >
               <span>{coord}</span>
               <span
                 style={{
-                  width: useScreenSize(3),
-                  height: useScreenSize(3),
+                  width: dotSize,
+                  height: dotSize,
                   borderRadius: "50%",
                   background: ink.accent,
                 }}
@@ -276,8 +291,8 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
                 <>
                   <span
                     style={{
-                      width: useScreenSize(3),
-                      height: useScreenSize(3),
+                      width: dotSize,
+                      height: dotSize,
                       borderRadius: "50%",
                       background: ink.accent,
                     }}
@@ -295,22 +310,22 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
         <div
           style={{
             position: "absolute",
-            top: useScreenSize(28),
-            left: useScreenSize(36),
+            top: nearTop,
+            left: nearLeft,
             display: "flex",
             alignItems: "center",
-            gap: useScreenSize(12),
-            padding: `${useScreenSize(10)}px ${useScreenSize(14)}px`,
+            gap: gap12,
+            padding: `${nearPadY}px ${nearPadX}px`,
             background: "var(--bg-elevated)",
             border: `1px solid ${ink.contour}`,
             borderRadius: `${radius}px`,
             opacity: nearAlpha,
             pointerEvents: "auto",
-            boxShadow: `0 ${useScreenSize(4)}px ${useScreenSize(14)}px rgba(10,14,20,0.08)`,
+            boxShadow: `0 ${nearShadowY}px ${nearShadowBlur}px rgba(10,14,20,0.08)`,
           }}
         >
           <span style={{ fontSize: emojiNear, lineHeight: 1 }}>{workspace.emoji}</span>
-          <div style={{ display: "flex", flexDirection: "column", gap: useScreenSize(2) }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: nearGap }}>
             <span
               className="font-display"
               style={{
@@ -436,6 +451,22 @@ function ItemNode({ data }: { data: ItemNodeData }) {
   const metaSize = useScreenSize(STABLE.ITEM_META);
   const bodySize = useScreenSize(STABLE.ITEM_BODY);
   const gap = useScreenSize(10);
+  
+  // Precompute sizes for conditional render blocks
+  const shadow12 = useScreenSize(12);
+  const shadow26 = useScreenSize(26);
+  const shadow14 = useScreenSize(14);
+  const shadow4 = useScreenSize(4);
+  const shadow10 = useScreenSize(10);
+  const stripWidth = useScreenSize(3);
+  const headerPadLeft = useScreenSize(18);
+  const headerMinHeight = useScreenSize(STABLE.ITEM_CHIP_HEIGHT - 4);
+  const iconBoxSize = useScreenSize(STABLE.ICON_MD + 8);
+  const iconRadius = useScreenSize(6);
+  const detailLeft = useScreenSize(6);
+  const detailTop = useScreenSize(STABLE.ITEM_CHIP_HEIGHT);
+  const footerPadTop = useScreenSize(4);
+  const dotSize = useScreenSize(2);
 
   const typeColor = meta?.color ?? "var(--text-secondary)";
 
@@ -456,8 +487,8 @@ function ItemNode({ data }: { data: ItemNodeData }) {
           border: `${border}px solid ${isFocused ? ink.accent : "var(--border-default)"}`,
           borderRadius: `${radius}px`,
           boxShadow: isFocused
-            ? `0 ${useScreenSize(12)}px ${useScreenSize(26)}px -${useScreenSize(14)}px ${ink.contour}`
-            : `0 ${useScreenSize(4)}px ${useScreenSize(12)}px -${useScreenSize(10)}px rgba(10,14,20,0.10)`,
+            ? `0 ${shadow12}px ${shadow26}px -${shadow14}px ${ink.contour}`
+            : `0 ${shadow4}px ${shadow12}px -${shadow10}px rgba(10,14,20,0.10)`,
           overflow: "hidden",
           display: "flex",
           flexDirection: "column",
@@ -471,7 +502,7 @@ function ItemNode({ data }: { data: ItemNodeData }) {
             top: 0,
             left: 0,
             bottom: 0,
-            width: useScreenSize(3),
+            width: stripWidth,
             background: typeColor,
             opacity: 0.75,
           }}
@@ -484,21 +515,21 @@ function ItemNode({ data }: { data: ItemNodeData }) {
             alignItems: "center",
             gap,
             padding: `${padSm}px ${pad}px`,
-            paddingLeft: useScreenSize(18),
+            paddingLeft: headerPadLeft,
             borderBottom:
               signals.cardDetail > 0.2
                 ? `${border}px solid color-mix(in oklab, ${typeColor} 10%, var(--border-default))`
                 : "none",
-            minHeight: useScreenSize(STABLE.ITEM_CHIP_HEIGHT - 4),
+            minHeight: headerMinHeight,
             flexShrink: 0,
           }}
         >
           {Icon ? (
             <div
               style={{
-                width: useScreenSize(STABLE.ICON_MD + 8),
-                height: useScreenSize(STABLE.ICON_MD + 8),
-                borderRadius: useScreenSize(6),
+                width: iconBoxSize,
+                height: iconBoxSize,
+                borderRadius: iconRadius,
                 background: `color-mix(in oklab, ${typeColor} 12%, transparent)`,
                 display: "flex",
                 alignItems: "center",
@@ -537,7 +568,7 @@ function ItemNode({ data }: { data: ItemNodeData }) {
             style={{
               flex: 1,
               padding: `${padSm}px ${pad}px`,
-              paddingLeft: useScreenSize(18),
+              paddingLeft: headerPadLeft,
               opacity: cardAlpha,
               overflow: "hidden",
               minHeight: 0,
@@ -565,9 +596,9 @@ function ItemNode({ data }: { data: ItemNodeData }) {
           <div
             style={{
               position: "absolute",
-              left: useScreenSize(6),
+              left: detailLeft,
               right: 0,
-              top: useScreenSize(STABLE.ITEM_CHIP_HEIGHT),
+              top: detailTop,
               bottom: 0,
               opacity: detailAlpha,
               pointerEvents: detailAlpha > 0.5 ? "auto" : "none",
@@ -582,8 +613,8 @@ function ItemNode({ data }: { data: ItemNodeData }) {
         {signals.cardDetail > 0.15 && signals.contentDepth < 0.6 ? (
           <div
             style={{
-              padding: `${useScreenSize(4)}px ${pad}px ${padSm}px`,
-              paddingLeft: useScreenSize(18),
+              padding: `${footerPadTop}px ${pad}px ${padSm}px`,
+              paddingLeft: headerPadLeft,
               display: "flex",
               alignItems: "center",
               gap,
@@ -607,8 +638,8 @@ function ItemNode({ data }: { data: ItemNodeData }) {
               <>
                 <span
                   style={{
-                    width: useScreenSize(2),
-                    height: useScreenSize(2),
+                    width: dotSize,
+                    height: dotSize,
                     borderRadius: "50%",
                     background: "var(--text-tertiary)",
                   }}
@@ -913,7 +944,7 @@ function buildNodes(
         style: { zIndex: 1 },
       });
 
-      let iy = gy + 120;
+      const iy = gy + 120;
       group.items.forEach((item, ii) => {
         const ix = gx + (ii % LAYOUT.ITEMS_PER_ROW) * 440;
         const baseY = iy + Math.floor(ii / LAYOUT.ITEMS_PER_ROW) * LAYOUT.WORLD_ROW_GAP;

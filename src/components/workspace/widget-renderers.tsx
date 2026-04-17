@@ -99,7 +99,7 @@ export function WidgetTimer({ widget }: { widget: WidgetData }) {
   const startedAt = (widget.state.startedAt as number | undefined) ?? 0;
   const accumulated = (widget.state.accumulated as number | undefined) ?? 0;
 
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!running) return;
     const t = setInterval(() => setNow(Date.now()), 250);
@@ -187,10 +187,9 @@ export function WidgetTimer({ widget }: { widget: WidgetData }) {
 
 export function WidgetCountdown({ widget }: { widget: WidgetData }) {
   const updateWidget = useWorkspaceStore((s) => s.updateWidget);
-  const targetAt = (widget.state.targetAt as number | undefined) ?? (Date.now() + 3600_000);
+  const [now, setNow] = useState(() => Date.now());
+  const targetAt = (widget.state.targetAt as number | undefined) ?? (now + 3600_000);
   const label = (widget.state.label as string | undefined) ?? "Countdown";
-
-  const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 500);
     return () => clearInterval(t);
@@ -374,6 +373,14 @@ export function WidgetImage({ widget }: { widget: WidgetData }) {
   const updateWidget = useWorkspaceStore((s) => s.updateWidget);
   const url = (widget.state.url as string | undefined) ?? "";
 
+  const gap8 = useScreenSize(8);
+  const padMd = useScreenSize(STABLE.PAD_MD);
+  const font13 = useScreenSize(13);
+  const pad6 = useScreenSize(6);
+  const pad10 = useScreenSize(10);
+  const radius8 = useScreenSize(8);
+  const radius6 = useScreenSize(6);
+
   if (!url) {
     return (
       <div
@@ -381,16 +388,16 @@ export function WidgetImage({ widget }: { widget: WidgetData }) {
           width: "100%", height: "100%",
           display: "flex", flexDirection: "column",
           alignItems: "center", justifyContent: "center",
-          gap: useScreenSize(8), padding: useScreenSize(STABLE.PAD_MD),
+          gap: gap8, padding: padMd,
         }}
       >
         <input
           placeholder="Paste image URL"
           onChange={(e) => updateWidget(widget.id, { state: { ...widget.state, url: e.target.value } })}
           style={{
-            fontSize: useScreenSize(13), border: `1px solid var(--border-default)`,
-            padding: `${useScreenSize(6)}px ${useScreenSize(10)}px`,
-            borderRadius: useScreenSize(8), width: "80%", outline: "none",
+            fontSize: font13, border: `1px solid var(--border-default)`,
+            padding: `${pad6}px ${pad10}px`,
+            borderRadius: radius8, width: "80%", outline: "none",
             background: "var(--bg-elevated)", color: "var(--text-primary)",
           }}
         />
@@ -398,12 +405,11 @@ export function WidgetImage({ widget }: { widget: WidgetData }) {
     );
   }
 
-  /* eslint-disable-next-line @next/next/no-img-element */
   return (
     <img
       src={url}
       alt=""
-      style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: useScreenSize(6) }}
+      style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: radius6 }}
     />
   );
 }
@@ -444,13 +450,20 @@ export function WidgetPlannerStrip({ widget }: { widget: WidgetData }) {
   const pad = useScreenSize(STABLE.PAD_MD);
   const size = useScreenSize(13);
   const small = useScreenSize(11);
+  
+  const rad6 = useScreenSize(6);
+  const pad4 = useScreenSize(4);
+  const pad8 = useScreenSize(8);
+  const gap8 = useScreenSize(8);
+  const gap4 = useScreenSize(4);
+  const pad6 = useScreenSize(6);
 
   const setTasks = (next: StripTask[]) =>
     updateWidget(widget.id, { state: { ...widget.state, tasks: next } });
 
   return (
-    <div style={{ width: "100%", height: "100%", padding: pad, display: "flex", flexDirection: "column", gap: useScreenSize(8) }}>
-      <div style={{ display: "flex", gap: useScreenSize(8) }}>
+    <div style={{ width: "100%", height: "100%", padding: pad, display: "flex", flexDirection: "column", gap: gap8 }}>
+      <div style={{ display: "flex", gap: gap8 }}>
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -463,14 +476,14 @@ export function WidgetPlannerStrip({ widget }: { widget: WidgetData }) {
           placeholder="Add a task and press enter"
           style={{
             flex: 1, border: `1px solid var(--border-default)`,
-            borderRadius: useScreenSize(6),
-            padding: `${useScreenSize(4)}px ${useScreenSize(8)}px`,
+            borderRadius: rad6,
+            padding: `${pad4}px ${pad8}px`,
             background: "var(--bg-elevated)", outline: "none",
             fontSize: size, color: "var(--text-primary)",
           }}
         />
       </div>
-      <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: useScreenSize(4) }}>
+      <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: gap4 }}>
         {tasks.length === 0 ? (
           <span className="font-mono" style={{ fontSize: small, color: "var(--text-tertiary)", letterSpacing: "0.1em", textTransform: "uppercase" }}>
             No tasks yet
@@ -480,9 +493,9 @@ export function WidgetPlannerStrip({ widget }: { widget: WidgetData }) {
             <label
               key={t.id}
               style={{
-                display: "flex", alignItems: "center", gap: useScreenSize(8),
-                padding: `${useScreenSize(4)}px ${useScreenSize(6)}px`,
-                borderRadius: useScreenSize(6),
+                display: "flex", alignItems: "center", gap: gap8,
+                padding: `${pad4}px ${pad6}px`,
+                borderRadius: rad6,
                 fontSize: size,
                 color: t.done ? "var(--text-tertiary)" : "var(--text-primary)",
                 textDecoration: t.done ? "line-through" : "none",
@@ -509,22 +522,22 @@ export function WidgetPlannerStrip({ widget }: { widget: WidgetData }) {
 function buttonStyle(py: number, px: number): React.CSSProperties {
   return {
     padding: `${py}px ${px}px`,
-    borderRadius: useScreenSizeStatic(8),
+    borderRadius: getScreenSizeStatic(8),
     background: "color-mix(in oklab, var(--accent-cyan) 10%, transparent)",
     color: "var(--accent-cyan)",
     border: "none",
     cursor: "pointer",
     display: "inline-flex",
     alignItems: "center",
-    gap: useScreenSizeStatic(4),
-    fontSize: useScreenSizeStatic(12),
+    gap: getScreenSizeStatic(4),
+    fontSize: getScreenSizeStatic(12),
     fontWeight: 600,
   };
 }
 
 // Tiny helper that just reads zoom once from the store — for use in
 // static helpers that can't call hooks. Accepted compromise.
-function useScreenSizeStatic(px: number): number {
+function getScreenSizeStatic(px: number): number {
   const zoom = useWorkspaceStore.getState().zoom;
   if (!zoom || zoom < 0.0001) return px * 100;
   return px / zoom;

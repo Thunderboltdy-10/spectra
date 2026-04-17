@@ -8,6 +8,12 @@ import type {
   ViewMode,
   WorkspaceData,
   WorkspaceItemData,
+  NavigationMode,
+  PageLevel,
+  WidgetData,
+  WidgetKind,
+  ItemPositionOverride,
+  HubEdge,
 } from "@/lib/workspace/contracts";
 import { zoomTierForLevel, zoomTierProgress, computeZoomSignals, VIEWPORT, computeWorkspaceEnvelope } from "@/lib/workspace/contracts";
 
@@ -24,7 +30,75 @@ type WorkspacePreferencesPayload = {
   workspaceBackgroundMode?: BackgroundMode;
   workspaceHubVisibility?: HubVisibility;
   workspaceAutoSelectContext?: boolean;
+  workspaceNavigationMode?: NavigationMode;
+  workspaceHubOrder?: Record<HubEdge, string[]>;
 };
+
+const WIDGET_STORAGE_KEY = "spectra:widgets:v1";
+const ITEM_POS_STORAGE_KEY = "spectra:item-positions:v1";
+const HUB_ORDER_STORAGE_KEY = "spectra:hub-order:v1";
+
+function loadWidgets(): WidgetData[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(WIDGET_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as WidgetData[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveWidgets(widgets: WidgetData[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(WIDGET_STORAGE_KEY, JSON.stringify(widgets));
+  } catch {}
+}
+
+function loadItemPositions(): Record<string, ItemPositionOverride> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(ITEM_POS_STORAGE_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as Record<string, ItemPositionOverride>;
+  } catch {
+    return {};
+  }
+}
+
+function saveItemPositions(positions: Record<string, ItemPositionOverride>) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(ITEM_POS_STORAGE_KEY, JSON.stringify(positions));
+  } catch {}
+}
+
+function loadHubOrder(): Record<HubEdge, string[]> {
+  const empty: Record<HubEdge, string[]> = { top: [], bottom: [], left: [], right: [] };
+  if (typeof window === "undefined") return empty;
+  try {
+    const raw = window.localStorage.getItem(HUB_ORDER_STORAGE_KEY);
+    if (!raw) return empty;
+    const parsed = JSON.parse(raw) as Record<HubEdge, string[]>;
+    return {
+      top: Array.isArray(parsed.top) ? parsed.top : [],
+      bottom: Array.isArray(parsed.bottom) ? parsed.bottom : [],
+      left: Array.isArray(parsed.left) ? parsed.left : [],
+      right: Array.isArray(parsed.right) ? parsed.right : [],
+    };
+  } catch {
+    return empty;
+  }
+}
+
+function saveHubOrder(order: Record<HubEdge, string[]>) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(HUB_ORDER_STORAGE_KEY, JSON.stringify(order));
+  } catch {}
+}
 
 let persistWorkspacePreferencesTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -92,6 +166,22 @@ type WorkspaceState = {
   hasHydratedPreferences: boolean;
   autoSelectContext: boolean;
 
+  /* ─ Navigation & Page mode ─ */
+  navigationMode: NavigationMode;
+  pageLevel: PageLevel;
+  /** In page mode, the active region key (group label) when at "region" */
+  pageRegionKey: string | null;
+
+  /* ─ Widget system ─ */
+  widgets: WidgetData[];
+  widgetPlacementHint: { kind: WidgetKind; at: "pointer" | "center" } | null;
+
+  /* ─ Item position overrides ─ */
+  itemPositions: Record<string, ItemPositionOverride>;
+
+  /* ─ Hub order ─ */
+  hubOrder: Record<HubEdge, string[]>;
+
   setZoom: (zoom: number) => void;
   setViewport: (x: number, y: number, zoom: number) => void;
   setActiveWorkspace: (id: string | null) => void;
@@ -150,6 +240,26 @@ type WorkspaceState = {
   flyToTarget: { centerX: number; centerY: number; zoom: number; requestId: number } | null;
   flyToWorkspace: (id: string) => void;
   clearFlyToTarget: () => void;
+
+  /* ─ Navigation ─ */
+  setNavigationMode: (mode: NavigationMode) => void;
+  toggleNavigationMode: () => void;
+  setPageLevel: (level: PageLevel) => void;
+  setPageRegionKey: (key: string | null) => void;
+
+  /* ─ Widget actions ─ */
+  addWidget: (widget: WidgetData) => void;
+  updateWidget: (id: string, patch: Partial<WidgetData>) => void;
+  removeWidget: (id: string) => void;
+  setWidgetPlacementHint: (hint: WorkspaceState["widgetPlacementHint"]) => void;
+
+  /* ─ Item positions ─ */
+  setItemPosition: (itemId: string, x: number, y: number) => void;
+  clearItemPosition: (itemId: string) => void;
+
+  /* ─ Hub order ─ */
+  setHubOrder: (edge: HubEdge, ids: string[]) => void;
+  reorderHub: (edge: HubEdge, fromIdx: number, toIdx: number) => void;
 };
 
 const HUB_VISIBILITY_ORDER: HubVisibility[] = ["collapsed", "expanded", "hidden"];
@@ -184,6 +294,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   hasHydratedPreferences: false,
   autoSelectContext: false,
   flyToTarget: null,
+
+  navigationMode: "canvas",
+  pageLevel: "atlas",
+  pageRegionKey: null,
+
+  widgets: loadWidgets(),
+  widgetPlacementHint: null,
+  itemPositions: loadItemPositions(),
+  hubOrder: loadHubOrder(),
 
   setZoom: (zoom) =>
     set({
@@ -461,6 +580,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
       backgroundMode: preferences.workspaceBackgroundMode ?? state.backgroundMode,
       hubVisibility: preferences.workspaceHubVisibility ?? state.hubVisibility,
       autoSelectContext: preferences.workspaceAutoSelectContext ?? state.autoSelectContext,
+      navigationMode: preferences.workspaceNavigationMode ?? state.navigationMode,
       hasHydratedPreferences: true,
     })),
 
@@ -498,4 +618,83 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
 
   clearFlyToTarget: () =>
     set({ flyToTarget: null }),
+
+  setNavigationMode: (mode) =>
+    set(() => {
+      scheduleWorkspacePreferencesPersist({ workspaceNavigationMode: mode });
+      return { navigationMode: mode };
+    }),
+
+  toggleNavigationMode: () =>
+    set((state) => {
+      const next: NavigationMode = state.navigationMode === "canvas" ? "pages" : "canvas";
+      scheduleWorkspacePreferencesPersist({ workspaceNavigationMode: next });
+      return { navigationMode: next };
+    }),
+
+  setPageLevel: (level) =>
+    set({ pageLevel: level }),
+
+  setPageRegionKey: (key) =>
+    set({ pageRegionKey: key }),
+
+  addWidget: (widget) =>
+    set((state) => {
+      const next = [...state.widgets, widget];
+      saveWidgets(next);
+      return { widgets: next };
+    }),
+
+  updateWidget: (id, patch) =>
+    set((state) => {
+      const next = state.widgets.map((w) => (w.id === id ? { ...w, ...patch } : w));
+      saveWidgets(next);
+      return { widgets: next };
+    }),
+
+  removeWidget: (id) =>
+    set((state) => {
+      const next = state.widgets.filter((w) => w.id !== id);
+      saveWidgets(next);
+      return { widgets: next };
+    }),
+
+  setWidgetPlacementHint: (hint) =>
+    set({ widgetPlacementHint: hint }),
+
+  setItemPosition: (itemId, x, y) =>
+    set((state) => {
+      const next: Record<string, ItemPositionOverride> = {
+        ...state.itemPositions,
+        [itemId]: { itemId, x, y, updatedAt: Date.now() },
+      };
+      saveItemPositions(next);
+      return { itemPositions: next };
+    }),
+
+  clearItemPosition: (itemId) =>
+    set((state) => {
+      const next = { ...state.itemPositions };
+      delete next[itemId];
+      saveItemPositions(next);
+      return { itemPositions: next };
+    }),
+
+  setHubOrder: (edge, ids) =>
+    set((state) => {
+      const next: Record<HubEdge, string[]> = { ...state.hubOrder, [edge]: ids };
+      saveHubOrder(next);
+      return { hubOrder: next };
+    }),
+
+  reorderHub: (edge, fromIdx, toIdx) =>
+    set((state) => {
+      const list = [...(state.hubOrder[edge] ?? [])];
+      if (fromIdx < 0 || fromIdx >= list.length || toIdx < 0 || toIdx >= list.length) return state;
+      const [moved] = list.splice(fromIdx, 1);
+      list.splice(toIdx, 0, moved);
+      const next: Record<HubEdge, string[]> = { ...state.hubOrder, [edge]: list };
+      saveHubOrder(next);
+      return { hubOrder: next };
+    }),
 }));

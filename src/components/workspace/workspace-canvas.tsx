@@ -1,5 +1,20 @@
 "use client";
 
+/* ===================================================================
+   WORKSPACE CANVAS — Atlas edition.
+
+   Everything inside a ReactFlow node is sized via useScreenSize, so
+   card chrome stays the same physical size on screen at every zoom.
+   The zoom signal drives DENSITY and REVEAL, not raw size.
+
+   Layers (bottom → top):
+     1. CanvasBackground (paper + dots/grid/contour)
+     2. Workspace territory (cartouche at center, contour rings around)
+     3. Group latitude-rule headers
+     4. Widget hosts (draggable non-item blocks)
+     5. Item nodes (chips → cards → detail through zoom signals)
+   =================================================================== */
+
 import {
   useCallback,
   useEffect,
@@ -13,6 +28,8 @@ import {
   useReactFlow,
   type Node,
   type Edge,
+  type NodeChange,
+  type NodePositionChange,
   type Viewport,
 } from "@xyflow/react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -22,378 +39,302 @@ import {
   computeZoomSignals,
   type WorkspaceData,
   type WorkspaceItemData,
+  type ViewMode,
+  type BackgroundMode,
+  type WidgetData,
+  type WidgetKind,
+  TYPE_TO_TINT,
+  TYPE_GROUP_LABELS,
 } from "@/lib/workspace/contracts";
 import {
   CANONICAL_WORKSPACE_TYPE_META,
   type CanonicalWorkspaceType,
 } from "@/lib/artifact-types";
-import { TYPE_TO_TINT, TYPE_GROUP_LABELS } from "@/lib/workspace/contracts";
 import { cn } from "@/lib/utils";
-
 import {
-  Trash2,
-  Link,
-  ExternalLink,
-  Pencil,
-  Maximize2,
-  Copy,
-} from "lucide-react";
-import { ActionMenuContent } from "@/components/workspace/shared-action-menu";
+  useScreenSize,
+  useZoom,
+  useZoomSignals,
+  smoothStep,
+  lerp,
+  STABLE,
+} from "@/lib/workspace/zoom";
+import {
+  territoryInk,
+  contourPatternDataUri,
+  coordinateBadge,
+  type TerritoryInk,
+} from "@/lib/workspace/atlas-theme";
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
+import { WidgetHost } from "@/components/workspace/widget-host";
 
 /* ===================================================================
-   Palette & Helpers
-   =================================================================== */
-
-const TERRITORY_COLORS: Record<string, { core: string; mid: string; outer: string; border: string }> = {
-  warm: {
-    core: "rgba(245, 178, 60, 0.18)",
-    mid: "rgba(245, 178, 60, 0.08)",
-    outer: "rgba(245, 178, 60, 0.02)",
-    border: "rgba(245, 178, 60, 0.12)",
-  },
-  cool: {
-    core: "rgba(56, 152, 232, 0.16)",
-    mid: "rgba(56, 152, 232, 0.07)",
-    outer: "rgba(56, 152, 232, 0.015)",
-    border: "rgba(56, 152, 232, 0.10)",
-  },
-  neutral: {
-    core: "rgba(140, 130, 115, 0.12)",
-    mid: "rgba(140, 130, 115, 0.06)",
-    outer: "rgba(140, 130, 115, 0.015)",
-    border: "rgba(140, 130, 115, 0.08)",
-  },
-  accent: {
-    core: "rgba(50, 196, 180, 0.15)",
-    mid: "rgba(50, 196, 180, 0.07)",
-    outer: "rgba(50, 196, 180, 0.015)",
-    border: "rgba(50, 196, 180, 0.10)",
-  },
-  muted: {
-    core: "rgba(158, 144, 130, 0.10)",
-    mid: "rgba(158, 144, 130, 0.05)",
-    outer: "rgba(158, 144, 130, 0.01)",
-    border: "rgba(158, 144, 130, 0.07)",
-  },
-};
-
-function getTerritoryColor(variant: string) {
-  return TERRITORY_COLORS[variant] ?? TERRITORY_COLORS.neutral;
-}
-
-function dominantTint(ws: WorkspaceData): string {
-  const counts: Record<string, number> = {};
-  for (const item of ws.items) {
-    const tint = TYPE_TO_TINT[item.itemType as CanonicalWorkspaceType] ?? "neutral";
-    counts[tint] = (counts[tint] ?? 0) + 1;
-  }
-  let best = "neutral";
-  let bestCount = 0;
-  for (const [k, v] of Object.entries(counts)) {
-    if (v > bestCount) { best = k; bestCount = v; }
-  }
-  return best;
-}
-
-const STATUS_COLORS: Record<string, string> = {
-  active: "bg-[var(--success)]",
-  quiet: "bg-[var(--border-default)]",
-  completed: "bg-[var(--text-tertiary)]",
-  archived: "bg-[var(--border-default)]",
-  idle: "bg-[var(--border-default)]",
-};
-
-function StatusDot({ status, className }: { status: string; className?: string }) {
-  return (
-    <span
-      className={cn(
-        "inline-block rounded-full shrink-0",
-        STATUS_COLORS[status] ?? "bg-[var(--border-default)]",
-        status === "active" && "animate-pulse",
-        className || "h-[6px] w-[6px]"
-      )}
-    />
-  );
-}
-
-/**
- * Perceptually stable scale.
- * Keeps items at a stable perceived size on screen by counter-scaling.
- * Uses an asymptotic curve that approaches maxScale rather than growing infinitely.
- * At anchorZoom, scale=1. Below anchorZoom, scale grows but caps at maxScale.
- */
-function stableScale(zoom: number, anchorZoom: number, maxScale: number = 3.5): number {
-  if (zoom >= anchorZoom) return 1;
-  const ratio = anchorZoom / zoom;
-  return 1 + (maxScale - 1) * (1 - Math.exp(-(ratio - 1) * 1.2));
-}
-
-/**
- * Interpolate between two values based on a 0-1 signal.
- */
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}
-
-
-/**
- * Reads the current zoom level from ReactFlow's viewport reactively.
- * Since @xyflow/react v12 has TypeScript resolution issues with useStore/useViewport
- * in Turbopack, we use the onViewportChange callback pattern instead, which is
- * always available and type-safe.
- *
- * The zoom value is tracked via a state that updates on every viewport change,
- * giving us frame-rate-level reactivity for smooth semantic zoom interpolation.
- */
-function useFlowZoom(): number {
-  // This hook is called inside ReactFlowProvider context.
-  // The zoom value is actually maintained by the parent component via
-  // onViewportChange and passed through the workspace store.
-  // For components that need zoom inside the canvas, they read it from the store.
-  return useWorkspaceStore((s) => s.zoom);
-}
-
-/* ===================================================================
-   Node Data Types
+   Node data types
    =================================================================== */
 
 type WorkspaceNodeData = {
   workspace: WorkspaceData;
-  tint: string;
+  ink: TerritoryInk;
 };
 
 type ItemNodeData = {
   item: WorkspaceItemData;
   groupLabel?: string;
-  isFirst?: boolean;
+  ink: TerritoryInk;
 };
 
 type GroupLabelNodeData = {
   label: string;
-  variant: string;
   count: number;
-  viewMode?: "byType" | "byTopic" | "timeline";
+  ink: TerritoryInk;
+  viewMode: ViewMode;
 };
 
-// Zoom/tier data is NOT passed in node data. Nodes read zoom directly
-// from ReactFlow's internal store via useReactFlowStore for frame-rate
-// responsiveness without triggering full node tree rebuilds.
+type WidgetNodeData = {
+  widget: WidgetData;
+};
 
 /* ===================================================================
-   Workspace Territory Node u2014 Semantic Zoom Recomposition
+   Status dot
+   =================================================================== */
 
-   LANDSCAPE: Dominant region with large legible name/emoji.
-              Territory background is strongly visible.
-              No items shown u2014 only identity.
+function statusColor(status: string): string {
+  switch (status) {
+    case "active":
+      return "var(--success)";
+    case "completed":
+      return "var(--text-tertiary)";
+    case "archived":
+    case "idle":
+    case "quiet":
+    default:
+      return "var(--border-default)";
+  }
+}
 
-   SUMMARY:   Title transitions to top-left anchored position SMOOTHLY.
-              Group headings begin appearing gradually.
-              Items fade in as compact chips.
-              Territory background softens progressively.
+function StatusDot({ status, screenSize }: { status: string; screenSize: number }) {
+  const worldSize = useScreenSize(screenSize);
+  return (
+    <span
+      style={{
+        width: worldSize,
+        height: worldSize,
+        borderRadius: "50%",
+        background: statusColor(status),
+        display: "inline-block",
+        flexShrink: 0,
+      }}
+    />
+  );
+}
 
-   DETAIL:    Full content cards with previews.
-              Territory is lightest wash.
-              Title is a small persistent header.
+/* ===================================================================
+   Workspace Territory — cartouche + contours.
+
+   World position is fixed. All visible chrome is screen-stable.
+   At far zoom: big emoji + cartouche name + concentric contour rings.
+   At summary+: cartouche slides to top-left corner as an anchor badge.
+   Contour rings fade out as zoom increases.
    =================================================================== */
 
 function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
-  const { workspace, tint } = data;
-  const zoom = useFlowZoom();
-  const colors = getTerritoryColor(tint);
+  const { workspace, ink } = data;
+  const signals = useZoomSignals();
 
-  const [isEditing, setIsEditing] = useState(false);
-  const [draftName, setDraftName] = useState(workspace.name);
-  const inputRef = useRef<HTMLInputElement>(null);
+  // Screen-stable dimensions
+  const emojiFar = useScreenSize(STABLE.WS_EMOJI_FAR);
+  const emojiNear = useScreenSize(STABLE.WS_EMOJI);
+  const nameFar = useScreenSize(STABLE.WS_NAME_FAR);
+  const nameNear = useScreenSize(STABLE.WS_NAME);
+  const metaSize = useScreenSize(STABLE.WS_META);
+  const pad = useScreenSize(STABLE.PAD_LG);
+  const radius = useScreenSize(STABLE.RADIUS_LG);
 
-  useEffect(() => {
-    setDraftName(workspace.name);
-  }, [workspace.name]);
+  // Crossfade far ↔ anchored
+  const farAlpha = 1 - signals.identityAnchor;
+  const nearAlpha = signals.identityAnchor;
+  // Contour rings fade out with detail
+  const contourAlpha = Math.max(0, 1 - signals.territoryFade * 1.1);
 
-  useEffect(() => {
-    if (isEditing && inputRef.current) {
-      inputRef.current.focus();
-      inputRef.current.select();
-    }
-  }, [isEditing]);
+  const coord = useMemo(() => coordinateBadge(workspace.id), [workspace.id]);
 
-  const commitRename = async () => {
-    setIsEditing(false);
-    const trimmed = draftName.trim();
-    if (!trimmed || trimmed === workspace.name) {
-      setDraftName(workspace.name);
-      return;
-    }
-    await fetch("/api/workstreams", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "update", workstreamId: workspace.id, title: trimmed }),
-    }).catch(() => undefined);
-    window.dispatchEvent(new CustomEvent("workspace:content-mutated", {
-      detail: { workstreamId: workspace.id, refreshWorkstreams: true, refreshHub: true },
-    }));
-  };
-
-  // Continuous zoom signals — no discrete tier boundaries
-  const sig = computeZoomSignals(zoom);
-  const { identityAnchor, territoryFade, structureReveal } = sig;
-
-  // Territory region: strong when landscape, fades as detail increases
-  const regionOpacity = lerp(1.0, 0.25, territoryFade);
-
-  // Identity scale: large at landscape, naturally shrinks as zoom increases
-  const identityScale = stableScale(zoom, 0.22);
-
-  // Centered (landscape) vs anchored (summary+): continuous crossfade
-  const showCentered = 1 - identityAnchor;
-  const showAnchored = identityAnchor;
+  const lastActivity = useMemo(() => {
+    if (!workspace.lastActivity) return null;
+    const diffM = Math.floor((Date.now() - workspace.lastActivity) / 60000);
+    if (diffM < 1) return "active now";
+    if (diffM < 60) return `${diffM}m`;
+    const h = Math.floor(diffM / 60);
+    if (h < 24) return `${h}h`;
+    return `${Math.floor(h / 24)}d`;
+  }, [workspace.lastActivity]);
 
   return (
     <div
-      style={{ width: "100%", height: "100%", pointerEvents: "none" }}
-      className="relative"
+      style={{
+        width: "100%",
+        height: "100%",
+        position: "relative",
+        pointerEvents: "none",
+      }}
     >
-      {/* Adaptive territory background u2014 scales with zoom/space */}
+      {/* Territory fill — subtle wash of ink */}
       <div
-        className="absolute inset-0 rounded-[80px]"
         style={{
-          opacity: regionOpacity,
-          background: `
-            radial-gradient(
-              ellipse ${lerp(90, 70, territoryFade)}% ${lerp(80, 65, territoryFade)}% at 50% ${lerp(35, 45, territoryFade)}%,
-              ${colors.core} 0%,
-              ${colors.mid} ${lerp(40, 55, territoryFade)}%,
-              ${colors.outer} ${lerp(70, 80, territoryFade)}%,
-              transparent 100%
-            )
-          `,
+          position: "absolute",
+          inset: 0,
+          background: ink.fill,
+          opacity: lerp(1, 0.35, signals.territoryFade),
+          borderRadius: `${pad * 2}px`,
         }}
       />
 
-      {/* Soft blended envelope boundary — no dashed borders per spec */}
+      {/* Contour rings — concentric, screen-stable tile */}
       <div
-        className="absolute inset-[6px] rounded-[80px]"
         style={{
-          background: `
-            radial-gradient(
-              ellipse 100% 100% at 50% 50%,
-              transparent 85%,
-              ${colors.mid} 92%,
-              ${colors.outer} 97%,
-              transparent 100%
-            )
-          `,
-          opacity: lerp(0.6, 0.08, identityAnchor * 0.5 + territoryFade * 0.5),
+          position: "absolute",
+          inset: 0,
+          backgroundImage: contourPatternDataUri(ink.contour, 0.35),
+          backgroundRepeat: "repeat",
+          backgroundSize: `${useScreenSize(240)}px ${useScreenSize(240)}px`,
+          opacity: contourAlpha * 0.55,
+          pointerEvents: "none",
+          borderRadius: `${pad * 2}px`,
+          maskImage: `radial-gradient(ellipse at center, black 60%, transparent 100%)`,
+          WebkitMaskImage: `radial-gradient(ellipse at center, black 60%, transparent 100%)`,
         }}
       />
 
-      {/* CENTERED identity (landscape) u2014 fades out smoothly */}
-      {showCentered > 0.01 && (
+      {/* FAR (landscape) identity — centered cartouche */}
+      {farAlpha > 0.01 && (
         <div
-          className="absolute inset-0 flex flex-col items-center justify-center gap-8"
           style={{
-            transform: `scale(${identityScale})`,
-            transformOrigin: "center center",
-            opacity: showCentered,
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexDirection: "column",
+            gap: useScreenSize(24),
+            opacity: farAlpha,
+            pointerEvents: "auto",
           }}
         >
-          <div className="flex h-[240px] w-[240px] items-center justify-center rounded-[3.5rem] bg-[var(--bg-elevated)]/40 backdrop-blur-xl border border-[var(--border-default)]/15 shadow-[0_16px_48px_-12px_rgba(7,20,35,0.12)]">
-            <span className="text-[120px] leading-none" style={{ filter: "drop-shadow(0 6px 12px rgba(0,0,0,0.08))" }}>
-              {workspace.emoji}
-            </span>
-          </div>
-
-          <div className="flex flex-col items-center gap-4 pointer-events-auto">
-            {isEditing ? (
-              <input
-                ref={inputRef}
-                value={draftName}
-                onChange={(e) => setDraftName(e.target.value)}
-                onBlur={commitRename}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") commitRename();
-                  if (e.key === "Escape") { setDraftName(workspace.name); setIsEditing(false); }
-                }}
-                className="font-bold text-[var(--text-primary)] text-[80px] tracking-[-0.02em] text-center max-w-[2200px] leading-[1.1] bg-transparent border-b border-[var(--accent-cyan)] outline-none"
-                style={{ textShadow: "0 3px 16px rgba(0,0,0,0.06)" }}
-              />
-            ) : (
-              <h3 
-                onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
-                className="font-bold text-[var(--text-primary)] text-[80px] tracking-[-0.02em] text-center max-w-[2200px] leading-[1.1] cursor-text hover:text-[var(--accent-cyan)] transition-colors" 
-                style={{ textShadow: "0 3px 16px rgba(0,0,0,0.06)" }}
-              >
-                {workspace.name}
-              </h3>
-            )}
-            <div className="flex items-center gap-5">
-              <span className="text-[36px] font-medium tracking-wide text-[var(--text-tertiary)] bg-[var(--bg-secondary)]/25 backdrop-blur-md px-8 py-3 rounded-full border border-[var(--border-default)]/15">
-                {workspace.itemCount} item{workspace.itemCount !== 1 ? "s" : ""}
-              </span>
-              <StatusDot status={workspace.status} className="h-6 w-6" />
-            </div>
-          </div>
-
-          {/* Landscape summary chips u2014 fade as structure reveals */}
           <div
-            className="flex flex-wrap items-center justify-center gap-3 mt-2 max-w-[1800px]"
-            style={{ opacity: Math.max(0, 1 - structureReveal * 1.5) }}
+            className="font-display"
+            style={{
+              fontSize: emojiFar,
+              lineHeight: 1,
+              filter: "drop-shadow(0 2px 6px rgba(10,14,20,0.08))",
+            }}
           >
-            {Object.entries(TYPE_GROUP_LABELS).map(([key, group]) => {
-              const count = workspace.items.filter((i) =>
-                group.types.includes(i.itemType as CanonicalWorkspaceType)
-              ).length;
-              if (count === 0) return null;
-              return (
-                <span
-                  key={key}
-                  className="text-[28px] font-medium text-[var(--text-tertiary)]/60 bg-[var(--bg-secondary)]/20 px-6 py-2 rounded-full"
-                >
-                  {group.label} {count}
-                </span>
-              );
-            })}
+            {workspace.emoji}
+          </div>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: useScreenSize(6),
+            }}
+          >
+            <div
+              className="font-display"
+              style={{
+                fontSize: nameFar,
+                fontWeight: 600,
+                letterSpacing: "-0.015em",
+                lineHeight: 1.1,
+                color: ink.ink,
+                textShadow: "0 2px 10px rgba(10,14,20,0.05)",
+              }}
+            >
+              {workspace.name}
+            </div>
+            <div
+              className="font-mono"
+              style={{
+                fontSize: metaSize,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: ink.accent,
+                display: "flex",
+                alignItems: "center",
+                gap: useScreenSize(12),
+              }}
+            >
+              <span>{coord}</span>
+              <span
+                style={{
+                  width: useScreenSize(3),
+                  height: useScreenSize(3),
+                  borderRadius: "50%",
+                  background: ink.accent,
+                }}
+              />
+              <span>{workspace.itemCount} ITEMS</span>
+              {lastActivity ? (
+                <>
+                  <span
+                    style={{
+                      width: useScreenSize(3),
+                      height: useScreenSize(3),
+                      borderRadius: "50%",
+                      background: ink.accent,
+                    }}
+                  />
+                  <span>{lastActivity}</span>
+                </>
+              ) : null}
+            </div>
           </div>
         </div>
       )}
 
-      {/* ANCHORED identity (summary+) u2014 fades in smoothly */}
-      {showAnchored > 0.01 && (
+      {/* NEAR (summary+) — small cartouche anchored top-left */}
+      {nearAlpha > 0.01 && (
         <div
-          className="absolute top-[60px] left-[80px] flex items-center gap-5 pointer-events-auto z-10"
           style={{
-            transform: `scale(${stableScale(zoom, 0.35)})`,
-            transformOrigin: "top left",
-            opacity: showAnchored,
+            position: "absolute",
+            top: useScreenSize(28),
+            left: useScreenSize(36),
+            display: "flex",
+            alignItems: "center",
+            gap: useScreenSize(12),
+            padding: `${useScreenSize(10)}px ${useScreenSize(14)}px`,
+            background: "var(--bg-elevated)",
+            border: `1px solid ${ink.contour}`,
+            borderRadius: `${radius}px`,
+            opacity: nearAlpha,
+            pointerEvents: "auto",
+            boxShadow: `0 ${useScreenSize(4)}px ${useScreenSize(14)}px rgba(10,14,20,0.08)`,
           }}
         >
-          <span className="text-[48px] leading-none pointer-events-none">{workspace.emoji}</span>
-          {isEditing ? (
-            <input
-              ref={inputRef}
-              value={draftName}
-              onChange={(e) => setDraftName(e.target.value)}
-              onBlur={commitRename}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") commitRename();
-                if (e.key === "Escape") { setDraftName(workspace.name); setIsEditing(false); }
+          <span style={{ fontSize: emojiNear, lineHeight: 1 }}>{workspace.emoji}</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: useScreenSize(2) }}>
+            <span
+              className="font-display"
+              style={{
+                fontSize: nameNear,
+                fontWeight: 600,
+                letterSpacing: "-0.01em",
+                color: ink.ink,
+                lineHeight: 1.05,
               }}
-              className="font-semibold text-[var(--text-primary)] text-[44px] tracking-[-0.01em] bg-transparent border-b border-[var(--accent-cyan)] outline-none min-w-[200px]"
-              style={{ textShadow: "0 2px 8px rgba(0,0,0,0.04)" }}
-            />
-          ) : (
-            <h3 
-              onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
-              className="font-semibold text-[var(--text-primary)] text-[44px] tracking-[-0.01em] cursor-text hover:text-[var(--accent-cyan)] transition-colors" 
-              style={{ textShadow: "0 2px 8px rgba(0,0,0,0.04)" }}
             >
               {workspace.name}
-            </h3>
-          )}
-          <span className="text-[24px] font-medium text-[var(--text-tertiary)]/50 ml-3 pointer-events-none">
-            {workspace.itemCount}
-          </span>
-          <StatusDot status={workspace.status} className="h-4 w-4" />
+            </span>
+            <span
+              className="font-mono"
+              style={{
+                fontSize: metaSize * 0.9,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: ink.accent,
+              }}
+            >
+              {coord} · {workspace.itemCount}
+            </span>
+          </div>
         </div>
       )}
     </div>
@@ -401,1167 +342,790 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
 }
 
 /* ===================================================================
-   Group Label Node u2014 appears gradually during summary tier
+   Group label — latitude-rule style.
    =================================================================== */
 
 function GroupLabelNode({ data }: { data: GroupLabelNodeData }) {
-  const zoom = useFlowZoom();
-  const sig = computeZoomSignals(zoom);
-  const scale = stableScale(zoom, 0.35, 3);
+  const signals = useZoomSignals();
+  const labelSize = useScreenSize(STABLE.GROUP_LABEL);
+  const countSize = useScreenSize(STABLE.GROUP_COUNT);
+  const pad = useScreenSize(STABLE.PAD_MD);
+  const ruleWidth = useScreenSize(80);
 
-  // Group labels use the continuous groupReveal signal.
-  // They also progressively gain weight/size as detail increases.
-  const labelSize = lerp(44, 38, sig.contentDepth);
-  const countSize = lerp(32, 26, sig.contentDepth);
-
-  const colors = getTerritoryColor(data.variant);
-
-  if (data.viewMode === "timeline") {
-    return (
-      <div
-        className="flex flex-col select-none pointer-events-none relative"
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: useScreenSize(10),
+        padding: `${useScreenSize(6)}px 0`,
+        opacity: signals.groupReveal,
+        pointerEvents: "none",
+      }}
+    >
+      <span
+        className="font-mono"
         style={{
-          transform: `scale(${scale})`,
-          transformOrigin: "left center",
-          opacity: sig.groupReveal,
+          fontSize: labelSize,
+          letterSpacing: "0.18em",
+          textTransform: "uppercase",
+          color: data.ink.ink,
+          fontWeight: 600,
         }}
       >
-        {/* Timeline Axis Line */}
-        <div className="absolute top-[28px] left-0 w-[2000px] h-[4px] bg-[var(--border-default)]/20" />
-        {/* Timeline Node Point */}
-        <div 
-          className="absolute top-[21px] left-[24px] w-[18px] h-[18px] rounded-full border-4 border-[var(--bg-primary)] z-10"
-          style={{ backgroundColor: colors.border }}
+        {data.label}
+      </span>
+      <span
+        style={{
+          height: 1,
+          width: ruleWidth,
+          background: `linear-gradient(to right, ${data.ink.accent}, transparent)`,
+        }}
+      />
+      <span
+        className="font-mono"
+        style={{
+          fontSize: countSize,
+          color: data.ink.accent,
+          letterSpacing: "0.04em",
+        }}
+      >
+        {String(data.count).padStart(2, "0")}
+      </span>
+    </div>
+  );
+}
+
+/* ===================================================================
+   Item node — screen-stable card. Density changes with zoom.
+   =================================================================== */
+
+function ItemNode({ data }: { data: ItemNodeData }) {
+  const { item, ink } = data;
+  const signals = useZoomSignals();
+  const meta = CANONICAL_WORKSPACE_TYPE_META[item.itemType as CanonicalWorkspaceType];
+  const Icon = meta?.icon;
+
+  const focusedItemId = useWorkspaceStore((s) => s.focusedItemId);
+  const isFocused = focusedItemId === item.id;
+
+  // Chip → card → detail through signals
+  const chipAlpha = 1 - signals.cardDetail;
+  const cardAlpha = signals.cardDetail * (1 - signals.contentDepth);
+  const detailAlpha = signals.contentDepth;
+
+  // Interpolate height in screen px then convert to world
+  const screenH = lerp(
+    STABLE.ITEM_CHIP_HEIGHT,
+    lerp(STABLE.ITEM_CARD_HEIGHT, STABLE.ITEM_DETAIL_HEIGHT, signals.contentDepth),
+    signals.cardDetail,
+  );
+  const height = useScreenSize(screenH);
+
+  const screenW = lerp(STABLE.ITEM_CHIP_WIDTH, STABLE.ITEM_DETAIL_WIDTH, signals.cardDetail);
+  const width = useScreenSize(screenW);
+
+  const pad = useScreenSize(STABLE.PAD_MD);
+  const padSm = useScreenSize(STABLE.PAD_SM);
+  const radius = useScreenSize(STABLE.RADIUS_MD);
+  const border = useScreenSize(STABLE.BORDER);
+  const iconSize = useScreenSize(STABLE.ICON_MD);
+  const titleSize = useScreenSize(
+    lerp(STABLE.ITEM_TITLE, STABLE.ITEM_TITLE_CARD, signals.cardDetail),
+  );
+  const metaSize = useScreenSize(STABLE.ITEM_META);
+  const bodySize = useScreenSize(STABLE.ITEM_BODY);
+  const gap = useScreenSize(10);
+
+  const typeColor = meta?.color ?? "var(--text-secondary)";
+
+  return (
+    <div
+      style={{
+        width,
+        height,
+        position: "relative",
+        pointerEvents: "auto",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: "var(--bg-elevated)",
+          border: `${border}px solid ${isFocused ? ink.accent : "var(--border-default)"}`,
+          borderRadius: `${radius}px`,
+          boxShadow: isFocused
+            ? `0 ${useScreenSize(12)}px ${useScreenSize(26)}px -${useScreenSize(14)}px ${ink.contour}`
+            : `0 ${useScreenSize(4)}px ${useScreenSize(12)}px -${useScreenSize(10)}px rgba(10,14,20,0.10)`,
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          transition: "border-color 160ms ease, box-shadow 200ms ease",
+        }}
+      >
+        {/* Coloured type strip — left edge */}
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            bottom: 0,
+            width: useScreenSize(3),
+            background: typeColor,
+            opacity: 0.75,
+          }}
         />
-        
-        <div className="flex items-center gap-4 pl-[64px] pt-[8px]">
-          <span
-            className="font-bold uppercase tracking-[0.14em] text-[var(--text-primary)]"
-            style={{ fontSize: `${labelSize}px` }}
+
+        {/* Header row — title, icon, status */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap,
+            padding: `${padSm}px ${pad}px`,
+            paddingLeft: useScreenSize(18),
+            borderBottom:
+              signals.cardDetail > 0.2
+                ? `${border}px solid color-mix(in oklab, ${typeColor} 10%, var(--border-default))`
+                : "none",
+            minHeight: useScreenSize(STABLE.ITEM_CHIP_HEIGHT - 4),
+            flexShrink: 0,
+          }}
+        >
+          {Icon ? (
+            <div
+              style={{
+                width: useScreenSize(STABLE.ICON_MD + 8),
+                height: useScreenSize(STABLE.ICON_MD + 8),
+                borderRadius: useScreenSize(6),
+                background: `color-mix(in oklab, ${typeColor} 12%, transparent)`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              <Icon
+                style={{ width: iconSize, height: iconSize, color: typeColor }}
+              />
+            </div>
+          ) : null}
+          <div
+            className="font-body"
+            style={{
+              fontSize: titleSize,
+              fontWeight: 600,
+              color: "var(--text-primary)",
+              letterSpacing: "-0.005em",
+              flex: 1,
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              lineHeight: 1.3,
+            }}
           >
-            {data.label}
-          </span>
-          <span
-            className="tabular-nums text-[var(--text-tertiary)]/50 font-semibold"
-            style={{ fontSize: `${countSize}px` }}
-          >
-            {data.count}
-          </span>
+            {item.title}
+          </div>
+          <StatusDot status={item.status} screenSize={6} />
         </div>
+
+        {/* Card body — preview */}
+        {item.preview && cardAlpha > 0.01 ? (
+          <div
+            style={{
+              flex: 1,
+              padding: `${padSm}px ${pad}px`,
+              paddingLeft: useScreenSize(18),
+              opacity: cardAlpha,
+              overflow: "hidden",
+              minHeight: 0,
+            }}
+          >
+            <div
+              className="font-body"
+              style={{
+                fontSize: bodySize,
+                color: "var(--text-secondary)",
+                lineHeight: 1.55,
+                display: "-webkit-box",
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
+              }}
+            >
+              {item.preview}
+            </div>
+          </div>
+        ) : null}
+
+        {/* Detail body — full preview / type-specific view */}
+        {detailAlpha > 0.05 ? (
+          <div
+            style={{
+              position: "absolute",
+              left: useScreenSize(6),
+              right: 0,
+              top: useScreenSize(STABLE.ITEM_CHIP_HEIGHT),
+              bottom: 0,
+              opacity: detailAlpha,
+              pointerEvents: detailAlpha > 0.5 ? "auto" : "none",
+              overflow: "hidden",
+            }}
+          >
+            <DetailBody item={item} typeColor={typeColor} />
+          </div>
+        ) : null}
+
+        {/* Footer meta — mono cartouche */}
+        {signals.cardDetail > 0.15 && signals.contentDepth < 0.6 ? (
+          <div
+            style={{
+              padding: `${useScreenSize(4)}px ${pad}px ${padSm}px`,
+              paddingLeft: useScreenSize(18),
+              display: "flex",
+              alignItems: "center",
+              gap,
+              opacity: Math.min(signals.cardDetail * 2, 1 - signals.contentDepth),
+              flexShrink: 0,
+            }}
+          >
+            <span
+              className="font-mono"
+              style={{
+                fontSize: metaSize,
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                color: typeColor,
+                fontWeight: 600,
+              }}
+            >
+              {meta?.label ?? item.itemType}
+            </span>
+            {item.meta ? (
+              <>
+                <span
+                  style={{
+                    width: useScreenSize(2),
+                    height: useScreenSize(2),
+                    borderRadius: "50%",
+                    background: "var(--text-tertiary)",
+                  }}
+                />
+                <span
+                  className="font-mono"
+                  style={{
+                    fontSize: metaSize,
+                    color: "var(--text-tertiary)",
+                    letterSpacing: "0.04em",
+                  }}
+                >
+                  {item.meta}
+                </span>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* Glance chip suppression border overlay when fully in chip */}
+        {chipAlpha > 0.5 && signals.cardDetail < 0.1 ? null : null}
+      </div>
+    </div>
+  );
+}
+
+/* ===================================================================
+   Type-specific detail body — code / note / etc.
+   =================================================================== */
+
+function DetailBody({ item, typeColor }: { item: WorkspaceItemData; typeColor: string }) {
+  const pad = useScreenSize(STABLE.PAD_MD);
+  const bodySize = useScreenSize(STABLE.ITEM_BODY);
+
+  if (!item.preview) {
+    return (
+      <div
+        style={{
+          padding: `${pad}px`,
+          color: "var(--text-tertiary)",
+          fontSize: bodySize,
+          fontStyle: "italic",
+        }}
+      >
+        Empty
+      </div>
+    );
+  }
+
+  if (item.itemType === "code") {
+    return (
+      <div
+        style={{
+          padding: `${pad}px`,
+          background: "var(--bg-code)",
+          height: "100%",
+          overflow: "hidden",
+          color: "var(--text-primary)",
+        }}
+      >
+        <pre
+          className="font-mono"
+          style={{
+            fontSize: bodySize,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            margin: 0,
+            lineHeight: 1.55,
+          }}
+        >
+          {item.preview.slice(0, 600)}
+        </pre>
+      </div>
+    );
+  }
+
+  if (item.itemType === "note" || item.itemType === "export") {
+    return (
+      <div
+        style={{
+          padding: `${pad}px`,
+          height: "100%",
+          overflow: "hidden",
+          color: "var(--text-primary)",
+          fontSize: bodySize,
+          lineHeight: 1.65,
+        }}
+      >
+        <MarkdownRenderer content={item.preview.slice(0, 800)} />
       </div>
     );
   }
 
   return (
     <div
-      className="flex items-center gap-6 px-6 py-4 rounded-[24px] select-none pointer-events-none"
       style={{
-        transform: `scale(${scale})`,
-        transformOrigin: "left center",
-        opacity: sig.groupReveal,
-        backgroundColor: colors.outer,
-        border: `1px solid ${colors.border}`,
+        padding: `${pad}px`,
+        color: "var(--text-secondary)",
+        fontSize: bodySize,
+        lineHeight: 1.55,
       }}
     >
-      <span
-        className="font-bold uppercase tracking-[0.14em]"
-        style={{ fontSize: `${labelSize}px`, color: colors.border }}
-      >
-        {data.label}
-      </span>
-      <span
-        className="tabular-nums text-[var(--text-tertiary)]/40 font-semibold"
-        style={{ fontSize: `${countSize}px` }}
-      >
-        {data.count}
-      </span>
-      <div
-        className="h-[3px] rounded-full ml-4"
-        style={{ width: `${lerp(40, 60, sig.cardDetail)}px`, backgroundColor: colors.border }}
-      />
+      {item.preview.slice(0, 400)}
     </div>
   );
 }
 
 /* ===================================================================
-   Item Node — progressive structural recomposition
-
-   GLANCE: Compact chip with icon, title, status dot. Minimal height.
-           No interaction affordances — pure information density.
-
-   TOUCH:  Expanded card with preview content, type badge, and
-           ACTION BAR (Edit, Open in Deep Edit, Copy). Focus ring
-           activates. The card becomes a working surface, not just
-           a preview. This is the key differentiator from Glance.
-
-   DEEP:   Content fills the card with type-specific TouchContent.
-           Item is connected to its deep-edit surface via a visual
-           bridge indicator on the right edge.
+   Widget node (shell — actual widgets live in widget-host.tsx)
    =================================================================== */
 
-function ItemNode({ data }: { data: ItemNodeData }) {
-  const { item } = data;
-  const zoom = useFlowZoom();
-  const meta = CANONICAL_WORKSPACE_TYPE_META[item.itemType as CanonicalWorkspaceType];
-  const Icon = meta?.icon;
-  const [hovered, setHovered] = useState(false);
-  const focusedItemId = useWorkspaceStore((s) => s.focusedItemId);
-  const deepEditTargets = useWorkspaceStore((s) => s.deepEditTargets);
-  const openDeepEdit = useWorkspaceStore((s) => s.openDeepEdit);
-  const setFocusedItem = useWorkspaceStore((s) => s.setFocusedItem);
-  const isFocused = focusedItemId === item.id;
-  const isOpenInDeepEdit = deepEditTargets.some((t) => t.item.id === item.id);
-
-  // Continuous zoom signals for progressive item recomposition
-  const sig = computeZoomSignals(zoom);
-
-  // Items use structureReveal for appearance, cardDetail for chip→card,
-  // contentDepth for card→detail. All continuous, no discrete boundaries.
-  const itemAppear = sig.structureReveal;
-  const chipToCard = sig.cardDetail;
-  const cardToDetail = sig.contentDepth;
-
-  // Perceptually stable counter-scale: items stay ~280-350px on screen max
-  const scale = stableScale(zoom, 0.4, 3);
-
-  const canvasWidth = TERRITORY.ITEM_COL_WIDTH - 20;
-  // Height interpolates continuously from chip (80px) through card to detail
-  const canvasHeight = lerp(80, lerp(TERRITORY.ITEM_ROW_HEIGHT - 20, TERRITORY.ITEM_ROW_HEIGHT + 220, cardToDetail), Math.max(chipToCard, cardToDetail));
-  const borderRadius = lerp(14, 20, chipToCard);
-
-  const dynamicBorderWidth = Math.max(1, 1 / zoom);
-  const borderColor = isFocused
-    ? "color-mix(in oklab, var(--accent-cyan) 40%, var(--border-default))"
-    : isOpenInDeepEdit && !isFocused
-      ? "color-mix(in oklab, var(--accent-cyan) 18%, var(--border-default))"
-      : hovered
-        ? "color-mix(in oklab, var(--accent-cyan) 22%, var(--border-default))"
-        : "color-mix(in srgb, var(--border-default) 50%, transparent)";
-
-  // Background opacity: subtle at chip, stronger at detail
-  const bgOpacity = lerp(0.88, 0.95, cardToDetail);
-
-  // Touch-tier action bar visibility: appears when cardDetail is sufficient
-  // and contentDepth hasn't taken over entirely
-  const actionBarOpacity = Math.min(
-    Math.max(0, (chipToCard - 0.25) * 4),   // fade in as card develops
-    Math.max(0, 1 - (cardToDetail - 0.7) * 5) // fade out as detail fills
-  );
-
-  return (
-    <div
-      style={{
-        width: canvasWidth,
-        height: canvasHeight,
-        transform: `scale(${scale})`,
-        transformOrigin: "center center",
-        opacity: itemAppear,
-      }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      className="relative flex items-center justify-center"
-    >
-      <div
-        className={cn(
-          "group relative flex overflow-hidden w-full h-full",
-          "transition-[box-shadow] duration-300 ease-[var(--ease-standard)]",
-          isOpenInDeepEdit && !isFocused && "opacity-80",
-        )}
-        style={{
-          borderRadius: `${borderRadius}px`,
-          border: `${dynamicBorderWidth}px solid ${borderColor}`,
-          backgroundColor: `color-mix(in oklab, var(--bg-elevated) ${Math.round(bgOpacity * 100)}%, transparent)`,
-          boxShadow: isFocused
-            ? "0 12px 30px -14px rgba(14,142,232,0.22), 0 0 0 1px color-mix(in oklab, var(--accent-cyan) 20%, transparent)"
-            : isOpenInDeepEdit
-              ? "0 8px 22px -14px rgba(14,142,232,0.12)"
-              : hovered
-                ? "0 10px 26px -16px rgba(7,20,35,0.18)"
-                : `0 ${lerp(4, 8, chipToCard)}px ${lerp(12, 22, chipToCard)}px -14px rgba(7,20,35,${lerp(0.08, 0.14, chipToCard)})`,
-        }}
-      >
-        {/* Focus ring — visible at Touch and Detail tiers when focused */}
-        {isFocused && chipToCard > 0.15 && (
-          <div
-            className="absolute inset-0 rounded-[inherit] pointer-events-none"
-            style={{
-              boxShadow: `inset 0 0 0 ${Math.max(2, 2 / zoom)}px color-mix(in oklab, var(--accent-cyan) 30%, transparent)`,
-              opacity: lerp(0.4, 1, chipToCard),
-              zIndex: 10,
-            }}
-          />
-        )}
-
-        {/* Deep Edit connector — visual bridge on right edge */}
-        {isOpenInDeepEdit && (
-          <div className="absolute -right-3 top-1/2 -translate-y-1/2 flex items-center pointer-events-none z-20">
-            {/* Connector line */}
-            <div className={cn(
-              "h-[2px] w-3 transition-all duration-300",
-              isFocused ? "bg-[var(--accent-cyan)]" : "bg-[var(--accent-cyan)]/30",
-            )} />
-            {/* Connector dot */}
-            <div className={cn(
-              "h-3 w-3 rounded-full transition-all duration-300 border-2 border-[var(--bg-primary)]",
-              isFocused
-                ? "bg-[var(--accent-cyan)] shadow-[0_0_8px_2px_rgba(14,142,232,0.35)]"
-                : "bg-[var(--accent-cyan)]/40",
-            )} />
-          </div>
-        )}
-
-        {/*
-          Progressive content recomposition:
-          Instead of 3 separate absolute-positioned layers with threshold-based
-          visibility, we render a SINGLE adaptive layout that continuously
-          morphs its structure based on zoom signals.
-        */}
-
-        {/* Unified adaptive content: morphs from chip → card → detail */}
-        <div className="absolute inset-0 flex flex-col">
-          {/* Header row: always present, grows with detail */}
-          <div
-            className="flex items-center shrink-0"
-            style={{
-              padding: `${lerp(8, 20, chipToCard)}px ${lerp(12, 24, chipToCard)}px`,
-              gap: `${lerp(8, 16, chipToCard)}px`,
-            }}
-          >
-            {Icon && (
-              <div
-                className={cn(
-                  "flex items-center justify-center shrink-0 transition-all duration-200",
-                  isFocused && chipToCard > 0.3 && "ring-2 ring-[var(--accent-cyan)]/25",
-                )}
-                style={{
-                  width: `${lerp(28, 44, chipToCard)}px`,
-                  height: `${lerp(28, 44, chipToCard)}px`,
-                  borderRadius: `${lerp(8, 13, chipToCard)}px`,
-                  backgroundColor: `color-mix(in oklab, ${meta?.color ?? "#637083"} ${lerp(8, 12, chipToCard)}%, var(--bg-secondary))`,
-                }}
-              >
-                <Icon
-                  style={{
-                    width: `${lerp(14, 20, chipToCard)}px`,
-                    height: `${lerp(14, 20, chipToCard)}px`,
-                    color: meta?.color ?? "var(--text-secondary)",
-                  }}
-                />
-              </div>
-            )}
-            <span
-              className="flex-1 truncate font-medium text-[var(--text-primary)] tracking-tight"
-              style={{
-                fontSize: `${lerp(14, 17, chipToCard)}px`,
-                fontWeight: chipToCard > 0.4 ? 600 : 500,
-              }}
-            >
-              {item.title}
-            </span>
-            <StatusDot status={item.status === "completed" ? "completed" : item.status === "active" ? "active" : "idle"} />
-          </div>
-
-          {/* Preview text: fades in with card detail, fades out when touch content takes over */}
-          {item.preview && chipToCard > 0.1 && cardToDetail < 0.9 && (
-            <div
-              className="flex-1 min-h-0 overflow-hidden"
-              style={{
-                opacity: Math.min(chipToCard * 2.5, 1 - cardToDetail),
-                padding: `0 ${lerp(12, 24, chipToCard)}px`,
-              }}
-            >
-              <p
-                className="text-[var(--text-tertiary)] leading-[1.6]"
-                style={{
-                  fontSize: `${lerp(12, 15, chipToCard)}px`,
-                  paddingLeft: `${lerp(0, 60, chipToCard)}px`,
-                  display: "-webkit-box",
-                  WebkitLineClamp: chipToCard > 0.6 ? 3 : 2,
-                  WebkitBoxOrient: "vertical" as const,
-                  overflow: "hidden",
-                }}
-              >
-                {item.preview}
-              </p>
-            </div>
-          )}
-
-          {/* Type badge and meta: progressively visible */}
-          {chipToCard > 0.3 && cardToDetail < 0.85 && (
-            <div
-              className="flex items-center justify-between mt-auto shrink-0"
-              style={{
-                opacity: Math.min((chipToCard - 0.3) * 3, 1 - cardToDetail),
-                padding: `${lerp(4, 8, chipToCard)}px ${lerp(12, 24, chipToCard)}px ${lerp(8, 20, chipToCard)}px`,
-                paddingLeft: `${lerp(12, 80, chipToCard)}px`,
-              }}
-            >
-              <span
-                className="rounded-md px-2 py-1 text-sm font-semibold uppercase tracking-[0.1em]"
-                style={{
-                  backgroundColor: isFocused ? `color-mix(in oklab, ${meta?.color ?? "var(--text-tertiary)"} 8%, transparent)` : "transparent",
-                  color: `color-mix(in oklab, ${meta?.color ?? "var(--text-tertiary)"} ${isFocused ? "80" : "50"}%, transparent)`,
-                }}
-              >
-                {meta?.label ?? item.itemType}
-              </span>
-              {item.meta && <span className="text-sm font-medium text-[var(--text-secondary)]">{item.meta}</span>}
-            </div>
-          )}
-
-          {/* ═══════════════════════════════════════════════════════════
-              TOUCH-TIER ACTION BAR — the key differentiator from Glance
-
-              This action bar makes Touch tier a real interaction layer,
-              not just "enlarged Glance cards". It provides:
-              - Edit button (opens inline editing via focus)
-              - Expand button (opens Deep Edit surface)
-              - Copy button (copies content to clipboard)
-
-              The bar fades in continuously with cardDetail and fades out
-              as contentDepth takes over (where TouchContent handles editing).
-              ═══════════════════════════════════════════════════════════ */}
-          {actionBarOpacity > 0.01 && (
-            <div
-              className="flex items-center gap-1.5 shrink-0 pointer-events-auto"
-              style={{
-                opacity: actionBarOpacity,
-                padding: `0 ${lerp(12, 24, chipToCard)}px ${lerp(6, 12, chipToCard)}px`,
-                paddingLeft: `${lerp(12, 80, chipToCard)}px`,
-              }}
-            >
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setFocusedItem(item.id);
-                }}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5",
-                  "text-[11px] font-semibold transition-all duration-150",
-                  isFocused
-                    ? "bg-[var(--accent-cyan)]/12 text-[var(--accent-cyan)]"
-                    : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]",
-                )}
-                title="Edit inline"
-              >
-                <Pencil className="h-3 w-3" />
-                Edit
-              </button>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  openDeepEdit(item);
-                }}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5",
-                  "text-[11px] font-semibold transition-all duration-150",
-                  isOpenInDeepEdit
-                    ? "bg-[var(--accent-cyan)]/12 text-[var(--accent-cyan)]"
-                    : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]",
-                )}
-                title="Open in Deep Edit"
-              >
-                <Maximize2 className="h-3 w-3" />
-                {isOpenInDeepEdit ? "Open" : "Expand"}
-              </button>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  navigator.clipboard.writeText(item.preview ?? item.title).catch(() => {});
-                }}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5",
-                  "text-[11px] font-semibold transition-all duration-150",
-                  "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]",
-                )}
-                title="Copy content"
-              >
-                <Copy className="h-3 w-3" />
-                Copy
-              </button>
-            </div>
-          )}
-
-          {/* Touch content: fades in continuously as contentDepth increases */}
-          {cardToDetail > 0.05 && (
-            <div
-              className="absolute inset-0 overflow-hidden pointer-events-auto"
-              style={{ opacity: cardToDetail }}
-            >
-              <TouchContent item={item} />
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** Detect programming language from item meta, title suffix, or content shebang/keywords */
-function detectCodeLanguage(item: WorkspaceItemData): string {
-  // Check meta field first (may contain language tag like "python", "js", etc.)
-  if (item.meta) {
-    const langMap: Record<string, string> = {
-      "python": "python", "py": "python",
-      "javascript": "javascript", "js": "javascript",
-      "typescript": "typescript", "ts": "typescript",
-      "jsx": "jsx", "tsx": "tsx",
-      "html": "html", "css": "css",
-      "rust": "rust", "go": "go",
-      "java": "java", "c": "c", "cpp": "cpp",
-      "ruby": "ruby", "php": "php",
-      "sql": "sql", "bash": "bash", "sh": "bash",
-      "swift": "swift", "kotlin": "kotlin",
-      "dart": "dart", "yaml": "yaml", "json": "json",
-      "markdown": "markdown", "md": "markdown",
-    };
-    const metaLower = item.meta.toLowerCase().trim();
-    if (langMap[metaLower]) return langMap[metaLower];
-  }
-
-  // Check title for common language extensions
-  const titleLower = item.title.toLowerCase();
-  const extMatch = titleLower.match(/\.(py|js|ts|jsx|tsx|html|css|rs|go|java|c|cpp|rb|php|sql|sh|swift|kt|dart|yaml|yml|json|md)$/);
-  if (extMatch) {
-    const extMap: Record<string, string> = {
-      "py": "python", "js": "javascript", "ts": "typescript",
-      "jsx": "jsx", "tsx": "tsx", "html": "html", "css": "css",
-      "rs": "rust", "go": "go", "java": "java", "c": "c", "cpp": "cpp",
-      "rb": "ruby", "php": "php", "sql": "sql", "sh": "bash",
-      "swift": "swift", "kt": "kotlin", "dart": "dart",
-      "yaml": "yaml", "yml": "yaml", "json": "json", "md": "markdown",
-    };
-    if (extMap[extMatch[1]]) return extMap[extMatch[1]];
-  }
-
-  // Check content for shebang or common patterns
-  const code = item.preview ?? "";
-  if (code.startsWith("#!/usr/bin/env python") || code.startsWith("#!/usr/bin/python")) return "python";
-  if (code.startsWith("#!/bin/bash") || code.startsWith("#!/bin/sh")) return "bash";
-  if (code.startsWith("<!DOCTYPE") || code.startsWith("<html")) return "html";
-  if (code.match(/^import\s+(React|{\s*useState)/m)) return "typescript";
-  if (code.match(/^(def |import |from )/m)) return "python";
-  if (code.match(/^(func |package )/m)) return "go";
-  if (code.match(/^(fn |let mut |impl )/m)) return "rust";
-  if (code.match(/^(public class |private |protected )/m)) return "java";
-
-  return "";
+function WidgetNode({ data }: { data: WidgetNodeData }) {
+  return <WidgetHost widget={data.widget} />;
 }
 
 /* ===================================================================
-   TouchContent u2014 Type-specific detail-tier rendering
+   Layout engine.
+
+   Territory size is computed from item count. Groups lay out into
+   rows of items sized exactly to match the STABLE card width at
+   SUMMARY zoom (so at summary, items pack evenly; at detail, they
+   have breathing room since cards grow).
    =================================================================== */
 
-function TouchContent({ item }: { item: WorkspaceItemData }) {
-  const meta = CANONICAL_WORKSPACE_TYPE_META[item.itemType as CanonicalWorkspaceType];
-  const Icon = meta?.icon;
-  const [isEditing, setIsEditing] = useState(false);
-  const [content, setContent] = useState(item.preview ?? "");
+const LAYOUT = {
+  WORLD_COL_WIDTH: 1400,
+  WORLD_ROW_GAP: 520,
+  HEADER_Y: 560,
+  ITEMS_PER_ROW: 3,
+  HORIZONTAL_GUTTER: 180,
+  GROUP_GAP: 260,
+};
 
-  useEffect(() => {
-    setContent(item.preview ?? "");
-  }, [item.preview]);
-
-  const handleBlur = () => {
-    setIsEditing(false);
-    if (content !== item.preview) {
-      void fetch("/api/artifacts", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ artifactId: item.id, content }),
-      }).catch(() => undefined);
-    }
-  };
-
-  switch (item.itemType) {
-    case "note":
-      return (
-        <div 
-          className="p-5 h-full overflow-hidden flex flex-col" 
-          onClick={() => !isEditing && setIsEditing(true)}
-        >
-          <div className="flex items-center gap-2 mb-3 shrink-0">
-            {Icon && <Icon className="h-4 w-4" style={{ color: meta?.color }} />}
-            <span className="text-[14px] font-semibold text-[var(--text-primary)] truncate">{item.title}</span>
-          </div>
-          {isEditing ? (
-            <textarea
-              autoFocus
-              className="flex-1 w-full resize-none bg-transparent text-[14px] leading-[1.8] text-[var(--text-primary)] outline-none border border-[var(--accent-cyan)]/50 rounded-lg p-2 font-[var(--font-manrope)]"
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              onBlur={handleBlur}
-            />
-          ) : (
-            <div className="flex-1 overflow-y-auto cursor-text">
-              <MarkdownRenderer content={content}  />
-            </div>
-          )}
-        </div>
-      );
-
-    case "code": {
-      const codeLang = detectCodeLanguage(item);
-      const fencedContent = codeLang
-        ? "```" + codeLang + "\n" + (content || "// No code yet") + "\n```"
-        : "```\n" + (content || "// No code yet") + "\n```";
-      const lineCount = (content || "").split("\n").length;
-      return (
-        <div 
-          className="h-full flex flex-col overflow-hidden"
-          onClick={() => !isEditing && setIsEditing(true)}
-        >
-          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[var(--border-default)]/20 shrink-0 bg-[var(--bg-code-editor)]">
-            {Icon && <Icon className="h-3.5 w-3.5" style={{ color: meta?.color }} />}
-            <span className="text-[12px] font-semibold text-[var(--text-primary)] truncate flex-1">{item.title}</span>
-            {codeLang && (
-              <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--text-tertiary)]/60 bg-[var(--bg-elevated)]/50 px-2 py-0.5 rounded">{codeLang}</span>
-            )}
-            <span className="text-[10px] text-[var(--text-tertiary)]/40 tabular-nums">{lineCount}L</span>
-          </div>
-          <div className="flex-1 bg-[var(--bg-code-editor)] overflow-hidden flex flex-col">
-            {isEditing ? (
-              <textarea
-                autoFocus
-                className="flex-1 w-full resize-none bg-transparent text-[var(--text-code-editor)] font-mono text-[12px] leading-[1.7] outline-none p-4 border-l-2 border-[var(--accent-cyan)]/30"
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                onBlur={handleBlur}
-                spellCheck={false}
-              />
-            ) : (
-              <div className="flex-1 overflow-y-auto p-4 [&_.markdown-body]:!bg-transparent [&_.markdown-body]:!text-[12px] [&_.markdown-body_pre]:!bg-transparent [&_.markdown-body_pre]:!m-0 [&_.markdown-body_pre]:!p-0 [&_.markdown-body_code]:!text-[12px] [&_.markdown-body_code]:!leading-[1.7] [&_.markdown-body_pre_code]:!font-mono [&_.markdown-body_pre_code]:!bg-transparent [&_.markdown-body]:!leading-[1.7] [&_button]:!hidden">
-                <MarkdownRenderer content={fencedContent} />
-              </div>
-            )}
-          </div>
-        </div>
-      );
-    }
-
-    case "visual":
-      return (
-        <div className="h-full flex flex-col items-center justify-center" style={{ background: `linear-gradient(135deg, color-mix(in oklab, ${meta?.color ?? "#1f9fb2"} 15%, var(--bg-elevated)), color-mix(in oklab, ${meta?.color ?? "#1f9fb2"} 5%, var(--bg-elevated)))` }}>
-          {Icon && <Icon className="h-12 w-12 mb-3" style={{ color: `color-mix(in oklab, ${meta?.color ?? "#1f9fb2"} 30%, transparent)` }} />}
-          <span className="text-[14px] font-semibold text-[var(--text-primary)]">{item.title}</span>
-          {item.preview && <p className="text-[12px] text-[var(--text-tertiary)] mt-1 px-6 text-center line-clamp-2">{item.preview}</p>}
-        </div>
-      );
-
-    case "thread":
-      return (
-        <div className="h-full flex flex-col p-4 gap-2 overflow-hidden">
-          <div className="flex items-center gap-2 mb-1">
-            {Icon && <Icon className="h-4 w-4" style={{ color: meta?.color }} />}
-            <span className="text-[13px] font-semibold text-[var(--text-primary)] truncate">{item.title}</span>
-          </div>
-          {item.preview ? (
-            <div className="flex flex-col gap-2">
-              <div className="self-end max-w-[80%] rounded-2xl rounded-br-md bg-[var(--bg-secondary)] px-3 py-2 text-[12px] text-[var(--text-primary)]">
-                {item.preview.slice(0, 80)}
-              </div>
-              <div className="self-start max-w-[80%] rounded-2xl rounded-bl-md bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-secondary))] px-3 py-2 text-[12px] text-[var(--text-primary)]">
-                {item.preview.slice(80) || "..."}
-              </div>
-            </div>
-          ) : (
-            <span className="text-[12px] text-[var(--text-tertiary)]">No messages yet</span>
-          )}
-        </div>
-      );
-
-    case "flashcard_deck":
-      return (
-        <div className="h-full flex flex-col items-center justify-center p-5">
-          <div className="relative w-[160px] h-[100px] mb-4">
-            <div className="absolute inset-0 translate-x-2 translate-y-2 rounded-xl bg-[var(--bg-secondary)]/60 border border-[var(--border-default)]/20" />
-            <div className="absolute inset-0 translate-x-1 translate-y-1 rounded-xl bg-[var(--bg-secondary)]/80 border border-[var(--border-default)]/20" />
-            <div className="absolute inset-0 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border-default)]/30 flex items-center justify-center">
-              {Icon && <Icon className="h-8 w-8" style={{ color: meta?.color }} />}
-            </div>
-          </div>
-          <span className="text-[14px] font-semibold text-[var(--text-primary)]">{item.title}</span>
-          {item.meta && <span className="text-[13px] font-medium text-[var(--accent-cyan)] mt-1">{item.meta}</span>}
-          <button type="button" className="mt-3 px-4 py-1.5 rounded-lg bg-[var(--accent-cyan)]/10 text-[12px] font-semibold text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/20 transition-colors">Review</button>
-        </div>
-      );
-
-    case "quiz":
-      return (
-        <div className="h-full flex flex-col items-center justify-center p-5">
-          {Icon && <Icon className="h-10 w-10 mb-3" style={{ color: meta?.color }} />}
-          <span className="text-[14px] font-semibold text-[var(--text-primary)]">{item.title}</span>
-          {item.meta ? (
-            <span className="text-[16px] font-bold mt-2" style={{ color: meta?.color }}>{item.meta}</span>
-          ) : (
-            <span className="text-[13px] text-[var(--text-tertiary)] mt-1">Not attempted</span>
-          )}
-          <button type="button" className="mt-3 px-4 py-1.5 rounded-lg bg-[color-mix(in_oklab,${meta?.color}_10%,var(--bg-secondary))] text-[12px] font-semibold hover:opacity-80 transition-opacity" style={{ color: meta?.color }}>
-            {item.status === "completed" ? "Review" : "Start"}
-          </button>
-        </div>
-      );
-
-    case "planner":
-      return (
-        <div className="h-full flex flex-col p-5">
-          <div className="flex items-center gap-2 mb-3">
-            {Icon && <Icon className="h-4 w-4" style={{ color: meta?.color }} />}
-            <span className="text-[13px] font-semibold text-[var(--text-primary)] truncate">{item.title}</span>
-          </div>
-          <div className="flex items-center gap-3 py-2">
-            <div className="h-5 w-5 rounded-md border-2 border-[var(--accent-cyan)]/40 flex items-center justify-center">
-              {item.status === "completed" && <div className="h-2.5 w-2.5 rounded-sm bg-[var(--success)]" />}
-            </div>
-            <span className="text-[13px] text-[var(--text-primary)]">{item.title}</span>
-          </div>
-          <div className="flex items-center gap-2 mt-auto">
-            <div className="h-2 w-2 rounded-full bg-[var(--accent-coral)]" />
-            <span className="text-[11px] text-[var(--text-tertiary)]">{item.meta ?? "No due date"}</span>
-          </div>
-        </div>
-      );
-
-    case "export":
-      return (
-        <div className="h-full flex flex-col overflow-hidden" style={{ background: "linear-gradient(135deg, var(--bg-secondary)/30, var(--bg-elevated))" }}>
-          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[var(--border-default)]/20 shrink-0">
-            {Icon && <Icon className="h-3.5 w-3.5" style={{ color: meta?.color }} />}
-            <span className="text-[12px] font-semibold text-[var(--text-primary)] truncate flex-1">{item.title}</span>
-            <span className="text-[10px] font-medium text-[var(--text-tertiary)]/50 uppercase tracking-wider">Document</span>
-          </div>
-          {content ? (
-            <div className="flex-1 overflow-y-auto p-4 [&_.markdown-body]:!text-[12px] [&_.markdown-body]:!leading-[1.6] [&_.markdown-body_p]:!mb-1 [&_.markdown-body_h1]:!text-[16px] [&_.markdown-body_h1]:!mb-1 [&_.markdown-body_h2]:!text-[14px] [&_.markdown-body_h2]:!mb-1 [&_.markdown-body_h3]:!text-[13px] [&_.markdown-body_h3]:!mb-1 [&_.markdown-body_ul]:!mb-1 [&_.markdown-body_ol]:!mb-1 [&_.markdown-body_blockquote]:!mb-1 [&_.markdown-body_pre]:!mb-1 [&_button]:!hidden">
-              <MarkdownRenderer content={content} mode="document" />
-            </div>
-          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center gap-2">
-              {Icon && <Icon className="h-8 w-8" style={{ color: `color-mix(in oklab, ${meta?.color ?? "#1f9fb2"} 30%, transparent)` }} />}
-              <span className="text-[12px] text-[var(--text-tertiary)]">Empty document</span>
-            </div>
-          )}
-        </div>
-      );
-
-    case "board":
-      return (
-        <div className="h-full flex flex-col p-4">
-          <div className="flex items-center gap-2 mb-3">
-            {Icon && <Icon className="h-4 w-4" style={{ color: meta?.color }} />}
-            <span className="text-[13px] font-semibold text-[var(--text-primary)] truncate">{item.title}</span>
-          </div>
-          <div className="flex-1 grid grid-cols-3 gap-2">
-            {[...Array(6)].map((_, i) => (
-              <div key={i} className="rounded-lg bg-[var(--bg-secondary)]/40 border border-[var(--border-default)]/15" />
-            ))}
-          </div>
-        </div>
-      );
-
-    default:
-      return (
-        <div className="h-full flex flex-col p-5">
-          <div className="flex items-center gap-2 mb-3">
-            {Icon && <Icon className="h-4 w-4" style={{ color: meta?.color }} />}
-            <span className="text-[14px] font-semibold text-[var(--text-primary)]">{item.title}</span>
-          </div>
-          {item.preview && <p className="text-[13px] leading-relaxed text-[var(--text-secondary)]">{item.preview}</p>}
-        </div>
-      );
-  }
+function computeTerritorySize(itemCount: number): { w: number; h: number } {
+  const rows = Math.max(2, Math.ceil(itemCount / LAYOUT.ITEMS_PER_ROW));
+  const w = Math.max(3600, Math.min(6400, 3200 + Math.ceil(itemCount / 4) * 520));
+  const h = Math.max(2800, Math.min(5200, LAYOUT.HEADER_Y + 400 + rows * LAYOUT.WORLD_ROW_GAP));
+  return { w, h };
 }
 
-/* ===================================================================
-   Build Nodes u2014 layout engine with semantic zoom awareness
-   =================================================================== */
+function groupByType(
+  items: WorkspaceItemData[],
+): { label: string; items: WorkspaceItemData[] }[] {
+  const byType: Record<string, WorkspaceItemData[]> = {};
+  for (const it of items) {
+    byType[it.itemType] = byType[it.itemType] ?? [];
+    byType[it.itemType].push(it);
+  }
+  const out: { label: string; items: WorkspaceItemData[] }[] = [];
+  for (const group of Object.values(TYPE_GROUP_LABELS)) {
+    const list = group.types.flatMap((t) => byType[t] ?? []);
+    if (list.length) out.push({ label: group.label, items: list });
+  }
+  return out;
+}
 
-/* ===================================================================
-   Heuristic Topic Grouping (Issue 4)
-   =================================================================== */
+const STOPWORDS = new Set([
+  "the", "a", "an", "of", "and", "or", "to", "for", "in", "on", "at",
+  "by", "with", "from", "is", "it", "as", "be", "are",
+]);
 
-function getTopicGroups(items: WorkspaceItemData[]): { label: string; items: WorkspaceItemData[] }[] {
-  // Use backend topicCluster if available
-  const clusterMap: Record<string, WorkspaceItemData[]> = {};
-  const unclustered: WorkspaceItemData[] = [];
-
-  for (const item of items) {
-    if (item.topicCluster) {
-      if (!clusterMap[item.topicCluster]) clusterMap[item.topicCluster] = [];
-      clusterMap[item.topicCluster].push(item);
+function groupByTopic(
+  items: WorkspaceItemData[],
+): { label: string; items: WorkspaceItemData[] }[] {
+  // Prefer backend clusters if present
+  const byCluster: Record<string, WorkspaceItemData[]> = {};
+  const rest: WorkspaceItemData[] = [];
+  for (const it of items) {
+    if (it.topicCluster) {
+      byCluster[it.topicCluster] = byCluster[it.topicCluster] ?? [];
+      byCluster[it.topicCluster].push(it);
     } else {
-      unclustered.push(item);
+      rest.push(it);
     }
   }
-
-  // If no backend clusters at all, fallback to heuristic
-  if (Object.keys(clusterMap).length === 0 && unclustered.length > 0) {
-    return heuristicTopicGroups(unclustered);
+  if (Object.keys(byCluster).length) {
+    const groups = Object.entries(byCluster).map(([label, list]) => ({ label, items: list }));
+    if (rest.length) groups.push({ label: "Misc", items: rest });
+    return groups;
   }
 
-  const groups = Object.entries(clusterMap).map(([label, clusterItems]) => ({ label, items: clusterItems }));
-
-  if (unclustered.length > 0) {
-    groups.push({ label: "Uncategorized", items: unclustered });
-  }
-
-  return groups;
-}
-
-const STOPWORDS = new Set(["the", "a", "an", "in", "on", "of", "for", "to", "and", "or", "is", "it", "at", "by", "with", "from"]);
-
-function heuristicTopicGroups(items: WorkspaceItemData[]): { label: string; items: WorkspaceItemData[] }[] {
-  const wordMap: Record<string, WorkspaceItemData[]> = {};
-  const itemWords: Map<string, string[]> = new Map();
-
-  for (const item of items) {
-    const textToAnalyze = `${item.title} ${item.preview ?? ""}`.toLowerCase().replace(/[^a-z0-9\s]/g, "");
-    const words = textToAnalyze.split(/\s+/).filter((w) => w.length > 3 && !STOPWORDS.has(w));
-    
-    // De-duplicate words for the item
-    const uniqueWords = Array.from(new Set(words));
-    itemWords.set(item.id, uniqueWords);
-    
-    for (const w of uniqueWords) {
-      if (!wordMap[w]) wordMap[w] = [];
-      wordMap[w].push(item);
+  // Heuristic keyword grouping
+  const wordToItems = new Map<string, WorkspaceItemData[]>();
+  for (const it of items) {
+    const text = `${it.title} ${it.preview ?? ""}`.toLowerCase().replace(/[^a-z0-9\s]/g, "");
+    const uniq = new Set(
+      text.split(/\s+/).filter((w) => w.length > 3 && !STOPWORDS.has(w)),
+    );
+    for (const w of uniq) {
+      const arr = wordToItems.get(w) ?? [];
+      arr.push(it);
+      wordToItems.set(w, arr);
     }
   }
-
-  // Find keywords shared by 2+ items
-  const clusters: { keyword: string; items: Set<string> }[] = [];
-  const assigned = new Set<string>();
-
-  const sortedKeywords = Object.entries(wordMap)
+  const sortedKw = Array.from(wordToItems.entries())
     .filter(([, arr]) => arr.length >= 2)
     .sort((a, b) => b[1].length - a[1].length);
 
-  for (const [keyword, keywordItems] of sortedKeywords) {
-    const unassigned = keywordItems.filter((it) => !assigned.has(it.id));
-    if (unassigned.length < 2) continue;
-    const cluster = { keyword, items: new Set(unassigned.map((it) => it.id)) };
-    for (const id of cluster.items) assigned.add(id);
-    clusters.push(cluster);
-  }
-
-  // Remaining unassigned items group by type
-  const remaining = items.filter((it) => !assigned.has(it.id));
+  const assigned = new Set<string>();
   const groups: { label: string; items: WorkspaceItemData[] }[] = [];
-
-  for (const cluster of clusters) {
-    const clusterItems = items.filter((it) => cluster.items.has(it.id));
-    const label = cluster.keyword.charAt(0).toUpperCase() + cluster.keyword.slice(1);
-    groups.push({ label, items: clusterItems });
+  for (const [kw, arr] of sortedKw) {
+    const claim = arr.filter((it) => !assigned.has(it.id));
+    if (claim.length < 2) continue;
+    claim.forEach((it) => assigned.add(it.id));
+    groups.push({
+      label: kw.charAt(0).toUpperCase() + kw.slice(1),
+      items: claim,
+    });
   }
-
-  if (remaining.length > 0) {
-    groups.push({ label: "Other", items: remaining });
-  }
-
-  return groups.length > 0 ? groups : [{ label: "All Items", items }];
+  const leftover = items.filter((it) => !assigned.has(it.id));
+  if (leftover.length) groups.push({ label: "Unfiled", items: leftover });
+  return groups.length ? groups : [{ label: "All", items }];
 }
 
-/* ===================================================================
-   Timeline Date Grouping (Issue 5)
-   =================================================================== */
-
-function timelineDateGroups(items: WorkspaceItemData[]): { label: string; items: WorkspaceItemData[] }[] {
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const yesterday = today - 86_400_000;
-  const startOfWeek = today - now.getDay() * 86_400_000;
-  const startOfLastWeek = startOfWeek - 7 * 86_400_000;
-
-  const buckets: { label: string; items: WorkspaceItemData[] }[] = [
-    { label: "Today", items: [] },
-    { label: "Yesterday", items: [] },
-    { label: "This Week", items: [] },
-    { label: "Last Week", items: [] },
-  ];
-  const monthBuckets: Record<string, WorkspaceItemData[]> = {};
-
-  const sorted = [...items].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
-
-  for (const item of sorted) {
-    const ts = item.updatedAt ?? 0;
-    if (ts >= today) {
-      buckets[0].items.push(item);
-    } else if (ts >= yesterday) {
-      buckets[1].items.push(item);
-    } else if (ts >= startOfWeek) {
-      buckets[2].items.push(item);
-    } else if (ts >= startOfLastWeek) {
-      buckets[3].items.push(item);
-    } else {
-      const d = new Date(ts);
-      const key = d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
-      if (!monthBuckets[key]) monthBuckets[key] = [];
-      monthBuckets[key].push(item);
-    }
+function groupByTimeline(
+  items: WorkspaceItemData[],
+): { label: string; items: WorkspaceItemData[] }[] {
+  const now = Date.now();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const t0 = today.getTime();
+  const buckets: Record<string, WorkspaceItemData[]> = {
+    "Today": [],
+    "Yesterday": [],
+    "This week": [],
+    "Earlier": [],
+  };
+  const sorted = [...items].sort(
+    (a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0),
+  );
+  for (const it of sorted) {
+    const ts = it.updatedAt ?? 0;
+    if (ts >= t0) buckets.Today.push(it);
+    else if (ts >= t0 - 86400000) buckets.Yesterday.push(it);
+    else if (ts >= now - 7 * 86400000) buckets["This week"].push(it);
+    else buckets.Earlier.push(it);
   }
-
-  const result = buckets.filter((b) => b.items.length > 0);
-  for (const [label, monthItems] of Object.entries(monthBuckets)) {
-    result.push({ label, items: monthItems });
-  }
-  return result.length > 0 ? result : [{ label: "All", items: sorted }];
+  return Object.entries(buckets)
+    .filter(([, arr]) => arr.length)
+    .map(([label, items]) => ({ label, items }));
 }
 
-/* ===================================================================
-   Build Nodes u2014 layout engine with semantic zoom awareness
-   =================================================================== */
-
-const ROW_HEIGHT = 300;
-
-function computeTerritorySize(itemCount: number): { w: number; h: number } {
-  const minW = 3000;
-  const minH = 2400;
-  const perItem = 400;
-  const w = Math.max(minW, Math.min(6000, 2000 + Math.ceil(itemCount / 3) * 1200));
-  const h = Math.max(minH, Math.min(5000, 1200 + itemCount * perItem));
-  return { w, h };
+function groupsFor(
+  items: WorkspaceItemData[],
+  mode: ViewMode,
+): { label: string; items: WorkspaceItemData[] }[] {
+  if (mode === "byTopic") return groupByTopic(items);
+  if (mode === "timeline") return groupByTimeline(items);
+  return groupByType(items);
 }
 
 function buildNodes(
   workspaces: WorkspaceData[],
-  zoomTier: "landscape" | "summary" | "detail",
-  zoomProgress: number,
-  zoom: number,
-  viewMode: "byType" | "byTopic" | "timeline" = "byType",
+  viewMode: ViewMode,
+  itemOverrides: Record<string, { x: number; y: number }>,
+  widgets: WidgetData[],
 ): Node[] {
   const nodes: Node[] = [];
-  const sig = computeZoomSignals(zoom);
 
-  // Progressive layout density: item spacing responds to zoom signals.
-  // At landscape (structureReveal ~0), items are spread far apart.
-  // As zoom increases, items pack tighter for more content density.
-  // At detail level, items are close together for efficient scanning.
-  const densityFactor = lerp(1.6, 0.75, Math.max(sig.structureReveal, sig.cardDetail));
-  const rowGap = Math.round(ROW_HEIGHT * densityFactor);
-
-  workspaces.forEach((ws, idx) => {
-    const col = idx % TERRITORY.COLS;
-    const row = Math.floor(idx / TERRITORY.COLS);
-    const tint = dominantTint(ws);
-    const { w: territoryWidth, h: territoryHeight } = computeTerritorySize(ws.items.length);
+  workspaces.forEach((ws, wsIdx) => {
+    const col = wsIdx % TERRITORY.COLS;
+    const row = Math.floor(wsIdx / TERRITORY.COLS);
+    const originX = col * TERRITORY.SPACING_X;
+    const originY = row * TERRITORY.SPACING_Y;
+    const ink = territoryInk(ws.id, ws.name);
+    const size = computeTerritorySize(ws.items.length);
 
     nodes.push({
       id: `ws-${ws.id}`,
       type: "workspaceTerritory",
-      position: {
-        x: col * TERRITORY.SPACING_X,
-        y: row * TERRITORY.SPACING_Y,
-      },
-      data: { workspace: ws, tint } satisfies WorkspaceNodeData,
+      position: { x: originX, y: originY },
+      data: { workspace: ws, ink } satisfies WorkspaceNodeData,
       draggable: false,
       selectable: true,
-      style: { width: territoryWidth, height: territoryHeight, zIndex: 0 },
+      style: { width: size.w, height: size.h, zIndex: 0 },
     });
 
-    // Items are ALWAYS included in the node tree. They control their own
-    // visibility via continuous opacity from structureReveal signal.
-    // No discrete threshold — eliminates abrupt show/hide viewport jumps.
+    const groups = groupsFor(ws.items, viewMode);
+    const colWidth = LAYOUT.WORLD_COL_WIDTH;
+    const totalColumns = Math.max(1, Math.floor((size.w - LAYOUT.HORIZONTAL_GUTTER * 2) / colWidth));
+    // Column accumulators
+    const colY: number[] = new Array(totalColumns).fill(LAYOUT.HEADER_Y);
 
-    // Build groups based on viewMode
-    let groups: { label: string; variant: string; items: WorkspaceItemData[] }[];
-
-    if (viewMode === "timeline") {
-      const dateGroups = timelineDateGroups(ws.items);
-      groups = dateGroups.map((g) => ({ label: g.label, variant: "neutral", items: g.items }));
-    } else if (viewMode === "byTopic") {
-      const topicGroups = getTopicGroups(ws.items);
-      const colorVariants = ["accent", "warm", "cool", "neutral", "muted"];
-      groups = topicGroups.map((g, i) => ({ 
-        label: g.label, 
-        variant: colorVariants[i % colorVariants.length], 
-        items: g.items 
-      }));
-    } else {
-      const typeGrouped: Record<string, WorkspaceItemData[]> = {};
-      for (const item of ws.items) {
-        const key = item.itemType;
-        if (!typeGrouped[key]) typeGrouped[key] = [];
-        typeGrouped[key].push(item);
+    groups.forEach((group, gi) => {
+      // Assign group to the shortest column for a balanced layout
+      let shortest = 0;
+      for (let c = 1; c < totalColumns; c++) {
+        if (colY[c] < colY[shortest]) shortest = c;
       }
-      groups = [];
-      for (const [, group] of Object.entries(TYPE_GROUP_LABELS)) {
-        const items = group.types.flatMap((t) => typeGrouped[t] ?? []);
-        if (items.length > 0) {
-          groups.push({ label: group.label, variant: TYPE_TO_TINT[group.types[0]], items });
-        }
-      }
-    }
+      const gx = LAYOUT.HORIZONTAL_GUTTER + shortest * colWidth;
+      const gy = colY[shortest];
 
-    // Layout Engine
-    const headerY = 500;
-    
-    if (viewMode === "timeline") {
-      // Timeline: horizontal layout (left-to-right)
-      let groupX = 120;
-      for (let gi = 0; gi < groups.length; gi++) {
-        const g = groups[gi];
+      nodes.push({
+        id: `group-${ws.id}-${gi}`,
+        type: "groupLabel",
+        parentId: `ws-${ws.id}`,
+        position: { x: gx, y: gy },
+        data: { label: group.label, count: group.items.length, ink, viewMode },
+        draggable: false,
+        selectable: false,
+        extent: "parent",
+        style: { zIndex: 1 },
+      });
+
+      let iy = gy + 120;
+      group.items.forEach((item, ii) => {
+        const ix = gx + (ii % LAYOUT.ITEMS_PER_ROW) * 440;
+        const baseY = iy + Math.floor(ii / LAYOUT.ITEMS_PER_ROW) * LAYOUT.WORLD_ROW_GAP;
+        const override = itemOverrides[item.id];
+        const finalX = override ? override.x : ix;
+        const finalY = override ? override.y : baseY;
         nodes.push({
-          id: `group-${ws.id}-${g.label}-${gi}`,
-          type: "groupLabel",
+          id: `item-${item.id}`,
+          type: "itemNode",
           parentId: `ws-${ws.id}`,
-          position: { x: groupX, y: headerY },
-          data: { label: g.label, variant: g.variant, count: g.items.length, viewMode: "timeline" } satisfies GroupLabelNodeData,
-          draggable: false,
-          selectable: false,
-          style: { width: 1200, zIndex: 1 },
+          position: { x: finalX, y: finalY },
+          data: { item, groupLabel: group.label, ink } satisfies ItemNodeData,
+          draggable: true,
+          selectable: true,
+          extent: "parent",
+          style: { zIndex: 2 },
         });
+      });
 
-        let itemY = headerY + 160; // Extra spacing for the timeline axis
-        for (let ii = 0; ii < g.items.length; ii++) {
-          const item = g.items[ii];
-          nodes.push({
-            id: `item-${item.id}`,
-            type: "itemNode",
-            parentId: `ws-${ws.id}`,
-            position: { x: groupX + 64, y: itemY }, // Indented slightly relative to axis
-            data: { item, groupLabel: g.label, isFirst: ii === 0 } satisfies ItemNodeData,
-            draggable: true,
-            selectable: true,
-            style: { zIndex: 2 },
-          });
-          itemY += rowGap + 40; // More vertical spacing for a chronological feel
-        }
-        groupX += 1200; // Closer together horizontally than before to make timeline cohesive
-      }
-    } else if (viewMode === "byTopic") {
-      // By Topic: Semantic Spatial Packing (simulated with 3 columns, more scattered y spacing)
-      const colCount = 3;
-      const colWidth = territoryWidth / colCount;
-      const colOffsets = Array.from({ length: colCount }, (_, i) => 120 + i * colWidth);
-      const colYCursors = Array.from({ length: colCount }, () => headerY + 100);
-
-      // Sort groups by size to balance columns
-      const sortedGroups = [...groups].sort((a, b) => b.items.length - a.items.length);
-
-      for (let gi = 0; gi < sortedGroups.length; gi++) {
-        const g = sortedGroups[gi];
-        // Find shortest column
-        let minColIdx = 0;
-        let minY = colYCursors[0];
-        for (let i = 1; i < colCount; i++) {
-          if (colYCursors[i] < minY) {
-            minY = colYCursors[i];
-            minColIdx = i;
-          }
-        }
-
-        const colIdx = minColIdx;
-        const x = colOffsets[colIdx];
-        let y = colYCursors[colIdx];
-
-        nodes.push({
-          id: `group-${ws.id}-${g.label}-${gi}`,
-          type: "groupLabel",
-          parentId: `ws-${ws.id}`,
-          position: { x, y },
-          data: { label: g.label, variant: g.variant, count: g.items.length, viewMode: "byTopic" } satisfies GroupLabelNodeData,
-          draggable: false,
-          selectable: false,
-          style: { width: Math.min(colWidth - 140, 2400), zIndex: 1 },
-        });
-        y += 140;
-
-        const itemsPerRow = 2; // Tighter clusters for topics
-        for (let ii = 0; ii < g.items.length; ii++) {
-          const item = g.items[ii];
-          const itemCol = ii % itemsPerRow;
-          const itemRow = Math.floor(ii / itemsPerRow);
-          // Apply slight randomness/stagger to make it feel organic and clustered
-          const staggerY = (itemCol % 2) * 40;
-          nodes.push({
-            id: `item-${item.id}`,
-            type: "itemNode",
-            parentId: `ws-${ws.id}`,
-            position: {
-              x: x + itemCol * (TERRITORY.ITEM_COL_WIDTH + 60),
-              y: y + itemRow * (rowGap + 60) + staggerY,
-            },
-            data: { item, groupLabel: g.label, isFirst: ii === 0 } satisfies ItemNodeData,
-            draggable: true,
-            selectable: true,
-            style: { zIndex: 2 },
-          });
-        }
-
-        colYCursors[colIdx] = y + Math.ceil(g.items.length / itemsPerRow) * (rowGap + 60) + 180; // More space between topics
-      }
-
-    } else {
-      // By Type: Structured 2-column layout (Default)
-      const groupsPerColumn = Math.ceil(groups.length / 2);
-      const colOffsets = [120, territoryWidth / 2 + 60];
-      const colYCursors = [headerY, headerY];
-
-      for (let gi = 0; gi < groups.length; gi++) {
-        const g = groups[gi];
-        const colIdx = gi < groupsPerColumn ? 0 : 1;
-        const x = colOffsets[colIdx];
-        let y = colYCursors[colIdx];
-
-        nodes.push({
-          id: `group-${ws.id}-${g.label}-${gi}`,
-          type: "groupLabel",
-          parentId: `ws-${ws.id}`,
-          position: { x, y },
-          data: { label: g.label, variant: g.variant, count: g.items.length, viewMode: "byType" } satisfies GroupLabelNodeData,
-          draggable: false,
-          selectable: false,
-          style: { width: Math.min(territoryWidth / 2 - 140, 2400), zIndex: 1 },
-        });
-        y += 120;
-
-        const itemsPerRow = Math.min(3, TERRITORY.ITEMS_PER_ROW);
-        for (let ii = 0; ii < g.items.length; ii++) {
-          const item = g.items[ii];
-          const itemCol = ii % itemsPerRow;
-          const itemRow = Math.floor(ii / itemsPerRow);
-          nodes.push({
-            id: `item-${item.id}`,
-            type: "itemNode",
-            parentId: `ws-${ws.id}`,
-            position: {
-              x: item.canvasX ?? x + itemCol * TERRITORY.ITEM_COL_WIDTH,
-              y: item.canvasY ?? y + itemRow * rowGap,
-            },
-            data: { item, groupLabel: g.label, isFirst: ii === 0 } satisfies ItemNodeData,
-            draggable: true,
-            selectable: true,
-            style: { zIndex: 2 },
-          });
-        }
-
-        colYCursors[colIdx] = y + Math.ceil(g.items.length / itemsPerRow) * rowGap + 80;
-      }
-    }
+      const rowsUsed = Math.ceil(group.items.length / LAYOUT.ITEMS_PER_ROW);
+      colY[shortest] =
+        iy + rowsUsed * LAYOUT.WORLD_ROW_GAP + LAYOUT.GROUP_GAP;
+    });
   });
+
+  // Widgets — live in world coords, not parented to any territory
+  for (const w of widgets) {
+    nodes.push({
+      id: `widget-${w.id}`,
+      type: "widgetHost",
+      position: { x: w.x, y: w.y },
+      data: { widget: w } satisfies WidgetNodeData,
+      draggable: true,
+      selectable: true,
+      style: { width: w.w, height: w.h, zIndex: 3 },
+    });
+  }
 
   return nodes;
 }
 
-/* --- Node Type Registry --- */
-
-const NODE_TYPES = {
-  workspaceTerritory: WorkspaceTerritoryNode,
-  itemNode: ItemNode,
-  groupLabel: GroupLabelNode,
-};
-
 /* ===================================================================
-   Fixed Screen-Size Background
+   Background — paper + mode-dependent pattern
    =================================================================== */
 
-function CanvasBackground({ mode, zoom }: { mode: "dots" | "blank" | "grid"; zoom: number }) {
+function CanvasBackground({ mode, zoom }: { mode: BackgroundMode; zoom: number }) {
+  const signals = computeZoomSignals(zoom);
+
+  const opacity = lerp(0.25, 0.55, signals.structureReveal);
   if (mode === "blank") return null;
 
-  const isDots = mode === "dots";
-  const sig = computeZoomSignals(zoom);
+  let backgroundImage = "";
+  let backgroundSize = "28px 28px";
 
-  // Background responds to zoom: subtler at landscape (territory backgrounds dominate),
-  // more present at detail level where the canvas is the working surface.
-  // Dot/grid size stays fixed on screen (CSS pattern, not transformed).
-  const baseOpacity = isDots ? 0.55 : 0.2;
-  const zoomOpacity = lerp(baseOpacity * 0.3, baseOpacity, sig.structureReveal);
+  if (mode === "dots") {
+    backgroundImage =
+      "radial-gradient(circle, color-mix(in oklab, var(--text-tertiary) 32%, transparent) 1px, transparent 1.4px)";
+    backgroundSize = "26px 26px";
+  } else if (mode === "grid") {
+    backgroundImage = `
+      linear-gradient(color-mix(in oklab, var(--border-default) 40%, transparent) 0.5px, transparent 0.5px),
+      linear-gradient(90deg, color-mix(in oklab, var(--border-default) 40%, transparent) 0.5px, transparent 0.5px)
+    `;
+    backgroundSize = "44px 44px";
+  } else if (mode === "contour") {
+    backgroundImage = "none";
+  }
 
   return (
     <div
-      className="absolute inset-0 pointer-events-none z-0"
       style={{
-        backgroundImage: isDots
-          ? "radial-gradient(circle, var(--border-default) 1.2px, transparent 1.2px)"
-          : "linear-gradient(var(--border-default) 0.5px, transparent 0.5px), linear-gradient(90deg, var(--border-default) 0.5px, transparent 0.5px)",
-        backgroundSize: isDots ? "28px 28px" : "40px 40px",
-        opacity: zoomOpacity,
+        position: "absolute",
+        inset: 0,
+        pointerEvents: "none",
+        backgroundImage,
+        backgroundSize,
+        opacity,
       }}
     />
   );
 }
 
 /* ===================================================================
-   Canvas Inner u2014 the ReactFlow instance
+   Canvas Inner
    =================================================================== */
+
+const NODE_TYPES = {
+  workspaceTerritory: WorkspaceTerritoryNode,
+  groupLabel: GroupLabelNode,
+  itemNode: ItemNode,
+  widgetHost: WidgetNode,
+};
 
 type WorkspaceCanvasProps = {
   onNodeClick?: (workspaceId: string) => void;
   onItemClick?: (itemId: string) => void;
 };
 
-function WorkspaceCanvasInner({
-  onNodeClick,
-  onItemClick,
-}: WorkspaceCanvasProps) {
+function WorkspaceCanvasInner({ onNodeClick, onItemClick }: WorkspaceCanvasProps) {
   const workspaces = useWorkspaceStore((s) => s.workspaces);
-  const zoomTier = useWorkspaceStore((s) => s.zoomTier);
-  const zoomProgress = useWorkspaceStore((s) => s.zoomProgress);
-  const zoom = useWorkspaceStore((s) => s.zoom);
   const viewMode = useWorkspaceStore((s) => s.viewMode);
-  const setViewport = useWorkspaceStore((s) => s.setViewport);
-  const setFocusedItem = useWorkspaceStore((s) => s.setFocusedItem);
   const backgroundMode = useWorkspaceStore((s) => s.backgroundMode);
+  const zoom = useZoom();
+  const setViewport = useWorkspaceStore((s) => s.setViewport);
+  const setZoom = useWorkspaceStore((s) => s.setZoom);
+  const setFocusedItem = useWorkspaceStore((s) => s.setFocusedItem);
   const flyToTarget = useWorkspaceStore((s) => s.flyToTarget);
   const clearFlyToTarget = useWorkspaceStore((s) => s.clearFlyToTarget);
+  const widgets = useWorkspaceStore((s) => s.widgets);
+  const setItemPosition = useWorkspaceStore((s) => s.setItemPosition);
+  const updateWidget = useWorkspaceStore((s) => s.updateWidget);
+  const itemPositions = useWorkspaceStore((s) => s.itemPositions);
+  const widgetPlacementHint = useWorkspaceStore((s) => s.widgetPlacementHint);
+  const setWidgetPlacementHint = useWorkspaceStore((s) => s.setWidgetPlacementHint);
+  const addWidget = useWorkspaceStore((s) => s.addWidget);
 
-  const { setCenter } = useReactFlow();
+  const { setCenter, zoomIn, zoomOut, zoomTo, screenToFlowPosition } = useReactFlow();
 
-  // Fly-to-workspace animation
-  const lastFlyToRef = useRef<number>(0);
+  // Fly-to animation
+  const lastFlyRef = useRef<number>(0);
   useEffect(() => {
-    if (!flyToTarget || flyToTarget.requestId === lastFlyToRef.current) return;
-    lastFlyToRef.current = flyToTarget.requestId;
-
+    if (!flyToTarget || flyToTarget.requestId === lastFlyRef.current) return;
+    lastFlyRef.current = flyToTarget.requestId;
     setCenter(flyToTarget.centerX, flyToTarget.centerY, {
       zoom: flyToTarget.zoom,
-      duration: 700,
+      duration: 720,
     });
-
-    const timer = setTimeout(() => clearFlyToTarget(), 750);
-    return () => clearTimeout(timer);
+    const t = setTimeout(clearFlyToTarget, 760);
+    return () => clearTimeout(t);
   }, [flyToTarget, setCenter, clearFlyToTarget]);
 
-  // RAF-based viewport tracking: zoom updates immediately for smooth
-  // semantic interpolation, full viewport (position + proximity) updates
-  // on animation frames to avoid excessive store computation.
+  // Keyboard zoom shortcuts
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.defaultPrevented) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if ((e.target as HTMLElement)?.isContentEditable) return;
+
+      if (e.key === "+" || (e.key === "=" && (e.ctrlKey || e.metaKey))) {
+        e.preventDefault();
+        zoomIn({ duration: 200 });
+      } else if (e.key === "-" || (e.key === "-" && (e.ctrlKey || e.metaKey))) {
+        e.preventDefault();
+        zoomOut({ duration: 200 });
+      } else if (e.key === "0") {
+        e.preventDefault();
+        zoomTo(VP.DEFAULT_ZOOM, { duration: 240 });
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zoomIn, zoomOut, zoomTo]);
+
+  // Viewport change — RAF throttled
   const rafRef = useRef<number>(0);
-  const lastVpRef = useRef<Viewport>({ x: 0, y: 0, zoom: 0 });
-  const setZoom = useWorkspaceStore((s) => s.setZoom);
+  const lastVp = useRef<Viewport>({ x: 0, y: 0, zoom: VP.DEFAULT_ZOOM });
+  const handleViewportChange = useCallback(
+    (vp: Viewport) => {
+      lastVp.current = vp;
+      setZoom(vp.zoom);
+      if (!rafRef.current) {
+        rafRef.current = requestAnimationFrame(() => {
+          rafRef.current = 0;
+          const cur = lastVp.current;
+          setViewport(cur.x, cur.y, cur.zoom);
+        });
+      }
+    },
+    [setViewport, setZoom],
+  );
+
+  // Build positions override map
+  const positionsMap = useMemo(() => {
+    const out: Record<string, { x: number; y: number }> = {};
+    for (const [id, pos] of Object.entries(itemPositions)) {
+      out[id] = { x: pos.x, y: pos.y };
+    }
+    return out;
+  }, [itemPositions]);
 
   const nodes = useMemo(
-    () => buildNodes(workspaces, zoomTier, zoomProgress, zoom, viewMode),
-    [workspaces, zoomTier, zoomProgress, zoom, viewMode],
+    () => buildNodes(workspaces, viewMode, positionsMap, widgets),
+    [workspaces, viewMode, positionsMap, widgets],
   );
 
   const edges: Edge[] = useMemo(() => [], []);
 
-  const handleViewportChange = useCallback(
-    (vp: Viewport) => {
-      lastVpRef.current = vp;
-      // Immediately update zoom for smooth visual interpolation
-      // (no debounce — this is cheap and drives all signal computation)
-      setZoom(vp.zoom);
-      // Throttle full viewport update (includes proximity computation)
-      // to one per animation frame
-      if (!rafRef.current) {
-        rafRef.current = requestAnimationFrame(() => {
-          rafRef.current = 0;
-          const current = lastVpRef.current;
-          setViewport(current.x, current.y, current.zoom);
-        });
+  // Track drag commits
+  const handleNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      for (const ch of changes) {
+        if (ch.type !== "position") continue;
+        const pc = ch as NodePositionChange;
+        if (pc.dragging) continue;
+        if (!pc.position) continue;
+        if (pc.id.startsWith("item-")) {
+          const itemId = pc.id.slice("item-".length);
+          setItemPosition(itemId, pc.position.x, pc.position.y);
+        } else if (pc.id.startsWith("widget-")) {
+          const widgetId = pc.id.slice("widget-".length);
+          updateWidget(widgetId, { x: pc.position.x, y: pc.position.y });
+        }
       }
     },
-    [setZoom, setViewport],
+    [setItemPosition, updateWidget],
   );
 
   const handleNodeClick = useCallback(
-    (_event: React.MouseEvent, node: Node) => {
+    (_e: React.MouseEvent, node: Node) => {
       if (node.type === "workspaceTerritory" && onNodeClick) {
-        const wsId = node.id.replace("ws-", "");
-        onNodeClick(wsId);
+        onNodeClick(node.id.replace("ws-", ""));
       } else if (node.type === "itemNode" && onItemClick) {
         const itemId = node.id.replace("item-", "");
         setFocusedItem(itemId);
@@ -1571,126 +1135,115 @@ function WorkspaceCanvasInner({
     [onNodeClick, onItemClick, setFocusedItem],
   );
 
-  const [contextMenu, setContextMenu] = useState<{
-    x: number;
-    y: number;
-    type: "pane" | "node";
-    id?: string;
-  } | null>(null);
-
-  const handlePaneContextMenu = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY, type: "pane" });
-  }, []);
-
-  const handleNodeContextMenu = useCallback(
-    (e: React.MouseEvent, node: Node) => {
-      e.preventDefault();
-      if (node.type === "itemNode") {
-        setContextMenu({
-          x: e.clientX,
-          y: e.clientY,
-          type: "node",
-          id: node.id.replace("item-", ""),
-        });
-      } else {
-        setContextMenu({ x: e.clientX, y: e.clientY, type: "pane" });
+  const handlePaneClick = useCallback(
+    (e: React.MouseEvent) => {
+      setFocusedItem(null);
+      // Place pending widget
+      if (widgetPlacementHint) {
+        const world = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+        const w: WidgetData = {
+          id: `wg-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          kind: widgetPlacementHint.kind,
+          x: world.x,
+          y: world.y,
+          w: defaultWidgetSize(widgetPlacementHint.kind).w,
+          h: defaultWidgetSize(widgetPlacementHint.kind).h,
+          workspaceId: null,
+          createdAt: Date.now(),
+          state: defaultWidgetState(widgetPlacementHint.kind),
+        };
+        addWidget(w);
+        setWidgetPlacementHint(null);
       }
     },
-    [],
+    [setFocusedItem, widgetPlacementHint, screenToFlowPosition, addWidget, setWidgetPlacementHint],
   );
 
-  const handlePaneClick = useCallback(() => {
-    setFocusedItem(null);
-    setContextMenu(null);
-  }, [setFocusedItem]);
-
-  useEffect(() => {
-    const handleGlobalClick = () => setContextMenu(null);
-    window.addEventListener("click", handleGlobalClick);
-    return () => window.removeEventListener("click", handleGlobalClick);
-  }, []);
+  // Resolve background — "contour" mode skips mask pattern since it's on the territory
+  const bgForFlow: BackgroundMode = backgroundMode === "contour" ? "blank" : backgroundMode;
 
   return (
-    <div className="h-full w-full relative bg-[var(--bg-primary)]">
-      <CanvasBackground mode={backgroundMode} zoom={zoom} />
+    <div
+      className="h-full w-full relative"
+      style={{
+        background: "var(--bg-primary)",
+        cursor: widgetPlacementHint ? "crosshair" : "default",
+      }}
+    >
+      <CanvasBackground mode={bgForFlow} zoom={zoom} />
 
       <div className="h-full w-full relative z-[1]">
         <ReactFlow
           nodes={nodes}
           edges={edges}
           nodeTypes={NODE_TYPES}
+          onNodesChange={handleNodesChange}
           onViewportChange={handleViewportChange}
           onNodeClick={handleNodeClick}
           onPaneClick={handlePaneClick}
-          onPaneContextMenu={handlePaneContextMenu}
-          onNodeContextMenu={handleNodeContextMenu}
-          zoomOnScroll={true}
-          panOnScroll={false}
+          panOnScroll={true}
+          panOnScrollMode={"free" as unknown as undefined}
           panOnDrag={true}
+          zoomOnScroll={true}
           zoomOnPinch={true}
+          zoomOnDoubleClick={false}
           minZoom={VP.MIN_ZOOM}
           maxZoom={VP.MAX_ZOOM}
           defaultViewport={{ x: 80, y: 40, zoom: VP.DEFAULT_ZOOM }}
           proOptions={{ hideAttribution: true }}
           fitView={true}
-          fitViewOptions={{ padding: 0.35, maxZoom: VP.DEFAULT_ZOOM + 0.05 }}
+          fitViewOptions={{ padding: 0.3, maxZoom: VP.DEFAULT_ZOOM + 0.05 }}
           deleteKeyCode={null}
           selectionKeyCode={null}
           style={{ background: "transparent" }}
         />
       </div>
-
-      {/* Context Menu */}
-      {contextMenu && (
-        <div
-          className="fixed z-[100] min-w-[180px] rounded-2xl border border-[var(--border-default)]/50 bg-[var(--bg-elevated)]/95 p-1.5 shadow-[0_12px_28px_-12px_rgba(8,22,40,0.30)] backdrop-blur-xl"
-          style={{
-            top: Math.min(contextMenu.y, (typeof window !== "undefined" ? window.innerHeight : 800) - 320),
-            left: Math.min(contextMenu.x, (typeof window !== "undefined" ? window.innerWidth : 1200) - 220),
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {contextMenu.type === "pane" ? (
-            <ActionMenuContent
-              onAction={() => setContextMenu(null)}
-            />
-          ) : (
-            <div className="flex flex-col gap-0.5">
-              <button
-                type="button"
-                onClick={() => {
-                  onItemClick?.(contextMenu.id!);
-                  setContextMenu(null);
-                }}
-                className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              >
-                <ExternalLink className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
-                <span className="flex-1 text-left">Open in Deep Edit</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setContextMenu(null)}
-                className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              >
-                <Link className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
-                <span className="flex-1 text-left">Copy Link</span>
-              </button>
-              <div className="my-0.5 h-px bg-[var(--border-default)]/25" />
-              <button
-                type="button"
-                onClick={() => setContextMenu(null)}
-                className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] font-medium text-[var(--danger)] transition-colors hover:bg-[var(--danger)]/10"
-              >
-                <Trash2 className="h-4 w-4 shrink-0 text-[var(--danger)]/80" />
-                <span className="flex-1 text-left">Delete Item</span>
-              </button>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
+}
+
+function defaultWidgetSize(kind: WidgetKind): { w: number; h: number } {
+  switch (kind) {
+    case "sticky":
+      return { w: 1200, h: 900 };
+    case "timer":
+    case "countdown":
+    case "clock":
+      return { w: 1100, h: 650 };
+    case "link":
+      return { w: 1300, h: 500 };
+    case "image":
+      return { w: 1600, h: 1100 };
+    case "scratchpad":
+      return { w: 1800, h: 1400 };
+    case "planner-strip":
+      return { w: 2200, h: 650 };
+    default:
+      return { w: 1200, h: 800 };
+  }
+}
+
+function defaultWidgetState(kind: WidgetKind): Record<string, unknown> {
+  switch (kind) {
+    case "sticky":
+      return { text: "", color: "ochre" };
+    case "timer":
+      return { minutes: 25, running: false };
+    case "countdown":
+      return { targetAt: Date.now() + 3600000, label: "Countdown" };
+    case "clock":
+      return { tz: "local" };
+    case "link":
+      return { url: "", label: "Open link" };
+    case "image":
+      return { url: "" };
+    case "scratchpad":
+      return { text: "" };
+    case "planner-strip":
+      return { tasks: [] };
+    default:
+      return {};
+  }
 }
 
 export function WorkspaceCanvas(props: WorkspaceCanvasProps) {

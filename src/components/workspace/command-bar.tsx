@@ -69,7 +69,7 @@ function ModeIndicator({ mode }: { mode: CommandMode }) {
 
 /* --- Focus Context Tags (right side, beside send button) --- */
 
-function FocusContextTags() {
+function FocusContextTags({ contextOverride }: { contextOverride?: { id: string; title: string; type: string } }) {
   const committedWorkspaceId = useWorkspaceStore((s) => s.committedWorkspaceId);
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const focusedItemId = useWorkspaceStore((s) => s.focusedItemId);
@@ -79,7 +79,11 @@ function FocusContextTags() {
 
   const workspace = workspaces.find((w) => w.id === committedWorkspaceId);
   const deepItem = deepEditTargets.length > 0 ? deepEditTargets[deepEditTargets.length - 1]?.item : null;
-  const focusedItem = deepItem ?? (focusedItemId ? workspaces.flatMap((w) => w.items).find((i) => i.id === focusedItemId) : null);
+  const storeFocusedItem = deepItem ?? (focusedItemId ? workspaces.flatMap((w) => w.items).find((i) => i.id === focusedItemId) : null);
+  
+  const focusedItem = contextOverride 
+    ? { id: contextOverride.id, title: contextOverride.title, itemType: contextOverride.type }
+    : storeFocusedItem;
 
   if (!workspace && !focusedItem) return null;
 
@@ -159,6 +163,7 @@ function SuggestionChips({
 
 type CommandBarProps = {
   workspaceName?: string;
+  contextOverride?: { id: string; title: string; type: string };
   onSendMessage: (message: string) => void;
   onStopStreaming?: () => void;
   onCreateWorkspace?: () => void;
@@ -166,6 +171,7 @@ type CommandBarProps = {
   onCreateCode: () => void;
   onCreateVisual: () => void;
   onCreateTask: () => void;
+  onCreateWidget?: () => void;
   onCreateThread: () => void;
   onCreateWithAi: () => void;
   onDismissResultCard?: (cardId: string) => void;
@@ -178,6 +184,7 @@ type CommandBarProps = {
 
 export function CommandBar({
   workspaceName,
+  contextOverride,
   onSendMessage,
   onStopStreaming,
   onCreateWorkspace,
@@ -185,6 +192,7 @@ export function CommandBar({
   onCreateCode,
   onCreateVisual,
   onCreateTask,
+  onCreateWidget,
   onCreateThread,
   onDismissResultCard,
   onReopenResultCard,
@@ -246,13 +254,14 @@ export function CommandBar({
       case "code": onCreateCode(); break;
       case "visual": onCreateVisual(); break;
       case "task": onCreateTask(); break;
+      case "widget": onCreateWidget?.(); break;
       case "thread": onCreateThread(); break;
       case "ai":
         onCreateWithAi();
         textareaRef.current?.focus();
         break;
     }
-  }, [onCreateWorkspace, onCreateCode, onCreateNote, onCreateTask, onCreateThread, onCreateVisual, onCreateWithAi]);
+  }, [onCreateWorkspace, onCreateCode, onCreateNote, onCreateTask, onCreateWidget, onCreateThread, onCreateVisual, onCreateWithAi]);
 
   const handleSubmit = useCallback(() => {
     const trimmed = value.trim();
@@ -414,7 +423,7 @@ export function CommandBar({
 
         {/* Right side: focus context tags + send/stop */}
         <div className="flex items-center gap-1.5 shrink-0 self-end">
-          <FocusContextTags />
+          <FocusContextTags contextOverride={contextOverride} />
           {isStreaming ? (
             <button
               type="button"

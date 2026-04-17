@@ -25,6 +25,19 @@ export type TaskNode = {
   status: "pending" | "running" | "done" | "failed" | "skipped";
 };
 
+export type OrchestrationProfileConfig = {
+  profile: OrchestrationProfile;
+  plannerRole: TaskRole;
+  allowedTools: string[];
+  subagentRoles: TaskRole[];
+  concurrencyCeiling: number;
+  verificationChecks: string[];
+  artifactSavingPolicy: "none" | "optional" | "required";
+  recursionMode: "none" | "tool_loop" | "subagent_loop" | "hybrid";
+  groundingPolicy: "none" | "prefer_sources" | "require_sources";
+  stopConditions: string[];
+};
+
 export type OrchestrationProfile =
   | "simple_direct"
   | "search_synthesis"
@@ -54,6 +67,121 @@ type ExecutionLimits = {
   usageBudgetTokens?: number;
   budgetOverrunFactor?: number;
 };
+
+const PROFILE_CONFIGS: Record<OrchestrationProfile, OrchestrationProfileConfig> = {
+  simple_direct: {
+    profile: "simple_direct",
+    plannerRole: "workflow_planner",
+    allowedTools: [],
+    subagentRoles: ["pedagogy_coach"],
+    concurrencyCeiling: 1,
+    verificationChecks: ["basic_completeness"],
+    artifactSavingPolicy: "none",
+    recursionMode: "none",
+    groundingPolicy: "none",
+    stopConditions: ["answer_complete", "no_more_dependencies"],
+  },
+  search_synthesis: {
+    profile: "search_synthesis",
+    plannerRole: "workflow_planner",
+    allowedTools: ["search_web"],
+    subagentRoles: ["web_researcher", "fact_checker", "critic"],
+    concurrencyCeiling: 3,
+    verificationChecks: ["source_coverage", "claim_consistency", "dated_claim_guard"],
+    artifactSavingPolicy: "optional",
+    recursionMode: "hybrid",
+    groundingPolicy: "prefer_sources",
+    stopConditions: ["sufficient_evidence", "conflicts_resolved", "budget_exhausted"],
+  },
+  artifact_builder: {
+    profile: "artifact_builder",
+    plannerRole: "workflow_planner",
+    allowedTools: ["create_note", "surface_result"],
+    subagentRoles: ["curriculum_planner", "critic"],
+    concurrencyCeiling: 2,
+    verificationChecks: ["artifact_structure", "output_contract"],
+    artifactSavingPolicy: "required",
+    recursionMode: "tool_loop",
+    groundingPolicy: "prefer_sources",
+    stopConditions: ["artifact_ready", "validation_passed"],
+  },
+  study_transform: {
+    profile: "study_transform",
+    plannerRole: "workflow_planner",
+    allowedTools: ["create_note", "surface_result"],
+    subagentRoles: ["retriever", "pedagogy_coach", "exam_strategist", "critic"],
+    concurrencyCeiling: 3,
+    verificationChecks: ["source_grounding", "transform_format", "duplicate_guard"],
+    artifactSavingPolicy: "optional",
+    recursionMode: "hybrid",
+    groundingPolicy: "require_sources",
+    stopConditions: ["transform_grounded", "format_validated"],
+  },
+  image_analysis: {
+    profile: "image_analysis",
+    plannerRole: "workflow_planner",
+    allowedTools: [],
+    subagentRoles: ["vision_interpreter", "fact_checker"],
+    concurrencyCeiling: 2,
+    verificationChecks: ["visual_evidence_alignment"],
+    artifactSavingPolicy: "optional",
+    recursionMode: "subagent_loop",
+    groundingPolicy: "require_sources",
+    stopConditions: ["image_evidence_sufficient", "answer_complete"],
+  },
+  workspace_action: {
+    profile: "workspace_action",
+    plannerRole: "workflow_planner",
+    allowedTools: ["get_workstream_context", "create_note", "update_planner", "surface_result", "fork_thread"],
+    subagentRoles: ["curriculum_planner", "critic"],
+    concurrencyCeiling: 2,
+    verificationChecks: ["workspace_target_resolved", "mutation_safety"],
+    artifactSavingPolicy: "required",
+    recursionMode: "tool_loop",
+    groundingPolicy: "prefer_sources",
+    stopConditions: ["workspace_action_completed", "user_request_satisfied"],
+  },
+  agent_delegation: {
+    profile: "agent_delegation",
+    plannerRole: "workflow_planner",
+    allowedTools: ["search_web", "get_workstream_context"],
+    subagentRoles: ["workflow_planner", "retriever", "web_researcher", "critic"],
+    concurrencyCeiling: 3,
+    verificationChecks: ["delegation_coverage", "merge_consistency"],
+    artifactSavingPolicy: "optional",
+    recursionMode: "hybrid",
+    groundingPolicy: "prefer_sources",
+    stopConditions: ["delegation_merged", "verification_passed"],
+  },
+  teacher_marking: {
+    profile: "teacher_marking",
+    plannerRole: "workflow_planner",
+    allowedTools: ["create_note", "surface_result"],
+    subagentRoles: ["retriever", "exam_strategist", "critic"],
+    concurrencyCeiling: 3,
+    verificationChecks: ["rubric_alignment", "feedback_specificity", "evidence_alignment"],
+    artifactSavingPolicy: "optional",
+    recursionMode: "hybrid",
+    groundingPolicy: "require_sources",
+    stopConditions: ["rubric_applied", "feedback_complete"],
+  },
+  long_context_reconstruction: {
+    profile: "long_context_reconstruction",
+    plannerRole: "workflow_planner",
+    allowedTools: ["recall_memory", "get_workstream_context", "fork_thread"],
+    subagentRoles: ["retriever", "workflow_planner", "critic"],
+    concurrencyCeiling: 2,
+    verificationChecks: ["continuity_reconstruction", "commitment_preservation"],
+    artifactSavingPolicy: "none",
+    recursionMode: "hybrid",
+    groundingPolicy: "prefer_sources",
+    stopConditions: ["context_restored", "continuity_decided"],
+  },
+};
+
+export function getOrchestrationProfileConfig(profile: OrchestrationProfile): OrchestrationProfileConfig {
+  return PROFILE_CONFIGS[profile];
+}
 
 function normalizeComplexityScore(value: number | "simple" | "medium" | "complex") {
   if (typeof value === "number") return Math.max(0, Math.min(1, value));
@@ -112,6 +240,7 @@ export function resolveOrchestrationProfile(prompt: string, mode: string, contex
 export function buildTaskGraph(prompt: string, mode: string, context: BuildTaskGraphContext = {}): TaskNode[] {
   const graph: TaskNode[] = [];
   const profile = resolveOrchestrationProfile(prompt, mode, context);
+  const profileConfig = getOrchestrationProfileConfig(profile);
   const hasSourceContext = Boolean(context.sourceBlock?.trim());
   const hasSearchContext = Boolean(context.searchBlock?.trim());
   const codeIntent = hasCodeIntent(prompt);
@@ -134,7 +263,7 @@ export function buildTaskGraph(prompt: string, mode: string, context: BuildTaskG
     .filter(Boolean)
     .join("\n");
 
-  if (needsPlanner) {
+  if (needsPlanner || profileConfig.plannerRole === "workflow_planner") {
     graph.push({
       id: "planner",
       role: "workflow_planner",
@@ -154,7 +283,7 @@ ${packedPrompt}`,
     });
   }
 
-  if (hasSourceContext) {
+  if (hasSourceContext && profileConfig.subagentRoles.includes("retriever")) {
     graph.push({
       id: "retriever",
       role: "retriever",
@@ -166,7 +295,7 @@ ${packedPrompt}`,
     });
   }
 
-  if (mode === "research" || context.searchEnabled) {
+  if ((mode === "research" || context.searchEnabled) && profileConfig.subagentRoles.includes("web_researcher")) {
     graph.push({
       id: "web",
       role: "web_researcher",
@@ -191,7 +320,7 @@ ${packedPrompt}`,
     });
   }
 
-  if (context.hasVision) {
+  if (context.hasVision && profileConfig.subagentRoles.includes("vision_interpreter")) {
     graph.push({
       id: "vision",
       role: "vision_interpreter",
@@ -206,7 +335,7 @@ ${packedPrompt}`,
     });
   }
 
-  if (codeIntent) {
+  if (codeIntent && profileConfig.subagentRoles.includes("code_helper")) {
     graph.push({
       id: "code",
       role: "code_helper",
@@ -221,7 +350,7 @@ ${packedPrompt}`,
     });
   }
 
-  if (mode === "tutor" || mode === "explain" || mode === "draft_coach") {
+  if ((mode === "tutor" || mode === "explain" || mode === "draft_coach") && profileConfig.subagentRoles.includes("pedagogy_coach")) {
     graph.push({
       id: "pedagogy",
       role: "pedagogy_coach",
@@ -236,7 +365,7 @@ ${packedPrompt}`,
     });
   }
 
-  if (mode === "quiz" || mode === "exam" || mode === "marker") {
+  if ((mode === "quiz" || mode === "exam" || mode === "marker") && profileConfig.subagentRoles.includes("exam_strategist")) {
     graph.push({
       id: "exam-strategy",
       role: "exam_strategist",
@@ -251,7 +380,7 @@ ${packedPrompt}`,
     });
   }
 
-  if (mode === "draft_coach" || planningIntent) {
+  if ((mode === "draft_coach" || planningIntent || profile === "artifact_builder" || profile === "workspace_action") && profileConfig.subagentRoles.includes("curriculum_planner")) {
     graph.push({
       id: "curriculum-plan",
       role: "curriculum_planner",
@@ -266,7 +395,7 @@ ${packedPrompt}`,
     });
   }
 
-  const maxSpecialists = Math.max(1, context.maxSpecialists ?? 5);
+  const maxSpecialists = Math.max(1, Math.min(context.maxSpecialists ?? 5, profileConfig.concurrencyCeiling + 2));
   const priority = [
     "workflow_planner",
     "retriever",
@@ -307,7 +436,7 @@ ${packedPrompt}`,
   }
   graph.push(...specialistNodes);
 
-  const includeCritic = context.includeCritic ?? true;
+  const includeCritic = (context.includeCritic ?? true) && profileConfig.subagentRoles.includes("critic");
   if (includeCritic) {
     const criticDependencies = graph
       .map((node) => node.id)

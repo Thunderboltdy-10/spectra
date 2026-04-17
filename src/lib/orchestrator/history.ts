@@ -18,6 +18,21 @@ export type MemoryEntry = {
   extractedAt: number;
 };
 
+export type ThreadCommitment = {
+  text: string;
+  status: "open" | "done" | "blocked";
+};
+
+export type ThreadSnapshot = {
+  rawRecentTurns: Array<{ role: ChatMessage["role"]; content: string; mode?: StudyMode }>;
+  commitments: ThreadCommitment[];
+  unresolvedTasks: string[];
+  activeConstraints: string[];
+  evidenceReferences: string[];
+  continuityHints: string[];
+  summary: string;
+};
+
 export function shouldScheduleCompaction(params: {
   history: ChatMessage[];
   mode?: StudyMode;
@@ -180,6 +195,95 @@ function fallbackCompactSummary(history: ChatMessage[]) {
   ];
 
   return lines.join("\n").slice(0, 2000);
+}
+
+function extractListByPattern(history: ChatMessage[], pattern: RegExp, max = 6) {
+  const values: string[] = [];
+  for (const message of history.slice(-18)) {
+    const matches = compactText(message.content)
+      .split(/(?<=[.!?])\s+/)
+      .map((line) => line.trim())
+      .filter((line) => pattern.test(line));
+    for (const match of matches) {
+      const clean = match.slice(0, 220);
+      if (!values.some((value) => value.toLowerCase() === clean.toLowerCase())) {
+        values.push(clean);
+      }
+      if (values.length >= max) return values;
+    }
+  }
+  return values;
+}
+
+export function buildThreadSnapshot(history: ChatMessage[], summary?: string): ThreadSnapshot {
+  const rawRecentTurns = history.slice(-8).map((message) => ({
+    role: message.role,
+    content: compactText(message.content).slice(0, 320),
+    mode: message.mode,
+  }));
+  const commitments = extractListByPattern(
+    history,
+    /\b(i will|we will|i'll|we'll|next step|plan is|i can|i should|you should|todo|to do|must|need to)\b/i,
+    6,
+  ).map((text) => ({
+    text,
+    status: /\b(done|completed|finished|resolved)\b/i.test(text) ? "done" as const : "open" as const,
+  }));
+  const unresolvedTasks = extractListByPattern(
+    history,
+    /\b(still need|remaining|unresolved|blocked|not yet|todo|to do|follow up|pending)\b/i,
+    6,
+  );
+  const activeConstraints = extractListByPattern(
+    history,
+    /\b(don't|do not|must|need to|required|constraint|limit|only|exactly|without)\b/i,
+    6,
+  );
+  const evidenceReferences = Array.from(new Set(history
+    .flatMap((message) => (message.citations ?? []).map((citation) => citation.filename))
+    .filter(Boolean)
+    .slice(-8)));
+  const continuityHints = extractListByPattern(
+    history,
+    /\b(continue|same thread|previous|earlier|last time|as above|pick up|resume)\b/i,
+    5,
+  );
+
+  return {
+    rawRecentTurns,
+    commitments,
+    unresolvedTasks,
+    activeConstraints,
+    evidenceReferences,
+    continuityHints,
+    summary: summary ?? fallbackCompactSummary(history),
+  };
+}
+
+export function formatThreadSnapshotForPrompt(snapshot: ThreadSnapshot | null) {
+  if (!snapshot) return "";
+  const lines: string[] = ["THREAD SNAPSHOT:"];
+  if (snapshot.summary) lines.push(`Summary: ${snapshot.summary}`);
+  if (snapshot.commitments.length > 0) {
+    lines.push("Commitments:");
+    snapshot.commitments.forEach((item) => lines.push(`- [${item.status}] ${item.text}`));
+  }
+  if (snapshot.unresolvedTasks.length > 0) {
+    lines.push("Unresolved tasks:");
+    snapshot.unresolvedTasks.forEach((item) => lines.push(`- ${item}`));
+  }
+  if (snapshot.activeConstraints.length > 0) {
+    lines.push("Constraints:");
+    snapshot.activeConstraints.forEach((item) => lines.push(`- ${item}`));
+  }
+  if (snapshot.evidenceReferences.length > 0) {
+    lines.push(`Evidence refs: ${snapshot.evidenceReferences.join(", ")}`);
+  }
+  if (snapshot.rawRecentTurns.length > 0) {
+    lines.push("Recent raw turns:");
+    snapshot.rawRecentTurns.forEach((turn) => lines.push(`- ${turn.role}: ${turn.content}`));
+  }
+  return lines.join("\n").slice(0, 3000);
 }
 
 export async function maybeCompactHistory(params: {

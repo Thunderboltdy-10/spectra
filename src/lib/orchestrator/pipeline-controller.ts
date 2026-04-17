@@ -12,6 +12,7 @@ export type PipelineStageId =
   | "clarificationCheck"
   | "multiAgent"
   | "generation"
+  | "rehydration"
   | "postProcess";
 
 export type PipelineSkippedStage = {
@@ -46,6 +47,7 @@ const ALL_STAGES: PipelineStageId[] = [
   "clarificationCheck",
   "multiAgent",
   "generation",
+  "rehydration",
   "postProcess",
 ];
 
@@ -83,6 +85,7 @@ const EXECUTION_PLAN_BY_CLASS: Record<RequestClass, PipelineStageId[]> = {
     "clarificationCheck",
     "multiAgent",
     "generation",
+    "rehydration",
     "postProcess",
   ],
 };

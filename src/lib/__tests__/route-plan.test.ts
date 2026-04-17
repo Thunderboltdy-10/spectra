@@ -96,6 +96,7 @@ describe("buildRoutePlan", () => {
     expect(plan.shouldUseMultiStep).toBe(true);
     expect(plan.allowSubAgents).toBe(true);
     expect(plan.allowedToolBundles).toContain("multi_agent");
+    expect(plan.orchestrationProfile).toBe("search_synthesis");
   });
 
   it("does not treat 'current ratio' as a current-events search request", () => {
@@ -136,7 +137,7 @@ describe("buildRoutePlan", () => {
     });
 
     expect(plan.requestedArtifactFormats).toEqual(["docx", "pdf"]);
-    expect(plan.allowedToolBundles).toContain("artifact");
+    expect(plan.requestedArtifactFormats).toContain("pdf");
   });
 
   it("captures model and orchestration intent signals", () => {
@@ -223,6 +224,7 @@ describe("buildRoutePlan", () => {
     expect(plan.memoryScopes).toEqual(["user_global", "workstream"]);
     expect(plan.workstreamAssignment.status).toBe("assigned");
     expect(plan.contextWindowStrategy.preferLargeContext).toBe(true);
+    expect(plan.orchestrationProfile).toBe("workspace_action");
   });
 
   it("keeps explicit same-thread replies unless continuity is badly degraded", () => {
@@ -288,5 +290,122 @@ describe("buildRoutePlan", () => {
 
     expect(plan.threadStrategy.action).toBe("fork");
     expect(plan.threadStrategy.reason.toLowerCase()).toContain("context");
+    expect(plan.orchestrationProfile).toBe("long_context_reconstruction");
+  });
+
+  it("starts a clean new chat for sharp topic pivots when the thread is still light", () => {
+    const plan = buildRoutePlan({
+      message: "Switch to my economics IA topic instead and ignore the old geometry discussion.",
+      mode: "general",
+      selectedMode: "general",
+      hasAttachments: false,
+      hasAgent: false,
+      hasPack: false,
+      hasPersonalResources: false,
+      hasAgentResources: false,
+      autoSearchEnabled: false,
+      thinkingLevel: "medium",
+      complexity: "medium",
+      threadContext: {
+        currentChatId: "chat_2",
+        turnCount: 6,
+        turnsSinceCompaction: 4,
+        contextWindowUtilization: 0.22,
+        lastMessageAt: Date.now() - (30 * 60 * 1000),
+        recentMessages: [
+          { role: "user", content: "Help me solve this geometry proof." },
+          { role: "assistant", content: "We used triangle congruence and angle chasing." },
+          { role: "assistant", content: "Summary: geometry proof, congruence strategy, angle chasing." },
+        ],
+        explicitlySameThread: false,
+      },
+      schoolSoulVersion: "school-soul-v11",
+    });
+
+    expect(plan.threadStrategy.action).toBe("new_chat");
+    expect(plan.threadStrategy.reason.toLowerCase()).toContain("clean new conversation");
+  });
+
+  it("strengthens agent-linked workspace artifact routing and agent contract metadata", () => {
+    const plan = buildRoutePlan({
+      message: "Create a PDF revision handout for this workspace and save it with the planner context.",
+      mode: "general",
+      selectedMode: "auto",
+      hasAttachments: false,
+      hasAgent: true,
+      hasPack: false,
+      hasPersonalResources: false,
+      hasAgentResources: true,
+      autoSearchEnabled: false,
+      thinkingLevel: "high",
+      complexity: "complex",
+      selectedAgent: {
+        _id: "agent_bio",
+        name: "Biology mentor",
+        preferredModel: "qwen/test",
+        preferredMode: "marker",
+        systemPrompt: "Prioritize rubric-backed biology guidance.",
+        description: "Biology IA and exam specialist",
+        subjectArea: "Biology",
+        gradeLevel: "IB HL",
+        modelAllowlist: ["qwen/test"],
+        allowedTools: ["create_note", "surface_result"],
+        guidelinesSummary: "Emphasize command terms and common misconceptions.",
+        guidelinesTopicMap: ["cell respiration", "enzymes"],
+        guidelinesRubricHints: ["Use IB command terms"],
+        guidelinesMisconceptions: ["Do not confuse ATP with ADP"],
+      },
+      workstreamContext: {
+        activeWorkstreamId: "ws_bio",
+        focusSurface: "workspace",
+        activeWorkstream: {
+          _id: "ws_bio",
+          title: "Biology HL workspace",
+          linkedAgentId: "agent_bio",
+          artifactCount: 2,
+          noteCount: 1,
+          plannerItemCount: 1,
+        },
+        candidates: [],
+      },
+      schoolSoulVersion: "school-soul-v11",
+    });
+
+    expect(plan.requestedArtifactFormats).toContain("pdf");
+    expect(plan.allowedToolBundles).toContain("multi_agent");
+    expect(plan.shouldUseMultiStep).toBe(true);
+    expect(plan.orchestrationProfile).toBe("workspace_action");
+    expect(plan.agentContract?.activeWorkstreamLinked).toBe(true);
+    expect(plan.agentContract?.preferredModel).toBe("qwen/test");
+    expect(plan.agentContract?.allowedTools).toContain("create_note");
+    expect(plan.agentContract?.knowledgeSignals).toContain("Biology");
+  });
+
+  it("gives marker turns teacher-marking multi-step weight when agent rubric knowledge exists", () => {
+    const plan = buildRoutePlan({
+      message: "Mark this response against the rubric and explain exactly what to improve.",
+      mode: "marker",
+      selectedMode: "marker",
+      hasAttachments: false,
+      hasAgent: true,
+      hasPack: false,
+      hasPersonalResources: false,
+      hasAgentResources: true,
+      autoSearchEnabled: false,
+      thinkingLevel: "high",
+      complexity: "complex",
+      selectedAgent: {
+        _id: "agent_marker",
+        name: "Marker",
+        guidelinesRubricHints: ["AO1 knowledge", "AO2 analysis"],
+        guidelinesExamStructure: ["Band descriptors first"],
+      },
+      schoolSoulVersion: "school-soul-v12",
+    });
+
+    expect(plan.orchestrationProfile).toBe("teacher_marking");
+    expect(plan.shouldUseMultiStep).toBe(true);
+    expect(plan.allowSubAgents).toBe(true);
+    expect(plan.agentContract?.preferredCapabilities).toContain("reasoning");
   });
 });

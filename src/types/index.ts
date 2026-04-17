@@ -127,6 +127,17 @@ export type ArtifactFormat = "docx" | "pdf" | "pptx" | "html";
 
 export type AssignmentLevel = "L0" | "L1" | "L2" | "L3" | "L4";
 
+export type OrchestrationProfile =
+  | "simple_direct"
+  | "search_synthesis"
+  | "artifact_builder"
+  | "study_transform"
+  | "image_analysis"
+  | "workspace_action"
+  | "agent_delegation"
+  | "teacher_marking"
+  | "long_context_reconstruction";
+
 export type AiToolName =
   | "recall_memory"
   | "save_memory"
@@ -239,6 +250,15 @@ export type AgentContract = {
   resourceScopes: RetrievalScope[];
   toolBundles: ToolBundle[];
   preferredCapabilities: Array<"vision" | "reasoning" | "code" | "search" | "image_generation">;
+  preferredMode?: import("@/lib/contracts/studyModes").StudyMode;
+  preferredModel?: string;
+  modelAllowlist?: string[];
+  modelDenylist?: string[];
+  allowedTools?: string[];
+  promptGuidance?: string;
+  promptSummary?: string;
+  knowledgeSignals?: string[];
+  activeWorkstreamLinked?: boolean;
 };
 
 export type RoutePlan = {
@@ -284,6 +304,7 @@ export type RoutePlan = {
   };
   requestedArtifactFormats: ArtifactFormat[];
   allowSubAgents: boolean;
+  orchestrationProfile: OrchestrationProfile;
   modeContract: ModeContract;
   agentContract?: AgentContract;
   schoolSoulVersion?: string;

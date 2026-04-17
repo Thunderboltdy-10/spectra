@@ -121,4 +121,46 @@ describe("runAssistantStreaming tool loop", () => {
     expect(sent.some((event) => event.type === "tool_call")).toBe(true);
     expect(result.responseText).toContain("Saved the revision handout");
   });
+
+  it("uses deeper continuation defaults for complex prompts without stopping after one shallow pass", async () => {
+    const streamSpy = vi.spyOn(openrouter, "openRouterStreamChat")
+      .mockImplementationOnce(async function* () {
+        yield { type: "delta", content: "Part one. " } as never;
+        yield {
+          type: "done",
+          model: "test-model",
+          inputTokens: 10,
+          outputTokens: 20,
+          finishReason: "length",
+          usage: { prompt_tokens: 10, completion_tokens: 20 },
+        } as never;
+      })
+      .mockImplementationOnce(async function* () {
+        yield { type: "delta", content: "Part two." } as never;
+        yield {
+          type: "done",
+          model: "test-model",
+          inputTokens: 8,
+          outputTokens: 12,
+          finishReason: "stop",
+          usage: { prompt_tokens: 8, completion_tokens: 12 },
+        } as never;
+      });
+
+    const sent: Array<Record<string, unknown>> = [];
+    const result = await runAssistantStreaming({
+      shouldVerify: false,
+      primaryModel: "test-model",
+      fallbackModels: [],
+      messages: [{ role: "user", content: "Build a detailed multi-step plan to investigate and compare these systems." }],
+      send: async (payload) => {
+        sent.push(payload);
+      },
+    });
+
+    expect(streamSpy).toHaveBeenCalledTimes(2);
+    expect(sent.some((event) => event.type === "notice")).toBe(true);
+    expect(result.responseText).toContain("Part one. Part two.");
+    expect(result.continuationCount).toBe(1);
+  });
 });

@@ -76,8 +76,8 @@ type ScoredCandidate = {
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const FAILURE_CIRCUIT_WINDOW_MS = 10 * 60 * 1000;
-const FRESHNESS_PENALTY_DAYS = 90;
-const FRESHNESS_BLOCK_DAYS = 180;
+const FRESHNESS_PENALTY_DAYS = 60;
+const FRESHNESS_BLOCK_DAYS = 120;
 const CLOSE_SCORE_NOISE_RANGE = 0.03;
 const WEIGHTED_RANDOM_WINDOW = 0.85;
 
@@ -144,10 +144,11 @@ function modelAgeDays(model: CatalogModelEntry) {
 function freshnessScore(model: CatalogModelEntry) {
   const ageDays = modelAgeDays(model);
   if (typeof ageDays !== "number") return 0.45;
-  if (ageDays <= 30) return 1;
-  if (ageDays <= 60) return 0.94;
-  if (ageDays <= FRESHNESS_PENALTY_DAYS) return 0.88;
-  if (ageDays <= FRESHNESS_BLOCK_DAYS) return 0.15;
+  if (ageDays <= 7) return 1;
+  if (ageDays <= 21) return 0.99;
+  if (ageDays <= 45) return 0.9;
+  if (ageDays <= FRESHNESS_PENALTY_DAYS) return 0.74;
+  if (ageDays <= FRESHNESS_BLOCK_DAYS) return 0.08;
   return 0;
 }
 

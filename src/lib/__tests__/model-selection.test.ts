@@ -127,6 +127,34 @@ describe("model selection guardrails", () => {
     expect(picked.selected?.modelId).toBe("provider/fresh-model");
   });
 
+  it("hard-excludes models older than roughly 120 days from primary auto routing", () => {
+    const picked = pickModelAndFallbacks({
+      catalog: [
+        {
+          modelId: "provider/very-stale",
+          name: "Very Stale",
+          inputCostPerM: 2,
+          outputCostPerM: 3,
+          createdAt: Date.now() - 170 * 24 * 60 * 60 * 1000,
+        },
+        {
+          modelId: "provider/recent",
+          name: "Recent",
+          inputCostPerM: 3,
+          outputCostPerM: 4,
+          createdAt: Date.now() - 16 * 24 * 60 * 60 * 1000,
+        },
+      ],
+      tier: "normal",
+      lane: "fast_chat",
+      mode: "general",
+      messageLength: 180,
+    });
+
+    expect(picked.selected?.modelId).toBe("provider/recent");
+    expect(picked.ranked.some((row) => row.model.modelId === "provider/very-stale")).toBe(false);
+  });
+
   it("falls back to stale models when no fresh options exist", () => {
     const picked = pickModelAndFallbacks({
       catalog: [

@@ -199,10 +199,13 @@ export function shouldUseMultiAgent(
   const lower = prompt.toLowerCase();
   const multipart = /(^|\n)\s*(\d+\.|-|\*)\s+/.test(prompt) || /(first|second|finally|compare|contrast)/i.test(lower);
   const longPrompt = prompt.length > 520;
+  const explicitSpecialistIntent =
+    /\b(use multiple models|multiple models|multi[- ]?agent|different perspectives|multiple perspectives|specialists?|parallel)\b/i.test(lower);
   // Research mode: low threshold — use multi-agent for anything non-trivial
   if (mode === "research" && normalizedComplexity > 0.15) return true;
   // Explain mode: use multi-agent for moderately complex prompts
   if (mode === "explain" && normalizedComplexity > 0.4) return true;
+  if (explicitSpecialistIntent && normalizedComplexity >= 0.3) return true;
   if (mode === "exam" && multipart && normalizedComplexity > 0.4) return true;
   if (mode === "draft_coach" && /evidence|citation|sources?|counter-argument/i.test(lower) && normalizedComplexity > 0.35) return true;
   if ((mode === "tutor" || mode === "general") && multipart && normalizedComplexity >= 0.45) return true;

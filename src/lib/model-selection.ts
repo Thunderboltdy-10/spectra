@@ -228,11 +228,12 @@ function recencyScore(model: CatalogModelEntry) {
     ?? (model.releaseDate ? Date.parse(model.releaseDate) : Number.NaN);
   if (!Number.isFinite(timestamp)) return 0.45;
   const ageDays = (Date.now() - timestamp) / (1000 * 60 * 60 * 24);
-  if (ageDays <= 14) return 1;
-  if (ageDays <= 30) return 0.95;
-  if (ageDays <= 60) return 0.72;
-  if (ageDays <= 90) return 0.45;
-  return 0.1;
+  if (ageDays <= 7) return 1;
+  if (ageDays <= 21) return 0.98;
+  if (ageDays <= 45) return 0.82;
+  if (ageDays <= 75) return 0.58;
+  if (ageDays <= 120) return 0.24;
+  return 0.02;
 }
 
 function modelAgeDays(model: CatalogModelEntry) {
@@ -422,7 +423,7 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
     const imageGenerationModel = isImageGenerationModel(model);
     const textChatCapable = isTextChatCapableModel(model);
     const modelAge = modelAgeDays(model);
-    const staleModel = typeof modelAge === "number" && modelAge > 90;
+    const staleModel = typeof modelAge === "number" && modelAge > 120;
     if (!params.allowStaleModels && staleModel) continue;
     if (!params.allowStaleModels && typeof modelAge === "number" && modelAge > 120) continue;
     if (isVideoGenerationModel(model)) continue;
@@ -460,7 +461,7 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
     score += reasoning * 0.12;
     score += mode * 0.2;
     score += context * 0.1;
-    score += recency * 0.1;
+    score += recency * 0.18;
 
     // Encourage diversity over very frequently used models so routing does not collapse
     // into one repeated option when similarly strong alternatives exist.
@@ -512,8 +513,8 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
         reasons.push("complexity-penalizes-free");
       }
       const sizeB = parameterSizeBillions(model);
-      if (typeof sizeB === "number" && sizeB <= 30) {
-        score -= 0.1;
+      if (typeof sizeB === "number" && sizeB < 40) {
+        score -= 0.14;
         reasons.push("small-parameter-penalty");
       }
     }

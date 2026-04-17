@@ -859,6 +859,11 @@ button:disabled {
   margin-bottom: 0.6em;
 }
 
+.chat-markdown > *:last-child,
+.chat-markdown p:last-child {
+  margin-bottom: 0;
+}
+
 .chat-markdown ul,
 .chat-markdown ol {
   padding-left: 1.5rem;

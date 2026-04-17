@@ -354,7 +354,7 @@ function decideThreadStrategy(params: {
 
   const normalizedMessage = compactText(params.message).toLowerCase();
   const explicitFork = /\b(new question|different topic|separate thread|start fresh|new thread|fork this|branch this)\b/i.test(params.message);
-  const explicitContinueCue = /\b(continue|carry on|pick up|resume|keep going|same thread|as above|based on that|from the previous|from the prior|tighten|revise|iterate)\b/i.test(params.message);
+  const explicitContinueCue = /\b(continue|carry on|pick up|resume|keep going|same thread|as above|based on that|from the previous|from the prior|tighten|revise|iterate|keep working on|finish this|keep building)\b/i.test(params.message);
   const explicitContinue = Boolean(params.threadContext.explicitlySameThread) || (explicitContinueCue && !explicitFork);
   const recentMessages = params.threadContext.recentMessages ?? [];
   const recentContext = recentMessages
@@ -392,30 +392,32 @@ function decideThreadStrategy(params: {
     lastUserContinuity < 0.22 ? 0.12 : 0,
     hasSummaryLikeMessage && topicContinuity < 0.35 ? 0.08 : 0,
   ].reduce((sum, value) => sum + value, 0);
-  const shouldStartFresh =
-    !explicitContinue
-    && !explicitFork
-    && switchIntent
-    && topicContinuity < 0.18
-    && lastUserContinuity < 0.14
-    && contextWindowPressure < 0.55
-    && turnsSinceCompaction < 10
-    && (typeof timeGapHours !== "number" || timeGapHours < 8)
-    && params.workstreamAssignment.status !== "assigned";
+  const shouldContinue =
+    explicitContinue
+    || (
+      topicContinuity >= 0.56
+      && lastUserContinuity >= 0.42
+      && contextWindowPressure < 0.76
+      && turnsSinceCompaction < 14
+      && (typeof timeGapHours !== "number" || timeGapHours < 12)
+    );
   const shouldFork =
-    !shouldStartFresh
-    && !explicitContinue
-    && (forkScore >= 0.46 || forkScore > continuityScore + 0.12);
+    !shouldContinue
+    && explicitFork
+    && (
+      contextWindowPressure >= 0.72
+      || turnsSinceCompaction >= 14
+      || (typeof timeGapHours === "number" && timeGapHours >= 10)
+      || params.workstreamAssignment.status === "assigned"
+    );
   return {
-    action: shouldStartFresh ? "new_chat" : shouldFork ? "fork" : "continue",
-    confidence: shouldStartFresh
-      ? normalizeConfidence(0.72 + (switchIntent ? 0.12 : 0) + ((1 - topicContinuity) * 0.08))
-      : shouldFork
+    action: shouldFork ? "fork" : shouldContinue ? "continue" : "new_chat",
+    confidence: shouldFork
         ? normalizeConfidence(0.5 + (forkScore * 0.4))
-        : normalizeConfidence(0.52 + (continuityScore * 0.38) + (topicContinuity * 0.14)),
-    reason: shouldStartFresh
-      ? "Prompt switches topics sharply while the current thread is still light enough to start a clean new conversation."
-      : shouldFork
+        : shouldContinue
+          ? normalizeConfidence(0.52 + (continuityScore * 0.38) + (topicContinuity * 0.14))
+          : normalizeConfidence(0.76 + ((1 - topicContinuity) * 0.12)),
+    reason: shouldFork
         ? explicitFork
           ? "User explicitly requested a fresh topic/thread."
           : contextWindowPressure >= 0.75
@@ -427,9 +429,11 @@ function decideThreadStrategy(params: {
                 : switchIntent
                   ? "Prompt pivots away from the current topic and is safer as a fork."
                   : "Topic continuity with the recent thread is too weak."
-      : explicitContinue
-        ? "User is explicitly continuing the active thread and continuity remains acceptable."
-        : "Prompt remains aligned with the active thread.",
+      : shouldContinue
+        ? explicitContinue
+          ? "User explicitly requested continuation of the active thread."
+          : "Prompt remains strongly aligned with the active thread."
+        : "Starting a clean new conversation because prior-thread continuity was not explicitly requested.",
     contextWindowPressure,
     topicContinuity: Math.max(topicContinuity, lastUserContinuity),
     timeGapHours,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, useEffect, useRef } from "react";
+import { useCallback, useMemo, useState, useEffect } from "react";
 import { Lock, Unlock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { HubEdge } from "@/lib/workspace/contracts";
@@ -19,12 +19,10 @@ type HubSurfaceProps = {
   className?: string;
   collapsedClassName?: string;
   expandedClassName?: string;
-  style?: React.CSSProperties;
   onToggleLock?: () => void;
   onTogglePin?: () => void;
 };
 
-/** Viewport-aware edge positioning with clamping to prevent overflow */
 function edgeClasses(edge: HubEdge) {
   switch (edge) {
     case "left":
@@ -51,104 +49,6 @@ function edgeClasses(edge: HubEdge) {
   }
 }
 
-/**
- * Hook that computes viewport-clamped positioning for expanded hub surfaces.
- * Ensures expanded panels never overflow the visible viewport.
- */
-function useViewportClamp(
-  edge: HubEdge,
-  expanded: boolean,
-  wrapperRef: React.RefObject<HTMLDivElement | null>,
-) {
-  const [clampedStyle, setClampedStyle] = useState<React.CSSProperties>({});
-
-  useEffect(() => {
-    if (!expanded) {
-      setClampedStyle({});
-      return;
-    }
-
-    const el = wrapperRef.current;
-    if (!el) return;
-
-    const measure = () => {
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-      const rect = el.getBoundingClientRect();
-
-      const style: React.CSSProperties = {};
-
-      if (edge === "left" || edge === "right") {
-        // Vertical clamping for side-anchored surfaces
-        const topOverflow = rect.top < 8;
-        const bottomOverflow = rect.bottom > vh - 8;
-
-        if (topOverflow && bottomOverflow) {
-          // Both edges overflow — center and let internal scroll handle it
-          style.top = "8px";
-          style.transform = "none";
-          style.maxHeight = `${vh - 16}px`;
-        } else if (topOverflow) {
-          style.top = "8px";
-          style.transform = "none";
-          style.maxHeight = `${Math.min(rect.height, vh - 16)}px`;
-        } else if (bottomOverflow) {
-          style.bottom = "8px";
-          style.top = "auto";
-          style.transform = "none";
-          style.maxHeight = `${Math.min(rect.height, vh - 16)}px`;
-        }
-
-        // Horizontal clamping — ensure expanded panel doesn't exceed viewport width
-        if (rect.width > vw - 40) {
-          style.maxWidth = `${vw - 40}px`;
-        }
-      } else {
-        // Horizontal clamping for top/bottom-anchored surfaces
-        const leftOverflow = rect.left < 8;
-        const rightOverflow = rect.right > vw - 8;
-
-        if (leftOverflow && rightOverflow) {
-          style.left = "8px";
-          style.transform = "none";
-          style.maxWidth = `${vw - 16}px`;
-        } else if (leftOverflow) {
-          style.left = "8px";
-          style.transform = "none";
-          style.maxWidth = `${Math.min(rect.width, vw - 16)}px`;
-        } else if (rightOverflow) {
-          style.right = "8px";
-          style.left = "auto";
-          style.transform = "none";
-          style.maxWidth = `${Math.min(rect.width, vw - 16)}px`;
-        }
-
-        // Vertical clamping
-        if (rect.height > vh - 40) {
-          style.maxHeight = `${vh - 40}px`;
-        }
-      }
-
-      setClampedStyle(style);
-    };
-
-    // Measure after expansion animation starts
-    const raf = requestAnimationFrame(() => {
-      requestAnimationFrame(measure);
-    });
-
-    // Re-measure on resize
-    window.addEventListener("resize", measure);
-
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("resize", measure);
-    };
-  }, [edge, expanded, wrapperRef]);
-
-  return clampedStyle;
-}
-
 export function HubSurface({
   id,
   edge,
@@ -162,7 +62,6 @@ export function HubSurface({
   className,
   collapsedClassName,
   expandedClassName,
-  style,
   onToggleLock,
   onTogglePin,
 }: HubSurfaceProps) {
@@ -172,21 +71,22 @@ export function HubSurface({
 
   useEffect(() => {
     if (!expanded) return;
-    if (!dismissOnOutsideClick || locked) return;
+    if (!dismissOnOutsideClick) return;
     function handleClickOutside(e: MouseEvent) {
       const target = e.target as HTMLElement;
       const surface = document.querySelector(`[data-hub-surface-id="${id}"]`);
       if (surface && !surface.contains(target)) {
         setClickedOpen(false);
+        if (locked && onToggleLock) {
+          onToggleLock();
+        }
       }
     }
     document.addEventListener("mousedown", handleClickOutside, true);
     return () => document.removeEventListener("mousedown", handleClickOutside, true);
-  }, [expanded, locked, id, dismissOnOutsideClick]);
+  }, [expanded, locked, onToggleLock, id, dismissOnOutsideClick]);
 
   const classes = useMemo(() => edgeClasses(edge), [edge]);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-  const clampedStyle = useViewportClamp(edge, expanded, wrapperRef);
 
   const handleToggleOpen = useCallback(() => {
     if (locked && onToggleLock) {
@@ -198,21 +98,10 @@ export function HubSurface({
 
   if (hidden) return null;
 
-  // Merge viewport-clamped styles with any user-supplied style
-  const mergedStyle: React.CSSProperties = {
-    ...clampedStyle,
-    ...style,
-    // If clampedStyle has a maxHeight, make sure it takes precedence
-    ...(clampedStyle.maxHeight ? { maxHeight: clampedStyle.maxHeight } : {}),
-    ...(clampedStyle.maxWidth ? { maxWidth: clampedStyle.maxWidth } : {}),
-  };
-
   return (
     <div
-      ref={wrapperRef}
       data-hub-surface-id={id}
       className={cn("z-50", classes.wrapper, className)}
-      style={mergedStyle}
     >
       <div className="relative">
         {/* Collapsed state */}

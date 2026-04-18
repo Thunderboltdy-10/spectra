@@ -302,8 +302,7 @@ export function DeepEditSurface({
   hidden = false,
   onClose,
   onToggleLock,
-  index = 0,
-}: DeepEditSurfaceProps & { index?: number }) {
+}: DeepEditSurfaceProps) {
   const meta = useMemo(
     () =>
       CANONICAL_WORKSPACE_TYPE_META[
@@ -381,8 +380,6 @@ export function DeepEditSurface({
       hidden={hidden}
       onToggleLock={onToggleLock}
       expandedClassName={expandedClassName}
-      className="!-translate-y-0 transition-all duration-300"
-      style={{ top: `${260 + index * 110}px` }}
     >
       <div className="flex h-[620px] w-[540px] flex-col overflow-hidden rounded-[28px]">
         {/* Surface header — icon + title only, lock handled by HubSurface wrapper */}

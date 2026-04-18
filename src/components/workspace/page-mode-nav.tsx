@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, ArrowRight, ChevronLeft } from "lucide-react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { territoryInk, coordinateBadge } from "@/lib/workspace/atlas-theme";
 import type { ViewMode, WorkspaceData, WorkspaceItemData } from "@/lib/workspace/contracts";

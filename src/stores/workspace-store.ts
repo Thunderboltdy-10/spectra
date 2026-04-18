@@ -16,6 +16,7 @@ import type {
   HubEdge,
 } from "@/lib/workspace/contracts";
 import { zoomTierForLevel, zoomTierProgress, computeZoomSignals, VIEWPORT, computeWorkspaceEnvelope } from "@/lib/workspace/contracts";
+import { semanticTierForSignals, type SemanticTier } from "@/lib/workspace/zoom";
 
 export type DeepEditTarget = {
   item: WorkspaceItemData;
@@ -127,6 +128,8 @@ type WorkspaceState = {
   zoomProgress: number;
   /** Continuous semantic zoom signals for progressive rendering */
   zoomSignals: ZoomSignals;
+  /** Discrete semantic tier for coarse visibility decisions */
+  semanticTier: SemanticTier;
   viewportX: number;
   viewportY: number;
 
@@ -271,6 +274,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   zoomTier: zoomTierForLevel(VIEWPORT.DEFAULT_ZOOM),
   zoomProgress: zoomTierProgress(VIEWPORT.DEFAULT_ZOOM),
   zoomSignals: computeZoomSignals(VIEWPORT.DEFAULT_ZOOM),
+  semanticTier: semanticTierForSignals(computeZoomSignals(VIEWPORT.DEFAULT_ZOOM)),
   viewportX: 0,
   viewportY: 0,
 
@@ -313,6 +317,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
       zoomTier: zoomTierForLevel(zoom),
       zoomProgress: zoomTierProgress(zoom),
       zoomSignals: computeZoomSignals(zoom),
+      semanticTier: semanticTierForSignals(computeZoomSignals(zoom)),
     }),
 
   setViewport: (x, y, zoom) =>
@@ -398,6 +403,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
         zoomTier: nextTier,
         zoomProgress: progress,
         zoomSignals: signals,
+        semanticTier: semanticTierForSignals(signals),
         workspaceProximity: proximity,
         nearestWorkspaceId: nearestId,
         committedWorkspaceId: autoWorkspaceId,

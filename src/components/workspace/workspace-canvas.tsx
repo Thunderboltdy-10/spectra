@@ -1,12 +1,20 @@
 "use client";
 
 /* ===================================================================
-   WORKSPACE CANVAS — Atlas edition v2.
+   WORKSPACE CANVAS — Atlas edition v4.
 
    ReactFlow scales natively. All node content is sized in CSS pixels
    and ReactFlow's transform handles zoom. Semantic zoom is achieved
-   through CSS opacity/display transitions driven by ZoomSignals —
-   progressive reveal, not counter-scaling.
+   through CONTINUOUS ZoomSignals that drive gradual structural
+   adaptation — not just hide/show by tier.
+
+   v4 changes:
+   - Continuous reveal: itemReveal(), territoryReveal(), groupLabelReveal()
+     produce 0-1 opacity/scale signals, not binary show/hide.
+   - Components consume useZoomSignals() directly for fine-grained control.
+   - useSemanticTier() only for coarse gating where needed.
+   - Shape/spacing/internal adaptation: icon size, padding, body height,
+     meta opacity, etc. all interpolate continuously.
 
    Layers (bottom → top):
      1. CanvasBackground (paper + dots/grid)
@@ -52,9 +60,12 @@ import {
 } from "@/lib/artifact-types";
 import {
   useZoom,
-  useScreenSize,
-  useScreenSizes,
+  useZoomSignals,
+  STABLE,
   lerp,
+  itemReveal,
+  territoryReveal,
+  groupLabelReveal,
 } from "@/lib/workspace/zoom";
 import {
   territoryInk,
@@ -111,17 +122,17 @@ function statusColor(status: string): string {
   }
 }
 
-function StatusDot({ status }: { status: string }) {
-  const size = useScreenSize(6);
+function StatusDot({ status, opacity }: { status: string; opacity: number }) {
   return (
     <span
       style={{
-        width: size,
-        height: size,
+        width: 6,
+        height: 6,
         borderRadius: "50%",
         background: statusColor(status),
         display: "inline-block",
         flexShrink: 0,
+        opacity,
       }}
     />
   );
@@ -130,22 +141,17 @@ function StatusDot({ status }: { status: string }) {
 /* ===================================================================
    Workspace Territory — clean identity display.
 
-   At far zoom: big emoji + name centered.
-   At summary+: compact badge anchored top-left.
-   Territory wash fades with zoom.
+   Uses territoryReveal() for continuous adaptation:
+   - Emoji scales down as we zoom in (identity anchors to corner)
+   - Name opacity interpolates smoothly
+   - Meta line fades in gradually
+   - Background wash intensity changes with territoryFade signal
    =================================================================== */
 
 function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
   const { workspace, ink } = data;
-  
-  const s = useScreenSizes({
-    emoji: 56,
-    name: 42,
-    meta: 14,
-    gap: 12,
-    padding: 32,
-    radius: 32,
-  });
+  const signals = useZoomSignals();
+  const reveal = territoryReveal(signals);
 
   return (
     <div
@@ -158,16 +164,17 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
         flexDirection: "column",
         justifyContent: "flex-start",
         alignItems: "flex-start",
-        padding: s.padding,
+        padding: reveal.padding,
       }}
     >
+      {/* Territory wash — intensity driven by territoryFade signal */}
       <div
         style={{
           position: "absolute",
           inset: 0,
           background: ink.fill,
-          opacity: 0.15,
-          borderRadius: s.radius,
+          opacity: reveal.washOpacity,
+          borderRadius: STABLE.RADIUS_LG,
         }}
       />
 
@@ -175,36 +182,50 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
         style={{
           display: "flex",
           alignItems: "center",
-          gap: s.gap,
+          gap: STABLE.PAD_MD,
           position: "relative",
           zIndex: 1,
         }}
       >
-        <span style={{ fontSize: s.emoji, lineHeight: 1 }}>{workspace.emoji}</span>
-        <div style={{ display: "flex", flexDirection: "column", gap: s.gap / 3 }}>
+        <span
+          style={{
+            fontSize: STABLE.WS_EMOJI,
+            lineHeight: 1,
+            transform: `scale(${reveal.emojiScale})`,
+            transformOrigin: "center left",
+            transition: "transform 0.3s ease-out",
+          }}
+        >
+          {workspace.emoji}
+        </span>
+        <div style={{ display: "flex", flexDirection: "column", gap: STABLE.PAD_SM / 2 }}>
           <span
             className="font-display"
             style={{
-              fontSize: s.name,
+              fontSize: STABLE.WS_NAME,
               fontWeight: 600,
               letterSpacing: "-0.015em",
               color: ink.ink,
               lineHeight: 1,
+              opacity: reveal.nameOpacity,
             }}
           >
             {workspace.name}
           </span>
-          <span
-            className="font-mono"
-            style={{
-              fontSize: s.meta,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase" as const,
-              color: ink.accent,
-            }}
-          >
-            {workspace.itemCount} items
-          </span>
+          {reveal.shouldMountMeta && (
+            <span
+              className="font-mono"
+              style={{
+                fontSize: STABLE.WS_META,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase" as const,
+                color: ink.accent,
+                opacity: reveal.metaOpacity,
+              }}
+            >
+              {workspace.itemCount} items
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -212,66 +233,78 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
 }
 
 /* ===================================================================
-   Group label — latitude-rule style.
+   Group label — latitude-rule style with continuous reveal.
+
+   Label text fades with groupReveal signal.
+   Rule line and count fade in with cardDetail signal.
    =================================================================== */
 
 function GroupLabelNode({ data }: { data: GroupLabelNodeData }) {
-  const s = useScreenSizes({
-    label: 13,
-    count: 11,
-    line: 80,
-    gap: 10,
-    padding: 6,
-  });
+  const signals = useZoomSignals();
+  const reveal = groupLabelReveal(signals);
 
   return (
     <div
       style={{
         display: "flex",
         alignItems: "center",
-        gap: s.gap,
-        padding: `${s.padding}px 0`,
+        gap: STABLE.PAD_SM,
+        padding: `${STABLE.PAD_SM / 2}px 0`,
         pointerEvents: "none",
       }}
     >
       <span
         className="font-mono"
         style={{
-          fontSize: s.label,
+          fontSize: STABLE.GROUP_LABEL,
           letterSpacing: "0.18em",
           textTransform: "uppercase" as const,
           color: data.ink.ink,
           fontWeight: 600,
+          opacity: reveal.labelOpacity,
         }}
       >
         {data.label}
       </span>
-      <span
-        style={{
-          height: 1,
-          width: s.line,
-          background: `linear-gradient(to right, ${data.ink.accent}, transparent)`,
-        }}
-      />
-      <span
-        className="font-mono"
-        style={{
-          fontSize: s.count,
-          color: data.ink.accent,
-          letterSpacing: "0.04em",
-        }}
-      >
-        {String(data.count).padStart(2, "0")}
-      </span>
+      {reveal.shouldMountRule && (
+        <>
+          <span
+            style={{
+              height: 1,
+              width: 80,
+              background: `linear-gradient(to right, ${data.ink.accent}, transparent)`,
+              opacity: reveal.ruleOpacity,
+            }}
+          />
+          <span
+            className="font-mono"
+            style={{
+              fontSize: STABLE.GROUP_COUNT,
+              color: data.ink.accent,
+              letterSpacing: "0.04em",
+              opacity: reveal.countOpacity,
+            }}
+          >
+            {String(data.count).padStart(2, "0")}
+          </span>
+        </>
+      )}
     </div>
   );
 }
 
 /* ===================================================================
-   Item node — native ReactFlow scaling with CSS semantic zoom.
+   Item node — native ReactFlow scaling with CONTINUOUS semantic zoom.
 
    Content is in CSS pixels; ReactFlow transforms handle zoom.
-   Sub-elements reveal/hide via opacity driven by ZoomSignals.
+   Sub-elements reveal via continuous 0-1 opacity signals from
+   itemReveal(), not binary tier-based show/hide.
+
+   Shape adaptation:
+   - Icon container size interpolates with cardDetail
+   - Header padding interpolates with cardDetail
+   - Body height grows continuously with cardDetail
+   - Meta/controls opacity fades in gradually
    =================================================================== */
 
 function ItemNode({ data }: { data: ItemNodeData }) {
@@ -282,31 +315,18 @@ function ItemNode({ data }: { data: ItemNodeData }) {
   const focusedItemId = useWorkspaceStore((s) => s.focusedItemId);
   const isFocused = focusedItemId === item.id;
   const typeColor = meta?.color ?? "var(--text-secondary)";
+  const signals = useZoomSignals();
+  const reveal = itemReveal(signals);
 
-  const s = useScreenSizes({
-    width: 240,
-    radius: 14,
-    border: 1,
-    strip: 3,
-    padSide: 14,
-    padLeft: 18,
-    padTop: 8,
-    minHeight: 60,
-    iconBox: 24,
-    iconRadius: 6,
-    iconSize: 16,
-    titleSize: 14,
-    gap: 10,
-    bodySize: 12.5,
-    metaSize: 11,
-    dotSize: 2,
-    previewMaxHeight: 200,
-  });
+  // Shadow varies with focus + content depth
+  const shadowStyle = isFocused
+    ? `0 ${lerp(8, 12, reveal.shadowIntensity)}px ${lerp(20, 26, reveal.shadowIntensity)}px -14px ${ink.contour}`
+    : `0 ${lerp(2, 4, reveal.shadowIntensity)}px ${lerp(8, 12, reveal.shadowIntensity)}px -10px rgba(10,14,20,0.10)`;
 
   return (
     <div
       style={{
-        width: s.width,
+        width: STABLE.ITEM_CARD_WIDTH,
         position: "relative",
         pointerEvents: "auto",
       }}
@@ -315,60 +335,64 @@ function ItemNode({ data }: { data: ItemNodeData }) {
         style={{
           position: "relative",
           background: "var(--bg-elevated)",
-          border: `${s.border}px solid ${isFocused ? ink.accent : "var(--border-default)"}`,
-          borderRadius: s.radius,
-          boxShadow: isFocused
-            ? `0 ${12 * s.border}px ${26 * s.border}px -${14 * s.border}px ${ink.contour}`
-            : `0 ${4 * s.border}px ${12 * s.border}px -${10 * s.border}px rgba(10,14,20,0.10)`,
+          border: `${STABLE.BORDER}px solid ${isFocused ? ink.accent : "var(--border-default)"}`,
+          borderRadius: STABLE.RADIUS_MD,
+          boxShadow: shadowStyle,
           overflow: "hidden",
           display: "flex",
           flexDirection: "column",
         }}
       >
+        {/* Type accent bar */}
         <div
           style={{
             position: "absolute",
             top: 0,
             left: 0,
             bottom: 0,
-            width: s.strip,
+            width: 3,
             background: typeColor,
             opacity: 0.75,
           }}
         />
 
+        {/* Header row — icon + title + status */}
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            gap: s.gap,
-            padding: `${s.padTop}px ${s.padSide}px`,
-            paddingLeft: s.padLeft,
-            borderBottom: `${s.border}px solid color-mix(in oklab, ${typeColor} 10%, var(--border-default))`,
-            minHeight: s.minHeight,
+            gap: STABLE.PAD_SM + 2,
+            padding: `${reveal.headerPadding}px ${STABLE.PAD_MD}px`,
+            paddingLeft: 18,
+            borderBottom: reveal.shouldMountBody
+              ? `${STABLE.BORDER}px solid color-mix(in oklab, ${typeColor} 10%, var(--border-default))`
+              : "none",
+            minHeight: STABLE.ITEM_CHIP_HEIGHT,
             flexShrink: 0,
           }}
         >
-          {Icon ? (
+          {reveal.shouldMountIcon && Icon ? (
             <div
               style={{
-                width: s.iconBox,
-                height: s.iconBox,
-                borderRadius: s.iconRadius,
+                width: reveal.iconSize,
+                height: reveal.iconSize,
+                borderRadius: STABLE.RADIUS_SM,
                 background: `color-mix(in oklab, ${typeColor} 12%, transparent)`,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 flexShrink: 0,
+                opacity: reveal.iconOpacity,
+                transition: "width 0.2s ease-out, height 0.2s ease-out, opacity 0.2s ease-out",
               }}
             >
-              <Icon style={{ width: s.iconSize, height: s.iconSize, color: typeColor }} />
+              <Icon style={{ width: STABLE.ICON_MD, height: STABLE.ICON_MD, color: typeColor }} />
             </div>
           ) : null}
           <div
             className="font-body"
             style={{
-              fontSize: s.titleSize,
+              fontSize: STABLE.ITEM_TITLE,
               fontWeight: 600,
               color: "var(--text-primary)",
               letterSpacing: "-0.005em",
@@ -378,71 +402,82 @@ function ItemNode({ data }: { data: ItemNodeData }) {
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
               lineHeight: 1.3,
+              opacity: reveal.titleOpacity,
             }}
           >
             {item.title}
           </div>
-          <StatusDot status={item.status} />
+          <StatusDot status={item.status} opacity={reveal.statusOpacity} />
         </div>
 
-        <div
-          style={{
-            padding: `${s.padTop}px ${s.padSide}px`,
-            paddingLeft: s.padLeft,
-            maxHeight: item.preview ? s.previewMaxHeight : 0,
-            overflow: "hidden",
-          }}
-        >
-          {item.preview ? (
-            <DetailBody item={item} s={s} />
-          ) : (
-            <div style={{ color: "var(--text-tertiary)", fontSize: s.bodySize, fontStyle: "italic" }}>
-              Empty
-            </div>
-          )}
-        </div>
-
-        <div
-          style={{
-            padding: `4px ${s.padSide}px ${s.padTop}px`,
-            paddingLeft: s.padLeft,
-            display: "flex",
-            alignItems: "center",
-            gap: s.gap,
-            flexShrink: 0,
-          }}
-        >
-          <span
-            className="font-mono"
+        {/* Body preview — height interpolates continuously */}
+        {reveal.shouldMountBody && (
+          <div
             style={{
-              fontSize: s.metaSize,
-              letterSpacing: "0.1em",
-              textTransform: "uppercase" as const,
-              color: typeColor,
-              fontWeight: 600,
+              padding: `${STABLE.PAD_SM}px ${STABLE.PAD_MD}px`,
+              paddingLeft: 18,
+              maxHeight: reveal.bodyHeight,
+              overflow: "hidden",
+              opacity: reveal.bodyOpacity,
+              transition: "max-height 0.25s ease-out, opacity 0.2s ease-out",
             }}
           >
-            {meta?.label ?? item.itemType}
-          </span>
-          {item.meta ? (
-            <>
-              <span style={{ width: s.dotSize, height: s.dotSize, borderRadius: "50%", background: "var(--text-tertiary)" }} />
-              <span className="font-mono" style={{ fontSize: s.metaSize, color: "var(--text-tertiary)", letterSpacing: "0.04em" }}>
-                {item.meta}
-              </span>
-            </>
-          ) : null}
-        </div>
+            {item.preview ? (
+              <DetailBody item={item} />
+            ) : (
+              <div style={{ color: "var(--text-tertiary)", fontSize: STABLE.ITEM_BODY, fontStyle: "italic" }}>
+                Empty
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Meta line — type badge + optional date */}
+        {reveal.shouldMountMeta && (
+          <div
+            style={{
+              padding: `4px ${STABLE.PAD_MD}px ${STABLE.PAD_SM}px`,
+              paddingLeft: 18,
+              display: "flex",
+              alignItems: "center",
+              gap: STABLE.PAD_SM + 2,
+              flexShrink: 0,
+              opacity: reveal.metaOpacity,
+              transition: "opacity 0.2s ease-out",
+            }}
+          >
+            <span
+              className="font-mono"
+              style={{
+                fontSize: STABLE.ITEM_META,
+                letterSpacing: "0.1em",
+                textTransform: "uppercase" as const,
+                color: typeColor,
+                fontWeight: 600,
+              }}
+            >
+              {meta?.label ?? item.itemType}
+            </span>
+            {item.meta ? (
+              <>
+                <span style={{ width: 2, height: 2, borderRadius: "50%", background: "var(--text-tertiary)" }} />
+                <span className="font-mono" style={{ fontSize: STABLE.ITEM_META, color: "var(--text-tertiary)", letterSpacing: "0.04em" }}>
+                  {item.meta}
+                </span>
+              </>
+            ) : null}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function DetailBody({ item, s }: { item: WorkspaceItemData; s: Record<string, number> }) {
+function DetailBody({ item }: { item: WorkspaceItemData }) {
   if (item.itemType === "code") {
     return (
-      <div style={{ padding: s.padSide, background: "var(--bg-code)", borderRadius: s.iconRadius, color: "var(--text-primary)" }}>
-        <pre className="font-mono" style={{ fontSize: s.bodySize, whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, lineHeight: 1.55 }}>
+      <div style={{ padding: STABLE.PAD_MD, background: "var(--bg-code)", borderRadius: STABLE.RADIUS_SM, color: "var(--text-primary)" }}>
+        <pre className="font-mono" style={{ fontSize: STABLE.ITEM_BODY, whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, lineHeight: 1.55 }}>
           {item.preview!.slice(0, 600)}
         </pre>
       </div>
@@ -451,14 +486,14 @@ function DetailBody({ item, s }: { item: WorkspaceItemData; s: Record<string, nu
 
   if (item.itemType === "note" || item.itemType === "export") {
     return (
-      <div style={{ color: "var(--text-primary)", fontSize: s.bodySize, lineHeight: 1.65 }}>
+      <div style={{ color: "var(--text-primary)", fontSize: STABLE.ITEM_BODY, lineHeight: 1.65 }}>
         <MarkdownRenderer content={item.preview!.slice(0, 800)} />
       </div>
     );
   }
 
   return (
-    <div style={{ color: "var(--text-secondary)", fontSize: s.bodySize, lineHeight: 1.55 }}>
+    <div style={{ color: "var(--text-secondary)", fontSize: STABLE.ITEM_BODY, lineHeight: 1.55 }}>
       {item.preview!.slice(0, 400)}
     </div>
   );
@@ -475,23 +510,23 @@ function WidgetNode({ data }: { data: WidgetNodeData }) {
 /* ===================================================================
    Layout engine.
 
-   Improved: uses a proper masonry-style column packing algorithm
-   to prevent overlaps and adapt dynamically to item count.
+   Uses stable world coordinates — no zoom-dependent sizing.
+   computeTerritorySize and buildNodes do NOT take zoom.
+   Masonry-style column packing algorithm for item placement.
    =================================================================== */
 
-function computeTerritorySize(itemCount: number, zoom: number): { w: number; h: number } {
-  const scale = zoom && zoom > 0.0001 ? 1 / zoom : 1;
+function computeTerritorySize(itemCount: number): { w: number; h: number } {
   const LAYOUT = {
-    WORLD_COL_WIDTH: 1400 * scale,
-    WORLD_ROW_GAP: 520 * scale,
-    HEADER_Y: 560 * scale,
+    WORLD_COL_WIDTH: 1400,
+    WORLD_ROW_GAP: 520,
+    HEADER_Y: 560,
     ITEMS_PER_ROW: 3,
-    HORIZONTAL_GUTTER: 180 * scale,
-    GROUP_GAP: 260 * scale,
+    HORIZONTAL_GUTTER: 180,
+    GROUP_GAP: 260,
   };
   const rows = Math.max(2, Math.ceil(itemCount / LAYOUT.ITEMS_PER_ROW));
-  const w = Math.max(3600 * scale, Math.min(6400 * scale, (3200 + Math.ceil(itemCount / 4) * 520) * scale));
-  const h = Math.max(2800 * scale, Math.min(5200 * scale, LAYOUT.HEADER_Y + 400 * scale + rows * LAYOUT.WORLD_ROW_GAP));
+  const w = Math.max(3600, Math.min(6400, 3200 + Math.ceil(itemCount / 4) * 520));
+  const h = Math.max(2800, Math.min(5200, LAYOUT.HEADER_Y + 400 + rows * LAYOUT.WORLD_ROW_GAP));
   return { w, h };
 }
 
@@ -609,19 +644,17 @@ function buildNodes(
   viewMode: ViewMode,
   itemOverrides: Record<string, { x: number; y: number }>,
   widgets: WidgetData[],
-  zoom: number,
 ): Node[] {
-  const scale = zoom && zoom > 0.0001 ? 1 / zoom : 1;
   const LAYOUT = {
-    WORLD_COL_WIDTH: 1400 * scale,
-    WORLD_ROW_GAP: 520 * scale,
-    HEADER_Y: 560 * scale,
+    WORLD_COL_WIDTH: 1400,
+    WORLD_ROW_GAP: 520,
+    HEADER_Y: 560,
     ITEMS_PER_ROW: 3,
-    HORIZONTAL_GUTTER: 180 * scale,
-    GROUP_GAP: 260 * scale,
+    HORIZONTAL_GUTTER: 180,
+    GROUP_GAP: 260,
     TERRITORY_COLS: TERRITORY.COLS,
-    TERRITORY_SPACING_X: TERRITORY.SPACING_X * scale,
-    TERRITORY_SPACING_Y: TERRITORY.SPACING_Y * scale,
+    TERRITORY_SPACING_X: TERRITORY.SPACING_X,
+    TERRITORY_SPACING_Y: TERRITORY.SPACING_Y,
   };
   const nodes: Node[] = [];
 
@@ -631,7 +664,7 @@ function buildNodes(
     const originX = col * LAYOUT.TERRITORY_SPACING_X;
     const originY = row * LAYOUT.TERRITORY_SPACING_Y;
     const ink = territoryInk(ws.id, ws.name);
-    const size = computeTerritorySize(ws.items.length, zoom);
+    const size = computeTerritorySize(ws.items.length);
 
     nodes.push({
       id: `ws-${ws.id}`,
@@ -671,9 +704,9 @@ function buildNodes(
       });
 
       // Place items using a masonry layout within the group
-      const itemStartY = gy + 120 * scale;
-      const itemColWidth = 440 * scale; // world-space width per item slot
-      const itemMarginY = 40 * scale; // Vertical gap between items
+      const itemStartY = gy + 120;
+      const itemColWidth = 440; // world-space width per item slot
+      const itemMarginY = 40; // Vertical gap between items
 
       // Accumulators for each column in this group
       const groupColY: number[] = new Array(LAYOUT.ITEMS_PER_ROW).fill(itemStartY);
@@ -705,9 +738,9 @@ function buildNodes(
         });
 
         // Estimate item height for masonry:
-        // Base minHeight is 60 * scale. If preview exists, add up to previewMaxHeight (200 * scale)
+        // Base minHeight is 60. If preview exists, add up to 200
         // plus padding and meta dot area.
-        const estimatedHeight = (item.preview ? 320 : 100) * scale;
+        const estimatedHeight = item.preview ? 320 : 100;
         groupColY[shortestCol] = baseY + estimatedHeight + itemMarginY;
       });
 
@@ -718,6 +751,7 @@ function buildNodes(
   });
 
   // Widgets — live in world coords, not parented to any territory
+  // Use w.w / w.h directly — stable world coordinates, no zoom scaling
   for (const w of widgets) {
     nodes.push({
       id: `widget-${w.id}`,
@@ -726,7 +760,7 @@ function buildNodes(
       data: { widget: w } satisfies WidgetNodeData,
       draggable: true,
       selectable: true,
-      style: { width: w.w * scale, height: w.h * scale, zIndex: 3 },
+      style: { width: w.w, height: w.h, zIndex: 3 },
     });
   }
 
@@ -931,9 +965,10 @@ function WorkspaceCanvasInner({ onNodeClick, onItemClick }: WorkspaceCanvasProps
     return out;
   }, [itemPositions]);
 
+  // buildNodes no longer takes zoom — layout is in stable world coordinates
   const nodes = useMemo(
-    () => buildNodes(workspaces, viewMode, positionsMap, widgets, zoom),
-    [workspaces, viewMode, positionsMap, widgets, zoom],
+    () => buildNodes(workspaces, viewMode, positionsMap, widgets),
+    [workspaces, viewMode, positionsMap, widgets],
   );
 
   const edges: Edge[] = useMemo(() => [], []);

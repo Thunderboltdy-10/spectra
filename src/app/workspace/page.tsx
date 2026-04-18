@@ -731,6 +731,60 @@ export default function WorkspacePage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [deepEditTargets, closeDeepEdit, committedWorkspaceId, handleBack, workspaces, handleWorkspaceSelect]);
 
+  // Handle right-click context menu actions
+  useEffect(() => {
+    const handleContextAction = (e: Event) => {
+      const customEvent = e as CustomEvent<{ action: string; flowX?: number; flowY?: number }>;
+      const { action } = customEvent.detail ?? {};
+      if (!action) return;
+
+      const wsId = useWorkspaceStore.getState().committedWorkspaceId;
+
+      switch (action) {
+        case "workspace":
+          void createWorkspaceAction({ title: "New workspace" });
+          break;
+        case "note":
+          if (!wsId) {
+            setWorkspacePickerIntent({ kind: "note", title: "Untitled note", content: "" });
+            return;
+          }
+          void createItemAction({ action: "createNote", workstreamId: wsId, title: "Untitled note", content: "" });
+          break;
+        case "code":
+          if (!wsId) {
+            setWorkspacePickerIntent({ kind: "code", title: "Untitled code", content: "// Start coding\n" });
+            return;
+          }
+          void createItemAction({ action: "createArtifact", workstreamId: wsId, type: "code_project", title: "Untitled code", content: "// Start coding\n" });
+          break;
+        case "visual":
+          if (!wsId) {
+            setWorkspacePickerIntent({ kind: "visual", title: "Untitled visual", content: "<svg></svg>" });
+            return;
+          }
+          void createItemAction({ action: "createArtifact", workstreamId: wsId, type: "visualization", title: "Untitled visual", content: "<svg></svg>" });
+          break;
+        case "task":
+          if (!wsId) {
+            setWorkspacePickerIntent({ kind: "task", title: "New task" });
+            return;
+          }
+          void createItemAction({ action: "createPlannerItem", workstreamId: wsId, title: "New task", type: "deadline", priority: "medium" });
+          break;
+        case "thread":
+          if (!wsId) {
+            setWorkspacePickerIntent({ kind: "thread", title: "New thread" });
+            return;
+          }
+          void createItemAction({ action: "createThread", workstreamId: wsId, title: "New thread" });
+          break;
+      }
+    };
+    window.addEventListener("workspace:context-action", handleContextAction);
+    return () => window.removeEventListener("workspace:context-action", handleContextAction);
+  }, [createWorkspaceAction, createItemAction]);
+
   // Handle open-item events from result cards and other surfaces
   useEffect(() => {
     const handleOpenItem = (e: Event) => {

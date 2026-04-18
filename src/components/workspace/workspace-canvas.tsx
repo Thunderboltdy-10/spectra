@@ -54,6 +54,8 @@ import { cn } from "@/lib/utils";
 import {
   useZoom,
   useZoomSignals,
+  useScreenSize,
+  useScreenSizes,
   lerp,
 } from "@/lib/workspace/zoom";
 import {
@@ -113,11 +115,12 @@ function statusColor(status: string): string {
 }
 
 function StatusDot({ status }: { status: string }) {
+  const size = useScreenSize(6);
   return (
     <span
       style={{
-        width: 6,
-        height: 6,
+        width: size,
+        height: size,
         borderRadius: "50%",
         background: statusColor(status),
         display: "inline-block",
@@ -137,21 +140,15 @@ function StatusDot({ status }: { status: string }) {
 
 function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
   const { workspace, ink } = data;
-  const signals = useZoomSignals();
-
-  // Crossfade far ↔ anchored
-  const farAlpha = 1 - signals.identityAnchor;
-  const nearAlpha = signals.identityAnchor;
-
-  const lastActivity = useMemo(() => {
-    if (!workspace.lastActivity) return null;
-    const diffM = Math.floor((Date.now() - workspace.lastActivity) / 60000);
-    if (diffM < 1) return "now";
-    if (diffM < 60) return `${diffM}m`;
-    const h = Math.floor(diffM / 60);
-    if (h < 24) return `${h}h`;
-    return `${Math.floor(h / 24)}d`;
-  }, [workspace.lastActivity]);
+  
+  const s = useScreenSizes({
+    emoji: 56,
+    name: 42,
+    meta: 14,
+    gap: 12,
+    padding: 32,
+    radius: 32,
+  });
 
   return (
     <div
@@ -160,124 +157,42 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
         height: "100%",
         position: "relative",
         pointerEvents: "none",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "flex-start",
+        alignItems: "flex-start",
+        padding: s.padding,
       }}
     >
-      {/* Territory fill — subtle wash of ink */}
       <div
         style={{
           position: "absolute",
           inset: 0,
           background: ink.fill,
-          opacity: lerp(1, 0.25, signals.territoryFade),
-          borderRadius: 40,
+          opacity: 0.15,
+          borderRadius: s.radius,
         }}
       />
 
-      {/* FAR (landscape) identity — centered cartouche */}
       <div
         style={{
-          position: "absolute",
-          inset: 0,
           display: "flex",
           alignItems: "center",
-          justifyContent: "center",
-          flexDirection: "column",
-          gap: 24,
-          opacity: farAlpha,
-          pointerEvents: farAlpha > 0.1 ? "auto" : "none",
-          transition: "opacity 200ms ease",
+          gap: s.gap,
+          position: "relative",
+          zIndex: 1,
         }}
       >
-        <div
-          className="font-display"
-          style={{
-            fontSize: 96,
-            lineHeight: 1,
-            filter: "drop-shadow(0 2px 6px rgba(10,14,20,0.08))",
-          }}
-        >
-          {workspace.emoji}
-        </div>
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          <div
-            className="font-display"
-            style={{
-              fontSize: 56,
-              fontWeight: 600,
-              letterSpacing: "-0.015em",
-              lineHeight: 1.1,
-              color: ink.ink,
-              textShadow: "0 2px 10px rgba(10,14,20,0.05)",
-            }}
-          >
-            {workspace.name}
-          </div>
-          <div
-            className="font-mono"
-            style={{
-              fontSize: 12.5,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase" as const,
-              color: ink.accent,
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-            }}
-          >
-            <span>{workspace.itemCount} items</span>
-            {lastActivity ? (
-              <>
-                <span
-                  style={{
-                    width: 3,
-                    height: 3,
-                    borderRadius: "50%",
-                    background: ink.accent,
-                  }}
-                />
-                <span>{lastActivity}</span>
-              </>
-            ) : null}
-          </div>
-        </div>
-      </div>
-
-      {/* NEAR (summary+) — compact badge anchored top-left */}
-      <div
-        style={{
-          position: "absolute",
-          top: 28,
-          left: 36,
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          padding: "10px 14px",
-          background: "var(--bg-elevated)",
-          border: `1px solid ${ink.contour}`,
-          borderRadius: 14,
-          opacity: nearAlpha,
-          pointerEvents: nearAlpha > 0.1 ? "auto" : "none",
-          boxShadow: "0 4px 14px rgba(10,14,20,0.08)",
-          transition: "opacity 200ms ease",
-        }}
-      >
-        <span style={{ fontSize: 44, lineHeight: 1 }}>{workspace.emoji}</span>
-        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <span style={{ fontSize: s.emoji, lineHeight: 1 }}>{workspace.emoji}</span>
+        <div style={{ display: "flex", flexDirection: "column", gap: s.gap / 3 }}>
           <span
             className="font-display"
             style={{
-              fontSize: 38,
+              fontSize: s.name,
               fontWeight: 600,
-              letterSpacing: "-0.01em",
+              letterSpacing: "-0.015em",
               color: ink.ink,
-              lineHeight: 1.05,
+              lineHeight: 1,
             }}
           >
             {workspace.name}
@@ -285,13 +200,13 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
           <span
             className="font-mono"
             style={{
-              fontSize: 11,
+              fontSize: s.meta,
               letterSpacing: "0.08em",
               textTransform: "uppercase" as const,
               color: ink.accent,
             }}
           >
-            {workspace.itemCount} items{lastActivity ? ` · ${lastActivity}` : ""}
+            {workspace.itemCount} items
           </span>
         </div>
       </div>
@@ -304,24 +219,28 @@ function WorkspaceTerritoryNode({ data }: { data: WorkspaceNodeData }) {
    =================================================================== */
 
 function GroupLabelNode({ data }: { data: GroupLabelNodeData }) {
-  const signals = useZoomSignals();
+  const s = useScreenSizes({
+    label: 13,
+    count: 11,
+    line: 80,
+    gap: 10,
+    padding: 6,
+  });
 
   return (
     <div
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 10,
-        padding: "6px 0",
-        opacity: signals.groupReveal,
+        gap: s.gap,
+        padding: `${s.padding}px 0`,
         pointerEvents: "none",
-        transition: "opacity 200ms ease",
       }}
     >
       <span
         className="font-mono"
         style={{
-          fontSize: 13,
+          fontSize: s.label,
           letterSpacing: "0.18em",
           textTransform: "uppercase" as const,
           color: data.ink.ink,
@@ -333,14 +252,14 @@ function GroupLabelNode({ data }: { data: GroupLabelNodeData }) {
       <span
         style={{
           height: 1,
-          width: 80,
+          width: s.line,
           background: `linear-gradient(to right, ${data.ink.accent}, transparent)`,
         }}
       />
       <span
         className="font-mono"
         style={{
-          fontSize: 11,
+          fontSize: s.count,
           color: data.ink.accent,
           letterSpacing: "0.04em",
         }}
@@ -360,74 +279,85 @@ function GroupLabelNode({ data }: { data: GroupLabelNodeData }) {
 
 function ItemNode({ data }: { data: ItemNodeData }) {
   const { item, ink } = data;
-  const signals = useZoomSignals();
   const meta = CANONICAL_WORKSPACE_TYPE_META[item.itemType as CanonicalWorkspaceType];
   const Icon = meta?.icon;
 
   const focusedItemId = useWorkspaceStore((s) => s.focusedItemId);
   const isFocused = focusedItemId === item.id;
-
   const typeColor = meta?.color ?? "var(--text-secondary)";
+
+  const s = useScreenSizes({
+    width: 240,
+    radius: 14,
+    border: 1,
+    strip: 3,
+    padSide: 14,
+    padLeft: 18,
+    padTop: 8,
+    minHeight: 60,
+    iconBox: 24,
+    iconRadius: 6,
+    iconSize: 16,
+    titleSize: 14,
+    gap: 10,
+    bodySize: 12.5,
+    metaSize: 11,
+    dotSize: 2,
+    previewMaxHeight: 200,
+  });
 
   return (
     <div
       style={{
-        width: 240,
+        width: s.width,
         position: "relative",
         pointerEvents: "auto",
-        transition: "width 200ms ease",
       }}
     >
       <div
         style={{
           position: "relative",
           background: "var(--bg-elevated)",
-          border: `1px solid ${isFocused ? ink.accent : "var(--border-default)"}`,
-          borderRadius: 14,
+          border: `${s.border}px solid ${isFocused ? ink.accent : "var(--border-default)"}`,
+          borderRadius: s.radius,
           boxShadow: isFocused
-            ? `0 12px 26px -14px ${ink.contour}`
-            : "0 4px 12px -10px rgba(10,14,20,0.10)",
+            ? `0 ${12 * s.border}px ${26 * s.border}px -${14 * s.border}px ${ink.contour}`
+            : `0 ${4 * s.border}px ${12 * s.border}px -${10 * s.border}px rgba(10,14,20,0.10)`,
           overflow: "hidden",
           display: "flex",
           flexDirection: "column",
-          transition: "border-color 160ms ease, box-shadow 200ms ease, width 200ms ease",
         }}
       >
-        {/* Coloured type strip — left edge */}
         <div
           style={{
             position: "absolute",
             top: 0,
             left: 0,
             bottom: 0,
-            width: 3,
+            width: s.strip,
             background: typeColor,
             opacity: 0.75,
           }}
         />
 
-        {/* Header row — title, icon, status */}
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 10,
-            padding: "8px 14px",
-            paddingLeft: 18,
-            borderBottom:
-              signals.cardDetail > 0.2
-                ? `1px solid color-mix(in oklab, ${typeColor} 10%, var(--border-default))`
-                : "none",
-            minHeight: 60,
+            gap: s.gap,
+            padding: `${s.padTop}px ${s.padSide}px`,
+            paddingLeft: s.padLeft,
+            borderBottom: `${s.border}px solid color-mix(in oklab, ${typeColor} 10%, var(--border-default))`,
+            minHeight: s.minHeight,
             flexShrink: 0,
           }}
         >
           {Icon ? (
             <div
               style={{
-                width: 24,
-                height: 24,
-                borderRadius: 6,
+                width: s.iconBox,
+                height: s.iconBox,
+                borderRadius: s.iconRadius,
                 background: `color-mix(in oklab, ${typeColor} 12%, transparent)`,
                 display: "flex",
                 alignItems: "center",
@@ -435,15 +365,13 @@ function ItemNode({ data }: { data: ItemNodeData }) {
                 flexShrink: 0,
               }}
             >
-              <Icon
-                style={{ width: 16, height: 16, color: typeColor }}
-              />
+              <Icon style={{ width: s.iconSize, height: s.iconSize, color: typeColor }} />
             </div>
           ) : null}
           <div
             className="font-body"
             style={{
-              fontSize: 14,
+              fontSize: s.titleSize,
               fontWeight: 600,
               color: "var(--text-primary)",
               letterSpacing: "-0.005em",
@@ -460,82 +388,37 @@ function ItemNode({ data }: { data: ItemNodeData }) {
           <StatusDot status={item.status} />
         </div>
 
-        {/* Card body — preview (revealed via opacity) */}
-        {item.preview && (
-          <div
-            style={{
-              flex: 1,
-              padding: "8px 14px",
-              paddingLeft: 18,
-              opacity: signals.cardDetail * (1 - signals.contentDepth),
-              maxHeight: signals.cardDetail > 0.1 ? 80 : 0,
-              overflow: "hidden",
-              transition: "opacity 200ms ease, max-height 200ms ease",
-              pointerEvents: signals.cardDetail > 0.5 ? "auto" : "none",
-            }}
-          >
-            <div
-              className="font-body"
-              style={{
-                fontSize: 12.5,
-                color: "var(--text-secondary)",
-                lineHeight: 1.55,
-                display: "-webkit-box",
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: "vertical",
-                overflow: "hidden",
-              }}
-            >
-              {item.preview}
-            </div>
-          </div>
-        )}
-
-        {/* Detail body — full preview (revealed via opacity) */}
         <div
           style={{
-            padding: "6px 14px",
-            paddingLeft: 18,
-            opacity: signals.contentDepth,
-            maxHeight: signals.contentDepth > 0.1 ? 200 : 0,
+            padding: `${s.padTop}px ${s.padSide}px`,
+            paddingLeft: s.padLeft,
+            maxHeight: item.preview ? s.previewMaxHeight : 0,
             overflow: "hidden",
-            pointerEvents: signals.contentDepth > 0.5 ? "auto" : "none",
-            transition: "opacity 200ms ease, max-height 200ms ease",
           }}
         >
           {item.preview ? (
-            <DetailBody item={item} typeColor={typeColor} />
+            <DetailBody item={item} typeColor={typeColor} s={s} />
           ) : (
-            <div
-              style={{
-                color: "var(--text-tertiary)",
-                fontSize: 12.5,
-                fontStyle: "italic",
-              }}
-            >
+            <div style={{ color: "var(--text-tertiary)", fontSize: s.bodySize, fontStyle: "italic" }}>
               Empty
             </div>
           )}
         </div>
 
-        {/* Footer meta — type label */}
         <div
           style={{
-            padding: "4px 14px 8px",
-            paddingLeft: 18,
+            padding: `4px ${s.padSide}px ${s.padTop}px`,
+            paddingLeft: s.padLeft,
             display: "flex",
             alignItems: "center",
-            gap: 10,
-            opacity: Math.min(signals.cardDetail * 2, 1 - signals.contentDepth),
+            gap: s.gap,
             flexShrink: 0,
-            transition: "opacity 200ms ease",
-            pointerEvents: signals.cardDetail > 0.3 ? "auto" : "none",
           }}
         >
           <span
             className="font-mono"
             style={{
-              fontSize: 11,
+              fontSize: s.metaSize,
               letterSpacing: "0.1em",
               textTransform: "uppercase" as const,
               color: typeColor,
@@ -546,22 +429,8 @@ function ItemNode({ data }: { data: ItemNodeData }) {
           </span>
           {item.meta ? (
             <>
-              <span
-                style={{
-                  width: 2,
-                  height: 2,
-                  borderRadius: "50%",
-                  background: "var(--text-tertiary)",
-                }}
-              />
-              <span
-                className="font-mono"
-                style={{
-                  fontSize: 11,
-                  color: "var(--text-tertiary)",
-                  letterSpacing: "0.04em",
-                }}
-              >
+              <span style={{ width: s.dotSize, height: s.dotSize, borderRadius: "50%", background: "var(--text-tertiary)" }} />
+              <span className="font-mono" style={{ fontSize: s.metaSize, color: "var(--text-tertiary)", letterSpacing: "0.04em" }}>
                 {item.meta}
               </span>
             </>
@@ -572,31 +441,11 @@ function ItemNode({ data }: { data: ItemNodeData }) {
   );
 }
 
-/* ===================================================================
-   Type-specific detail body
-   =================================================================== */
-
-function DetailBody({ item, typeColor }: { item: WorkspaceItemData; typeColor: string }) {
+function DetailBody({ item, typeColor, s }: { item: WorkspaceItemData; typeColor: string; s: Record<string, number> }) {
   if (item.itemType === "code") {
     return (
-      <div
-        style={{
-          padding: 14,
-          background: "var(--bg-code)",
-          borderRadius: 8,
-          color: "var(--text-primary)",
-        }}
-      >
-        <pre
-          className="font-mono"
-          style={{
-            fontSize: 12.5,
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-            margin: 0,
-            lineHeight: 1.55,
-          }}
-        >
+      <div style={{ padding: s.padSide, background: "var(--bg-code)", borderRadius: s.iconRadius, color: "var(--text-primary)" }}>
+        <pre className="font-mono" style={{ fontSize: s.bodySize, whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, lineHeight: 1.55 }}>
           {item.preview!.slice(0, 600)}
         </pre>
       </div>
@@ -605,26 +454,14 @@ function DetailBody({ item, typeColor }: { item: WorkspaceItemData; typeColor: s
 
   if (item.itemType === "note" || item.itemType === "export") {
     return (
-      <div
-        style={{
-          color: "var(--text-primary)",
-          fontSize: 12.5,
-          lineHeight: 1.65,
-        }}
-      >
+      <div style={{ color: "var(--text-primary)", fontSize: s.bodySize, lineHeight: 1.65 }}>
         <MarkdownRenderer content={item.preview!.slice(0, 800)} />
       </div>
     );
   }
 
   return (
-    <div
-      style={{
-        color: "var(--text-secondary)",
-        fontSize: 12.5,
-        lineHeight: 1.55,
-      }}
-    >
+    <div style={{ color: "var(--text-secondary)", fontSize: s.bodySize, lineHeight: 1.55 }}>
       {item.preview!.slice(0, 400)}
     </div>
   );
@@ -654,10 +491,19 @@ const LAYOUT = {
   GROUP_GAP: 260,
 };
 
-function computeTerritorySize(itemCount: number): { w: number; h: number } {
+function computeTerritorySize(itemCount: number, zoom: number): { w: number; h: number } {
+  const scale = zoom && zoom > 0.0001 ? 1 / zoom : 1;
+  const LAYOUT = {
+    WORLD_COL_WIDTH: 1400 * scale,
+    WORLD_ROW_GAP: 520 * scale,
+    HEADER_Y: 560 * scale,
+    ITEMS_PER_ROW: 3,
+    HORIZONTAL_GUTTER: 180 * scale,
+    GROUP_GAP: 260 * scale,
+  };
   const rows = Math.max(2, Math.ceil(itemCount / LAYOUT.ITEMS_PER_ROW));
-  const w = Math.max(3600, Math.min(6400, 3200 + Math.ceil(itemCount / 4) * 520));
-  const h = Math.max(2800, Math.min(5200, LAYOUT.HEADER_Y + 400 + rows * LAYOUT.WORLD_ROW_GAP));
+  const w = Math.max(3600 * scale, Math.min(6400 * scale, (3200 + Math.ceil(itemCount / 4) * 520) * scale));
+  const h = Math.max(2800 * scale, Math.min(5200 * scale, LAYOUT.HEADER_Y + 400 * scale + rows * LAYOUT.WORLD_ROW_GAP));
   return { w, h };
 }
 
@@ -775,16 +621,29 @@ function buildNodes(
   viewMode: ViewMode,
   itemOverrides: Record<string, { x: number; y: number }>,
   widgets: WidgetData[],
+  zoom: number,
 ): Node[] {
+  const scale = zoom && zoom > 0.0001 ? 1 / zoom : 1;
+  const LAYOUT = {
+    WORLD_COL_WIDTH: 1400 * scale,
+    WORLD_ROW_GAP: 520 * scale,
+    HEADER_Y: 560 * scale,
+    ITEMS_PER_ROW: 3,
+    HORIZONTAL_GUTTER: 180 * scale,
+    GROUP_GAP: 260 * scale,
+    TERRITORY_COLS: TERRITORY.COLS,
+    TERRITORY_SPACING_X: TERRITORY.SPACING_X * scale,
+    TERRITORY_SPACING_Y: TERRITORY.SPACING_Y * scale,
+  };
   const nodes: Node[] = [];
 
   workspaces.forEach((ws, wsIdx) => {
-    const col = wsIdx % TERRITORY.COLS;
-    const row = Math.floor(wsIdx / TERRITORY.COLS);
-    const originX = col * TERRITORY.SPACING_X;
-    const originY = row * TERRITORY.SPACING_Y;
+    const col = wsIdx % LAYOUT.TERRITORY_COLS;
+    const row = Math.floor(wsIdx / LAYOUT.TERRITORY_COLS);
+    const originX = col * LAYOUT.TERRITORY_SPACING_X;
+    const originY = row * LAYOUT.TERRITORY_SPACING_Y;
     const ink = territoryInk(ws.id, ws.name);
-    const size = computeTerritorySize(ws.items.length);
+    const size = computeTerritorySize(ws.items.length, zoom);
 
     nodes.push({
       id: `ws-${ws.id}`,
@@ -862,7 +721,7 @@ function buildNodes(
       data: { widget: w } satisfies WidgetNodeData,
       draggable: true,
       selectable: true,
-      style: { width: w.w, height: w.h, zIndex: 3 },
+      style: { width: w.w * scale, height: w.h * scale, zIndex: 3 },
     });
   }
 
@@ -1068,8 +927,8 @@ function WorkspaceCanvasInner({ onNodeClick, onItemClick }: WorkspaceCanvasProps
   }, [itemPositions]);
 
   const nodes = useMemo(
-    () => buildNodes(workspaces, viewMode, positionsMap, widgets),
-    [workspaces, viewMode, positionsMap, widgets],
+    () => buildNodes(workspaces, viewMode, positionsMap, widgets, zoom),
+    [workspaces, viewMode, positionsMap, widgets, zoom],
   );
 
   const edges: Edge[] = useMemo(() => [], []);
@@ -1200,10 +1059,10 @@ function WorkspaceCanvasInner({ onNodeClick, onItemClick }: WorkspaceCanvasProps
           onNodeClick={handleNodeClick}
           onPaneClick={handlePaneClick}
           onPaneContextMenu={handlePaneContextMenu}
-          panOnScroll={true}
-          panOnScrollMode={"free" as unknown as undefined}
+          panOnScroll={false}
+          
           panOnDrag={true}
-          zoomOnScroll={false}
+          zoomOnScroll={true}
           zoomOnPinch={true}
           zoomOnDoubleClick={false}
           minZoom={VP.MIN_ZOOM}

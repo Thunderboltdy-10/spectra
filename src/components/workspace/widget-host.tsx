@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { X, GripHorizontal, ArrowDownRight } from "lucide-react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { useScreenSizes, useZoom } from "@/lib/workspace/zoom";
 import type { WidgetData } from "@/lib/workspace/contracts";
 import {
   WidgetSticky,
@@ -29,12 +30,19 @@ export function WidgetHost({ widget }: { widget: WidgetData }) {
   const removeWidget = useWorkspaceStore((s) => s.removeWidget);
   const updateWidget = useWorkspaceStore((s) => s.updateWidget);
 
-  const radius = 14;
-  const border = 1;
-  const pad = 8;
-  const titleSize = 11;
-  const iconSize = 12;
-  const handleSize = 18;
+  const s = useScreenSizes({
+    radius: 14,
+    border: 1,
+    pad: 8,
+    titleSize: 11,
+    iconSize: 12,
+    handleSize: 18,
+    closeBtn: 22,
+    closeRadius: 6,
+    shadowY: 8,
+    shadowBlur: 22,
+    shadowSpread: 12
+  });
 
   const [resizing, setResizing] = useState(false);
   const startRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -94,9 +102,9 @@ export function WidgetHost({ widget }: { widget: WidgetData }) {
           position: "absolute",
           inset: 0,
           background: "var(--bg-elevated)",
-          border: `${border}px solid var(--border-default)`,
-          borderRadius: `${radius}px`,
-          boxShadow: `0 ${8}px ${22}px -${12}px rgba(10,14,20,0.12)`,
+          border: `${s.border}px solid var(--border-default)`,
+          borderRadius: s.radius,
+          boxShadow: `0 ${s.shadowY}px ${s.shadowBlur}px -${s.shadowSpread}px rgba(10,14,20,0.12)`,
           overflow: "hidden",
           display: "flex",
           flexDirection: "column",
@@ -108,20 +116,20 @@ export function WidgetHost({ widget }: { widget: WidgetData }) {
             display: "flex",
             alignItems: "center",
             gap: 8,
-            padding: `${pad}px ${14}px`,
-            borderBottom: `${border}px solid var(--border-default)`,
+            padding: `${s.pad}px ${s.pad * 1.75}px`,
+            borderBottom: `${s.border}px solid var(--border-default)`,
             background:
               "linear-gradient(to bottom, color-mix(in oklab, var(--bg-elevated) 92%, var(--border-default)), var(--bg-elevated))",
             flexShrink: 0,
           }}
         >
           <GripHorizontal
-            style={{ width: iconSize, height: iconSize, color: "var(--text-tertiary)", flexShrink: 0 }}
+            style={{ width: s.iconSize, height: s.iconSize, color: "var(--text-tertiary)", flexShrink: 0 }}
           />
           <span
             className="font-mono"
             style={{
-              fontSize: titleSize,
+              fontSize: s.titleSize,
               letterSpacing: "0.14em",
               textTransform: "uppercase",
               color: "var(--text-secondary)",
@@ -141,9 +149,9 @@ export function WidgetHost({ widget }: { widget: WidgetData }) {
               removeWidget(widget.id);
             }}
             style={{
-              width: 22,
-              height: 22,
-              borderRadius: 6,
+              width: s.closeBtn,
+              height: s.closeBtn,
+              borderRadius: s.closeRadius,
               background: "transparent",
               border: "none",
               display: "flex",
@@ -155,7 +163,7 @@ export function WidgetHost({ widget }: { widget: WidgetData }) {
             }}
             title="Remove widget"
           >
-            <X style={{ width: iconSize, height: iconSize }} />
+            <X style={{ width: s.iconSize, height: s.iconSize }} />
           </button>
         </div>
 
@@ -165,7 +173,7 @@ export function WidgetHost({ widget }: { widget: WidgetData }) {
             flex: 1,
             minHeight: 0,
             overflow: "auto",
-            padding: 8,
+            padding: s.pad,
           }}
         >
           {renderWidget(widget)}
@@ -176,10 +184,10 @@ export function WidgetHost({ widget }: { widget: WidgetData }) {
           onMouseDown={onResizeStart}
           style={{
             position: "absolute",
-            right: 4,
-            bottom: 4,
-            width: handleSize,
-            height: handleSize,
+            right: s.pad / 2,
+            bottom: s.pad / 2,
+            width: s.handleSize,
+            height: s.handleSize,
             cursor: "nwse-resize",
             display: "flex",
             alignItems: "center",
@@ -189,7 +197,7 @@ export function WidgetHost({ widget }: { widget: WidgetData }) {
           }}
           title="Resize"
         >
-          <ArrowDownRight style={{ width: iconSize, height: iconSize }} />
+          <ArrowDownRight style={{ width: s.iconSize, height: s.iconSize }} />
         </div>
       </div>
     </div>

@@ -71,13 +71,15 @@ function ModeIndicator({ mode }: { mode: CommandMode }) {
 
 function FocusContextTags({ contextOverride }: { contextOverride?: { id: string; title: string; type: string } }) {
   const committedWorkspaceId = useWorkspaceStore((s) => s.committedWorkspaceId);
+  const viewedWorkspaceId = useWorkspaceStore((s) => s.viewedWorkspaceId);
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const focusedItemId = useWorkspaceStore((s) => s.focusedItemId);
   const deepEditTargets = useWorkspaceStore((s) => s.deepEditTargets);
   const setFocusedItem = useWorkspaceStore((s) => s.setFocusedItem);
   const closeDeepEdit = useWorkspaceStore((s) => s.closeDeepEdit);
 
-  const workspace = workspaces.find((w) => w.id === committedWorkspaceId);
+  const effectiveWorkspaceId = committedWorkspaceId ?? viewedWorkspaceId;
+  const workspace = workspaces.find((w) => w.id === effectiveWorkspaceId);
   const deepItem = deepEditTargets.length > 0 ? deepEditTargets[deepEditTargets.length - 1]?.item : null;
   const storeFocusedItem = deepItem ?? (focusedItemId ? workspaces.flatMap((w) => w.items).find((i) => i.id === focusedItemId) : null);
   
@@ -415,7 +417,7 @@ export function CommandBar({
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
             placeholder={hasContextualItem ? "Act on focused item\u2026" : "Ask AI, search, or create\u2026"}
-            disabled={(disabled || isProcessing) && !isStreaming}
+            disabled={Boolean((disabled || isProcessing) && !isStreaming)}
             className="min-w-0 flex-1 resize-none border-none bg-transparent py-1.5 text-[14px] leading-[1.5] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]/60"
             style={{ maxHeight: 120, minHeight: 24 }}
           />
@@ -436,7 +438,7 @@ export function CommandBar({
             <button
               type="button"
               onClick={handleSubmit}
-              disabled={!value.trim() || disabled}
+              disabled={Boolean(!value.trim() || disabled)}
               className={cn(
                 "flex h-9 w-9 items-center justify-center rounded-[12px] transition-all duration-150",
                 value.trim()

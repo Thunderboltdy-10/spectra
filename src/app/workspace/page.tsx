@@ -31,24 +31,46 @@ import { notifyWorkspaceContentMutated } from "@/lib/workspace/events";
 /* ─── Demo Fallback Data ──────────────────────────────── */
 
 const DEMO_ITEMS: WorkspaceItemData[] = [
-  { id: "i1", workspaceId: "ws1", title: "Physics — Momentum Notes", preview: "Newton's second law applied to collisions and impulse-momentum theorem", itemType: "note", status: "active", updatedAt: Date.now() - 60_000, meta: "Edited 1m ago" },
-  { id: "i2", workspaceId: "ws1", title: "Energy Conservation Flashcards", preview: "25 cards covering kinetic, potential, and thermal energy", itemType: "flashcard_deck", status: "active", updatedAt: Date.now() - 300_000, meta: "12 due" },
-  { id: "i3", workspaceId: "ws1", title: "Lab Report: Pendulum Experiment", preview: "Simple harmonic motion analysis with uncertainty propagation", itemType: "export", status: "idle", updatedAt: Date.now() - 3_600_000 },
-  { id: "i4", workspaceId: "ws1", title: "AI Tutor: Circular Motion Q&A", preview: "Thread about centripetal acceleration and orbital mechanics", itemType: "thread", status: "active", updatedAt: Date.now() - 120_000, meta: "3 new" },
-  { id: "i5", workspaceId: "ws1", title: "Python: Projectile Simulation", preview: "Numerical integration of 2D projectile with air resistance", itemType: "code", status: "idle", updatedAt: Date.now() - 7_200_000 },
-  { id: "i6", workspaceId: "ws1", title: "Mock Exam: Mechanics Paper 1", preview: "45 minutes, 6 structured questions, Cambridge style", itemType: "quiz", status: "completed", meta: "Score: 82%" },
-  { id: "i7", workspaceId: "ws1", title: "Revision Timetable", itemType: "planner", status: "active", meta: "3 tasks today" },
-  { id: "i8", workspaceId: "ws2", title: "Organic Chemistry Mind Map", preview: "Reaction pathways for alkenes, alcohols, and carbonyls", itemType: "visual", status: "active", updatedAt: Date.now() - 180_000 },
-  { id: "i9", workspaceId: "ws2", title: "Titration Calculations", preview: "Worked examples with molar concentration calculations", itemType: "note", status: "idle" },
-  { id: "i10", workspaceId: "ws2", title: "Bonding Quiz", preview: "Ionic, covalent, and metallic bonding assessment", itemType: "quiz", status: "active", meta: "Not started" },
-  { id: "i11", workspaceId: "ws3", title: "Shakespeare Essay Draft", preview: "Analysis of power in Macbeth with textual references", itemType: "note", status: "active", updatedAt: Date.now() - 600_000, meta: "1,240 words" },
-  { id: "i12", workspaceId: "ws3", title: "Vocabulary Flashcards: Rhetoric", preview: "Literary terms and rhetorical devices", itemType: "flashcard_deck", status: "idle", meta: "8 due" },
+  // ── Product Launch: Nova Wearable ──
+  { id: "i1", workspaceId: "ws1", title: "Go-to-Market Strategy Brief", preview: "Comprehensive GTM plan covering market positioning for Nova wearable, targeting health-conscious millennials 25-40. Key differentiators: 7-day battery, medical-grade SpO2, open API for third-party health apps. Launch window: Q3 2026 to align with back-to-school and fitness season.", itemType: "note", status: "active", updatedAt: Date.now() - 45_000, meta: "Edited just now" },
+  { id: "i2", workspaceId: "ws1", title: "Competitive Landscape Analysis", preview: "Deep dive into Whoop 4.0, Oura Ring Gen 3, Apple Watch Ultra 2 pricing tiers. SWOT analysis per competitor. Nova positioning: premium health-focused at mid-range price ($249 vs Whoop $336/yr). Market gap: no device under $300 offers continuous blood oxygen + skin temp + HRV with open developer API.", itemType: "export", status: "active", updatedAt: Date.now() - 180_000, meta: "24 pages" },
+  { id: "i3", workspaceId: "ws1", title: "Launch Campaign Assets Tracker", preview: "Social media creative briefs, influencer partnership contracts, PR outreach list (TechCrunch, The Verge, Wired). Landing page copy drafts A/B tested. Email drip sequence: 5-part pre-launch teaser series targeting waitlist of 12,400 signups.", itemType: "planner", status: "active", meta: "14 tasks, 6 in progress" },
+  { id: "i4", workspaceId: "ws1", title: "Pricing Model: Sensitivity Analysis", preview: "Python simulation of demand elasticity across price points $199-$349. Monte Carlo analysis with 10k iterations shows optimal price at $249 with 85% confidence interval for 50k units in first quarter. Includes break-even analysis at varying CAC scenarios.", itemType: "code", status: "active", updatedAt: Date.now() - 360_000, meta: "Python · 340 lines" },
+  { id: "i5", workspaceId: "ws1", title: "Investor Pitch Deck v4", preview: "Series A deck: 18 slides covering traction (12.4k waitlist, 340 beta users, 92% retention at 8 weeks), market sizing ($34B wearable health by 2028), team (ex-Apple, ex-Fitbit), financial projections. Raising $8M for scaling manufacturing and hiring 15 engineers.", itemType: "visual", status: "active", updatedAt: Date.now() - 240_000 },
+  { id: "i6", workspaceId: "ws1", title: "Beta Feedback Synthesis", preview: "Compiled feedback from 340 beta testers across 8 weeks. Top requests: sleep staging (67%), native Strava integration (54%), smaller form factor for women wrists (41%). Net Promoter Score: 72. Common praise: battery life, SpO2 accuracy, comfortable sleep tracking.", itemType: "thread", status: "active", updatedAt: Date.now() - 90_000, meta: "23 messages" },
+  { id: "i7", workspaceId: "ws1", title: "Regulatory Compliance Checklist", preview: "FCC Part 15 Class B certification, FDA 510(k) pre-submission for SpO2 medical claims, CE Marking under MDR for EU launch, California Prop 65 compliance. Legal review of health data privacy (HIPAA adjacency, not covered entity). Estimated timeline: 14 weeks for full certification.", itemType: "note", status: "idle", updatedAt: Date.now() - 7200_000 },
+
+  // ── CS 301: Algorithms & Data Structures ──
+  { id: "i8", workspaceId: "ws2", title: "Lecture Notes: Graph Traversal", preview: "BFS vs DFS tradeoffs for different graph types. Dijkstra with priority queue optimization O((V+E)log V). A* search with admissible heuristics. Problem set 7: implement bidirectional BFS for social network shortest path on a graph with 10M nodes.", itemType: "note", status: "active", updatedAt: Date.now() - 120_000, meta: "Edited 2m ago" },
+  { id: "i9", workspaceId: "ws2", title: "Dynamic Programming Patterns", preview: "5 core DP patterns: linear (fibonacci, LIS), grid (unique paths, min cost path), interval (matrix chain, burst balloons), tree (diameter, max path sum), and subset (0/1 knapsack, partition equal subset). Each pattern with 3-4 LeetCode-style problems ranked easy to hard.", itemType: "flashcard_deck", status: "active", updatedAt: Date.now() - 600_000, meta: "48 cards, 15 due today" },
+  { id: "i10", workspaceId: "ws2", title: "Red-Black Tree Implementation", preview: "Complete RBT implementation in C++ with insert, delete, search, and range queries. Includes rotation helpers, fixup procedures, and comprehensive test suite with 200+ edge cases. Benchmarked against std::map on 1M random operations.", itemType: "code", status: "active", updatedAt: Date.now() - 1_800_000, meta: "C++ · 580 lines" },
+  { id: "i11", workspaceId: "ws2", title: "Algorithm Complexity Cheat Sheet", preview: "Visual reference card: sorting algorithms (comparison, non-comparison, hybrid), graph algorithms (spanning tree, shortest path, flow), string algorithms (KMP, Rabin-Karp, suffix array), and data structure operation costs. Space-time tradeoffs for each category.", itemType: "visual", status: "active", updatedAt: Date.now() - 3_600_000 },
+  { id: "i12", workspaceId: "ws2", title: "Study Group: Midterm Prep Thread", preview: "Coordinating midterm review sessions. Topics: amortized analysis (potential method), disjoint sets with path compression proof, advanced DP (digit DP, bitmask DP). Meeting Saturday 2pm in CS lab. Sharing practice problems from past 3 years.", itemType: "thread", status: "active", updatedAt: Date.now() - 300_000, meta: "11 messages · 3 new" },
+  { id: "i13", workspaceId: "ws2", title: "Problem Set 6: Solutions", preview: "Full worked solutions for PS6: Q1 greedy interval scheduling proof by exchange argument, Q2 Huffman coding with tiebreaking rules, Q3 union-find with both path compression and union by rank proving inverse Ackermann bound, Q4 designing a data structure for dynamic order statistics.", itemType: "note", status: "completed", updatedAt: Date.now() - 7_200_000, meta: "Graded 94/100" },
+  { id: "i14", workspaceId: "ws2", title: "Assignment Deadlines & Exam Schedule", itemType: "planner", status: "active", meta: "5 upcoming deadlines" },
+
+  // ── Personal Finance 2026 ──
+  { id: "i15", workspaceId: "ws3", title: "Monthly Budget Tracker: April", preview: "Income: $6,800 salary + $420 freelance design. Expenses: rent $1,850, groceries $380 (down 12% from March with meal prep), transport $95, subscriptions $47, dining out $210, fitness $65. Savings rate: 38.2%. Emergency fund now at 5.2 months expenses.", itemType: "note", status: "active", updatedAt: Date.now() - 60_000, meta: "Updated today" },
+  { id: "i16", workspaceId: "ws3", title: "Investment Portfolio Rebalancing", preview: "Current allocation: 72% VTI (US total market), 18% VXUS (international), 10% BND (bonds). Target: 65/25/10. Need to sell $4.2k VTI and buy VXUS. Tax-loss harvesting opportunity: sell VTSAX lot from Nov 2024 at -$680 loss, redirect to VFIAX. Rebalance by April 30.", itemType: "note", status: "active", updatedAt: Date.now() - 300_000 },
+  { id: "i17", workspaceId: "ws3", title: "Tax Filing Preparation 2025", preview: "W-2 from employer, 1099-NEC from freelance ($5,040 total), 1099-DIV from brokerage. Deductions: home office (simplified method $5/sqft x 120sqft), student loan interest $2,400, traditional IRA contribution $6,500. Estimated refund: $1,840. Filing deadline: April 15, 2026.", itemType: "export", status: "active", updatedAt: Date.now() - 1_200_000, meta: "Draft · 12 pages" },
+  { id: "i18", workspaceId: "ws3", title: "Savings Goal Simulator", preview: "Interactive Python model projecting savings trajectories. Scenarios: conservative (4% real return), moderate (7%), aggressive (10%). Monte Carlo simulation for retirement age probability. Current trajectory: FIRE at age 47 with 85% confidence at 6% savings rate increase per year.", itemType: "code", status: "idle", updatedAt: Date.now() - 14_400_000, meta: "Python · Jupyter notebook" },
+  { id: "i19", workspaceId: "ws3", title: "Apartment Lease Renewal Decision", preview: "Landlord offered renewal at $1,950/mo (5.4% increase) vs current $1,850. Comparing: negotiate down to $1,900, move to comparable apt at $1,780 but $2,500 moving costs + hassle, or buy a condo. Running 3-year total cost comparison including opportunity cost of down payment.", itemType: "thread", status: "active", updatedAt: Date.now() - 180_000, meta: "8 messages" },
+  { id: "i20", workspaceId: "ws3", title: "Financial Milestones & Goals", itemType: "planner", status: "active", meta: "7 goals, 3 on track" },
+
+  // ── Screenplay: "The Last Frequency" ──
+  { id: "i21", workspaceId: "ws4", title: "Act I: The Signal — Treatment", preview: "Dr. Maren Cole, radio astronomer at Arecibo II, detects a repeating signal at 1.42 GHz with embedded mathematical structure — prime number sequence modulated into carrier wave. Her supervisor dismisses it as pulsar interference. She secretly continues analysis, discovering the signal contains a self-referencing data format: a Rosetta Stone that teaches its own decoding protocol. Setup ends when she realizes the signal is not arriving from space — it is originating from 847 meters beneath the observatory.", itemType: "note", status: "active", updatedAt: Date.now() - 180_000, meta: "2,840 words" },
+  { id: "i22", workspaceId: "ws4", title: "Character Bible", preview: "MAREN COLE (38): Brilliant but marginalized. Published breakthrough paper at 26, then blacklisted for claiming anomalous signals were structured. Obsessive, dry humor, terrible at personal relationships. Key wound: her mother, also a scientist, died in a lab accident Maren believes was covered up. JONAS OSEI (42): Geologist turned government liaison. Pragmatic, loyal to institutions. The reveal: he has been monitoring the same signal for 11 years.", itemType: "note", status: "active", updatedAt: Date.now() - 600_000, meta: "6 characters" },
+  { id: "i23", workspaceId: "ws4", title: "Scene Breakdown: Full Script", preview: "87 scenes across 3 acts. Act I (scenes 1-28): Discovery and denial. Act II (scenes 29-62): Descent and confrontation — physical descent into the cave system, emotional confrontation with Jonas. Act III (scenes 63-87): Contact and choice — Maren must decide whether to answer the signal, knowing a response will expose humanity position. The signal is a question, not a message.", itemType: "planner", status: "active", meta: "87 scenes · Act II drafting" },
+  { id: "i24", workspaceId: "ws4", title: "Dialogue Workshop: Maren & Jonas", preview: "Workshopping the Act II confrontation scene. Current draft feels too on-the-nose. Need subtext: Maren anger at Jonas should mirror her anger at her mother secrecy. Jonas protectiveness should reveal his own fear. Key line being refined: You think silence is safety. My mother thought that too. Revision notes from screenwriting group incorporated.", itemType: "thread", status: "active", updatedAt: Date.now() - 90_000, meta: "15 messages · 4 new" },
+  { id: "i25", workspaceId: "ws4", title: "World-Building: Arecibo II", preview: "Technical specifications of the fictional observatory. Located in same karst terrain as original Arecibo. Upgraded with quantum-enhanced receivers, deep borehole sensor array, and a SETI-dedicated compute cluster. The underground anomaly: a natural limestone chamber with crystalline formations that function as a resonant cavity at exactly 1.42 GHz — the hydrogen line frequency. Geological impossibility or engineered?", itemType: "note", status: "idle", updatedAt: Date.now() - 7_200_000 },
+  { id: "i26", workspaceId: "ws4", title: "Pitch Deck: Visual References", preview: "Mood board compiled from: Arrival (Villeneuve) for tone, Contact (Zemeckis) for scientific authenticity, Annihilation (Garland) for the descent metaphor, Underwater (Eubank) for claustrophobic tension. Color palette: deep teal and amber. Key visual: the signal visualized as interference patterns on water — ripples that spell out equations.", itemType: "visual", status: "active", updatedAt: Date.now() - 1_440_000 },
 ];
 
 const DEMO_WORKSPACES: WorkspaceData[] = [
-  { id: "ws1", name: "IB Physics HL", emoji: "⚙️", status: "active", itemCount: 7, lastActivity: Date.now() - 60_000, items: DEMO_ITEMS.filter((i) => i.workspaceId === "ws1") },
-  { id: "ws2", name: "Chemistry SL", emoji: "🧪", status: "active", itemCount: 3, lastActivity: Date.now() - 180_000, items: DEMO_ITEMS.filter((i) => i.workspaceId === "ws2") },
-  { id: "ws3", name: "English Literature", emoji: "📚", status: "quiet", itemCount: 2, lastActivity: Date.now() - 600_000, items: DEMO_ITEMS.filter((i) => i.workspaceId === "ws3") },
+  { id: "ws1", name: "Product Launch: Nova", emoji: "⚙️", status: "active", itemCount: 7, lastActivity: Date.now() - 45_000, items: DEMO_ITEMS.filter((i) => i.workspaceId === "ws1") },
+  { id: "ws2", name: "CS 301: Algorithms", emoji: "👨‍💻", status: "active", itemCount: 7, lastActivity: Date.now() - 120_000, items: DEMO_ITEMS.filter((i) => i.workspaceId === "ws2") },
+  { id: "ws3", name: "Personal Finance 2026", emoji: "💰", status: "active", itemCount: 6, lastActivity: Date.now() - 60_000, items: DEMO_ITEMS.filter((i) => i.workspaceId === "ws3") },
+  { id: "ws4", name: "Screenplay: Last Frequency", emoji: "🎬", status: "quiet", itemCount: 6, lastActivity: Date.now() - 90_000, items: DEMO_ITEMS.filter((i) => i.workspaceId === "ws4") },
 ];
 
 
@@ -58,6 +80,7 @@ const DEMO_WORKSPACES: WorkspaceData[] = [
 export default function WorkspacePage() {
   const {
     committedWorkspaceId,
+    viewedWorkspaceId,
     commitToWorkspace,
     flyToWorkspace,
     setWorkspaces,
@@ -349,6 +372,8 @@ export default function WorkspacePage() {
     const isWorkspaceCmd = lowered.startsWith("/workspace") || lowered.startsWith("create workspace");
 
     setIsProcessingCommand(true);
+    // Use viewed workspace as fallback when no workspace is explicitly committed
+    const effectiveWorkspaceId = committedWorkspaceId ?? viewedWorkspaceId;
 
     let createdResultId: string | undefined;
 
@@ -357,7 +382,7 @@ export default function WorkspacePage() {
       if (isSearch) {
         const query = normalized.replace(/^\?/, "").replace(/^(search|find)\s+/i, "").trim();
         const res = await createCommandResult({
-          workstreamId: committedWorkspaceId ?? "",
+          workstreamId: effectiveWorkspaceId ?? "",
           intent: "result",
           title: normalized.length > 60 ? normalized.slice(0, 57) + "\u2026" : normalized,
           status: "processing",
@@ -366,7 +391,7 @@ export default function WorkspacePage() {
 
         const result = await createItemAction({
           action: "search",
-          workstreamId: committedWorkspaceId ?? "",
+          workstreamId: effectiveWorkspaceId ?? "",
           query,
           limit: 8,
         }) as { results?: Array<{ title: string; workspaceTitle?: string; _id?: string }> };
@@ -387,7 +412,7 @@ export default function WorkspacePage() {
 
       /* ── Create note ── */
       if (isNoteCmd) {
-        if (!committedWorkspaceId) throw new Error("Enter a workspace first");
+        if (!effectiveWorkspaceId) throw new Error("Enter a workspace first");
         const title = normalized.replace(/^\/note\s*/i, "").replace(/^create note\s*/i, "").trim() || "Untitled note";
         // Push optimistic result card for immediate feedback
         const optimisticId = `optimistic-note-${Date.now()}`;
@@ -401,7 +426,7 @@ export default function WorkspacePage() {
         try {
           await createItemAction({
             action: "createNote",
-            workstreamId: committedWorkspaceId,
+            workstreamId: effectiveWorkspaceId,
             title,
             content: "",
           });
@@ -423,7 +448,7 @@ export default function WorkspacePage() {
 
       /* ── Create task ── */
       if (isTaskCmd) {
-        if (!committedWorkspaceId) throw new Error("Enter a workspace first");
+        if (!effectiveWorkspaceId) throw new Error("Enter a workspace first");
         const title = normalized.replace(/^\/task\s*/i, "").replace(/^create task\s*/i, "").trim() || "New task";
         // Push optimistic result card for immediate feedback
         const optimisticId = `optimistic-task-${Date.now()}`;
@@ -437,7 +462,7 @@ export default function WorkspacePage() {
         try {
           await createItemAction({
             action: "createPlannerItem",
-            workstreamId: committedWorkspaceId,
+            workstreamId: effectiveWorkspaceId,
             title,
             type: "deadline",
             priority: "medium",
@@ -464,7 +489,7 @@ export default function WorkspacePage() {
 
       /* ── Create thread ── */
       if (isThreadCmd) {
-        if (!committedWorkspaceId) throw new Error("Enter a workspace first");
+        if (!effectiveWorkspaceId) throw new Error("Enter a workspace first");
         const title = normalized.replace(/^\/thread\s*/i, "").replace(/^create thread\s*/i, "").trim() || "New thread";
         // Push optimistic result card for immediate feedback
         const optimisticId = `optimistic-thread-${Date.now()}`;
@@ -478,7 +503,7 @@ export default function WorkspacePage() {
         try {
           await createItemAction({
             action: "createThread",
-            workstreamId: committedWorkspaceId,
+            workstreamId: effectiveWorkspaceId,
             title,
           });
           updateResultCard(optimisticId, {
@@ -520,9 +545,9 @@ export default function WorkspacePage() {
 
       /* ── General AI message → routed to chat pipeline ── */
       // Create backend processing result first
-      if (committedWorkspaceId) {
+      if (effectiveWorkspaceId) {
         const res = await createCommandResult({
-          workstreamId: committedWorkspaceId ?? "",
+          workstreamId: effectiveWorkspaceId ?? "",
           intent: "result",
           title: normalized.length > 60 ? normalized.slice(0, 57) + "\u2026" : normalized,
           status: "processing",
@@ -541,8 +566,8 @@ export default function WorkspacePage() {
           routerMode: "auto",
           usePersonalResources: true,
           skipUserMessagePersist: false,
-          workstreamId: committedWorkspaceId,
-          scopeLevel: committedWorkspaceId ? "workspace" : "global",
+          workstreamId: effectiveWorkspaceId,
+          scopeLevel: effectiveWorkspaceId ? "workspace" : "global",
         }),
       });
       if (!response.ok) {
@@ -613,7 +638,7 @@ export default function WorkspacePage() {
     } finally {
       setIsProcessingCommand(false);
     }
-  }, [committedWorkspaceId, createWorkspaceAction, refreshData, createItemAction, pushResultCard, updateResultCard]);
+  }, [committedWorkspaceId, viewedWorkspaceId, createWorkspaceAction, refreshData, createItemAction, pushResultCard, updateResultCard]);
 
   /* ─── Dismiss/reopen: real backend when live, store-only otherwise ─── */
   const handleDismissResultCard = useCallback(
@@ -705,6 +730,60 @@ export default function WorkspacePage() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [deepEditTargets, closeDeepEdit, committedWorkspaceId, handleBack, workspaces, handleWorkspaceSelect]);
+
+  // Handle right-click context menu actions
+  useEffect(() => {
+    const handleContextAction = (e: Event) => {
+      const customEvent = e as CustomEvent<{ action: string; flowX?: number; flowY?: number }>;
+      const { action } = customEvent.detail ?? {};
+      if (!action) return;
+
+      const wsId = useWorkspaceStore.getState().committedWorkspaceId;
+
+      switch (action) {
+        case "workspace":
+          void createWorkspaceAction({ title: "New workspace" });
+          break;
+        case "note":
+          if (!wsId) {
+            setWorkspacePickerIntent({ kind: "note", title: "Untitled note", content: "" });
+            return;
+          }
+          void createItemAction({ action: "createNote", workstreamId: wsId, title: "Untitled note", content: "" });
+          break;
+        case "code":
+          if (!wsId) {
+            setWorkspacePickerIntent({ kind: "code", title: "Untitled code", content: "// Start coding\n" });
+            return;
+          }
+          void createItemAction({ action: "createArtifact", workstreamId: wsId, type: "code_project", title: "Untitled code", content: "// Start coding\n" });
+          break;
+        case "visual":
+          if (!wsId) {
+            setWorkspacePickerIntent({ kind: "visual", title: "Untitled visual", content: "<svg></svg>" });
+            return;
+          }
+          void createItemAction({ action: "createArtifact", workstreamId: wsId, type: "visualization", title: "Untitled visual", content: "<svg></svg>" });
+          break;
+        case "task":
+          if (!wsId) {
+            setWorkspacePickerIntent({ kind: "task", title: "New task" });
+            return;
+          }
+          void createItemAction({ action: "createPlannerItem", workstreamId: wsId, title: "New task", type: "deadline", priority: "medium" });
+          break;
+        case "thread":
+          if (!wsId) {
+            setWorkspacePickerIntent({ kind: "thread", title: "New thread" });
+            return;
+          }
+          void createItemAction({ action: "createThread", workstreamId: wsId, title: "New thread" });
+          break;
+      }
+    };
+    window.addEventListener("workspace:context-action", handleContextAction);
+    return () => window.removeEventListener("workspace:context-action", handleContextAction);
+  }, [createWorkspaceAction, createItemAction]);
 
   // Handle open-item events from result cards and other surfaces
   useEffect(() => {

@@ -7,10 +7,11 @@
    updateWidget. All sizing uses screen-stable world px.
    =================================================================== */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import Image from "next/image";
 import { Play, Pause, RotateCcw, ExternalLink, Timer, Clock as ClockIcon, Hourglass } from "lucide-react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import { useScreenSize, STABLE } from "@/lib/workspace/zoom";
+import { useScreenSize } from "@/lib/workspace/zoom";
 import type { WidgetData } from "@/lib/workspace/contracts";
 
 const STICKY_COLORS: Record<string, { bg: string; ink: string; accent: string }> = {
@@ -30,8 +31,13 @@ export function WidgetSticky({ widget }: { widget: WidgetData }) {
   const palette = STICKY_COLORS[color] ?? STICKY_COLORS.ochre;
 
   const size = useScreenSize(15);
-  const pad = useScreenSize(STABLE.PAD_MD);
+  const pad = useScreenSize(14);
   const swatchSize = useScreenSize(16);
+  const rad10 = useScreenSize(10);
+  const gap8 = useScreenSize(8);
+  const gap6 = useScreenSize(6);
+  const border2 = useScreenSize(2);
+  const border1 = useScreenSize(1);
 
   return (
     <div
@@ -39,15 +45,15 @@ export function WidgetSticky({ widget }: { widget: WidgetData }) {
         width: "100%",
         height: "100%",
         background: palette.bg,
-        borderRadius: useScreenSize(10),
+        borderRadius: rad10,
         padding: pad,
         display: "flex",
         flexDirection: "column",
-        gap: useScreenSize(8),
+        gap: gap8,
         color: palette.ink,
       }}
     >
-      <div style={{ display: "flex", gap: useScreenSize(6) }}>
+      <div style={{ display: "flex", gap: gap6 }}>
         {Object.keys(STICKY_COLORS).map((key) => (
           <button
             key={key}
@@ -59,8 +65,8 @@ export function WidgetSticky({ widget }: { widget: WidgetData }) {
               borderRadius: "50%",
               background: STICKY_COLORS[key].bg,
               border: color === key
-                ? `2px solid ${STICKY_COLORS[key].accent}`
-                : `1px solid rgba(10,14,20,0.12)`,
+                ? `${border2}px solid ${STICKY_COLORS[key].accent}`
+                : `${border1}px solid rgba(10,14,20,0.12)`,
               cursor: "pointer",
             }}
             title={key}
@@ -99,6 +105,14 @@ export function WidgetTimer({ widget }: { widget: WidgetData }) {
   const startedAt = (widget.state.startedAt as number | undefined) ?? 0;
   const accumulated = (widget.state.accumulated as number | undefined) ?? 0;
 
+  const displaySize = useScreenSize(42);
+  const metaSize = useScreenSize(12);
+  const iconSize = useScreenSize(16);
+  const pad = useScreenSize(14);
+  const gap10 = useScreenSize(10);
+  const gap8 = useScreenSize(8);
+  const btnStyle = useButtonStyle(10, 12);
+
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!running) return;
@@ -114,11 +128,6 @@ export function WidgetTimer({ widget }: { widget: WidgetData }) {
 
   const display = `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 
-  const displaySize = useScreenSize(42);
-  const metaSize = useScreenSize(12);
-  const iconSize = useScreenSize(16);
-  const pad = useScreenSize(STABLE.PAD_MD);
-
   return (
     <div
       style={{
@@ -128,7 +137,7 @@ export function WidgetTimer({ widget }: { widget: WidgetData }) {
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        gap: useScreenSize(10),
+        gap: gap10,
         padding: pad,
       }}
     >
@@ -144,7 +153,7 @@ export function WidgetTimer({ widget }: { widget: WidgetData }) {
       >
         {display}
       </div>
-      <div style={{ display: "flex", gap: useScreenSize(8) }}>
+      <div style={{ display: "flex", gap: gap8 }}>
         <button
           type="button"
           onClick={() =>
@@ -157,7 +166,7 @@ export function WidgetTimer({ widget }: { widget: WidgetData }) {
               },
             })
           }
-          style={buttonStyle(useScreenSize(10), useScreenSize(12))}
+          style={btnStyle}
         >
           {running ? <Pause style={{ width: iconSize, height: iconSize }} /> : <Play style={{ width: iconSize, height: iconSize }} />}
         </button>
@@ -168,7 +177,7 @@ export function WidgetTimer({ widget }: { widget: WidgetData }) {
               state: { ...widget.state, running: false, startedAt: 0, accumulated: 0 },
             })
           }
-          style={buttonStyle(useScreenSize(10), useScreenSize(12))}
+          style={btnStyle}
         >
           <RotateCcw style={{ width: iconSize, height: iconSize }} />
         </button>
@@ -187,6 +196,14 @@ export function WidgetTimer({ widget }: { widget: WidgetData }) {
 
 export function WidgetCountdown({ widget }: { widget: WidgetData }) {
   const updateWidget = useWorkspaceStore((s) => s.updateWidget);
+  
+  const size = useScreenSize(32);
+  const labelSize = useScreenSize(13);
+  const iconSize = useScreenSize(14);
+  const gap6 = useScreenSize(6);
+  const pad14 = useScreenSize(14);
+  const inputSize = useScreenSize(11);
+
   const [now, setNow] = useState(() => Date.now());
   const targetAt = (widget.state.targetAt as number | undefined) ?? (now + 3600_000);
   const label = (widget.state.label as string | undefined) ?? "Countdown";
@@ -201,16 +218,12 @@ export function WidgetCountdown({ widget }: { widget: WidgetData }) {
   const m = Math.floor((remaining % 3600000) / 60000);
   const s = Math.floor((remaining % 60000) / 1000);
 
-  const size = useScreenSize(32);
-  const labelSize = useScreenSize(13);
-  const iconSize = useScreenSize(14);
-
   return (
     <div
       style={{
         width: "100%", height: "100%", display: "flex",
         flexDirection: "column", alignItems: "center", justifyContent: "center",
-        gap: useScreenSize(6), padding: useScreenSize(STABLE.PAD_MD),
+        gap: gap6, padding: pad14,
       }}
     >
       <Hourglass style={{ width: iconSize, height: iconSize, color: "var(--text-tertiary)" }} />
@@ -248,7 +261,7 @@ export function WidgetCountdown({ widget }: { widget: WidgetData }) {
           }
         }}
         style={{
-          fontSize: useScreenSize(11),
+          fontSize: inputSize,
           color: "var(--text-tertiary)",
           border: "none", background: "transparent", outline: "none",
           textAlign: "center",
@@ -261,6 +274,13 @@ export function WidgetCountdown({ widget }: { widget: WidgetData }) {
 /* ─── Clock ───────────────────────────────────────────── */
 
 export function WidgetClock({ widget: _widget }: { widget: WidgetData }) {
+  void _widget;
+  const size = useScreenSize(40);
+  const sub = useScreenSize(12);
+  const iconSize = useScreenSize(14);
+  const gap4 = useScreenSize(4);
+  const pad14 = useScreenSize(14);
+
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -272,17 +292,13 @@ export function WidgetClock({ widget: _widget }: { widget: WidgetData }) {
   const ss = String(now.getSeconds()).padStart(2, "0");
   const day = now.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
 
-  const size = useScreenSize(40);
-  const sub = useScreenSize(12);
-  const iconSize = useScreenSize(14);
-
   return (
     <div
       style={{
         width: "100%", height: "100%",
         display: "flex", flexDirection: "column",
         alignItems: "center", justifyContent: "center",
-        gap: useScreenSize(4), padding: useScreenSize(STABLE.PAD_MD),
+        gap: gap4, padding: pad14,
       }}
     >
       <ClockIcon style={{ width: iconSize, height: iconSize, color: "var(--text-tertiary)" }} />
@@ -313,16 +329,25 @@ export function WidgetClock({ widget: _widget }: { widget: WidgetData }) {
 
 export function WidgetLink({ widget }: { widget: WidgetData }) {
   const updateWidget = useWorkspaceStore((s) => s.updateWidget);
-  const url = (widget.state.url as string | undefined) ?? "";
-  const label = (widget.state.label as string | undefined) ?? "Open link";
+  
   const size = useScreenSize(14);
   const iconSize = useScreenSize(16);
+  const pad14 = useScreenSize(14);
+  const gap8 = useScreenSize(8);
+  const fs12 = useScreenSize(12);
+  const gap6 = useScreenSize(6);
+  const py6 = useScreenSize(6);
+  const px10 = useScreenSize(10);
+  const rad8 = useScreenSize(8);
+
+  const url = (widget.state.url as string | undefined) ?? "";
+  const label = (widget.state.label as string | undefined) ?? "Open link";
 
   return (
     <div
       style={{
-        width: "100%", height: "100%", padding: useScreenSize(STABLE.PAD_MD),
-        display: "flex", flexDirection: "column", gap: useScreenSize(8),
+        width: "100%", height: "100%", padding: pad14,
+        display: "flex", flexDirection: "column", gap: gap8,
       }}
     >
       <input
@@ -339,7 +364,7 @@ export function WidgetLink({ widget }: { widget: WidgetData }) {
         onChange={(e) => updateWidget(widget.id, { state: { ...widget.state, url: e.target.value } })}
         placeholder="https://…"
         style={{
-          fontSize: useScreenSize(12), border: "none", outline: "none",
+          fontSize: fs12, border: "none", outline: "none",
           color: "var(--text-secondary)", background: "transparent",
         }}
       />
@@ -349,12 +374,12 @@ export function WidgetLink({ widget }: { widget: WidgetData }) {
         rel="noopener"
         style={{
           marginTop: "auto",
-          display: "inline-flex", alignItems: "center", gap: useScreenSize(6),
-          padding: `${useScreenSize(6)}px ${useScreenSize(10)}px`,
+          display: "inline-flex", alignItems: "center", gap: gap6,
+          padding: `${py6}px ${px10}px`,
           background: "color-mix(in oklab, var(--accent-cyan) 10%, transparent)",
           color: "var(--accent-cyan)",
-          borderRadius: useScreenSize(8),
-          fontSize: useScreenSize(12),
+          borderRadius: rad8,
+          fontSize: fs12,
           fontWeight: 600,
           textDecoration: "none",
           width: "fit-content",
@@ -371,15 +396,17 @@ export function WidgetLink({ widget }: { widget: WidgetData }) {
 
 export function WidgetImage({ widget }: { widget: WidgetData }) {
   const updateWidget = useWorkspaceStore((s) => s.updateWidget);
-  const url = (widget.state.url as string | undefined) ?? "";
-
+  
   const gap8 = useScreenSize(8);
-  const padMd = useScreenSize(STABLE.PAD_MD);
+  const padMd = useScreenSize(14);
   const font13 = useScreenSize(13);
   const pad6 = useScreenSize(6);
   const pad10 = useScreenSize(10);
   const radius8 = useScreenSize(8);
   const radius6 = useScreenSize(6);
+  const border1 = useScreenSize(1);
+
+  const url = (widget.state.url as string | undefined) ?? "";
 
   if (!url) {
     return (
@@ -395,7 +422,7 @@ export function WidgetImage({ widget }: { widget: WidgetData }) {
           placeholder="Paste image URL"
           onChange={(e) => updateWidget(widget.id, { state: { ...widget.state, url: e.target.value } })}
           style={{
-            fontSize: font13, border: `1px solid var(--border-default)`,
+            fontSize: font13, border: `${border1}px solid var(--border-default)`,
             padding: `${pad6}px ${pad10}px`,
             borderRadius: radius8, width: "80%", outline: "none",
             background: "var(--bg-elevated)", color: "var(--text-primary)",
@@ -406,11 +433,15 @@ export function WidgetImage({ widget }: { widget: WidgetData }) {
   }
 
   return (
-    <img
-      src={url}
-      alt=""
-      style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: radius6 }}
-    />
+    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+      <Image
+        src={url}
+        alt=""
+        fill
+        unoptimized
+        style={{ objectFit: "cover", borderRadius: radius6 }}
+      />
+    </div>
   );
 }
 
@@ -418,6 +449,10 @@ export function WidgetImage({ widget }: { widget: WidgetData }) {
 
 export function WidgetScratchpad({ widget }: { widget: WidgetData }) {
   const updateWidget = useWorkspaceStore((s) => s.updateWidget);
+  
+  const pad14 = useScreenSize(14);
+  const fs14 = useScreenSize(14);
+
   const text = (widget.state.text as string | undefined) ?? "";
   return (
     <textarea
@@ -428,8 +463,8 @@ export function WidgetScratchpad({ widget }: { widget: WidgetData }) {
         width: "100%", height: "100%",
         resize: "none", border: "none", outline: "none",
         background: "transparent",
-        padding: useScreenSize(STABLE.PAD_MD),
-        fontSize: useScreenSize(14),
+        padding: pad14,
+        fontSize: fs14,
         lineHeight: 1.55,
         color: "var(--text-primary)",
         fontFamily: "var(--font-manrope), sans-serif",
@@ -444,10 +479,8 @@ type StripTask = { id: string; text: string; done: boolean };
 
 export function WidgetPlannerStrip({ widget }: { widget: WidgetData }) {
   const updateWidget = useWorkspaceStore((s) => s.updateWidget);
-  const tasks = ((widget.state.tasks as StripTask[] | undefined) ?? []);
-  const [draft, setDraft] = useState("");
-
-  const pad = useScreenSize(STABLE.PAD_MD);
+  
+  const pad = useScreenSize(14);
   const size = useScreenSize(13);
   const small = useScreenSize(11);
   
@@ -457,6 +490,10 @@ export function WidgetPlannerStrip({ widget }: { widget: WidgetData }) {
   const gap8 = useScreenSize(8);
   const gap4 = useScreenSize(4);
   const pad6 = useScreenSize(6);
+  const border1 = useScreenSize(1);
+
+  const tasks = ((widget.state.tasks as StripTask[] | undefined) ?? []);
+  const [draft, setDraft] = useState("");
 
   const setTasks = (next: StripTask[]) =>
     updateWidget(widget.id, { state: { ...widget.state, tasks: next } });
@@ -475,7 +512,7 @@ export function WidgetPlannerStrip({ widget }: { widget: WidgetData }) {
           }}
           placeholder="Add a task and press enter"
           style={{
-            flex: 1, border: `1px solid var(--border-default)`,
+            flex: 1, border: `${border1}px solid var(--border-default)`,
             borderRadius: rad6,
             padding: `${pad4}px ${pad8}px`,
             background: "var(--bg-elevated)", outline: "none",
@@ -519,26 +556,26 @@ export function WidgetPlannerStrip({ widget }: { widget: WidgetData }) {
 
 /* ─── Shared ──────────────────────────────────────────── */
 
-function buttonStyle(py: number, px: number): React.CSSProperties {
+function useButtonStyle(pyPx: number, pxPx: number): React.CSSProperties {
+  const py = useScreenSize(pyPx);
+  const px = useScreenSize(pxPx);
+  const rad = useScreenSize(8);
+  const gap = useScreenSize(4);
+  const fs = useScreenSize(12);
+
   return {
     padding: `${py}px ${px}px`,
-    borderRadius: getScreenSizeStatic(8),
+    borderRadius: rad,
     background: "color-mix(in oklab, var(--accent-cyan) 10%, transparent)",
     color: "var(--accent-cyan)",
     border: "none",
     cursor: "pointer",
     display: "inline-flex",
     alignItems: "center",
-    gap: getScreenSizeStatic(4),
-    fontSize: getScreenSizeStatic(12),
+    gap: gap,
+    fontSize: fs,
     fontWeight: 600,
   };
 }
 
-// Tiny helper that just reads zoom once from the store — for use in
-// static helpers that can't call hooks. Accepted compromise.
-function getScreenSizeStatic(px: number): number {
-  const zoom = useWorkspaceStore.getState().zoom;
-  if (!zoom || zoom < 0.0001) return px * 100;
-  return px / zoom;
-}
+

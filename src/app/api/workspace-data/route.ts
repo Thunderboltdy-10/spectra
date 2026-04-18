@@ -270,6 +270,14 @@ export async function POST(request: NextRequest) {
       return ok({ workstreamId: created.workstreamId, templateSuggestion: suggestion.suggestion });
     }
 
+    if (action === "seedDemoWorkspaces") {
+      const result = await convexMutation("workspaceBlueprints:seedRichDemoWorkspaces", {
+        actorClerkId: actor.clerkId,
+        force: body.force === true,
+      });
+      return ok(result);
+    }
+
     if (action === "pinWorkspaceItem") {
       const itemId = body.itemId as string | undefined;
       const pinned = body.pinned as boolean | undefined;

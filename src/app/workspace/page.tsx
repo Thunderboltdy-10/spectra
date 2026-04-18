@@ -872,12 +872,13 @@ export default function WorkspacePage() {
       {/* Hub ecology: Right-edge deep-edit surfaces */}
       {!hubHidden && (
         <AnimatePresence>
-          {deepEditTargets.map((target) => (
+          {deepEditTargets.map((target, index) => (
             <DeepEditSurface
               key={target.item.id}
               item={target.item}
               locked={target.locked}
               pinned={target.pinned}
+              index={index}
               onClose={() => closeDeepEdit(target.item.id)}
               onToggleLock={() => toggleDeepEditLock(target.item.id)}
             />

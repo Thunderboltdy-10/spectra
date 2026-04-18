@@ -100,13 +100,13 @@ type ResultCardProps = {
 
 function ShimmerBar() {
   return (
-    <div className="absolute inset-0 overflow-hidden rounded-2xl">
+    <div className="absolute inset-0 overflow-hidden rounded-2xl pointer-events-none">
       <div
         className="absolute inset-0"
         style={{
-          background:
-            "linear-gradient(105deg, transparent 40%, color-mix(in oklab, var(--accent-cyan) 6%, transparent) 50%, transparent 60%)",
-          animation: "islandShimmer 1.8s ease-in-out infinite",
+          background: "linear-gradient(90deg, transparent 0%, color-mix(in oklab, var(--accent-cyan) 8%, transparent) 50%, transparent 100%)",
+          backgroundSize: "200% 100%",
+          animation: "shimmerBg 2s infinite linear",
         }}
       />
     </div>

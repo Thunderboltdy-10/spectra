@@ -50,10 +50,8 @@ import {
   CANONICAL_WORKSPACE_TYPE_META,
   type CanonicalWorkspaceType,
 } from "@/lib/artifact-types";
-import { cn } from "@/lib/utils";
 import {
   useZoom,
-  useZoomSignals,
   useScreenSize,
   useScreenSizes,
   lerp,
@@ -66,7 +64,6 @@ import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { WidgetHost } from "@/components/workspace/widget-host";
 import {
   ActionMenuContent,
-  ACTION_MENU_ITEMS,
   type ActionMenuItemId,
 } from "@/components/workspace/shared-action-menu";
 
@@ -397,7 +394,7 @@ function ItemNode({ data }: { data: ItemNodeData }) {
           }}
         >
           {item.preview ? (
-            <DetailBody item={item} typeColor={typeColor} s={s} />
+            <DetailBody item={item} s={s} />
           ) : (
             <div style={{ color: "var(--text-tertiary)", fontSize: s.bodySize, fontStyle: "italic" }}>
               Empty
@@ -441,7 +438,7 @@ function ItemNode({ data }: { data: ItemNodeData }) {
   );
 }
 
-function DetailBody({ item, typeColor, s }: { item: WorkspaceItemData; typeColor: string; s: Record<string, number> }) {
+function DetailBody({ item, s }: { item: WorkspaceItemData; s: Record<string, number> }) {
   if (item.itemType === "code") {
     return (
       <div style={{ padding: s.padSide, background: "var(--bg-code)", borderRadius: s.iconRadius, color: "var(--text-primary)" }}>
@@ -481,15 +478,6 @@ function WidgetNode({ data }: { data: WidgetNodeData }) {
    Improved: uses a proper masonry-style column packing algorithm
    to prevent overlaps and adapt dynamically to item count.
    =================================================================== */
-
-const LAYOUT = {
-  WORLD_COL_WIDTH: 1400,
-  WORLD_ROW_GAP: 520,
-  HEADER_Y: 560,
-  ITEMS_PER_ROW: 3,
-  HORIZONTAL_GUTTER: 180,
-  GROUP_GAP: 260,
-};
 
 function computeTerritorySize(itemCount: number, zoom: number): { w: number; h: number } {
   const scale = zoom && zoom > 0.0001 ? 1 / zoom : 1;
@@ -682,17 +670,28 @@ function buildNodes(
         style: { zIndex: 1 },
       });
 
-      // Place items in a grid within the group column
-      const itemStartY = gy + 120;
-      const itemColWidth = 440; // world-space width per item slot
-      const itemRowHeight = LAYOUT.WORLD_ROW_GAP;
+      // Place items using a masonry layout within the group
+      const itemStartY = gy + 120 * scale;
+      const itemColWidth = 440 * scale; // world-space width per item slot
+      const itemMarginY = 40 * scale; // Vertical gap between items
 
-      group.items.forEach((item, ii) => {
-        const ix = gx + (ii % LAYOUT.ITEMS_PER_ROW) * itemColWidth;
-        const baseY = itemStartY + Math.floor(ii / LAYOUT.ITEMS_PER_ROW) * itemRowHeight;
+      // Accumulators for each column in this group
+      const groupColY: number[] = new Array(LAYOUT.ITEMS_PER_ROW).fill(itemStartY);
+
+      group.items.forEach((item) => {
+        // Find the shortest column in the group
+        let shortestCol = 0;
+        for (let c = 1; c < LAYOUT.ITEMS_PER_ROW; c++) {
+          if (groupColY[c] < groupColY[shortestCol]) shortestCol = c;
+        }
+
+        const ix = gx + shortestCol * itemColWidth;
+        const baseY = groupColY[shortestCol];
+        
         const override = itemOverrides[item.id];
         const finalX = override ? override.x : ix;
         const finalY = override ? override.y : baseY;
+        
         nodes.push({
           id: `item-${item.id}`,
           type: "itemNode",
@@ -704,11 +703,17 @@ function buildNodes(
           extent: "parent",
           style: { zIndex: 2 },
         });
+
+        // Estimate item height for masonry:
+        // Base minHeight is 60 * scale. If preview exists, add up to previewMaxHeight (200 * scale)
+        // plus padding and meta dot area.
+        const estimatedHeight = (item.preview ? 320 : 100) * scale;
+        groupColY[shortestCol] = baseY + estimatedHeight + itemMarginY;
       });
 
-      // Update column accumulator
-      const rowsUsed = Math.ceil(group.items.length / LAYOUT.ITEMS_PER_ROW);
-      colY[shortest] = itemStartY + rowsUsed * itemRowHeight + LAYOUT.GROUP_GAP;
+      // Update the main column accumulator for the entire group
+      const maxGroupY = Math.max(...groupColY);
+      colY[shortest] = maxGroupY + LAYOUT.GROUP_GAP;
     });
   });
 

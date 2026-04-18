@@ -19,6 +19,7 @@ type HubSurfaceProps = {
   className?: string;
   collapsedClassName?: string;
   expandedClassName?: string;
+  style?: React.CSSProperties;
   onToggleLock?: () => void;
   onTogglePin?: () => void;
 };
@@ -62,6 +63,7 @@ export function HubSurface({
   className,
   collapsedClassName,
   expandedClassName,
+  style,
   onToggleLock,
   onTogglePin,
 }: HubSurfaceProps) {
@@ -71,20 +73,17 @@ export function HubSurface({
 
   useEffect(() => {
     if (!expanded) return;
-    if (!dismissOnOutsideClick) return;
+    if (!dismissOnOutsideClick || locked) return;
     function handleClickOutside(e: MouseEvent) {
       const target = e.target as HTMLElement;
       const surface = document.querySelector(`[data-hub-surface-id="${id}"]`);
       if (surface && !surface.contains(target)) {
         setClickedOpen(false);
-        if (locked && onToggleLock) {
-          onToggleLock();
-        }
       }
     }
     document.addEventListener("mousedown", handleClickOutside, true);
     return () => document.removeEventListener("mousedown", handleClickOutside, true);
-  }, [expanded, locked, onToggleLock, id, dismissOnOutsideClick]);
+  }, [expanded, locked, id, dismissOnOutsideClick]);
 
   const classes = useMemo(() => edgeClasses(edge), [edge]);
 
@@ -102,6 +101,7 @@ export function HubSurface({
     <div
       data-hub-surface-id={id}
       className={cn("z-50", classes.wrapper, className)}
+      style={style}
     >
       <div className="relative">
         {/* Collapsed state */}

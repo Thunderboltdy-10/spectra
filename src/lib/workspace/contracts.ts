@@ -250,7 +250,7 @@ export const TYPE_GROUP_LABELS: Record<string, { label: string; types: Canonical
 
 
 export type HubVisibility = "hidden" | "collapsed" | "expanded";
-export type BackgroundMode = "dots" | "blank" | "grid";
+export type BackgroundMode = "dots" | "blank" | "grid" | "contour";
 export type HubEdge = "top" | "bottom" | "left" | "right";
 
 export type HubSurfaceState = {
@@ -260,4 +260,46 @@ export type HubSurfaceState = {
   locked: boolean;
   expanded: boolean;
   pinned?: boolean;
+};
+
+/* ─── Navigation Mode ────────────────────────────────── */
+
+export type NavigationMode = "canvas" | "pages";
+
+export type PageLevel = "atlas" | "workspace" | "region";
+
+/* ─── Widget System ──────────────────────────────────── */
+
+export type WidgetKind =
+  | "sticky"
+  | "timer"
+  | "countdown"
+  | "clock"
+  | "link"
+  | "image"
+  | "scratchpad"
+  | "planner-strip";
+
+export type WidgetData = {
+  id: string;
+  kind: WidgetKind;
+  /** World coordinates (ReactFlow space) */
+  x: number;
+  y: number;
+  /** World pixels — kept modest so widget stays reasonable on screen */
+  w: number;
+  h: number;
+  /** Optional workspace binding — if null, widget lives in the atlas */
+  workspaceId: string | null;
+  createdAt: number;
+  state: Record<string, unknown>;
+};
+
+/* ─── Item Move Overrides (client-side persistence) ──── */
+
+export type ItemPositionOverride = {
+  itemId: string;
+  x: number;
+  y: number;
+  updatedAt: number;
 };

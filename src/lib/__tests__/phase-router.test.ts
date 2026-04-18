@@ -233,6 +233,42 @@ describe("phase-router", () => {
     expect(decision.candidates.some((candidate) => candidate.modelId === "zeta/old-model")).toBe(false);
   });
 
+  it("strongly prefers 1-3 week old models over older but otherwise similar choices", () => {
+    const recent = new Date();
+    recent.setDate(recent.getDate() - 12);
+    const older = new Date();
+    older.setDate(older.getDate() - 82);
+    const decision = selectModelForPhase({
+      phaseId: "analysis",
+      phaseLabel: "Primary response",
+      mode: "general",
+      routerMode: "auto",
+      spendingTier: "normal",
+      thinkingLevel: "medium",
+      stakes: "medium",
+      messageLength: 180,
+      modelCatalog: [
+        {
+          ...baseCatalog()[0],
+          modelId: "recent/model",
+          releaseDate: recent.toISOString(),
+        },
+        {
+          ...baseCatalog()[1],
+          modelId: "older/model",
+          releaseDate: older.toISOString(),
+        },
+      ],
+      modelRuntimeStats: {
+        "recent/model": { successCount: 20, failureCount: 1, avgLatencyMs: 2200 },
+        "older/model": { successCount: 21, failureCount: 1, avgLatencyMs: 2200 },
+      },
+      seedKey: "recent-preference",
+    });
+
+    expect(decision.selectedModel).toBe("recent/model");
+  });
+
   it("honors persisted challenger state from runtime evaluation", () => {
     const decision = selectModelForPhase({
       phaseId: "analysis",

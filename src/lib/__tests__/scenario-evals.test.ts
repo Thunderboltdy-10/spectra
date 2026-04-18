@@ -83,6 +83,24 @@ describe("scenario evals", () => {
     expect(plan.allowedToolBundles).toContain("search");
   });
 
+  it("explicit specialist requests earn multi-agent orchestration outside research mode", () => {
+    expect(
+      buildRoutePlan({
+        message: "Use multiple models and different perspectives to compare these arguments.",
+        mode: "general",
+        selectedMode: "general",
+        hasAttachments: false,
+        hasAgent: false,
+        hasPack: false,
+        hasPersonalResources: false,
+        hasAgentResources: false,
+        autoSearchEnabled: false,
+        thinkingLevel: "medium",
+        complexity: "medium",
+      }).shouldUseMultiStep,
+    ).toBe(true);
+  });
+
   it("flashcard output remains validator-compatible", () => {
     const candidate = normalizeFlashcardDeck(`
 <<FLASHCARDS_START>>

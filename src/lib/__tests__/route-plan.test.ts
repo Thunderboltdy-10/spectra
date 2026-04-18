@@ -259,7 +259,7 @@ describe("buildRoutePlan", () => {
     expect(plan.threadStrategy.contextWindowPressure).toBeLessThan(0.75);
   });
 
-  it("forks stale low-continuity threads when a summary exists and topic changes", () => {
+  it("starts a clean new chat for unrelated prompts unless the user explicitly requests continuity", () => {
     const plan = buildRoutePlan({
       message: "Switch to my chemistry revision plan and ignore the old essay topic.",
       mode: "general",
@@ -288,8 +288,8 @@ describe("buildRoutePlan", () => {
       schoolSoulVersion: "school-soul-v10",
     });
 
-    expect(plan.threadStrategy.action).toBe("fork");
-    expect(plan.threadStrategy.reason.toLowerCase()).toContain("context");
+    expect(plan.threadStrategy.action).toBe("new_chat");
+    expect(plan.threadStrategy.reason.toLowerCase()).toContain("clean new conversation");
     expect(plan.orchestrationProfile).toBe("long_context_reconstruction");
   });
 
@@ -324,6 +324,38 @@ describe("buildRoutePlan", () => {
 
     expect(plan.threadStrategy.action).toBe("new_chat");
     expect(plan.threadStrategy.reason.toLowerCase()).toContain("clean new conversation");
+  });
+
+  it("only forks when the user explicitly asks for a new thread and continuity isolation", () => {
+    const plan = buildRoutePlan({
+      message: "Start a new thread for this and branch this chemistry work away from the essay.",
+      mode: "general",
+      selectedMode: "general",
+      hasAttachments: false,
+      hasAgent: false,
+      hasPack: false,
+      hasPersonalResources: false,
+      hasAgentResources: false,
+      autoSearchEnabled: false,
+      thinkingLevel: "medium",
+      complexity: "medium",
+      threadContext: {
+        currentChatId: "chat_3",
+        turnCount: 20,
+        turnsSinceCompaction: 16,
+        contextWindowUtilization: 0.82,
+        lastMessageAt: Date.now() - (16 * 60 * 60 * 1000),
+        recentMessages: [
+          { role: "user", content: "Help me improve my English essay conclusion." },
+          { role: "assistant", content: "I suggested a stronger thesis and evidence chain." },
+        ],
+        explicitlySameThread: false,
+      },
+      schoolSoulVersion: "school-soul-v13",
+    });
+
+    expect(plan.threadStrategy.action).toBe("fork");
+    expect(plan.threadStrategy.reason.toLowerCase()).toContain("explicitly requested");
   });
 
   it("strengthens agent-linked workspace artifact routing and agent contract metadata", () => {

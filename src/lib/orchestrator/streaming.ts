@@ -70,6 +70,9 @@ function shouldRunToolLoop(params: {
   ) {
     return true;
   }
+  if (toolNames.size >= 2 && /\b(build|create|implement|fix|compare|analy[sz]e|research|investigate|plan|review|audit)\b/.test(content)) {
+    return true;
+  }
   return false;
 }
 
@@ -140,7 +143,7 @@ export async function runAssistantStreaming(params: {
 
     if (shouldRunTools && params.tools?.length && params.executeTool) {
       const workingMessages = [...params.messages];
-      const maxToolRounds = Math.max(1, Math.min(6, params.maxToolRounds ?? 4));
+      const maxToolRounds = Math.max(2, Math.min(8, params.maxToolRounds ?? 6));
       const allowedToolNames = new Set(params.tools.map((tool) => tool.function.name));
       let executedToolCalls = 0;
 
@@ -275,7 +278,7 @@ export async function runAssistantStreaming(params: {
       };
     }
 
-    const maxContinuations = Math.max(0, Math.min(4, params.maxContinuations ?? 2));
+    const maxContinuations = Math.max(1, Math.min(6, params.maxContinuations ?? 4));
     let continuationMessages = params.messages;
 
     while (true) {
@@ -633,7 +636,7 @@ export async function runCollaborativeStreaming(params: {
       maxSubcalls: params.maxSubcalls ?? 4,
       maxTokensPerSpecialist: params.maxTokensPerSpecialist ?? 1200,
       maxWallTimeMs: params.maxWallTimeMs ?? 120_000,
-      maxConcurrency: 3,
+      maxConcurrency: 4,
       usageBudgetTokens: params.usageBudgetTokens,
       budgetOverrunFactor: params.budgetOverrunFactor ?? 1.5,
     },
@@ -691,7 +694,7 @@ export async function runCollaborativeStreaming(params: {
     return next;
   };
 
-  const maxContinuations = Math.max(0, Math.min(4, params.maxContinuations ?? 2));
+  const maxContinuations = Math.max(1, Math.min(6, params.maxContinuations ?? 4));
   let continuationCount = 0;
   let continuationMessages: OpenRouterMessage[] = [
     { role: "system", content: params.baseSystemPrompt },

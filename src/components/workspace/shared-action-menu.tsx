@@ -18,7 +18,8 @@ export type ActionMenuItemId =
   | "code"
   | "visual"
   | "task"
-  | "thread";
+  | "thread"
+  | "widget";
 
 export type ActionMenuItem = {
   id: ActionMenuItemId;
@@ -39,6 +40,7 @@ export const ACTION_MENU_ITEMS: ActionMenuItem[] = [
   { id: "code", label: "Code", icon: Code2, shortcut: "C" },
   { id: "visual", label: "Visual", icon: Image, shortcut: "V" },
   { id: "task", label: "Task", icon: CalendarCheck, shortcut: "T" },
+  { id: "widget", label: "Widget", icon: Layers, shortcut: "G" },
   { id: "thread", label: "Thread", icon: MessageSquare, secondary: true },
 ];
 

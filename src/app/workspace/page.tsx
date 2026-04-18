@@ -17,6 +17,7 @@ import { QuickNotesHub } from "@/components/workspace/quick-notes-hub";
 import { PlannerEdge } from "@/components/workspace/planner-edge";
 import { DeepEditSurface } from "@/components/workspace/deep-edit-surface";
 import { ThreadsHub } from "@/components/workspace/threads-hub";
+import { PageModeNav } from "@/components/workspace/page-mode-nav";
 import type { WorkspaceData, WorkspaceItemData } from "@/lib/workspace/contracts";
 import {
   useWorkspaceData,
@@ -343,6 +344,7 @@ export default function WorkspacePage() {
     const isSearch = normalized.startsWith("?") || lowered.startsWith("search ") || lowered.startsWith("find ");
     const isNoteCmd = lowered.startsWith("/note") || lowered.startsWith("create note");
     const isTaskCmd = lowered.startsWith("/task") || lowered.startsWith("create task");
+    const isWidgetCmd = lowered.startsWith("/widget") || lowered.startsWith("create widget");
     const isThreadCmd = lowered.startsWith("/thread") || lowered.startsWith("create thread");
     const isWorkspaceCmd = lowered.startsWith("/workspace") || lowered.startsWith("create workspace");
 
@@ -451,6 +453,12 @@ export default function WorkspacePage() {
           });
           throw err;
         }
+        return;
+      }
+
+      /* ── Create widget ── */
+      if (isWidgetCmd) {
+        useWorkspaceStore.getState().setWidgetPlacementHint({ kind: "sticky", at: "pointer" });
         return;
       }
 
@@ -665,9 +673,10 @@ export default function WorkspacePage() {
     return () => timers.forEach(clearTimeout);
   }, [resultCards, storeDismissResultCard]);
 
-  // Global keyboard: Escape closes deep edits
+  // Global keyboard: Escape closes deep edits, Tab/. toggles page mode, Cmd+1..9 pins/focuses
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      if ((e.target as HTMLElement)?.tagName === "INPUT" || (e.target as HTMLElement)?.tagName === "TEXTAREA") return;
       if (e.key === "Escape") {
         if (deepEditTargets.length > 0) {
           const last = deepEditTargets[deepEditTargets.length - 1];
@@ -675,11 +684,27 @@ export default function WorkspacePage() {
         } else if (committedWorkspaceId) {
           handleBack();
         }
+      } else if (e.key === "Tab" || e.key === ".") {
+        e.preventDefault();
+        useWorkspaceStore.getState().toggleNavigationMode();
+      } else if ((e.metaKey || e.ctrlKey) && /^[1-9]$/.test(e.key)) {
+        e.preventDefault();
+        const num = parseInt(e.key, 10);
+        // Toggle pin for the Nth deep edit target, or open the Nth workspace if no targets
+        if (deepEditTargets.length > 0) {
+          const target = deepEditTargets[num - 1];
+          if (target) {
+            useWorkspaceStore.getState().toggleDeepEditLock(target.item.id);
+          }
+        } else {
+          const ws = workspaces[num - 1];
+          if (ws) handleWorkspaceSelect(ws.id);
+        }
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [deepEditTargets, closeDeepEdit, committedWorkspaceId, handleBack]);
+  }, [deepEditTargets, closeDeepEdit, committedWorkspaceId, handleBack, workspaces, handleWorkspaceSelect]);
 
   // Handle open-item events from result cards and other surfaces
   useEffect(() => {
@@ -757,7 +782,8 @@ export default function WorkspacePage() {
       )}
 
       {/* Continuous canvas — always present, never replaced */}
-      <div className="flex-1">
+      <div className="flex-1 relative">
+        <PageModeNav />
         <WorkspaceCanvas
           onNodeClick={handleCanvasNodeClick}
           onItemClick={handleCanvasItemClick}
@@ -842,6 +868,9 @@ export default function WorkspacePage() {
             return;
           }
           void createItemAction({ action: "createPlannerItem", workstreamId: committedWorkspaceId, title: "New task", type: "deadline", priority: "medium" });
+        }}
+        onCreateWidget={() => {
+          useWorkspaceStore.getState().setWidgetPlacementHint({ kind: "sticky", at: "pointer" });
         }}
         onCreateThread={() => {
           if (!committedWorkspaceId) {

@@ -8,6 +8,8 @@ import { TiptapEditor } from "@/components/editor/tiptap-editor";
 import { CreateArtifactDialog, type ArtifactTemplate } from "@/components/artifacts/create-artifact-dialog";
 import { useNotesData } from "@/hooks/use-notes-data";
 import { useEditorStore, normalizeEditorMode } from "@/stores/editor-store";
+import { useWorkspaceStore } from "@/stores/workspace-store";
+import { CommandBar } from "@/components/workspace/command-bar";
 import { getArtifactMeta, type ArtifactType } from "@/lib/artifact-types";
 import { cn } from "@/lib/utils";
 import { stripGeneratedDocumentMarkers } from "@/lib/document-generator";
@@ -84,6 +86,61 @@ function ArtifactsPageInner() {
     next.set("id", createdId);
     router.replace(`/artifacts?${next.toString()}`, { scroll: false });
   }, [createNote, params, router]);
+
+  const pushResultCard = useWorkspaceStore((s) => s.pushResultCard);
+  const updateResultCard = useWorkspaceStore((s) => s.updateResultCard);
+
+  const handleSendMessage = useCallback(async (message: string) => {
+    const trimmed = message.trim();
+    if (!trimmed) return;
+    
+    // Command parsing for artifacts resolver
+    const isCreateCmd = trimmed.startsWith("/create") || trimmed.startsWith("/new");
+    if (isCreateCmd) {
+      setCreateDialogOpen(true);
+      return;
+    }
+
+    if (!activeNote) {
+      alert("Select an artifact first.");
+      return;
+    }
+
+    const optimisticId = `optimistic-edit-${Date.now()}`;
+    pushResultCard({
+      id: optimisticId,
+      state: "loading",
+      promptSnippet: trimmed.length > 60 ? trimmed.slice(0, 57) + "\u2026" : trimmed,
+      actionType: "modified",
+      targetItemType: "note",
+    });
+
+    try {
+      const res = await fetch("/api/editor/ai-edit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          documentId: activeNote._id,
+          prompt: trimmed,
+          content: activeNote.content,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Edit failed");
+
+      updateResultCard(optimisticId, {
+        state: "done",
+        summary: `Edited \u201c${activeNote.title || "artifact"}\u201d`,
+      });
+      // Content is updated via websocket/polling in TiptapEditor or we trigger fetch
+      void fetchNote(activeNote._id);
+    } catch (err) {
+      updateResultCard(optimisticId, {
+        state: "error",
+        summary: err instanceof Error ? err.message : "Failed to edit artifact",
+      });
+    }
+  }, [activeNote, fetchNote, pushResultCard, updateResultCard]);
 
   const noteList = useMemo(() => {
     let filtered = notes.slice();
@@ -202,7 +259,7 @@ function ArtifactsPageInner() {
           </div>
         </aside>
 
-        <main className="flex min-h-0 flex-1 flex-col bg-[var(--bg-primary)]">
+        <main className="relative flex min-h-0 flex-1 flex-col bg-[var(--bg-primary)]">
           <div className="min-h-0 flex-1">
             {activeNote ? (
               <TiptapEditor
@@ -233,6 +290,20 @@ function ArtifactsPageInner() {
               </div>
             )}
           </div>
+          
+          <CommandBar
+            workspaceName="Artifacts"
+            contextOverride={activeNote ? { id: activeNote._id, title: activeNote.title || "Untitled", type: activeNote.type || "note" } : undefined}
+            onSendMessage={handleSendMessage}
+            onCreateWorkspace={() => {}}
+            onCreateNote={() => setCreateDialogOpen(true)}
+            onCreateCode={() => setCreateDialogOpen(true)}
+            onCreateVisual={() => setCreateDialogOpen(true)}
+            onCreateTask={() => {}}
+            onCreateThread={() => {}}
+            onCreateWithAi={() => {}}
+            className="bottom-6"
+          />
         </main>
       </div>
 

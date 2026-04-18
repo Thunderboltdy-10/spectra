@@ -288,18 +288,18 @@ export function ChatHeader({
             </DropdownMenu>
           </div>
         </div>
-
-        {showCompactTip ? (
-          <div className="mx-auto mt-2 w-full max-w-5xl">
-            <ContextualTip
-              tipId="chat-header-compact-tip"
-              message="Use Compact to reduce context length."
-              actionLabel={!sending && onCompact && !compacting ? "Compact now" : undefined}
-              onAction={!sending && onCompact && !compacting ? onCompact : undefined}
-            />
-          </div>
-        ) : null}
       </div>
+      
+      {showCompactTip ? (
+        <div className="mx-auto w-full max-w-[680px] xl:max-w-[780px] 2xl:max-w-[860px] px-3 sm:px-6 lg:px-10 pb-2 -mt-1">
+          <ContextualTip
+            tipId="chat-header-compact-tip"
+            message="Use Compact to reduce context length."
+            actionLabel={!sending && onCompact && !compacting ? "Compact now" : undefined}
+            onAction={!sending && onCompact && !compacting ? onCompact : undefined}
+          />
+        </div>
+      ) : null}
     </header>
   );
 }

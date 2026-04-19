@@ -10,7 +10,9 @@ export type WidgetKind =
   | "today"
   | "scratch"
   | "library"
-  | "calendar";
+  | "calendar"
+  | "thread"
+  | "artifact";
 
 export type FloatingWidgetData = {
   id: string;
@@ -23,13 +25,15 @@ export type FloatingWidgetData = {
   collapsed?: boolean;
 };
 
-const WIDGET_META: Record<WidgetKind, { label: string; short: string; icon: IconName; defaultSize: { w: number; h: number } }> = {
-  timer:    { label: "Focus timer",  short: "Timer",    icon: "timer",    defaultSize: { w: 288, h: 132 } },
-  planner:  { label: "Week planner", short: "Plan",     icon: "planner",  defaultSize: { w: 300, h: 278 } },
-  today:    { label: "Today",        short: "Today",    icon: "schedule", defaultSize: { w: 296, h: 230 } },
-  scratch:  { label: "Scratchpad",   short: "Note",     icon: "note",     defaultSize: { w: 304, h: 232 } },
-  library:  { label: "Library",      short: "Library",  icon: "reading",  defaultSize: { w: 308, h: 276 } },
-  calendar: { label: "Calendar",     short: "Calendar", icon: "schedule", defaultSize: { w: 312, h: 270 } },
+const WIDGET_META: Record<WidgetKind, { label: string; short: string; icon: IconName; defaultSize: { w: number; h: number }; color: string }> = {
+  timer:    { label: "Focus timer",  short: "Timer",    icon: "timer",    defaultSize: { w: 288, h: 132 }, color: "#e05137" },
+  planner:  { label: "Week planner", short: "Plan",     icon: "planner",  defaultSize: { w: 300, h: 278 }, color: "#0e8ee8" },
+  today:    { label: "Today",        short: "Today",    icon: "schedule", defaultSize: { w: 296, h: 230 }, color: "#20b8b2" },
+  scratch:  { label: "Scratchpad",   short: "Note",     icon: "note",     defaultSize: { w: 304, h: 232 }, color: "#b67616" },
+  library:  { label: "Library",      short: "Library",  icon: "reading",  defaultSize: { w: 308, h: 276 }, color: "#148f5d" },
+  calendar: { label: "Calendar",     short: "Calendar", icon: "schedule", defaultSize: { w: 312, h: 270 }, color: "#6b5f52" },
+  thread:   { label: "Thread",        short: "Thread",   icon: "thread",   defaultSize: { w: 340, h: 320 }, color: "#0e8ee8" },
+  artifact: { label: "Artifact",      short: "Artifact", icon: "note",     defaultSize: { w: 380, h: 300 }, color: "#b67616" },
 };
 
 export const WIDGET_KINDS: WidgetKind[] = ["timer", "planner", "today", "scratch", "library", "calendar"];
@@ -399,15 +403,19 @@ export function WidgetChipRail({
   onCollapseAll, onExpandAll, allCollapsed, someCollapsed, revealingWidgetId,
 }: ChipRailProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  // mounted guard prevents SSR/client mismatch on widget chip count
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   const present = new Set(widgets.map((w) => w.kind));
   const addableKinds = WIDGET_KINDS.filter((k) => !present.has(k));
+  const collapsedWidgets = widgets.filter((w) => Boolean(w.collapsed));
+
+  if (!mounted) return null;
 
   return (
-    <div className="absolute left-3 top-[128px] z-30 pointer-events-auto flex flex-col gap-1.5">
-      {widgets.map((w) => {
-        const collapsed = Boolean(w.collapsed);
-        if (!collapsed) return null;
+    <div className="absolute left-3 top-[68px] z-30 pointer-events-auto flex flex-col gap-1.5">
+      {collapsedWidgets.map((w) => {
         const meta = WIDGET_META[w.kind];
         const isRevealing = revealingWidgetId === w.id;
         return (
@@ -416,25 +424,26 @@ export function WidgetChipRail({
             onClick={() => onExpand(w.id)}
             className={`sv2-chip-rail-item group transition-all ${aiTouched[w.id] ? "sv2-ai-touched-subtle" : ""} ${isRevealing ? "sv2-chip-reveal" : ""}`}
             title={`Expand ${meta.label}`}
+            style={{ background: `${meta.color}12`, borderColor: `${meta.color}28` }}
           >
-            <span className="flex items-center justify-center w-5 h-5 rounded-md shrink-0" style={{ color: "var(--ink-300)" }}>
-              <Icon name={meta.icon} size={12} />
+            <span className="flex items-center justify-center w-5 h-5 rounded-md shrink-0" style={{ color: meta.color }}>
+              <Icon name={meta.icon} size={13} />
             </span>
-            <span className="font-mono text-[10px] uppercase tracking-[0.13em] min-w-0 truncate" style={{ color: "var(--ink-300)" }}>{meta.short}</span>
-            <span className="ml-auto pl-2 shrink-0"><ChipPreview widget={w} tick={tick} /></span>
+            <span className="font-mono text-[9.5px] uppercase tracking-[0.13em] min-w-0 truncate" style={{ color: "var(--ink-300)" }}>{meta.short}</span>
+            <span className="ml-auto pl-1 shrink-0"><ChipPreview widget={w} tick={tick} /></span>
           </button>
         );
       })}
 
-      {/* Add / manage */}
+      {/* Add / manage — info icon replaces dots */}
       <div className="relative mt-1">
         <button
           onClick={() => setMenuOpen((v) => !v)}
           className="sv2-chip-rail-item sv2-chip-rail-add"
-          title="Widgets"
+          title="Manage widgets"
         >
           <span className="flex items-center justify-center w-5 h-5 rounded-md shrink-0" style={{ color: "var(--accent)" }}>
-            <Icon name="widget" size={12} />
+            <Icon name="info" size={12} />
           </span>
           <span className="font-mono text-[10px] uppercase tracking-[0.13em]" style={{ color: "var(--ink-200)" }}>Widgets</span>
           <span className="ml-auto pl-2 font-mono text-[10px]" style={{ color: "var(--ink-400)" }}>
@@ -463,7 +472,9 @@ export function WidgetChipRail({
                       className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-[12px] hover:bg-[var(--bg2)] text-left"
                       style={{ color: "var(--ink-200)" }}
                     >
-                      <Icon name={m.icon} size={12} style={{ color: "var(--ink-400)" }} />
+                      <div className="w-5 h-5 rounded flex items-center justify-center shrink-0" style={{ background: `${m.color}14` }}>
+                        <Icon name={m.icon} size={11} style={{ color: m.color }} />
+                      </div>
                       <span>{m.label}</span>
                     </button>
                   );
@@ -475,18 +486,18 @@ export function WidgetChipRail({
               <button
                 onClick={() => { onCollapseAll(); setMenuOpen(false); }}
                 disabled={allCollapsed}
-                className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-[12px] hover:bg-[var(--bg2)] disabled:opacity-40 disabled:cursor-not-allowed"
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-[12px] hover:bg-[var(--bg2)] disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{ color: "var(--ink-200)" }}
               >
-                <span className="flex items-center gap-2"><Icon name="collapse" size={11} />Collapse all</span>
+                <Icon name="collapse" size={11} />Collapse all
               </button>
               <button
                 onClick={() => { onExpandAll(); setMenuOpen(false); }}
                 disabled={!someCollapsed}
-                className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-[12px] hover:bg-[var(--bg2)] disabled:opacity-40 disabled:cursor-not-allowed"
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-[12px] hover:bg-[var(--bg2)] disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{ color: "var(--ink-200)" }}
               >
-                <span className="flex items-center gap-2"><Icon name="expand" size={11} />Expand all</span>
+                <Icon name="expand" size={11} />Expand all
               </button>
             </div>
           </div>
@@ -504,6 +515,7 @@ type FloatingProps = {
   onMove: (id: string, x: number, y: number) => void;
   onClose: (id: string) => void;
   onCollapse: (id: string) => void;
+  onExpand: (id: string) => void;
   onTimerToggle: (id: string) => void;
   onTimerReset: (id: string, secs: number) => void;
   aiTouched?: boolean;
@@ -515,7 +527,7 @@ type FloatingProps = {
 };
 
 export function FloatingWidget({
-  widget, workspaceItems = [], onMove, onClose, onCollapse,
+  widget, workspaceItems = [], onMove, onClose, onCollapse, onExpand,
   onTimerToggle, onTimerReset, aiTouched, onAsk, onWidgetEdit, onOpenItem, onExpandEdit,
 }: FloatingProps) {
   void onExpandEdit; // reserved for Agent A
@@ -527,7 +539,7 @@ export function FloatingWidget({
     const move = (ev: MouseEvent) => {
       const d = dragRef.current;
       if (!d) return;
-      onMove(widget.id, Math.max(72, d.ox + (ev.clientX - d.sx)), Math.max(84, d.oy + (ev.clientY - d.sy)));
+      onMove(widget.id, Math.max(0, Math.min(window.innerWidth - 40, d.ox + (ev.clientX - d.sx))), Math.max(0, Math.min(window.innerHeight - 40, d.oy + (ev.clientY - d.sy))));
     };
     const up = () => {
       dragRef.current = null;
@@ -539,67 +551,105 @@ export function FloatingWidget({
   };
 
   const meta = WIDGET_META[widget.kind];
+  const isCollapsed = Boolean(widget.collapsed);
+
+  // Position-aware expansion: prefer expanding rightward, but if widget is in right half
+  // of screen expand leftward so it doesn't overflow
+  const expandedX = useMemo(() => {
+    if (typeof window === "undefined") return widget.x;
+    const midScreen = window.innerWidth / 2;
+    // If widget is in the right half, anchor the right edge
+    if (widget.x > midScreen) {
+      return Math.max(16, widget.x + 44 - widget.w);
+    }
+    // Left half: just prevent overflow at right edge
+    const rightEdge = widget.x + widget.w;
+    if (rightEdge > window.innerWidth - 16) {
+      return Math.max(16, window.innerWidth - widget.w - 16);
+    }
+    return widget.x;
+  }, [widget.x, widget.w]);
 
   return (
     <div
       data-widget
-      className={`absolute z-20 pointer-events-auto rounded-2xl overflow-hidden sv2-widget-in sv2-widget-expanded ${
+      className={`absolute z-20 pointer-events-auto overflow-hidden sv2-widget-in ${
         aiTouched ? "sv2-ai-touched" : ""
       }`}
       style={{
-        left: widget.x, top: widget.y,
-        width: widget.w, height: widget.h,
-        background: "rgba(251,250,246,0.97)",
-        border: "1px solid var(--line)",
-        boxShadow: "0 24px 54px -30px rgba(8,22,40,0.22)",
+        left: isCollapsed ? widget.x : expandedX,
+        top: widget.y,
+        width: isCollapsed ? 52 : widget.w,
+        height: isCollapsed ? 52 : widget.h,
+        borderRadius: isCollapsed ? 14 : 16,
+        background: isCollapsed ? `${meta.color}18` : "rgba(251,250,246,0.97)",
+        border: `1px solid ${isCollapsed ? `${meta.color}35` : "var(--line)"}`,
+        boxShadow: isCollapsed ? `0 3px 10px ${meta.color}20` : "0 24px 54px -30px rgba(8,22,40,0.22)",
         backdropFilter: "blur(12px)",
+        transition: "width 260ms cubic-bezier(0.22,1,0.36,1), height 260ms cubic-bezier(0.22,1,0.36,1), left 260ms cubic-bezier(0.22,1,0.36,1), border-radius 200ms ease, box-shadow 200ms ease",
       }}
       onMouseDown={(e) => e.stopPropagation()}
     >
       <div
         onMouseDown={onDown}
-        className="cursor-grab active:cursor-grabbing flex items-center justify-between px-3 py-2"
+        onClick={() => { if (isCollapsed) onExpand(widget.id); }}
+        className={`${isCollapsed ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"} flex items-center justify-between px-2.5`}
         style={{
-          borderBottom: "1px solid rgba(221,216,207,0.55)",
-          background: "rgba(237,233,227,0.35)",
+          height: isCollapsed ? "100%" : 40,
+          borderBottom: isCollapsed ? "none" : "1px solid rgba(221,216,207,0.55)",
+          background: isCollapsed ? "transparent" : `linear-gradient(90deg, ${meta.color}12, transparent 60%)`,
         }}
       >
-        <div className="flex items-center gap-2">
-          <Icon name={meta.icon} size={11} style={{ color: "var(--ink-300)" }} />
-          <span className="font-mono text-[10px] uppercase tracking-[0.14em]" style={{ color: "var(--ink-300)" }}>
-            {meta.label}
-          </span>
+        <div className="flex items-center gap-2 min-w-0">
+          <div className={`shrink-0 flex items-center justify-center ${isCollapsed ? "w-full h-full flex-col gap-1" : ""}`}
+               style={{ color: meta.color }}>
+            <Icon name={meta.icon} size={isCollapsed ? 18 : 11} />
+            {isCollapsed && (
+              <span className="font-mono text-[8px] uppercase tracking-[0.1em] opacity-70" style={{ color: meta.color }}>
+                {meta.short}
+              </span>
+            )}
+          </div>
+          {!isCollapsed && (
+            <span className="font-mono text-[10px] uppercase tracking-[0.14em] truncate" style={{ color: "var(--ink-300)" }}>
+              {meta.label}
+            </span>
+          )}
         </div>
-        <div className="flex items-center gap-1" data-nodrag>
-          <button
-            onClick={() => onCollapse(widget.id)}
-            className="w-5 h-5 rounded flex items-center justify-center hover:bg-[var(--bg2)]"
-            style={{ color: "var(--ink-400)" }}
-            title="Collapse to chip"
-          >
-            <Icon name="collapse" size={10} />
-          </button>
-          <button
-            onClick={() => onClose(widget.id)}
-            className="w-5 h-5 rounded flex items-center justify-center hover:bg-[var(--bg2)]"
-            style={{ color: "var(--ink-400)" }}
-            title="Remove widget"
-          >
-            <Icon name="close" size={10} />
-          </button>
+        {!isCollapsed && (
+          <div className="flex items-center gap-1 shrink-0" data-nodrag>
+            <button
+              onClick={(e) => { e.stopPropagation(); onCollapse(widget.id); }}
+              className="w-7 h-7 rounded flex items-center justify-center hover:bg-[var(--bg2)]"
+              style={{ color: "var(--ink-400)" }}
+              title="Collapse"
+            >
+              <Icon name="collapse" size={10} />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onClose(widget.id); }}
+              className="w-7 h-7 rounded flex items-center justify-center hover:bg-[var(--bg2)]"
+              style={{ color: "var(--ink-400)" }}
+              title="Remove widget"
+            >
+              <Icon name="close" size={10} />
+            </button>
+          </div>
+        )}
+      </div>
+      {!isCollapsed && (
+        <div className="p-3.5 h-[calc(100%-40px)] overflow-y-auto sv2-slim">
+          <WidgetBody
+            widget={widget}
+            items={workspaceItems}
+            onTimerToggle={onTimerToggle}
+            onTimerReset={onTimerReset}
+            onAsk={onAsk}
+            onWidgetEdit={onWidgetEdit}
+            onOpenItem={onOpenItem}
+          />
         </div>
-      </div>
-      <div className="p-3.5">
-        <WidgetBody
-          widget={widget}
-          items={workspaceItems}
-          onTimerToggle={onTimerToggle}
-          onTimerReset={onTimerReset}
-          onAsk={onAsk}
-          onWidgetEdit={onWidgetEdit}
-          onOpenItem={onOpenItem}
-        />
-      </div>
+      )}
     </div>
   );
 }
@@ -612,12 +662,15 @@ type ArtifactWidgetProps = {
   y: number;
   w: number;
   h: number;
+  collapsed?: boolean;
   onMove: (x: number, y: number) => void;
   onClose: () => void;
+  onCollapse: () => void;
+  onExpand: () => void;
   onEdit: (patch: { title?: string; body?: string }) => void;
 };
 
-export function ArtifactWidget({ item, x, y, w, h, onMove, onClose, onEdit }: ArtifactWidgetProps) {
+export function ArtifactWidget({ item, x, y, w, h, collapsed, onMove, onClose, onCollapse, onExpand, onEdit }: ArtifactWidgetProps) {
   const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const onDown = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest("[data-nodrag]")) return;
@@ -625,7 +678,7 @@ export function ArtifactWidget({ item, x, y, w, h, onMove, onClose, onEdit }: Ar
     const move = (ev: MouseEvent) => {
       const d = dragRef.current;
       if (!d) return;
-      onMove(Math.max(72, d.ox + (ev.clientX - d.sx)), Math.max(84, d.oy + (ev.clientY - d.sy)));
+      onMove(Math.max(0, Math.min(window.innerWidth - 40, d.ox + (ev.clientX - d.sx))), Math.max(0, Math.min(window.innerHeight - 40, d.oy + (ev.clientY - d.sy))));
     };
     const up = () => {
       dragRef.current = null;
@@ -673,24 +726,30 @@ export function ArtifactWidget({ item, x, y, w, h, onMove, onClose, onEdit }: Ar
   }, [hydrated, item.sourceArtifactId, item.sourcePlannerItemId]);
 
   const kindColor = item.color;
+  const isCollapsed = Boolean(collapsed);
 
   return (
     <div
       data-widget data-bloom-editor="1"
-      className="absolute z-30 pointer-events-auto rounded-2xl overflow-hidden sv2-widget-in flex flex-col"
+      className="absolute z-30 pointer-events-auto overflow-hidden transition-all duration-300 ease-out sv2-widget-in flex flex-col"
       style={{
-        left: x, top: y, width: w, height: h,
+        left: x, top: y,
+        width: isCollapsed ? 120 : w,
+        height: isCollapsed ? 36 : h,
+        borderRadius: isCollapsed ? 18 : 16,
         background: "var(--paper)",
         border: "1px solid var(--line)",
-        boxShadow: "0 40px 80px -30px rgba(8,22,40,0.28), 0 0 0 1px rgba(14,142,232,0.06)",
+        boxShadow: isCollapsed ? "0 4px 12px rgba(0,0,0,0.05)" : "0 40px 80px -30px rgba(8,22,40,0.28), 0 0 0 1px rgba(14,142,232,0.06)",
       }}
       onMouseDown={(e) => e.stopPropagation()}
     >
       <div
         onMouseDown={onDown}
-        className="cursor-grab active:cursor-grabbing flex items-center justify-between px-4 py-2.5 shrink-0"
+        onClick={() => { if (isCollapsed) onExpand(); }}
+        className={`${isCollapsed ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"} flex items-center justify-between px-4 shrink-0 h-full`}
         style={{
-          borderBottom: "1px solid rgba(221,216,207,0.55)",
+          height: isCollapsed ? "100%" : 44,
+          borderBottom: isCollapsed ? "none" : "1px solid rgba(221,216,207,0.55)",
           background: `linear-gradient(90deg, ${kindColor}14, transparent 60%)`,
         }}
       >
@@ -699,41 +758,57 @@ export function ArtifactWidget({ item, x, y, w, h, onMove, onClose, onEdit }: Ar
           <span className="font-mono text-[10px] uppercase tracking-[0.15em] shrink-0" style={{ color: "var(--ink-400)" }}>
             Artifact
           </span>
-          <span className="font-mono text-[10px] tracking-[0.1em] opacity-60 shrink-0" style={{ color: "var(--ink-400)" }}>
-            · {item.updated || "open"}
-          </span>
+          {!isCollapsed && (
+            <span className="font-mono text-[10px] tracking-[0.1em] opacity-60 shrink-0" style={{ color: "var(--ink-400)" }}>
+              · {item.updated || "open"}
+            </span>
+          )}
         </div>
-        <div className="flex items-center gap-1" data-nodrag>
-          <button
-            onClick={onClose}
-            className="w-6 h-6 rounded flex items-center justify-center hover:bg-[var(--bg2)]"
-            style={{ color: "var(--ink-400)" }}
-            title="Close (Esc)"
-          >
-            <Icon name="close" size={11} />
-          </button>
-        </div>
+        {!isCollapsed && (
+          <div className="flex items-center gap-1" data-nodrag>
+            <button
+              onClick={(e) => { e.stopPropagation(); onCollapse(); }}
+              className="w-7 h-7 rounded flex items-center justify-center hover:bg-[var(--bg2)]"
+              style={{ color: "var(--ink-400)" }}
+              title="Collapse"
+            >
+              <Icon name="collapse" size={11} />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onClose(); }}
+              className="w-7 h-7 rounded flex items-center justify-center hover:bg-[var(--bg2)]"
+              style={{ color: "var(--ink-400)" }}
+              title="Close (Esc)"
+            >
+              <Icon name="close" size={11} />
+            </button>
+          </div>
+        )}
       </div>
-      <div className="px-6 pt-5 pb-2 shrink-0" data-nodrag>
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onBlur={() => { if (title !== item.title) onEdit({ title }); }}
-          className="w-full bg-transparent outline-none font-display text-[24px] leading-[1.1]"
-          style={{ color: "var(--ink-100)" }}
-        />
-        <div className="mt-2 h-px w-12" style={{ background: kindColor, opacity: 0.55 }} />
-      </div>
-      <div className="flex-1 overflow-y-auto sv2-slim px-6 pb-5" data-nodrag>
-        <textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          onBlur={() => onEdit({ body })}
-          placeholder="Start writing…"
-          className="w-full h-full bg-transparent outline-none resize-none text-[13.5px] leading-[1.72] font-display placeholder:text-[var(--ink-400)]"
-          style={{ color: "var(--ink-200)", minHeight: 240 }}
-        />
-      </div>
+      {!isCollapsed && (
+        <>
+          <div className="px-6 pt-5 pb-2 shrink-0" data-nodrag>
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onBlur={() => { if (title !== item.title) onEdit({ title }); }}
+              className="w-full bg-transparent outline-none font-display text-[24px] leading-[1.1]"
+              style={{ color: "var(--ink-100)" }}
+            />
+            <div className="mt-2 h-px w-12" style={{ background: kindColor, opacity: 0.55 }} />
+          </div>
+          <div className="flex-1 overflow-y-auto sv2-slim px-6 pb-5" data-nodrag>
+            <textarea
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              onBlur={() => onEdit({ body })}
+              placeholder="Start writing…"
+              className="w-full h-full bg-transparent outline-none resize-none text-[13.5px] leading-[1.72] font-display placeholder:text-[var(--ink-400)]"
+              style={{ color: "var(--ink-200)", minHeight: 240 }}
+            />
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -746,11 +821,14 @@ type ThreadWidgetProps = {
   y: number;
   w: number;
   h: number;
+  collapsed?: boolean;
   onMove: (x: number, y: number) => void;
   onClose: () => void;
+  onCollapse: () => void;
+  onExpand: () => void;
 };
 
-export function ThreadWidget({ item, x, y, w, h, onMove, onClose }: ThreadWidgetProps) {
+export function ThreadWidget({ item, x, y, w, h, collapsed, onMove, onClose, onCollapse, onExpand }: ThreadWidgetProps) {
   const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const onDown = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest("[data-nodrag]")) return;
@@ -758,7 +836,7 @@ export function ThreadWidget({ item, x, y, w, h, onMove, onClose }: ThreadWidget
     const move = (ev: MouseEvent) => {
       const d = dragRef.current;
       if (!d) return;
-      onMove(Math.max(72, d.ox + (ev.clientX - d.sx)), Math.max(84, d.oy + (ev.clientY - d.sy)));
+      onMove(Math.max(0, Math.min(window.innerWidth - 40, d.ox + (ev.clientX - d.sx))), Math.max(0, Math.min(window.innerHeight - 40, d.oy + (ev.clientY - d.sy))));
     };
     const up = () => {
       dragRef.current = null;
@@ -790,23 +868,30 @@ export function ThreadWidget({ item, x, y, w, h, onMove, onClose }: ThreadWidget
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages.length]);
 
+  const isCollapsed = Boolean(collapsed);
+
   return (
     <div
       data-widget data-bloom-editor="1"
-      className="absolute z-30 pointer-events-auto rounded-2xl overflow-hidden sv2-widget-in flex flex-col"
+      className="absolute z-30 pointer-events-auto overflow-hidden transition-all duration-300 ease-out sv2-widget-in flex flex-col"
       style={{
-        left: x, top: y, width: w, height: h,
+        left: x, top: y,
+        width: isCollapsed ? 120 : w,
+        height: isCollapsed ? 36 : h,
+        borderRadius: isCollapsed ? 18 : 16,
         background: "var(--paper)",
         border: "1px solid var(--line)",
-        boxShadow: "0 40px 80px -30px rgba(8,22,40,0.28), 0 0 0 1px rgba(14,142,232,0.10)",
+        boxShadow: isCollapsed ? "0 4px 12px rgba(0,0,0,0.05)" : "0 40px 80px -30px rgba(8,22,40,0.28), 0 0 0 1px rgba(14,142,232,0.10)",
       }}
       onMouseDown={(e) => e.stopPropagation()}
     >
       <div
         onMouseDown={onDown}
-        className="cursor-grab active:cursor-grabbing flex items-center justify-between px-4 py-2.5 shrink-0"
+        onClick={() => { if (isCollapsed) onExpand(); }}
+        className={`${isCollapsed ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"} flex items-center justify-between px-4 shrink-0 h-full`}
         style={{
-          borderBottom: "1px solid rgba(221,216,207,0.55)",
+          height: isCollapsed ? "100%" : 44,
+          borderBottom: isCollapsed ? "none" : "1px solid rgba(221,216,207,0.55)",
           background: `linear-gradient(90deg, ${item.color}1f, transparent 60%)`,
         }}
       >
@@ -815,56 +900,72 @@ export function ThreadWidget({ item, x, y, w, h, onMove, onClose }: ThreadWidget
           <span className="font-mono text-[10px] uppercase tracking-[0.15em]" style={{ color: "var(--ink-400)" }}>
             Thread
           </span>
-          <span className="font-mono text-[10px] tracking-[0.1em] opacity-60" style={{ color: "var(--ink-400)" }}>
-            · {messages.length} messages
-          </span>
+          {!isCollapsed && (
+            <span className="font-mono text-[10px] tracking-[0.1em] opacity-60" style={{ color: "var(--ink-400)" }}>
+              · {messages.length} messages
+            </span>
+          )}
         </div>
-        <div className="flex items-center gap-1" data-nodrag>
-          <button
-            onClick={onClose}
-            className="w-6 h-6 rounded flex items-center justify-center hover:bg-[var(--bg2)]"
-            style={{ color: "var(--ink-400)" }}
-            title="Close (Esc)"
-          >
-            <Icon name="close" size={11} />
-          </button>
-        </div>
-      </div>
-      <div className="px-6 pt-4 pb-2 shrink-0">
-        <div className="font-display text-[20px] leading-[1.15]" style={{ color: "var(--ink-100)" }}>
-          {item.title}
-        </div>
-        <div className="mt-2 flex items-center gap-2 text-[10.5px] font-mono" style={{ color: "var(--ink-400)" }}>
-          <span className="inline-flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--accent)" }} />
-            Quick chat is typing here
-          </span>
-        </div>
-      </div>
-      <div className="flex-1 overflow-y-auto sv2-slim px-6 pb-4 space-y-3" data-nodrag>
-        {messages.length === 0 && (
-          <div className="text-[12.5px] italic opacity-70 py-4" style={{ color: "var(--ink-400)" }}>
-            No messages yet. Reply from the quick chat below.
+        {!isCollapsed && (
+          <div className="flex items-center gap-1" data-nodrag>
+            <button
+              onClick={(e) => { e.stopPropagation(); onCollapse(); }}
+              className="w-7 h-7 rounded flex items-center justify-center hover:bg-[var(--bg2)]"
+              style={{ color: "var(--ink-400)" }}
+              title="Collapse"
+            >
+              <Icon name="collapse" size={11} />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onClose(); }}
+              className="w-7 h-7 rounded flex items-center justify-center hover:bg-[var(--bg2)]"
+              style={{ color: "var(--ink-400)" }}
+              title="Close (Esc)"
+            >
+              <Icon name="close" size={11} />
+            </button>
           </div>
         )}
-        {messages.map((m, i) => (
-          <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-            <div
-              className={`max-w-[86%] text-[12.5px] leading-[1.58] rounded-xl px-3 py-2 whitespace-pre-wrap ${
-                m.role === "user" ? "rounded-br-sm text-white" : "rounded-bl-sm"
-              }`}
-              style={{
-                background: m.role === "user" ? "var(--accent)" : "var(--bg2)",
-                border: `1px solid ${m.role === "user" ? "transparent" : "var(--line)"}`,
-                color: m.role === "user" ? "#fff" : "var(--ink-200)",
-              }}
-            >
-              {m.text}
+      </div>
+      {!isCollapsed && (
+        <>
+          <div className="px-6 pt-4 pb-2 shrink-0">
+            <div className="font-display text-[20px] leading-[1.15]" style={{ color: "var(--ink-100)" }}>
+              {item.title}
+            </div>
+            <div className="mt-2 flex items-center gap-2 text-[10.5px] font-mono" style={{ color: "var(--ink-400)" }}>
+              <span className="inline-flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--accent)" }} />
+                Quick chat is typing here
+              </span>
             </div>
           </div>
-        ))}
-        <div ref={bottomRef} />
-      </div>
+          <div className="flex-1 overflow-y-auto sv2-slim px-6 pb-4 space-y-3" data-nodrag>
+            {messages.length === 0 && (
+              <div className="text-[12.5px] italic opacity-70 py-4" style={{ color: "var(--ink-400)" }}>
+                No messages yet. Reply from the quick chat below.
+              </div>
+            )}
+            {messages.map((m, i) => (
+              <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                <div
+                  className={`max-w-[86%] text-[12.5px] leading-[1.58] rounded-xl px-3 py-2 whitespace-pre-wrap ${
+                    m.role === "user" ? "rounded-br-sm text-white" : "rounded-bl-sm"
+                  }`}
+                  style={{
+                    background: m.role === "user" ? "var(--accent)" : "var(--bg2)",
+                    border: `1px solid ${m.role === "user" ? "transparent" : "var(--line)"}`,
+                    color: m.role === "user" ? "#fff" : "var(--ink-200)",
+                  }}
+                >
+                  {m.text}
+                </div>
+              </div>
+            ))}
+            <div ref={bottomRef} />
+          </div>
+        </>
+      )}
     </div>
   );
 }

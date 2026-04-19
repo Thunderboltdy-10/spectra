@@ -6,10 +6,10 @@ import type { V2Item, V2Territory, QuickStart } from "./data";
 import { KIND_META } from "./data";
 
 /* ─────────────────────────────────────────────────────────────
- *  Unified TopRail — single surface that replaces multiple boxes
+ *  Unified TopRail — single bar: identity | workspace picker | view modes | guide
  * ───────────────────────────────────────────────────────────── */
 
-export type ViewMode = "spatial" | "type" | "topic" | "timeline";
+export type ViewMode = "type" | "topic" | "timeline";
 
 type TopRailProps = {
   workspace: V2Territory | null;
@@ -19,137 +19,133 @@ type TopRailProps = {
   onViewMode: (m: ViewMode) => void;
   onHome: () => void;
   onAtlas: () => void;
-  /** Retained for ⌘K wiring; no longer renders a button in the rail. */
   onSpotlight?: () => void;
   onToggleTheme: () => void;
   onOpenInfo: () => void;
+  territories?: V2Territory[];
+  currentWorkspaceId?: string | null;
+  onPickWorkspace?: (id: string) => void;
+  onCreateWorkspace?: () => void;
 };
 
 export function TopRail({
-  workspace, zoom, viewMode, theme,
-  onViewMode, onHome, onAtlas, onSpotlight,
-  onToggleTheme, onOpenInfo,
+  workspace, viewMode,
+  onViewMode, onHome,
+  onOpenInfo,
+  territories, currentWorkspaceId, onPickWorkspace, onCreateWorkspace,
 }: TopRailProps) {
-  // "spatial" is the internal id; label is "Free" so users understand it means "your manual layout"
-  const modes: { id: ViewMode; label: string; icon: IconName; tip: string }[] = [
-    { id: "spatial", label: "Free",     icon: "layout",   tip: "Free layout — your manual arrangement. Type/Topic/Timeline will regroup items." },
-    { id: "type",    label: "Type",     icon: "grid",     tip: "Group by item type (notes, tasks, threads…)" },
-    { id: "topic",   label: "Topic",    icon: "topic",    tip: "Group by topic within this workspace" },
-    { id: "timeline",label: "Timeline", icon: "timeline", tip: "Sort by recency — most recent first" },
+  const modes: { id: ViewMode; label: string; icon: IconName }[] = [
+    { id: "topic",    label: "Topic",    icon: "topic"    },
+    { id: "type",     label: "Type",     icon: "grid"     },
+    { id: "timeline", label: "Timeline", icon: "timeline" },
   ];
-
-  const [optionsOpen, setOptionsOpen] = useState(false);
 
   return (
     <div className="absolute top-0 left-0 right-0 z-30 pointer-events-none">
-      <div className="mx-auto max-w-[1600px] px-4 py-3 flex items-center justify-between gap-3">
-        {/* LEFT: identity + breadcrumb */}
-        <div className="flex items-center gap-2 pointer-events-auto">
+      {/* Single unified bar — h-14 = 56px */}
+      <div className="mx-auto max-w-[1800px] px-3 h-14 flex items-center gap-2">
+        {/* LEFT: home button + Spectra label + workspace identity */}
+        <div className="flex items-center gap-2 pointer-events-auto shrink-0">
           <button
             onClick={onHome}
-            className="w-8 h-8 rounded-full flex items-center justify-center transition-colors shadow-sm hover:shadow-md"
-            style={{ border: "1px solid var(--line)", background: "var(--paper)", backdropFilter: "blur(8px)" }}
-            title="Home / Atlas"
+            className="w-9 h-9 rounded-xl flex items-center justify-center transition-colors hover:bg-[var(--bg2)]"
+            title="Home (zoom out)"
           >
-            <div className="w-2 h-2 rounded-full" style={{ background: "linear-gradient(135deg, var(--accent), var(--mint))" }} />
+            <Icon name="home" size={20} style={{ color: "var(--ink-300)" }} />
           </button>
-          <div className="font-mono text-[10px] uppercase tracking-[0.16em] opacity-80" style={{ color: "var(--ink-400)" }}>Spectra</div>
-          <span className="opacity-60" style={{ color: "var(--ink-400)" }}>·</span>
-          <button
-            onClick={onAtlas}
-            className="font-mono text-[10px] uppercase tracking-[0.16em] hover:text-[var(--accent)] transition-colors opacity-80"
-            style={{ color: "var(--ink-300)" }}
-          >
-            Atlas
-          </button>
+          <span className="font-mono text-[10px] uppercase tracking-[0.16em] opacity-75 hidden sm:block" style={{ color: "var(--ink-400)" }}>
+            Spectra
+          </span>
           {workspace && (
             <>
-              <Icon name="chevron" size={12} className="opacity-60" style={{ color: "var(--ink-400)" }} />
-              <div className="flex items-center gap-2">
-                <span className="text-[14px]">{workspace.glyph}</span>
-                <span className="font-display text-[17px] font-medium" style={{ color: "var(--ink-100)" }}>{workspace.name}</span>
-                <span className="text-[11px] font-mono ml-1 opacity-70" style={{ color: "var(--ink-400)" }}>{workspace.subtitle}</span>
-              </div>
+              <Icon name="chevron" size={11} className="opacity-40" style={{ color: "var(--ink-400)" }} />
+              <span className="text-[16px] leading-none">{workspace.glyph}</span>
+              <span className="font-display text-[22px] font-medium leading-none" style={{ color: "var(--ink-100)" }}>
+                {workspace.name}
+              </span>
+              {workspace.subtitle && (
+                <span className="text-[12px] font-mono opacity-55 ml-0.5 hidden md:block" style={{ color: "var(--ink-400)" }}>
+                  {workspace.subtitle}
+                </span>
+              )}
             </>
           )}
         </div>
 
-        {/* RIGHT: view modes + unified actions */}
-        <div className="flex items-center gap-2 pointer-events-auto relative">
-          {workspace && (
-            <div className="flex items-center p-[3px] rounded-full shadow-sm"
-                 style={{ border: "1px solid var(--line)", background: "var(--paper)", backdropFilter: "blur(8px)" }}>
-              {modes.map((m, i) => (
+        {/* CENTER: workspace picker */}
+        <div className="flex-1 flex justify-center pointer-events-auto">
+          {territories && territories.length > 0 && (
+            <div
+              className="flex items-center gap-0.5 p-1 rounded-full"
+              style={{
+                background: "rgba(251,250,246,0.88)",
+                border: "1px solid var(--line)",
+                backdropFilter: "blur(12px) saturate(1.05)",
+              }}
+            >
+              {territories.map((w) => (
                 <button
-                  key={m.id}
-                  onClick={() => onViewMode(m.id)}
-                  className="px-3 h-7 rounded-full flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-[0.1em] transition-all"
+                  key={w.id}
+                  onClick={() => onPickWorkspace?.(w.id)}
+                  className="px-3 py-1.5 rounded-full flex items-center gap-1.5 transition-all duration-200 text-[11px] font-medium"
                   style={{
-                    background: viewMode === m.id ? "var(--ink-100)" : "transparent",
-                    color: viewMode === m.id ? "var(--paper)" : "var(--ink-300)",
+                    background: currentWorkspaceId === w.id ? "var(--accent)" : "transparent",
+                    color: currentWorkspaceId === w.id ? "#fff" : "var(--ink-200)",
+                    boxShadow: currentWorkspaceId === w.id ? "0 2px 8px rgba(14,142,232,0.28)" : "none",
                   }}
-                  title={`${m.tip} (press ${i + 1})`}
                 >
-                  <Icon name={m.icon} size={11} />
-                  <span>{m.label}</span>
+                  <span className="text-[13px] leading-none">{w.glyph}</span>
+                  <span>{w.name}</span>
                 </button>
               ))}
+              {onCreateWorkspace && (
+                <>
+                  <div className="w-px h-5 mx-0.5" style={{ background: "var(--line)" }} />
+                  <button
+                    onClick={onCreateWorkspace}
+                    className="px-2 py-1.5 rounded-full transition-colors hover:bg-[var(--bg2)]"
+                    style={{ color: "var(--ink-400)" }}
+                    title="New workspace"
+                  >
+                    <Icon name="plus" size={12} />
+                  </button>
+                </>
+              )}
             </div>
           )}
+        </div>
 
-          <div className="relative">
-            <button
-              onClick={() => setOptionsOpen(!optionsOpen)}
-              className="w-8 h-8 rounded-full flex items-center justify-center shadow-sm hover:shadow-md transition-all"
-              style={{ border: "1px solid var(--line)", background: optionsOpen ? "var(--bg2)" : "var(--paper)", backdropFilter: "blur(8px)", color: optionsOpen ? "var(--ink-100)" : "var(--ink-300)" }}
-              title="Options"
-            >
-              <Icon name="ellipsis" size={14} />
-            </button>
-            
-            {optionsOpen && (
-              <div className="absolute right-0 top-full mt-2 w-48 rounded-xl shadow-lg border overflow-hidden sv2-drift-in z-50"
-                   style={{ background: "var(--paper)", borderColor: "var(--line)" }}>
-                <div className="py-1">
-                  <div className="px-3 py-1.5 text-[10px] font-mono uppercase tracking-widest text-[var(--ink-400)] border-b border-[var(--line)] mb-1">
-                    Display
-                  </div>
-                  <button
-                    onClick={() => { onToggleTheme(); setOptionsOpen(false); }}
-                    className="w-full flex items-center justify-between px-3 py-2 text-[12px] hover:bg-[var(--bg2)] transition-colors"
-                    style={{ color: "var(--ink-200)" }}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Icon name={theme === "dark" ? "sun" : "moon"} size={14} />
-                      <span>{theme === "dark" ? "Light Theme" : "Dark Theme"}</span>
-                    </div>
-                  </button>
-                  <div className="w-full flex items-center justify-between px-3 py-2 text-[12px]"
-                       style={{ color: "var(--ink-200)" }}>
-                    <div className="flex items-center gap-2">
-                      <Icon name="zoom-in" size={14} />
-                      <span>Zoom</span>
-                    </div>
-                    <span className="font-mono text-[10px]">{Math.round(zoom * 100)}%</span>
-                  </div>
-                  
-                  <div className="px-3 py-1.5 text-[10px] font-mono uppercase tracking-widest text-[var(--ink-400)] border-b border-[var(--line)] mt-1 mb-1">
-                    Help
-                  </div>
-                  <button
-                    onClick={() => { onOpenInfo(); setOptionsOpen(false); }}
-                    className="w-full flex items-center justify-between px-3 py-2 text-[12px] hover:bg-[var(--bg2)] transition-colors"
-                    style={{ color: "var(--ink-200)" }}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Icon name="info" size={14} />
-                      <span>Shortcuts & Guide</span>
-                    </div>
-                  </button>
-                </div>
-              </div>
-            )}
+        {/* RIGHT: view mode pills (teal when active) + info button */}
+        <div className="flex items-center gap-2 pointer-events-auto shrink-0">
+          <div
+            className="flex items-center p-[3px] rounded-full"
+            style={{ border: "1px solid var(--line)", background: "var(--paper)", backdropFilter: "blur(8px)" }}
+          >
+            {modes.map((m, i) => (
+              <button
+                key={m.id}
+                onClick={() => onViewMode(m.id)}
+                className="px-3 h-7 rounded-full flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-[0.1em] transition-all duration-150"
+                style={{
+                  background: viewMode === m.id ? "var(--mint)" : "transparent",
+                  color: viewMode === m.id ? "#fff" : "var(--ink-300)",
+                }}
+                title={`${m.id} view (${i + 1})`}
+              >
+                <Icon name={m.icon} size={11} />
+                <span className="hidden sm:inline">{m.label}</span>
+              </button>
+            ))}
           </div>
+
+          <button
+            onClick={onOpenInfo}
+            className="w-8 h-8 rounded-full flex items-center justify-center transition-all hover:bg-[var(--bg2)] shadow-sm"
+            style={{ border: "1px solid var(--line)", background: "var(--paper)", color: "var(--ink-300)" }}
+            title="Shortcuts & guide (⌘/)"
+          >
+            <Icon name="info" size={14} />
+          </button>
         </div>
       </div>
     </div>
@@ -178,7 +174,7 @@ export function WidgetLauncher({
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="absolute top-[80px] right-4 z-30 pointer-events-auto flex flex-col items-end gap-2">
+    <div className="absolute top-[110px] right-4 z-30 pointer-events-auto flex flex-col items-end gap-2">
       <button
         onClick={() => {
           if (widgetsHidden) onToggleWidgets();
@@ -241,21 +237,22 @@ export function AtlasStrip({
   onCreate?: () => void;
 }) {
   return (
-    <div className="absolute top-[60px] left-1/2 -translate-x-1/2 z-20 pointer-events-auto">
-      <div className="flex items-center gap-1 p-1 rounded-full"
-           style={{ background: "rgba(251,250,246,0.8)", border: "1px solid var(--line)", backdropFilter: "blur(8px)" }}>
+    <div className="absolute top-[44px] left-1/2 -translate-x-1/2 z-20 pointer-events-auto">
+      <div className="flex items-center gap-1 p-1 rounded-full shadow-sm"
+           style={{ background: "rgba(251,250,246,0.88)", border: "1px solid var(--line)", backdropFilter: "blur(12px) saturate(1.05)" }}>
         {territories.map((w) => (
           <button
             key={w.id}
             onClick={() => onPick(w.id)}
-            className="px-3 py-1.5 rounded-full flex items-center gap-1.5 transition-colors"
+            className="px-3 py-1.5 rounded-full flex items-center gap-1.5 transition-all duration-200"
             style={{
-              background: current === w.id ? "var(--paper)" : "transparent",
-              border: `1px solid ${current === w.id ? "rgba(14,142,232,0.6)" : "transparent"}`,
+              background: current === w.id ? "var(--ink-300)" : "transparent",
+              border: `1px solid ${current === w.id ? "var(--ink-300)" : "transparent"}`,
+              boxShadow: current === w.id ? "0 2px 6px rgba(26,21,16,0.08)" : "none",
             }}
           >
             <span className="text-[13px]">{w.glyph}</span>
-            <span className="text-[11px]" style={{ color: "var(--ink-200)", fontWeight: 500 }}>{w.name}</span>
+            <span className="text-[11px]" style={{ color: current === w.id ? "var(--paper)" : "var(--ink-200)", fontWeight: current === w.id ? 600 : 500 }}>{w.name}</span>
           </button>
         ))}
         {onCreate && (
@@ -343,8 +340,8 @@ export function Minimap({
         </div>
         <div
           ref={mapRef}
-          className="relative transition-colors"
-          style={{ width: W, height: H, background: activePan ? "var(--paper)" : "var(--bg2)", borderRadius: 6, cursor: activePan ? "crosshair" : "pointer", overflow: "hidden" }}
+          className="relative transition-colors sv2-grid"
+          style={{ width: W, height: H, background: activePan ? "var(--paper)" : "var(--paper-deep)", borderRadius: 8, cursor: activePan ? "crosshair" : "pointer", overflow: "hidden" }}
           onMouseMove={(e) => {
             if (!activePan) return;
             const p = toWorld(e);
@@ -371,7 +368,7 @@ export function Minimap({
           {territories.map((w) => (
             <div
               key={w.id}
-              onClick={(e) => { e.stopPropagation(); onWorkspaceClick(w.id); }}
+              onDoubleClick={(e) => { e.stopPropagation(); onWorkspaceClick(w.id); }}
               className="absolute rounded-sm cursor-pointer transition-opacity"
               style={{
                 left: ox + (w.cx - w.w / 2) * scale,
@@ -443,13 +440,12 @@ type CommandBarProps = {
   /** Opens the Spotlight (⌘K) overlay from the search icon inside the bar. */
   onSpotlight?: () => void;
   /** Creates an item at camera center. Called from the + inline menu. */
-  onCreate?: (kind: "note" | "task" | "thread" | "visual") => void;
-  /**
-   * Slot for Agent A to inject focused-context (selection set, artifact, thread).
-   * Not rendered yet — leave the prop for forward-compatibility.
-   */
+  onCreate?: (kind: "note" | "task" | "thread" | "visual" | "code") => void;
+  /** Clears the focus context (closes inspector or focus set). */
+  onClearFocusContext?: () => void;
+  /** Focused-context: shows a chip in the bar indicating active context. */
   focusContext?: {
-    kind: "artifact" | "thread" | "selection";
+    kind: "artifact" | "thread" | "selection" | "focused-view" | "building-set";
     title: string;
     color: string;
     count?: number;
@@ -462,13 +458,13 @@ export const CREATION_MENU_ITEMS = [
   { kind: "task"   as const, label: "New task",   icon: "schedule" as const },
   { kind: "thread" as const, label: "New thread", icon: "thread"   as const },
   { kind: "visual" as const, label: "New visual", icon: "layers"   as const },
+  { kind: "code"   as const, label: "New code",   icon: "pset"     as const },
 ];
 
 export function CommandBar({
-  focusedItem, workspace, selectedCount, bloomedCount,
+  focusedItem, workspace, selectedCount,
   resultIsland, quickStarts, onSubmit, onDismissResult,
-  onSpotlight, onCreate,
-  /* focusContext — reserved for Agent A */ focusContext: _focusContext,
+  onSpotlight, onCreate, onClearFocusContext, focusContext,
 }: CommandBarProps) {
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
@@ -477,9 +473,12 @@ export function CommandBar({
   const inputRef = useRef<HTMLInputElement>(null);
 
   const placeholder = (() => {
+    if (focusContext?.kind === "focused-view") return `Ask about ${focusContext.count ?? 1} items in focus…`;
+    if (focusContext?.kind === "building-set") return `Building set · ${focusContext.count ?? 0} items…`;
+    if (focusContext?.kind === "thread") return `Ask about thread "${focusContext.title.slice(0, 28)}…"`;
+    if (focusContext?.kind === "artifact") return `Ask about "${focusContext.title.slice(0, 28)}…"`;
     if (selectedCount > 1) return `Ask about ${selectedCount} items…`;
     if (focusedItem) return `Ask about "${focusedItem.title.slice(0, 32)}…"`;
-    if (bloomedCount > 1) return `Ask across ${bloomedCount} open items…`;
     if (workspace) return `Ask, act, or create in ${workspace.name}…`;
     return "Ask anything, or type /…";
   })();
@@ -493,7 +492,7 @@ export function CommandBar({
   };
 
   return (
-    <div className="absolute left-1/2 -translate-x-1/2 bottom-5 z-40 pointer-events-auto flex flex-col items-center max-w-[92vw]">
+    <div className="absolute left-1/2 -translate-x-1/2 bottom-8 z-40 pointer-events-auto flex flex-col items-center max-w-[92vw]">
       {/* Result island — animated pill attachment with four honest states */}
       {resultIsland && (
         <div
@@ -555,7 +554,7 @@ export function CommandBar({
         </div>
       )}
 
-      <div className={`flex items-center gap-2 transition-all duration-200 ${focused ? "w-[580px]" : "w-[430px]"}`}>
+      <div className={`flex items-center gap-2 transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] ${focused ? "w-[560px]" : "w-[440px]"}`}>
         {/* Plus button — opens inline creation menu */}
         <div className="relative shrink-0">
           <button
@@ -618,10 +617,11 @@ export function CommandBar({
 
           {/* Input pill */}
           <div
-            className={`sv2-island ${focused ? "shadow-lg" : "shadow-md"} rounded-full flex items-center gap-2 transition-all h-10`}
+            className={`sv2-island ${focused ? "shadow-lg" : "shadow-md"} rounded-[20px] flex items-center gap-2 transition-all h-12`}
             style={{
-              border: focused ? "1px solid var(--accent)" : "1px solid var(--line)",
-              padding: "0 10px 0 12px",
+              border: focused ? "1.5px solid var(--accent)" : "1px solid var(--line)",
+              padding: "0 14px 0 16px",
+              boxShadow: focused ? "0 8px 24px -8px rgba(14,142,232,0.18), var(--shadow-md)" : "var(--shadow-md)",
             }}
           >
             {/* Search / Spotlight icon — leftmost, opens Spotlight */}
@@ -631,15 +631,30 @@ export function CommandBar({
               style={{ color: "var(--ink-400)" }}
               title="Spotlight (⌘K)"
             >
-              <Icon name="search" size={13} />
+              <Icon name="search" size={14} />
             </button>
+            {/* Focus context chip */}
+            {focusContext && (
+              <div className="hidden sm:flex items-center gap-1 shrink-0 px-2 h-6 rounded-full border text-[10px] font-mono"
+                   style={{ background: `${focusContext.color}12`, borderColor: `${focusContext.color}30`, color: focusContext.color, maxWidth: 160 }}>
+                <span className="truncate max-w-[100px]">{focusContext.title}</span>
+                {focusContext.count != null && <span className="opacity-60">·{focusContext.count}</span>}
+                <button
+                  onMouseDown={(e) => { e.preventDefault(); onClearFocusContext?.(); }}
+                  className="ml-0.5 opacity-60 hover:opacity-100 transition-opacity"
+                  title="Clear focus"
+                >
+                  <Icon name="close" size={8} />
+                </button>
+              </div>
+            )}
 
             <input
               ref={inputRef}
               value={value}
               onChange={(e) => setValue(e.target.value)}
               onFocus={() => setFocused(true)}
-              onBlur={() => setTimeout(() => { setFocused(false); setShowQS(false); setShowCreateMenu(false); }, 180)}
+              onBlur={() => setTimeout(() => { setFocused(false); setShowQS(false); setShowCreateMenu(false); }, 160)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && value.trim()) {
                   onSubmit(value);
@@ -647,7 +662,7 @@ export function CommandBar({
                 }
               }}
               placeholder={placeholder}
-              className="flex-1 bg-transparent outline-none text-[13.5px] font-medium placeholder-[var(--ink-400)]"
+              className="flex-1 bg-transparent outline-none text-[14.5px] font-medium placeholder-[var(--ink-400)]"
               style={{ color: "var(--ink-100)" }}
             />
 
@@ -719,9 +734,8 @@ export function Spotlight({
   const wsHits = territories.filter((w) => !qlc || w.name.toLowerCase().includes(qlc)).slice(0, 4);
   const qsHits = quickStarts.filter((s) => !qlc || s.title.toLowerCase().includes(qlc)).slice(0, 4);
   const viewHits: { id: ViewMode; label: string }[] = ([
-    { id: "spatial" as ViewMode, label: "Switch to Free layout" },
-    { id: "type" as ViewMode, label: "Switch to Type view" },
     { id: "topic" as ViewMode, label: "Switch to Topic view" },
+    { id: "type" as ViewMode, label: "Switch to Type view" },
     { id: "timeline" as ViewMode, label: "Switch to Timeline view" },
   ]).filter((v) => !qlc || v.label.toLowerCase().includes(qlc)).slice(0, 4);
   const hasAnyHit = itemHits.length > 0 || wsHits.length > 0 || qsHits.length > 0 || viewHits.length > 0;
@@ -729,11 +743,11 @@ export function Spotlight({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-start justify-center pt-[14vh]"
-         style={{ background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)" }}
+         style={{ background: "rgba(0,0,0,0.4)", backdropFilter: "blur(8px) saturate(1.1)" }}
          onClick={onClose}>
       <div
-        className="w-[min(640px,92vw)] rounded-2xl overflow-hidden"
-        style={{ background: "var(--paper)", border: "1px solid var(--line)", boxShadow: "0 30px 80px -20px rgba(7,20,35,0.3)" }}
+        className="w-[min(640px,92vw)] rounded-2xl overflow-hidden sv2-drift-in"
+        style={{ background: "var(--paper)", border: "1px solid var(--line)", boxShadow: "0 32px 80px -20px rgba(26,21,16,0.28)" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-3 px-4 py-3" style={{ borderBottom: "1px solid var(--line)" }}>
@@ -802,7 +816,7 @@ export function Spotlight({
                     <div className="w-7 h-7 rounded-lg flex items-center justify-center"
                          style={{ background: "var(--bg2)", color: "var(--ink-300)" }}>
                       <Icon
-                        name={v.id === "spatial" ? "layout" : v.id === "type" ? "grid" : v.id === "topic" ? "topic" : "timeline"}
+                        name={v.id === "type" ? "grid" : v.id === "topic" ? "topic" : "timeline"}
                         size={12}
                       />
                     </div>
@@ -910,14 +924,13 @@ type TrayProps = {
   pinned: V2Item[];
   onClose: () => void;
   onRemove: (id: string) => void;
-  onAction: (action: "bloom" | "quiz" | "link" | "ask" | "focus") => void;
+  onAction: (action: "ask" | "focus") => void;
 };
 
 export function Tray({ open, items, pinned, onClose, onRemove, onAction }: TrayProps) {
-  if (!open && items.length === 0 && pinned.length === 0) return null;
   const allItems = [...pinned, ...items.filter(i => !pinned.find(p => p.id === i.id))];
-  
-  if (allItems.length === 0) return null;
+  // Only show tray when genuinely multi-selecting
+  if (!open || allItems.length < 2) return null;
 
   return (
     <div className="absolute left-1/2 -translate-x-1/2 bottom-20 z-30 pointer-events-auto flex justify-center">
@@ -929,7 +942,7 @@ export function Tray({ open, items, pinned, onClose, onRemove, onAction }: TrayP
           <div className="flex items-center gap-1.5">
             <Icon name="tray" size={12} style={{ color: "var(--accent)" }} />
             <span className="font-mono text-[10px] uppercase tracking-[0.1em] font-medium" style={{ color: "var(--accent)" }}>
-              {allItems.length} queued
+              {allItems.length} selected
             </span>
           </div>
           <button
@@ -965,20 +978,16 @@ export function Tray({ open, items, pinned, onClose, onRemove, onAction }: TrayP
           ))}
         </div>
 
-        <div className="flex flex-wrap gap-1 mt-1 border-t pt-2 px-1" style={{ borderColor: "var(--line)" }}>
-          {([
-            { action: "focus" as const, label: "Focus", icon: "layout" as const },
-          ]).map(({ action, label, icon }) => (
-            <button
-              key={action}
-              onClick={() => onAction(action)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors hover:bg-[var(--bg2)]"
-              style={{ color: "var(--ink-200)" }}
-            >
-              <Icon name={icon} size={11} />
-              <span className="text-[10px] font-mono uppercase tracking-[0.05em]">{label}</span>
-            </button>
-          ))}
+        <div className="flex items-center gap-1 mt-1 border-t pt-2 px-1" style={{ borderColor: "var(--line)" }}>
+          <button
+            onClick={() => onAction("focus")}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors hover:bg-[var(--bg2)]"
+            style={{ color: "var(--ink-200)" }}
+          >
+            <Icon name="layout" size={11} />
+            <span className="text-[10px] font-mono uppercase tracking-[0.05em]">Focus view</span>
+            <span className="sv2-kbd text-[8px]">Space</span>
+          </button>
           <div className="flex-1" />
           <button
             onClick={() => onAction("ask")}
@@ -1001,7 +1010,7 @@ export function ZoomControl({ zoom, onZoom, onReset }: { zoom: number; onZoom: (
     <div className="absolute bottom-4 left-4 z-30 pointer-events-auto">
       <div
         className="rounded-full px-1 py-1 flex items-center gap-0.5"
-        style={{ background: "rgba(251,250,246,0.92)", border: "1px solid var(--line)", backdropFilter: "blur(8px)" }}
+        style={{ background: "rgba(251,250,246,0.88)", border: "1px solid var(--line)", backdropFilter: "blur(12px) saturate(1.05)", boxShadow: "var(--shadow-sm)" }}
       >
         <button
           onClick={() => onZoom(0.90)}
@@ -1056,12 +1065,12 @@ export function InfoPanel({ open, onClose }: { open: boolean; onClose: () => voi
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center"
-      style={{ background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)" }}
+      style={{ background: "rgba(0,0,0,0.4)", backdropFilter: "blur(8px) saturate(1.1)" }}
       onClick={onClose}
     >
       <div
-        className="w-[min(520px,92vw)] rounded-2xl p-6"
-        style={{ background: "var(--paper)", border: "1px solid var(--line)", boxShadow: "0 30px 80px -20px rgba(7,20,35,0.3)" }}
+        className="w-[min(520px,92vw)] rounded-2xl p-6 sv2-drift-in"
+        style={{ background: "var(--paper)", border: "1px solid var(--line)", boxShadow: "0 32px 80px -20px rgba(26,21,16,0.28)" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between mb-4">

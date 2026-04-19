@@ -10,7 +10,6 @@ import {
 import "./spectra-v2.css";
 import {
   TopRail,
-  AtlasStrip,
   Minimap,
   CommandBar,
   Spotlight,
@@ -22,7 +21,9 @@ import {
 } from "./chrome";
 import { ItemCard } from "./items";
 import {
+  ArtifactWidget,
   FloatingWidget,
+  ThreadWidget,
   WidgetBloom,
   WidgetChipRail,
   useTimerTick,
@@ -57,6 +58,53 @@ import type {
   WorkspaceData,
   WorkspaceItemData,
 } from "@/lib/workspace/contracts";
+
+/* ─── FocusPaneContent — renders item body inside focused view pane ─── */
+function FocusPaneContent({ item, onEdit }: { item: V2Item; onEdit?: (patch: { title?: string; body?: string }) => void }) {
+  const [body, setBody] = useState(item.body ?? item.preview ?? "");
+  useEffect(() => { setBody(item.body ?? item.preview ?? ""); }, [item.id, item.body, item.preview]);
+
+  useEffect(() => {
+    if (!item.sourceArtifactId) return;
+    let cancelled = false;
+    fetch(`/api/artifacts?artifactId=${item.sourceArtifactId}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data.artifact?.contentPlaintext || data.artifact?.content) setBody(data.artifact.contentPlaintext || data.artifact.content);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [item.sourceArtifactId]);
+
+  if (item.kind === "thread") {
+    const msgs = item.messages ?? [];
+    return (
+      <div className="space-y-2">
+        {msgs.length === 0 && <div className="text-[12px] italic" style={{ color: "var(--ink-400)" }}>No messages yet.</div>}
+        {msgs.map((m, i) => (
+          <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+            <div className={`max-w-[88%] text-[12.5px] leading-[1.58] rounded-xl px-3 py-2 whitespace-pre-wrap ${m.role === "user" ? "rounded-br-sm" : "rounded-bl-sm"}`}
+                 style={{ background: m.role === "user" ? "var(--accent)" : "var(--bg2)", color: m.role === "user" ? "#fff" : "var(--ink-200)", border: `1px solid ${m.role === "user" ? "transparent" : "var(--line)"}` }}>
+              {m.text}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return (
+    <textarea
+      value={body}
+      onChange={(e) => setBody(e.target.value)}
+      onBlur={() => onEdit?.({ body })}
+      placeholder="Start writing…"
+      className="w-full bg-transparent outline-none resize-none text-[13.5px] leading-[1.72] font-display placeholder:text-[var(--ink-400)]"
+      style={{ color: "var(--ink-200)", minHeight: "100%", height: "100%" }}
+      onClick={(e) => e.stopPropagation()}
+    />
+  );
+}
 
 /* ─── Demo data (fallback when backend returns no workspaces) ───────── */
 
@@ -124,23 +172,82 @@ export default function WorkspaceV2() {
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
   /* ─── Selection & focus ─── */
-  const [bloomedIds, setBloomedIds] = useState<string[]>([]);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [pinned, setPinned] = useState<string[]>([]);
   const [trayOpen, setTrayOpen] = useState(false);
 
+  /* ─── Inspector (single-click opens artifact/thread) ─── */
+  const [openInspectorId, setOpenInspectorId] = useState<string | null>(null);
+  const [inspectorPos, setInspectorPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  /* ─── Focus set (double-click builds set; Space opens focused view) ─── */
+  const [buildingFocusSet, setBuildingFocusSet] = useState(false);
+  const [focusSetIds, setFocusSetIds] = useState<string[]>([]);
+  const [primaryFocusId, setPrimaryFocusId] = useState<string | null>(null);
+  const [focusedViewOpen, setFocusedViewOpen] = useState(false);
+  const [focusViewPrimaryId, setFocusViewPrimaryId] = useState<string | null>(null);
+  const [focusViewFocusIdx, setFocusViewFocusIdx] = useState(0);
+
   /* ─── Chrome panels ─── */
   const [spotOpen, setSpotOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>("spatial");
+  const [viewMode, setViewModeRaw] = useState<ViewMode>(() => {
+    if (typeof window === "undefined") return "topic";
+    const saved = localStorage.getItem("spectra-v2:viewMode");
+    if (saved === "type" || saved === "topic" || saved === "timeline") return saved;
+    return "topic";
+  });
+  const setViewMode = useCallback((m: ViewMode) => {
+    setViewModeRaw(m);
+    if (typeof window !== "undefined") localStorage.setItem("spectra-v2:viewMode", m);
+  }, []);
   const [resultIsland, setResultIsland] = useState<ResultIsland>(null);
 
-  /* ─── Widgets — collapsed by default ─── */
-  const [widgets, setWidgets] = useState<FloatingWidgetData[]>([
-    { id: "w-timer", kind: "timer", x: 80, y: 128, w: 288, h: 132, collapsed: true, state: { secs: 25 * 60, running: false } },
-    { id: "w-planner", kind: "planner", x: 80, y: 128, w: 300, h: 278, collapsed: true, state: {} },
-    { id: "w-today", kind: "today", x: 80, y: 128, w: 296, h: 230, collapsed: true, state: {} },
-  ]);
+  /* ─── Widgets — positions from localStorage (loaded after mount to avoid SSR mismatch) ─── */
+  const WIDGET_LS_KEY = "spectra-v2:widget-positions";
+  const loadWidgetPositions = (): Record<string, { x: number; y: number; collapsed: boolean }> => {
+    if (typeof window === "undefined") return {};
+    try {
+      const raw = localStorage.getItem(WIDGET_LS_KEY);
+      if (!raw) return {};
+      const parsed: Record<string, { x?: number; y?: number; collapsed?: boolean }> = JSON.parse(raw);
+      const result: Record<string, { x: number; y: number; collapsed: boolean }> = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v?.x === "number" && typeof v?.y === "number") {
+          result[k] = { x: v.x, y: v.y, collapsed: v.collapsed ?? false };
+        }
+      }
+      return result;
+    } catch { return {}; }
+  };
+  const saveWidgetPositions = (ws: FloatingWidgetData[]) => {
+    if (typeof window === "undefined") return;
+    try {
+      const positions: Record<string, { x: number; y: number; collapsed: boolean }> = {};
+      ws.forEach((w) => { positions[w.id] = { x: w.x, y: w.y, collapsed: w.collapsed ?? false }; });
+      localStorage.setItem(WIDGET_LS_KEY, JSON.stringify(positions));
+    } catch { /* ignore */ }
+  };
+  // Default positions: spread down the left edge, expanded
+  const WIDGET_DEFAULTS: FloatingWidgetData[] = [
+    { id: "w-timer",   kind: "timer",   x: 16, y: 72,  w: 288, h: 132, collapsed: false, state: { secs: 25 * 60, running: false, totalSecs: 25 * 60 } },
+    { id: "w-planner", kind: "planner", x: 16, y: 224, w: 300, h: 278, collapsed: false, state: {} },
+    { id: "w-today",   kind: "today",   x: 16, y: 522, w: 296, h: 230, collapsed: false, state: {} },
+  ];
+  // Init with plain defaults (no localStorage read here → avoids SSR hydration mismatch)
+  const [widgets, setWidgets] = useState<FloatingWidgetData[]>(WIDGET_DEFAULTS);
+
+  // After mount, load saved positions from localStorage
+  useEffect(() => {
+    const saved = loadWidgetPositions();
+    if (Object.keys(saved).length > 0) {
+      setWidgets((prev) => prev.map((w) => {
+        const p = saved[w.id];
+        return p ? { ...w, x: p.x, y: p.y, collapsed: p.collapsed } : w;
+      }));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [widgetsHidden, setWidgetsHidden] = useState(false);
   const [widgetStateRevision, setWidgetStateRevision] = useState(0);
   useTimerTick(widgets, (updater) => {
@@ -163,6 +270,8 @@ export default function WorkspaceV2() {
 
   /* ─── Widget deep-edit ─── */
   const [editingWidgetId, setEditingWidgetId] = useState<string | null>(null);
+  /* ─── Bloomed items (legacy compat) ─── */
+  const [, setBloomedIds] = useState<string[]>([]);
 
   /* ─── AI connector trails (spatial view only) ─── */
   const [trails, setTrails] = useState<Array<{ id: string; x1: number; y1: number; x2: number; y2: number; until: number }>>([]);
@@ -172,6 +281,7 @@ export default function WorkspaceV2() {
     setTimeout(() => setTrails((ts) => ts.filter((t) => t.id !== id)), 950);
   }, []);
 
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<
@@ -199,7 +309,7 @@ export default function WorkspaceV2() {
         const res = await fetch("/api/preferences");
         if (!res.ok || cancelled) return;
         const j = await res.json();
-        if (j?.viewMode && ["spatial", "type", "topic", "timeline"].includes(j.viewMode)) {
+        if (j?.viewMode && ["type", "topic", "timeline"].includes(j.viewMode)) {
           setViewMode(j.viewMode as ViewMode);
         }
         if (j?.theme === "dark" || j?.theme === "light") setTheme(j.theme);
@@ -267,41 +377,88 @@ export default function WorkspaceV2() {
     if (nextCommit !== committedWorkspaceId) setCommittedWorkspaceId(nextCommit);
   }, [currentTerritory, zoom, committedWorkspaceId]);
 
+  /* ─── Topic grouping — keyword-based (no embeddings required) ─── */
+  const computeTopicGroups = useCallback((items: V2Item[]): Record<string, V2Item[]> => {
+    const STOP = new Set(["this","that","with","from","have","will","been","what","when","where","which","your","more","also","some","they","their","about","these","would","could","should","there","other","after","before","during","study","notes","review","flashcard","cards","deck","items","item"]);
+    const wordItems: Record<string, string[]> = {};
+    items.forEach((it) => {
+      const text = (it.title + " " + (it.preview ?? "")).toLowerCase();
+      const words = text.split(/\W+/).filter((w) => w.length > 4 && !STOP.has(w) && isNaN(Number(w)));
+      const seen = new Set<string>();
+      words.forEach((w) => {
+        if (!seen.has(w)) { seen.add(w); (wordItems[w] = wordItems[w] ?? []).push(it.id); }
+      });
+    });
+    const sorted = Object.entries(wordItems).filter(([, ids]) => ids.length >= 2).sort((a, b) => b[1].length - a[1].length);
+    const assigned = new Set<string>();
+    const groups: Record<string, V2Item[]> = {};
+    for (const [word, itemIds] of sorted) {
+      const unassigned = itemIds.filter((id) => !assigned.has(id));
+      if (unassigned.length >= 2) {
+        const label = word.charAt(0).toUpperCase() + word.slice(1);
+        groups[label] = unassigned.map((id) => items.find((it) => it.id === id)).filter(Boolean) as V2Item[];
+        unassigned.forEach((id) => assigned.add(id));
+      }
+    }
+    // Remaining fall back to kind label
+    items.forEach((it) => {
+      if (!assigned.has(it.id)) {
+        const label = KIND_META[it.kind]?.label ?? it.kind;
+        (groups[label] = groups[label] ?? []).push(it);
+      }
+    });
+    return groups;
+  }, []);
+
   /* ─── View-mode reflow: produce positions keyed by item id ─── */
   const arranged = useMemo<Record<string, { x: number; y: number }> | null>(() => {
-    if (viewMode === "spatial" || !currentTerritory) return null;
-    const w = currentTerritory;
-    const wsItems = baseItems.filter((i) => i.workspaceId === w.id);
     const coords: Record<string, { x: number; y: number }> = {};
-    const padLeft = w.cx - w.w / 2 + 80;
-    const padTop = w.cy - w.h / 2 + 160;
+    for (const w of territories) {
+      const wsItems = baseItems.filter((i) => i.workspaceId === w.id);
+      const padLeft = w.cx - w.w / 2 + 80;
+      const padTop = w.cy - w.h / 2 + 160;
 
-    if (viewMode === "type" || viewMode === "topic") {
-      const byKey: Record<string, V2Item[]> = {};
-      wsItems.forEach((it) => {
-        const k = viewMode === "type" ? it.kind : (it.meta?.topic as string) ?? it.kind;
-        (byKey[k] = byKey[k] || []).push(it);
-      });
-      let y = padTop;
-      Object.keys(byKey).forEach((k) => {
-        const row = byKey[k];
-        row.forEach((it, idx) => {
-          coords[it.id] = { x: padLeft + (idx % 3) * 360, y: y + Math.floor(idx / 3) * 270 };
+      if (viewMode === "type") {
+        const byKey: Record<string, V2Item[]> = {};
+        wsItems.forEach((it) => { (byKey[it.kind] = byKey[it.kind] ?? []).push(it); });
+        let y = padTop;
+        Object.keys(byKey).forEach((k) => {
+          const row = byKey[k];
+          row.forEach((it, idx) => { coords[it.id] = { x: padLeft + (idx % 3) * 360, y: y + Math.floor(idx / 3) * 270 }; });
+          y += Math.ceil(row.length / 3) * 270 + 60;
         });
-        y += Math.ceil(row.length / 3) * 270 + 50;
-      });
-    } else if (viewMode === "timeline") {
-      const sorted = [...wsItems].sort((a, b) => {
-        const au = (a.meta?.updatedAt as number) ?? 0;
-        const bu = (b.meta?.updatedAt as number) ?? 0;
-        return bu - au;
-      });
-      sorted.forEach((it, idx) => {
-        coords[it.id] = { x: padLeft + (idx % 4) * 310, y: padTop + Math.floor(idx / 4) * 270 };
-      });
+      } else if (viewMode === "topic") {
+        const groups = computeTopicGroups(wsItems);
+        let y = padTop;
+        Object.keys(groups).forEach((k) => {
+          const row = groups[k];
+          row.forEach((it, idx) => { coords[it.id] = { x: padLeft + (idx % 3) * 360, y: y + Math.floor(idx / 3) * 270 }; });
+          y += Math.ceil(row.length / 3) * 270 + 60;
+        });
+      } else if (viewMode === "timeline") {
+        const buckets: { label: string; until: number; items: V2Item[] }[] = [
+          { label: "Today",      until: Date.now() - 86_400_000,     items: [] },
+          { label: "Yesterday",  until: Date.now() - 2 * 86_400_000, items: [] },
+          { label: "Last week",  until: Date.now() - 7 * 86_400_000, items: [] },
+          { label: "Older",      until: 0,                            items: [] },
+        ];
+        wsItems.forEach((it) => {
+          const ts = (it.meta?.updatedAt as number) ?? (0);
+          const bucket = buckets.find((b) => ts > b.until) ?? buckets[buckets.length - 1];
+          bucket.items.push(it);
+        });
+        // Sort within each bucket by date desc
+        buckets.forEach((b) => b.items.sort((a, z) => ((z.meta?.updatedAt as number) ?? 0) - ((a.meta?.updatedAt as number) ?? 0)));
+        let y = padTop;
+        buckets.forEach((b) => {
+          if (b.items.length === 0) return;
+          b.items.forEach((it, idx) => { coords[it.id] = { x: padLeft + 80 + (idx % 3) * 360, y: y + Math.floor(idx / 3) * 270 }; });
+          y += Math.ceil(b.items.length / 3) * 270 + 70;
+        });
+      }
     }
-    return coords;
-  }, [viewMode, currentTerritory, baseItems]);
+    return Object.keys(coords).length > 0 ? coords : null;
+  }, [viewMode, territories, baseItems, computeTopicGroups]);
 
   const posOf = useCallback(
     (it: V2Item): { x: number; y: number } => {
@@ -311,14 +468,14 @@ export default function WorkspaceV2() {
     [arranged],
   );
 
-  /* ─── Mode per item (glance/touch/bloom) ─── */
+  /* ─── Mode per item (glance/touch) ─── */
   const modeFor = useCallback(
-    (item: V2Item): "glance" | "touch" | "bloom" => {
-      if (bloomedIds.includes(item.id)) return "bloom";
+    (item: V2Item): "glance" | "touch" => {
+      void item;
       if (zoom < 0.42) return "glance";
       return "touch";
     },
-    [zoom, bloomedIds],
+    [zoom],
   );
 
   /* ─── Smooth flyTo via rAF, cubic-ease (1 - (1-t)^3) over 520ms ─── */
@@ -396,6 +553,11 @@ export default function WorkspaceV2() {
       dragRef.current = { type: "pan", sx: e.clientX, sy: e.clientY, px: pan.x, py: pan.y };
       setPanning(true);
     } else if (e.button === 0 && (el === canvasRef.current || el.closest("[data-canvas-bg]"))) {
+      // Close inspector on empty canvas click
+      if (openInspectorId) {
+        setOpenInspectorId(null);
+        return;
+      }
       const rect = viewportRef.current?.getBoundingClientRect();
       if (!rect) return;
       const wx = (e.clientX - rect.left - rect.width / 2) / zoom - pan.x;
@@ -441,7 +603,7 @@ export default function WorkspaceV2() {
 
   /* ─── Navigation helpers ─── */
   const goToWorkspace = (terrId: string) => {
-    setViewMode("spatial");
+    // Do NOT force viewMode — keep the previous arrangement so items don't jump around
     const t = territories.find((x) => x.id === terrId);
     if (!t) return;
     setBloomedIds([]);
@@ -462,27 +624,27 @@ export default function WorkspaceV2() {
   /* ─── Focused item (nearest to camera center) ─── */
   const focusedItem = useMemo<V2Item | null>(() => {
     if (zoom < 0.48) return null;
-    if (bloomedIds.length > 0) return null;
+    if (focusedViewOpen) return null;
     const cx = -pan.x, cy = -pan.y;
-    const pool = currentTerritory ? baseItems.filter((i) => i.workspaceId === currentTerritory.id) : baseItems;
+    // Search ALL items, not just current territory
     let best: V2Item | null = null;
     let bd = Infinity;
     const maxDist = 300 / zoom;
-    pool.forEach((it) => {
+    baseItems.forEach((it) => {
       const p = posOf(it);
       const ix = p.x + it.w / 2, iy = p.y + it.h / 2;
       const d = Math.hypot(ix - cx, iy - cy);
       if (d < bd && d < maxDist) { best = it; bd = d; }
     });
     return best;
-  }, [pan, zoom, currentTerritory, posOf, baseItems, bloomedIds]);
+  }, [pan, zoom, posOf, baseItems, focusedViewOpen]);
 
   const cycleFocus = (dir: 1 | -1) => {
-    const pool = currentTerritory ? baseItems.filter((i) => i.workspaceId === currentTerritory.id) : baseItems;
-    if (pool.length === 0) return;
-    let idx = focusedItem ? pool.findIndex((i) => i.id === focusedItem.id) : -1;
-    idx = (idx + dir + pool.length) % pool.length;
-    const it = pool[idx];
+    // Cycle through ALL items
+    if (baseItems.length === 0) return;
+    let idx = focusedItem ? baseItems.findIndex((i) => i.id === focusedItem.id) : -1;
+    idx = (idx + dir + baseItems.length) % baseItems.length;
+    const it = baseItems[idx];
     const p = posOf(it);
     flyTo({ x: -(p.x + it.w / 2), y: -(p.y + it.h / 2) }, Math.max(zoom, TIERS.ITEM));
   };
@@ -506,28 +668,47 @@ export default function WorkspaceV2() {
 
   /* ─── Item interactions ─── */
   const onItemClick = (item: V2Item, e: React.MouseEvent) => {
+    e.stopPropagation();
+    // Shift-click: immediate multi-select (Tray)
     if (e.shiftKey) {
+      if (clickTimerRef.current) { clearTimeout(clickTimerRef.current); clickTimerRef.current = null; }
       const s = new Set(selection);
       if (s.has(item.id)) s.delete(item.id); else s.add(item.id);
       setSelection(s);
       if (s.size > 1) setTrayOpen(true);
       return;
     }
-    if (e.metaKey || e.ctrlKey) {
-      if (bloomedIds.includes(item.id)) {
-        // Promote to primary (first in list).
-        setBloomedIds((bs) => [item.id, ...bs.filter((x) => x !== item.id)]);
-        return;
-      }
+    // If building focus set: toggle item in/out of set (no delay needed)
+    if (buildingFocusSet) {
+      if (clickTimerRef.current) { clearTimeout(clickTimerRef.current); clickTimerRef.current = null; }
+      setFocusSetIds((prev) => {
+        if (prev.includes(item.id)) return prev.filter((id) => id !== item.id);
+        return [...prev, item.id];
+      });
+      return;
     }
-    if (bloomedIds.includes(item.id)) return;
-    const p = posOf(item);
-    flyTo({ x: -(p.x + item.w / 2), y: -(p.y + item.h / 2) }, Math.max(zoom, TIERS.WORKSPACE + 0.1));
+    // Normal single click: open inspector + fly camera
+    if (clickTimerRef.current) { clearTimeout(clickTimerRef.current); clickTimerRef.current = null; }
+    clickTimerRef.current = setTimeout(() => {
+      clickTimerRef.current = null;
+      // Set inspector position near item but on right side of screen
+      const vpW = typeof window !== "undefined" ? window.innerWidth : 1400;
+      setInspectorPos({ x: Math.min(vpW - 420, vpW - 440), y: 90 });
+      setOpenInspectorId(item.id);
+      const p = posOf(item);
+      flyTo({ x: -(p.x + item.w / 2), y: -(p.y + item.h / 2) }, Math.max(zoom, TIERS.ITEM));
+    }, 220);
   };
+
+  /* Double click → start building focus set with this item as primary */
   const onItemDoubleClick = (item: V2Item) => {
-    setBloomedIds((bs) => (bs.includes(item.id) ? bs : [...bs, item.id].slice(-3)));
+    if (clickTimerRef.current) { clearTimeout(clickTimerRef.current); clickTimerRef.current = null; }
+    setBuildingFocusSet(true);
+    setPrimaryFocusId(item.id);
+    setFocusSetIds([item.id]);
+    setOpenInspectorId(null); // close inspector if open
   };
-  const closeBloom = (id: string) => setBloomedIds((bs) => bs.filter((i) => i !== id));
+
   const onPinItem = (item: V2Item) => {
     if (!pinned.includes(item.id)) setPinned((p) => [...p, item.id]);
     setTrayOpen(true);
@@ -652,7 +833,7 @@ export default function WorkspaceV2() {
         if (r.ok) {
            const id = r.data?.artifactId || r.data?.plannerItemId || r.data?.chatId;
            if (id) {
-             action = { label: `Open ${kind}`, onClick: () => setPendingBloomSourceId(id) };
+             action = { label: `Open ${kind}`, onClick: () => setPendingOpenSourceId(id) };
            }
         }
         scheduleIslandDismiss({
@@ -828,7 +1009,7 @@ export default function WorkspaceV2() {
           scheduleIslandDismiss({
             status: r.ok ? "done" : "error",
             text: r.ok ? `Created note "${title}".` : "Could not create note.",
-            action: r.data?.artifactId ? { label: "Open Note", onClick: () => setPendingBloomSourceId(r.data.artifactId) } : undefined
+            action: r.data?.artifactId ? { label: "Open Note", onClick: () => setPendingOpenSourceId(r.data.artifactId) } : undefined
           });
         } else {
           // Demo: still show the sequence so the UI is honest
@@ -852,7 +1033,7 @@ export default function WorkspaceV2() {
           scheduleIslandDismiss({ 
             status: r.ok ? "done" : "error", 
             text: r.ok ? `Added planner task "${title}".` : "Could not add task.", 
-            action: r.data?.plannerItemId ? { label: "Open Task", onClick: () => setPendingBloomSourceId(r.data.plannerItemId) } : undefined
+            action: r.data?.plannerItemId ? { label: "Open Task", onClick: () => setPendingOpenSourceId(r.data.plannerItemId) } : undefined
           });
         } else {
           spawnCenterTrail();
@@ -871,7 +1052,7 @@ export default function WorkspaceV2() {
           scheduleIslandDismiss({ 
             status: r.ok ? "done" : "error", 
             text: r.ok ? `Started thread "${title}".` : "Could not start thread.", 
-            action: r.data?.chatId ? { label: "Open Thread", onClick: () => setPendingBloomSourceId(r.data.chatId) } : undefined
+            action: r.data?.chatId ? { label: "Open Thread", onClick: () => setPendingOpenSourceId(r.data.chatId) } : undefined
           });
         } else {
           spawnCenterTrail();
@@ -996,7 +1177,7 @@ export default function WorkspaceV2() {
               status: "done",
               text: stub?.text ?? "Saved workspace action.",
               chips: j?.targetKind ? [j.targetKind] : stub?.chips,
-              action: j?.targetId ? { label: "Open result", onClick: () => setPendingBloomSourceId(j.targetId) } : undefined,
+              action: j?.targetId ? { label: "Open result", onClick: () => setPendingOpenSourceId(j.targetId) } : undefined,
             });
           } else {
             scheduleIslandDismiss(stub);
@@ -1015,20 +1196,24 @@ export default function WorkspaceV2() {
   );
 
   /* ─── Tray actions ─── */
-  const onTrayAction = (action: "bloom" | "quiz" | "link" | "ask" | "focus") => {
+  const onTrayAction = (action: "ask" | "focus") => {
     const ids = Array.from(selection);
     const n = ids.length;
-    if (action === "bloom" || action === "focus") {
-      ids.slice(0, 3).forEach((id) => setBloomedIds((bs) => (bs.includes(id) ? bs : [...bs, id].slice(-3))));
+    if (action === "focus") {
+      // Open focused view with selected items
+      setFocusSetIds(ids);
+      setPrimaryFocusId(ids[0] ?? null);
+      setFocusViewPrimaryId(ids[0] ?? null);
+      setFocusViewFocusIdx(0);
+      setBuildingFocusSet(false);
+      setFocusedViewOpen(true);
       return;
     }
     touchAI(ids, action);
-    let text = "";
-    if (action === "ask") text = `Asked about ${n} items. Pulled common threads.`;
-    if (action === "quiz") text = `Quiz generated from ${n} items — 12 questions.`;
-    if (action === "link") text = `Linked ${n} items as related.`;
+    const text = `Asked about ${n} items. Pulled common threads.`;
     scheduleIslandDismiss({ status: "done", text, chips: [`${n} items`] });
     setSelection(new Set());
+    setTrayOpen(false);
   };
 
   /* ─── Spotlight picks ─── */
@@ -1054,6 +1239,7 @@ export default function WorkspaceV2() {
       if (isLive) {
         void updateWorkspaceWidget({ widgetId: id, x, y });
       }
+      saveWidgetPositions(next);
       return next;
     });
   const closeWidget = (id: string) => {
@@ -1063,38 +1249,54 @@ export default function WorkspaceV2() {
     }
   };
   const toggleWidgetCollapsed = (id: string) =>
-    setWidgets((ws) => ws.map((w) => {
-      if (w.id !== id) return w;
-      const next = { ...w, collapsed: !w.collapsed };
-      if (isLive) {
-        void updateWorkspaceWidget({ widgetId: id, collapsed: next.collapsed });
+    setWidgets((ws) => {
+      const next = ws.map((w) => {
+        if (w.id !== id) return w;
+        return { ...w, collapsed: !w.collapsed };
+      });
+      const w = next.find((w) => w.id === id);
+      if (w && isLive) {
+        void updateWorkspaceWidget({ widgetId: id, collapsed: w.collapsed });
       }
+      saveWidgetPositions(next);
       return next;
-    }));
+    });
 
   const expandWidget = useCallback((id: string) => {
-    setWidgets((ws) => ws.map((w) => {
-      if (w.id !== id) return w;
-      if (w.collapsed === false) return w;
+    setWidgets((ws) => {
+      const next = ws.map((w) => {
+        if (w.id !== id) return w;
+        if (w.collapsed === false) return w;
+        return { ...w, collapsed: false };
+      });
       if (isLive) void updateWorkspaceWidget({ widgetId: id, collapsed: false });
-      return { ...w, collapsed: false };
-    }));
+      saveWidgetPositions(next);
+      return next;
+    });
   }, [isLive]);
 
   const collapseAllWidgets = useCallback(() => {
-    setWidgets((ws) => ws.map((w) => {
-      if (w.collapsed) return w;
-      if (isLive) void updateWorkspaceWidget({ widgetId: w.id, collapsed: true });
-      return { ...w, collapsed: true };
-    }));
+    setWidgets((ws) => {
+      const next = ws.map((w) => {
+        if (w.collapsed) return w;
+        return { ...w, collapsed: true };
+      });
+      next.forEach((w) => { if (isLive) void updateWorkspaceWidget({ widgetId: w.id, collapsed: true }); });
+      saveWidgetPositions(next);
+      return next;
+    });
   }, [isLive]);
 
   const expandAllWidgets = useCallback(() => {
-    setWidgets((ws) => ws.map((w) => {
-      if (!w.collapsed) return w;
-      if (isLive) void updateWorkspaceWidget({ widgetId: w.id, collapsed: false });
-      return { ...w, collapsed: false };
-    }));
+    setWidgets((ws) => {
+      const next = ws.map((w) => {
+        if (!w.collapsed) return w;
+        return { ...w, collapsed: false };
+      });
+      next.forEach((w) => { if (isLive) void updateWorkspaceWidget({ widgetId: w.id, collapsed: false }); });
+      saveWidgetPositions(next);
+      return next;
+    });
   }, [isLive]);
   const toggleTimer = useCallback((id: string) =>
     setWidgets((ws) => ws.map((w) => {
@@ -1183,34 +1385,83 @@ export default function WorkspaceV2() {
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setSpotOpen(true); return; }
       if (e.key === " ") {
+        // Skip if focus is in a text field
+        const tag = (e.target as HTMLElement)?.tagName;
+        const isEditable = (e.target as HTMLElement)?.isContentEditable;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || isEditable) return;
         e.preventDefault();
         if (e.repeat) { setSpaceHeld(true); return; }
-        if (focusedItem) {
-          setBloomedIds((bs) => (bs.includes(focusedItem.id) ? bs.filter((i) => i !== focusedItem.id) : [...bs, focusedItem.id].slice(-3)));
+        // Space: open/close focused view
+        if (focusedViewOpen) {
+          // Already in focused view — close it
+          setFocusedViewOpen(false);
+          setBuildingFocusSet(false);
+          setFocusSetIds([]);
+          setPrimaryFocusId(null);
+          setFocusViewPrimaryId(null);
+        } else if (buildingFocusSet && focusSetIds.length > 0) {
+          // Open focused view with the current set
+          setFocusViewPrimaryId(primaryFocusId ?? focusSetIds[0]);
+          setFocusViewFocusIdx(0);
+          setFocusedViewOpen(true);
+        } else if (selection.size > 0) {
+          // Tray selection → open focused view with tray items
+          const ids = Array.from(selection);
+          setFocusSetIds(ids);
+          setPrimaryFocusId(ids[0]);
+          setFocusViewPrimaryId(ids[0]);
+          setFocusViewFocusIdx(0);
+          setBuildingFocusSet(false);
+          setFocusedViewOpen(true);
+        } else if (focusedItem) {
+          // Quick-focus: 1-item focused view
+          setFocusSetIds([focusedItem.id]);
+          setPrimaryFocusId(focusedItem.id);
+          setFocusViewPrimaryId(focusedItem.id);
+          setFocusViewFocusIdx(0);
+          setFocusedViewOpen(true);
         }
       }
-      if (e.key === "Tab") { e.preventDefault(); cycleFocus(e.shiftKey ? -1 : 1); }
+      if (e.key === "Tab") {
+        if (focusedViewOpen && focusSetIds.length > 0) {
+          e.preventDefault();
+          setFocusViewFocusIdx((i) => {
+            const n = focusSetIds.length;
+            return ((i + (e.shiftKey ? -1 : 1)) + n) % n;
+          });
+        } else {
+          e.preventDefault();
+          cycleFocus(e.shiftKey ? -1 : 1);
+        }
+      }
       if (e.key === "Escape") {
-        if (ctx) setCtx(null);
+        if (focusedViewOpen) {
+          setFocusedViewOpen(false);
+          setBuildingFocusSet(false);
+          setFocusSetIds([]);
+          setPrimaryFocusId(null);
+          setFocusViewPrimaryId(null);
+        } else if (buildingFocusSet) {
+          setBuildingFocusSet(false);
+          setFocusSetIds([]);
+          setPrimaryFocusId(null);
+        } else if (openInspectorId) {
+          setOpenInspectorId(null);
+        } else if (ctx) setCtx(null);
         else if (editingWidgetId) setEditingWidgetId(null);
         else if (spotOpen) setSpotOpen(false);
         else if (infoOpen) setInfoOpen(false);
-        else if (bloomedIds.length > 0) setBloomedIds((bs) => bs.slice(0, -1));
-        else if (selection.size > 0) setSelection(new Set());
+        else if (selection.size > 0) { setSelection(new Set()); setTrayOpen(false); }
         else if (trayOpen) setTrayOpen(false);
       }
       const rect = viewportRef.current?.getBoundingClientRect();
       if (rect && (e.key === "=" || e.key === "+")) zoomAt(rect.width / 2, rect.height / 2, 1.08);
       if (rect && (e.key === "-" || e.key === "_")) zoomAt(rect.width / 2, rect.height / 2, 0.92);
       if (e.key === "0") goToAtlas();
-      if (e.key === "1") setViewMode("spatial");
+      if (e.key === "1") setViewMode("topic");
       if (e.key === "2") setViewMode("type");
-      if (e.key === "3") setViewMode("topic");
-      if (e.key === "4") setViewMode("timeline");
+      if (e.key === "3") setViewMode("timeline");
       if (e.key.toLowerCase() === "w") setWidgetsHidden((h) => !h);
-      if (e.key.toLowerCase() === "b" && focusedItem) {
-        setBloomedIds((bs) => (bs.includes(focusedItem.id) ? bs.filter((i) => i !== focusedItem.id) : [...bs, focusedItem.id].slice(-3)));
-      }
     };
     const onUp = (e: KeyboardEvent) => { if (e.key === " ") setSpaceHeld(false); };
     window.addEventListener("keydown", onKey);
@@ -1220,7 +1471,7 @@ export default function WorkspaceV2() {
       window.removeEventListener("keyup", onUp);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusedItem, bloomedIds, spotOpen, selection, trayOpen, ctx, infoOpen, zoomAt]);
+  }, [focusedItem, focusedViewOpen, buildingFocusSet, focusSetIds, primaryFocusId, openInspectorId, spotOpen, selection, trayOpen, ctx, infoOpen, zoomAt]);
 
   /* ─── External event bridges (preserve legacy app contract) ─── */
   useEffect(() => {
@@ -1260,13 +1511,12 @@ export default function WorkspaceV2() {
     const cx = -pan.x, cy = -pan.y;
     const hw = vpSize.w / 2 / zoom + pad;
     const hh = vpSize.h / 2 / zoom + pad;
-    let pool = baseItems;
-    if (arranged && currentTerritory) pool = baseItems.filter((i) => i.workspaceId === currentTerritory.id);
-    return pool.filter((it) => {
+    // Show ALL items from ALL workspaces always
+    return baseItems.filter((it) => {
       const p = posOf(it);
       return p.x + it.w > cx - hw && p.x < cx + hw && p.y + it.h > cy - hh && p.y < cy + hh;
     });
-  }, [pan, zoom, vpSize, arranged, currentTerritory, posOf, baseItems]);
+  }, [pan, zoom, vpSize, posOf, baseItems]);
 
   /* ─── Welcome toast (first-load) ─── */
   const [welcomeShown, setWelcomeShown] = useState(false);
@@ -1280,28 +1530,27 @@ export default function WorkspaceV2() {
     }
   }, []);
 
-  /* ─── On view-mode change (non-spatial), frame the territory ─── */
+  /* ─── On view-mode change, frame the territory ─── */
   useEffect(() => {
-    if (viewMode !== "spatial" && currentTerritory) {
+    if (currentTerritory) {
       flyTo({ x: -currentTerritory.cx, y: -currentTerritory.cy + 40 }, Math.max(0.62, zoom));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewMode]);
 
-  /* ─── Bloom layout (flex/grid — never overlap) ─── */
-  const bloomed = bloomedIds.map((id) => baseItems.find((i) => i.id === id)).filter(Boolean) as V2Item[];
+  const [pendingOpenSourceId, setPendingOpenSourceId] = useState<string | null>(null);
 
-  const [pendingBloomSourceId, setPendingBloomSourceId] = useState<string | null>(null);
-
-  /* ─── Check pending bloom ─── */
+  /* ─── Check pending open (after backend creation returns id) ─── */
   useEffect(() => {
-    if (!pendingBloomSourceId) return;
-    const hit = baseItems.find((i) => i.sourceChatId === pendingBloomSourceId || i.sourceArtifactId === pendingBloomSourceId || i.sourceId === pendingBloomSourceId);
+    if (!pendingOpenSourceId) return;
+    const hit = baseItems.find((i) => i.sourceChatId === pendingOpenSourceId || i.sourceArtifactId === pendingOpenSourceId || i.sourceId === pendingOpenSourceId);
     if (hit) {
-      goToItem(hit.id, true);
-      setPendingBloomSourceId(null);
+      const p = posOf(hit);
+      flyTo({ x: -(p.x + hit.w / 2), y: -(p.y + hit.h / 2) }, Math.max(zoom, TIERS.ITEM));
+      setOpenInspectorId(hit.id);
+      setPendingOpenSourceId(null);
     }
-  }, [baseItems, pendingBloomSourceId, goToItem]);
+  }, [baseItems, pendingOpenSourceId, posOf, flyTo, zoom]);
 
   /* ─── Derived ─── */
   const canvasTransform = `translate(${vpSize.w / 2 + pan.x * zoom}px, ${vpSize.h / 2 + pan.y * zoom}px) scale(${zoom})`;
@@ -1311,7 +1560,7 @@ export default function WorkspaceV2() {
   /* ─── Render ─── */
   return (
     <div
-      className={`spectra-v2 spectra-v2-grid fixed inset-0 overflow-hidden ${theme === "dark" ? "dark" : ""}`}
+      className={`spectra-v2 spectra-v2-grid fixed inset-0 overflow-hidden ${theme === "dark" ? "dark" : ""} ${buildingFocusSet ? "sv2-building-set" : ""}`}
       style={{ cursor: panning ? "grabbing" : spaceHeld ? "grab" : "default" }}
     >
       {/* Viewport / canvas bg */}
@@ -1339,24 +1588,21 @@ export default function WorkspaceV2() {
           style={{ left: 0, top: 0, transform: canvasTransform, transformOrigin: "0 0", width: 1, height: 1 }}
         >
           {/* Territory borders */}
-          {territories.map((t) => {
-            const territoryOpacity = zoom < 0.5 ? 1 : zoom < 0.8 ? (0.8 - zoom) * 4 : 0;
-            return (
+          {territories.map((t) => (
               <div
                 key={t.id}
                 className="absolute pointer-events-none"
                 style={{
                   left: t.cx - t.w / 2, top: t.cy - t.h / 2, width: t.w, height: t.h,
-                  border: `1.5px dashed ${t.color}`, opacity: territoryOpacity * 0.35,
+                  border: `2px dashed ${t.color}`, opacity: 0.55,
                   borderRadius: 24, transition: "opacity 220ms ease",
                 }}
               />
-            );
-          })}
+          ))}
 
           {/* Territory titles */}
           {territories.map((t) => {
-            const labelOpacity = zoom < 0.32 ? 1 : zoom < 0.5 ? 1 : zoom < 0.72 ? (0.72 - zoom) * 3.2 : 0;
+            const labelOpacity = 1;
             if (labelOpacity <= 0) return null;
             const itemCount = baseItems.filter((i) => i.workspaceId === t.id).length;
             return (
@@ -1368,127 +1614,139 @@ export default function WorkspaceV2() {
                   opacity: labelOpacity, transition: "opacity 220ms ease",
                 }}
               >
-                <div className="font-display" style={{ fontSize: 44, color: t.color, lineHeight: 1, letterSpacing: "-0.02em", opacity: 0.85 }}>
+                <div className="font-display" style={{ fontSize: 50, color: t.color, lineHeight: 1, letterSpacing: "-0.02em", opacity: 0.9 }}>
                   {t.name}
                 </div>
-                <div className="font-mono uppercase tracking-[0.16em]" style={{ fontSize: 14, color: t.color, opacity: 0.6, marginTop: 10 }}>
+                <div className="font-mono uppercase tracking-[0.16em]" style={{ fontSize: 16, color: t.color, opacity: 0.75, marginTop: 12 }}>
                   {itemCount} items · {t.subtitle}
                 </div>
               </div>
             );
           })}
 
-          {/* ─── View-mode group labels (type / topic / timeline) ─── */}
-          {arranged && currentTerritory && viewMode !== "spatial" && (() => {
-            const w = currentTerritory;
-            const wsItems = baseItems.filter((i) => i.workspaceId === w.id);
-            const padLeft = w.cx - w.w / 2 + 80;
-            const padTop = w.cy - w.h / 2 + 160;
+          {/* ─── View-mode group labels for ALL territories ─── */}
+          {arranged && (() => {
+            const allLabels: import("react").ReactNode[] = [];
+            for (const w of territories) {
+              const wsItems = baseItems.filter((i) => i.workspaceId === w.id);
+              const padLeft = w.cx - w.w / 2 + 80;
+              const padTop = w.cy - w.h / 2 + 160;
 
-            if (viewMode === "type" || viewMode === "topic") {
-              const byKey: Record<string, V2Item[]> = {};
-              wsItems.forEach((it) => {
-                const k = viewMode === "type" ? it.kind : (it.meta?.topic as string) ?? it.kind;
-                (byKey[k] = byKey[k] || []).push(it);
-              });
-              let y = padTop;
-              const labels: import("react").ReactNode[] = [];
-              Object.keys(byKey).forEach((k, ki) => {
-                const row = byKey[k];
-                const labelText = viewMode === "type"
-                  ? `${KIND_META[k as V2Kind]?.label ?? k} · ${row.length}`
-                  : `Topic: ${k} · ${row.length}`;
-                const color = viewMode === "type" ? (KIND_META[k as V2Kind]?.tone ?? "var(--ink-400)") : "var(--ink-400)";
-                labels.push(
-                  <div key={`group-${ki}`} className="absolute pointer-events-none" style={{ left: 0, top: 0 }}>
-                    {ki > 0 && (
-                      <div
-                        className="absolute sv2-view-lane-divider"
-                        style={{ left: padLeft - 20, top: y - 26, width: w.w - 100 }}
-                      />
-                    )}
-                    <div
-                      className="absolute sv2-view-group-label"
-                      style={{ left: padLeft, top: y - 22, color }}
-                    >
-                      {labelText}
+              if (viewMode === "type") {
+                const byKey: Record<string, V2Item[]> = {};
+                wsItems.forEach((it) => { (byKey[it.kind] = byKey[it.kind] || []).push(it); });
+                let y = padTop;
+                Object.keys(byKey).forEach((k, ki) => {
+                  const row = byKey[k];
+                  const color = KIND_META[k as V2Kind]?.tone ?? "var(--ink-400)";
+                  allLabels.push(
+                    <div key={`group-${w.id}-${ki}`} className="absolute pointer-events-none" style={{ left: 0, top: 0 }}>
+                      {ki > 0 && (
+                        <div className="absolute sv2-view-lane-divider"
+                             style={{ left: padLeft - 20, top: y - 28, width: w.w - 100 }} />
+                      )}
+                      <div className="absolute sv2-view-group-label" style={{ left: padLeft, top: y - 22, color }}>
+                        {KIND_META[k as V2Kind]?.label ?? k} · {row.length}
+                      </div>
                     </div>
-                  </div>
-                );
-                y += Math.ceil(row.length / 3) * 270 + 50;
-              });
-              return labels;
-            }
+                  );
+                  y += Math.ceil(row.length / 3) * 270 + 60;
+                });
+              }
 
-            if (viewMode === "timeline") {
-              const sorted = [...wsItems].sort((a, b) => {
-                const au = (a.meta?.updatedAt as number) ?? 0;
-                const bu = (b.meta?.updatedAt as number) ?? 0;
-                return bu - au;
-              });
-              const now = Date.now();
-              const buckets: { label: string; until: number }[] = [
-                { label: "Today",     until: now - 86_400_000 },
-                { label: "Yesterday", until: now - 2 * 86_400_000 },
-                { label: "Last week", until: now - 7 * 86_400_000 },
-                { label: "Older",     until: 0 },
-              ];
-              const seenBuckets = new Set<string>();
-              return sorted.map((it, idx) => {
-                const ts = (it.meta?.updatedAt as number) ?? 0;
-                const bucket = buckets.find((b) => ts > b.until) ?? buckets[buckets.length - 1];
-                const row = Math.floor(idx / 4);
-                const y = padTop + row * 270;
-                if (seenBuckets.has(bucket.label)) return null;
-                seenBuckets.add(bucket.label);
-                return (
-                  <div
-                    key={`tl-${bucket.label}`}
-                    className="absolute sv2-timeline-tick-label"
-                    style={{ left: padLeft - 68, top: y + 4, width: 60, textAlign: "right" }}
-                  >
-                    {bucket.label}
-                  </div>
-                );
-              });
+              if (viewMode === "topic") {
+                const groups = computeTopicGroups(wsItems);
+                let y = padTop;
+                Object.entries(groups).forEach(([topicLabel, items], ki) => {
+                  allLabels.push(
+                    <div key={`topic-${w.id}-${ki}`} className="absolute pointer-events-none" style={{ left: 0, top: 0 }}>
+                      {ki > 0 && (
+                        <div className="absolute sv2-view-lane-divider"
+                             style={{ left: padLeft - 20, top: y - 28, width: w.w - 100 }} />
+                      )}
+                      <div className="absolute sv2-view-group-label" style={{ left: padLeft, top: y - 22, color: "var(--mint)" }}>
+                        {topicLabel} · {items.length}
+                      </div>
+                    </div>
+                  );
+                  y += Math.ceil(items.length / 3) * 270 + 60;
+                });
+              }
+
+              if (viewMode === "timeline") {
+                const now = Date.now();
+                const buckets: { label: string; until: number; items: V2Item[] }[] = [
+                  { label: "Today",      until: now - 86_400_000,     items: [] },
+                  { label: "Yesterday",  until: now - 2 * 86_400_000, items: [] },
+                  { label: "Last week",  until: now - 7 * 86_400_000, items: [] },
+                  { label: "Older",      until: 0,                    items: [] },
+                ];
+                wsItems.forEach((it) => {
+                  const ts = (it.meta?.updatedAt as number) ?? (0);
+                  const bucket = buckets.find((b) => ts > b.until) ?? buckets[buckets.length - 1];
+                  bucket.items.push(it);
+                });
+                buckets.forEach((b) => b.items.sort((a, z) => ((z.meta?.updatedAt as number) ?? 0) - ((a.meta?.updatedAt as number) ?? 0)));
+                let y = padTop;
+                buckets.forEach((b, bi) => {
+                  if (b.items.length === 0) return;
+                  allLabels.push(
+                    <div key={`tl-${w.id}-${bi}`} className="absolute pointer-events-none" style={{ left: 0, top: 0 }}>
+                      {bi > 0 && (
+                        <div className="absolute sv2-view-lane-divider"
+                             style={{ left: padLeft, top: y - 28, width: w.w - 180 }} />
+                      )}
+                      <div className="absolute sv2-timeline-tick-label sv2-timeline-bucket-header"
+                           style={{ left: padLeft, top: y - 20 }}>
+                        {b.label}
+                        <span className="ml-2 font-normal opacity-55">{b.items.length}</span>
+                      </div>
+                    </div>
+                  );
+                  y += Math.ceil(b.items.length / 3) * 270 + 70;
+                });
+              }
             }
-            return null;
+            return allLabels;
           })()}
 
           {/* Items */}
           {visibleItems.map((it, idx) => {
             const m = modeFor(it);
             const p = posOf(it);
-            const dimmed = bloomedIds.length > 0 && !bloomedIds.includes(it.id);
+            const inSet = focusSetIds.includes(it.id);
+            const isPrimary = it.id === primaryFocusId;
+            const setIndex = focusSetIds.indexOf(it.id);
             return (
               <div
                 key={it.id}
                 className="absolute sv2-drift-in"
                 style={{
                   left: p.x, top: p.y, width: it.w, height: it.h,
-                  opacity: dimmed ? 0.22 : 1,
-                  pointerEvents: dimmed || m === "bloom" ? "none" : "auto",
                   transition:
                     "left 380ms cubic-bezier(0.22,1,0.36,1), top 380ms cubic-bezier(0.22,1,0.36,1), width 260ms ease, height 260ms ease, opacity 220ms ease",
                   animationDelay: `${Math.min(idx * 22, 360)}ms`,
+                  position: "absolute",
                 }}
               >
-                {/* When bloomed we render a faint placeholder here; real bloom is rendered in the overlay. */}
-                {m === "bloom" ? (
-                  <div className="w-full h-full rounded-xl" style={{ background: "rgba(200,200,200,0.06)", border: "1px dashed var(--line)" }} />
-                ) : (
-                  <ItemCard
-                    item={it}
-                    mode={m}
-                    focused={focusedItem?.id === it.id}
-                    selected={selection.has(it.id)}
-                    aiTouched={!!aiTouched[it.id]}
-                    onClick={onItemClick}
-                    onDoubleClick={onItemDoubleClick}
-                    onPin={onPinItem}
-                    onClose={() => closeBloom(it.id)}
-                    onEdit={(patch) => handleItemEdit(it, patch)}
-                  />
+                <ItemCard
+                  item={it}
+                  mode={m}
+                  focused={focusedItem?.id === it.id}
+                  selected={selection.has(it.id)}
+                  inSet={inSet}
+                  primaryInSet={isPrimary && buildingFocusSet}
+                  aiTouched={!!aiTouched[it.id]}
+                  onClick={onItemClick}
+                  onDoubleClick={onItemDoubleClick}
+                  onPin={onPinItem}
+                  onEdit={(patch) => handleItemEdit(it, patch)}
+                />
+                {/* Set index badge */}
+                {inSet && buildingFocusSet && (
+                  <div className="sv2-set-badge" style={{ background: isPrimary ? "var(--accent)" : "var(--ink-300)" }}>
+                    {isPrimary ? "★" : setIndex + 1}
+                  </div>
                 )}
               </div>
             );
@@ -1513,7 +1771,7 @@ export default function WorkspaceV2() {
       </div>
 
       {/* ─── AI connector trails (command-bar → new item) ─── */}
-      {trails.length > 0 && viewMode === "spatial" && (
+      {trails.length > 0 && (
         <svg className="fixed inset-0 pointer-events-none z-[35]" width="100%" height="100%">
           {trails.map((t) => {
             const midX = (t.x1 + t.x2) / 2;
@@ -1526,97 +1784,101 @@ export default function WorkspaceV2() {
         </svg>
       )}
 
-      {/* ─── Bloom overlay (fixed-position, solid, flex-based layout) ─── */}
-      {bloomed.length > 0 && (
-        <>
-          <div className="sv2-scrim" onClick={() => setBloomedIds([])} />
-          <div
-            className={`sv2-bloom-stage count-${Math.min(bloomed.length, 3)}`}
-            onMouseDown={(e) => {
-              // Clicking the stage background (not a pane) closes all.
-              if (e.target === e.currentTarget) setBloomedIds([]);
-            }}
-          >
-            {bloomed.length <= 2 && bloomed.map((it, idx) => (
-              <div
-                key={it.id}
-                data-bloom-editor="1"
-                className="sv2-bloom-slot"
-                onMouseDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  if (e.metaKey || e.ctrlKey) {
-                    e.stopPropagation();
-                    setBloomedIds((bs) => [it.id, ...bs.filter((x) => x !== it.id)]);
-                  }
-                }}
-              >
-                <ItemCard
-                  item={it}
-                  mode="bloom"
-                  aiTouched={!!aiTouched[it.id]}
-                  bloomPrimary={idx === 0}
-                  onClose={() => closeBloom(it.id)}
-                  onPin={onPinItem}
-                  onEdit={(patch) => handleItemEdit(it, patch)}
-                />
-              </div>
-            ))}
-            {bloomed.length === 3 && (
-              <>
-                <div
-                  key={bloomed[0].id}
-                  data-bloom-editor="1"
-                  className="sv2-bloom-slot primary"
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    if (e.metaKey || e.ctrlKey) {
-                      e.stopPropagation();
-                      setBloomedIds((bs) => [bloomed[0].id, ...bs.filter((x) => x !== bloomed[0].id)]);
-                    }
-                  }}
-                >
-                  <ItemCard
-                    item={bloomed[0]}
-                    mode="bloom"
-                    aiTouched={!!aiTouched[bloomed[0].id]}
-                    bloomPrimary
-                    onClose={() => closeBloom(bloomed[0].id)}
-                    onPin={onPinItem}
-                    onEdit={(patch) => handleItemEdit(bloomed[0], patch)}
-                  />
-                </div>
-                <div className="sv2-bloom-slot secondary-col">
-                  {[bloomed[1], bloomed[2]].map((it) => (
-                    <div
-                      key={it.id}
-                      data-bloom-editor="1"
-                      onMouseDown={(e) => e.stopPropagation()}
-                      onClick={(e) => {
-                        if (e.metaKey || e.ctrlKey) {
-                          e.stopPropagation();
-                          setBloomedIds((bs) => [it.id, ...bs.filter((x) => x !== it.id)]);
-                        }
-                      }}
-                    >
-                      <ItemCard
-                        item={it}
-                        mode="bloom"
-                        aiTouched={!!aiTouched[it.id]}
-                        bloomPrimary={false}
-                        onClose={() => closeBloom(it.id)}
-                        onPin={onPinItem}
-                        onEdit={(patch) => handleItemEdit(it, patch)}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        </>
-      )}
+      {/* ─── Focused view (replaces bloom) ─── */}
+      {focusedViewOpen && (() => {
+        const focusItems = focusSetIds.map((id) => baseItems.find((i) => i.id === id)).filter(Boolean) as V2Item[];
+        if (focusItems.length === 0) return null;
+        const activePrimaryId = focusViewPrimaryId ?? focusItems[0].id;
+        const closeView = () => {
+          setFocusedViewOpen(false);
+          setBuildingFocusSet(false);
+          setFocusSetIds([]);
+          setPrimaryFocusId(null);
+          setFocusViewPrimaryId(null);
+        };
+        const promotePrimary = (id: string) => {
+          setFocusViewPrimaryId(id);
+          setFocusViewFocusIdx(focusSetIds.indexOf(id));
+        };
+        const n = focusItems.length;
+        // Arrange primary first, then rest
+        const primaryItem = focusItems.find((i) => i.id === activePrimaryId) ?? focusItems[0];
+        const restItems = focusItems.filter((i) => i.id !== primaryItem.id);
 
-      {/* Chrome */}
+        const renderPane = (it: V2Item, isPrim: boolean, isFocused: boolean, idx: number) => (
+          <div
+            key={it.id}
+            data-bloom-editor="1"
+            className={`sv2-focus-pane${isPrim ? " primary" : ""}`}
+            style={{
+              outline: isFocused && !isPrim ? "2px solid rgba(14,142,232,0.4)" : "none",
+              animationDelay: `${idx * 50}ms`,
+              flex: isPrim ? (n === 1 ? undefined : "1.55 1 0") : "1 1 0",
+            }}
+            onClick={!isPrim ? () => promotePrimary(it.id) : undefined}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="sv2-focus-item-header" style={{ background: `linear-gradient(90deg, ${it.color}18, transparent 60%)` }}>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: it.color }} />
+                  <span className="font-mono text-[10px] uppercase tracking-[0.14em] truncate" style={{ color: "var(--ink-400)" }}>
+                    {KIND_META[it.kind]?.label ?? it.kind}
+                  </span>
+                  {isPrim && <span className="font-mono text-[9px] uppercase tracking-[0.12em] px-1.5 py-0.5 rounded-full" style={{ background: "var(--accent)", color: "#fff" }}>Primary</span>}
+                </div>
+                {!isPrim && <span className="sv2-focus-promote-hint">Click to promote</span>}
+                {isPrim && (
+                  <button onClick={closeView} className="w-6 h-6 rounded-full flex items-center justify-center hover:bg-[var(--bg2)] transition-colors" style={{ color: "var(--ink-400)" }} title="Close (Esc)">
+                    <Icon name="close" size={10} />
+                  </button>
+                )}
+              </div>
+              <div className="font-display text-[18px] leading-[1.2] mt-1 truncate" style={{ color: "var(--ink-100)" }}>{it.title}</div>
+            </div>
+            {/* Body */}
+            <div className="sv2-focus-item-body sv2-slim">
+              <FocusPaneContent item={it} onEdit={(patch) => handleItemEdit(it, patch)} />
+            </div>
+          </div>
+        );
+
+        return (
+          <>
+            <div className="sv2-focus-scrim" onClick={closeView} />
+            {n <= 2 ? (
+              <div
+                className={`sv2-focus-stage count-${n}`}
+                onMouseDown={(e) => { if (e.target === e.currentTarget) closeView(); }}
+              >
+                {renderPane(primaryItem, true, focusViewFocusIdx === 0, 0)}
+                {restItems.map((it, i) => renderPane(it, false, focusViewFocusIdx === i + 1, i + 1))}
+              </div>
+            ) : n === 3 ? (
+              <div
+                className="sv2-focus-stage count-3"
+                onMouseDown={(e) => { if (e.target === e.currentTarget) closeView(); }}
+              >
+                {renderPane(primaryItem, true, focusViewFocusIdx === 0, 0)}
+                <div className="sv2-focus-secondary-col">
+                  {restItems.map((it, i) => renderPane(it, false, focusViewFocusIdx === i + 1, i + 1))}
+                </div>
+              </div>
+            ) : (
+              <div
+                className="sv2-focus-stage count-4"
+                onMouseDown={(e) => { if (e.target === e.currentTarget) closeView(); }}
+              >
+                {renderPane(primaryItem, true, focusViewFocusIdx === 0, 0)}
+                {restItems.slice(0, Math.min(restItems.length, 5)).map((it, i) => renderPane(it, false, focusViewFocusIdx === i + 1, i + 1))}
+              </div>
+            )}
+          </>
+        );
+      })()}
+
+      {/* Chrome — unified bar */}
       <TopRail
         workspace={currentTerritory}
         zoom={zoom}
@@ -1628,29 +1890,10 @@ export default function WorkspaceV2() {
         onSpotlight={() => setSpotOpen(true)}
         onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
         onOpenInfo={() => setInfoOpen(true)}
-      />
-
-      {/* Widget chip rail — left edge, below top chrome */}
-      {!widgetsHidden && (
-        <WidgetChipRail
-          widgets={widgets}
-          tick={widgetStateRevision}
-          aiTouched={Object.fromEntries(Object.entries(aiTouched).map(([k]) => [k, true]))}
-          onExpand={expandWidget}
-          onAddWidget={(k) => addWidget(k)}
-          onCollapseAll={collapseAllWidgets}
-          onExpandAll={expandAllWidgets}
-          allCollapsed={widgets.every((w) => w.collapsed)}
-          someCollapsed={widgets.some((w) => w.collapsed)}
-          revealingWidgetId={revealingWidgetId}
-        />
-      )}
-
-      <AtlasStrip
         territories={territories}
-        current={currentTerritory?.id ?? null}
-        onPick={goToWorkspace}
-        onCreate={async () => {
+        currentWorkspaceId={currentTerritory?.id ?? null}
+        onPickWorkspace={goToWorkspace}
+        onCreateWorkspace={async () => {
           if (isLive) {
             const r = await createItemAction({ action: "createWorkspace", title: "New workspace" });
             scheduleIslandDismiss({ status: r.ok ? "done" : "error", text: r.ok ? "Created new workspace." : "Could not create workspace.", chips: ["Workspace"] });
@@ -1685,9 +1928,61 @@ export default function WorkspaceV2() {
         onReset={goToAtlas}
       />
 
-      {/* Floating widgets — only render expanded (non-collapsed) ones */}
-      {!widgetsHidden &&
-        widgets.filter((w) => !w.collapsed).map((w) => (
+      {/* Widget chip rail — collapsed widget chips + add/manage */}
+      <WidgetChipRail
+        widgets={widgets.filter((w) => w.kind !== "artifact" && w.kind !== "thread")}
+        tick={widgetStateRevision}
+        aiTouched={Object.fromEntries(
+          Object.entries(aiTouched).filter(([k]) => widgets.some((w) => w.id === k)).map(([k]) => [k, true])
+        )}
+        onExpand={expandWidget}
+        onAddWidget={addWidget}
+        onCollapseAll={collapseAllWidgets}
+        onExpandAll={expandAllWidgets}
+        allCollapsed={widgets.filter((w) => w.kind !== "artifact" && w.kind !== "thread").every((w) => Boolean(w.collapsed))}
+        someCollapsed={widgets.filter((w) => w.kind !== "artifact" && w.kind !== "thread").some((w) => Boolean(w.collapsed))}
+        revealingWidgetId={revealingWidgetId}
+      />
+
+      {/* ─── Inspector: ArtifactWidget / ThreadWidget (single-click opens item) ─── */}
+      {(() => {
+        if (!openInspectorId) return null;
+        const item = baseItems.find((i) => i.id === openInspectorId);
+        if (!item) return null;
+        const vpW = typeof window !== "undefined" ? window.innerWidth : 1400;
+        const x = Math.min(vpW - 456, vpW - 460);
+        const y = 90;
+        if (item.kind === "thread") {
+          return (
+            <ThreadWidget
+              item={item}
+              x={x} y={y} w={440} h={520}
+              collapsed={false}
+              onMove={() => {}}
+              onClose={() => setOpenInspectorId(null)}
+              onCollapse={() => setOpenInspectorId(null)}
+              onExpand={() => {}}
+            />
+          );
+        }
+        return (
+          <ArtifactWidget
+            item={item}
+            x={x} y={y} w={440} h={520}
+            collapsed={false}
+            onMove={() => {}}
+            onClose={() => setOpenInspectorId(null)}
+            onCollapse={() => setOpenInspectorId(null)}
+            onExpand={() => {}}
+            onEdit={(patch) => handleItemEdit(item, patch)}
+          />
+        );
+      })()}
+
+      {/* Floating utility widgets — never include artifact/thread (handled above as inspector) */}
+      {widgets.filter((w) => w.kind !== "artifact" && w.kind !== "thread").map((w) => {
+        if (widgetsHidden) return null;
+        return (
           <FloatingWidget
             key={w.id}
             widget={w}
@@ -1695,28 +1990,30 @@ export default function WorkspaceV2() {
             onMove={moveWidget}
             onClose={closeWidget}
             onCollapse={toggleWidgetCollapsed}
+            onExpand={expandWidget}
             onTimerToggle={toggleTimer}
             onTimerReset={resetTimer}
             aiTouched={!!aiTouched[w.id]}
             onAsk={(text) => handleSendMessage(text)}
             onExpandEdit={(id) => setEditingWidgetId(id)}
             onWidgetEdit={updateWidgetState}
-            onOpenItem={(id) => setPendingBloomSourceId(id)}
+            onOpenItem={(id) => setPendingOpenSourceId(id)}
           />
-        ))}
+        );
+      })}
 
-      {/* Widget deep-edit bloom */}
+      {/* Widget deep-edit (WidgetBloom) — separate from focused view */}
       {editingWidgetId && (() => {
         const w = widgets.find((ww) => ww.id === editingWidgetId);
         if (!w) return null;
         return (
           <>
-            <div className="sv2-scrim" onClick={() => setEditingWidgetId(null)} />
+            <div className="sv2-focus-scrim" onClick={() => setEditingWidgetId(null)} />
             <div
-              className="sv2-bloom-stage count-1"
+              className="sv2-focus-stage count-1"
               onMouseDown={(e) => { if (e.target === e.currentTarget) setEditingWidgetId(null); }}
             >
-              <div className="sv2-bloom-slot">
+              <div className="sv2-focus-pane primary" style={{ pointerEvents: "auto" }}>
                 <WidgetBloom
                   widget={w}
                   workspaceItems={baseItems}
@@ -1725,7 +2022,7 @@ export default function WorkspaceV2() {
                   onTimerReset={resetTimer}
                   onAsk={(text) => handleSendMessage(text)}
                   onWidgetEdit={updateWidgetState}
-                  onOpenItem={(id) => setPendingBloomSourceId(id)}
+                  onOpenItem={(id) => setPendingOpenSourceId(id)}
                 />
               </div>
             </div>
@@ -1734,7 +2031,7 @@ export default function WorkspaceV2() {
       })()}
 
       <Tray
-        open={trayOpen || selection.size > 0}
+        open={trayOpen || selection.size > 1}
         items={trayItems}
         pinned={pinnedItems}
         onClose={() => { setTrayOpen(false); setSelection(new Set()); }}
@@ -1746,19 +2043,36 @@ export default function WorkspaceV2() {
         focusedItem={focusedItem}
         workspace={currentTerritory}
         selectedCount={selection.size}
-        bloomedCount={bloomedIds.length}
+        bloomedCount={0}
         resultIsland={resultIsland}
         quickStarts={QUICK_STARTS}
         onSubmit={handleSendMessage}
         onDismissResult={() => setResultIsland(null)}
         onSpotlight={() => setSpotOpen(true)}
         onCreate={(kind) => {
-          const worldX = -pan.x;
-          const worldY = -pan.y;
-          void createHereByKind(kind, worldX, worldY);
+          void createHereByKind(kind, -pan.x, -pan.y);
         }}
-        /* focusContext — left empty; Agent A will fill in selection-set semantics */
-        focusContext={null}
+        onClearFocusContext={() => {
+          setOpenInspectorId(null);
+          setBuildingFocusSet(false);
+          setFocusSetIds([]);
+          setPrimaryFocusId(null);
+          setFocusedViewOpen(false);
+          setFocusViewPrimaryId(null);
+        }}
+        focusContext={
+          focusedViewOpen
+            ? { kind: "focused-view", title: `${focusSetIds.length} items`, color: "var(--accent)", count: focusSetIds.length }
+            : buildingFocusSet && focusSetIds.length > 0
+            ? { kind: "building-set", title: `${focusSetIds.length} items`, color: "var(--ink-300)", count: focusSetIds.length }
+            : openInspectorId
+            ? (() => {
+                const it = baseItems.find((i) => i.id === openInspectorId);
+                if (!it) return null;
+                return { kind: it.kind === "thread" ? "thread" as const : "artifact" as const, title: it.title, color: it.color };
+              })()
+            : null
+        }
       />
 
       <Spotlight
@@ -1793,6 +2107,7 @@ export default function WorkspaceV2() {
               { id: "c-task", label: "New task here", icon: "schedule" as const, run: () => { const c = ctx; setCtx(null); if (c) createHereByKind("task", c.worldX, c.worldY); } },
               { id: "c-thread", label: "New thread here", icon: "thread" as const, run: () => { const c = ctx; setCtx(null); if (c) createHereByKind("thread", c.worldX, c.worldY); } },
               { id: "c-visual", label: "New visual here", icon: "layers" as const, run: () => { const c = ctx; setCtx(null); if (c) createHereByKind("visual", c.worldX, c.worldY); } },
+              { id: "c-code", label: "New code here", icon: "pset" as const, run: () => { const c = ctx; setCtx(null); if (c) createHereByKind("code", c.worldX, c.worldY); } },
               { id: "_div1", label: "", icon: "dots" as const, run: () => {} },
               { id: "w-planner", label: "Add Planner widget", icon: "planner" as const, run: () => { setCtx(null); addWidget("planner"); } },
               { id: "w-timer", label: "Add Timer widget", icon: "timer" as const, run: () => { setCtx(null); addWidget("timer"); } },
@@ -1821,18 +2136,48 @@ export default function WorkspaceV2() {
         </>
       )}
 
-      {/* Focused hint — minimal for now; Agent A will expand this hint with selection-set semantics */}
-      {focusedItem && bloomedIds.length === 0 && (
-        <div className="absolute left-1/2 -translate-x-1/2 top-[96px] z-10 pointer-events-none sv2-drift-in">
-          <div className="sv2-chip" style={{ background: "var(--paper)" }}>
-            <span style={{ color: focusedItem.color }}>
-              <Icon name={KIND_META[focusedItem.kind as V2Kind].icon} size={10} />
-            </span>
-            Focused · <span className="sv2-kbd">Tab</span> next
-            {/* Agent A will expand this hint with selection-set semantics */}
-          </div>
-        </div>
-      )}
+      {/* Dynamic tip hint — reflects current interaction state */}
+      {(() => {
+        if (focusedViewOpen) {
+          return (
+            <div className="absolute left-1/2 -translate-x-1/2 top-[62px] z-10 pointer-events-none sv2-drift-in">
+              <div className="sv2-hint-pill">
+                <span style={{ color: "var(--accent)" }}>Focused</span>
+                &nbsp;·&nbsp;<span className="sv2-kbd">Tab</span> cycle
+                &nbsp;·&nbsp;Click pane to promote
+                &nbsp;·&nbsp;<span className="sv2-kbd">Esc</span> exit
+              </div>
+            </div>
+          );
+        }
+        if (buildingFocusSet) {
+          return (
+            <div className="absolute left-1/2 -translate-x-1/2 top-[62px] z-10 pointer-events-none sv2-drift-in">
+              <div className="sv2-hint-pill" style={{ borderColor: "rgba(14,142,232,0.4)" }}>
+                <span style={{ color: "var(--accent)" }}>Building set</span>
+                &nbsp;·&nbsp;{focusSetIds.length} items selected
+                &nbsp;·&nbsp;<span className="sv2-kbd">Space</span> to focus
+                &nbsp;·&nbsp;<span className="sv2-kbd">Esc</span> cancel
+              </div>
+            </div>
+          );
+        }
+        if (focusedItem && !openInspectorId) {
+          return (
+            <div className="absolute left-1/2 -translate-x-1/2 top-[62px] z-10 pointer-events-none sv2-drift-in">
+              <div className="sv2-hint-pill">
+                <span style={{ color: focusedItem.color }}>
+                  <Icon name={KIND_META[focusedItem.kind as V2Kind].icon} size={12} />
+                </span>
+                <span style={{ color: "var(--ink-100)" }}>{focusedItem.title.slice(0, 28)}</span>
+                &nbsp;·&nbsp;<span className="sv2-kbd">Space</span> focus
+                &nbsp;·&nbsp;<span className="sv2-kbd">Tab</span> next
+              </div>
+            </div>
+          );
+        }
+        return null;
+      })()}
 
       {/* Welcome toast */}
       {welcomeShown && (
@@ -1858,7 +2203,7 @@ export default function WorkspaceV2() {
                   Welcome back.
                 </div>
                 <div className="text-[12px] mt-1.5 leading-[1.55]" style={{ color: "var(--ink-300)" }}>
-                  Scroll pan · ⌘ Scroll zoom · Space bloom · Tab cycle · ⌘K spotlight
+                  Scroll pan · ⌘ Scroll zoom · Double-click focus set · Space to open · Tab cycle · ⌘K spotlight
                 </div>
               </div>
               <button

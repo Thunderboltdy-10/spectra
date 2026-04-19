@@ -46,8 +46,27 @@ type BackendCommandResult = {
   createdAt: number;
   updatedAt: number;
   dismissedAt?: number;
+  topicCluster?: string;
+  timelineAt?: number;
+  signalStrength?: number;
+  threadStatus?: "open" | "resolved" | "blocked";
   targetRecord?: Record<string, unknown> | null;
   relatedWorkspaceItem?: BackendWorkspaceItem | null;
+};
+
+type BackendWorkspaceWidget = {
+  _id: string;
+  workstreamId?: string;
+  kind: string;
+  title: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  collapsed?: boolean;
+  hidden?: boolean;
+  state?: Record<string, unknown>;
+  updatedAt: number;
 };
 
 type BackendWorkstream = {
@@ -66,6 +85,15 @@ type BackendPageData = {
   workstream: BackendWorkstream;
   items: BackendWorkspaceItem[];
   commandResults: BackendCommandResult[];
+  widgets?: BackendWorkspaceWidget[];
+  preferences?: {
+    workspaceViewMode?: "byType" | "byTopic" | "timeline";
+  };
+  signals?: {
+    workspaceHealth?: Record<string, unknown>;
+    topicSignals?: Array<Record<string, unknown>>;
+    timelineSignals?: Array<Record<string, unknown>>;
+  };
   revision?: number;
   revisionKey?: string;
 };
@@ -200,11 +228,14 @@ type CreateCommandResultPayload = {
 
 type UpdateCommandResultPayload = {
   resultId: string;
+  title?: string;
   status?: "processing" | "completed" | "dismissed";
   summary?: string;
+  detail?: string;
   targetKind?: "artifact" | "plannerItem" | "chat" | "workspaceItem" | "result";
   targetId?: string;
   variant?: "summary" | "answer" | "artifact" | "planner" | "thread";
+  metadata?: Record<string, unknown>;
 };
 
 export async function createCommandResult(payload: CreateCommandResultPayload): Promise<{ resultId: string } | null> {
@@ -240,6 +271,75 @@ export async function reopenCommandResult(resultId: string): Promise<boolean> {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "reopenResult", resultId }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export type WorkspaceWidgetPayload = {
+  widgetId?: string;
+  workstreamId?: string;
+  kind?: string;
+  title?: string;
+  x?: number;
+  y?: number;
+  w?: number;
+  h?: number;
+  collapsed?: boolean;
+  hidden?: boolean;
+  state?: Record<string, unknown>;
+};
+
+export async function createWorkspaceWidget(payload: WorkspaceWidgetPayload): Promise<{ widgetId: string } | null> {
+  try {
+    const res = await fetch("/api/workspace-data", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "createWidget", ...payload }),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function updateWorkspaceWidget(payload: WorkspaceWidgetPayload): Promise<boolean> {
+  try {
+    const res = await fetch("/api/workspace-data", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "updateWidget", ...payload }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function removeWorkspaceWidget(widgetId: string): Promise<boolean> {
+  try {
+    const res = await fetch("/api/workspace-data", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "removeWidget", widgetId }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function persistWorkspaceViewMode(
+  viewMode: "spatial" | "type" | "topic" | "timeline",
+): Promise<boolean> {
+  try {
+    const res = await fetch("/api/workspace-data", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "persistViewMode", viewMode }),
     });
     return res.ok;
   } catch {
@@ -377,12 +477,16 @@ export function useWorkspaceData(
 export function useWorkspacePageData(workstreamId: string | null) {
   const [items, setItems] = useState<WorkspaceItemData[]>([]);
   const [commandResultCards, setCommandResultCards] = useState<ResultCardData[]>([]);
+  const [widgets, setWidgets] = useState<BackendWorkspaceWidget[]>([]);
+  const [preferences, setPreferences] = useState<BackendPageData["preferences"] | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!workstreamId) {
       setItems([]);
       setCommandResultCards([]);
+      setWidgets([]);
+      setPreferences(null);
       return;
     }
 
@@ -396,6 +500,8 @@ export function useWorkspacePageData(workstreamId: string | null) {
       }
       setItems(data.items.map((item) => backendItemToFrontend(item, workstreamId)));
       setCommandResultCards(data.commandResults.map(backendResultToCard));
+      setWidgets(data.widgets ?? []);
+      setPreferences(data.preferences ?? null);
       setLoading(false);
     });
 
@@ -404,5 +510,5 @@ export function useWorkspacePageData(workstreamId: string | null) {
     };
   }, [workstreamId]);
 
-  return { items, commandResultCards, loading };
+  return { items, commandResultCards, widgets, preferences, loading };
 }

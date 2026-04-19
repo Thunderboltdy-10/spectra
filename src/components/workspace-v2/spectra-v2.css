@@ -211,11 +211,11 @@
 /* Solid scrim — blurs background, NOT see-through */
 .sv2-scrim {
   position: fixed; inset: 0;
-  background: rgba(245,243,239,0.97);
-  backdrop-filter: blur(16px) saturate(1.15);
+  background: rgba(245,243,239,0.80);
+  backdrop-filter: blur(8px) saturate(1.1);
   z-index: 55;
 }
-.spectra-v2.dark .sv2-scrim { background: rgba(14,16,20,0.97); }
+.spectra-v2.dark .sv2-scrim { background: rgba(14,16,20,0.80); }
 
 /* Bloom container — flex/grid based so children never overlap */
 .sv2-bloom-stage {
@@ -227,6 +227,8 @@
   padding: 4vw;
   box-sizing: border-box;
   pointer-events: none;
+  max-width: 1400px;
+  margin: 0 auto;
 }
 .sv2-bloom-stage > .sv2-bloom-slot {
   pointer-events: auto;
@@ -321,5 +323,150 @@
   font-family: 'Fraunces', serif;
   line-height: 1;
   letter-spacing: -0.02em;
+  pointer-events: none;
+}
+
+/* ─── Widget chip rail ─── */
+.sv2-chip-rail-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  min-width: 140px;
+  max-width: 176px;
+  background: rgba(251,250,246,0.92);
+  border: 1px solid var(--line);
+  box-shadow: 0 2px 8px -4px rgba(8,22,40,0.12);
+  backdrop-filter: blur(10px);
+  transition: box-shadow 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+.sv2-chip-rail-item:hover {
+  background: var(--paper);
+  border-color: var(--line-strong);
+  box-shadow: 0 4px 14px -6px rgba(8,22,40,0.18);
+}
+.spectra-v2.dark .sv2-chip-rail-item {
+  background: rgba(19,22,28,0.9);
+}
+.sv2-chip-rail-add {
+  border-style: dashed;
+  opacity: 0.85;
+}
+.sv2-chip-rail-add:hover {
+  opacity: 1;
+  border-style: solid;
+  border-color: var(--accent);
+}
+
+/* Subtle AI-touched state for chips */
+.sv2-ai-touched-subtle {
+  border-color: rgba(14,142,232,0.4) !important;
+  box-shadow: 0 0 0 2px rgba(14,142,232,0.08), 0 2px 8px -4px rgba(14,142,232,0.2) !important;
+}
+
+/* Singleton reveal pulse — used when trying to add a widget that already exists */
+@keyframes sv2-chip-reveal {
+  0%   { box-shadow: 0 0 0 0 rgba(14,142,232,0), 0 2px 8px -4px rgba(8,22,40,0.12); border-color: var(--line); }
+  25%  { box-shadow: 0 0 0 5px rgba(14,142,232,0.22), 0 4px 18px -6px rgba(14,142,232,0.3); border-color: rgba(14,142,232,0.7); }
+  70%  { box-shadow: 0 0 0 2px rgba(14,142,232,0.1), 0 4px 14px -6px rgba(14,142,232,0.15); border-color: rgba(14,142,232,0.4); }
+  100% { box-shadow: 0 2px 8px -4px rgba(8,22,40,0.12); border-color: var(--line); }
+}
+.sv2-chip-reveal {
+  animation: sv2-chip-reveal 1s cubic-bezier(0.22,1,0.36,1) forwards !important;
+}
+
+/* ─── Result island states ─── */
+
+/* pending: dashed ring */
+@keyframes sv2-pending-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.sv2-pending-ring {
+  border: 2px dashed var(--ink-400);
+  border-top-color: transparent;
+  animation: sv2-pending-spin 1.2s linear infinite;
+}
+.sv2-island-pending {
+  border-color: var(--line) !important;
+  color: var(--ink-300);
+  opacity: 0.8;
+}
+
+/* running: shimmer background */
+@keyframes sv2-shimmer {
+  0%   { background-position: -300px 0; }
+  100% { background-position: 300px 0; }
+}
+.sv2-island-running {
+  background-image: linear-gradient(
+    90deg,
+    rgba(14,142,232,0.04) 0%,
+    rgba(14,142,232,0.10) 40%,
+    rgba(14,142,232,0.04) 80%
+  ) !important;
+  background-size: 600px 100%;
+  animation: sv2-shimmer 1.8s ease-in-out infinite;
+  border-color: rgba(14,142,232,0.3) !important;
+}
+
+/* done: solid orb pop-in */
+@keyframes sv2-orb-in {
+  0%   { transform: scale(0.6); opacity: 0; }
+  70%  { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.sv2-island-orb-in {
+  animation: sv2-orb-in 350ms cubic-bezier(0.22,1,0.36,1) both;
+}
+.sv2-island-done {
+  border-color: rgba(32,184,178,0.35) !important;
+}
+
+/* error: coral dot + short shake */
+@keyframes sv2-shake {
+  0%, 100% { transform: translateX(0); }
+  20%       { transform: translateX(-4px); }
+  40%       { transform: translateX(4px); }
+  60%       { transform: translateX(-3px); }
+  80%       { transform: translateX(2px); }
+}
+.sv2-island-error {
+  border-color: rgba(224,81,55,0.35) !important;
+  animation: sv2-shake 400ms cubic-bezier(0.22,1,0.36,1) both;
+}
+
+/* ─── View mode labels (non-spatial decorations) ─── */
+.sv2-view-group-label {
+  pointer-events: none;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  opacity: 0.65;
+}
+.sv2-view-lane-divider {
+  pointer-events: none;
+  border-top: 1.5px dashed var(--line);
+  opacity: 0.55;
+}
+.sv2-view-header {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--ink-400);
+}
+.sv2-timeline-axis {
+  border-left: 1.5px solid var(--line);
+  pointer-events: none;
+}
+.sv2-timeline-tick-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-400);
   pointer-events: none;
 }

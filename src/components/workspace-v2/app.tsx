@@ -24,6 +24,7 @@ import { ItemCard } from "./items";
 import {
   FloatingWidget,
   WidgetBloom,
+  WidgetChipRail,
   useTimerTick,
   type FloatingWidgetData,
   type WidgetKind,
@@ -42,8 +43,12 @@ import {
 } from "./data";
 import {
   createCommandResult,
+  createWorkspaceWidget,
+  removeWorkspaceWidget,
   updateCommandResult,
   useWorkspaceData,
+  useWorkspacePageData,
+  updateWorkspaceWidget,
 } from "@/hooks/use-workspace-data";
 import {
   notifyWorkspaceContentMutated,
@@ -130,14 +135,21 @@ export default function WorkspaceV2() {
   const [viewMode, setViewMode] = useState<ViewMode>("spatial");
   const [resultIsland, setResultIsland] = useState<ResultIsland>(null);
 
-  /* ─── Widgets ─── */
+  /* ─── Widgets — collapsed by default ─── */
   const [widgets, setWidgets] = useState<FloatingWidgetData[]>([
-    { id: "w-timer", kind: "timer", x: 20, y: 100, w: 280, h: 112, state: { secs: 25 * 60, running: false } },
-    { id: "w-planner", kind: "planner", x: 20, y: 230, w: 280, h: 260, state: {} },
-    { id: "w-today", kind: "today", x: 20, y: 510, w: 280, h: 210, state: {} },
+    { id: "w-timer", kind: "timer", x: 80, y: 128, w: 288, h: 132, collapsed: true, state: { secs: 25 * 60, running: false } },
+    { id: "w-planner", kind: "planner", x: 80, y: 128, w: 300, h: 278, collapsed: true, state: {} },
+    { id: "w-today", kind: "today", x: 80, y: 128, w: 296, h: 230, collapsed: true, state: {} },
   ]);
   const [widgetsHidden, setWidgetsHidden] = useState(false);
-  useTimerTick(widgets, setWidgets);
+  const [widgetStateRevision, setWidgetStateRevision] = useState(0);
+  useTimerTick(widgets, (updater) => {
+    setWidgets((current) => {
+      const next = typeof updater === "function" ? updater(current) : updater;
+      if (current !== next) setWidgetStateRevision((revision) => revision + 1);
+      return next;
+    });
+  });
 
   /* ─── AI glow ─── */
   const [aiTouched, setAiTouched] = useState<Record<string, { until: number; reason: string }>>({});
@@ -201,6 +213,37 @@ export default function WorkspaceV2() {
   /* ─── Committed workspace from camera center ─── */
   const [committedWorkspaceId, setCommittedWorkspaceId] = useState<string | null>(null);
   const { workspaces: live, isLive, refresh } = useWorkspaceData(committedWorkspaceId);
+  const { widgets: liveWidgets } = useWorkspacePageData(committedWorkspaceId);
+
+  useEffect(() => {
+    if (!isLive || !committedWorkspaceId) return;
+    if (liveWidgets.length === 0) return;
+    setWidgets(liveWidgets.map((widget) => ({
+      id: widget._id,
+      kind: widget.kind as WidgetKind,
+      x: widget.x,
+      y: widget.y,
+      w: widget.w,
+      h: widget.h,
+      collapsed: widget.collapsed,
+      state: widget.state ?? {},
+    })));
+  }, [isLive, committedWorkspaceId, liveWidgets]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const key = committedWorkspaceId ? `spectra-v2:${committedWorkspaceId}:widgets-hidden` : "spectra-v2:widgets-hidden";
+    const saved = window.localStorage.getItem(key);
+    if (saved === "true" || saved === "false") {
+      setWidgetsHidden(saved === "true");
+    }
+  }, [committedWorkspaceId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const key = committedWorkspaceId ? `spectra-v2:${committedWorkspaceId}:widgets-hidden` : "spectra-v2:widgets-hidden";
+    window.localStorage.setItem(key, String(widgetsHidden));
+  }, [committedWorkspaceId, widgetsHidden]);
 
   const effectiveWorkspaces: WorkspaceData[] = useMemo(() => {
     return isLive && live.length > 0 ? live : DEMO_WORKSPACES;
@@ -408,13 +451,13 @@ export default function WorkspaceV2() {
     setBloomedIds([]);
     flyTo({ x: 0, y: 0 }, TIERS.OUT);
   };
-  const goToItem = (itemId: string, bloom = true) => {
+  const goToItem = useCallback((itemId: string, bloom = true) => {
     const it = baseItems.find((x) => x.id === itemId);
     if (!it) return;
     const p = posOf(it);
     flyTo({ x: -(p.x + it.w / 2), y: -(p.y + it.h / 2) }, TIERS.ITEM);
     if (bloom) setTimeout(() => setBloomedIds((bs) => (bs.includes(it.id) ? bs : [...bs, it.id].slice(-3))), 440);
-  };
+  }, [baseItems, posOf, flyTo]);
 
   /* ─── Focused item (nearest to camera center) ─── */
   const focusedItem = useMemo<V2Item | null>(() => {
@@ -515,12 +558,67 @@ export default function WorkspaceV2() {
     [isLive, refresh],
   );
 
+  /* ─── Backend item update ─── */
+  const handleItemEdit = useCallback(async (item: V2Item, patch: Partial<V2Item>) => {
+    if (!isLive) return;
+    
+    if (patch.messages && item.sourceChatId) {
+      const userMsg = patch.messages[patch.messages.length - 1];
+      if (userMsg?.role === "user") {
+        try {
+          const quick = await fetch("/api/workspace-data", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "executeQuickAction",
+              workstreamId: committedWorkspaceId,
+              targetChatId: item.sourceChatId,
+              prompt: userMsg.text,
+              quickAction: "create_thread",
+              title: item.title,
+              metadata: { source: "focused-thread-surface", sourceWorkspaceItemId: item.sourceId },
+            }),
+          });
+          if (quick.ok) refresh();
+        } catch {}
+      }
+      return;
+    }
+
+    if (patch.body !== undefined) {
+      if (item.sourceArtifactId) {
+        try {
+          await fetch("/api/artifacts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "update", artifactId: item.sourceArtifactId, content: patch.body, contentPlaintext: patch.body, title: patch.title ?? item.title }),
+          });
+          refresh();
+        } catch {}
+      } else if (item.sourcePlannerItemId) {
+        try {
+          await fetch("/api/planner-items", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ plannerItemId: item.sourcePlannerItemId, description: patch.body, title: patch.title ?? item.title }),
+          });
+          refresh();
+        } catch {}
+      }
+    }
+  }, [isLive, refresh]);
+
   /* ─── Result island auto-dismiss ─── */
   const scheduleIslandDismiss = useCallback((island: ResultIsland, ms = 8000) => {
     setResultIsland(island);
     if (!island) return;
     setTimeout(() => {
-      setResultIsland((r) => (r && r.status !== "streaming" ? null : r));
+      // Only dismiss if no longer in a "working" state
+      setResultIsland((r) => {
+        if (!r) return null;
+        if (r.status === "streaming" || r.status === "running" || r.status === "pending") return r;
+        return null;
+      });
     }, ms);
   }, []);
 
@@ -550,10 +648,18 @@ export default function WorkspaceV2() {
           code: { action: "createArtifact", type: "code_project", title: "Untitled code", content: "// Start\n", ...base },
         };
         const r = await createItemAction(actions[kind]);
+        let action;
+        if (r.ok) {
+           const id = r.data?.artifactId || r.data?.plannerItemId || r.data?.chatId;
+           if (id) {
+             action = { label: `Open ${kind}`, onClick: () => setPendingBloomSourceId(id) };
+           }
+        }
         scheduleIslandDismiss({
           status: r.ok ? "done" : "error",
           text: r.ok ? `Created ${kind} here.` : `Could not create ${kind}.`,
-          chips: [kind],
+          chips: action ? undefined : [kind],
+          action
         });
       } else {
         scheduleIslandDismiss({ status: "done", text: `(demo) Created ${kind} here.`, chips: [kind] });
@@ -561,6 +667,57 @@ export default function WorkspaceV2() {
     },
     [committedWorkspaceId, isLive, createItemAction, scheduleIslandDismiss, pan, zoom, spawnTrail],
   );
+
+  /* ─── Reveal animation state (singleton enforcement pulse) ─── */
+  const [revealingWidgetId, setRevealingWidgetId] = useState<string | null>(null);
+
+  /* ─── Widgets ─── */
+  const addWidget = useCallback((kind: string, position?: { x: number; y: number }) => {
+    // Singleton enforcement: if a widget of this kind already exists, reveal it instead.
+    setWidgets((ws) => {
+      const existing = ws.find((w) => w.kind === kind);
+      if (existing) {
+        // Ensure it's expanded and pulse-highlight it.
+        setRevealingWidgetId(existing.id);
+        setTimeout(() => setRevealingWidgetId(null), 1100);
+        if (isLive) void updateWorkspaceWidget({ widgetId: existing.id, collapsed: false });
+        return ws.map((w) => w.id === existing.id ? { ...w, collapsed: false } : w);
+      }
+
+      const id = `w-${Date.now()}`;
+      const sizes: Record<string, { w: number; h: number }> = {
+        timer: { w: 288, h: 132 }, planner: { w: 300, h: 278 }, today: { w: 296, h: 230 },
+        scratch: { w: 304, h: 232 }, calendar: { w: 312, h: 270 }, library: { w: 308, h: 276 },
+        thread: { w: 340, h: 320 }, artifact: { w: 380, h: 300 }
+      };
+      const size = sizes[kind] ?? { w: 288, h: 200 };
+      const widget: FloatingWidgetData = {
+        id,
+        kind: (kind as WidgetKind),
+        x: position?.x ?? 96,
+        y: position?.y ?? 96,
+        ...size,
+        collapsed: true, // new widgets start as chips
+        state: kind === "timer" ? { secs: 25 * 60, running: false } : {},
+      };
+      if (isLive) {
+        void createWorkspaceWidget({
+          workstreamId: committedWorkspaceId ?? undefined,
+          kind,
+          title: kind,
+          x: widget.x,
+          y: widget.y,
+          w: widget.w,
+          h: widget.h,
+          state: widget.state,
+        }).then((result) => {
+          if (result) refresh();
+        });
+      }
+      return [...ws, widget];
+    });
+    if (widgetsHidden) setWidgetsHidden(false);
+  }, [isLive, committedWorkspaceId, refresh, widgetsHidden]);
 
   /* ─── Quick-start scaffold (multi-widget + seeded tasks) ─── */
   const runQuickStartScaffold = useCallback(
@@ -571,28 +728,7 @@ export default function WorkspaceV2() {
 
       const seed = (kinds: WidgetKind[]) => {
         kinds.forEach((k, i) => {
-          const id = `w-qs-${Date.now()}-${i}`;
-          const sizes: Record<WidgetKind, { w: number; h: number }> = {
-            timer: { w: 280, h: 112 },
-            planner: { w: 280, h: 260 },
-            today: { w: 280, h: 210 },
-            scratch: { w: 280, h: 220 },
-            library: { w: 300, h: 260 },
-            calendar: { w: 300, h: 260 },
-          };
-          const size = sizes[k];
-          const y = 96 + i * 24;
-          setWidgets((ws) => [
-            ...ws,
-            {
-              id,
-              kind: k,
-              x: 96 + i * 20,
-              y,
-              ...size,
-              state: k === "timer" ? { secs: 25 * 60, running: false } : {},
-            },
-          ]);
+          addWidget(k, { x: 96 + i * 20, y: 96 + i * 24 });
           actions.push(k);
         });
         if (widgetsHidden) setWidgetsHidden(false);
@@ -640,7 +776,7 @@ export default function WorkspaceV2() {
         chips: ["Scaffold", ...chips],
       });
     },
-    [widgetsHidden, isLive, committedWorkspaceId, createItemAction, scheduleIslandDismiss],
+    [widgetsHidden, isLive, committedWorkspaceId, createItemAction, scheduleIslandDismiss, addWidget],
   );
 
   /* ─── Command bar routing ─── */
@@ -681,10 +817,25 @@ export default function WorkspaceV2() {
         if (!requiresWorkspace()) return;
         const title = raw.slice(6).trim() || "Untitled note";
         if (isLive) {
+          // Show pending → running → done sequence honestly
+          scheduleIslandDismiss({ status: "pending", text: "Queued…" }, 60000);
+          await new Promise((r) => setTimeout(r, 150));
+          setResultIsland({ status: "running", text: `Creating note "${title}"…` });
           const r = await createItemAction({ action: "createNote", workstreamId: wsId, title, content: "" });
-          if (r.ok) spawnCenterTrail();
-          scheduleIslandDismiss({ status: r.ok ? "done" : "error", text: r.ok ? `Created note "${title}".` : "Could not create note.", chips: ["Note"] });
+          if (r.ok) {
+             spawnCenterTrail();
+          }
+          scheduleIslandDismiss({
+            status: r.ok ? "done" : "error",
+            text: r.ok ? `Created note "${title}".` : "Could not create note.",
+            action: r.data?.artifactId ? { label: "Open Note", onClick: () => setPendingBloomSourceId(r.data.artifactId) } : undefined
+          });
         } else {
+          // Demo: still show the sequence so the UI is honest
+          scheduleIslandDismiss({ status: "pending", text: "Queued…" }, 60000);
+          await new Promise((r) => setTimeout(r, 150));
+          setResultIsland({ status: "running", text: `Creating note "${title}"…` });
+          await new Promise((r) => setTimeout(r, 400));
           spawnCenterTrail();
           scheduleIslandDismiss({ status: "done", text: `(demo) Created note "${title}".`, chips: ["Note"] });
         }
@@ -694,9 +845,15 @@ export default function WorkspaceV2() {
         if (!requiresWorkspace()) return;
         const title = raw.slice(6).trim() || "Untitled task";
         if (isLive) {
-          const r = await createItemAction({ action: "createPlannerItem", workstreamId: wsId, title, type: "deadline", priority: "normal" });
-          if (r.ok) spawnCenterTrail();
-          scheduleIslandDismiss({ status: r.ok ? "done" : "error", text: r.ok ? `Added planner task "${title}".` : "Could not add task.", chips: ["Task"] });
+          const r = await createItemAction({ action: "createPlannerItem", workstreamId: wsId, title, type: "deadline", priority: "medium" });
+          if (r.ok) {
+             spawnCenterTrail();
+          }
+          scheduleIslandDismiss({ 
+            status: r.ok ? "done" : "error", 
+            text: r.ok ? `Added planner task "${title}".` : "Could not add task.", 
+            action: r.data?.plannerItemId ? { label: "Open Task", onClick: () => setPendingBloomSourceId(r.data.plannerItemId) } : undefined
+          });
         } else {
           spawnCenterTrail();
           scheduleIslandDismiss({ status: "done", text: `(demo) Added planner task "${title}".`, chips: ["Task"] });
@@ -708,8 +865,14 @@ export default function WorkspaceV2() {
         const title = raw.slice(8).trim() || "New thread";
         if (isLive) {
           const r = await createItemAction({ action: "createThread", workstreamId: wsId, title });
-          if (r.ok) spawnCenterTrail();
-          scheduleIslandDismiss({ status: r.ok ? "done" : "error", text: r.ok ? `Started thread "${title}".` : "Could not start thread.", chips: ["Thread"] });
+          if (r.ok) {
+             spawnCenterTrail();
+          }
+          scheduleIslandDismiss({ 
+            status: r.ok ? "done" : "error", 
+            text: r.ok ? `Started thread "${title}".` : "Could not start thread.", 
+            action: r.data?.chatId ? { label: "Open Thread", onClick: () => setPendingBloomSourceId(r.data.chatId) } : undefined
+          });
         } else {
           spawnCenterTrail();
           scheduleIslandDismiss({ status: "done", text: `(demo) Started thread "${title}".`, chips: ["Thread"] });
@@ -761,51 +924,80 @@ export default function WorkspaceV2() {
         return;
       }
 
-      // Default → /api/chat or stubbed v1-style reply.
+      // Default → persisted workspace quick action / linked result.
       let touched: string[] = [];
       let stub: ResultIsland = null;
+      let inferredAction: "summarize" | "make_flashcards" | "plan_week" | "create_note" | "create_task" | "create_thread" | "artifact_request" | undefined;
       if (selection.size > 1) {
         touched = Array.from(selection);
-        stub = { status: "done", text: `Compared ${selection.size} items. Built a side-by-side with differences highlighted.`, chips: ["Compare", `${selection.size} items`] };
+        stub = { status: "done", text: `Asked about ${selection.size} items.`, chips: [`${selection.size} items`] };
+        inferredAction = "summarize";
       } else if (focusedItem?.kind === "essay") {
         touched = [focusedItem.id];
         stub = { status: "done", text: "Your thesis reads strong. The weakest transition is ¶3→¶4 — I've drafted a bridge sentence.", chips: ["Suggestion"] };
+        inferredAction = "artifact_request";
       } else if (focusedItem?.kind === "pset") {
         touched = [focusedItem.id];
         stub = { status: "done", text: "Hint inserted at the current stuck problem. Try IBP with u=arctan(x), then a trig substitution.", chips: ["Hint"] };
+        inferredAction = "summarize";
       } else if (focusedItem?.kind === "flashcards") {
         touched = [focusedItem.id];
         stub = { status: "done", text: "Review queued — 10 cards, weakest first.", chips: ["Review"] };
+        inferredAction = "make_flashcards";
       } else if (focusedItem?.kind === "note") {
         touched = [focusedItem.id];
         stub = { status: "done", text: "Condensed into 3 lines and extracted 6 flashcard-ready terms at the bottom.", chips: ["Note updated"] };
+        inferredAction = "artifact_request";
       } else if (lc.includes("plan") && (lc.includes("week") || lc.includes("exam"))) {
         touched = territories.flatMap((t) => baseItems.filter((i) => i.workspaceId === t.id).slice(0, 1).map((i) => i.id));
         stub = { status: "done", text: "This week: Biology midterm Thu, Calc pset Fri, essay Mon. Scheduled 6×50-min focus blocks with a 2-day taper.", chips: ["Plan drafted"] };
+        inferredAction = "plan_week";
+      } else if (/thread|chat|discuss/.test(lc)) {
+        inferredAction = "create_thread";
+        stub = { status: "done", text: `Started a linked thread for "${raw}".`, chips: ["Thread"] };
+      } else if (/task|todo|deadline|remind/.test(lc)) {
+        inferredAction = "create_task";
+        stub = { status: "done", text: `Captured a planner task for "${raw}".`, chips: ["Task"] };
+      } else if (/note|write down|capture/.test(lc)) {
+        inferredAction = "create_note";
+        stub = { status: "done", text: `Saved a note for "${raw}".`, chips: ["Note"] };
       } else {
+        inferredAction = "summarize";
         stub = { status: "done", text: `Working on: "${raw}". I've surfaced the most relevant items for you.`, chips: ["AI"] };
       }
 
       if (isLive && wsId) {
         scheduleIslandDismiss({ status: "streaming", text: "Thinking…", chips: [] });
         try {
-          const res = await fetch("/api/chat", {
+          const res = await fetch("/api/workspace-data", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              mode: "general",
-              message: raw,
-              thinkingLevel: "low",
-              routerMode: "auto",
-              usePersonalResources: true,
+              action: "executeQuickAction",
               workstreamId: wsId,
-              scopeLevel: "workspace",
+              prompt: raw,
+              quickAction: inferredAction,
+              targetArtifactId: focusedItem?.sourceArtifactId,
+              targetPlannerItemId: focusedItem?.sourcePlannerItemId,
+              targetChatId: focusedItem?.sourceChatId,
+              title: focusedItem ? `${focusedItem.title} · ${raw.slice(0, 48)}` : raw.slice(0, 72),
+              content: focusedItem?.preview,
+              metadata: {
+                source: "workspace-v2-quick-chat",
+                focusedItemId: focusedItem?.sourceId,
+                selectedItemIds: Array.from(selection),
+              },
             }),
           });
           if (res.ok) {
             const j = await res.json();
-            const t = (j?.threadTitle as string) ?? "Response ready";
-            scheduleIslandDismiss({ status: "done", text: t, chips: j?.chatId ? ["Chat opened"] : ["Answered"] });
+            refresh();
+            scheduleIslandDismiss({
+              status: "done",
+              text: stub?.text ?? "Saved workspace action.",
+              chips: j?.targetKind ? [j.targetKind] : stub?.chips,
+              action: j?.targetId ? { label: "Open result", onClick: () => setPendingBloomSourceId(j.targetId) } : undefined,
+            });
           } else {
             scheduleIslandDismiss(stub);
           }
@@ -823,18 +1015,16 @@ export default function WorkspaceV2() {
   );
 
   /* ─── Tray actions ─── */
-  const onTrayAction = (action: "bloom" | "compare" | "merge" | "quiz" | "link" | "ask") => {
+  const onTrayAction = (action: "bloom" | "quiz" | "link" | "ask" | "focus") => {
     const ids = Array.from(selection);
     const n = ids.length;
-    if (action === "bloom") {
+    if (action === "bloom" || action === "focus") {
       ids.slice(0, 3).forEach((id) => setBloomedIds((bs) => (bs.includes(id) ? bs : [...bs, id].slice(-3))));
       return;
     }
     touchAI(ids, action);
     let text = "";
     if (action === "ask") text = `Asked about ${n} items. Pulled common threads.`;
-    if (action === "compare") text = `Built a side-by-side of ${n} items with differences highlighted.`;
-    if (action === "merge") text = `Merged ${n} items into a new combined note.`;
     if (action === "quiz") text = `Quiz generated from ${n} items — 12 questions.`;
     if (action === "link") text = `Linked ${n} items as related.`;
     scheduleIslandDismiss({ status: "done", text, chips: [`${n} items`] });
@@ -857,34 +1047,129 @@ export default function WorkspaceV2() {
     else if (sel.type === "quick") runQuickStartScaffold(sel.title);
   };
 
-  /* ─── Widgets ─── */
-  const addWidget = (kind: string) => {
-    const id = `w-${Date.now()}`;
-    const sizes: Record<string, { w: number; h: number }> = {
-      timer: { w: 280, h: 112 }, planner: { w: 280, h: 260 }, today: { w: 280, h: 210 },
-      scratch: { w: 280, h: 220 }, calendar: { w: 300, h: 260 }, library: { w: 300, h: 260 },
-    };
-    const size = sizes[kind] ?? { w: 260, h: 200 };
-    setWidgets((ws) => [
-      ...ws,
-      {
-        id,
-        kind: (kind as WidgetKind),
-        x: 96, y: 96, ...size,
-        state: kind === "timer" ? { secs: 25 * 60, running: false } : {},
-      },
-    ]);
-    if (widgetsHidden) setWidgetsHidden(false);
-  };
+  /* ─── Widget Handlers ─── */
   const moveWidget = (id: string, x: number, y: number) =>
-    setWidgets((ws) => ws.map((w) => (w.id === id ? { ...w, x, y } : w)));
-  const closeWidget = (id: string) => setWidgets((ws) => ws.filter((w) => w.id !== id));
+    setWidgets((ws) => {
+      const next = ws.map((w) => (w.id === id ? { ...w, x, y } : w));
+      if (isLive) {
+        void updateWorkspaceWidget({ widgetId: id, x, y });
+      }
+      return next;
+    });
+  const closeWidget = (id: string) => {
+    setWidgets((ws) => ws.filter((w) => w.id !== id));
+    if (isLive) {
+      void removeWorkspaceWidget(id);
+    }
+  };
   const toggleWidgetCollapsed = (id: string) =>
-    setWidgets((ws) => ws.map((w) => (w.id === id ? { ...w, collapsed: !w.collapsed } : w)));
-  const toggleTimer = (id: string) =>
-    setWidgets((ws) => ws.map((w) => (w.id === id ? { ...w, state: { ...w.state, running: !(w.state.running as boolean) } } : w)));
-  const resetTimer = (id: string, secs: number) =>
-    setWidgets((ws) => ws.map((w) => (w.id === id ? { ...w, state: { ...w.state, secs, running: false } } : w)));
+    setWidgets((ws) => ws.map((w) => {
+      if (w.id !== id) return w;
+      const next = { ...w, collapsed: !w.collapsed };
+      if (isLive) {
+        void updateWorkspaceWidget({ widgetId: id, collapsed: next.collapsed });
+      }
+      return next;
+    }));
+
+  const expandWidget = useCallback((id: string) => {
+    setWidgets((ws) => ws.map((w) => {
+      if (w.id !== id) return w;
+      if (w.collapsed === false) return w;
+      if (isLive) void updateWorkspaceWidget({ widgetId: id, collapsed: false });
+      return { ...w, collapsed: false };
+    }));
+  }, [isLive]);
+
+  const collapseAllWidgets = useCallback(() => {
+    setWidgets((ws) => ws.map((w) => {
+      if (w.collapsed) return w;
+      if (isLive) void updateWorkspaceWidget({ widgetId: w.id, collapsed: true });
+      return { ...w, collapsed: true };
+    }));
+  }, [isLive]);
+
+  const expandAllWidgets = useCallback(() => {
+    setWidgets((ws) => ws.map((w) => {
+      if (!w.collapsed) return w;
+      if (isLive) void updateWorkspaceWidget({ widgetId: w.id, collapsed: false });
+      return { ...w, collapsed: false };
+    }));
+  }, [isLive]);
+  const toggleTimer = useCallback((id: string) =>
+    setWidgets((ws) => ws.map((w) => {
+      if (w.id !== id) return w;
+      const next = { ...w, state: { ...w.state, running: !(w.state.running as boolean) } };
+      if (isLive) {
+        void updateWorkspaceWidget({ widgetId: id, state: next.state });
+      }
+      return next;
+    })), [isLive]);
+  const resetTimer = useCallback((id: string, secs: number) =>
+    setWidgets((ws) => ws.map((w) => {
+      if (w.id !== id) return w;
+      const next = { ...w, state: { ...w.state, secs, running: false } };
+      if (isLive) {
+        void updateWorkspaceWidget({ widgetId: id, state: next.state });
+      }
+      return next;
+    })), [isLive]);
+  const updateWidgetState = (id: string, stateUpdate: Record<string, unknown>) =>
+    setWidgets((ws) => ws.map((w) => {
+      if (w.id !== id) return w;
+      const next = { ...w, state: { ...w.state, ...stateUpdate } };
+      if (isLive) {
+        void updateWorkspaceWidget({ widgetId: id, state: next.state });
+      }
+      return next;
+    }));
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const active = widgets.find((widget) => widget.kind === "timer" && !widget.collapsed);
+    if (!active) return;
+    const secs = Number(active.state.secs ?? 25 * 60);
+    const running = Boolean(active.state.running);
+    const total = Math.max(1, Number(active.state.totalSecs ?? 25 * 60));
+    const progress = Math.max(0, Math.min(1, 1 - secs / total));
+    const mm = String(Math.floor(secs / 60)).padStart(2, "0");
+    const ss = String(secs % 60).padStart(2, "0");
+    window.dispatchEvent(new CustomEvent("ai-school:timer-state", {
+      detail: {
+        display: `${mm}:${ss}`,
+        isRunning: running,
+        progress,
+        phase: "work",
+      },
+    }));
+  }, [widgets, widgetStateRevision]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleStart = () => {
+      const timer = widgets.find((widget) => widget.kind === "timer");
+      if (!timer || Boolean(timer.state.running)) return;
+      toggleTimer(timer.id);
+    };
+    const handlePause = () => {
+      const timer = widgets.find((widget) => widget.kind === "timer" && Boolean(widget.state.running));
+      if (!timer) return;
+      toggleTimer(timer.id);
+    };
+    const handleReset = () => {
+      const timer = widgets.find((widget) => widget.kind === "timer");
+      if (!timer) return;
+      resetTimer(timer.id, Number(timer.state.totalSecs ?? 25 * 60));
+    };
+    window.addEventListener("ai-school:timer-start", handleStart);
+    window.addEventListener("ai-school:timer-pause", handlePause);
+    window.addEventListener("ai-school:timer-reset", handleReset);
+    return () => {
+      window.removeEventListener("ai-school:timer-start", handleStart);
+      window.removeEventListener("ai-school:timer-pause", handlePause);
+      window.removeEventListener("ai-school:timer-reset", handleReset);
+    };
+  }, [widgets, resetTimer, toggleTimer]);
 
   /* ─── Keyboard (global) ─── */
   useEffect(() => {
@@ -1006,6 +1291,18 @@ export default function WorkspaceV2() {
   /* ─── Bloom layout (flex/grid — never overlap) ─── */
   const bloomed = bloomedIds.map((id) => baseItems.find((i) => i.id === id)).filter(Boolean) as V2Item[];
 
+  const [pendingBloomSourceId, setPendingBloomSourceId] = useState<string | null>(null);
+
+  /* ─── Check pending bloom ─── */
+  useEffect(() => {
+    if (!pendingBloomSourceId) return;
+    const hit = baseItems.find((i) => i.sourceChatId === pendingBloomSourceId || i.sourceArtifactId === pendingBloomSourceId || i.sourceId === pendingBloomSourceId);
+    if (hit) {
+      goToItem(hit.id, true);
+      setPendingBloomSourceId(null);
+    }
+  }, [baseItems, pendingBloomSourceId, goToItem]);
+
   /* ─── Derived ─── */
   const canvasTransform = `translate(${vpSize.w / 2 + pan.x * zoom}px, ${vpSize.h / 2 + pan.y * zoom}px) scale(${zoom})`;
   const trayItems = Array.from(selection).map((id) => baseItems.find((i) => i.id === id)).filter(Boolean) as V2Item[];
@@ -1081,6 +1378,83 @@ export default function WorkspaceV2() {
             );
           })}
 
+          {/* ─── View-mode group labels (type / topic / timeline) ─── */}
+          {arranged && currentTerritory && viewMode !== "spatial" && (() => {
+            const w = currentTerritory;
+            const wsItems = baseItems.filter((i) => i.workspaceId === w.id);
+            const padLeft = w.cx - w.w / 2 + 80;
+            const padTop = w.cy - w.h / 2 + 160;
+
+            if (viewMode === "type" || viewMode === "topic") {
+              const byKey: Record<string, V2Item[]> = {};
+              wsItems.forEach((it) => {
+                const k = viewMode === "type" ? it.kind : (it.meta?.topic as string) ?? it.kind;
+                (byKey[k] = byKey[k] || []).push(it);
+              });
+              let y = padTop;
+              const labels: import("react").ReactNode[] = [];
+              Object.keys(byKey).forEach((k, ki) => {
+                const row = byKey[k];
+                const labelText = viewMode === "type"
+                  ? `${KIND_META[k as V2Kind]?.label ?? k} · ${row.length}`
+                  : `Topic: ${k} · ${row.length}`;
+                const color = viewMode === "type" ? (KIND_META[k as V2Kind]?.tone ?? "var(--ink-400)") : "var(--ink-400)";
+                labels.push(
+                  <div key={`group-${ki}`} className="absolute pointer-events-none" style={{ left: 0, top: 0 }}>
+                    {ki > 0 && (
+                      <div
+                        className="absolute sv2-view-lane-divider"
+                        style={{ left: padLeft - 20, top: y - 26, width: w.w - 100 }}
+                      />
+                    )}
+                    <div
+                      className="absolute sv2-view-group-label"
+                      style={{ left: padLeft, top: y - 22, color }}
+                    >
+                      {labelText}
+                    </div>
+                  </div>
+                );
+                y += Math.ceil(row.length / 3) * 270 + 50;
+              });
+              return labels;
+            }
+
+            if (viewMode === "timeline") {
+              const sorted = [...wsItems].sort((a, b) => {
+                const au = (a.meta?.updatedAt as number) ?? 0;
+                const bu = (b.meta?.updatedAt as number) ?? 0;
+                return bu - au;
+              });
+              const now = Date.now();
+              const buckets: { label: string; until: number }[] = [
+                { label: "Today",     until: now - 86_400_000 },
+                { label: "Yesterday", until: now - 2 * 86_400_000 },
+                { label: "Last week", until: now - 7 * 86_400_000 },
+                { label: "Older",     until: 0 },
+              ];
+              const seenBuckets = new Set<string>();
+              return sorted.map((it, idx) => {
+                const ts = (it.meta?.updatedAt as number) ?? 0;
+                const bucket = buckets.find((b) => ts > b.until) ?? buckets[buckets.length - 1];
+                const row = Math.floor(idx / 4);
+                const y = padTop + row * 270;
+                if (seenBuckets.has(bucket.label)) return null;
+                seenBuckets.add(bucket.label);
+                return (
+                  <div
+                    key={`tl-${bucket.label}`}
+                    className="absolute sv2-timeline-tick-label"
+                    style={{ left: padLeft - 68, top: y + 4, width: 60, textAlign: "right" }}
+                  >
+                    {bucket.label}
+                  </div>
+                );
+              });
+            }
+            return null;
+          })()}
+
           {/* Items */}
           {visibleItems.map((it, idx) => {
             const m = modeFor(it);
@@ -1113,6 +1487,7 @@ export default function WorkspaceV2() {
                     onDoubleClick={onItemDoubleClick}
                     onPin={onPinItem}
                     onClose={() => closeBloom(it.id)}
+                    onEdit={(patch) => handleItemEdit(it, patch)}
                   />
                 )}
               </div>
@@ -1182,6 +1557,7 @@ export default function WorkspaceV2() {
                   bloomPrimary={idx === 0}
                   onClose={() => closeBloom(it.id)}
                   onPin={onPinItem}
+                  onEdit={(patch) => handleItemEdit(it, patch)}
                 />
               </div>
             ))}
@@ -1206,6 +1582,7 @@ export default function WorkspaceV2() {
                     bloomPrimary
                     onClose={() => closeBloom(bloomed[0].id)}
                     onPin={onPinItem}
+                    onEdit={(patch) => handleItemEdit(bloomed[0], patch)}
                   />
                 </div>
                 <div className="sv2-bloom-slot secondary-col">
@@ -1228,6 +1605,7 @@ export default function WorkspaceV2() {
                         bloomPrimary={false}
                         onClose={() => closeBloom(it.id)}
                         onPin={onPinItem}
+                        onEdit={(patch) => handleItemEdit(it, patch)}
                       />
                     </div>
                   ))}
@@ -1242,20 +1620,31 @@ export default function WorkspaceV2() {
       <TopRail
         workspace={currentTerritory}
         zoom={zoom}
-        trayCount={selection.size + pinned.length}
         viewMode={viewMode}
-        widgetsHidden={widgetsHidden}
         theme={theme}
         onViewMode={setViewMode}
-        onOpenTray={() => setTrayOpen((v) => !v)}
         onHome={goToAtlas}
         onAtlas={goToAtlas}
         onSpotlight={() => setSpotOpen(true)}
-        onToggleWidgets={() => setWidgetsHidden((h) => !h)}
-        onAddWidget={addWidget}
         onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
         onOpenInfo={() => setInfoOpen(true)}
       />
+
+      {/* Widget chip rail — left edge, below top chrome */}
+      {!widgetsHidden && (
+        <WidgetChipRail
+          widgets={widgets}
+          tick={widgetStateRevision}
+          aiTouched={Object.fromEntries(Object.entries(aiTouched).map(([k]) => [k, true]))}
+          onExpand={expandWidget}
+          onAddWidget={(k) => addWidget(k)}
+          onCollapseAll={collapseAllWidgets}
+          onExpandAll={expandAllWidgets}
+          allCollapsed={widgets.every((w) => w.collapsed)}
+          someCollapsed={widgets.some((w) => w.collapsed)}
+          revealingWidgetId={revealingWidgetId}
+        />
+      )}
 
       <AtlasStrip
         territories={territories}
@@ -1296,20 +1685,23 @@ export default function WorkspaceV2() {
         onReset={goToAtlas}
       />
 
-      {/* Floating widgets (fixed position — outside canvas transform) */}
+      {/* Floating widgets — only render expanded (non-collapsed) ones */}
       {!widgetsHidden &&
-        widgets.map((w) => (
+        widgets.filter((w) => !w.collapsed).map((w) => (
           <FloatingWidget
             key={w.id}
             widget={w}
+            workspaceItems={baseItems}
             onMove={moveWidget}
             onClose={closeWidget}
-            onToggleCollapsed={toggleWidgetCollapsed}
+            onCollapse={toggleWidgetCollapsed}
             onTimerToggle={toggleTimer}
             onTimerReset={resetTimer}
             aiTouched={!!aiTouched[w.id]}
             onAsk={(text) => handleSendMessage(text)}
             onExpandEdit={(id) => setEditingWidgetId(id)}
+            onWidgetEdit={updateWidgetState}
+            onOpenItem={(id) => setPendingBloomSourceId(id)}
           />
         ))}
 
@@ -1327,10 +1719,13 @@ export default function WorkspaceV2() {
               <div className="sv2-bloom-slot">
                 <WidgetBloom
                   widget={w}
+                  workspaceItems={baseItems}
                   onClose={() => setEditingWidgetId(null)}
                   onTimerToggle={toggleTimer}
                   onTimerReset={resetTimer}
                   onAsk={(text) => handleSendMessage(text)}
+                  onWidgetEdit={updateWidgetState}
+                  onOpenItem={(id) => setPendingBloomSourceId(id)}
                 />
               </div>
             </div>
@@ -1356,6 +1751,14 @@ export default function WorkspaceV2() {
         quickStarts={QUICK_STARTS}
         onSubmit={handleSendMessage}
         onDismissResult={() => setResultIsland(null)}
+        onSpotlight={() => setSpotOpen(true)}
+        onCreate={(kind) => {
+          const worldX = -pan.x;
+          const worldY = -pan.y;
+          void createHereByKind(kind, worldX, worldY);
+        }}
+        /* focusContext — left empty; Agent A will fill in selection-set semantics */
+        focusContext={null}
       />
 
       <Spotlight
@@ -1397,6 +1800,8 @@ export default function WorkspaceV2() {
               { id: "w-today", label: "Add Today widget", icon: "schedule" as const, run: () => { setCtx(null); addWidget("today"); } },
               { id: "w-library", label: "Add Library widget", icon: "reading" as const, run: () => { setCtx(null); addWidget("library"); } },
               { id: "w-calendar", label: "Add Calendar widget", icon: "schedule" as const, run: () => { setCtx(null); addWidget("calendar"); } },
+              { id: "w-thread", label: "Add Thread widget", icon: "thread" as const, run: () => { setCtx(null); addWidget("thread"); } },
+              { id: "w-artifact", label: "Add Artifact widget", icon: "note" as const, run: () => { setCtx(null); addWidget("artifact"); } },
             ] as const).map((row) =>
               row.id.startsWith("_div") ? (
                 <div key={row.id} className="h-px mx-2 my-1" style={{ background: "var(--line)" }} />
@@ -1416,14 +1821,15 @@ export default function WorkspaceV2() {
         </>
       )}
 
-      {/* Focused hint */}
+      {/* Focused hint — minimal for now; Agent A will expand this hint with selection-set semantics */}
       {focusedItem && bloomedIds.length === 0 && (
         <div className="absolute left-1/2 -translate-x-1/2 top-[96px] z-10 pointer-events-none sv2-drift-in">
           <div className="sv2-chip" style={{ background: "var(--paper)" }}>
             <span style={{ color: focusedItem.color }}>
               <Icon name={KIND_META[focusedItem.kind as V2Kind].icon} size={10} />
             </span>
-            Focused · <span className="sv2-kbd ml-1">Space</span> to open · <span className="sv2-kbd">Tab</span> next
+            Focused · <span className="sv2-kbd">Tab</span> next
+            {/* Agent A will expand this hint with selection-set semantics */}
           </div>
         </div>
       )}

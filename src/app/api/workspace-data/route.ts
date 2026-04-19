@@ -8,6 +8,9 @@ type WorkspaceResultIntent = "note" | "planner" | "thread" | "result" | "widget"
 type WorkspaceResultStatus = "processing" | "completed" | "dismissed";
 type WorkspaceResultVariant = "summary" | "answer" | "artifact" | "planner" | "thread";
 type WorkspaceResultTargetKind = "artifact" | "plannerItem" | "chat" | "workspaceItem" | "result";
+type WorkspaceResultThreadStatus = "open" | "resolved" | "blocked";
+type WorkspaceWidgetSource = "user" | "ai" | "system";
+type WorkspaceViewMode = "spatial" | "type" | "topic" | "timeline";
 
 function parseIntent(value: unknown): WorkspaceResultIntent {
   return value === "note" || value === "planner" || value === "thread" || value === "widget" ? value : "result";
@@ -29,6 +32,12 @@ function parseTargetKind(value: unknown): WorkspaceResultTargetKind | undefined 
     : undefined;
 }
 
+function parseThreadStatus(value: unknown): WorkspaceResultThreadStatus | undefined {
+  return value === "open" || value === "resolved" || value === "blocked"
+    ? value
+    : undefined;
+}
+
 function sanitizeTitle(value: unknown, fallback: string) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
 }
@@ -38,6 +47,38 @@ function summarizeContent(value: unknown, max = 280) {
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized ? normalized.slice(0, max) : undefined;
 }
+
+function parseWidgetSource(value: unknown): WorkspaceWidgetSource {
+  return value === "ai" || value === "system" ? value : "user";
+}
+
+function parseCanvasNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+
+
+function parseQuickAction(value: unknown) {
+  return value === "summarize" || value === "make_flashcards" || value === "plan_week" || value === "create_note" || value === "create_task" || value === "create_thread" || value === "artifact_request"
+    ? value
+    : undefined;
+}
+function parseWorkspaceViewMode(value: unknown): WorkspaceViewMode | undefined {
+  return value === "spatial" || value === "type" || value === "topic" || value === "timeline"
+    ? value
+    : undefined;
+}
+
+function toPreferenceViewMode(value: WorkspaceViewMode | undefined) {
+  if (value === "type") return "byType" as const;
+  if (value === "topic") return "byTopic" as const;
+  if (value === "timeline") return "timeline" as const;
+  return null;
+}
+
+type AttachedItemsResult = {
+  itemIds?: string[];
+};
 
 export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
@@ -51,15 +92,25 @@ export async function GET(request: NextRequest) {
       1,
       Math.min(Number(params.get("commandResultLimit")) || 25, 100),
     );
+    const widgetLimit = Math.max(
+      1,
+      Math.min(Number(params.get("widgetLimit")) || 25, 100),
+    );
 
     const data = await convexQuery("workspaceItems:getWorkspacePageData", {
       actorClerkId: actor.clerkId,
       workstreamId,
       includeDismissedResults,
       commandResultLimit,
+      widgetLimit,
     });
-
-    return ok(data);
+    const preferences = await convexQuery("userPreferences:get", {
+      actorClerkId: actor.clerkId,
+    });
+    return ok({
+      ...(data as Record<string, unknown>),
+      preferences,
+    });
   }, request);
 }
 
@@ -92,6 +143,10 @@ export async function POST(request: NextRequest) {
         targetKind: parseTargetKind(body.targetKind),
         targetId: body.targetId as string,
         variant: parseVariant(body.variant),
+        topicCluster: body.topicCluster as string | undefined,
+        timelineAt: typeof body.timelineAt === "number" ? body.timelineAt : undefined,
+        signalStrength: typeof body.signalStrength === "number" ? body.signalStrength : undefined,
+        threadStatus: parseThreadStatus(body.threadStatus),
       });
       return ok(result);
     }
@@ -102,11 +157,18 @@ export async function POST(request: NextRequest) {
       const result = await convexMutation("workspaceCommandResults:update", {
         actorClerkId: actor.clerkId,
         resultId,
+        title: body.title as string | undefined,
         status: parseStatus(body.status, "completed"),
         summary: body.summary as string,
+        detail: body.detail as string | undefined,
         targetKind: parseTargetKind(body.targetKind),
         targetId: body.targetId as string,
         variant: parseVariant(body.variant),
+        metadata: body.metadata,
+        topicCluster: body.topicCluster as string | undefined,
+        timelineAt: typeof body.timelineAt === "number" ? body.timelineAt : undefined,
+        signalStrength: typeof body.signalStrength === "number" ? body.signalStrength : undefined,
+        threadStatus: parseThreadStatus(body.threadStatus),
       });
       return ok(result);
     }
@@ -121,6 +183,28 @@ export async function POST(request: NextRequest) {
       return ok(result);
     }
 
+
+    if (action === "executeQuickAction") {
+      const workstreamId = body.workstreamId as string | undefined;
+      if (!workstreamId) return badRequest("workstreamId is required");
+      const result = await convexMutation("workspaceCommandResults:executeQuickAction", {
+        actorClerkId: actor.clerkId,
+        workstreamId,
+        sourceChatId: body.sourceChatId as string | undefined,
+        sourceMessageId: body.sourceMessageId as string | undefined,
+        prompt: typeof body.prompt === "string" && body.prompt.trim().length > 0 ? body.prompt.trim() : "Quick action",
+        action: parseQuickAction(body.quickAction),
+        title: body.title as string | undefined,
+        content: body.content as string | undefined,
+        dueAt: typeof body.dueAt === "number" ? body.dueAt : undefined,
+        cards: Array.isArray(body.cards) ? body.cards as Array<{ front: string; back: string }> : undefined,
+        targetArtifactId: body.targetArtifactId as string | undefined,
+        targetPlannerItemId: body.targetPlannerItemId as string | undefined,
+        targetChatId: body.targetChatId as string | undefined,
+        metadata: body.metadata,
+      });
+      return ok(result);
+    }
     if (action === "search") {
       const workstreamId = body.workstreamId as string | undefined;
       const query = body.query as string | undefined;
@@ -149,6 +233,29 @@ export async function POST(request: NextRequest) {
         editorMode: "standard",
         sourceType: "user_manual",
       });
+      const canvasX = parseCanvasNumber(body.canvasX);
+      const canvasY = parseCanvasNumber(body.canvasY);
+      if (canvasX !== undefined || canvasY !== undefined) {
+        await convexMutation("workspaceItems:updateBySourceArtifact", {
+          actorClerkId: actor.clerkId,
+          sourceArtifactId: artifactId,
+          provenanceSource: "user",
+        });
+      }
+      const createdItemIds = await convexMutation("workspaceItems:attachItemsToWorkstream", {
+        actorClerkId: actor.clerkId,
+        workstreamId,
+        items: [{
+          title,
+          itemType: "artifact",
+          sourceArtifactId: artifactId,
+          renderMode: "note",
+          contentSummary: summarizeContent(content, 280),
+          x: canvasX,
+          y: canvasY,
+          category: "documents",
+        }],
+      });
       await convexMutation("workspaceCommandResults:create", {
         actorClerkId: actor.clerkId,
         workstreamId,
@@ -161,7 +268,7 @@ export async function POST(request: NextRequest) {
         targetId: artifactId,
         metadata: { source: "workspace-command-bar" },
       });
-      return ok({ artifactId });
+      return ok({ artifactId, itemIds: (createdItemIds as AttachedItemsResult).itemIds });
     }
 
     if (action === "createArtifact") {
@@ -180,6 +287,21 @@ export async function POST(request: NextRequest) {
         editorMode: type === "code_project" || type === "code_output" ? "standard" : "ai_enhanced",
         sourceType: "user_manual",
       });
+      const canvasX = parseCanvasNumber(body.canvasX);
+      const canvasY = parseCanvasNumber(body.canvasY);
+      const createdItemIds = await convexMutation("workspaceItems:attachItemsToWorkstream", {
+        actorClerkId: actor.clerkId,
+        workstreamId,
+        items: [{
+          title,
+          itemType: "artifact",
+          sourceArtifactId: artifactId,
+          renderMode: type,
+          contentSummary: summarizeContent(typeof content === "string" ? content : JSON.stringify(content), 280),
+          x: canvasX,
+          y: canvasY,
+        }],
+      });
       await convexMutation("workspaceCommandResults:create", {
         actorClerkId: actor.clerkId,
         workstreamId,
@@ -192,24 +314,48 @@ export async function POST(request: NextRequest) {
         targetId: artifactId,
         metadata: { source: "workspace-command-bar", type },
       });
-      return ok({ artifactId });
+      return ok({ artifactId, itemIds: (createdItemIds as AttachedItemsResult).itemIds });
     }
 
     if (action === "createPlannerItem") {
       const workstreamId = body.workstreamId as string | undefined;
       if (!workstreamId) return badRequest("workstreamId is required");
       const title = sanitizeTitle(body.title, "New task");
+      const description = summarizeContent(body.description, 320);
       const plannerItem = await convexMutation<{ actorClerkId: string; title: string; description?: string; workstreamId?: string; type?: "deadline" | "milestone" | "goal" | "reminder"; priority?: "low" | "medium" | "high"; status?: "pending" | "in_progress" | "completed" | "cancelled"; dueAt?: number; sourceType?: "user_manual" | "ai_suggested" | "managebac_sync" }, { plannerItemId: string }>("plannerItems:create", {
         actorClerkId: actor.clerkId,
         workstreamId,
         title,
-        description: summarizeContent(body.description, 320),
+        description,
         type: (body.type as "deadline" | "milestone" | "goal" | "reminder" | undefined) ?? "deadline",
         priority: (body.priority as "low" | "medium" | "high" | undefined) ?? "medium",
         status: (body.status as "pending" | "in_progress" | "completed" | "cancelled" | undefined) ?? "pending",
         dueAt: typeof body.dueAt === "number" ? body.dueAt : undefined,
         sourceType: "user_manual",
       });
+      const canvasX = parseCanvasNumber(body.canvasX);
+      const canvasY = parseCanvasNumber(body.canvasY);
+      if (canvasX !== undefined || canvasY !== undefined) {
+        const itemRows = await convexQuery("workspaceItems:getWorkspacePageData", {
+          actorClerkId: actor.clerkId,
+          workstreamId,
+          includeDismissedResults: false,
+          commandResultLimit: 1,
+          widgetLimit: 1,
+        });
+        const linkedItem = ((itemRows as { items?: Array<{ sourcePlannerItemId?: string; _id: string }> }).items ?? []).find((item) => item.sourcePlannerItemId === plannerItem.plannerItemId);
+        if (linkedItem) {
+          await convexMutation("workspaceItems:updateWidget", {
+            actorClerkId: actor.clerkId,
+            itemId: linkedItem._id,
+            x: canvasX,
+            y: canvasY,
+            contentSummary: summarizeContent(description, 280),
+            renderMode: (body.type as string | undefined) ?? "deadline",
+            category: "planner",
+          });
+        }
+      }
       await convexMutation("workspaceCommandResults:create", {
         actorClerkId: actor.clerkId,
         workstreamId,
@@ -239,6 +385,23 @@ export async function POST(request: NextRequest) {
         routerMode: "auto",
         usePersonalResources: true,
       });
+      const canvasX = parseCanvasNumber(body.canvasX);
+      const canvasY = parseCanvasNumber(body.canvasY);
+      if (canvasX !== undefined || canvasY !== undefined) {
+        await convexMutation("workspaceItems:attachItemsToWorkstream", {
+          actorClerkId: actor.clerkId,
+          workstreamId,
+          items: [{
+            title,
+            itemType: "thread",
+            sourceChatId: result.chatId,
+            renderMode: "thread",
+            x: canvasX,
+            y: canvasY,
+            category: "threads",
+          }],
+        });
+      }
       await convexMutation("workspaceCommandResults:create", {
         actorClerkId: actor.clerkId,
         workstreamId,
@@ -286,6 +449,64 @@ export async function POST(request: NextRequest) {
         actorClerkId: actor.clerkId,
         itemId,
         pinned,
+      });
+      return ok(result);
+    }
+
+    if (action === "createWidget") {
+      const kind = body.kind as string | undefined;
+      if (!kind) return badRequest("kind is required");
+      const result = await convexMutation("workspaceWidgets:create", {
+        actorClerkId: actor.clerkId,
+        workstreamId: body.workstreamId as string | undefined,
+        kind,
+        title: body.title as string | undefined,
+        x: parseCanvasNumber(body.x) ?? 96,
+        y: parseCanvasNumber(body.y) ?? 96,
+        w: parseCanvasNumber(body.w) ?? 280,
+        h: parseCanvasNumber(body.h) ?? 200,
+        collapsed: typeof body.collapsed === "boolean" ? body.collapsed : undefined,
+        hidden: typeof body.hidden === "boolean" ? body.hidden : undefined,
+        state: body.state,
+        source: parseWidgetSource(body.source),
+      });
+      return ok(result);
+    }
+
+    if (action === "updateWidget") {
+      const widgetId = body.widgetId as string | undefined;
+      if (!widgetId) return badRequest("widgetId is required");
+      const result = await convexMutation("workspaceWidgets:update", {
+        actorClerkId: actor.clerkId,
+        widgetId,
+        title: body.title as string | undefined,
+        x: parseCanvasNumber(body.x),
+        y: parseCanvasNumber(body.y),
+        w: parseCanvasNumber(body.w),
+        h: parseCanvasNumber(body.h),
+        collapsed: typeof body.collapsed === "boolean" ? body.collapsed : undefined,
+        hidden: typeof body.hidden === "boolean" ? body.hidden : undefined,
+        state: body.state,
+      });
+      return ok(result);
+    }
+
+    if (action === "removeWidget") {
+      const widgetId = body.widgetId as string | undefined;
+      if (!widgetId) return badRequest("widgetId is required");
+      const result = await convexMutation("workspaceWidgets:remove", {
+        actorClerkId: actor.clerkId,
+        widgetId,
+      });
+      return ok(result);
+    }
+
+    if (action === "persistViewMode") {
+      const viewMode = parseWorkspaceViewMode(body.viewMode);
+      if (!viewMode) return badRequest("viewMode is required");
+      const result = await convexMutation("userPreferences:upsert", {
+        actorClerkId: actor.clerkId,
+        workspaceViewMode: toPreferenceViewMode(viewMode),
       });
       return ok(result);
     }

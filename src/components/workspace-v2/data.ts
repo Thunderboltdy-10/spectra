@@ -23,6 +23,9 @@ export type V2Territory = {
 export type V2Item = {
   id: string;
   sourceId: string;            // real item id
+  sourceArtifactId?: string;
+  sourcePlannerItemId?: string;
+  sourceChatId?: string;
   workspaceId: string;         // v2 territory id
   kind: V2Kind;
   title: string;
@@ -113,6 +116,9 @@ function layoutItems(
     return {
       id: `v2-${it.id}`,
       sourceId: it.id,
+      sourceArtifactId: it.sourceArtifactId,
+      sourcePlannerItemId: it.sourcePlannerItemId,
+      sourceChatId: it.sourceChatId,
       workspaceId,
       kind,
       title: it.title,

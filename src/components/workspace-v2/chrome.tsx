@@ -14,41 +14,31 @@ export type ViewMode = "spatial" | "type" | "topic" | "timeline";
 type TopRailProps = {
   workspace: V2Territory | null;
   zoom: number;
-  trayCount: number;
   viewMode: ViewMode;
-  widgetsHidden: boolean;
   theme: "light" | "dark";
   onViewMode: (m: ViewMode) => void;
-  onOpenTray: () => void;
   onHome: () => void;
   onAtlas: () => void;
-  onSpotlight: () => void;
-  onToggleWidgets: () => void;
-  onAddWidget: (kind: string) => void;
+  /** Retained for ⌘K wiring; no longer renders a button in the rail. */
+  onSpotlight?: () => void;
   onToggleTheme: () => void;
   onOpenInfo: () => void;
 };
 
 export function TopRail({
-  workspace, zoom, trayCount, viewMode, widgetsHidden, theme,
-  onViewMode, onOpenTray, onHome, onAtlas, onSpotlight,
-  onToggleWidgets, onAddWidget, onToggleTheme, onOpenInfo,
+  workspace, zoom, viewMode, theme,
+  onViewMode, onHome, onAtlas, onSpotlight,
+  onToggleTheme, onOpenInfo,
 }: TopRailProps) {
-  const [widgetsMenu, setWidgetsMenu] = useState(false);
-  const modes: { id: ViewMode; label: string; icon: IconName }[] = [
-    { id: "spatial", label: "Spatial", icon: "layout" },
-    { id: "type", label: "Type", icon: "grid" },
-    { id: "topic", label: "Topic", icon: "topic" },
-    { id: "timeline", label: "Timeline", icon: "timeline" },
+  // "spatial" is the internal id; label is "Free" so users understand it means "your manual layout"
+  const modes: { id: ViewMode; label: string; icon: IconName; tip: string }[] = [
+    { id: "spatial", label: "Free",     icon: "layout",   tip: "Free layout — your manual arrangement. Type/Topic/Timeline will regroup items." },
+    { id: "type",    label: "Type",     icon: "grid",     tip: "Group by item type (notes, tasks, threads…)" },
+    { id: "topic",   label: "Topic",    icon: "topic",    tip: "Group by topic within this workspace" },
+    { id: "timeline",label: "Timeline", icon: "timeline", tip: "Sort by recency — most recent first" },
   ];
-  const addables: { kind: string; label: string; icon: IconName }[] = [
-    { kind: "timer", label: "Focus timer", icon: "timer" },
-    { kind: "planner", label: "Week planner", icon: "planner" },
-    { kind: "today", label: "Today queue", icon: "schedule" },
-    { kind: "scratch", label: "Scratchpad", icon: "note" },
-    { kind: "library", label: "Library", icon: "reading" },
-    { kind: "calendar", label: "Calendar", icon: "schedule" },
-  ];
+
+  const [optionsOpen, setOptionsOpen] = useState(false);
 
   return (
     <div className="absolute top-0 left-0 right-0 z-30 pointer-events-none">
@@ -57,48 +47,48 @@ export function TopRail({
         <div className="flex items-center gap-2 pointer-events-auto">
           <button
             onClick={onHome}
-            className="w-8 h-8 rounded-full flex items-center justify-center transition-colors"
-            style={{ border: "1px solid var(--line)", background: "rgba(251,250,246,0.8)", backdropFilter: "blur(8px)" }}
+            className="w-8 h-8 rounded-full flex items-center justify-center transition-colors shadow-sm hover:shadow-md"
+            style={{ border: "1px solid var(--line)", background: "var(--paper)", backdropFilter: "blur(8px)" }}
             title="Home / Atlas"
           >
             <div className="w-2 h-2 rounded-full" style={{ background: "linear-gradient(135deg, var(--accent), var(--mint))" }} />
           </button>
-          <div className="font-mono text-[10px] uppercase tracking-[0.16em]" style={{ color: "var(--ink-400)" }}>Spectra</div>
-          <span style={{ color: "var(--ink-400)" }}>·</span>
+          <div className="font-mono text-[10px] uppercase tracking-[0.16em] opacity-80" style={{ color: "var(--ink-400)" }}>Spectra</div>
+          <span className="opacity-60" style={{ color: "var(--ink-400)" }}>·</span>
           <button
             onClick={onAtlas}
-            className="font-mono text-[10px] uppercase tracking-[0.16em] hover:underline"
+            className="font-mono text-[10px] uppercase tracking-[0.16em] hover:text-[var(--accent)] transition-colors opacity-80"
             style={{ color: "var(--ink-300)" }}
           >
             Atlas
           </button>
           {workspace && (
             <>
-              <Icon name="chevron" size={12} style={{ color: "var(--ink-400)" }} />
-              <div className="flex items-center gap-1.5">
+              <Icon name="chevron" size={12} className="opacity-60" style={{ color: "var(--ink-400)" }} />
+              <div className="flex items-center gap-2">
                 <span className="text-[14px]">{workspace.glyph}</span>
-                <span className="font-display text-[17px]" style={{ color: "var(--ink-100)" }}>{workspace.name}</span>
-                <span className="text-[11px] font-mono ml-2" style={{ color: "var(--ink-400)" }}>{workspace.subtitle}</span>
+                <span className="font-display text-[17px] font-medium" style={{ color: "var(--ink-100)" }}>{workspace.name}</span>
+                <span className="text-[11px] font-mono ml-1 opacity-70" style={{ color: "var(--ink-400)" }}>{workspace.subtitle}</span>
               </div>
             </>
           )}
         </div>
 
         {/* RIGHT: view modes + unified actions */}
-        <div className="flex items-center gap-2 pointer-events-auto">
+        <div className="flex items-center gap-2 pointer-events-auto relative">
           {workspace && (
-            <div className="flex items-center p-0.5 rounded-full"
-                 style={{ border: "1px solid var(--line)", background: "rgba(251,250,246,0.8)", backdropFilter: "blur(8px)" }}>
+            <div className="flex items-center p-[3px] rounded-full shadow-sm"
+                 style={{ border: "1px solid var(--line)", background: "var(--paper)", backdropFilter: "blur(8px)" }}>
               {modes.map((m, i) => (
                 <button
                   key={m.id}
                   onClick={() => onViewMode(m.id)}
-                  className="px-2.5 h-7 rounded-full flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-[0.1em] transition-colors"
+                  className="px-3 h-7 rounded-full flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-[0.1em] transition-all"
                   style={{
-                    background: viewMode === m.id ? "var(--accent)" : "transparent",
-                    color: viewMode === m.id ? "#fff" : "var(--ink-300)",
+                    background: viewMode === m.id ? "var(--ink-100)" : "transparent",
+                    color: viewMode === m.id ? "var(--paper)" : "var(--ink-300)",
                   }}
-                  title={`${m.label} (press ${i + 1})`}
+                  title={`${m.tip} (press ${i + 1})`}
                 >
                   <Icon name={m.icon} size={11} />
                   <span>{m.label}</span>
@@ -107,113 +97,135 @@ export function TopRail({
             </div>
           )}
 
-          {/* Widgets menu — add / toggle */}
           <div className="relative">
             <button
-              onClick={() => setWidgetsMenu((v) => !v)}
-              className="h-8 px-3 rounded-full flex items-center gap-1.5 transition-colors"
-              style={{
-                border: `1px solid ${widgetsHidden ? "var(--line)" : "rgba(14,142,232,0.4)"}`,
-                background: widgetsHidden ? "rgba(251,250,246,0.8)" : "var(--paper)",
-                color: widgetsHidden ? "var(--ink-300)" : "var(--accent)",
-                backdropFilter: "blur(8px)",
-              }}
-              title="Widgets"
+              onClick={() => setOptionsOpen(!optionsOpen)}
+              className="w-8 h-8 rounded-full flex items-center justify-center shadow-sm hover:shadow-md transition-all"
+              style={{ border: "1px solid var(--line)", background: optionsOpen ? "var(--bg2)" : "var(--paper)", backdropFilter: "blur(8px)", color: optionsOpen ? "var(--ink-100)" : "var(--ink-300)" }}
+              title="Options"
             >
-              <Icon name="widget" size={12} />
-              <span className="text-[10.5px] font-mono uppercase tracking-[0.12em]">Widgets</span>
+              <Icon name="ellipsis" size={14} />
             </button>
-            {widgetsMenu && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setWidgetsMenu(false)} />
-                <div
-                  className="absolute right-0 mt-1 rounded-xl py-1 z-50 min-w-[220px]"
-                  style={{ background: "var(--paper)", border: "1px solid var(--line)", boxShadow: "0 18px 45px -28px rgba(8,22,40,0.2)" }}
-                >
+            
+            {optionsOpen && (
+              <div className="absolute right-0 top-full mt-2 w-48 rounded-xl shadow-lg border overflow-hidden sv2-drift-in z-50"
+                   style={{ background: "var(--paper)", borderColor: "var(--line)" }}>
+                <div className="py-1">
+                  <div className="px-3 py-1.5 text-[10px] font-mono uppercase tracking-widest text-[var(--ink-400)] border-b border-[var(--line)] mb-1">
+                    Display
+                  </div>
                   <button
-                    onClick={() => { onToggleWidgets(); setWidgetsMenu(false); }}
-                    className="w-full text-left px-3 py-2 flex items-center gap-2 text-[12px] hover:bg-[var(--bg2)]"
+                    onClick={() => { onToggleTheme(); setOptionsOpen(false); }}
+                    className="w-full flex items-center justify-between px-3 py-2 text-[12px] hover:bg-[var(--bg2)] transition-colors"
                     style={{ color: "var(--ink-200)" }}
                   >
-                    <Icon name={widgetsHidden ? "expand" : "collapse"} size={11} />
-                    {widgetsHidden ? "Show widgets" : "Hide widgets"}
+                    <div className="flex items-center gap-2">
+                      <Icon name={theme === "dark" ? "sun" : "moon"} size={14} />
+                      <span>{theme === "dark" ? "Light Theme" : "Dark Theme"}</span>
+                    </div>
                   </button>
-                  <div className="h-px mx-2 my-1" style={{ background: "var(--line)" }} />
-                  <div className="px-3 py-1 font-mono text-[9px] uppercase tracking-[0.16em]" style={{ color: "var(--ink-400)" }}>
-                    Add widget
+                  <div className="w-full flex items-center justify-between px-3 py-2 text-[12px]"
+                       style={{ color: "var(--ink-200)" }}>
+                    <div className="flex items-center gap-2">
+                      <Icon name="zoom-in" size={14} />
+                      <span>Zoom</span>
+                    </div>
+                    <span className="font-mono text-[10px]">{Math.round(zoom * 100)}%</span>
                   </div>
-                  {addables.map((a) => (
-                    <button
-                      key={a.kind}
-                      onClick={() => { onAddWidget(a.kind); setWidgetsMenu(false); }}
-                      className="w-full text-left px-3 py-1.5 flex items-center gap-2 text-[12px] hover:bg-[var(--bg2)]"
-                      style={{ color: "var(--ink-200)" }}
-                    >
-                      <Icon name={a.icon} size={11} style={{ color: "var(--ink-400)" }} />
-                      {a.label}
-                    </button>
-                  ))}
+                  
+                  <div className="px-3 py-1.5 text-[10px] font-mono uppercase tracking-widest text-[var(--ink-400)] border-b border-[var(--line)] mt-1 mb-1">
+                    Help
+                  </div>
+                  <button
+                    onClick={() => { onOpenInfo(); setOptionsOpen(false); }}
+                    className="w-full flex items-center justify-between px-3 py-2 text-[12px] hover:bg-[var(--bg2)] transition-colors"
+                    style={{ color: "var(--ink-200)" }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Icon name="info" size={14} />
+                      <span>Shortcuts & Guide</span>
+                    </div>
+                  </button>
                 </div>
-              </>
+              </div>
             )}
-          </div>
-
-          <button
-            onClick={onSpotlight}
-            className="flex items-center gap-2 px-3 h-8 rounded-full transition-colors"
-            style={{
-              border: "1px solid var(--line)",
-              background: "rgba(251,250,246,0.8)",
-              backdropFilter: "blur(8px)",
-            }}
-            title="Spotlight (⌘K)"
-          >
-            <Icon name="search" size={13} style={{ color: "var(--ink-400)" }} />
-            <span className="text-[12px]" style={{ color: "var(--ink-300)" }}>Jump…</span>
-            <span className="sv2-kbd">⌘K</span>
-          </button>
-
-          <button
-            onClick={onOpenTray}
-            className="relative h-8 px-3 rounded-full flex items-center gap-2"
-            style={{ border: "1px solid var(--line)", background: "rgba(251,250,246,0.8)", backdropFilter: "blur(8px)" }}
-          >
-            <Icon name="tray" size={13} style={{ color: "var(--ink-400)" }} />
-            <span className="text-[11px] font-mono uppercase tracking-[0.12em]" style={{ color: "var(--ink-300)" }}>Tray</span>
-            {trayCount > 0 && (
-              <span className="font-mono text-[10px]" style={{ color: "var(--accent)" }}>{trayCount}</span>
-            )}
-          </button>
-
-          <button
-            onClick={onToggleTheme}
-            className="w-8 h-8 rounded-full flex items-center justify-center"
-            style={{ border: "1px solid var(--line)", background: "rgba(251,250,246,0.8)", backdropFilter: "blur(8px)", color: "var(--ink-300)" }}
-            title="Toggle theme"
-          >
-            <Icon name={theme === "dark" ? "sun" : "moon"} size={12} />
-          </button>
-
-          <button
-            onClick={onOpenInfo}
-            className="w-8 h-8 rounded-full flex items-center justify-center"
-            style={{ border: "1px solid var(--line)", background: "rgba(251,250,246,0.8)", backdropFilter: "blur(8px)", color: "var(--ink-300)" }}
-            title="Shortcuts & help"
-          >
-            <Icon name="info" size={13} />
-          </button>
-
-          <div
-            className="h-8 px-3 rounded-full flex items-center gap-1.5"
-            style={{ border: "1px solid var(--line)", background: "rgba(251,250,246,0.8)", backdropFilter: "blur(8px)" }}
-          >
-            <span className="font-mono text-[10px]" style={{ color: "var(--ink-400)" }}>zoom</span>
-            <span className="font-mono text-[10.5px] tabular-nums" style={{ color: "var(--ink-100)" }}>
-              {Math.round(zoom * 100)}%
-            </span>
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ─── WidgetLauncher — Edge Launcher Model ─── */
+export function WidgetLauncher({
+  widgetsHidden, onToggleWidgets, onAddWidget
+}: {
+  widgetsHidden: boolean;
+  onToggleWidgets: () => void;
+  onAddWidget: (kind: string) => void;
+}) {
+  const addables: { kind: string; label: string; icon: IconName }[] = [
+    { kind: "timer", label: "Focus timer", icon: "timer" },
+    { kind: "planner", label: "Week planner", icon: "planner" },
+    { kind: "today", label: "Today queue", icon: "schedule" },
+    { kind: "scratch", label: "Scratchpad", icon: "note" },
+    { kind: "library", label: "Library", icon: "reading" },
+    { kind: "calendar", label: "Calendar", icon: "schedule" },
+    { kind: "thread", label: "Chat Thread", icon: "thread" },
+    { kind: "artifact", label: "New Artifact", icon: "note" },
+  ];
+
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="absolute top-[80px] right-4 z-30 pointer-events-auto flex flex-col items-end gap-2">
+      <button
+        onClick={() => {
+          if (widgetsHidden) onToggleWidgets();
+          setExpanded((v) => !v);
+        }}
+        className="h-10 px-3 rounded-xl flex items-center gap-2 shadow-sm transition-all hover:shadow-md"
+        style={{
+          border: `1px solid ${expanded ? "var(--accent)" : "var(--line)"}`,
+          background: "var(--paper)",
+          color: expanded ? "var(--accent)" : "var(--ink-300)",
+          backdropFilter: "blur(8px)",
+        }}
+      >
+        <Icon name="widget" size={14} />
+        <span className="text-[11px] font-mono uppercase tracking-[0.1em] font-medium">Widgets</span>
+      </button>
+
+      {expanded && (
+        <div 
+          className="rounded-xl flex flex-col gap-1 p-1.5 sv2-drift-in shadow-md"
+          style={{ background: "var(--paper)", border: "1px solid var(--line)" }}
+        >
+          <button
+            onClick={onToggleWidgets}
+            className="w-full text-left p-2 rounded-lg flex items-center gap-2 text-[12px] hover:bg-[var(--bg2)] transition-colors"
+            style={{ color: "var(--ink-200)" }}
+          >
+            <Icon name={widgetsHidden ? "expand" : "collapse"} size={12} />
+            {widgetsHidden ? "Show active widgets" : "Hide active widgets"}
+          </button>
+          <div className="h-px w-full my-0.5 opacity-50" style={{ background: "var(--line)" }} />
+          {addables.map((a) => (
+            <button
+              key={a.kind}
+              onClick={() => { onAddWidget(a.kind); if(widgetsHidden) onToggleWidgets(); }}
+              className="w-full text-left p-2 rounded-lg flex items-center gap-2.5 text-[12px] hover:bg-[var(--bg2)] transition-colors group"
+              style={{ color: "var(--ink-200)" }}
+              title={`Add ${a.label}`}
+            >
+              <div className="w-6 h-6 rounded flex items-center justify-center bg-[var(--bg2)] group-hover:bg-transparent transition-colors">
+                <Icon name={a.icon} size={12} style={{ color: "var(--ink-400)" }} className="group-hover:text-[var(--accent)] transition-colors" />
+              </div>
+              <span className="font-medium whitespace-nowrap pr-2">{a.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -265,10 +277,7 @@ export function AtlasStrip({
 }
 
 /* ─────────────────────────────────────────────────────────────
- *  Minimap — HOVER-TELEPORT (user requested)
- *  Hover → camera flies to that world point
- *  Wheel over map → zoom (not aggressive)
- *  Click workspace tile → fly there
+ *  Minimap — click to arm, click to commit
  * ───────────────────────────────────────────────────────────── */
 
 export function Minimap({
@@ -290,7 +299,7 @@ export function Minimap({
   const ox = W / 2;
   const oy = H / 2;
   const mapRef = useRef<HTMLDivElement>(null);
-  const hovering = useRef(false);
+  const [activePan, setActivePan] = useState(false);
 
   const toWorld = (e: React.MouseEvent | MouseEvent) => {
     const rect = mapRef.current?.getBoundingClientRect();
@@ -302,14 +311,20 @@ export function Minimap({
 
   return (
     <div className="absolute bottom-4 right-4 z-30 pointer-events-auto">
-      <div className="rounded-xl p-2"
-           style={{ background: "rgba(251,250,246,0.94)", border: "1px solid var(--line)", backdropFilter: "blur(10px)", boxShadow: "0 18px 45px -28px rgba(8,22,40,0.18)" }}>
+      <div className={`rounded-xl p-2 transition-all ${activePan ? "shadow-lg scale-[1.02]" : "shadow-sm"}`}
+           style={{ 
+             background: activePan ? "var(--paper)" : "rgba(251,250,246,0.94)", 
+             border: `1px solid ${activePan ? "var(--accent)" : "var(--line)"}`, 
+             backdropFilter: "blur(10px)",
+           }}>
         <div className="flex items-center justify-between mb-1.5 px-1 gap-2">
-          <span className="font-mono text-[9px] uppercase tracking-[0.16em]" style={{ color: "var(--ink-400)" }}>Map · hover to fly</span>
+          <span className="font-mono text-[9px] uppercase tracking-[0.16em] flex items-center gap-1" style={{ color: activePan ? "var(--accent)" : "var(--ink-400)" }}>
+            {activePan ? <><span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse" /> Active pan</> : "Map · click to pan"}
+          </span>
           <div className="flex items-center gap-0.5">
             <button
               onClick={(e) => { e.stopPropagation(); onWheelZoom(-80, 0, 0); }}
-              className="w-4 h-4 rounded flex items-center justify-center"
+              className="w-4 h-4 rounded flex items-center justify-center hover:bg-[var(--bg2)] transition-colors"
               style={{ color: "var(--ink-400)", border: "1px solid var(--line)" }}
               title="Zoom out"
             >
@@ -317,37 +332,41 @@ export function Minimap({
             </button>
             <button
               onClick={(e) => { e.stopPropagation(); onWheelZoom(80, 0, 0); }}
-              className="w-4 h-4 rounded flex items-center justify-center"
+              className="w-4 h-4 rounded flex items-center justify-center hover:bg-[var(--bg2)] transition-colors"
               style={{ color: "var(--ink-400)", border: "1px solid var(--line)" }}
               title="Zoom in"
             >
               <Icon name="plus" size={8} />
             </button>
-            <span className="font-mono text-[9px] ml-1" style={{ color: "var(--ink-400)" }}>{items.length}</span>
+            <span className="font-mono text-[9px] ml-1 font-medium" style={{ color: "var(--ink-400)" }}>{items.length}</span>
           </div>
         </div>
         <div
           ref={mapRef}
-          className="relative"
-          style={{ width: W, height: H, background: "var(--bg2)", borderRadius: 6, cursor: "crosshair", overflow: "hidden" }}
-          onMouseEnter={() => { hovering.current = true; }}
-          onMouseLeave={() => { hovering.current = false; }}
+          className="relative transition-colors"
+          style={{ width: W, height: H, background: activePan ? "var(--paper)" : "var(--bg2)", borderRadius: 6, cursor: activePan ? "crosshair" : "pointer", overflow: "hidden" }}
           onMouseMove={(e) => {
-            if (!hovering.current) return;
+            if (!activePan) return;
             const p = toWorld(e);
             onHoverPan(p.x, p.y);
           }}
           onClick={(e) => {
-            const p = toWorld(e);
-            onCommitPan(p.x, p.y);
+            if (activePan) {
+              setActivePan(false);
+              const p = toWorld(e);
+              onCommitPan(p.x, p.y);
+            } else {
+              setActivePan(true);
+              const p = toWorld(e);
+              onHoverPan(p.x, p.y);
+            }
           }}
           onWheel={(e) => {
-            // Shift+wheel zooms — plain wheel is reserved for page scroll.
             if (!e.shiftKey) return;
             e.preventDefault();
             onWheelZoom(-e.deltaY, 0, 0);
           }}
-          title="Hover to fly · click to commit · shift+scroll or buttons to zoom"
+          title="Click to activate pan · click again to release · shift+scroll to zoom"
         >
           {territories.map((w) => (
             <div
@@ -405,9 +424,11 @@ export function Minimap({
  * ───────────────────────────────────────────────────────────── */
 
 export type ResultIsland = {
-  status: "streaming" | "done" | "error";
+  /** pending = queued, not started yet · running = in-progress (streaming) · done = completed · error = failed */
+  status: "pending" | "streaming" | "running" | "done" | "error";
   text: string;
   chips?: string[];
+  action?: { label: string; onClick: () => void };
 } | null;
 
 type CommandBarProps = {
@@ -419,201 +440,251 @@ type CommandBarProps = {
   quickStarts: readonly QuickStart[];
   onSubmit: (text: string) => void;
   onDismissResult: () => void;
+  /** Opens the Spotlight (⌘K) overlay from the search icon inside the bar. */
+  onSpotlight?: () => void;
+  /** Creates an item at camera center. Called from the + inline menu. */
+  onCreate?: (kind: "note" | "task" | "thread" | "visual") => void;
+  /**
+   * Slot for Agent A to inject focused-context (selection set, artifact, thread).
+   * Not rendered yet — leave the prop for forward-compatibility.
+   */
+  focusContext?: {
+    kind: "artifact" | "thread" | "selection";
+    title: string;
+    color: string;
+    count?: number;
+  } | null;
 };
+
+/* Creation menu items — shared with right-click context menu in app.tsx */
+export const CREATION_MENU_ITEMS = [
+  { kind: "note"   as const, label: "New note",   icon: "note"     as const },
+  { kind: "task"   as const, label: "New task",   icon: "schedule" as const },
+  { kind: "thread" as const, label: "New thread", icon: "thread"   as const },
+  { kind: "visual" as const, label: "New visual", icon: "layers"   as const },
+];
 
 export function CommandBar({
   focusedItem, workspace, selectedCount, bloomedCount,
   resultIsland, quickStarts, onSubmit, onDismissResult,
+  onSpotlight, onCreate,
+  /* focusContext — reserved for Agent A */ focusContext: _focusContext,
 }: CommandBarProps) {
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
   const [showQS, setShowQS] = useState(false);
+  const [showCreateMenu, setShowCreateMenu] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  const suggestionsFor = (): string[] => {
-    if (selectedCount > 1) return [`Ask about ${selectedCount} items`, "Compare", "Merge into one note", "Quiz me"];
-    if (focusedItem) {
-      const k = focusedItem.kind;
-      if (k === "essay") return ["Strengthen thesis", "Tighten transition", "Find counterargument"];
-      if (k === "pset") return ["Hint for current problem", "Check my work", "Make similar practice"];
-      if (k === "flashcards") return ["Quick review 10", "Add harder cards"];
-      if (k === "note") return ["Explain in 3 lines", "Turn into flashcards", "Find related"];
-      if (k === "reading") return ["Summarize", "Extract key terms", "Make flashcards"];
-      return ["Summarize", "Find related", "Turn into flashcards"];
-    }
-    if (workspace) return [`Plan ${workspace.name} this week`, `What's urgent in ${workspace.name}?`, "Start a new note"];
-    return ["Plan my exam week", "Cram session", "What should I do next?"];
-  };
-  const suggestions = suggestionsFor();
 
   const placeholder = (() => {
     if (selectedCount > 1) return `Ask about ${selectedCount} items…`;
     if (focusedItem) return `Ask about "${focusedItem.title.slice(0, 32)}…"`;
     if (bloomedCount > 1) return `Ask across ${bloomedCount} open items…`;
     if (workspace) return `Ask, act, or create in ${workspace.name}…`;
-    return "Ask anything, or /command…";
+    return "Ask anything, or type /…";
   })();
 
+  /* Island icon/class based on status */
+  const islandStatusIcon = (status: NonNullable<ResultIsland>["status"]) => {
+    if (status === "pending") return null; // dashed ring rendered below
+    if (status === "running" || status === "streaming") return null; // breathing orb
+    if (status === "done") return "sparkle" as const;
+    return "close" as const; // error
+  };
+
   return (
-    <div className="absolute left-1/2 -translate-x-1/2 bottom-5 z-40 pointer-events-auto w-[min(720px,92vw)]">
-      {/* Result island — compact single-row (~32px) */}
+    <div className="absolute left-1/2 -translate-x-1/2 bottom-5 z-40 pointer-events-auto flex flex-col items-center max-w-[92vw]">
+      {/* Result island — animated pill attachment with four honest states */}
       {resultIsland && (
         <div
-          className="sv2-result-in mb-2 rounded-full pl-2.5 pr-2 h-8 flex gap-2 items-center sv2-island"
-          style={{ fontSize: "12px" }}
+          className={`sv2-result-in flex gap-2 items-center sv2-island mb-1.5 h-10 px-3
+            ${resultIsland.status === "pending" ? "sv2-island-pending" : ""}
+            ${resultIsland.status === "running" || resultIsland.status === "streaming" ? "sv2-island-running" : ""}
+            ${resultIsland.status === "done" ? "sv2-island-done" : ""}
+            ${resultIsland.status === "error" ? "sv2-island-error" : ""}
+          `}
+          style={{ fontSize: "12px", minWidth: "240px", maxWidth: "360px", borderRadius: "18px" }}
         >
-          {resultIsland.status === "streaming" ? (
+          {/* Status indicator */}
+          {resultIsland.status === "pending" && (
+            <span className="inline-block w-3 h-3 rounded-full shrink-0 sv2-pending-ring" />
+          )}
+          {(resultIsland.status === "running" || resultIsland.status === "streaming") && (
             <span
-              className="inline-block w-2 h-2 rounded-full shrink-0 sv2-breathe"
-              style={{ background: "linear-gradient(135deg, var(--accent), var(--mint))" }}
+              className="inline-block w-2.5 h-2.5 rounded-full shrink-0 sv2-breathe"
+              style={{ background: "linear-gradient(135deg, var(--accent), var(--mint))", boxShadow: "0 0 8px rgba(14,142,232,0.4)" }}
             />
-          ) : (
+          )}
+          {(resultIsland.status === "done" || resultIsland.status === "error") && (
             <div
-              className="w-3.5 h-3.5 rounded-full flex items-center justify-center shrink-0"
-              style={{ background: "linear-gradient(135deg, var(--accent), var(--mint))" }}
+              className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 sv2-island-orb-in`}
+              style={{ background: resultIsland.status === "error" ? "var(--coral)" : "linear-gradient(135deg, var(--accent), var(--mint))" }}
             >
-              <Icon name="sparkle" size={8} stroke="#fff" />
+              <Icon name={islandStatusIcon(resultIsland.status)!} size={10} stroke="#fff" />
             </div>
           )}
+
           <span
-            className="text-[12px] leading-none truncate flex-1 min-w-0"
+            className="text-[12.5px] font-medium truncate flex-1 min-w-0"
             style={{ color: "var(--ink-100)" }}
             title={resultIsland.text}
           >
             {resultIsland.text}
           </span>
-          {resultIsland.chips && resultIsland.chips.length > 0 && (
-            <div className="hidden sm:flex gap-1 items-center shrink-0">
-              {resultIsland.chips.slice(0, 2).map((c, i) => (
-                <span
-                  key={i}
-                  className="font-mono text-[9px] uppercase tracking-[0.12em] px-1.5 py-0.5 rounded-full"
-                  style={{ color: "var(--ink-300)", border: "1px solid var(--line)" }}
-                >
-                  {c}
-                </span>
-              ))}
-            </div>
+
+          {/* Action button — only when done */}
+          {resultIsland.status === "done" && resultIsland.action && (
+            <button
+              onClick={resultIsland.action.onClick}
+              className="hidden sm:flex items-center gap-1.5 shrink-0 px-2.5 py-1 rounded-md transition-colors shadow-sm ml-1 hover:shadow"
+              style={{ background: "var(--accent)", color: "#fff" }}
+            >
+              <Icon name="sparkle" size={10} />
+              <span className="font-mono text-[9.5px] uppercase tracking-[0.1em] font-medium">{resultIsland.action.label}</span>
+            </button>
           )}
+
           <button
             onClick={onDismissResult}
-            className="w-5 h-5 rounded-full flex items-center justify-center shrink-0"
+            className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 hover:bg-[var(--bg2)] transition-colors ml-1"
             style={{ color: "var(--ink-400)" }}
             title="Dismiss"
           >
-            <Icon name="close" size={10} />
+            <Icon name="close" size={9} />
           </button>
         </div>
       )}
 
-      {/* Context chips */}
-      {(focusedItem || selectedCount > 0 || bloomedCount > 0) && (
-        <div className="flex items-center gap-1.5 mb-2 px-1">
-          {selectedCount > 0 ? (
-            <div className="sv2-chip" style={{ color: "var(--accent)", borderColor: "var(--accent)" }}>
-              <div className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--accent)" }} />
-              {selectedCount} selected
-            </div>
-          ) : focusedItem ? (
-            <>
-              <span className="font-mono text-[9.5px] uppercase tracking-[0.14em]" style={{ color: "var(--ink-400)" }}>
-                acting on
-              </span>
-              <div className="sv2-chip">
-                <span style={{ color: focusedItem.color }}>
-                  <Icon name={KIND_META[focusedItem.kind].icon} size={10} />
-                </span>
-                {focusedItem.title}
+      <div className={`flex items-center gap-2 transition-all duration-200 ${focused ? "w-[580px]" : "w-[430px]"}`}>
+        {/* Plus button — opens inline creation menu */}
+        <div className="relative shrink-0">
+          <button
+            onClick={() => setShowCreateMenu((v) => !v)}
+            className="w-10 h-10 rounded-full flex items-center justify-center shadow-md sv2-island hover:shadow-lg transition-all group"
+            title="Create…"
+          >
+            <Icon name="plus" size={15} style={{ color: "var(--accent)" }} className="group-hover:scale-110 transition-transform" />
+          </button>
+          {showCreateMenu && (
+            <div
+              className="absolute bottom-full mb-2 left-0 w-[180px] rounded-xl py-1.5 sv2-island sv2-drift-in shadow-xl"
+              style={{ border: "1px solid var(--line)" }}
+            >
+              <div className="px-3 py-1 font-mono text-[9px] uppercase tracking-[0.16em]" style={{ color: "var(--ink-400)" }}>
+                Create here
               </div>
-            </>
-          ) : (
-            <div className="sv2-chip" style={{ color: "var(--accent)", borderColor: "var(--accent)" }}>
-              <div className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--accent)" }} />
-              {bloomedCount} open
+              {CREATION_MENU_ITEMS.map((item) => (
+                <button
+                  key={item.kind}
+                  onMouseDown={() => {
+                    setShowCreateMenu(false);
+                    onCreate?.(item.kind);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-[12px] hover:bg-[var(--bg2)] transition-colors text-left"
+                  style={{ color: "var(--ink-200)" }}
+                >
+                  <Icon name={item.icon} size={12} style={{ color: "var(--ink-400)" }} />
+                  <span>{item.label}</span>
+                </button>
+              ))}
             </div>
           )}
         </div>
-      )}
 
-      {/* Quick-starts panel */}
-      {showQS && focused && (
-        <div className="mb-2 sv2-island rounded-xl p-2 sv2-drift-in">
-          <div className="font-mono text-[9.5px] uppercase tracking-[0.16em] px-2 py-1" style={{ color: "var(--ink-400)" }}>
-            Quick starts
-          </div>
-          <div className="grid grid-cols-2 gap-1">
-            {quickStarts.map((q) => (
-              <button
-                key={q.id}
-                onMouseDown={() => { onSubmit(q.title); setShowQS(false); setValue(""); }}
-                className="text-left p-2 rounded-lg flex gap-2 items-start transition-colors hover:bg-[var(--bg2)]"
-              >
-                <div className="w-1 rounded-full mt-0.5 shrink-0" style={{ background: q.tone, width: 3, minHeight: 24 }} />
-                <div>
-                  <div className="text-[12px]" style={{ color: "var(--ink-100)" }}>{q.title}</div>
-                  <div className="text-[10.5px]" style={{ color: "var(--ink-400)" }}>{q.blurb}</div>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+        <div className="relative flex-1">
+          {/* Quick-starts panel */}
+          {showQS && focused && (
+            <div className="absolute bottom-full mb-3 w-full sv2-island rounded-2xl p-2 sv2-drift-in shadow-xl border" style={{ borderColor: "var(--line)" }}>
+              <div className="font-mono text-[10px] uppercase tracking-[0.15em] px-3 py-1.5 font-medium" style={{ color: "var(--ink-400)" }}>
+                Quick starts
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {quickStarts.map((q) => (
+                  <button
+                    key={q.id}
+                    onMouseDown={() => { onSubmit(q.title); setShowQS(false); setValue(""); }}
+                    className="text-left p-2.5 rounded-xl flex gap-3 items-start transition-colors hover:bg-[var(--bg2)] group"
+                  >
+                    <div className="rounded-full mt-0.5 shrink-0" style={{ background: q.tone, width: 4, minHeight: 28 }} />
+                    <div>
+                      <div className="text-[12.5px] font-medium" style={{ color: "var(--ink-100)" }}>{q.title}</div>
+                      <div className="text-[11px] mt-0.5 leading-tight opacity-80" style={{ color: "var(--ink-300)" }}>{q.blurb}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
-      {/* Input */}
-      <div
-        className={`sv2-island ${focused ? "active" : ""} rounded-full px-3 py-2 flex items-center gap-2.5 transition-all`}
-      >
-        <button
-          onClick={() => setShowQS((v) => !v)}
-          className="shrink-0"
-          style={{ color: "var(--accent)" }}
-          title="Quick starts"
-        >
-          <Icon name="sparkle" size={13} />
-        </button>
-        <input
-          ref={inputRef}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setTimeout(() => { setFocused(false); setShowQS(false); }, 180)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && value.trim()) {
-              onSubmit(value);
-              setValue("");
-            }
-          }}
-          placeholder={placeholder}
-          className="flex-1 bg-transparent outline-none text-[13.5px]"
-          style={{ color: "var(--ink-100)" }}
-        />
-        <span className="sv2-kbd">⌘K</span>
-        <button
-          onClick={() => { if (value.trim()) { onSubmit(value); setValue(""); } }}
-          className="w-6 h-6 rounded-full flex items-center justify-center shrink-0"
-          style={{
-            background: value.trim() ? "var(--accent)" : "var(--bg2)",
-            color: value.trim() ? "#fff" : "var(--ink-400)",
-          }}
-        >
-          <Icon name="arrow-rt" size={11} />
-        </button>
-      </div>
-
-      {focused && !showQS && (
-        <div className="mt-2 flex gap-1.5 flex-wrap px-1">
-          {suggestions.map((s, i) => (
+          {/* Input pill */}
+          <div
+            className={`sv2-island ${focused ? "shadow-lg" : "shadow-md"} rounded-full flex items-center gap-2 transition-all h-10`}
+            style={{
+              border: focused ? "1px solid var(--accent)" : "1px solid var(--line)",
+              padding: "0 10px 0 12px",
+            }}
+          >
+            {/* Search / Spotlight icon — leftmost, opens Spotlight */}
             <button
-              key={i}
-              onMouseDown={() => onSubmit(s)}
-              className="sv2-chip sv2-breathe"
-              style={{ animationDelay: `${i * 160}ms`, cursor: "pointer" }}
+              onClick={() => { onSpotlight?.(); }}
+              className="shrink-0 transition-opacity opacity-60 hover:opacity-100"
+              style={{ color: "var(--ink-400)" }}
+              title="Spotlight (⌘K)"
             >
-              <Icon name="sparkle" size={9} /> {s}
+              <Icon name="search" size={13} />
             </button>
-          ))}
+
+            <input
+              ref={inputRef}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setTimeout(() => { setFocused(false); setShowQS(false); setShowCreateMenu(false); }, 180)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && value.trim()) {
+                  onSubmit(value);
+                  setValue("");
+                }
+              }}
+              placeholder={placeholder}
+              className="flex-1 bg-transparent outline-none text-[13.5px] font-medium placeholder-[var(--ink-400)]"
+              style={{ color: "var(--ink-100)" }}
+            />
+
+            {/* Sparkle quick-starts toggle */}
+            <button
+              onClick={() => setShowQS((v) => !v)}
+              className={`shrink-0 transition-all ${showQS ? "opacity-100 scale-110" : "opacity-50 hover:opacity-80"}`}
+              style={{ color: "var(--accent)" }}
+              title="Quick starts"
+            >
+              <Icon name="sparkle" size={13} />
+            </button>
+
+            {/* Focused item context chip */}
+            {focusedItem && !value && (
+              <div className="hidden sm:flex sv2-chip shrink-0 opacity-70 h-6">
+                <Icon name={KIND_META[focusedItem.kind].icon} size={10} />
+                <span className="max-w-[72px] truncate">{focusedItem.title}</span>
+              </div>
+            )}
+
+            {/* Send button */}
+            <button
+              onClick={() => { if (value.trim()) { onSubmit(value); setValue(""); } }}
+              className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition-all"
+              style={{
+                background: value.trim() ? "var(--accent)" : "var(--bg2)",
+                color: value.trim() ? "#fff" : "var(--ink-400)",
+                transform: value.trim() ? "scale(1.05)" : "scale(1)",
+              }}
+            >
+              <Icon name="arrow-rt" size={11} />
+            </button>
+          </div>
+          {/* Suggestion chips row removed per design spec */}
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -648,11 +719,12 @@ export function Spotlight({
   const wsHits = territories.filter((w) => !qlc || w.name.toLowerCase().includes(qlc)).slice(0, 4);
   const qsHits = quickStarts.filter((s) => !qlc || s.title.toLowerCase().includes(qlc)).slice(0, 4);
   const viewHits: { id: ViewMode; label: string }[] = ([
-    { id: "spatial" as ViewMode, label: "Switch to Spatial view" },
+    { id: "spatial" as ViewMode, label: "Switch to Free layout" },
     { id: "type" as ViewMode, label: "Switch to Type view" },
     { id: "topic" as ViewMode, label: "Switch to Topic view" },
     { id: "timeline" as ViewMode, label: "Switch to Timeline view" },
   ]).filter((v) => !qlc || v.label.toLowerCase().includes(qlc)).slice(0, 4);
+  const hasAnyHit = itemHits.length > 0 || wsHits.length > 0 || qsHits.length > 0 || viewHits.length > 0;
   const aiSug = q.trim() ? [{ text: `Ask AI: "${q}"` }] : [];
 
   return (
@@ -673,6 +745,15 @@ export function Spotlight({
             placeholder="Search items, workspaces, views, or ask AI…"
             className="flex-1 bg-transparent outline-none text-[15px]"
             style={{ color: "var(--ink-100)" }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") { onClose(); return; }
+              // Enter with no matching hits → submit as Ask AI directly
+              if (e.key === "Enter" && q.trim() && !hasAnyHit) {
+                e.preventDefault();
+                onPick({ type: "ai", query: q });
+                onClose();
+              }
+            }}
           />
           <span className="sv2-kbd">esc</span>
         </div>
@@ -829,88 +910,85 @@ type TrayProps = {
   pinned: V2Item[];
   onClose: () => void;
   onRemove: (id: string) => void;
-  onAction: (action: "bloom" | "compare" | "merge" | "quiz" | "link" | "ask") => void;
+  onAction: (action: "bloom" | "quiz" | "link" | "ask" | "focus") => void;
 };
 
 export function Tray({ open, items, pinned, onClose, onRemove, onAction }: TrayProps) {
-  if (!open) return null;
+  if (!open && items.length === 0 && pinned.length === 0) return null;
+  const allItems = [...pinned, ...items.filter(i => !pinned.find(p => p.id === i.id))];
+  
+  if (allItems.length === 0) return null;
+
   return (
-    <div className="absolute left-1/2 -translate-x-1/2 bottom-24 z-30 pointer-events-auto">
+    <div className="absolute left-1/2 -translate-x-1/2 bottom-20 z-30 pointer-events-auto flex justify-center">
       <div
-        className="sv2-island rounded-2xl px-3 py-3 min-w-[620px] max-w-[85vw] sv2-drift-in"
+        className="sv2-island rounded-2xl p-2 max-w-[500px] sv2-drift-in flex flex-col gap-2 shadow-lg"
+        style={{ border: "1px solid var(--accent)", background: "var(--paper)" }}
       >
-        <div className="flex items-center justify-between mb-2 px-1">
-          <div className="flex items-center gap-2">
-            <Icon name="tray" size={13} style={{ color: "var(--ink-300)" }} />
-            <span className="font-mono text-[10px] uppercase tracking-[0.16em]" style={{ color: "var(--ink-300)" }}>
-              Working tray
-            </span>
-            <span className="font-mono text-[10px]" style={{ color: "var(--ink-400)" }}>
-              {items.length + pinned.length} queued
+        <div className="flex items-center justify-between px-2 pt-1 pb-0.5">
+          <div className="flex items-center gap-1.5">
+            <Icon name="tray" size={12} style={{ color: "var(--accent)" }} />
+            <span className="font-mono text-[10px] uppercase tracking-[0.1em] font-medium" style={{ color: "var(--accent)" }}>
+              {allItems.length} queued
             </span>
           </div>
           <button
             onClick={onClose}
-            className="w-5 h-5 rounded-full flex items-center justify-center"
-            style={{ color: "var(--ink-400)" }}
+            className="w-5 h-5 rounded-full flex items-center justify-center opacity-60 hover:opacity-100 transition-opacity"
+            style={{ color: "var(--ink-400)", background: "var(--bg2)" }}
           >
-            <Icon name="close" size={11} />
+            <Icon name="close" size={10} />
           </button>
         </div>
-        {items.length > 0 && (
-          <div className="mb-2">
-            <div className="flex items-center gap-2 flex-wrap mb-2">
-              {items.map((it) => (
-                <div
-                  key={it.id}
-                  className="group flex items-center gap-2 pl-2 pr-1.5 py-1 rounded-full"
-                  style={{ background: "rgba(237,233,227,0.6)", border: "1px solid var(--line)" }}
-                >
-                  <span style={{ color: it.color }}>
-                    <Icon name={KIND_META[it.kind].icon} size={10} />
-                  </span>
-                  <span className="text-[11.5px] max-w-[140px] truncate" style={{ color: "var(--ink-200)" }}>
-                    {it.title}
-                  </span>
-                  <button
-                    onClick={() => onRemove(it.id)}
-                    className="w-4 h-4 rounded-full flex items-center justify-center"
-                    style={{ color: "var(--ink-400)" }}
-                  >
-                    <Icon name="close" size={9} />
-                  </button>
-                </div>
-              ))}
-            </div>
-            <div className="flex gap-1.5 flex-wrap">
-              {([
-                { action: "bloom", label: "Open side-by-side", icon: "layout" },
-                { action: "compare", label: "Compare", icon: "compare" },
-                { action: "merge", label: "Merge", icon: "merge" },
-                { action: "quiz", label: "Quiz me", icon: "quiz-me" },
-                { action: "link", label: "Link", icon: "link" },
-              ] as const).map(({ action, label, icon }) => (
-                <button
-                  key={action}
-                  onClick={() => onAction(action)}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition-colors"
-                  style={{ background: "var(--paper)", border: "1px solid var(--line)", color: "var(--ink-300)" }}
-                >
-                  <Icon name={icon} size={12} />
-                  <span className="text-[11px] font-mono uppercase tracking-[0.1em]">{label}</span>
-                </button>
-              ))}
+        
+        <div className="flex flex-wrap gap-1.5 px-1 max-h-[80px] overflow-y-auto sv2-slim">
+          {allItems.map((it) => (
+            <div
+              key={it.id}
+              className="flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-md"
+              style={{ background: "var(--bg2)", border: "1px solid var(--line)" }}
+            >
+              <span style={{ color: it.color }}>
+                <Icon name={KIND_META[it.kind].icon} size={10} />
+              </span>
+              <span className="text-[11px] max-w-[100px] truncate" style={{ color: "var(--ink-100)" }}>
+                {it.title}
+              </span>
               <button
-                onClick={() => onAction("ask")}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg"
-                style={{ background: "var(--accent)", border: "1px solid var(--accent)", color: "#fff" }}
+                onClick={() => onRemove(it.id)}
+                className="w-4 h-4 rounded-sm flex items-center justify-center hover:bg-black/5"
+                style={{ color: "var(--ink-400)" }}
               >
-                <Icon name="sparkle" size={12} />
-                <span className="text-[11px] font-mono uppercase tracking-[0.1em]">Ask about these</span>
+                <Icon name="close" size={9} />
               </button>
             </div>
-          </div>
-        )}
+          ))}
+        </div>
+
+        <div className="flex flex-wrap gap-1 mt-1 border-t pt-2 px-1" style={{ borderColor: "var(--line)" }}>
+          {([
+            { action: "focus" as const, label: "Focus", icon: "layout" as const },
+          ]).map(({ action, label, icon }) => (
+            <button
+              key={action}
+              onClick={() => onAction(action)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition-colors hover:bg-[var(--bg2)]"
+              style={{ color: "var(--ink-200)" }}
+            >
+              <Icon name={icon} size={11} />
+              <span className="text-[10px] font-mono uppercase tracking-[0.05em]">{label}</span>
+            </button>
+          ))}
+          <div className="flex-1" />
+          <button
+            onClick={() => onAction("ask")}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md shadow-sm hover:shadow transition-shadow"
+            style={{ background: "var(--accent)", color: "#fff" }}
+          >
+            <Icon name="sparkle" size={11} />
+            <span className="text-[10px] font-mono uppercase tracking-[0.05em] font-medium">Ask</span>
+          </button>
+        </div>
       </div>
     </div>
   );

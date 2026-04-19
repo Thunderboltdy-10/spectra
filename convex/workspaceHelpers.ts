@@ -218,3 +218,105 @@ export function buildWorkspaceSearchText(...parts: Array<string | null | undefin
     .replace(/\s+/g, " ")
     .trim();
 }
+
+export function normalizeWorkspaceWidgetState(
+  kind: string | null | undefined,
+  state: unknown,
+) {
+  const base =
+    state && typeof state === "object" && !Array.isArray(state)
+      ? { ...(state as Record<string, unknown>) }
+      : {};
+
+  if (kind === "timer") {
+    const totalSecsRaw = typeof base.totalSecs === "number" && Number.isFinite(base.totalSecs)
+      ? base.totalSecs
+      : typeof base.secs === "number" && Number.isFinite(base.secs)
+        ? base.secs
+        : 25 * 60;
+    const totalSecs = Math.max(60, Math.floor(totalSecsRaw));
+    const secsRaw = typeof base.secs === "number" && Number.isFinite(base.secs) ? base.secs : totalSecs;
+    const secs = Math.max(0, Math.min(totalSecs, Math.floor(secsRaw)));
+    const elapsedSecsRaw =
+      typeof base.elapsedSecs === "number" && Number.isFinite(base.elapsedSecs)
+        ? base.elapsedSecs
+        : Math.max(0, totalSecs - secs);
+    const elapsedSecs = Math.max(0, Math.min(totalSecs, Math.floor(elapsedSecsRaw)));
+    const cycleCount =
+      typeof base.cycleCount === "number" && Number.isFinite(base.cycleCount)
+        ? Math.max(0, Math.floor(base.cycleCount))
+        : 0;
+    return {
+      ...base,
+      secs,
+      totalSecs,
+      elapsedSecs,
+      cycleCount,
+      running: base.running === true,
+      completedAt: typeof base.completedAt === "number" && Number.isFinite(base.completedAt) ? base.completedAt : undefined,
+      lastStartedAt: typeof base.lastStartedAt === "number" && Number.isFinite(base.lastStartedAt) ? base.lastStartedAt : undefined,
+      lastTickedAt: typeof base.lastTickedAt === "number" && Number.isFinite(base.lastTickedAt) ? base.lastTickedAt : undefined,
+      lastPausedAt: typeof base.lastPausedAt === "number" && Number.isFinite(base.lastPausedAt) ? base.lastPausedAt : undefined,
+    };
+  }
+
+  return base;
+}
+
+export function normalizeWorkspaceResultMetadata(metadata: unknown) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return {};
+  }
+
+  const input = metadata as Record<string, unknown>;
+  const normalized: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(input)) {
+    if (value === undefined) continue;
+    if (
+      value === null
+      || typeof value === "string"
+      || typeof value === "number"
+      || typeof value === "boolean"
+    ) {
+      normalized[key] = value;
+      continue;
+    }
+    if (Array.isArray(value)) {
+      normalized[key] = value.slice(0, 50).map((entry) => {
+        if (
+          entry === null
+          || typeof entry === "string"
+          || typeof entry === "number"
+          || typeof entry === "boolean"
+        ) {
+          return entry;
+        }
+        if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+          return Object.fromEntries(
+            Object.entries(entry as Record<string, unknown>).filter(([, nested]) =>
+              nested === null
+              || typeof nested === "string"
+              || typeof nested === "number"
+              || typeof nested === "boolean",
+            ),
+          );
+        }
+        return String(entry);
+      });
+      continue;
+    }
+    if (typeof value === "object") {
+      normalized[key] = Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).filter(([, nested]) =>
+          nested === null
+          || typeof nested === "string"
+          || typeof nested === "number"
+          || typeof nested === "boolean",
+        ),
+      );
+    }
+  }
+
+  return normalized;
+}

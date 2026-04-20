@@ -184,7 +184,29 @@ export const ensureUser = mutation({
     bootstrapAdmin: v.boolean(),
   },
   handler: async (ctx, args) => {
-    const existing = await getUserByClerkId(ctx, args.clerkId);
+    const normalizedEmail = normalizeEmail(args.email);
+    let existing = await getUserByClerkId(ctx, args.clerkId);
+
+    if (!existing) {
+      // Try to find by email if not found by clerkId to support auto-linking
+      // for users manually added by admin or following old links.
+      const byEmail = await ctx.db
+        .query("users")
+        .withIndex("by_email", (q) => q.eq("email", normalizedEmail))
+        .unique();
+
+      if (byEmail) {
+        // If this record already has a DIFFERENT clerkId, we have a conflict.
+        // We shouldn't auto-link in that case to prevent account hijacking.
+        if (byEmail.clerkId && byEmail.clerkId !== args.clerkId) {
+          // Fall through to normal logic - it will likely fail on orgId check below
+          // unless it's a bootstrap admin.
+        } else {
+          existing = byEmail;
+        }
+      }
+    }
+
     let orgId = existing?.orgId;
 
     // Super admins should remain operable even if their previous org was deleted.
@@ -213,7 +235,8 @@ export const ensureUser = mutation({
       const nextRole = existing.role === "admin" ? "admin" : role;
       const previous = { _id: existing._id, role: existing.role };
       await ctx.db.patch(existing._id, {
-        email: normalizeEmail(args.email),
+        clerkId: args.clerkId, // Ensure clerkId is set (links it if it was only email-based)
+        email: normalizedEmail,
         name: args.name,
         role: nextRole,
         orgId,
@@ -231,7 +254,7 @@ export const ensureUser = mutation({
       });
       await ctx.runMutation(api.seed.migrateLegacyDemoCopy, { orgId });
 
-      return { ...existing, role: nextRole, orgId };
+      return { ...existing, role: nextRole, orgId, clerkId: args.clerkId };
     }
 
     if (!args.bootstrapAdmin) {
@@ -240,7 +263,7 @@ export const ensureUser = mutation({
 
     const userId = await ctx.db.insert("users", {
       clerkId: args.clerkId,
-      email: normalizeEmail(args.email),
+      email: normalizedEmail,
       name: args.name,
       role,
       orgId,
@@ -262,11 +285,21 @@ export const ensureUser = mutation({
     return {
       _id: userId,
       clerkId: args.clerkId,
-      email: normalizeEmail(args.email),
+      email: normalizedEmail,
       name: args.name,
       role,
       orgId,
     };
+  },
+});
+
+export const getAnyByEmail = query({
+  args: { email: v.string() },
+  handler: async (ctx, args) => {
+    return ctx.db
+      .query("users")
+      .withIndex("by_email", (q) => q.eq("email", normalizeEmail(args.email)))
+      .unique();
   },
 });
 

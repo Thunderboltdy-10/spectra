@@ -45,7 +45,7 @@ export default async function HomePage({
       } catch (error) {
         const message = error instanceof Error ? error.message : "";
         if (message.startsWith("AUTH_NO_ACCESS") || message.startsWith("AUTH_ORG_INACTIVE")) {
-          redirect(message.startsWith("AUTH_ORG_INACTIVE") ? "/no-access?reason=inactive" : "/no-access");
+          redirect(message.startsWith("AUTH_ORG_INACTIVE") ? "/request-access?reason=inactive" : "/request-access");
         }
       }
       redirect(`/chat${toQueryString(resolvedSearchParams)}`);

@@ -198,7 +198,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       pathname.startsWith("/sign-in")
       || pathname.startsWith("/sign-up")
       || pathname.startsWith("/join")
-      || pathname.startsWith("/no-access");
+      || pathname.startsWith("/request-access");
     if (isAuthRoute) {
       setLoading(false);
       return;
@@ -209,7 +209,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to load sidebar data";
         if (message.startsWith("AUTH_NO_ACCESS") || message.startsWith("AUTH_ORG_INACTIVE")) {
-          window.location.href = message.startsWith("AUTH_ORG_INACTIVE") ? "/no-access?reason=inactive" : "/no-access";
+          window.location.href = message.startsWith("AUTH_ORG_INACTIVE") ? "/request-access?reason=inactive" : "/request-access";
           return;
         }
         if (!message.startsWith("AUTH_NOT_SIGNED_IN")) {

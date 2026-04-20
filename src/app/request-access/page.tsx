@@ -1,7 +1,8 @@
 "use client";
 
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useAuth, useUser } from "@clerk/nextjs";
 import { ArrowLeft, CheckCircle2, Loader2, Search, School, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,8 @@ type RequestAccessFormProps = {
 };
 
 function RequestAccessForm({ isLoaded, userId, userEmail, userEmails }: RequestAccessFormProps) {
+  const searchParams = useSearchParams();
+  const reason = searchParams.get("reason");
   const [query, setQuery] = useState("");
   const [schools, setSchools] = useState<SchoolMatch[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState("");
@@ -37,6 +40,33 @@ function RequestAccessForm({ isLoaded, userId, userEmail, userEmails }: RequestA
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<RequestResult | null>(null);
   const [selectedEmail, setSelectedEmail] = useState<string>(userEmail ?? userEmails[0] ?? "");
+
+  // Smart re-check: if the user is signed in but stuck here, periodically
+  // check if they've been granted access yet (e.g. admin approved request).
+  useEffect(() => {
+    if (!isLoaded || !userId) return;
+
+    let cancelled = false;
+    const recheck = async () => {
+      try {
+        const response = await fetch("/api/auth/access-state", { cache: "no-store" });
+        if (cancelled || !response.ok) return;
+        const payload = (await response.json().catch(() => null)) as { status?: string } | null;
+        if (payload?.status === "ok") {
+          window.location.replace("/chat");
+        }
+      } catch {
+        // Best effort.
+      }
+    };
+
+    void recheck();
+    const interval = window.setInterval(recheck, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [isLoaded, userId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -126,7 +156,7 @@ function RequestAccessForm({ isLoaded, userId, userEmail, userEmails }: RequestA
   return (
     <main className="min-h-screen bg-[var(--bg-primary)] px-4 py-10">
       <div className="mx-auto w-full max-w-3xl">
-        <Link href={userId ? "/no-access" : "/sign-in"} className="mb-6 inline-flex items-center gap-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
+        <Link href={userId ? "/" : "/sign-in"} className="mb-6 inline-flex items-center gap-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
           <ArrowLeft className="h-4 w-4" />
           Back
         </Link>
@@ -138,8 +168,14 @@ function RequestAccessForm({ isLoaded, userId, userEmail, userEmails }: RequestA
                 <School className="h-5 w-5" />
               </div>
               <div>
-                <h1 className="font-display text-2xl text-[var(--text-primary)]">Request school access</h1>
-                <p className="text-sm text-[var(--text-secondary)]">Ask a school admin to review your request and send you an invitation.</p>
+                <h1 className="font-display text-2xl text-[var(--text-primary)]">
+                  {reason === "inactive" ? "Workspace inactive" : "Request school access"}
+                </h1>
+                <p className="text-sm text-[var(--text-secondary)]">
+                  {reason === "inactive"
+                    ? "Your school's workspace is currently disabled. Contact your administrator or find another school."
+                    : "Ask a school admin to review your request and send you an invitation."}
+                </p>
               </div>
             </div>
 
@@ -313,9 +349,17 @@ function RequestAccessFormWithClerk() {
 }
 
 export default function RequestAccessPage() {
-  if (hasClerkPublishableKey()) {
-    return <RequestAccessFormWithClerk />;
-  }
-
-  return <RequestAccessForm isLoaded userId={null} userEmail={null} userEmails={[]} />;
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)]">
+        <Loader2 className="h-6 w-6 animate-spin text-[var(--text-secondary)]" />
+      </div>
+    }>
+      {hasClerkPublishableKey() ? (
+        <RequestAccessFormWithClerk />
+      ) : (
+        <RequestAccessForm isLoaded userId={null} userEmail={null} userEmails={[]} />
+      )}
+    </Suspense>
+  );
 }

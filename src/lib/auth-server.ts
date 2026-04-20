@@ -326,6 +326,46 @@ export async function requireActor(): Promise<SessionActor> {
       };
     }
   }
+
+  // Fallback: If no invitation was found or accepted, but the user might already
+  // exist in the database (e.g. manually added by email), try to link them.
+  try {
+    const recovered = await convexMutation<
+      { clerkId: string; email: string; name: string; bootstrapAdmin: boolean },
+      {
+        _id: string;
+        clerkId: string;
+        email: string;
+        name: string;
+        role: Role;
+        orgId: string;
+        onboardingComplete?: boolean;
+      } | null
+    >("users:ensureUser", {
+      clerkId: userId,
+      email,
+      name,
+      bootstrapAdmin: false,
+    });
+    if (recovered && recovered.orgId) {
+      if (!isSuperAdminEmail(recovered.email)) {
+        await assertActiveOrgAccess(userId);
+      }
+      return {
+        clerkId: userId,
+        email: recovered.email,
+        name: recovered.name,
+        role: recovered.role,
+        orgId: recovered.orgId,
+        userId: recovered._id,
+        onboardingComplete: Boolean(recovered.onboardingComplete),
+      };
+    }
+  } catch (error) {
+    // If ensureUser fails (e.g. no orgId found for this email either),
+    // we fall through to the final error.
+  }
+
   if (invitationResult === "mismatch") {
     throw new Error("AUTH_NO_ACCESS: This invitation belongs to a different email address.");
   }

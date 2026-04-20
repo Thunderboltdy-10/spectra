@@ -18,6 +18,7 @@ export type ChatStreamEvent = {
   status?: string;
   reason?: string;
   result?: unknown;
+  routeTrace?: unknown;
 };
 
 export type CreateChatStreamParams = {
@@ -30,6 +31,10 @@ export type CreateChatStreamParams = {
   workstreamId?: string;
   artifactId?: string;
   scopeLevel?: "global" | "workspace" | "artifact";
+  manualModel?: string;
+  confirmExpensiveModel?: boolean;
+  attachmentTypes?: string[];
+  attachmentResourceIds?: string[];
   signal?: AbortSignal;
   autoSettings?: {
     enhancePrompt?: boolean;
@@ -54,6 +59,10 @@ export async function* createChatStream(params: CreateChatStreamParams): AsyncGe
       workstreamId: params.workstreamId,
       artifactId: params.artifactId,
       scopeLevel: params.scopeLevel,
+      manualModel: params.manualModel,
+      confirmExpensiveModel: params.confirmExpensiveModel,
+      attachmentTypes: params.attachmentTypes,
+      attachmentResourceIds: params.attachmentResourceIds,
       thinkingLevel: params.thinkingLevel ?? "low",
       routerMode: params.routerMode ?? "auto",
       autoSettings: params.autoSettings ?? {

@@ -3,12 +3,12 @@ export const CURATED_FEATURED: Array<{
   label: string;
   order: number;
 }> = [
-  { modelId: "stepfun/step-3.5-flash:free", label: "Fast Included", order: 1 },
-  { modelId: "openai/gpt-oss-120b:free", label: "Deep Reasoning", order: 2 },
-  { modelId: "anthropic/claude-sonnet-4.5", label: "Best Writing", order: 3 },
-  { modelId: "openai/gpt-5.4-mini", label: "Best Reasoning", order: 4 },
-  { modelId: "openai/gpt-5.4-nano", label: "Smart & Cheap", order: 5 },
-  { modelId: "google/gemma-3-27b-vision:free", label: "Vision", order: 6 },
+  { modelId: "z-ai/glm-4.5-air:free", label: "Fast Included", order: 1 },
+  { modelId: "moonshotai/kimi-k2:free", label: "Deep Reasoning", order: 2 },
+  { modelId: "minimax/minimax-m1", label: "Best Writing", order: 3 },
+  { modelId: "moonshotai/kimi-k2", label: "Best Reasoning", order: 4 },
+  { modelId: "z-ai/glm-4.5-air", label: "Smart & Cheap", order: 5 },
+  { modelId: "qwen/qwen2.5-vl-72b-instruct:free", label: "Vision", order: 6 },
 ];
 
 export function featuredMeta(modelId: string) {

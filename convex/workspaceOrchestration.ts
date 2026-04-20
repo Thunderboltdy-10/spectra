@@ -1,6 +1,8 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
 import { getUserByClerkId } from "./helpers";
+import { buildWorkspaceSearchText, recordWorkspaceMutation } from "./workspaceHelpers";
 
 type WorkspaceTemplateSuggestion = {
   id: string;
@@ -131,5 +133,125 @@ export const suggestTemplate = mutation({
       title: args.title,
       suggestion: inferTemplate(args.title),
     };
+  },
+});
+
+function tokenizeTopic(value: string) {
+  return value
+    .toLowerCase()
+    .split(/[^a-z0-9]+/g)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 2);
+}
+
+function keywordScore(source: string, tokens: string[]) {
+  const haystack = source.toLowerCase();
+  return tokens.reduce((score, token) => score + (haystack.includes(token) ? 1 : 0), 0);
+}
+
+export const suggestWorkspaceFromTopic = query({
+  args: {
+    actorClerkId: v.string(),
+    topic: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    const topic = args.topic.trim();
+    if (!topic) {
+      return { shouldSuggest: false, topic: "", suggestions: [] };
+    }
+
+    const tokens = tokenizeTopic(topic);
+    const limit = Math.max(1, Math.min(args.limit ?? 8, 20));
+
+    const [workstreams, artifacts, plannerItems, chats] = await Promise.all([
+      ctx.db.query("workstreams").withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id)).order("desc").take(100),
+      ctx.db.query("artifacts").withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id)).order("desc").take(150),
+      ctx.db.query("plannerItems").withIndex("by_owner", (q) => q.eq("ownerUserId", actor._id)).collect(),
+      ctx.db.query("chats").withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id)).order("desc").take(120),
+    ]);
+
+    const suggestions = workstreams
+      .filter((row) => row.orgId === actor.orgId && row.status === "active")
+      .map((workstream) => {
+        const workspaceArtifacts = artifacts.filter((row) => row.orgId === actor.orgId && row.workstreamId === workstream._id && row.status === "active");
+        const workspacePlanner = plannerItems.filter((row) => row.orgId === actor.orgId && row.workstreamId === workstream._id && row.status !== "cancelled");
+        const workspaceChats = chats.filter((row) => row.orgId === actor.orgId && row.workstreamId === workstream._id && !row.deletedAt);
+        const corpus = buildWorkspaceSearchText(
+          workstream.title,
+          workstream.description,
+          ...workspaceArtifacts.slice(0, 8).flatMap((row) => [row.title, row.contentPlaintext]),
+          ...workspacePlanner.slice(0, 8).flatMap((row) => [row.title, row.description]),
+          ...workspaceChats.slice(0, 6).flatMap((row) => [row.title, row.latestUserPrompt]),
+        );
+        const score = keywordScore(corpus, tokens);
+        return {
+          workstreamId: workstream._id,
+          title: workstream.title,
+          score,
+          supportingArtifacts: workspaceArtifacts.length,
+          supportingThreads: workspaceChats.length,
+          supportingPlannerItems: workspacePlanner.length,
+        };
+      })
+      .filter((row) => row.score > 0)
+      .sort((a, b) => b.score - a.score || b.supportingArtifacts - a.supportingArtifacts)
+      .slice(0, limit);
+
+    return {
+      shouldSuggest: suggestions.length === 0,
+      topic,
+      suggestions,
+    };
+  },
+});
+
+export const createWorkstream = mutation({
+  args: {
+    actorClerkId: v.string(),
+    title: v.string(),
+    description: v.optional(v.string()),
+    emoji: v.optional(v.string()),
+    color: v.optional(v.string()),
+    type: v.optional(v.union(v.literal("subject"), v.literal("project"), v.literal("general"))),
+    provenanceSource: v.optional(v.union(v.literal("user"), v.literal("ai"), v.literal("system"))),
+    mutationSummary: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    const title = args.title.trim();
+    if (!title) throw new Error("title is required");
+    const now = Date.now();
+    const workstreamId = await ctx.db.insert("workstreams", {
+      ownerUserId: actor._id,
+      orgId: actor.orgId,
+      type: args.type ?? "general",
+      title,
+      description: args.description?.trim() || undefined,
+      emoji: args.emoji?.trim() || undefined,
+      color: args.color?.trim() || undefined,
+      status: "active",
+      artifactCount: 0,
+      threadCount: 0,
+      workspaceRevision: now,
+      workspaceRevisionKey: `init:${now}`,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const mutationId = await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: workstreamId as Id<"workstreams">,
+      mutationType: "create_workstream",
+      source: args.provenanceSource ?? "user",
+      entity: "workspace",
+      action: "created",
+      summary: args.mutationSummary ?? `Created workspace ${title}`,
+      after: { workstreamId, title },
+    });
+
+    return { workstreamId, mutationId };
   },
 });

@@ -461,6 +461,14 @@ export default defineSchema({
       v.literal("result"),
     )),
     targetId: v.optional(v.string()),
+    topicCluster: v.optional(v.string()),
+    timelineAt: v.optional(v.number()),
+    signalStrength: v.optional(v.number()),
+    threadStatus: v.optional(v.union(
+      v.literal("open"),
+      v.literal("resolved"),
+      v.literal("blocked"),
+    )),
     metadata: v.optional(v.any()),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -469,6 +477,26 @@ export default defineSchema({
     .index("by_workstream_status", ["workstreamId", "status"])
     .index("by_workstream_updated", ["workstreamId", "updatedAt"])
     .index("by_chat", ["sourceChatId"]),
+
+  workspaceWidgets: defineTable({
+    orgId: v.id("orgs"),
+    ownerUserId: v.id("users"),
+    workstreamId: v.optional(v.id("workstreams")),
+    kind: v.string(),
+    title: v.string(),
+    x: v.number(),
+    y: v.number(),
+    w: v.number(),
+    h: v.number(),
+    collapsed: v.optional(v.boolean()),
+    hidden: v.optional(v.boolean()),
+    state: v.optional(v.any()),
+    source: v.optional(v.union(v.literal("user"), v.literal("ai"), v.literal("system"))),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_owner_updated", ["ownerUserId", "updatedAt"])
+    .index("by_workstream_updated", ["workstreamId", "updatedAt"]),
 
   workstreams: defineTable({
     ownerUserId: v.id("users"),

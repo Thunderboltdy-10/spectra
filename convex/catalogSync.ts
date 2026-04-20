@@ -10,15 +10,6 @@ const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const ENDPOINT_SAMPLE_LIMIT = 60;
 const ENDPOINT_FETCH_CONCURRENCY = 6;
 
-const FEATURED: Record<string, number> = {
-  "stepfun/step-3.5-flash:free": 1,
-  "openai/gpt-oss-120b:free": 2,
-  "anthropic/claude-sonnet-4.5": 3,
-  "openai/gpt-5.4-mini": 4,
-  "openai/gpt-5.4-nano": 5,
-  "google/gemma-3-27b-vision:free": 6,
-};
-
 type OpenRouterModel = {
   id: string;
   name?: string;
@@ -346,6 +337,10 @@ function mapOpenRouterModels(params: {
 
     const endpointStats = params.endpointStatsByModelId.get(model.id);
 
+    const createdIso =
+      typeof model.created === "number" && Number.isFinite(model.created)
+        ? new Date(model.created * 1000).toISOString()
+        : undefined;
     const item = {
       modelId: model.id,
       name: model.name || model.id,
@@ -374,8 +369,8 @@ function mapOpenRouterModels(params: {
       multimodalRating: isVision ? "strong" : "none",
       recommendedForPhysics: /(physics|math|science|reason|deepseek|gemini-2\.5-pro)/i.test(model.id),
       isFree,
-      isFeatured: typeof FEATURED[model.id] === "number",
-      featuredOrder: FEATURED[model.id],
+      isFeatured: false,
+      featuredOrder: undefined,
       capabilities: {
         reasoning: reasoningBoost > 1 ? 8 : 4,
         creative: /(claude|gpt|gemini)/i.test(model.id) ? 7 : 5,
@@ -390,7 +385,7 @@ function mapOpenRouterModels(params: {
       ...item,
       strengthText: strengthText(item),
       strengthEmbedding: undefined as number[] | undefined,
-      releaseDate: curated?.releaseDate,
+      releaseDate: createdIso ?? curated?.releaseDate,
       knowledgeCutoff: curated?.knowledgeCutoff,
       curatedNotes: curated?.curatedNotes,
       benchmarkMMLU: curated?.benchmarkMMLU,

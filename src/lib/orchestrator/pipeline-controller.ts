@@ -228,7 +228,7 @@ export class PipelineController {
     }
 
     const tierAllowsForcedMultiAgent =
-      params.spendingTier !== "cheap_only" && params.spendingTier !== "free_only";
+      params.spendingTier !== "free_only";
     const forceDeniedReasons: string[] = [];
     if (params.forceMultiAgentRequested) {
       if (!tierAllowsForcedMultiAgent) forceDeniedReasons.push(`tier ${params.spendingTier} blocks forced multi-agent`);

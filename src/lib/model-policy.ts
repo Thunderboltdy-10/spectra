@@ -11,7 +11,7 @@ export type RoutingLane =
   | "agent_subtask"
   | "verification";
 
-export const DEFAULT_MANUAL_MODEL_COST_CAP_PER_MILLION = 120;
+export const DEFAULT_MANUAL_MODEL_COST_CAP_PER_MILLION = Number.POSITIVE_INFINITY;
 
 export const ROUTING_LANE_COST_CAPS: Record<RoutingLane, number> = {
   utility: 6,

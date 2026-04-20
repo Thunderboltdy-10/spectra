@@ -153,6 +153,34 @@ export function RouteTraceDrawer({ open, onClose, trace, showCostDetails = false
           </div>
             </section>
 
+            {trace.routePlan ? (
+              <section className="mb-5">
+                <h4 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Route Plan</h4>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <InputRow label="Execution Path" value={trace.routePlan.executionPath ?? "direct_chat"} />
+                  <InputRow label="Task Class" value={trace.routePlan.taskClass} />
+                  <InputRow label="Assignment Level" value={trace.routePlan.assignmentLevel} />
+                  <InputRow label="Response Budget" value={trace.routePlan.responseBudget} />
+                  <InputRow
+                    label="Workstream Assignment"
+                    value={`${trace.routePlan.workstreamAssignment.status}${trace.routePlan.workstreamAssignment.title ? ` (${trace.routePlan.workstreamAssignment.title})` : ""}`}
+                  />
+                  <InputRow
+                    label="Thread Strategy"
+                    value={`${trace.routePlan.threadStrategy.action} — ${trace.routePlan.threadStrategy.reason}`}
+                  />
+                  <InputRow
+                    label="Workspace Action"
+                    value={trace.routePlan.workspaceAction ? `${trace.routePlan.workspaceAction.intent} — ${trace.routePlan.workspaceAction.reason}` : "none"}
+                  />
+                  <InputRow
+                    label="Context Pressure"
+                    value={`${Math.round((trace.routePlan.contextWindowStrategy.contextWindowPressure ?? 0) * 100)}%`}
+                  />
+                </div>
+              </section>
+            ) : null}
+
             <section className="mb-5">
           <h4 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Pipeline Timeline</h4>
           <div className="mb-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">

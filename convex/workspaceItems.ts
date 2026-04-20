@@ -108,6 +108,39 @@ function isActiveThreadChat(chat: Doc<"chats">, actorId: Id<"users">, orgId: Id<
   return chat.ownerUserId === actorId && chat.orgId === orgId && chat.workstreamId === workstreamId && !chat.deletedAt;
 }
 
+
+function inferTopicCluster(parts: Array<string | null | undefined>) {
+  const tokens = parts
+    .flatMap((part) => (typeof part === "string" ? part.toLowerCase().split(/[^a-z0-9]+/g) : []))
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 4);
+  return tokens[0];
+}
+
+function deriveTimelineEntry(params: {
+  kind: "item" | "planner" | "chat" | "result";
+  id: string;
+  title: string;
+  timestamp: number;
+  status?: string | null;
+  itemType?: string | null;
+  topicCluster?: string | null;
+  summary?: string | null;
+  linkedItemId?: Id<"workspaceItems"> | null;
+}) {
+  return {
+    id: `${params.kind}:${params.id}`,
+    kind: params.kind,
+    title: params.title,
+    timestamp: params.timestamp,
+    status: params.status ?? null,
+    itemType: params.itemType ?? null,
+    topicCluster: params.topicCluster ?? null,
+    summary: normalizeText(params.summary, 220) ?? null,
+    linkedItemId: params.linkedItemId ?? null,
+  };
+}
+
 function defaultLegacyTypeForItemType(itemType: string): Doc<"workspaceItems">["type"] {
   switch (itemType) {
     case "thread": return "thread";
@@ -162,13 +195,15 @@ export const getWorkspacePageData = query({
     workstreamId: v.id("workstreams"),
     includeDismissedResults: v.optional(v.boolean()),
     commandResultLimit: v.optional(v.number()),
+    widgetLimit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
     const workstream = await requireOwnedWorkstream(ctx, actor, args.workstreamId);
     const commandResultLimit = Math.max(1, Math.min(args.commandResultLimit ?? 25, 100));
+    const widgetLimit = Math.max(1, Math.min(args.widgetLimit ?? 25, 100));
 
-    const [items, artifacts, plannerItems, chats, latestMutation, commandResults] = await Promise.all([
+    const [items, artifacts, plannerItems, chats, latestMutation, commandResults, widgets, messages] = await Promise.all([
       ctx.db.query("workspaceItems").withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId)).collect(),
       ctx.db.query("artifacts").withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId)).collect(),
       ctx.db.query("plannerItems").withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId)).collect(),
@@ -179,6 +214,15 @@ export const getWorkspacePageData = query({
         .withIndex("by_workstream_updated", (q) => q.eq("workstreamId", args.workstreamId))
         .order("desc")
         .take(args.includeDismissedResults ? commandResultLimit : Math.min(commandResultLimit * 3, 300)),
+      ctx.db
+        .query("workspaceWidgets")
+        .withIndex("by_workstream_updated", (q) => q.eq("workstreamId", args.workstreamId))
+        .order("desc")
+        .take(widgetLimit * 3),
+      ctx.db
+        .query("messages")
+        .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
+        .collect(),
     ]);
 
     const activeItems = items
@@ -188,6 +232,14 @@ export const getWorkspacePageData = query({
     const liveArtifacts = artifacts.filter((artifact) => artifact.ownerUserId === actor._id && artifact.orgId === actor.orgId && artifact.status === "active");
     const livePlannerItems = plannerItems.filter((item) => item.ownerUserId === actor._id && item.orgId === actor.orgId && item.status !== "cancelled");
     const liveChats = chats.filter((chat) => isActiveThreadChat(chat, actor._id, actor.orgId, args.workstreamId));
+    const chatById = new Map(liveChats.map((chat) => [chat._id, chat]));
+    const liveMessages = messages.filter((message) => {
+      const chat = chatById.get(message.chatId);
+      return Boolean(chat && message.userId === actor._id);
+    });
+    const liveWidgets = widgets
+      .filter((widget) => widget.ownerUserId === actor._id && widget.orgId === actor.orgId && !widget.hidden)
+      .slice(0, widgetLimit);
     const visibleCommandResults = commandResults
       .filter((row) => row.ownerUserId === actor._id && row.orgId === actor.orgId)
       .filter((row) => args.includeDismissedResults ? true : row.status !== "dismissed")
@@ -199,14 +251,197 @@ export const getWorkspacePageData = query({
     const itemById = new Map(activeItems.map((item) => [item._id, item]));
     const artifactById = new Map(liveArtifacts.map((artifact) => [artifact._id, artifact]));
     const plannerById = new Map(livePlannerItems.map((item) => [item._id, item]));
-    const chatById = new Map(liveChats.map((chat) => [chat._id, chat]));
+
+    const itemSignals = activeItems.map((item) => ({
+      ...item,
+      linkedArtifact: item.sourceArtifactId ? artifactById.get(item.sourceArtifactId) ?? null : null,
+      linkedPlannerItem: item.sourcePlannerItemId ? plannerById.get(item.sourcePlannerItemId) ?? null : null,
+      linkedChat: item.sourceChatId ? chatById.get(item.sourceChatId) ?? null : null,
+      dueAt: item.sourcePlannerItemId ? plannerById.get(item.sourcePlannerItemId)?.dueAt : undefined,
+      scheduledAt: item.sourcePlannerItemId ? plannerById.get(item.sourcePlannerItemId)?.dueAt : undefined,
+      relevantTimestamp: item.sourcePlannerItemId
+        ? plannerById.get(item.sourcePlannerItemId)?.dueAt ?? item.updatedAt
+        : item.updatedAt,
+      topicCluster: item.topicCluster ?? inferTopicCluster([item.title, item.contentSummary, item.renderMode]),
+    }));
+
+    const chatSignalMap = new Map(liveChats.map((chat) => {
+      const chatMessages = liveMessages
+        .filter((message) => message.chatId === chat._id)
+        .sort((a, b) => b.createdAt - a.createdAt);
+      const assistantReplies = chatMessages.filter((message) => message.role === "assistant").length;
+      const userTurns = chatMessages.filter((message) => message.role === "user").length;
+      const unresolved =
+        chatMessages.length === 0
+          ? false
+          : chatMessages[0]?.role === "user";
+      return [chat._id, {
+        assistantReplies,
+        userTurns,
+        unresolved,
+        latestMessageAt: chatMessages[0]?.createdAt ?? chat.updatedAt,
+      }];
+    }));
+
+    const workspaceHealth = {
+      itemCount: activeItems.length,
+      artifactCount: liveArtifacts.length,
+      plannerCount: livePlannerItems.length,
+      threadCount: liveChats.length,
+      activeWidgetCount: liveWidgets.length,
+      openCommandCount: visibleCommandResults.filter((row) => row.status === "processing").length,
+      blockedThreadCount: visibleCommandResults.filter((row) => row.threadStatus === "blocked").length,
+      overduePlannerCount: livePlannerItems.filter((item) => typeof item.dueAt === "number" && item.dueAt < Date.now() && item.status !== "completed").length,
+      unresolvedThreadCount: liveChats.filter((chat) => chatSignalMap.get(chat._id)?.unresolved).length,
+      revision: workstream.workspaceRevision ?? latestMutation?.updatedAt ?? workstream.updatedAt,
+    };
+
+    const topicAccumulator = new Map<string, {
+      topic: string;
+      itemCount: number;
+      plannerCount: number;
+      chatCount: number;
+      resultCount: number;
+      latestTimestamp: number;
+      overdueCount: number;
+      unresolvedCount: number;
+    }>();
+    const bumpTopic = (topic: string | null | undefined, patch: Partial<{
+      itemCount: number;
+      plannerCount: number;
+      chatCount: number;
+      resultCount: number;
+      latestTimestamp: number;
+      overdueCount: number;
+      unresolvedCount: number;
+    }>) => {
+      if (!topic) return;
+      const current = topicAccumulator.get(topic) ?? {
+        topic,
+        itemCount: 0,
+        plannerCount: 0,
+        chatCount: 0,
+        resultCount: 0,
+        latestTimestamp: 0,
+        overdueCount: 0,
+        unresolvedCount: 0,
+      };
+      current.itemCount += patch.itemCount ?? 0;
+      current.plannerCount += patch.plannerCount ?? 0;
+      current.chatCount += patch.chatCount ?? 0;
+      current.resultCount += patch.resultCount ?? 0;
+      current.overdueCount += patch.overdueCount ?? 0;
+      current.unresolvedCount += patch.unresolvedCount ?? 0;
+      current.latestTimestamp = Math.max(current.latestTimestamp, patch.latestTimestamp ?? 0);
+      topicAccumulator.set(topic, current);
+    };
+
+    itemSignals.forEach((item) => bumpTopic(item.topicCluster, { itemCount: 1, latestTimestamp: item.relevantTimestamp ?? item.updatedAt }));
+    livePlannerItems.forEach((item) => bumpTopic(inferTopicCluster([item.title, item.description, item.type]), {
+      plannerCount: 1,
+      overdueCount: typeof item.dueAt === "number" && item.dueAt < Date.now() && item.status !== "completed" ? 1 : 0,
+      latestTimestamp: item.dueAt ?? item.updatedAt,
+    }));
+    liveChats.forEach((chat) => {
+      const signal = chatSignalMap.get(chat._id);
+      bumpTopic(inferTopicCluster([chat.title, chat.latestUserPrompt, chat.contextSummary]), {
+        chatCount: 1,
+        unresolvedCount: signal?.unresolved ? 1 : 0,
+        latestTimestamp: signal?.latestMessageAt ?? chat.updatedAt,
+      });
+    });
+    visibleCommandResults.forEach((row) => bumpTopic(row.topicCluster ?? inferTopicCluster([row.title, row.summary, row.detail]), {
+      resultCount: 1,
+      unresolvedCount: row.threadStatus === "blocked" || row.threadStatus === "open" ? 1 : 0,
+      latestTimestamp: row.timelineAt ?? row.updatedAt,
+    }));
+
+    const topicSignals = Array.from(topicAccumulator.values())
+      .map((topic) => ({
+        ...topic,
+        state:
+          topic.overdueCount > 0 || topic.unresolvedCount > 1
+            ? "attention"
+            : topic.resultCount > 0 || topic.chatCount > 0
+              ? "active"
+              : "stable",
+      }))
+      .sort((a, b) => b.latestTimestamp - a.latestTimestamp || (b.itemCount + b.chatCount + b.plannerCount) - (a.itemCount + a.chatCount + a.plannerCount));
+
+    const timelineSignals = [
+      ...itemSignals.map((item) => deriveTimelineEntry({
+        kind: "item",
+        id: item._id,
+        title: item.title,
+        timestamp: item.relevantTimestamp ?? item.updatedAt,
+        status: item.status,
+        itemType: item.workspaceType ?? item.itemType,
+        topicCluster: item.topicCluster,
+        summary: item.contentSummary,
+        linkedItemId: item._id,
+      })),
+      ...livePlannerItems.map((item) => deriveTimelineEntry({
+        kind: "planner",
+        id: item._id,
+        title: item.title,
+        timestamp: item.dueAt ?? item.updatedAt,
+        status: item.status,
+        itemType: item.type,
+        topicCluster: inferTopicCluster([item.title, item.description]),
+        summary: item.description,
+        linkedItemId: itemByPlannerId.get(item._id)?._id ?? null,
+      })),
+      ...liveChats.map((chat) => deriveTimelineEntry({
+        kind: "chat",
+        id: chat._id,
+        title: chat.title,
+        timestamp: chatSignalMap.get(chat._id)?.latestMessageAt ?? chat.updatedAt,
+        status: chatSignalMap.get(chat._id)?.unresolved ? "open" : "resolved",
+        itemType: "thread",
+        topicCluster: inferTopicCluster([chat.title, chat.latestUserPrompt, chat.contextSummary]),
+        summary: chat.contextSummary ?? chat.latestUserPrompt,
+        linkedItemId: itemByChatId.get(chat._id)?._id ?? null,
+      })),
+      ...visibleCommandResults.map((row: typeof visibleCommandResults[number]) => deriveTimelineEntry({
+        kind: "result",
+        id: row._id,
+        title: row.title,
+        timestamp: row.timelineAt ?? row.updatedAt,
+        status: row.threadStatus ?? row.status,
+        itemType: row.variant ?? row.intent,
+        topicCluster: row.topicCluster ?? inferTopicCluster([row.title, row.summary, row.detail]),
+        summary: row.summary,
+        linkedItemId:
+          row.targetKind === "artifact" && row.targetId
+            ? itemByArtifactId.get(row.targetId as Id<"artifacts">)?._id ?? null
+            : row.targetKind === "plannerItem" && row.targetId
+              ? itemByPlannerId.get(row.targetId as Id<"plannerItems">)?._id ?? null
+              : row.targetKind === "chat" && row.targetId
+                ? itemByChatId.get(row.targetId as Id<"chats">)?._id ?? null
+                : row.targetKind === "workspaceItem" && row.targetId
+                  ? itemById.get(row.targetId as Id<"workspaceItems">)?._id ?? null
+                  : null,
+      })),
+    ]
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 120);
 
     return {
       workstream,
-      items: activeItems,
+      items: itemSignals,
       artifacts: liveArtifacts,
-      plannerItems: livePlannerItems,
-      chats: liveChats,
+      plannerItems: livePlannerItems.map((item) => ({
+        ...item,
+        scheduledAt: item.dueAt,
+        relevantTimestamp: item.dueAt ?? item.updatedAt,
+        topicCluster: inferTopicCluster([item.title, item.description, item.type]),
+      })),
+      chats: liveChats.map((chat) => ({
+        ...chat,
+        relevantTimestamp: chat.updatedAt,
+        topicCluster: inferTopicCluster([chat.title, chat.latestUserPrompt, chat.contextSummary]),
+      })),
+      widgets: liveWidgets,
       commandResults: visibleCommandResults.map((row) => ({
         ...row,
         targetRecord:
@@ -230,6 +465,11 @@ export const getWorkspacePageData = query({
                   ? itemById.get(row.targetId as Id<"workspaceItems">) ?? null
                   : null,
       })),
+      signals: {
+        workspaceHealth,
+        topicSignals,
+        timelineSignals,
+      },
       revision: workstream.workspaceRevision ?? latestMutation?.updatedAt ?? workstream.updatedAt,
       revisionKey: workstream.workspaceRevisionKey ?? latestMutation?.revisionKey ?? `${args.workstreamId}:${workstream.updatedAt}`,
       lastMutationId: workstream.lastWorkspaceMutationId ?? latestMutation?._id,
@@ -297,6 +537,9 @@ export const createWidget = mutation({
     width: v.optional(v.number()),
     height: v.optional(v.number()),
     category: v.optional(v.string()),
+    provenanceSource: v.optional(v.union(v.literal("user"), v.literal("ai"), v.literal("system"))),
+    provenanceAction: v.optional(v.string()),
+    mutationSummary: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
@@ -333,23 +576,24 @@ export const createWidget = mutation({
       pinned: false,
       collapsed: false,
       hidden: false,
-      provenanceSource: "user",
+      provenanceSource: args.provenanceSource ?? "user",
+      provenanceAction: args.provenanceAction,
       createdAt: now,
       updatedAt: now,
     });
 
-    await recordWorkspaceMutation(ctx, {
+    const mutationId = await recordWorkspaceMutation(ctx, {
       orgId: actor.orgId,
       ownerUserId: actor._id,
       workstreamId: args.workstreamId,
       mutationType: "create_widget",
-      source: "user",
+      source: args.provenanceSource ?? "user",
       targetItemIds: [itemId],
       after: { itemId },
-      summary: `Created widget ${args.title}`,
+      summary: args.mutationSummary ?? `Created widget ${args.title}`,
     });
 
-    return { itemId };
+    return { itemId, mutationId };
   },
 });
 
@@ -367,6 +611,11 @@ export const updateWidget = mutation({
     hidden: v.optional(v.boolean()),
     collapsed: v.optional(v.boolean()),
     pinned: v.optional(v.boolean()),
+    category: v.optional(v.string()),
+    zIndex: v.optional(v.number()),
+    provenanceSource: v.optional(v.union(v.literal("user"), v.literal("ai"), v.literal("system"))),
+    provenanceAction: v.optional(v.string()),
+    mutationSummary: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
@@ -379,29 +628,38 @@ export const updateWidget = mutation({
     if (args.y !== undefined) patch.y = args.y;
     if (args.width !== undefined) patch.width = args.width;
     if (args.height !== undefined) patch.height = args.height;
+    if (args.zIndex !== undefined) patch.zIndex = args.zIndex;
     if (args.hidden !== undefined) patch.hidden = args.hidden;
     if (args.collapsed !== undefined) patch.collapsed = args.collapsed;
     if (args.pinned !== undefined) patch.pinned = args.pinned;
+    if (args.category !== undefined) patch.category = resolveWorkspaceCategory({
+      category: args.category,
+      itemType: item.itemType,
+      renderMode: (patch.renderMode as string | undefined) ?? item.renderMode,
+      legacyType: item.type,
+    });
+    if (args.provenanceSource !== undefined) patch.provenanceSource = args.provenanceSource;
+    if (args.provenanceAction !== undefined) patch.provenanceAction = args.provenanceAction;
     patch.searchText = searchTextForWorkspaceItem({
       title: (patch.title as string | undefined) ?? item.title,
       contentSummary: (patch.contentSummary as string | undefined) ?? item.contentSummary,
       renderMode: (patch.renderMode as string | undefined) ?? item.renderMode,
-      category: item.category,
+      category: (patch.category as string | undefined) ?? item.category,
     });
 
     await ctx.db.patch(args.itemId, patch);
-    await recordWorkspaceMutation(ctx, {
+    const mutationId = await recordWorkspaceMutation(ctx, {
       orgId: actor.orgId,
       ownerUserId: actor._id,
       workstreamId: item.workstreamId,
       mutationType: "update_widget",
-      source: "user",
+      source: args.provenanceSource ?? "user",
       targetItemIds: [item._id],
       before: item,
       after: patch,
-      summary: `Updated widget ${item.title}`,
+      summary: args.mutationSummary ?? `Updated widget ${item.title}`,
     });
-    return { success: true };
+    return { success: true, mutationId };
   },
 });
 
@@ -412,6 +670,8 @@ export const moveWidget = mutation({
     targetWorkstreamId: v.id("workstreams"),
     x: v.optional(v.number()),
     y: v.optional(v.number()),
+    provenanceSource: v.optional(v.union(v.literal("user"), v.literal("ai"), v.literal("system"))),
+    mutationSummary: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
@@ -424,19 +684,19 @@ export const moveWidget = mutation({
       updatedAt: Date.now(),
     };
     await ctx.db.patch(args.itemId, patch);
-    await recordWorkspaceMutation(ctx, {
+    const mutationId = await recordWorkspaceMutation(ctx, {
       orgId: actor.orgId,
       ownerUserId: actor._id,
       workstreamId: item.workstreamId,
       targetWorkstreamId: args.targetWorkstreamId,
       mutationType: "move_widget",
-      source: "user",
+      source: args.provenanceSource ?? "user",
       targetItemIds: [item._id],
       before: item,
       after: patch,
-      summary: `Moved widget ${item.title}`,
+      summary: args.mutationSummary ?? `Moved widget ${item.title}`,
     });
-    return { success: true };
+    return { success: true, mutationId };
   },
 });
 
@@ -686,7 +946,10 @@ export const attachItemsToWorkstream = mutation({
       y: v.optional(v.number()),
       width: v.optional(v.number()),
       height: v.optional(v.number()),
+      category: v.optional(v.string()),
     })),
+    provenanceSource: v.optional(v.union(v.literal("user"), v.literal("ai"), v.literal("system"))),
+    mutationSummary: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
@@ -751,18 +1014,18 @@ export const attachItemsToWorkstream = mutation({
       inserted.push(itemId);
     }
 
-    await recordWorkspaceMutation(ctx, {
+    const mutationId = await recordWorkspaceMutation(ctx, {
       orgId: actor.orgId,
       ownerUserId: actor._id,
       workstreamId: args.workstreamId,
       mutationType: "attach_items_to_workstream",
-      source: "user",
+      source: args.provenanceSource ?? "user",
       targetItemIds: inserted,
       after: { inserted },
-      summary: `Attached ${inserted.length} item${inserted.length === 1 ? "" : "s"}`,
+      summary: args.mutationSummary ?? `Attached ${inserted.length} item${inserted.length === 1 ? "" : "s"}`,
     });
 
-    return { itemIds: inserted };
+    return { itemIds: inserted, createdItemIds: inserted, mutationId, success: true };
   },
 });
 
@@ -771,16 +1034,19 @@ export const listMergeCandidates = query({
     actorClerkId: v.string(),
     workstreamId: v.id("workstreams"),
     search: v.optional(v.string()),
+    topic: v.optional(v.string()),
+    limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
     await requireOwnedWorkstream(ctx, actor, args.workstreamId);
-    const search = normalizeText(args.search, 80)?.toLowerCase();
+    const search = normalizeText(args.search ?? args.topic, 80)?.toLowerCase();
+    const limit = Math.max(1, Math.min(args.limit ?? 50, 100));
     const items = await ctx.db.query("workspaceItems").withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId)).collect();
     return items.filter((item) => item.ownerUserId === actor._id && item.orgId === actor.orgId && item.status === "active").filter((item) => {
       if (!search) return true;
       return [item.title, item.contentSummary, item.renderMode].filter(Boolean).some((value) => String(value).toLowerCase().includes(search));
-    });
+    }).slice(0, limit);
   },
 });
 
@@ -796,12 +1062,23 @@ export const updateWorkstreamLayout = mutation({
       height: v.optional(v.number()),
       zIndex: v.optional(v.number()),
     })),
+    widgets: v.optional(v.array(v.object({
+      itemId: v.id("workspaceItems"),
+      x: v.number(),
+      y: v.number(),
+      width: v.optional(v.number()),
+      height: v.optional(v.number()),
+      zIndex: v.optional(v.number()),
+    }))),
+    provenanceSource: v.optional(v.union(v.literal("user"), v.literal("ai"), v.literal("system"))),
+    mutationSummary: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
     await requireOwnedWorkstream(ctx, actor, args.workstreamId);
+    const incomingItems = args.items.length > 0 ? args.items : (args.widgets ?? []);
     const updated: Id<"workspaceItems">[] = [];
-    for (const incoming of args.items) {
+    for (const incoming of incomingItems) {
       const item = await requireOwnedItem(ctx, actor, incoming.itemId);
       if (item.workstreamId !== args.workstreamId) throw new Error("Workspace item not in target workstream");
       await ctx.db.patch(incoming.itemId, {
@@ -814,17 +1091,17 @@ export const updateWorkstreamLayout = mutation({
       });
       updated.push(incoming.itemId);
     }
-    await recordWorkspaceMutation(ctx, {
+    const mutationId = await recordWorkspaceMutation(ctx, {
       orgId: actor.orgId,
       ownerUserId: actor._id,
       workstreamId: args.workstreamId,
       mutationType: "update_workstream_layout",
-      source: "user",
+      source: args.provenanceSource ?? "user",
       targetItemIds: updated,
       after: { updated },
-      summary: `Updated layout for ${updated.length} item${updated.length === 1 ? "" : "s"}`,
+      summary: args.mutationSummary ?? `Updated layout for ${updated.length} item${updated.length === 1 ? "" : "s"}`,
     });
-    return { success: true };
+    return { success: true, mutationId };
   },
 });
 

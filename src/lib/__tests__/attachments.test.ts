@@ -11,6 +11,13 @@ describe("attachment capability gate", () => {
       selectedModel: MODEL_CONFIG.multimodal,
       requiresVision: true,
       fallbackModels: [MODEL_CONFIG.tutorFast],
+      modelCatalog: [
+        {
+          modelId: MODEL_CONFIG.multimodal,
+          multimodalRating: "strong",
+          tags: ["vision"],
+        },
+      ],
     });
 
     expect(result.modelSwitched).toBe(false);
@@ -23,6 +30,18 @@ describe("attachment capability gate", () => {
       selectedModel: MODEL_CONFIG.marker,
       requiresVision: true,
       fallbackModels: [MODEL_CONFIG.multimodal, MODEL_CONFIG.marker],
+      modelCatalog: [
+        {
+          modelId: MODEL_CONFIG.marker,
+          multimodalRating: "none",
+          tags: [],
+        },
+        {
+          modelId: MODEL_CONFIG.multimodal,
+          multimodalRating: "strong",
+          tags: ["vision"],
+        },
+      ],
     });
 
     expect(result.modelSwitched).toBe(true);
@@ -42,6 +61,7 @@ describe("attachment capability gate", () => {
     expect(typeof result.prepassModel).toBe("string");
     expect(result.prepassModel?.length).toBeGreaterThan(0);
   });
+
 });
 
 describe("toOpenRouterMessages", () => {

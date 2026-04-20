@@ -1,4 +1,4 @@
-import { MODEL_CONFIG } from "@/lib/model-config";
+import { getCatalogBackedEmergencyModel } from "@/lib/model-config";
 import { openRouterChatCompletion } from "@/lib/openrouter";
 import type {
   ClarificationBlock,
@@ -141,9 +141,10 @@ export async function generatePromptAwareClarification(params: {
   if (!message) return null;
 
   const startedAt = Date.now();
+  const clarificationModel = getCatalogBackedEmergencyModel({ role: "text" });
   const completion = await openRouterChatCompletion({
-    model: MODEL_CONFIG.smartCheap,
-    fallbackModels: [MODEL_CONFIG.tutorFast],
+    model: clarificationModel,
+    fallbackModels: [],
     messages: [
       {
         role: "system",
@@ -182,7 +183,7 @@ ${JSON.stringify(params.fallbackBlock, null, 2)}`,
     reasoningEffort: "low",
   });
 
-  const modelUsed = completion.model ?? MODEL_CONFIG.smartCheap;
+  const modelUsed = completion.model ?? clarificationModel;
   const usage = completion.usage;
   params.onModelCall?.({
     model: modelUsed,

@@ -845,6 +845,55 @@ function resolveOrchestrationProfile(params: {
   return "simple_direct";
 }
 
+function deterministicExecutionPath(params: {
+  mode: StudyMode;
+  message: string;
+  hasAttachments: boolean;
+  shouldUseWebSearch: boolean;
+  workstreamAssignment: WorkstreamAssignment;
+  workspaceAction?: RoutePlan["workspaceAction"];
+  requestedArtifactFormats: ArtifactFormat[];
+  threadStrategy: ThreadStrategy;
+  assignmentLevel: AssignmentLevel;
+}) {
+  const lower = params.message.toLowerCase();
+  const targetCount =
+    (lower.match(/\b(and|then|also|plus|along with)\b/g) ?? []).length
+    + (lower.match(/\b(two|three|four|multiple|several)\b/g) ?? []).length;
+  const explicitMultiStep =
+    /\b(step by step|iterate|keep going|multi-step|workflow|plan then|first .* then|research and compare)\b/.test(lower);
+  const actionIntent = params.workspaceAction?.intent;
+  const hasWorkspaceTarget = params.workstreamAssignment.status === "assigned";
+  const artifactMutationRequest =
+    params.requestedArtifactFormats.length > 0
+    || /\b(create|make|build|generate|draft|save|update|edit|rewrite|organi[sz]e|move|rename|attach)\b/.test(lower);
+  const directAnswerOnly =
+    !params.shouldUseWebSearch
+    && !params.hasAttachments
+    && !actionIntent
+    && !artifactMutationRequest
+    && params.assignmentLevel === "L0";
+
+  if (params.shouldUseWebSearch || params.mode === "research") return "research_workflow";
+  if (directAnswerOnly) return "direct_chat";
+  if (
+    hasWorkspaceTarget
+    && (
+      explicitMultiStep
+      || params.assignmentLevel === "L3"
+      || params.assignmentLevel === "L4"
+      || params.hasAttachments
+      || targetCount >= 2
+      || params.threadStrategy.action === "defer_to_workspace_action"
+      || actionIntent === "widget"
+    )
+  ) {
+    return "action_loop";
+  }
+  if (actionIntent || artifactMutationRequest || params.hasAttachments) return "single_action";
+  return "direct_chat";
+}
+
 export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
   const assignmentLevel =
     params.assignmentLevel
@@ -1036,6 +1085,18 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
     ]),
   ).filter((bundle) => bundle !== "none");
 
+  const executionPath = deterministicExecutionPath({
+    mode: params.mode,
+    message: params.message,
+    hasAttachments: params.hasAttachments,
+    shouldUseWebSearch,
+    workstreamAssignment,
+    workspaceAction,
+    requestedArtifactFormats,
+    threadStrategy,
+    assignmentLevel,
+  });
+
   const required = [
     ...(multimodal ? ["vision" as const] : []),
     ...(artifactRequest ? [] : []),
@@ -1094,6 +1155,7 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
       required,
       preferred,
     },
+    executionPath,
     requestedArtifactFormats,
     allowSubAgents: shouldUseMultiStep && (params.mode === "research" || params.complexity === "complex"),
     orchestrationProfile,

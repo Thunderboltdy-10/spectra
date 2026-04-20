@@ -18,11 +18,20 @@ export type V2Territory = {
   cy: number;
   w: number;
   h: number;
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+  contentTop: number;
+  contentBottom: number;
 };
 
 export type V2Item = {
   id: string;
   sourceId: string;            // real item id
+  sourceArtifactId?: string;
+  sourcePlannerItemId?: string;
+  sourceChatId?: string;
   workspaceId: string;         // v2 territory id
   kind: V2Kind;
   title: string;
@@ -91,28 +100,105 @@ function timeAgo(ts?: number): string {
   return `${Math.round(diff / 86_400_000)}d ago`;
 }
 
+export const V2_LAYOUT = {
+  itemW: 280,
+  itemH: 240,
+  gapX: 24,
+  gapY: 28,
+  sectionGap: 64,
+  sectionGapX: 56,
+  sidePad: 80,
+  topPad: 168,
+  bottomPad: 96,
+  titleInsetX: 30,
+  titleInsetY: 24,
+  titleBlockH: 116,
+  minCols: 1,
+  maxCols: 4,
+  compactCols: 2,
+  minTerritoryW: 1080,
+  maxTerritoryW: 1680,
+  minTerritoryH: 820,
+  territoryGapX: 240,
+  territoryGapY: 280,
+  atlasCols: 2,
+} as const;
+
+/**
+ * Compute the *base* territory size from item count alone.
+ * The actual rendered height may grow if section packing in app.tsx
+ * spills past `contentBottom`; the atlas allocates extra Y headroom
+ * (`territoryGapY`) so workspaces never overlap each other vertically.
+ */
+function computeTerritorySize(itemCount: number) {
+  const {
+    itemW,
+    itemH,
+    gapX,
+    gapY,
+    sidePad,
+    topPad,
+    bottomPad,
+    minCols,
+    maxCols,
+    compactCols,
+    minTerritoryW,
+    maxTerritoryW,
+    minTerritoryH,
+  } = V2_LAYOUT;
+
+  const safeCount = Math.max(itemCount, 1);
+  const cols = Math.max(minCols, Math.min(maxCols, Math.ceil(Math.sqrt(safeCount))));
+  const targetCols = safeCount <= 2 ? safeCount : Math.max(compactCols, cols);
+  const safeCols = Math.max(minCols, Math.min(maxCols, targetCols));
+  const width = Math.max(
+    minTerritoryW,
+    Math.min(maxTerritoryW, sidePad * 2 + safeCols * itemW + Math.max(0, safeCols - 1) * gapX),
+  );
+  const rows = Math.max(1, Math.ceil(safeCount / safeCols));
+  const height = Math.max(
+    minTerritoryH,
+    topPad + bottomPad + rows * itemH + Math.max(0, rows - 1) * gapY,
+  );
+
+  return { width, height, columns: safeCols };
+}
+
 /* ─── Grid layout for items inside a territory ─── */
 function layoutItems(
   wsItems: WorkspaceItemData[],
   workspaceId: string,
-  territory: { cx: number; cy: number; w: number; h: number },
+  territory: { cx: number; cy: number; w: number; h: number; contentTop: number },
   color: string,
 ): V2Item[] {
-  const COLS = 3;
-  const cellW = 320;
-  const cellH = 240;
-  const gapX = 40;
-  const gapY = 36;
-  const totalW = COLS * cellW + (COLS - 1) * gapX;
+  const { itemW: cellW, itemH: cellH, gapX, gapY, sidePad } = V2_LAYOUT;
+  const usableW = territory.w - sidePad * 2;
+  const cols = Math.max(1, Math.min(4, Math.floor((usableW + gapX) / (cellW + gapX))));
+  const totalW = cols * cellW + (cols - 1) * gapX;
   const startX = territory.cx - totalW / 2;
-  const startY = territory.cy - territory.h / 2 + 140;
+  const startY = territory.contentTop;
+  const clusters = new Map<string, WorkspaceItemData[]>();
+  wsItems.forEach((item) => {
+    const cluster = (item.topicCluster?.trim() || item.itemType || "misc").toLowerCase();
+    const bucket = clusters.get(cluster) ?? [];
+    bucket.push(item);
+    clusters.set(cluster, bucket);
+  });
+  const ordered = Array.from(clusters.entries())
+    .sort((a, b) => b[1].length - a[1].length)
+    .flatMap(([, items]) => items);
   return wsItems.map((it, i) => {
-    const col = i % COLS;
-    const row = Math.floor(i / COLS);
+    const orderedIndex = ordered.findIndex((row) => row.id === it.id);
+    const index = orderedIndex >= 0 ? orderedIndex : i;
+    const col = index % cols;
+    const row = Math.floor(index / cols);
     const kind = toKind(it.itemType);
     return {
       id: `v2-${it.id}`,
       sourceId: it.id,
+      sourceArtifactId: it.sourceArtifactId,
+      sourcePlannerItemId: it.sourcePlannerItemId,
+      sourceChatId: it.sourceChatId,
       workspaceId,
       kind,
       title: it.title,
@@ -131,29 +217,70 @@ function layoutItems(
 /* ─── Convert real workspaces → v2 territories + items ─── */
 export function buildV2Graph(workspaces: WorkspaceData[]): { territories: V2Territory[]; items: V2Item[] } {
   if (workspaces.length === 0) return { territories: [], items: [] };
-  const COLS = 2;
-  const TERR_W = 1400;
-  const TERR_H = 900;
-  const SPACING_X = 1700;
-  const SPACING_Y = 1200;
+  const { atlasCols, territoryGapX, territoryGapY, titleInsetY, titleBlockH } = V2_LAYOUT;
 
-  const territories: V2Territory[] = workspaces.map((ws, i) => {
-    const col = i % COLS;
-    const row = Math.floor(i / COLS);
-    const cx = col * SPACING_X - ((COLS - 1) * SPACING_X) / 2;
-    const cy = row * SPACING_Y - ((Math.ceil(workspaces.length / COLS) - 1) * SPACING_Y) / 2;
-    const color = PALETTE[i % PALETTE.length];
+  // Step 1: precompute each workspace's frame (width/height based on item count).
+  const frames = workspaces.map((ws, i) => ({
+    ws,
+    color: PALETTE[i % PALETTE.length],
+    row: Math.floor(i / atlasCols),
+    ...computeTerritorySize(ws.items.length),
+  }));
+
+  // Step 2: per-row geometry — tallest wins, total width is sum+gaps.
+  const totalRows = Math.ceil(workspaces.length / atlasCols);
+  const rowHeights: number[] = Array.from({ length: totalRows }, () => V2_LAYOUT.minTerritoryH);
+  const rowWidths: number[] = Array.from({ length: totalRows }, () => 0);
+  frames.forEach((frame) => {
+    rowHeights[frame.row] = Math.max(rowHeights[frame.row], frame.height);
+    rowWidths[frame.row] += frame.width;
+  });
+  // Add inter-territory gaps to each row's total width.
+  for (let row = 0; row < totalRows; row += 1) {
+    const rowCount = frames.filter((frame) => frame.row === row).length;
+    rowWidths[row] += Math.max(0, rowCount - 1) * territoryGapX;
+  }
+
+  // Step 3: stack rows vertically with a generous vertical gap so workspaces
+  // can never visually collide even if section packing grows them a bit.
+  const rowOffsets: number[] = Array.from({ length: totalRows }, () => 0);
+  let yCursor = 0;
+  for (let row = 0; row < totalRows; row += 1) {
+    rowOffsets[row] = yCursor;
+    yCursor += rowHeights[row] + territoryGapY;
+  }
+  const totalHeight = yCursor - territoryGapY;
+
+  // Step 4: place each territory centered on its row.
+  const territories: V2Territory[] = frames.map((frame) => {
+    const row = frame.row;
+    const rowItems = frames.filter((f) => f.row === row);
+    const rowStartX = -rowWidths[row] / 2;
+    // Determine x based on order within row.
+    const indexInRow = rowItems.findIndex((f) => f.ws.id === frame.ws.id);
+    const xOffset = rowItems
+      .slice(0, indexInRow)
+      .reduce((sum, f) => sum + f.width + territoryGapX, 0);
+    const cx = rowStartX + xOffset + frame.width / 2;
+    const cy = rowOffsets[row] - totalHeight / 2 + frame.height / 2;
+    const contentTop = cy - frame.height / 2 + titleInsetY + titleBlockH;
     return {
-      id: `terr-${ws.id}`,
-      sourceId: ws.id,
-      name: ws.name,
-      subtitle: `${ws.itemCount} items`,
-      glyph: ws.emoji || "◎",
-      color,
+      id: `terr-${frame.ws.id}`,
+      sourceId: frame.ws.id,
+      name: frame.ws.name,
+      subtitle: `${frame.ws.itemCount} items`,
+      glyph: frame.ws.emoji || "◎",
+      color: frame.color,
       cx,
       cy,
-      w: TERR_W,
-      h: TERR_H,
+      w: frame.width,
+      h: frame.height,
+      minX: cx - frame.width / 2,
+      maxX: cx + frame.width / 2,
+      minY: cy - frame.height / 2,
+      maxY: cy + frame.height / 2,
+      contentTop,
+      contentBottom: cy + frame.height / 2 - V2_LAYOUT.bottomPad,
     };
   });
 

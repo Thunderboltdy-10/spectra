@@ -1,4 +1,10 @@
-import { CHEAP_MODEL_DEFAULTS, MODEL_CONFIG, ROUTER_FALLBACKS, getRouterFallbacks } from "@/lib/model-config";
+import {
+  CHEAP_MODEL_DEFAULTS,
+  MODEL_CONFIG,
+  ROUTER_FALLBACKS,
+  getCatalogBackedEmergencyModel,
+  getRouterFallbacks,
+} from "@/lib/model-config";
 import {
   isModelAllowedInTier,
   modelSupportsCapability,
@@ -51,6 +57,15 @@ function isFreeModel(modelId: string) {
   return modelId.includes(":free");
 }
 
+function isCheapPreferredModel(modelId: string, catalog?: CatalogModelEntry[]) {
+  if (modelId.includes(":free")) return true;
+  const model = (catalog ?? []).find((item) => item.modelId === modelId);
+  if (!model) return false;
+  const input = typeof model.inputCostPerM === "number" ? model.inputCostPerM : Number.POSITIVE_INFINITY;
+  const output = typeof model.outputCostPerM === "number" ? model.outputCostPerM : Number.POSITIVE_INFINITY;
+  return input <= 3 && output <= 3;
+}
+
 function isBudgetGuardedTier(tier: ModelRouteInput["spendingTier"]) {
   return tier === "expensive_blocked" || tier === "cheap_only" || tier === "free_only";
 }
@@ -68,7 +83,7 @@ function eliminationReason(modelId: string, tier: ModelRouteInput["spendingTier"
     return "free_only tier requires free models";
   }
 
-  if (tier === "cheap_only" && !isFreeModel(modelId) && !CHEAP_MODEL_DEFAULTS.has(modelId)) {
+  if (tier === "cheap_only" && !isFreeModel(modelId)) {
     return "cheap_only tier excludes this paid model";
   }
 
@@ -85,20 +100,23 @@ export function canUseInTier(
     if (model) return isModelAllowedInTier(model, tier);
     if (modelId === "openrouter/auto") return tier === "normal";
   }
+  if (tier === "cheap_only") {
+    return isCheapPreferredModel(modelId, catalog);
+  }
   return !eliminationReason(modelId, tier);
 }
 
 function fallbackFor(model: string, tier: ModelRouteInput["spendingTier"]) {
-  const defaults = ROUTER_FALLBACKS[model] ?? [MODEL_CONFIG.tutorFast, MODEL_CONFIG.marker];
+  const defaults = ROUTER_FALLBACKS[model] ?? [MODEL_CONFIG.glmAir, MODEL_CONFIG.marker];
   return defaults.filter((candidate) => canUseInTier(candidate, tier));
 }
 
 function enforceTier(model: string, tier: ModelRouteInput["spendingTier"]) {
   if (canUseInTier(model, tier)) return model;
-  if (tier === "free_only") return MODEL_CONFIG.tutorFast;
-  if (tier === "cheap_only") return MODEL_CONFIG.smartCheap;
-  if (tier === "expensive_blocked") return MODEL_CONFIG.smartCheap;
-  return MODEL_CONFIG.tutorFast;
+  if (tier === "free_only") return MODEL_CONFIG.glmAir;
+  if (tier === "cheap_only") return MODEL_CONFIG.glmAir;
+  if (tier === "expensive_blocked") return MODEL_CONFIG.glmAir;
+  return MODEL_CONFIG.glmAir;
 }
 
 function fallbackForCatalog(
@@ -110,7 +128,7 @@ function fallbackForCatalog(
     return fallbackFor(model, tier);
   }
   const catalogFallbacks = getRouterFallbacks(catalog);
-  const defaults = catalogFallbacks[model] ?? ROUTER_FALLBACKS[model] ?? [MODEL_CONFIG.tutorFast, MODEL_CONFIG.marker];
+  const defaults = catalogFallbacks[model] ?? ROUTER_FALLBACKS[model] ?? [MODEL_CONFIG.glmAir, MODEL_CONFIG.marker];
   return defaults.filter((candidate) => canUseInTier(candidate, tier, catalog));
 }
 
@@ -124,9 +142,9 @@ function enforceTierWithCatalog(
   }
   if (canUseInTier(model, tier, catalog)) return model;
   const emergencyFallbacks = [
-    tier === "free_only" ? MODEL_CONFIG.tutorFast : undefined,
-    tier === "cheap_only" || tier === "expensive_blocked" ? MODEL_CONFIG.smartCheap : undefined,
-    MODEL_CONFIG.tutorFast,
+    tier === "free_only" ? getCatalogBackedEmergencyModel({ catalog, role: "text" }) : undefined,
+    tier === "cheap_only" || tier === "expensive_blocked" ? getCatalogBackedEmergencyModel({ catalog, role: "text" }) : undefined,
+    getCatalogBackedEmergencyModel({ catalog, role: "text" }),
   ].reduce<string[]>((acc, candidate) => {
     if (candidate) acc.push(candidate);
     return acc;
@@ -255,6 +273,17 @@ function isLowSignalSimpleTurn(params: {
     return false;
   }
   return true;
+}
+
+function shouldPreferConversationStability(input: ModelRouteInput, complexPrompt: boolean) {
+  if (input.routerMode !== "auto") return false;
+  if (!input.previousModelUsed) return false;
+  if (input.preserveContinuity === false) return false;
+  if (input.needsSearch || input.needsRag || input.hasAttachments) return false;
+  if (input.mode === "research" || input.mode === "image") return false;
+  if (complexPrompt) return true;
+  if ((input.conversationLength ?? 0) >= 2) return true;
+  return input.messageLength > 80;
 }
 
 function modelScoreBreakdown(params: {
@@ -531,6 +560,7 @@ function dynamicRouteFromCatalog(params: {
     params.input.routerMode === "auto"
     && Boolean(params.input.previousModelUsed)
     && lowSignalSimpleTurn;
+  const preferConversationStability = shouldPreferConversationStability(params.input, params.complexPrompt);
   const lowSignalAvoidModels = lowSignalSimpleTurn
     ? catalogWithoutAuto
       .filter((model) => isReasoningHeavyModel(model.modelId) || isExpensiveModel(model.modelId))
@@ -562,6 +592,9 @@ function dynamicRouteFromCatalog(params: {
         ...lowSignalAvoidModels,
       ]),
     ),
+    anchorModelId: preferConversationStability ? params.input.previousModelUsed : undefined,
+    preserveAnchor: preferConversationStability,
+    anchorModelBias: preferConversationStability ? 0.26 : undefined,
     runtimeStats: params.input.modelRuntimeStats,
   } as const;
   const fallbackCatalogModelId =
@@ -720,7 +753,10 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
   const longMessage = input.messageLength > 1200;
   const complexPrompt = longMessage || input.thinkingLevel === "high" || input.studentSeemsStuck || tabularNeeded;
   const promptCategory = input.promptCategory ?? "general";
-  const searchAuxModel = input.thinkingLevel === "high" ? MODEL_CONFIG.searchDeep : MODEL_CONFIG.searchFast;
+  const searchAuxModel = getCatalogBackedEmergencyModel({
+    catalog,
+    role: "search",
+  });
   const paidTier = allowsPaidTier(input.spendingTier);
 
   const catalogRoute = dynamicRouteFromCatalog({
@@ -752,7 +788,7 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
     const needsVisionFallback = multimodalNeeded && !isLikelyVisionModel(primaryModel);
     const visionFirstFallbacks = needsVisionFallback
       ? [
-          MODEL_CONFIG.multimodal,
+          getCatalogBackedEmergencyModel({ catalog, role: "vision" }),
           ...fallbackModels,
         ]
           .filter((candidate) => candidate !== primaryModel)
@@ -764,7 +800,7 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
       input,
       primaryModel,
       fallbackModels: [...new Set(visionFirstFallbacks)],
-      verificationModel: input.mode === "marker" ? MODEL_CONFIG.verify : undefined,
+      verificationModel: input.mode === "marker" ? getCatalogBackedEmergencyModel({ catalog, role: "verify" }) : undefined,
       reason:
         primaryModel === input.manualModel
           ? (needsVisionFallback ? "Manual selection with vision-capable fallback" : "Manual selection")
@@ -796,7 +832,7 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
       input,
       primaryModel,
       fallbackModels: fallbackForCatalog(primaryModel, input.spendingTier, catalog),
-      verificationModel: input.mode === "marker" ? MODEL_CONFIG.verify : undefined,
+      verificationModel: input.mode === "marker" ? getCatalogBackedEmergencyModel({ catalog, role: "verify" }) : undefined,
       reason:
         primaryModel === MODEL_CONFIG.autoRouter
           ? "OpenRouter auto-router mode"
@@ -812,47 +848,51 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
   }
 
   if (input.spendingTier === "free_only") {
-    let freeModel: string = MODEL_CONFIG.tutorFast;
+    let freeModel: string = getCatalogBackedEmergencyModel({ catalog, role: "text" });
     let reason = "Free-tier routing";
 
     if (input.mode === "marker") {
-      freeModel = MODEL_CONFIG.marker;
+      freeModel = getCatalogBackedEmergencyModel({ catalog, role: "reasoning" });
       reason = "Free-tier marker route";
     } else if (input.mode === "research" || (input.mode === "tutor" && promptCategory === "math_science")) {
-      freeModel = MODEL_CONFIG.tutorHigh;
+      freeModel = getCatalogBackedEmergencyModel({ catalog, role: "reasoning" });
       reason = "Free-tier deep reasoning route";
     } else if (input.mode === "exam" || input.mode === "draft_coach") {
-      freeModel = MODEL_CONFIG.gptOss;
+      freeModel = getCatalogBackedEmergencyModel({ catalog, role: "reasoning" });
       reason = "Free-tier structured output route";
     } else if (multimodalNeeded) {
-      freeModel = MODEL_CONFIG.multimodal;
+      freeModel = getCatalogBackedEmergencyModel({ catalog, role: "vision" });
       reason = "Free-tier multimodal route";
     } else if (promptCategory === "comparison" || promptCategory === "synthesis" || promptCategory === "debate") {
-      freeModel = MODEL_CONFIG.tutorHigh;
+      freeModel = getCatalogBackedEmergencyModel({ catalog, role: "reasoning" });
       reason = "Free-tier comparative reasoning route";
     } else if (promptCategory === "code") {
-      freeModel = MODEL_CONFIG.gptOss;
+      freeModel = getCatalogBackedEmergencyModel({ catalog, role: "reasoning" });
       reason = "Free-tier code route";
     } else if (tabularNeeded) {
-      freeModel = MODEL_CONFIG.gptOss;
+      freeModel = getCatalogBackedEmergencyModel({ catalog, role: "reasoning" });
       reason = "Free-tier tabular analysis route";
     }
 
-    pushCandidate(candidates, MODEL_CONFIG.tutorFast, input.spendingTier, 0.85, "Free-tier fast tutoring baseline");
-    pushCandidate(candidates, MODEL_CONFIG.marker, input.spendingTier, 0.82, "Free-tier grading/review fallback");
-    pushCandidate(candidates, MODEL_CONFIG.gptOss, input.spendingTier, 0.81, "Free-tier broad reasoning option");
-    pushCandidate(candidates, MODEL_CONFIG.tutorHigh, input.spendingTier, 0.8, "Free-tier deep reasoning option");
+    pushCandidate(candidates, getCatalogBackedEmergencyModel({ catalog, role: "text" }), input.spendingTier, 0.85, "Free-tier fast tutoring baseline");
+    pushCandidate(candidates, getCatalogBackedEmergencyModel({ catalog, role: "reasoning" }), input.spendingTier, 0.82, "Free-tier grading/review fallback");
+    pushCandidate(candidates, getCatalogBackedEmergencyModel({ catalog, role: "reasoning" }), input.spendingTier, 0.81, "Free-tier broad reasoning option");
+    pushCandidate(candidates, getCatalogBackedEmergencyModel({ catalog, role: "reasoning" }), input.spendingTier, 0.8, "Free-tier deep reasoning option");
     if (multimodalNeeded) {
-      pushCandidate(candidates, MODEL_CONFIG.multimodal, input.spendingTier, 0.88, "Free-tier vision-capable choice");
+      pushCandidate(candidates, getCatalogBackedEmergencyModel({ catalog, role: "vision" }), input.spendingTier, 0.88, "Free-tier vision-capable choice");
     }
 
     return finalizeRoute({
       input,
       primaryModel: freeModel,
-      fallbackModels: [MODEL_CONFIG.tutorFast, MODEL_CONFIG.marker, MODEL_CONFIG.gptOss].filter(
+      fallbackModels: [
+        getCatalogBackedEmergencyModel({ catalog, role: "text" }),
+        getCatalogBackedEmergencyModel({ catalog, role: "reasoning" }),
+        getCatalogBackedEmergencyModel({ catalog, role: "reasoning" }),
+      ].filter(
         (candidate) => candidate !== freeModel && canUseInTier(candidate, "free_only"),
       ),
-      verificationModel: input.mode === "marker" ? MODEL_CONFIG.verify : undefined,
+      verificationModel: input.mode === "marker" ? getCatalogBackedEmergencyModel({ catalog, role: "verify" }) : undefined,
       reason,
       autoEnhanced: true,
       searchEnabled: false,
@@ -931,63 +971,63 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
     );
   }
 
-  let baseModel: string = MODEL_CONFIG.tutorFast;
+  let baseModel: string = getCatalogBackedEmergencyModel({ catalog, role: "text" });
   let reason = "General tutoring route";
 
   if (input.mode === "marker") {
-    baseModel = complexPrompt || input.teacherStrictness === "hard" ? MODEL_CONFIG.markerHard : MODEL_CONFIG.marker;
+    baseModel = getCatalogBackedEmergencyModel({ catalog, role: "reasoning" });
     reason = "Marker mode high-accuracy route";
   } else if (input.mode === "research") {
-    baseModel = paidTier && complexPrompt ? MODEL_CONFIG.reasoningPaid : MODEL_CONFIG.tutorHigh;
+    baseModel = getCatalogBackedEmergencyModel({ catalog, role: "reasoning" });
     reason = "Research mode deep reasoning route";
   } else if (input.mode === "tutor") {
     if (promptCategory === "code") {
-      baseModel = paidTier ? MODEL_CONFIG.smartCheap : MODEL_CONFIG.tutorFast;
+      baseModel = getCatalogBackedEmergencyModel({ catalog, role: "text" });
       reason = "Tutor route optimized for code-oriented prompts";
     } else if (promptCategory === "comparison" || promptCategory === "synthesis" || promptCategory === "debate") {
-      baseModel = paidTier ? MODEL_CONFIG.reasoningPaid : MODEL_CONFIG.tutorHigh;
+      baseModel = getCatalogBackedEmergencyModel({ catalog, role: "reasoning" });
       reason = "Tutor route optimized for comparative and synthesis reasoning";
     } else if (promptCategory === "practical_application") {
-      baseModel = paidTier ? MODEL_CONFIG.smartPaid : MODEL_CONFIG.smartCheap;
+      baseModel = getCatalogBackedEmergencyModel({ catalog, role: "text" });
       reason = "Tutor route optimized for applied planning and implementation";
     } else if (promptCategory === "math_science") {
-      baseModel = paidTier ? MODEL_CONFIG.reasoningPaid : MODEL_CONFIG.tutorHigh;
+      baseModel = getCatalogBackedEmergencyModel({ catalog, role: "reasoning" });
       reason = "Tutor route optimized for math/science reasoning depth";
     } else if (promptCategory === "creative") {
-      baseModel = paidTier ? MODEL_CONFIG.smartPaid : MODEL_CONFIG.smartCheap;
+      baseModel = getCatalogBackedEmergencyModel({ catalog, role: "text" });
       reason = "Tutor route optimized for creative generation quality";
     } else if (complexPrompt && paidTier) {
-      baseModel = MODEL_CONFIG.smartPaid;
+      baseModel = getCatalogBackedEmergencyModel({ catalog, role: "text" });
       reason = "Tutor route for complex prompts";
     } else if (complexPrompt && input.spendingTier === "cheap_only") {
-      baseModel = MODEL_CONFIG.smartCheap;
+      baseModel = getCatalogBackedEmergencyModel({ catalog, role: "text" });
       reason = "Tutor route for complex prompts within cheap tier";
     } else {
-      baseModel = paidTier ? MODEL_CONFIG.smartCheap : MODEL_CONFIG.tutorFast;
+      baseModel = getCatalogBackedEmergencyModel({ catalog, role: "text" });
       reason = "Tutor mode adaptive route";
     }
   } else if (input.mode === "exam") {
-    baseModel = paidTier ? MODEL_CONFIG.smartCheap : MODEL_CONFIG.marker;
+    baseModel = getCatalogBackedEmergencyModel({ catalog, role: "reasoning" });
     reason = "Exam scaffold route with concise evaluation bias";
   } else if (input.mode === "draft_coach") {
-    baseModel = paidTier ? MODEL_CONFIG.smartPaid : MODEL_CONFIG.smartCheap;
+    baseModel = getCatalogBackedEmergencyModel({ catalog, role: "text" });
     reason = "Draft coach route with stronger editorial fluency";
   } else if (input.mode === "quiz" || input.mode === "flashcard") {
-    baseModel = MODEL_CONFIG.tutorFast;
+    baseModel = getCatalogBackedEmergencyModel({ catalog, role: "text" });
     reason = `${input.mode === "quiz" ? "Quiz" : "Flashcard"} generation route`;
   } else if (input.mode === "explain") {
-    baseModel = paidTier ? MODEL_CONFIG.smartCheap : MODEL_CONFIG.tutorFast;
+    baseModel = getCatalogBackedEmergencyModel({ catalog, role: "text" });
     reason = "Explain mode with simplified pedagogy emphasis";
   } else if (input.mode === "image") {
-    baseModel = MODEL_CONFIG.tutorFast;
+    baseModel = getCatalogBackedEmergencyModel({ catalog, role: "image" });
     reason = "Image mode prompt refinement route";
   }
 
   if (multimodalNeeded) {
-    baseModel = MODEL_CONFIG.multimodal;
+    baseModel = getCatalogBackedEmergencyModel({ catalog, role: "vision" });
     reason = `${reason} with multimodal attachments`;
   } else if (tabularNeeded) {
-    baseModel = paidTier ? MODEL_CONFIG.reasoningPaid : MODEL_CONFIG.smartCheap;
+    baseModel = getCatalogBackedEmergencyModel({ catalog, role: "reasoning" });
     reason = `${reason} with tabular attachment analysis`;
   }
 
@@ -1022,7 +1062,7 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
     input,
     primaryModel,
     fallbackModels: [...ranked.rankedFallbacks, ...fallbackForCatalog(primaryModel, input.spendingTier, catalog)],
-    verificationModel: input.mode === "marker" ? MODEL_CONFIG.verify : undefined,
+    verificationModel: input.mode === "marker" ? getCatalogBackedEmergencyModel({ catalog, role: "verify" }) : undefined,
     reason,
     autoEnhanced: true,
     searchEnabled: input.needsSearch,

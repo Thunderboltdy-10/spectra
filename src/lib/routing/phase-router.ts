@@ -1,5 +1,6 @@
 import type { ThinkingLevel } from "@/lib/contracts/studyModes";
 import {
+  AUTO_ROUTER_FRESHNESS_MAX_DAYS,
   inferRoutingLane,
   isTextChatCapableModel,
   isModelAllowedInTier,
@@ -77,7 +78,7 @@ type ScoredCandidate = {
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const FAILURE_CIRCUIT_WINDOW_MS = 10 * 60 * 1000;
 const FRESHNESS_PENALTY_DAYS = 60;
-const FRESHNESS_BLOCK_DAYS = 120;
+const FRESHNESS_BLOCK_DAYS = AUTO_ROUTER_FRESHNESS_MAX_DAYS;
 const CLOSE_SCORE_NOISE_RANGE = 0.03;
 const WEIGHTED_RANDOM_WINDOW = 0.85;
 

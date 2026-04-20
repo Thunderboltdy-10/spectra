@@ -269,6 +269,39 @@ describe("phase-router", () => {
     expect(decision.selectedModel).toBe("recent/model");
   });
 
+  it("excludes models older than 90 days from auto routing when fresher options exist", () => {
+    const recent = new Date();
+    recent.setDate(recent.getDate() - 15);
+    const stale = new Date();
+    stale.setDate(stale.getDate() - 100);
+    const decision = selectModelForPhase({
+      phaseId: "analysis",
+      phaseLabel: "Primary response",
+      mode: "general",
+      routerMode: "auto",
+      spendingTier: "normal",
+      thinkingLevel: "medium",
+      stakes: "medium",
+      messageLength: 140,
+      modelCatalog: [
+        {
+          ...baseCatalog()[0],
+          modelId: "fresh/model",
+          releaseDate: recent.toISOString(),
+        },
+        {
+          ...baseCatalog()[1],
+          modelId: "stale/model",
+          releaseDate: stale.toISOString(),
+        },
+      ],
+      seedKey: "exclude-stale-over-90",
+    });
+
+    expect(decision.selectedModel).toBe("fresh/model");
+    expect(decision.candidates.some((candidate) => candidate.modelId === "stale/model")).toBe(false);
+  });
+
   it("honors persisted challenger state from runtime evaluation", () => {
     const decision = selectModelForPhase({
       phaseId: "analysis",

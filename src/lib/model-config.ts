@@ -8,6 +8,7 @@ import {
 } from "@/lib/model-roles";
 
 const MODEL_ROLE_CACHE_TTL_MS = 30 * 60 * 1000;
+const ROUTER_MODEL_MAX_AGE_DAYS = 90;
 
 declare global {
   var __modelRoleResolutionCache:
@@ -16,12 +17,12 @@ declare global {
 }
 
 export const MODEL_CONFIG = {
-  utilityFree: "stepfun/step-3.5-flash:free",
-  tutorFast: "stepfun/step-3.5-flash:free",
-  tutorHigh: "minimax/minimax-m2.5:free",
+  utilityFree: "z-ai/glm-4.5-air:free",
+  tutorFast: "z-ai/glm-4.5-air:free",
+  tutorHigh: "moonshotai/kimi-k2:free",
   marker: "qwen/qwen3-next-80b-a3b-instruct:free",
-  markerHard: "nvidia/nemotron-3-super-120b-a12b:free",
-  multimodal: "google/gemma-3-27b-vision:free",
+  markerHard: "deepseek/deepseek-r1-0528:free",
+  multimodal: "qwen/qwen2.5-vl-72b-instruct:free",
   verify: "openai/gpt-5.4-mini",
   autoRouter: "openrouter/auto",
   embedding: "openai/text-embedding-3-large",
@@ -30,9 +31,9 @@ export const MODEL_CONFIG = {
   gptOss: "openai/gpt-oss-120b:free",
 
   // Paid tier for normal spending.
-  smartPaid: "anthropic/claude-sonnet-4.5",
-  smartCheap: "openai/gpt-5.4-nano",
-  reasoningPaid: "openai/gpt-5.4-mini",
+  smartPaid: "minimax/minimax-m1",
+  smartCheap: "z-ai/glm-4.5-air",
+  reasoningPaid: "moonshotai/kimi-k2",
 
   // Search-focused routes.
   searchFast: "perplexity/sonar",
@@ -40,6 +41,16 @@ export const MODEL_CONFIG = {
 
   // Image generation.
   imageGen: "google/gemini-3.1-flash-image-preview",
+} as const;
+
+export const EMERGENCY_MODEL_FALLBACKS = {
+  text: MODEL_CONFIG.glmAir,
+  reasoning: MODEL_CONFIG.marker,
+  vision: MODEL_CONFIG.multimodal,
+  search: MODEL_CONFIG.searchFast,
+  image: MODEL_CONFIG.imageGen,
+  embedding: MODEL_CONFIG.embedding,
+  verify: MODEL_CONFIG.verify,
 } as const;
 
 const ROLE_FALLBACK_MODEL: Record<ModelRole, string> = {
@@ -76,6 +87,19 @@ function embeddingCandidateScore(model: CatalogModelEntry) {
   return (cost <= 1 ? 1 : cost <= 5 ? 0.7 : 0.3) + ((model.endpointUptimePercent ?? 84) / 100) * 0.2;
 }
 
+function modelAgeDays(model: CatalogModelEntry) {
+  const timestamp = model.createdAt
+    ?? (typeof model.releaseDate === "string" ? Date.parse(model.releaseDate) : Number.NaN);
+  if (!Number.isFinite(timestamp)) return undefined;
+  return Math.max(0, (Date.now() - timestamp) / (1000 * 60 * 60 * 24));
+}
+
+function isRouterFreshModel(model: CatalogModelEntry) {
+  const ageDays = modelAgeDays(model);
+  if (typeof ageDays !== "number") return true;
+  return ageDays <= ROUTER_MODEL_MAX_AGE_DAYS;
+}
+
 function imageCandidateScore(model: CatalogModelEntry) {
   const blob = `${model.modelId} ${model.name ?? ""} ${(model.tags ?? []).join(" ")}`.toLowerCase();
   if (!modelSupportsCapabilityLite(model, "image_generation") && !/image/.test(blob)) return -Infinity;
@@ -97,7 +121,9 @@ export function resolveModelForRole(role: ModelRole, catalog: CatalogModelEntry[
   }
 
   const criteria = MODEL_ROLE_CRITERIA[role];
-  const sorted = [...catalog].sort((a, b) => a.modelId.localeCompare(b.modelId));
+  const freshCatalog = catalog.filter((model) => isRouterFreshModel(model));
+  const candidateCatalog = freshCatalog.length > 0 ? freshCatalog : catalog;
+  const sorted = [...candidateCatalog].sort((a, b) => a.modelId.localeCompare(b.modelId));
   let selected: CatalogModelEntry | undefined;
   let bestScore = -Infinity;
 
@@ -145,7 +171,9 @@ function compatibleCapabilityClass(primary: CatalogModelEntry, candidate: Catalo
 }
 
 export function buildRouterFallbacksFromCatalog(catalog: CatalogModelEntry[], primaryModels: string[]): Record<string, string[]> {
-  const byId = new Map(catalog.map((model) => [model.modelId, model]));
+  const freshCatalog = catalog.filter((model) => isRouterFreshModel(model));
+  const candidateCatalog = freshCatalog.length > 0 ? freshCatalog : catalog;
+  const byId = new Map(candidateCatalog.map((model) => [model.modelId, model]));
   const out: Record<string, string[]> = {};
 
   for (const primary of primaryModels) {
@@ -153,7 +181,7 @@ export function buildRouterFallbacksFromCatalog(catalog: CatalogModelEntry[], pr
     if (!primaryModel) continue;
     const primaryCost = averageModelCost(primaryModel);
 
-    const candidates = catalog
+    const candidates = candidateCatalog
       .filter((model) => model.modelId !== primary)
       .filter((model) => compatibleCapabilityClass(primaryModel, model))
       .filter((model) => {
@@ -217,7 +245,6 @@ export const ROUTER_FALLBACKS: Record<string, string[]> = {
     MODEL_CONFIG.marker,
     MODEL_CONFIG.smartCheap,
   ],
-  [MODEL_CONFIG.glmAir]: [MODEL_CONFIG.tutorFast, MODEL_CONFIG.marker],
   [MODEL_CONFIG.gptOss]: [MODEL_CONFIG.tutorHigh, MODEL_CONFIG.marker],
 
   [MODEL_CONFIG.smartPaid]: [MODEL_CONFIG.smartCheap, MODEL_CONFIG.tutorFast],
@@ -235,6 +262,28 @@ export function getRouterFallbacks(catalog?: CatalogModelEntry[]) {
     merged[modelId] = dynamic[modelId]?.length ? dynamic[modelId] : ROUTER_FALLBACKS[modelId];
   }
   return merged;
+}
+
+export function getCatalogBackedEmergencyModel(params: {
+  catalog?: CatalogModelEntry[];
+  role: "text" | "reasoning" | "vision" | "search" | "image" | "embedding" | "verify";
+}) {
+  const catalog = params.catalog ?? [];
+  if (catalog.length === 0) return EMERGENCY_MODEL_FALLBACKS[params.role];
+
+  const freshCatalog = catalog.filter((model) => isRouterFreshModel(model));
+  const candidateCatalog = freshCatalog.length > 0 ? freshCatalog : catalog;
+
+  const match = candidateCatalog.find((model) => {
+    if (params.role === "embedding") return /embedding/.test(`${model.modelId} ${model.name ?? ""}`.toLowerCase());
+    if (params.role === "image") return modelSupportsCapabilityLite(model, "image_generation");
+    if (params.role === "vision") return modelSupportsCapabilityLite(model, "vision");
+    if (params.role === "search") return modelSupportsCapabilityLite(model, "search");
+    if (params.role === "reasoning" || params.role === "verify") return modelSupportsCapabilityLite(model, "reasoning");
+    return true;
+  });
+
+  return match?.modelId ?? EMERGENCY_MODEL_FALLBACKS[params.role];
 }
 
 export const CHEAP_MODEL_DEFAULTS = new Set<string>([

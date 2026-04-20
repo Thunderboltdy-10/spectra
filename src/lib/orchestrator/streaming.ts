@@ -31,8 +31,17 @@ function reasoningEffortForThinkingLevel(
 function shouldRunToolLoop(params: {
   tools?: OpenRouterToolDefinition[];
   messages: OpenRouterMessage[];
+  executionPath?: "direct_chat" | "single_action" | "action_loop" | "research_workflow";
 }) {
+  if (params.executionPath === "direct_chat") return false;
+  if (params.executionPath === "single_action" || params.executionPath === "action_loop" || params.executionPath === "research_workflow") {
+    return true;
+  }
   if (!params.tools?.length) return false;
+  if (params.executionPath === "single_action" || params.executionPath === "action_loop" || params.executionPath === "research_workflow") {
+    return true;
+  }
+  if (params.executionPath === "direct_chat") return false;
   const lastUserMessage = [...params.messages].reverse().find((message) => message.role === "user");
   const content = typeof lastUserMessage?.content === "string"
     ? lastUserMessage.content.toLowerCase()
@@ -93,6 +102,7 @@ export async function runAssistantStreaming(params: {
   tools?: OpenRouterToolDefinition[];
   executeTool?: (params: { name: string; rawArguments: string }) => Promise<ExecutedToolResult>;
   maxToolRounds?: number;
+  executionPath?: "direct_chat" | "single_action" | "action_loop" | "research_workflow";
   stopWhen?: (state: {
     toolRounds: number;
     toolCallsExecuted: number;
@@ -139,11 +149,18 @@ export async function runAssistantStreaming(params: {
     const shouldRunTools = shouldRunToolLoop({
       tools: params.tools,
       messages: params.messages,
+      executionPath: params.executionPath,
     });
 
     if (shouldRunTools && params.tools?.length && params.executeTool) {
       const workingMessages = [...params.messages];
-      const maxToolRounds = Math.max(2, Math.min(8, params.maxToolRounds ?? 6));
+      const executionPath = params.executionPath ?? "direct_chat";
+      const boundedDefaultRounds =
+        executionPath === "single_action" ? 2
+          : executionPath === "action_loop" ? 4
+            : executionPath === "research_workflow" ? 5
+              : 3;
+      const maxToolRounds = Math.max(1, Math.min(8, params.maxToolRounds ?? boundedDefaultRounds));
       const allowedToolNames = new Set(params.tools.map((tool) => tool.function.name));
       let executedToolCalls = 0;
 

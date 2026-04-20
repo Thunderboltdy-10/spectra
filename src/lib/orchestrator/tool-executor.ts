@@ -2,6 +2,8 @@ import { convexAction, convexMutation, convexQuery } from "@/lib/convex-server";
 import { MODEL_CONFIG } from "@/lib/model-config";
 import { openRouterEmbeddingRequest } from "@/lib/openrouter";
 import { maybeSearchWeb } from "@/lib/orchestrator/retrieval";
+import { listRegisteredSkills } from "@/lib/skills/skill-registry";
+import { selectRuntimeSkills } from "@/lib/orchestrator/skills";
 import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 import type { AiToolName, StudyMode } from "@/types";
 
@@ -9,6 +11,7 @@ type ToolCallContext = {
   actorClerkId: string;
   chatId?: string;
   activeWorkstreamId?: string;
+  artifactId?: string;
   mode: StudyMode;
   spendingTier?: "normal" | "expensive_blocked" | "cheap_only" | "free_only";
   onModelCall?: (call: {
@@ -30,6 +33,7 @@ export type ExecutedToolResult = {
   eventPayload: Record<string, unknown>;
   modeSwitch?: StudyMode;
   threadFork?: { chatId: string; workstreamId?: string };
+  loadedSkill?: { id: string; prompt?: string };
 };
 
 type ListedMemoryEntry = {
@@ -124,6 +128,211 @@ export async function executeOrchestratorTool(params: {
 }): Promise<ExecutedToolResult> {
   const args = params.rawArguments.trim() ? JSON.parse(params.rawArguments) as Record<string, unknown> : {};
   const context = params.context;
+
+  if (params.name === "inspect_runtime_context") {
+    const workstreamId = context.activeWorkstreamId;
+    const artifactId = compactText(args.focusArtifactId, 128) || context.artifactId;
+    const includeArtifacts = args.includeArtifacts !== false;
+    const includePlanner = args.includePlanner !== false;
+    const includeThreads = args.includeThreads !== false;
+    const workspaceData = workstreamId
+      ? await convexQuery("workspaceItems:getWorkspacePageData", {
+          actorClerkId: context.actorClerkId,
+          workstreamId,
+        }).catch(() => null)
+      : null;
+    const versions = artifactId
+      ? await convexQuery("artifacts:getVersions", {
+          actorClerkId: context.actorClerkId,
+          artifactId,
+        }).catch(() => [])
+      : [];
+    const payload = {
+      surface: artifactId ? "artifact_quick_chat" : workstreamId ? "workspace_quick_chat" : "chat",
+      workstreamId,
+      artifactId,
+      workspaceRevision: workspaceData && typeof workspaceData === "object" ? (workspaceData as Record<string, unknown>).revision : undefined,
+      workspaceRevisionKey: workspaceData && typeof workspaceData === "object" ? (workspaceData as Record<string, unknown>).revisionKey : undefined,
+      artifactVersionCount: Array.isArray(versions) ? versions.length : 0,
+      artifactLatestVersionId: Array.isArray(versions) ? String((versions[0] as Record<string, unknown> | undefined)?._id ?? "") || undefined : undefined,
+      focus: {
+        artifacts: includeArtifacts,
+        planner: includePlanner,
+        threads: includeThreads,
+      },
+    };
+    return {
+      name: params.name,
+      summary: "Inspected current runtime context.",
+      modelPayload: payload,
+      eventPayload: payload,
+    };
+  }
+
+  if (params.name === "search_skills") {
+    const query = compactText(args.query, 240);
+    const intent = compactText(args.intent, 120);
+    const matches = selectRuntimeSkills({
+      message: query || intent || "workspace action",
+      mode: context.mode,
+      maxSkills: 6,
+    }).map((skill) => ({
+      id: skill.id,
+      name: skill.name,
+      summary: skill.summary,
+      category: skill.category,
+    }));
+    return {
+      name: params.name,
+      summary: matches.length > 0 ? `Found ${matches.length} relevant skill candidates.` : "No relevant skills found.",
+      modelPayload: { query, intent, matches },
+      eventPayload: { query, intent, matches },
+    };
+  }
+
+  if (params.name === "load_skill") {
+    const skillId = compactText(args.skillId, 120);
+    const skill = listRegisteredSkills().find((entry) => entry.id === skillId);
+    const payload = skill
+      ? {
+          id: skill.id,
+          name: skill.name,
+          summary: skill.summary,
+          prompt: skill.prompt,
+          guidance: skill.guidance,
+        }
+      : null;
+    return {
+      name: params.name,
+      summary: payload ? `Loaded skill ${skillId}.` : `Skill ${skillId || "unknown"} not found.`,
+      modelPayload: payload ? { skill: payload } : { skill: null },
+      eventPayload: payload ? { skill: { id: payload.id, name: payload.name, summary: payload.summary } } : { skill: null },
+      loadedSkill: payload ? { id: payload.id, prompt: payload.prompt } : undefined,
+    };
+  }
+
+  if (params.name === "propose_actions") {
+    const intent = compactText(args.intent, 120).toLowerCase();
+    const targetType = compactText(args.targetType, 80).toLowerCase();
+    const templates = [
+      intent.includes("planner")
+        ? { op: "update_planner_item", required: ["title"], optional: ["description", "priority", "status", "dueAt"] }
+        : null,
+      intent.includes("thread")
+        ? { op: "append_thread_message", required: ["content"], optional: ["title"] }
+        : null,
+      targetType.includes("artifact") || intent.includes("artifact") || intent.includes("note")
+        ? { op: "artifact_patch", required: ["artifactId", "patch"], optional: ["title"] }
+        : null,
+      intent.includes("layout") || intent.includes("organize") || intent.includes("move")
+        ? { op: "move_widget", required: ["itemId"], optional: ["x", "y", "workstreamId"] }
+        : null,
+    ].filter(Boolean);
+    return {
+      name: params.name,
+      summary: templates.length > 0 ? "Prepared structured action templates." : "No structured action template matched the request.",
+      modelPayload: { intent, targetType, templates },
+      eventPayload: { intent, targetType, templates },
+    };
+  }
+
+  if (params.name === "get_version_history") {
+    const artifactId = compactText(args.artifactId, 128) || context.artifactId;
+    const limit = clampLimit(args.limit, 5, 10);
+    if (!artifactId) {
+      return {
+        name: params.name,
+        summary: "No artifact target available for version history.",
+        modelPayload: { versions: [] },
+        eventPayload: { versions: [] },
+      };
+    }
+    const versions = await convexQuery("artifacts:getVersions", {
+      actorClerkId: context.actorClerkId,
+      artifactId,
+    }).catch(() => []);
+    const compactVersions = (Array.isArray(versions) ? versions : []).slice(0, limit).map((version) => {
+      const row = version as Record<string, unknown>;
+      return {
+        id: String(row._id ?? ""),
+        createdAt: Number(row.createdAt ?? 0),
+        title: typeof row.title === "string" ? row.title : undefined,
+        summary: compactText(row.aiEditInstruction ?? row.contentPlaintext ?? row.content ?? "", 180),
+      };
+    });
+    return {
+      name: params.name,
+      summary: compactVersions.length > 0 ? `Fetched ${compactVersions.length} artifact versions.` : "No artifact versions found.",
+      modelPayload: { artifactId, versions: compactVersions },
+      eventPayload: { artifactId, versions: compactVersions },
+    };
+  }
+
+  if (params.name === "apply_actions") {
+    const actions = Array.isArray(args.actions) ? args.actions as Array<Record<string, unknown>> : [];
+    const applied: Array<Record<string, unknown>> = [];
+    for (const action of actions.slice(0, 6)) {
+      const op = compactText(action.op, 80);
+      if (op === "update_planner_item") {
+        const plannerItemId = compactText(action.plannerItemId, 128);
+        const title = compactText(action.title, 160);
+        if (!plannerItemId || !title) continue;
+        await convexMutation("plannerItems:updatePlannerItem", {
+          actorClerkId: context.actorClerkId,
+          plannerItemId,
+          title,
+          description: compactText(action.description, 600) || undefined,
+          priority: compactText(action.priority, 20) || undefined,
+          status: compactText(action.status, 20) || undefined,
+          dueAt: typeof action.dueAt === "number" ? action.dueAt : undefined,
+        }).catch(() => null);
+        applied.push({ op, plannerItemId, title });
+        continue;
+      }
+      if (op === "move_widget") {
+        const itemId = compactText(action.itemId, 128);
+        if (!itemId) continue;
+        await convexMutation("workspaceItems:updateWidget", {
+          actorClerkId: context.actorClerkId,
+          itemId,
+          x: typeof action.x === "number" ? action.x : undefined,
+          y: typeof action.y === "number" ? action.y : undefined,
+        }).catch(() => null);
+        applied.push({ op, itemId, x: action.x, y: action.y });
+        continue;
+      }
+      if (op === "artifact_patch") {
+        const artifactId = compactText(action.artifactId, 128) || context.artifactId;
+        if (!artifactId) continue;
+        await convexMutation("artifacts:applyAiEdit", {
+          actorClerkId: context.actorClerkId,
+          artifactId,
+          instruction: compactText(action.instruction ?? "Apply structured artifact update", 500),
+          operations: Array.isArray(action.patch) ? action.patch : [],
+        }).catch(() => null);
+        applied.push({ op, artifactId });
+        continue;
+      }
+      if (op === "append_thread_message") {
+        const content = compactText(action.content, 1_200);
+        if (!context.chatId || !content) continue;
+        await convexMutation("chats:appendAssistantMessage", {
+          actorClerkId: context.actorClerkId,
+          chatId: context.chatId,
+          content,
+          mode: context.mode,
+          citations: [],
+        }).catch(() => null);
+        applied.push({ op, chatId: context.chatId });
+      }
+    }
+    return {
+      name: params.name,
+      summary: applied.length > 0 ? `Applied ${applied.length} structured action${applied.length === 1 ? "" : "s"}.` : "No actions were applied.",
+      modelPayload: { applied },
+      eventPayload: { applied },
+    };
+  }
 
   if (params.name === "recall_memory") {
     const query = compactText(args.query, 500);

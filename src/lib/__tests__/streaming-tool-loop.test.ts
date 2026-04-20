@@ -112,6 +112,7 @@ describe("runAssistantStreaming tool loop", () => {
         modelPayload: { saved: true },
         eventPayload: { saved: true },
       }),
+      executionPath: "single_action",
       send: async (payload) => {
         sent.push(payload);
       },
@@ -122,7 +123,51 @@ describe("runAssistantStreaming tool loop", () => {
     expect(result.responseText).toContain("Saved the revision handout");
   });
 
+  it("does not enter the tool loop on direct-chat requests even when tools are available", async () => {
+    const completionSpy = vi.spyOn(openrouter, "openRouterChatCompletion").mockClear();
+    const streamSpy = vi.spyOn(openrouter, "openRouterStreamChat")
+      .mockImplementationOnce(async function* () {
+        yield { type: "delta", content: "Quick answer." } as never;
+        yield {
+          type: "done",
+          model: "test-model",
+          inputTokens: 4,
+          outputTokens: 6,
+          finishReason: "stop",
+          usage: { prompt_tokens: 4, completion_tokens: 6 },
+        } as never;
+      });
+
+    const result = await runAssistantStreaming({
+      shouldVerify: false,
+      primaryModel: "test-model",
+      fallbackModels: [],
+      executionPath: "direct_chat",
+      messages: [{ role: "user", content: "Hi" }],
+      tools: [{
+        type: "function",
+        function: {
+          name: "create_note",
+          description: "create note",
+          parameters: { type: "object", properties: {} },
+        },
+      }],
+      executeTool: async () => ({
+        name: "create_note",
+        summary: "Saved note",
+        modelPayload: { saved: true },
+        eventPayload: { saved: true },
+      }),
+      send: async () => {},
+    });
+
+    expect(completionSpy).not.toHaveBeenCalled();
+    expect(streamSpy).toHaveBeenCalledTimes(1);
+    expect(result.responseText).toContain("Quick answer.");
+  });
+
   it("uses deeper continuation defaults for complex prompts without stopping after one shallow pass", async () => {
+    vi.restoreAllMocks();
     const streamSpy = vi.spyOn(openrouter, "openRouterStreamChat")
       .mockImplementationOnce(async function* () {
         yield { type: "delta", content: "Part one. " } as never;

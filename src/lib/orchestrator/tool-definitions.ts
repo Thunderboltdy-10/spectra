@@ -3,6 +3,105 @@ import type { AiToolName, AssignmentLevel } from "@/types";
 import type { StudyMode } from "@/lib/contracts/studyModes";
 
 const TOOL_DEFINITIONS: Record<AiToolName, OpenRouterToolDefinition> = {
+  inspect_runtime_context: {
+    type: "function",
+    function: {
+      name: "inspect_runtime_context",
+      description: "Inspect the current runtime surface, focused entities, revision metadata, and compact workspace/artifact context before taking action.",
+      parameters: {
+        type: "object",
+        properties: {
+          includeArtifacts: { type: "boolean" },
+          includePlanner: { type: "boolean" },
+          includeThreads: { type: "boolean" },
+          focusArtifactId: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  search_skills: {
+    type: "function",
+    function: {
+      name: "search_skills",
+      description: "Search the available runtime skill packs and return the smallest relevant set for the current request.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          intent: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  load_skill: {
+    type: "function",
+    function: {
+      name: "load_skill",
+      description: "Load one runtime skill pack on demand so the model can act with narrower, task-specific guidance.",
+      parameters: {
+        type: "object",
+        properties: {
+          skillId: { type: "string" },
+        },
+        required: ["skillId"],
+        additionalProperties: false,
+      },
+    },
+  },
+  propose_actions: {
+    type: "function",
+    function: {
+      name: "propose_actions",
+      description: "Request a compact structured action plan or patch schema for workspace/artifact mutations before applying changes.",
+      parameters: {
+        type: "object",
+        properties: {
+          intent: { type: "string" },
+          targetType: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  apply_actions: {
+    type: "function",
+    function: {
+      name: "apply_actions",
+      description: "Apply structured patch-based actions to workspace or artifact state with version-safe execution.",
+      parameters: {
+        type: "object",
+        properties: {
+          actions: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: true,
+            },
+          },
+        },
+        required: ["actions"],
+        additionalProperties: false,
+      },
+    },
+  },
+  get_version_history: {
+    type: "function",
+    function: {
+      name: "get_version_history",
+      description: "Fetch compact recent version history or diff metadata for the current artifact or thread target.",
+      parameters: {
+        type: "object",
+        properties: {
+          artifactId: { type: "string" },
+          chatId: { type: "string" },
+          limit: { type: "number", minimum: 1, maximum: 10 },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
   recall_memory: {
     type: "function",
     function: {
@@ -423,10 +522,16 @@ const TOOL_DEFINITIONS: Record<AiToolName, OpenRouterToolDefinition> = {
 
 export function getAllowedAiToolNames(assignmentLevel: AssignmentLevel): AiToolName[] {
   if (assignmentLevel === "L0") return [];
-  if (assignmentLevel === "L1") return ["recall_memory"];
-  if (assignmentLevel === "L2") return ["recall_memory", "save_memory", "search_web"];
+  if (assignmentLevel === "L1") return ["inspect_runtime_context", "recall_memory"];
+  if (assignmentLevel === "L2") return ["inspect_runtime_context", "search_skills", "recall_memory", "save_memory", "search_web"];
   if (assignmentLevel === "L3") {
     return [
+      "inspect_runtime_context",
+      "search_skills",
+      "load_skill",
+      "propose_actions",
+      "apply_actions",
+      "get_version_history",
       "recall_memory",
       "save_memory",
       "update_memory",
@@ -439,6 +544,12 @@ export function getAllowedAiToolNames(assignmentLevel: AssignmentLevel): AiToolN
     ];
   }
   return [
+    "inspect_runtime_context",
+    "search_skills",
+    "load_skill",
+    "propose_actions",
+    "apply_actions",
+    "get_version_history",
     "recall_memory",
     "save_memory",
     "update_memory",

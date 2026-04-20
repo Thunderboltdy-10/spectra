@@ -1,10 +1,13 @@
-/* Spectra V2 — workspace redesign styles */
+/* Spectra V2 — workspace redesign styles
+   Aesthetic: Editorial warmth — tactile paper, strong serif typography,
+   deliberate color accents, carefully choreographed motion. */
 
 .spectra-v2 {
   --bg: #f5f3ef;
   --bg2: #ede9e3;
   --bg3: #e3ddd5;
   --paper: #fbfaf6;
+  --paper-deep: #f7f5ef;
   --ink-100: #1a1510;
   --ink-200: #3a322a;
   --ink-300: #6b5f52;
@@ -13,10 +16,15 @@
   --line: #ddd8cf;
   --line-strong: #c9c2b6;
   --accent: #0e8ee8;
+  --accent-soft: rgba(14,142,232,0.08);
   --mint: #20b8b2;
   --coral: #e05137;
   --warn: #b67616;
   --ok: #148f5d;
+  --shadow-sm: 0 1px 3px rgba(26,21,16,0.06), 0 1px 2px rgba(26,21,16,0.04);
+  --shadow-md: 0 4px 14px -4px rgba(26,21,16,0.12), 0 2px 6px -2px rgba(26,21,16,0.06);
+  --shadow-lg: 0 20px 44px -16px rgba(26,21,16,0.16), 0 4px 12px -4px rgba(26,21,16,0.08);
+  --shadow-xl: 0 32px 64px -20px rgba(26,21,16,0.22), 0 8px 20px -8px rgba(26,21,16,0.10);
 
   background: var(--bg);
   color: var(--ink-100);
@@ -28,6 +36,7 @@
   --bg2: #16181d;
   --bg3: #1e2128;
   --paper: #13161c;
+  --paper-deep: #0f1218;
   --ink-100: #f1ece3;
   --ink-200: #c8c2b6;
   --ink-300: #8e867a;
@@ -35,6 +44,11 @@
   --ink-500: #453f37;
   --line: #24282f;
   --line-strong: #2f3440;
+  --accent-soft: rgba(14,142,232,0.12);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.2);
+  --shadow-md: 0 4px 14px -4px rgba(0,0,0,0.25);
+  --shadow-lg: 0 20px 44px -16px rgba(0,0,0,0.35);
+  --shadow-xl: 0 32px 64px -20px rgba(0,0,0,0.45);
 }
 
 .spectra-v2 *::selection { background: rgba(14,142,232,0.28); }
@@ -42,46 +56,90 @@
 .spectra-v2 .font-display { font-family: 'Fraunces', 'Times New Roman', serif; font-weight: 500; letter-spacing: -0.018em; }
 .spectra-v2 .font-mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
 
+/* ─── Atmospheric background ─── */
+/* Grain overlay — subtle paper texture */
+.spectra-v2::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+.spectra-v2.dark::before { opacity: 0.03; }
+
 /* Paper dots background */
 .spectra-v2-grid {
-  background-image: radial-gradient(circle at 1px 1px, rgba(26,21,16,0.08) 1px, transparent 0);
+  background-image: radial-gradient(circle at 1px 1px, rgba(26,21,16,0.07) 1px, transparent 0);
   background-size: 28px 28px;
 }
 .spectra-v2.dark .spectra-v2-grid {
-  background-image: radial-gradient(circle at 1px 1px, rgba(241,236,227,0.06) 1px, transparent 0);
+  background-image: radial-gradient(circle at 1px 1px, rgba(241,236,227,0.045) 1px, transparent 0);
 }
 
-/* Field cards */
+/* ─── Field cards ─── */
 .sv2-field {
-  background: rgba(251,250,246,0.5);
+  background: rgba(251,250,246,0.55);
   border: 1px solid var(--line);
   border-radius: 14px;
   overflow: hidden;
   position: relative;
-  transition: transform 260ms cubic-bezier(0.22,1,0.36,1),
-              box-shadow 260ms cubic-bezier(0.22,1,0.36,1),
-              background 200ms;
+  cursor: pointer;
+  transition: transform 320ms cubic-bezier(0.22,1,0.36,1),
+              box-shadow 320ms cubic-bezier(0.22,1,0.36,1),
+              background 240ms,
+              border-color 240ms;
 }
 .spectra-v2.dark .sv2-field { background: rgba(19,22,28,0.72); }
 .sv2-field:hover {
   background: var(--paper);
-  box-shadow: 0 20px 40px -28px rgba(7,20,35,0.22);
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-2px);
 }
 .sv2-field.focused {
   background: var(--paper);
-  box-shadow: 0 24px 48px -24px rgba(14,142,232,0.25),
-              0 2px 0 0 var(--accent) inset;
+  border-color: rgba(14,142,232,0.4);
+  box-shadow: 0 24px 48px -20px rgba(14,142,232,0.18),
+              0 0 0 1px rgba(14,142,232,0.12),
+              inset 0 2px 0 0 rgba(14,142,232,0.6);
+  transform: translateY(-1px);
 }
 .sv2-field.bloomed {
   background: var(--paper);
-  box-shadow: 0 40px 80px -30px rgba(7,20,35,0.32);
+  box-shadow: var(--shadow-xl);
   z-index: 20;
 }
 .sv2-field.selected {
   outline: 2px solid rgba(14,142,232,0.5);
   outline-offset: -2px;
+  background: rgba(251,250,246,0.85);
+  border-color: rgba(14,142,232,0.35);
+}
+.spectra-v2.dark .sv2-field.selected {
+  background: rgba(19,22,28,0.9);
 }
 
+/* Color accent stripe on the left edge for focused/selected */
+.sv2-field.focused::before,
+.sv2-field.selected::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 0;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
+  opacity: 0.7;
+  z-index: 2;
+}
+.sv2-field.selected::before { opacity: 0.4; }
+
+/* ─── Decorative elements ─── */
 .sv2-rule {
   height: 1px;
   background: var(--line);
@@ -90,36 +148,41 @@
 }
 @keyframes sv2-rule-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 
-@keyframes sv2-drift-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-.sv2-drift-in { animation: sv2-drift-in 420ms cubic-bezier(0.22,1,0.36,1) both; }
-
-@keyframes sv2-bloom-in {
-  0% { transform: scale(0.985); opacity: 0.7; }
-  100% { transform: scale(1); opacity: 1; }
-}
-.sv2-bloom-in { animation: sv2-bloom-in 280ms cubic-bezier(0.22,1,0.36,1) both; }
-
-@keyframes sv2-result-in {
+/* ─── Motion system ─── */
+@keyframes sv2-drift-in {
   from { opacity: 0; transform: translateY(8px) scale(0.98); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
-.sv2-result-in { animation: sv2-result-in 360ms cubic-bezier(0.22,1,0.36,1) both; }
+.sv2-drift-in { animation: sv2-drift-in 480ms cubic-bezier(0.22,1,0.36,1) both; }
+
+@keyframes sv2-bloom-in {
+  0% { transform: scale(0.96); opacity: 0; }
+  60% { transform: scale(1.005); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.sv2-bloom-in { animation: sv2-bloom-in 360ms cubic-bezier(0.22,1,0.36,1) both; }
+
+@keyframes sv2-result-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.sv2-result-in { animation: sv2-result-in 420ms cubic-bezier(0.22,1,0.36,1) both; }
 
 @keyframes sv2-breathe { 0%, 100% { opacity: 0.72; } 50% { opacity: 1; } }
 .sv2-breathe { animation: sv2-breathe 3.2s ease-in-out infinite; }
 
 @keyframes sv2-lens-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(14,142,232,0); }
-  50% { box-shadow: 0 0 0 4px rgba(14,142,232,0.14); }
+  50% { box-shadow: 0 0 0 4px rgba(14,142,232,0.12); }
 }
-.sv2-lens-pulse { animation: sv2-lens-pulse 2.6s ease-in-out infinite; }
+.sv2-lens-pulse { animation: sv2-lens-pulse 2.8s ease-in-out infinite; }
 
 @keyframes sv2-ai-glow {
   0% { box-shadow: 0 0 0 0 rgba(14,142,232,0); }
   15% {
-    box-shadow: 0 0 0 6px rgba(14,142,232,0.15),
-                0 20px 44px -14px rgba(14,142,232,0.35);
-    border-color: rgba(14,142,232,0.7);
+    box-shadow: 0 0 0 6px rgba(14,142,232,0.12),
+                0 20px 44px -14px rgba(14,142,232,0.28);
+    border-color: rgba(14,142,232,0.6);
   }
   100% { box-shadow: 0 0 0 0 rgba(14,142,232,0); }
 }
@@ -131,23 +194,27 @@
   font-size: 9px; letter-spacing: 0.14em;
   color: #fff;
   background: linear-gradient(135deg, var(--accent), var(--mint));
-  padding: 2px 6px; border-radius: 999px;
+  padding: 2px 7px; border-radius: 999px;
   animation: sv2-breathe 2s ease-in-out infinite;
   pointer-events: none; z-index: 5;
+  box-shadow: 0 2px 8px rgba(14,142,232,0.3);
 }
 
+/* ─── Island (glass surfaces) ─── */
 .sv2-island {
-  background: rgba(251,250,246,0.94);
-  backdrop-filter: blur(14px) saturate(1.05);
+  background: rgba(251,250,246,0.92);
+  backdrop-filter: blur(16px) saturate(1.08);
   border: 1px solid var(--line);
+  box-shadow: var(--shadow-md);
 }
-.spectra-v2.dark .sv2-island { background: rgba(19,22,28,0.9); }
+.spectra-v2.dark .sv2-island { background: rgba(19,22,28,0.88); }
 .sv2-island.active {
-  border-color: rgba(14,142,232,0.55);
-  box-shadow: 0 20px 44px -20px rgba(14,142,232,0.22),
-              0 0 0 3px rgba(14,142,232,0.08);
+  border-color: rgba(14,142,232,0.5);
+  box-shadow: 0 20px 44px -16px rgba(14,142,232,0.18),
+              0 0 0 3px rgba(14,142,232,0.06);
 }
 
+/* ─── Chips & key badges ─── */
 .sv2-chip {
   display: inline-flex; align-items: center; gap: 6px;
   font-family: 'IBM Plex Mono', monospace;
@@ -175,28 +242,29 @@
 
 .sv2-lasso {
   position: absolute;
-  border: 1px dashed rgba(14,142,232,0.55);
-  background: rgba(14,142,232,0.06);
+  border: 1.5px dashed rgba(14,142,232,0.5);
+  background: rgba(14,142,232,0.05);
   border-radius: 4px;
   pointer-events: none;
 }
 
-.sv2-slim::-webkit-scrollbar { width: 6px; height: 6px; }
-.sv2-slim::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
-.sv2-slim::-webkit-scrollbar-thumb:hover { background: var(--line-strong); }
+.sv2-slim::-webkit-scrollbar { width: 5px; height: 5px; }
+.sv2-slim::-webkit-scrollbar-track { background: transparent; }
+.sv2-slim::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 4px; }
+.sv2-slim::-webkit-scrollbar-thumb:hover { background: var(--ink-400); }
 
 .sv2-placeholder {
   background:
-    repeating-linear-gradient(135deg, rgba(26,21,16,0.05) 0 8px, transparent 8px 16px),
+    repeating-linear-gradient(135deg, rgba(26,21,16,0.04) 0 6px, transparent 6px 12px),
     var(--bg2);
 }
 
-/* Deep-edit panel — solid, NOT transparent. Occupies side-by-side grid cleanly. */
+/* ─── Bloom surface (deep-edit panel) ─── */
 .sv2-bloom-surface {
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: 18px;
-  box-shadow: 0 30px 60px -24px rgba(7,20,35,0.22);
+  box-shadow: var(--shadow-xl);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -204,20 +272,26 @@
   min-height: 0;
 }
 .sv2-bloom-surface.primary {
-  box-shadow: 0 40px 80px -24px rgba(14,142,232,0.22),
-              0 0 0 1px rgba(14,142,232,0.15);
+  box-shadow: 0 40px 80px -20px rgba(14,142,232,0.16),
+              0 0 0 1px rgba(14,142,232,0.12),
+              var(--shadow-xl);
 }
 
-/* Solid scrim — blurs background, NOT see-through */
+/* Scrim — frosted overlay */
 .sv2-scrim {
   position: fixed; inset: 0;
-  background: rgba(245,243,239,0.97);
-  backdrop-filter: blur(16px) saturate(1.15);
+  background: rgba(245,243,239,0.78);
+  backdrop-filter: blur(10px) saturate(1.1);
   z-index: 55;
+  animation: sv2-scrim-in 300ms cubic-bezier(0.22,1,0.36,1) both;
 }
-.spectra-v2.dark .sv2-scrim { background: rgba(14,16,20,0.97); }
+@keyframes sv2-scrim-in {
+  from { opacity: 0; backdrop-filter: blur(0); }
+  to { opacity: 1; backdrop-filter: blur(10px) saturate(1.1); }
+}
+.spectra-v2.dark .sv2-scrim { background: rgba(14,16,20,0.82); }
 
-/* Bloom container — flex/grid based so children never overlap */
+/* ─── Bloom stage — flex container ─── */
 .sv2-bloom-stage {
   position: fixed;
   inset: 0;
@@ -227,6 +301,8 @@
   padding: 4vw;
   box-sizing: border-box;
   pointer-events: none;
+  max-width: 1400px;
+  margin: 0 auto;
 }
 .sv2-bloom-stage > .sv2-bloom-slot {
   pointer-events: auto;
@@ -272,7 +348,6 @@
   min-height: 0;
 }
 
-/* Narrow screens — stack to single column if crammed */
 @media (max-width: 780px) {
   .sv2-bloom-stage.count-2,
   .sv2-bloom-stage.count-3 {
@@ -284,7 +359,7 @@
   }
 }
 
-/* Connector */
+/* ─── Connectors ─── */
 .sv2-connector {
   stroke: var(--line-strong);
   stroke-dasharray: 2 4;
@@ -292,7 +367,6 @@
   opacity: 0.6;
 }
 
-/* AI-created connector trail (command bar → new item) */
 @keyframes sv2-trail-in {
   0% { opacity: 0; stroke-dashoffset: 80; }
   15% { opacity: 0.85; }
@@ -307,19 +381,506 @@
   animation: sv2-trail-in 900ms cubic-bezier(0.22,1,0.36,1) forwards;
 }
 
-/* Widget dock animations */
+/* ─── Widget animations ─── */
 @keyframes sv2-widget-in {
-  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  from { opacity: 0; transform: translateY(12px) scale(0.96); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
-.sv2-widget-in { animation: sv2-widget-in 320ms cubic-bezier(0.22,1,0.36,1) both; }
+.sv2-widget-in { animation: sv2-widget-in 380ms cubic-bezier(0.22,1,0.36,1) both; }
 
 .sv2-widget-collapsed { height: 36px !important; overflow: hidden; }
 
-/* Glance zoom — workspace titles */
 .sv2-territory-title {
   font-family: 'Fraunces', serif;
   line-height: 1;
   letter-spacing: -0.02em;
   pointer-events: none;
+}
+
+/* ─── Widget chip rail ─── */
+.sv2-chip-rail-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  min-width: 140px;
+  max-width: 176px;
+  background: rgba(251,250,246,0.9);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(10px);
+  transition: box-shadow 200ms ease, border-color 200ms ease, background 200ms ease, transform 200ms ease;
+}
+.sv2-chip-rail-item:hover {
+  background: var(--paper);
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+.spectra-v2.dark .sv2-chip-rail-item {
+  background: rgba(19,22,28,0.88);
+}
+.sv2-chip-rail-add {
+  border-style: dashed;
+  opacity: 0.85;
+}
+.sv2-chip-rail-add:hover {
+  opacity: 1;
+  border-style: solid;
+  border-color: var(--accent);
+}
+
+.sv2-ai-touched-subtle {
+  border-color: rgba(14,142,232,0.4) !important;
+  box-shadow: 0 0 0 2px rgba(14,142,232,0.06), 0 2px 8px -4px rgba(14,142,232,0.18) !important;
+}
+
+@keyframes sv2-chip-reveal {
+  0%   { box-shadow: 0 0 0 0 rgba(14,142,232,0), var(--shadow-sm); border-color: var(--line); }
+  25%  { box-shadow: 0 0 0 5px rgba(14,142,232,0.18), var(--shadow-md); border-color: rgba(14,142,232,0.65); }
+  70%  { box-shadow: 0 0 0 2px rgba(14,142,232,0.08), var(--shadow-md); border-color: rgba(14,142,232,0.35); }
+  100% { box-shadow: var(--shadow-sm); border-color: var(--line); }
+}
+.sv2-chip-reveal {
+  animation: sv2-chip-reveal 1s cubic-bezier(0.22,1,0.36,1) forwards !important;
+}
+
+/* ─── Result island states ─── */
+@keyframes sv2-pending-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.sv2-pending-ring {
+  border: 2px dashed var(--ink-400);
+  border-top-color: transparent;
+  animation: sv2-pending-spin 1.2s linear infinite;
+}
+.sv2-island-pending {
+  border-color: var(--line) !important;
+  color: var(--ink-300);
+  opacity: 0.8;
+}
+
+@keyframes sv2-shimmer {
+  0%   { background-position: -300px 0; }
+  100% { background-position: 300px 0; }
+}
+.sv2-island-running {
+  background-image: linear-gradient(
+    90deg,
+    rgba(14,142,232,0.03) 0%,
+    rgba(14,142,232,0.08) 40%,
+    rgba(14,142,232,0.03) 80%
+  ) !important;
+  background-size: 600px 100%;
+  animation: sv2-shimmer 1.8s ease-in-out infinite;
+  border-color: rgba(14,142,232,0.28) !important;
+}
+
+@keyframes sv2-orb-in {
+  0%   { transform: scale(0.6); opacity: 0; }
+  70%  { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.sv2-island-orb-in {
+  animation: sv2-orb-in 350ms cubic-bezier(0.22,1,0.36,1) both;
+}
+.sv2-island-done {
+  border-color: rgba(32,184,178,0.35) !important;
+}
+
+@keyframes sv2-shake {
+  0%, 100% { transform: translateX(0); }
+  20%       { transform: translateX(-4px); }
+  40%       { transform: translateX(4px); }
+  60%       { transform: translateX(-3px); }
+  80%       { transform: translateX(2px); }
+}
+.sv2-island-error {
+  border-color: rgba(224,81,55,0.35) !important;
+  animation: sv2-shake 400ms cubic-bezier(0.22,1,0.36,1) both;
+}
+
+/* ─── View mode decorations ─── */
+.sv2-view-group-label {
+  pointer-events: none;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  opacity: 0.88;
+}
+.sv2-view-lane-divider {
+  pointer-events: none;
+  border-top: 1.5px dashed var(--line);
+  opacity: 0.72;
+}
+.sv2-view-header {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--ink-400);
+}
+.sv2-timeline-axis {
+  border-left: 2px solid var(--line);
+  pointer-events: none;
+}
+.sv2-timeline-tick-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-300);
+  pointer-events: none;
+}
+.sv2-timeline-bucket-header {
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 1;
+  color: var(--ink-200);
+}
+
+/* ─── Hover micro-interaction on cards ─── */
+.sv2-field .sv2-card-accent-line {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 380ms cubic-bezier(0.22,1,0.36,1);
+}
+.sv2-field:hover .sv2-card-accent-line {
+  transform: scaleX(1);
+}
+.sv2-field.focused .sv2-card-accent-line {
+  transform: scaleX(1);
+}
+
+/* Stagger children on drift-in */
+.sv2-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.sv2-stagger > *:nth-child(2) { animation-delay: 40ms; }
+.sv2-stagger > *:nth-child(3) { animation-delay: 80ms; }
+.sv2-stagger > *:nth-child(4) { animation-delay: 120ms; }
+.sv2-stagger > *:nth-child(5) { animation-delay: 160ms; }
+.sv2-stagger > *:nth-child(6) { animation-delay: 200ms; }
+
+/* ─── Canvas: prevent text selection during drag ─── */
+[data-canvas-bg] { user-select: none; }
+[data-canvas-bg] * { user-select: none; }
+/* Allow selection inside explicitly editable areas */
+[contenteditable="true"] { user-select: text !important; }
+textarea { user-select: text !important; }
+input { user-select: text !important; }
+
+/* ─── Focus hint pill — prominent version ─── */
+.sv2-hint-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-200);
+  padding: 5px 14px;
+  background: var(--paper);
+  border: 1.5px solid var(--line-strong);
+  border-radius: 999px;
+  white-space: nowrap;
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(12px);
+  letter-spacing: 0.02em;
+}
+.sv2-hint-pill .sv2-kbd {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/* ─── Focused view (replaces bloom) ─── */
+@keyframes sv2-focus-in {
+  from { opacity: 0; transform: scale(0.97) translateY(4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+.sv2-focus-scrim {
+  position: fixed; inset: 0;
+  background: rgba(245,243,239,0.72);
+  backdrop-filter: blur(14px) saturate(0.85) brightness(0.96);
+  z-index: 56;
+  animation: sv2-scrim-in 260ms cubic-bezier(0.22,1,0.36,1) both;
+}
+.spectra-v2.dark .sv2-focus-scrim {
+  background: rgba(14,16,20,0.78);
+}
+.sv2-focus-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 58;
+  display: flex;
+  gap: 14px;
+  padding: 5vh 4vw 9vh;
+  box-sizing: border-box;
+  pointer-events: none;
+  align-items: stretch;
+}
+.sv2-focus-pane {
+  pointer-events: auto;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 18px;
+  overflow: hidden;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-xl);
+  display: flex;
+  flex-direction: column;
+  animation: sv2-focus-in 360ms cubic-bezier(0.22,1,0.36,1) both;
+  transition: flex 360ms cubic-bezier(0.22,1,0.36,1), box-shadow 360ms cubic-bezier(0.22,1,0.36,1);
+  cursor: pointer;
+}
+.sv2-focus-pane:hover { box-shadow: 0 32px 64px -20px rgba(0,0,0,0.16), var(--shadow-xl); }
+.sv2-focus-pane.primary {
+  box-shadow: 0 40px 80px -20px rgba(14,142,232,0.18),
+              0 0 0 1.5px rgba(14,142,232,0.28),
+              var(--shadow-xl);
+  cursor: default;
+}
+.sv2-focus-secondary-col {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+.sv2-focus-secondary-col > .sv2-focus-pane {
+  flex: 1 1 0;
+  min-height: 0;
+}
+/* 1-item layout */
+.sv2-focus-stage.count-1 { align-items: center; justify-content: center; }
+.sv2-focus-stage.count-1 > .sv2-focus-pane {
+  flex: 0 1 880px;
+  max-width: 880px;
+  height: min(80vh, 700px);
+}
+/* 2-item layout */
+.sv2-focus-stage.count-2 > .sv2-focus-pane.primary { flex: 1.55 1 0; }
+.sv2-focus-stage.count-2 > .sv2-focus-pane { flex: 1 1 0; }
+/* 3-item layout */
+.sv2-focus-stage.count-3 > .sv2-focus-pane.primary { flex: 1.6 1 0; }
+.sv2-focus-stage.count-3 > .sv2-focus-secondary-col { flex: 1 1 0; }
+/* 4-item layout */
+.sv2-focus-stage.count-4 {
+  flex-wrap: wrap;
+  align-items: stretch;
+  align-content: stretch;
+}
+.sv2-focus-stage.count-4 > .sv2-focus-pane.primary {
+  flex: 1.5 1 calc(50% - 7px);
+  max-width: calc(60% - 7px);
+}
+.sv2-focus-stage.count-4 > .sv2-focus-pane:not(.primary) {
+  flex: 1 1 calc(33% - 7px);
+}
+/* Mobile */
+@media (max-width: 780px) {
+  .sv2-focus-stage { flex-direction: column; overflow-y: auto; }
+  .sv2-focus-secondary-col { flex-direction: row; }
+}
+
+/* ─── Focus set — item badges ─── */
+.sv2-set-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 4;
+  border: 2px solid var(--paper);
+  box-shadow: 0 1px 4px rgba(14,142,232,0.4);
+  pointer-events: none;
+}
+.sv2-field.in-set {
+  outline: 2px solid rgba(14,142,232,0.52);
+  outline-offset: 1px;
+}
+.sv2-field.primary-in-set {
+  outline: 2.5px solid rgba(14,142,232,0.85) !important;
+  box-shadow: 0 0 0 5px rgba(14,142,232,0.12), var(--shadow-lg) !important;
+}
+
+/* Building-set mode global cursor */
+.sv2-building-set [data-canvas-bg] { cursor: crosshair !important; }
+
+/* ─── Widget chip rail — revised: square icon chips ─── */
+.sv2-chip-rail-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  min-width: 44px;
+  max-width: 150px;
+  height: auto;
+  min-height: 44px;
+  background: rgba(251,250,246,0.92);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(10px);
+  transition: box-shadow 180ms ease, border-color 180ms ease, background 180ms ease, transform 180ms ease;
+}
+.sv2-chip-rail-item:hover {
+  background: var(--paper);
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px) translateX(1px);
+}
+.spectra-v2.dark .sv2-chip-rail-item { background: rgba(19,22,28,0.9); }
+.sv2-chip-rail-add {
+  border-style: dashed;
+  opacity: 0.82;
+  min-height: 36px;
+}
+.sv2-chip-rail-add:hover { opacity: 1; border-style: solid; border-color: var(--accent); }
+
+/* ─── Widget color header (applies to all FloatingWidget types) ─── */
+.sv2-widget-header-gradient {
+  border-bottom: 1px solid rgba(221,216,207,0.5);
+}
+
+/* ─── Focus mode pane inner content ─── */
+.sv2-focus-item-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.25rem 1.5rem 1.5rem;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--ink-200);
+}
+.sv2-focus-item-header {
+  padding: 1rem 1.5rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper-deep);
+  flex-shrink: 0;
+}
+.sv2-focus-promote-hint {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-400);
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+.sv2-focus-pane:not(.primary):hover .sv2-focus-promote-hint { opacity: 1; }
+
+/* ─── Always-visible artifact/quick-create row ─── */
+.sv2-quick-create-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: rgba(251,250,246,0.88);
+  border: 1px solid var(--line);
+  color: var(--ink-300);
+  backdrop-filter: blur(8px);
+  transition: all 180ms ease;
+  box-shadow: var(--shadow-sm);
+}
+.sv2-quick-create-btn:hover {
+  background: var(--paper);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+.spectra-v2.dark .sv2-quick-create-btn {
+  background: rgba(19,22,28,0.88);
+}
+
+/* ─── Compact grid layout for workspace items ─── */
+.sv2-item-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 280px);
+  gap: 16px;
+  align-items: start;
+}
+.sv2-item-row {
+  display: flex;
+  gap: 16px;
+  align-items: start;
+}
+
+/* ─── Widget morph (expanded ↔ in-place collapsed pill) ─── */
+.sv2-widget-morph {
+  transition:
+    width 320ms cubic-bezier(0.4, 0, 0.2, 1),
+    height 320ms cubic-bezier(0.4, 0, 0.2, 1),
+    left 320ms cubic-bezier(0.4, 0, 0.2, 1),
+    border-radius 260ms ease,
+    box-shadow 260ms ease,
+    background-color 260ms ease,
+    border-color 260ms ease;
+  will-change: width, height, left;
+}
+.sv2-widget-morph .sv2-widget-expanded-shell {
+  transition: opacity 220ms ease, transform 320ms cubic-bezier(0.4, 0, 0.2, 1);
+  transform-origin: var(--morph-origin, left center);
+}
+.sv2-widget-morph.is-collapsed .sv2-widget-expanded-shell {
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.92);
+}
+.sv2-widget-morph .sv2-widget-collapsed-shell {
+  transition: opacity 220ms ease 60ms, transform 260ms cubic-bezier(0.4, 0, 0.2, 1);
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.96);
+}
+.sv2-widget-morph.is-collapsed .sv2-widget-collapsed-shell {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1);
+}
+.sv2-widget-morph.anchor-right,
+.sv2-widget-morph.sv2-morph-right {
+  --morph-origin: right center;
+}
+.sv2-widget-morph.anchor-left,
+.sv2-widget-morph.sv2-morph-left {
+  --morph-origin: left center;
+}
+
+/* ─── Artifact blueprint (empty-state) panel ─── */
+.sv2-artifact-blueprint {
+  border: 1.5px dashed var(--line);
+  background:
+    radial-gradient(120% 100% at 50% 0%, rgba(14,142,232,0.05), transparent 60%),
+    linear-gradient(180deg, rgba(251,250,246,0.6), rgba(237,233,227,0.3));
+  backdrop-filter: blur(4px);
+  transition: border-color 220ms ease, background 220ms ease;
+}
+.sv2-artifact-blueprint:hover {
+  border-color: rgba(14,142,232,0.38);
+}
+.spectra-v2.dark .sv2-artifact-blueprint {
+  background:
+    radial-gradient(120% 100% at 50% 0%, rgba(14,142,232,0.10), transparent 60%),
+    linear-gradient(180deg, rgba(19,22,28,0.55), rgba(13,15,20,0.35));
 }

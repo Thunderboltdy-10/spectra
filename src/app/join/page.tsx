@@ -124,7 +124,12 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
 
     if (payload.shouldAutoRedirectToAuth) {
       if (payload.state === "token_valid_signed_in_wrong_identity") {
-        void goToSignIn();
+        // We do NOT clear the cookie here, because the user needs it to
+        // switch to the correct account.
+        const signInUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in";
+        const appUrl = getAppUrl(typeof window !== "undefined" ? window.location.origin : undefined);
+        const redirect = encodeURIComponent(`${appUrl}/join${token ? `?token=${encodeURIComponent(token)}` : ""}`);
+        window.location.href = `${signInUrl}?redirect_url=${redirect}`;
         return;
       }
       if (payload.state === "token_valid_signed_out" || payload.state === "token_already_redeemed_other_user") {
@@ -145,45 +150,25 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
 
     // Auto-redirect if token is missing or invalid and user is signed out
     if (!userId && (payload.state === "token_missing" || payload.state === "token_invalid")) {
+      void clearInvitationCookie();
       const signInUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in";
       window.location.href = signInUrl;
       return;
     }
 
-    // Auto-redirect to no-access if token is missing and user is signed in
-    if (userId && payload.state === "token_missing") {
-      window.location.replace("/no-access");
+    // Auto-redirect to request-access if token is missing/invalid and user is signed in
+    if (userId && (payload.state === "token_missing" || payload.state === "token_invalid")) {
+      void clearInvitationCookie();
+      window.location.replace("/request-access");
       return;
     }
 
+    // If we have an invitation and a matching user, but we haven't redeemed it yet,
+    // we show the "Join" button instead of auto-redeeming immediately.
+    // This gives the user a moment to see the school branding and confirm their entry.
     if (!userId || redeeming || !payload.canRedeemNow || !invitationToRedeem) {
       return;
     }
-
-    setRedeeming(true);
-    setRedeemState({ message: null });
-    void (async () => {
-      try {
-        const response = await fetch("/api/invitations/redeem", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token: invitationToRedeem.token }),
-        });
-        const redeemPayload = (await response.json().catch(() => null)) as
-          | { error?: { message?: string }; alreadyAccepted?: boolean; sameUser?: boolean }
-          | null;
-        if (!response.ok) {
-          throw new Error(redeemPayload?.error?.message ?? "Could not accept invitation.");
-        }
-        window.location.replace("/chat");
-      } catch (error) {
-        setRedeemState({
-          message: error instanceof Error ? error.message : "Could not accept invitation.",
-        });
-      } finally {
-        setRedeeming(false);
-      }
-    })();
   }, [isLoaded, redeeming, state, token, userId]);
 
   const resolvedPayload = state.status === "resolved" ? state.payload : null;
@@ -197,14 +182,43 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
   const shouldAutoRedirect = resolvedPayload && (
     resolvedPayload.shouldAutoRedirectToAuth ||
     (!userId && (resolvedPayload.state === "token_missing" || resolvedPayload.state === "token_invalid")) ||
-    (userId && resolvedPayload.state === "token_missing") ||
+    (userId && (resolvedPayload.state === "token_missing" || resolvedPayload.state === "token_invalid")) ||
     (resolvedPayload.state === "token_already_redeemed_same_user" || resolvedPayload.state === "token_redeemed")
   );
 
   async function goToSignIn() {
+    // Only clear cookie if it's genuinely invalid/expired.
+    // Mismatch scenarios should PRESERVE the cookie.
     await clearInvitationCookie();
     const signInUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in";
     window.location.href = signInUrl;
+  }
+
+  async function handleRedeem() {
+    const invitationToRedeem = resolvedPayload?.invitation;
+    if (!invitationToRedeem || redeeming) return;
+
+    setRedeeming(true);
+    setRedeemState({ message: null });
+    try {
+      const response = await fetch("/api/invitations/redeem", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: invitationToRedeem.token }),
+      });
+      const redeemPayload = (await response.json().catch(() => null)) as
+        | { error?: { message?: string }; alreadyAccepted?: boolean; sameUser?: boolean }
+        | null;
+      if (!response.ok) {
+        throw new Error(redeemPayload?.error?.message ?? "Could not accept invitation.");
+      }
+      window.location.replace("/chat");
+    } catch (error) {
+      setRedeemState({
+        message: error instanceof Error ? error.message : "Could not accept invitation.",
+      });
+      setRedeeming(false);
+    }
   }
 
   async function goHomeAfterClear(destination: string) {
@@ -225,46 +239,58 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
     );
   }
 
-  if (state.status === "resolved" && state.payload.state === "token_expired") {
+  // If we reach here and status is error, it means the API call failed entirely.
+  // In that case, we should try to redirect them to /chat if they are signed in,
+  // or /sign-in if they are not, instead of showing an error.
+  if (state.status === "error") {
+    if (isLoaded) {
+      if (userId) {
+        window.location.replace("/chat");
+      } else {
+        void goToSignIn();
+      }
+    }
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)] px-4">
-        <div className="w-full max-w-sm rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 text-center shadow-[var(--shadow-soft)]">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[color-mix(in_oklab,var(--warning)_12%,transparent)]">
-            <Clock className="h-7 w-7 text-[var(--warning)]" />
-          </div>
-          <h1 className="mb-2 text-xl font-semibold text-[var(--text-primary)]">Invitation Expired</h1>
-          <p className="text-sm text-[var(--text-secondary)]">This invitation has expired.</p>
-          <p className="mt-3 text-xs text-[var(--text-secondary)]">
-            Contact your school administrator for a fresh invitation link.
-          </p>
-          <Button
-            variant="secondary"
-            className="mt-6 w-full cursor-pointer"
-            onClick={() => void goHomeAfterClear(userId ? "/no-access" : "/sign-in")}
-          >
-            Continue
-          </Button>
+      <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)]">
+        <div className="flex flex-col items-center gap-4">
+          <SpectraLogo size={56} showTile className="animate-pulse" />
+          <p className="text-sm text-[var(--text-secondary)]">Redirecting you...</p>
         </div>
       </div>
     );
   }
 
-  if (state.status === "error" || (state.status === "resolved" && (state.payload.state === "token_invalid" || state.payload.state === "token_missing"))) {
+  if (state.status === "resolved" && state.payload.state === "token_expired") {
+    // Instead of showing an expired screen, let's also just try to get them in
+    // if they already have access, or send them to sign-in if not.
+    if (userId) {
+      window.location.replace("/chat");
+    } else {
+      void goToSignIn();
+    }
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)] px-4">
-        <div className="w-full max-w-sm rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 text-center shadow-[var(--shadow-soft)]">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[color-mix(in_oklab,var(--danger)_10%,transparent)]">
-            <AlertTriangle className="h-7 w-7 text-[var(--danger)]" />
-          </div>
-          <h1 className="mb-2 text-xl font-semibold text-[var(--text-primary)]">Invalid Invitation</h1>
-          <p className="text-sm text-[var(--text-secondary)]">{state.status === "error" ? state.message : "Invitation not found. Please ask your school admin for a new link."}</p>
-          <Button
-            variant="secondary"
-            className="mt-6 w-full cursor-pointer"
-            onClick={() => void goHomeAfterClear(userId ? "/no-access" : "/sign-in")}
-          >
-            Continue
-          </Button>
+      <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)]">
+        <div className="flex flex-col items-center gap-4">
+          <SpectraLogo size={56} showTile className="animate-pulse" />
+          <p className="text-sm text-[var(--text-secondary)]">Redirecting you...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Final fallback: if somehow we are in a state that doesn't render above
+  // (like token_invalid while signed in), force a redirect to /chat.
+  if (state.status === "resolved" && (state.payload.state === "token_invalid" || state.payload.state === "token_missing")) {
+    if (userId) {
+      window.location.replace("/chat");
+    } else {
+      void goToSignIn();
+    }
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)]">
+        <div className="flex flex-col items-center gap-4">
+          <SpectraLogo size={56} showTile className="animate-pulse" />
+          <p className="text-sm text-[var(--text-secondary)]">Redirecting you...</p>
         </div>
       </div>
     );

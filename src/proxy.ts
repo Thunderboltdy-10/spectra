@@ -90,14 +90,17 @@ const authMiddleware = clerkMiddleware(async (auth, req) => {
   if (userId && cookieToken && !isApiRoute) {
     cachedAccess = await fetchAccessState(req);
     if (cachedAccess) {
-      if (cachedAccess.status === 200) {
-        // User has access; invitation cookie is moot. Clear it and continue.
-        const response = NextResponse.next();
+      if (cachedAccess.payload?.status === "ok") {
+        // User has access; invitation cookie is moot. Clear it and redirect to chat
+        // if they are currently on a joining page.
+        const response = (url.pathname.startsWith("/join") || url.pathname.startsWith("/no-access"))
+          ? NextResponse.redirect(new URL("/chat", req.url))
+          : NextResponse.next();
         response.cookies.delete(INVITATION_TOKEN_COOKIE);
         response.cookies.delete(INVITATION_HANDOFF_COOKIE);
         return response;
       }
-      if (cachedAccess.status === 403 && cachedAccess.payload?.status === "org_inactive") {
+      if (cachedAccess.payload?.status === "org_inactive") {
         const destination = new URL("/no-access", req.url);
         destination.searchParams.set("reason", "inactive");
         const response = NextResponse.redirect(destination);
@@ -105,7 +108,7 @@ const authMiddleware = clerkMiddleware(async (auth, req) => {
         response.cookies.delete(INVITATION_HANDOFF_COOKIE);
         return response;
       }
-      if (cachedAccess.status === 403 && !isSafeExitPath(url.pathname)) {
+      if (cachedAccess.payload?.status === "no_access" && !isSafeExitPath(url.pathname)) {
         return NextResponse.redirect(new URL(`/join?token=${cookieToken}`, req.url));
       }
       // 401 signed_out / safe-exit path / unknown: fall through to normal routing.
@@ -142,12 +145,13 @@ const authMiddleware = clerkMiddleware(async (auth, req) => {
   if (shouldCheckAccess) {
     // Reuse the access-state we already fetched above when possible.
     const access = cachedAccess ?? (await fetchAccessState(req));
-    if (access?.status === 403) {
+    if (access?.payload?.status === "org_inactive") {
       const destination = new URL("/no-access", req.url);
-      if (access.payload?.status === "org_inactive") {
-        destination.searchParams.set("reason", "inactive");
-      }
+      destination.searchParams.set("reason", "inactive");
       return NextResponse.redirect(destination);
+    }
+    if (access?.payload?.status === "no_access") {
+      return NextResponse.redirect(new URL("/no-access", req.url));
     }
   }
 

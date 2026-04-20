@@ -66,6 +66,7 @@ export function deriveInvitationAuthState(params: {
   userId: string | null;
   emails: string[];
   handoffToken?: string | null;
+  tokenProvided?: boolean;
 }): InvitationAuthStatePayload {
   const invitation = params.invitation;
   const emails = params.emails.map(normalizeEmail);
@@ -78,7 +79,7 @@ export function deriveInvitationAuthState(params: {
 
   if (!invitation) {
     return {
-      state: "token_invalid",
+      state: params.tokenProvided === false ? "token_missing" : "token_invalid",
       invitation: null,
       invitedEmail: null,
       viewer,

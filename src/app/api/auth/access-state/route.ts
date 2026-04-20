@@ -45,10 +45,10 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     const message = error instanceof Error ? error.message : '';
     if (message.startsWith('AUTH_NO_ACCESS')) {
-      return NextResponse.json({ status: 'no_access' as const, expected: true }, { status: 403 });
+      return NextResponse.json({ status: 'no_access' as const, expected: true }, { status: 200 });
     }
     if (message.startsWith('AUTH_ORG_INACTIVE')) {
-      return NextResponse.json({ status: 'org_inactive' as const, expected: true }, { status: 403 });
+      return NextResponse.json({ status: 'org_inactive' as const, expected: true }, { status: 200 });
     }
     if (message.startsWith('AUTH_NOT_SIGNED_IN')) {
       return NextResponse.json({ status: 'signed_out' as const, expected: true }, { status: 401 });

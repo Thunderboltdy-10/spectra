@@ -132,6 +132,7 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
         const appUrl = getAppUrl(typeof window !== "undefined" ? window.location.origin : undefined);
         const redirect = encodeURIComponent(`${appUrl}/join${token ? `?token=${encodeURIComponent(token)}` : ""}`);
         window.location.href = `${signInUrl}?redirect_url=${redirect}`;
+        return;
       }
       return;
     }
@@ -139,6 +140,19 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
     if (payload.state === "token_already_redeemed_same_user" || payload.state === "token_redeemed") {
       void clearInvitationCookie();
       window.location.replace("/chat");
+      return;
+    }
+
+    // Auto-redirect if token is missing or invalid and user is signed out
+    if (!userId && (payload.state === "token_missing" || payload.state === "token_invalid")) {
+      const signInUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in";
+      window.location.href = signInUrl;
+      return;
+    }
+
+    // Auto-redirect to no-access if token is missing and user is signed in
+    if (userId && payload.state === "token_missing") {
+      window.location.replace("/no-access");
       return;
     }
 
@@ -180,6 +194,13 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
     ? viewerEmails.some((email) => email.toLowerCase() === invitation.email.toLowerCase())
     : false;
 
+  const shouldAutoRedirect = resolvedPayload && (
+    resolvedPayload.shouldAutoRedirectToAuth ||
+    (!userId && (resolvedPayload.state === "token_missing" || resolvedPayload.state === "token_invalid")) ||
+    (userId && resolvedPayload.state === "token_missing") ||
+    (resolvedPayload.state === "token_already_redeemed_same_user" || resolvedPayload.state === "token_redeemed")
+  );
+
   async function goToSignIn() {
     await clearInvitationCookie();
     const signInUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in";
@@ -191,12 +212,14 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
     window.location.href = destination;
   }
 
-  if (state.status === "loading") {
+  if (state.status === "loading" || shouldAutoRedirect) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)]">
         <div className="flex flex-col items-center gap-4">
           <SpectraLogo size={56} showTile className="animate-pulse" />
-          <p className="text-sm text-[var(--text-secondary)]">Verifying invitation...</p>
+          <p className="text-sm text-[var(--text-secondary)]">
+            {state.status === "loading" ? "Verifying invitation..." : "Redirecting you..."}
+          </p>
         </div>
       </div>
     );

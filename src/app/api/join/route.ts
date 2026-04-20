@@ -15,7 +15,22 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const { token: cookieToken, handoffToken } = await getInvitationCookies();
     const token = searchParams.get("token") ?? cookieToken ?? handoffToken;
-    if (!token) return badRequest("token is required");
+
+    const { userId } = await auth();
+    const profile = userId ? await currentUser().catch(() => null) : null;
+    const emails = (profile?.emailAddresses ?? [])
+      .map((entry) => entry.emailAddress?.trim().toLowerCase())
+      .filter((value): value is string => Boolean(value));
+
+    if (!token) {
+      return ok(deriveInvitationAuthState({
+        invitation: null,
+        userId,
+        emails,
+        handoffToken,
+        tokenProvided: false,
+      }));
+    }
 
     const invitation = await convexQuery<{ token: string }, {
       status: string;
@@ -31,19 +46,14 @@ export async function GET(request: NextRequest) {
     if (!invitation) {
       return ok(deriveInvitationAuthState({
         invitation: null,
-        userId: null,
-        emails: [],
+        userId,
+        emails,
         handoffToken,
+        tokenProvided: true,
       }));
     }
 
     const normalizedInvitation = normalizeInvitation(invitation, token);
-    const { userId } = await auth();
-    const profile = userId ? await currentUser().catch(() => null) : null;
-    const emails = (profile?.emailAddresses ?? [])
-      .map((entry) => entry.emailAddress?.trim().toLowerCase())
-      .filter((value): value is string => Boolean(value));
-
     await persistInvitationHandoff(token);
 
     return ok(deriveInvitationAuthState({
@@ -51,6 +61,7 @@ export async function GET(request: NextRequest) {
       userId,
       emails,
       handoffToken,
+      tokenProvided: true,
     }));
   });
 }

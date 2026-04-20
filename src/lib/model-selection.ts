@@ -271,7 +271,7 @@ function providerQualityPreferenceScore(model: CatalogModelEntry) {
   if (/^(cohere|nvidia|x-ai|amazon|microsoft|perplexity)$/.test(provider)) {
     return 0.03;
   }
-  return -0.02;
+  return 0;
 }
 
 function lowEndOpenSourcePenalty(model: CatalogModelEntry) {

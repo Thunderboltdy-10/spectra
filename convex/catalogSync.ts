@@ -10,8 +10,6 @@ const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const ENDPOINT_SAMPLE_LIMIT = 60;
 const ENDPOINT_FETCH_CONCURRENCY = 6;
 
-const FEATURED: Record<string, number> = {};
-
 type OpenRouterModel = {
   id: string;
   name?: string;

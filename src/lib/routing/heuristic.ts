@@ -1,7 +1,9 @@
-import { CHEAP_MODEL_DEFAULTS, MODEL_CONFIG, ROUTER_FALLBACKS, getRouterFallbacks } from "@/lib/model-config";
 import {
-  getCatalogBackedEmergencyModel,
+  CHEAP_MODEL_DEFAULTS,
   MODEL_CONFIG,
+  ROUTER_FALLBACKS,
+  getCatalogBackedEmergencyModel,
+  getRouterFallbacks,
 } from "@/lib/model-config";
 import {
   isModelAllowedInTier,
@@ -62,21 +64,6 @@ function isCheapPreferredModel(modelId: string, catalog?: CatalogModelEntry[]) {
   const input = typeof model.inputCostPerM === "number" ? model.inputCostPerM : Number.POSITIVE_INFINITY;
   const output = typeof model.outputCostPerM === "number" ? model.outputCostPerM : Number.POSITIVE_INFINITY;
   return input <= 3 && output <= 3;
-}
-
-function complexityEmergencyModel(params: {
-  catalog?: CatalogModelEntry[];
-  complexPrompt: boolean;
-  multimodalNeeded: boolean;
-  needsSearch: boolean;
-}) {
-  if (params.multimodalNeeded) {
-    return getCatalogBackedEmergencyModel({ catalog: params.catalog, role: "vision" });
-  }
-  if (params.needsSearch || params.complexPrompt) {
-    return getCatalogBackedEmergencyModel({ catalog: params.catalog, role: "reasoning" });
-  }
-  return getCatalogBackedEmergencyModel({ catalog: params.catalog, role: "text" });
 }
 
 function isBudgetGuardedTier(tier: ModelRouteInput["spendingTier"]) {

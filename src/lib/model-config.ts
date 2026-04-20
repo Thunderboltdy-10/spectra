@@ -245,7 +245,6 @@ export const ROUTER_FALLBACKS: Record<string, string[]> = {
     MODEL_CONFIG.marker,
     MODEL_CONFIG.smartCheap,
   ],
-  [MODEL_CONFIG.glmAir]: [MODEL_CONFIG.tutorFast, MODEL_CONFIG.marker],
   [MODEL_CONFIG.gptOss]: [MODEL_CONFIG.tutorHigh, MODEL_CONFIG.marker],
 
   [MODEL_CONFIG.smartPaid]: [MODEL_CONFIG.smartCheap, MODEL_CONFIG.tutorFast],

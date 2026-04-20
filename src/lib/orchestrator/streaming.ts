@@ -32,7 +32,6 @@ function shouldRunToolLoop(params: {
   tools?: OpenRouterToolDefinition[];
   messages: OpenRouterMessage[];
   executionPath?: "direct_chat" | "single_action" | "action_loop" | "research_workflow";
-  executionPath?: "direct_chat" | "single_action" | "action_loop" | "research_workflow";
 }) {
   if (params.executionPath === "direct_chat") return false;
   if (params.executionPath === "single_action" || params.executionPath === "action_loop" || params.executionPath === "research_workflow") {
@@ -103,7 +102,6 @@ export async function runAssistantStreaming(params: {
   tools?: OpenRouterToolDefinition[];
   executeTool?: (params: { name: string; rawArguments: string }) => Promise<ExecutedToolResult>;
   maxToolRounds?: number;
-  executionPath?: "direct_chat" | "single_action" | "action_loop" | "research_workflow";
   executionPath?: "direct_chat" | "single_action" | "action_loop" | "research_workflow";
   stopWhen?: (state: {
     toolRounds: number;

@@ -8,8 +8,8 @@ export type WidgetKind =
   | "timer"
   | "planner"
   | "today"
+  | "timetable"
   | "scratch"
-  | "library"
   | "calendar"
   | "thread"
   | "artifact";
@@ -23,20 +23,22 @@ export type FloatingWidgetData = {
   h: number;
   state: Record<string, unknown>;
   collapsed?: boolean;
+  /** Anchor side used when collapsed; computed at drop (mouse-up). */
+  collapseAnchor?: "left" | "right";
 };
 
 const WIDGET_META: Record<WidgetKind, { label: string; short: string; icon: IconName; defaultSize: { w: number; h: number }; color: string }> = {
   timer:    { label: "Focus timer",  short: "Timer",    icon: "timer",    defaultSize: { w: 288, h: 132 }, color: "#e05137" },
   planner:  { label: "Week planner", short: "Plan",     icon: "planner",  defaultSize: { w: 300, h: 278 }, color: "#0e8ee8" },
   today:    { label: "Today",        short: "Today",    icon: "schedule", defaultSize: { w: 296, h: 230 }, color: "#20b8b2" },
+  timetable:{ label: "Timetable",    short: "Table",    icon: "schedule", defaultSize: { w: 308, h: 248 }, color: "#6b5f52" },
   scratch:  { label: "Scratchpad",   short: "Note",     icon: "note",     defaultSize: { w: 304, h: 232 }, color: "#b67616" },
-  library:  { label: "Library",      short: "Library",  icon: "reading",  defaultSize: { w: 308, h: 276 }, color: "#148f5d" },
   calendar: { label: "Calendar",     short: "Calendar", icon: "schedule", defaultSize: { w: 312, h: 270 }, color: "#6b5f52" },
   thread:   { label: "Thread",        short: "Thread",   icon: "thread",   defaultSize: { w: 340, h: 320 }, color: "#0e8ee8" },
   artifact: { label: "Artifact",      short: "Artifact", icon: "note",     defaultSize: { w: 380, h: 300 }, color: "#b67616" },
 };
 
-export const WIDGET_KINDS: WidgetKind[] = ["timer", "planner", "today", "scratch", "library", "calendar"];
+export const WIDGET_KINDS: WidgetKind[] = ["timer", "planner", "today", "timetable", "scratch", "calendar", "artifact"];
 
 export function defaultWidgetSize(kind: WidgetKind) {
   return WIDGET_META[kind].defaultSize;
@@ -228,31 +230,40 @@ function ScratchpadInner({ widget, onEdit }: { widget: FloatingWidgetData; onEdi
   );
 }
 
-function LibraryInner({ onOpenItem, widget }: { onOpenItem?: (id: string) => void; widget: FloatingWidgetData }) {
-  const artifacts = useMemo(() => Array.isArray(widget.state.artifacts) ? widget.state.artifacts as Array<Record<string, unknown>> : [], [widget.state.artifacts]);
-  const resources = useMemo(() => Array.isArray(widget.state.resources) ? widget.state.resources as Array<Record<string, unknown>> : [], [widget.state.resources]);
+function TimetableInner({ widget, onOpenItem }: { widget: FloatingWidgetData; onOpenItem?: (id: string) => void }) {
+  const entries = useMemo(() => Array.isArray(widget.state.days) ? widget.state.days as Array<Record<string, unknown>> : [], [widget.state.days]);
+  const grouped = entries
+    .map((entry) => ({
+      day: typeof entry.day === "string" ? entry.day : "",
+      count: typeof entry.count === "number" ? entry.count : 0,
+      items: Array.isArray(entry.items) ? entry.items as Array<Record<string, unknown>> : [],
+    }))
+    .filter((entry) => entry.day);
   return (
     <div data-nodrag className="space-y-1">
-      {artifacts.slice(0, 6).map((s, i) => (
-        <button key={String(s.id ?? i)} onClick={() => typeof s.id === "string" ? onOpenItem?.(s.id) : undefined}
-             className="w-full flex items-center gap-2 py-1 rounded transition-colors hover:bg-[var(--bg2)] px-1 -mx-1 text-left"
-             style={{ borderTop: i === 0 ? "none" : "1px solid rgba(221,216,207,0.5)" }}>
-          <Icon name="reading" size={10} style={{ color: "var(--ink-400)" }} />
-          <span className="text-[11.5px] flex-1 truncate" style={{ color: "var(--ink-200)" }} title={typeof s.title === "string" ? s.title : undefined}>{typeof s.title === "string" ? s.title : "Untitled"}</span>
-          <span className="font-mono text-[9px] uppercase" style={{ color: "var(--ink-400)" }}>{typeof s.type === "string" ? s.type : "artifact"}</span>
-        </button>
-      ))}
-      {resources.slice(0, 3).map((s, i) => (
-        <div key={String(s.id ?? i)} className="flex items-center gap-2 py-1 px-1 -mx-1"
-             style={{ borderTop: artifacts.length === 0 && i === 0 ? "none" : "1px solid rgba(221,216,207,0.5)" }}>
-          <Icon name="reading" size={10} style={{ color: "var(--ink-400)" }} />
-          <span className="text-[11.5px] flex-1 truncate" style={{ color: "var(--ink-200)" }}>{typeof s.title === "string" ? s.title : "Untitled resource"}</span>
-          <span className="font-mono text-[9px] uppercase" style={{ color: "var(--ink-400)" }}>resource</span>
-        </div>
-      ))}
-      {artifacts.length === 0 && resources.length === 0 && (
+      {grouped.slice(0, 5).map((entry, i) => {
+        const top = entry.items[0];
+        const topId = typeof top?.id === "string" ? top.id : undefined;
+        const label = new Date(entry.day).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+        return (
+          <button key={entry.day} onClick={() => { if (topId) onOpenItem?.(topId); }}
+               className="w-full flex items-start gap-2 py-1.5 rounded transition-colors hover:bg-[var(--bg2)] px-1 -mx-1 text-left"
+               style={{ borderTop: i === 0 ? "none" : "1px solid rgba(221,216,207,0.5)" }}>
+            <span className="font-mono text-[9px] uppercase tracking-[0.12em] w-16 pt-0.5" style={{ color: "var(--ink-400)" }}>{label}</span>
+            <div className="flex-1 min-w-0">
+              <div className="text-[11.5px] truncate" style={{ color: "var(--ink-200)" }}>
+                {entry.count > 0 ? `${entry.count} scheduled item${entry.count === 1 ? "" : "s"}` : "Open schedule"}
+              </div>
+              {typeof top?.title === "string" && (
+                <div className="text-[10.5px] truncate mt-0.5" style={{ color: "var(--ink-400)" }}>{top.title}</div>
+              )}
+            </div>
+          </button>
+        );
+      })}
+      {grouped.length === 0 && (
         <div className="text-[12px] leading-relaxed py-3" style={{ color: "var(--ink-400)" }}>
-          No sources yet in this workspace.
+          No upcoming schedule yet in this workspace.
         </div>
       )}
     </div>
@@ -330,7 +341,7 @@ function WidgetBody({ widget, onTimerToggle, onTimerReset, onAsk, onWidgetEdit, 
     case "planner":  return <PlannerInner widget={widget} onAsk={onAsk} onOpenItem={onOpenItem} />;
     case "today":    return <TodayInner widget={widget} onAsk={onAsk} onOpenItem={onOpenItem} />;
     case "scratch":  return <ScratchpadInner widget={widget} onEdit={(s) => onWidgetEdit?.(widget.id, s)} />;
-    case "library":  return <LibraryInner widget={widget} onOpenItem={onOpenItem} />;
+    case "timetable": return <TimetableInner widget={widget} onOpenItem={onOpenItem} />;
     case "calendar": return <CalendarInner widget={widget} onOpenItem={onOpenItem} />;
   }
 }
@@ -358,9 +369,9 @@ function ChipPreview({ widget, tick }: { widget: FloatingWidgetData; tick: numbe
     const items = Array.isArray(widget.state.items) ? widget.state.items.length : 0;
     return <span className="font-mono text-[10.5px]" style={{ color: "var(--ink-300)" }}>{items}</span>;
   }
-  if (widget.kind === "library") {
-    const arts = Array.isArray(widget.state.artifacts) ? widget.state.artifacts.length : 0;
-    return <span className="font-mono text-[10.5px]" style={{ color: "var(--ink-300)" }}>{arts}</span>;
+  if (widget.kind === "timetable") {
+    const days = Array.isArray(widget.state.days) ? widget.state.days.length : 0;
+    return <span className="font-mono text-[10.5px]" style={{ color: "var(--ink-300)" }}>{days}</span>;
   }
   if (widget.kind === "scratch") {
     const t = typeof widget.state.text === "string" ? (widget.state.text as string).trim() : "";
@@ -374,144 +385,13 @@ function ChipPreview({ widget, tick }: { widget: FloatingWidgetData; tick: numbe
   return null;
 }
 
-/* ─── Widget chip rail ─── */
-/*
- * The rail renders on the LEFT edge, below the top chrome. It contains chips
- * for each collapsed utility widget. Chips still show live info. Clicking
- * a chip expands the widget into a floating panel near the chip.
- *
- * The rail also houses a small "add" control that opens a menu to add more
- * widget kinds (singleton-enforced in the parent), plus expand-all /
- * collapse-all options.
- */
-type ChipRailProps = {
-  widgets: FloatingWidgetData[];
-  tick: number;                              // forces re-render on timer tick
-  aiTouched: Record<string, boolean>;
-  onExpand: (id: string) => void;
-  onAddWidget: (kind: WidgetKind) => void;
-  onCollapseAll: () => void;
-  onExpandAll: () => void;
-  allCollapsed: boolean;
-  someCollapsed: boolean;
-  /** ID of a widget to briefly highlight (singleton reveal animation). */
-  revealingWidgetId?: string | null;
-};
-
-export function WidgetChipRail({
-  widgets, tick, aiTouched, onExpand, onAddWidget,
-  onCollapseAll, onExpandAll, allCollapsed, someCollapsed, revealingWidgetId,
-}: ChipRailProps) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  // mounted guard prevents SSR/client mismatch on widget chip count
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
-
-  const present = new Set(widgets.map((w) => w.kind));
-  const addableKinds = WIDGET_KINDS.filter((k) => !present.has(k));
-  const collapsedWidgets = widgets.filter((w) => Boolean(w.collapsed));
-
-  if (!mounted) return null;
-
-  return (
-    <div className="absolute left-3 top-[68px] z-30 pointer-events-auto flex flex-col gap-1.5">
-      {collapsedWidgets.map((w) => {
-        const meta = WIDGET_META[w.kind];
-        const isRevealing = revealingWidgetId === w.id;
-        return (
-          <button
-            key={w.id}
-            onClick={() => onExpand(w.id)}
-            className={`sv2-chip-rail-item group transition-all ${aiTouched[w.id] ? "sv2-ai-touched-subtle" : ""} ${isRevealing ? "sv2-chip-reveal" : ""}`}
-            title={`Expand ${meta.label}`}
-            style={{ background: `${meta.color}12`, borderColor: `${meta.color}28` }}
-          >
-            <span className="flex items-center justify-center w-5 h-5 rounded-md shrink-0" style={{ color: meta.color }}>
-              <Icon name={meta.icon} size={13} />
-            </span>
-            <span className="font-mono text-[9.5px] uppercase tracking-[0.13em] min-w-0 truncate" style={{ color: "var(--ink-300)" }}>{meta.short}</span>
-            <span className="ml-auto pl-1 shrink-0"><ChipPreview widget={w} tick={tick} /></span>
-          </button>
-        );
-      })}
-
-      {/* Add / manage — info icon replaces dots */}
-      <div className="relative mt-1">
-        <button
-          onClick={() => setMenuOpen((v) => !v)}
-          className="sv2-chip-rail-item sv2-chip-rail-add"
-          title="Manage widgets"
-        >
-          <span className="flex items-center justify-center w-5 h-5 rounded-md shrink-0" style={{ color: "var(--accent)" }}>
-            <Icon name="info" size={12} />
-          </span>
-          <span className="font-mono text-[10px] uppercase tracking-[0.13em]" style={{ color: "var(--ink-200)" }}>Widgets</span>
-          <span className="ml-auto pl-2 font-mono text-[10px]" style={{ color: "var(--ink-400)" }}>
-            {widgets.length}
-          </span>
-        </button>
-        {menuOpen && (
-          <div className="absolute left-full ml-2 top-0 w-[220px] rounded-xl p-1.5 sv2-drift-in shadow-xl"
-               style={{ background: "var(--paper)", border: "1px solid var(--line)" }}
-               onMouseLeave={() => setMenuOpen(false)}>
-            <div className="px-2 pt-1 pb-0.5 font-mono text-[9.5px] uppercase tracking-[0.16em]" style={{ color: "var(--ink-400)" }}>
-              Add widget
-            </div>
-            {addableKinds.length === 0 ? (
-              <div className="text-[11px] italic px-2 py-1.5" style={{ color: "var(--ink-400)" }}>
-                All widget types present.
-              </div>
-            ) : (
-              <div className="space-y-0.5 mb-1">
-                {addableKinds.map((k) => {
-                  const m = WIDGET_META[k];
-                  return (
-                    <button
-                      key={k}
-                      onClick={() => { onAddWidget(k); setMenuOpen(false); }}
-                      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-[12px] hover:bg-[var(--bg2)] text-left"
-                      style={{ color: "var(--ink-200)" }}
-                    >
-                      <div className="w-5 h-5 rounded flex items-center justify-center shrink-0" style={{ background: `${m.color}14` }}>
-                        <Icon name={m.icon} size={11} style={{ color: m.color }} />
-                      </div>
-                      <span>{m.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            <div className="h-px my-1" style={{ background: "var(--line)" }} />
-            <div className="space-y-0.5">
-              <button
-                onClick={() => { onCollapseAll(); setMenuOpen(false); }}
-                disabled={allCollapsed}
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-[12px] hover:bg-[var(--bg2)] disabled:opacity-40 disabled:cursor-not-allowed"
-                style={{ color: "var(--ink-200)" }}
-              >
-                <Icon name="collapse" size={11} />Collapse all
-              </button>
-              <button
-                onClick={() => { onExpandAll(); setMenuOpen(false); }}
-                disabled={!someCollapsed}
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-[12px] hover:bg-[var(--bg2)] disabled:opacity-40 disabled:cursor-not-allowed"
-                style={{ color: "var(--ink-200)" }}
-              >
-                <Icon name="expand" size={11} />Expand all
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ─── FloatingWidget (expanded state) ─── */
+/* ─── FloatingWidget (expanded + in-place collapsed) ─── */
 
 type FloatingProps = {
   widget: FloatingWidgetData;
   workspaceItems?: V2Item[];
+  /** Tick counter to force rerender of collapsed live-preview. */
+  tick?: number;
   onMove: (id: string, x: number, y: number) => void;
   onClose: (id: string) => void;
   onCollapse: (id: string) => void;
@@ -524,99 +404,172 @@ type FloatingProps = {
   onOpenItem?: (id: string) => void;
   /** Optional expand-to-bloom handler; wired by Agent A later. */
   onExpandEdit?: (id: string) => void;
+  /** Called on drag end with the anchor side (left/right) computed from drop x. */
+  onDropAnchor?: (id: string, anchor: "left" | "right") => void;
+  /** Whether this widget is currently in its reveal pulse. */
+  isRevealing?: boolean;
 };
 
+const COLLAPSED_W = 260;
+const COLLAPSED_H = 56;
+
 export function FloatingWidget({
-  widget, workspaceItems = [], onMove, onClose, onCollapse, onExpand,
+  widget, workspaceItems = [], tick = 0, onMove, onClose, onCollapse, onExpand,
   onTimerToggle, onTimerReset, aiTouched, onAsk, onWidgetEdit, onOpenItem, onExpandEdit,
+  onDropAnchor, isRevealing,
 }: FloatingProps) {
-  void onExpandEdit; // reserved for Agent A
-  const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
+  void onExpandEdit;
+  const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number; moved: boolean } | null>(null);
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  // `mounted` gates any viewport-dependent clamp logic so server and client
+  // render the exact same positions on first paint → no hydration mismatch.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
+  const isCollapsed = Boolean(widget.collapsed);
+  const anchor: "left" | "right" = widget.collapseAnchor ?? "left";
+
+  const measureBounds = useCallback(() => {
+    const rect = frameRef.current?.getBoundingClientRect();
+    const viewportW = typeof window !== "undefined" ? window.innerWidth : 0;
+    const viewportH = typeof window !== "undefined" ? window.innerHeight : 0;
+    const currentW = rect?.width ?? (isCollapsed ? COLLAPSED_W : widget.w);
+    const currentH = rect?.height ?? (isCollapsed ? COLLAPSED_H : widget.h);
+    return {
+      width: currentW,
+      height: currentH,
+      maxX: Math.max(16, viewportW - currentW - 16),
+      maxY: Math.max(84, viewportH - currentH - 20),
+    };
+  }, [isCollapsed, widget.h, widget.w]);
 
   const onDown = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest("[data-nodrag]")) return;
-    dragRef.current = { sx: e.clientX, sy: e.clientY, ox: widget.x, oy: widget.y };
+    dragRef.current = { sx: e.clientX, sy: e.clientY, ox: widget.x, oy: widget.y, moved: false };
+    let lastX = widget.x;
     const move = (ev: MouseEvent) => {
       const d = dragRef.current;
       if (!d) return;
-      onMove(widget.id, Math.max(0, Math.min(window.innerWidth - 40, d.ox + (ev.clientX - d.sx))), Math.max(0, Math.min(window.innerHeight - 40, d.oy + (ev.clientY - d.sy))));
+      const bounds = measureBounds();
+      const nx = Math.max(16, Math.min(bounds.maxX, d.ox + (ev.clientX - d.sx)));
+      const ny = Math.max(84, Math.min(bounds.maxY, d.oy + (ev.clientY - d.sy)));
+      if (Math.abs(ev.clientX - d.sx) > 2 || Math.abs(ev.clientY - d.sy) > 2) d.moved = true;
+      lastX = nx;
+      onMove(widget.id, nx, ny);
     };
     const up = () => {
+      const d = dragRef.current;
       dragRef.current = null;
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
+      if (!d?.moved) return;
+      // Compute collapse anchor from drop x (widget center vs viewport midline)
+      if (onDropAnchor && typeof window !== "undefined") {
+        const bounds = measureBounds();
+        const center = lastX + bounds.width / 2;
+        const side: "left" | "right" = center < window.innerWidth / 2 ? "left" : "right";
+        if (side !== widget.collapseAnchor) onDropAnchor(widget.id, side);
+      }
     };
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", up);
   };
 
   const meta = WIDGET_META[widget.kind];
-  const isCollapsed = Boolean(widget.collapsed);
 
-  // Position-aware expansion: prefer expanding rightward, but if widget is in right half
-  // of screen expand leftward so it doesn't overflow
-  const expandedX = useMemo(() => {
-    if (typeof window === "undefined") return widget.x;
-    const midScreen = window.innerWidth / 2;
-    // If widget is in the right half, anchor the right edge
-    if (widget.x > midScreen) {
-      return Math.max(16, widget.x + 44 - widget.w);
+  // When anchored right, shift `left` by (expanded.w - collapsed.w) so the expanded
+  // panel's RIGHT edge aligns with the collapsed pill's right edge. This makes the
+  // morph appear to slide/grow from the right side. Clamp to viewport on both ends.
+  // Render-only shift (does not mutate widget.x).
+  let renderLeft = widget.x;
+  if (!isCollapsed && mounted) {
+    if (anchor === "right") {
+      renderLeft = widget.x + (COLLAPSED_W - widget.w);
     }
-    // Left half: just prevent overflow at right edge
-    const rightEdge = widget.x + widget.w;
-    if (rightEdge > window.innerWidth - 16) {
-      return Math.max(16, window.innerWidth - widget.w - 16);
+    if (typeof window !== "undefined") {
+      const maxLeft = window.innerWidth - widget.w - 16;
+      if (renderLeft > maxLeft) renderLeft = Math.max(16, maxLeft);
+      if (renderLeft < 16) renderLeft = 16;
     }
-    return widget.x;
-  }, [widget.x, widget.w]);
+  }
+
+  const morphClass = anchor === "right" ? "sv2-morph-right" : "sv2-morph-left";
 
   return (
     <div
+      ref={frameRef}
       data-widget
-      className={`absolute z-20 pointer-events-auto overflow-hidden sv2-widget-in ${
-        aiTouched ? "sv2-ai-touched" : ""
-      }`}
+      className={`absolute z-20 pointer-events-auto overflow-hidden sv2-widget-morph ${morphClass} anchor-${anchor} sv2-widget-in ${
+        isCollapsed ? "is-collapsed" : ""
+      } ${aiTouched ? "sv2-ai-touched" : ""} ${isRevealing ? "sv2-chip-reveal" : ""}`}
       style={{
-        left: isCollapsed ? widget.x : expandedX,
+        left: renderLeft,
         top: widget.y,
-        width: isCollapsed ? 52 : widget.w,
-        height: isCollapsed ? 52 : widget.h,
+        width: isCollapsed ? COLLAPSED_W : widget.w,
+        height: isCollapsed ? COLLAPSED_H : widget.h,
         borderRadius: isCollapsed ? 14 : 16,
-        background: isCollapsed ? `${meta.color}18` : "rgba(251,250,246,0.97)",
-        border: `1px solid ${isCollapsed ? `${meta.color}35` : "var(--line)"}`,
-        boxShadow: isCollapsed ? `0 3px 10px ${meta.color}20` : "0 24px 54px -30px rgba(8,22,40,0.22)",
+        background: isCollapsed ? `${meta.color}12` : "rgba(251,250,246,0.97)",
+        border: `1px solid ${isCollapsed ? `${meta.color}28` : "var(--line)"}`,
+        boxShadow: isCollapsed ? "0 3px 10px rgba(8,22,40,0.06)" : "0 24px 54px -30px rgba(8,22,40,0.22)",
         backdropFilter: "blur(12px)",
-        transition: "width 260ms cubic-bezier(0.22,1,0.36,1), height 260ms cubic-bezier(0.22,1,0.36,1), left 260ms cubic-bezier(0.22,1,0.36,1), border-radius 200ms ease, box-shadow 200ms ease",
       }}
       onMouseDown={(e) => e.stopPropagation()}
     >
+      {/* ─── Rich in-place collapsed pill (layered; opacity-toggled by .is-collapsed) ─── */}
       <div
         onMouseDown={onDown}
-        onClick={() => { if (isCollapsed) onExpand(widget.id); }}
-        className={`${isCollapsed ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"} flex items-center justify-between px-2.5`}
-        style={{
-          height: isCollapsed ? "100%" : 40,
-          borderBottom: isCollapsed ? "none" : "1px solid rgba(221,216,207,0.55)",
-          background: isCollapsed ? "transparent" : `linear-gradient(90deg, ${meta.color}12, transparent 60%)`,
+        onClick={() => {
+          if (!isCollapsed) return;
+          if (!dragRef.current?.moved) onExpand(widget.id);
         }}
+        className="sv2-widget-collapsed-shell absolute inset-0 flex items-center gap-2.5 px-3 cursor-pointer"
+        style={{ background: "transparent", border: "none", borderRadius: 14 }}
+        title={`Expand ${meta.label}`}
       >
-        <div className="flex items-center gap-2 min-w-0">
-          <div className={`shrink-0 flex items-center justify-center ${isCollapsed ? "w-full h-full flex-col gap-1" : ""}`}
-               style={{ color: meta.color }}>
-            <Icon name={meta.icon} size={isCollapsed ? 18 : 11} />
-            {isCollapsed && (
-              <span className="font-mono text-[8px] uppercase tracking-[0.1em] opacity-70" style={{ color: meta.color }}>
-                {meta.short}
-              </span>
-            )}
+        <span
+          className="flex items-center justify-center w-8 h-8 rounded-xl shrink-0"
+          style={{ color: meta.color, background: `${meta.color}16` }}
+        >
+          <Icon name={meta.icon} size={14} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div
+            className="font-mono text-[9px] uppercase tracking-[0.13em] truncate"
+            style={{ color: "var(--ink-400)" }}
+          >
+            {meta.short}
           </div>
-          {!isCollapsed && (
-            <span className="font-mono text-[10px] uppercase tracking-[0.14em] truncate" style={{ color: "var(--ink-300)" }}>
+          <div className="text-[11.5px] truncate" style={{ color: "var(--ink-200)" }}>
+            {meta.label}
+          </div>
+        </div>
+        <span className="ml-auto pl-1 shrink-0">
+          <ChipPreview widget={widget} tick={tick} />
+        </span>
+      </div>
+
+      {/* ─── Expanded shell (layered; opacity-toggled by .is-collapsed) ─── */}
+      <div className="sv2-widget-expanded-shell absolute inset-0 flex flex-col">
+        <div
+          onMouseDown={onDown}
+          className="cursor-grab active:cursor-grabbing flex items-center justify-between px-2.5 shrink-0"
+          style={{
+            height: 40,
+            borderBottom: "1px solid rgba(221,216,207,0.55)",
+            background: `linear-gradient(90deg, ${meta.color}12, transparent 60%)`,
+          }}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="shrink-0 flex items-center justify-center" style={{ color: meta.color }}>
+              <Icon name={meta.icon} size={11} />
+            </div>
+            <span
+              className="font-mono text-[10px] uppercase tracking-[0.14em] truncate"
+              style={{ color: "var(--ink-300)" }}
+            >
               {meta.label}
             </span>
-          )}
-        </div>
-        {!isCollapsed && (
+          </div>
           <div className="flex items-center gap-1 shrink-0" data-nodrag>
             <button
               onClick={(e) => { e.stopPropagation(); onCollapse(widget.id); }}
@@ -635,10 +588,8 @@ export function FloatingWidget({
               <Icon name="close" size={10} />
             </button>
           </div>
-        )}
-      </div>
-      {!isCollapsed && (
-        <div className="p-3.5 h-[calc(100%-40px)] overflow-y-auto sv2-slim">
+        </div>
+        <div className="p-3.5 flex-1 overflow-y-auto sv2-slim">
           <WidgetBody
             widget={widget}
             items={workspaceItems}
@@ -649,7 +600,7 @@ export function FloatingWidget({
             onOpenItem={onOpenItem}
           />
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -672,13 +623,20 @@ type ArtifactWidgetProps = {
 
 export function ArtifactWidget({ item, x, y, w, h, collapsed, onMove, onClose, onCollapse, onExpand, onEdit }: ArtifactWidgetProps) {
   const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
+  const frameRef = useRef<HTMLDivElement | null>(null);
   const onDown = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest("[data-nodrag]")) return;
     dragRef.current = { sx: e.clientX, sy: e.clientY, ox: x, oy: y };
     const move = (ev: MouseEvent) => {
       const d = dragRef.current;
       if (!d) return;
-      onMove(Math.max(0, Math.min(window.innerWidth - 40, d.ox + (ev.clientX - d.sx))), Math.max(0, Math.min(window.innerHeight - 40, d.oy + (ev.clientY - d.sy))));
+      const rect = frameRef.current?.getBoundingClientRect();
+      const width = rect?.width ?? (collapsed ? 120 : w);
+      const height = rect?.height ?? (collapsed ? 36 : h);
+      onMove(
+        Math.max(16, Math.min(window.innerWidth - width - 16, d.ox + (ev.clientX - d.sx))),
+        Math.max(84, Math.min(window.innerHeight - height - 20, d.oy + (ev.clientY - d.sy))),
+      );
     };
     const up = () => {
       dragRef.current = null;
@@ -727,88 +685,189 @@ export function ArtifactWidget({ item, x, y, w, h, collapsed, onMove, onClose, o
 
   const kindColor = item.color;
   const isCollapsed = Boolean(collapsed);
+  const isWorkspacePanel = item.id === "artifact-panel";
+
+  // Inline title rename — read-only until double-clicked
+  const [titleEditing, setTitleEditing] = useState(false);
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Reset edit state when item changes
+  useEffect(() => { setTitleEditing(false); }, [item.id]);
+
+  const commitTitle = useCallback(() => {
+    setTitleEditing(false);
+    if (isWorkspacePanel) return;
+    const next = title.trim();
+    if (!next || next === item.title) {
+      setTitle(item.title);
+      return;
+    }
+    onEdit({ title: next });
+  }, [isWorkspacePanel, item.title, onEdit, title]);
+
+  const cancelTitle = useCallback(() => {
+    setTitle(item.title);
+    setTitleEditing(false);
+  }, [item.title]);
+
+  const beginTitleEdit = () => {
+    if (isWorkspacePanel) return;
+    setTitleEditing(true);
+    requestAnimationFrame(() => {
+      titleInputRef.current?.focus();
+      titleInputRef.current?.select();
+    });
+  };
 
   return (
     <div
+      ref={frameRef}
       data-widget data-bloom-editor="1"
-      className="absolute z-30 pointer-events-auto overflow-hidden transition-all duration-300 ease-out sv2-widget-in flex flex-col"
+      className={`absolute z-30 pointer-events-auto overflow-hidden sv2-widget-morph sv2-morph-left anchor-left sv2-widget-in ${
+        isCollapsed ? "is-collapsed" : ""
+      }`}
       style={{
         left: x, top: y,
-        width: isCollapsed ? 120 : w,
-        height: isCollapsed ? 36 : h,
-        borderRadius: isCollapsed ? 18 : 16,
+        width: isCollapsed ? 240 : w,
+        height: isCollapsed ? 44 : h,
+        borderRadius: isCollapsed ? 14 : 16,
         background: "var(--paper)",
-        border: "1px solid var(--line)",
-        boxShadow: isCollapsed ? "0 4px 12px rgba(0,0,0,0.05)" : "0 40px 80px -30px rgba(8,22,40,0.28), 0 0 0 1px rgba(14,142,232,0.06)",
+        border: `1px solid ${isCollapsed ? `${kindColor}30` : "var(--line)"}`,
+        boxShadow: isCollapsed ? "0 3px 10px rgba(8,22,40,0.06)" : "0 40px 80px -30px rgba(8,22,40,0.28), 0 0 0 1px rgba(14,142,232,0.06)",
       }}
       onMouseDown={(e) => e.stopPropagation()}
     >
+      {/* ─── Rich collapsed pill ─── */}
       <div
         onMouseDown={onDown}
         onClick={() => { if (isCollapsed) onExpand(); }}
-        className={`${isCollapsed ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"} flex items-center justify-between px-4 shrink-0 h-full`}
-        style={{
-          height: isCollapsed ? "100%" : 44,
-          borderBottom: isCollapsed ? "none" : "1px solid rgba(221,216,207,0.55)",
-          background: `linear-gradient(90deg, ${kindColor}14, transparent 60%)`,
-        }}
+        className="sv2-widget-collapsed-shell absolute inset-0 flex items-center gap-2.5 px-3 cursor-pointer"
+        style={{ background: "transparent", border: "none", borderRadius: 14 }}
+        title={`Expand ${isWorkspacePanel ? "Artifacts" : item.title}`}
       >
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: kindColor }} />
-          <span className="font-mono text-[10px] uppercase tracking-[0.15em] shrink-0" style={{ color: "var(--ink-400)" }}>
-            Artifact
-          </span>
-          {!isCollapsed && (
-            <span className="font-mono text-[10px] tracking-[0.1em] opacity-60 shrink-0" style={{ color: "var(--ink-400)" }}>
-              · {item.updated || "open"}
-            </span>
-          )}
+        <span className="flex items-center justify-center w-7 h-7 rounded-xl shrink-0"
+              style={{ color: kindColor, background: `${kindColor}16` }}>
+          <Icon name="note" size={13} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="font-mono text-[9px] uppercase tracking-[0.13em]"
+               style={{ color: "var(--ink-400)" }}>Artifact</div>
+          <div className="text-[11.5px] truncate" style={{ color: "var(--ink-200)" }}>
+            {isWorkspacePanel ? "Artifacts" : item.title}
+          </div>
         </div>
-        {!isCollapsed && (
-          <div className="flex items-center gap-1" data-nodrag>
-            <button
-              onClick={(e) => { e.stopPropagation(); onCollapse(); }}
-              className="w-7 h-7 rounded flex items-center justify-center hover:bg-[var(--bg2)]"
-              style={{ color: "var(--ink-400)" }}
-              title="Collapse"
-            >
-              <Icon name="collapse" size={11} />
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); onClose(); }}
-              className="w-7 h-7 rounded flex items-center justify-center hover:bg-[var(--bg2)]"
-              style={{ color: "var(--ink-400)" }}
-              title="Close (Esc)"
-            >
-              <Icon name="close" size={11} />
-            </button>
-          </div>
-        )}
       </div>
-      {!isCollapsed && (
-        <>
-          <div className="px-6 pt-5 pb-2 shrink-0" data-nodrag>
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              onBlur={() => { if (title !== item.title) onEdit({ title }); }}
-              className="w-full bg-transparent outline-none font-display text-[24px] leading-[1.1]"
-              style={{ color: "var(--ink-100)" }}
-            />
-            <div className="mt-2 h-px w-12" style={{ background: kindColor, opacity: 0.55 }} />
+
+      {/* ─── Expanded shell ─── */}
+      <div className="sv2-widget-expanded-shell absolute inset-0 flex flex-col">
+          <div
+            onMouseDown={onDown}
+            className="cursor-grab active:cursor-grabbing flex items-center justify-between px-4 shrink-0"
+            style={{
+              height: 44,
+              borderBottom: "1px solid rgba(221,216,207,0.55)",
+              background: `linear-gradient(90deg, ${kindColor}14, transparent 60%)`,
+            }}
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: kindColor }} />
+              <span className="font-mono text-[10px] uppercase tracking-[0.15em] shrink-0" style={{ color: "var(--ink-400)" }}>
+                Artifact
+              </span>
+              <span className="font-mono text-[10px] tracking-[0.1em] opacity-60 shrink-0" style={{ color: "var(--ink-400)" }}>
+                · {item.updated || "open"}
+              </span>
+            </div>
+            <div className="flex items-center gap-1" data-nodrag>
+              <button
+                onClick={(e) => { e.stopPropagation(); onCollapse(); }}
+                className="w-7 h-7 rounded flex items-center justify-center hover:bg-[var(--bg2)]"
+                style={{ color: "var(--ink-400)" }}
+                title="Collapse"
+              >
+                <Icon name="collapse" size={11} />
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); onClose(); }}
+                className="w-7 h-7 rounded flex items-center justify-center hover:bg-[var(--bg2)]"
+                style={{ color: "var(--ink-400)" }}
+                title="Close (Esc)"
+              >
+                <Icon name="close" size={11} />
+              </button>
+            </div>
           </div>
-          <div className="flex-1 overflow-y-auto sv2-slim px-6 pb-5" data-nodrag>
-            <textarea
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              onBlur={() => onEdit({ body })}
-              placeholder="Start writing…"
-              className="w-full h-full bg-transparent outline-none resize-none text-[13.5px] leading-[1.72] font-display placeholder:text-[var(--ink-400)]"
-              style={{ color: "var(--ink-200)", minHeight: 240 }}
-            />
-          </div>
-        </>
-      )}
+          {isWorkspacePanel ? (
+            /* ─── Blueprint empty-state ─── */
+            <div className="flex-1 flex flex-col p-5" data-nodrag>
+              <div className="sv2-artifact-blueprint flex-1 flex flex-col items-center justify-center gap-4 p-6 rounded-xl">
+                <div className="text-center">
+                  <div className="font-display text-[18px] leading-tight" style={{ color: "var(--ink-100)" }}>
+                    Start a new artifact
+                  </div>
+                  <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em]" style={{ color: "var(--ink-400)" }}>
+                    Pick a starting point
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2 w-full max-w-[260px]">
+                  {([
+                    { label: "Note", action: "newNote", icon: "note" as IconName },
+                    { label: "Visual", action: "newVisual", icon: "layers" as IconName },
+                    { label: "Code", action: "newCode", icon: "pset" as IconName },
+                    { label: "Thread", action: "newThread", icon: "thread" as IconName },
+                  ] as const).map((b) => (
+                    <button
+                      key={b.action}
+                      type="button"
+                      className="sv2-quick-create-btn justify-center"
+                      onClick={() => {
+                        window.dispatchEvent(new CustomEvent("workspace:context-action", { detail: { action: b.action } }));
+                      }}
+                    >
+                      <Icon name={b.icon} size={11} />
+                      <span className="font-mono text-[10px] uppercase tracking-[0.1em]">{b.label}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="text-[11px] italic" style={{ color: "var(--ink-400)" }}>
+                  or ask the quick chat below
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="px-6 pt-5 pb-2 shrink-0" data-nodrag>
+                <input
+                  ref={titleInputRef}
+                  value={title}
+                  readOnly={!titleEditing}
+                  onChange={(e) => setTitle(e.target.value)}
+                  onDoubleClick={beginTitleEdit}
+                  onBlur={() => { if (titleEditing) commitTitle(); }}
+                  onKeyDown={(e) => {
+                    if (!titleEditing) return;
+                    if (e.key === "Enter") { e.preventDefault(); commitTitle(); titleInputRef.current?.blur(); }
+                    else if (e.key === "Escape") { e.preventDefault(); cancelTitle(); titleInputRef.current?.blur(); }
+                  }}
+                  className="w-full bg-transparent outline-none font-display text-[24px] leading-[1.1]"
+                  style={{ color: "var(--ink-100)", cursor: titleEditing ? "text" : "pointer" }}
+                  title={titleEditing ? "Press Enter to save, Esc to cancel" : "Double-click to rename"}
+                />
+                <div className="mt-2 h-px w-12" style={{ background: kindColor, opacity: 0.55 }} />
+              </div>
+              <div className="flex-1 overflow-y-auto sv2-slim px-6 pb-5" data-nodrag>
+                <textarea
+                  value={body}
+                  onChange={(e) => setBody(e.target.value)}
+                  onBlur={() => onEdit({ body })}
+                  placeholder="Start writing…"
+                  className="w-full h-full bg-transparent outline-none resize-none text-[13.5px] leading-[1.72] font-display placeholder:text-[var(--ink-400)]"
+                  style={{ color: "var(--ink-200)", minHeight: 240 }}
+                />
+              </div>
+            </>
+          )}
+      </div>
     </div>
   );
 }
@@ -830,13 +889,20 @@ type ThreadWidgetProps = {
 
 export function ThreadWidget({ item, x, y, w, h, collapsed, onMove, onClose, onCollapse, onExpand }: ThreadWidgetProps) {
   const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
+  const frameRef = useRef<HTMLDivElement | null>(null);
   const onDown = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest("[data-nodrag]")) return;
     dragRef.current = { sx: e.clientX, sy: e.clientY, ox: x, oy: y };
     const move = (ev: MouseEvent) => {
       const d = dragRef.current;
       if (!d) return;
-      onMove(Math.max(0, Math.min(window.innerWidth - 40, d.ox + (ev.clientX - d.sx))), Math.max(0, Math.min(window.innerHeight - 40, d.oy + (ev.clientY - d.sy))));
+      const rect = frameRef.current?.getBoundingClientRect();
+      const width = rect?.width ?? (collapsed ? 120 : w);
+      const height = rect?.height ?? (collapsed ? 36 : h);
+      onMove(
+        Math.max(16, Math.min(window.innerWidth - width - 16, d.ox + (ev.clientX - d.sx))),
+        Math.max(84, Math.min(window.innerHeight - height - 20, d.oy + (ev.clientY - d.sy))),
+      );
     };
     const up = () => {
       dragRef.current = null;
@@ -872,6 +938,7 @@ export function ThreadWidget({ item, x, y, w, h, collapsed, onMove, onClose, onC
 
   return (
     <div
+      ref={frameRef}
       data-widget data-bloom-editor="1"
       className="absolute z-30 pointer-events-auto overflow-hidden transition-all duration-300 ease-out sv2-widget-in flex flex-col"
       style={{

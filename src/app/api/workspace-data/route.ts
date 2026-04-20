@@ -433,6 +433,19 @@ export async function POST(request: NextRequest) {
       return ok({ workstreamId: created.workstreamId, templateSuggestion: suggestion.suggestion });
     }
 
+    if (action === "updateWorkspace") {
+      const workstreamId = body.workstreamId as string | undefined;
+      if (!workstreamId) return badRequest("workstreamId is required");
+      const result = await convexMutation("workstreams:update", {
+        actorClerkId: actor.clerkId,
+        workstreamId,
+        title: typeof body.title === "string" ? body.title : undefined,
+        emoji: typeof body.emoji === "string" ? body.emoji : undefined,
+        description: typeof body.description === "string" ? body.description : undefined,
+      });
+      return ok(result);
+    }
+
     if (action === "seedDemoWorkspaces") {
       const result = await convexMutation("workspaceBlueprints:seedRichDemoWorkspaces", {
         actorClerkId: actor.clerkId,

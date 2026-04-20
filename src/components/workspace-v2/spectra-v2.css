@@ -787,3 +787,100 @@ input { user-select: text !important; }
   transition: opacity 180ms ease;
 }
 .sv2-focus-pane:not(.primary):hover .sv2-focus-promote-hint { opacity: 1; }
+
+/* ─── Always-visible artifact/quick-create row ─── */
+.sv2-quick-create-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: rgba(251,250,246,0.88);
+  border: 1px solid var(--line);
+  color: var(--ink-300);
+  backdrop-filter: blur(8px);
+  transition: all 180ms ease;
+  box-shadow: var(--shadow-sm);
+}
+.sv2-quick-create-btn:hover {
+  background: var(--paper);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+.spectra-v2.dark .sv2-quick-create-btn {
+  background: rgba(19,22,28,0.88);
+}
+
+/* ─── Compact grid layout for workspace items ─── */
+.sv2-item-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 280px);
+  gap: 16px;
+  align-items: start;
+}
+.sv2-item-row {
+  display: flex;
+  gap: 16px;
+  align-items: start;
+}
+
+/* ─── Widget morph (expanded ↔ in-place collapsed pill) ─── */
+.sv2-widget-morph {
+  transition:
+    width 320ms cubic-bezier(0.4, 0, 0.2, 1),
+    height 320ms cubic-bezier(0.4, 0, 0.2, 1),
+    left 320ms cubic-bezier(0.4, 0, 0.2, 1),
+    border-radius 260ms ease,
+    box-shadow 260ms ease,
+    background-color 260ms ease,
+    border-color 260ms ease;
+  will-change: width, height, left;
+}
+.sv2-widget-morph .sv2-widget-expanded-shell {
+  transition: opacity 220ms ease, transform 320ms cubic-bezier(0.4, 0, 0.2, 1);
+  transform-origin: var(--morph-origin, left center);
+}
+.sv2-widget-morph.is-collapsed .sv2-widget-expanded-shell {
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.92);
+}
+.sv2-widget-morph .sv2-widget-collapsed-shell {
+  transition: opacity 220ms ease 60ms, transform 260ms cubic-bezier(0.4, 0, 0.2, 1);
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.96);
+}
+.sv2-widget-morph.is-collapsed .sv2-widget-collapsed-shell {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1);
+}
+.sv2-widget-morph.anchor-right,
+.sv2-widget-morph.sv2-morph-right {
+  --morph-origin: right center;
+}
+.sv2-widget-morph.anchor-left,
+.sv2-widget-morph.sv2-morph-left {
+  --morph-origin: left center;
+}
+
+/* ─── Artifact blueprint (empty-state) panel ─── */
+.sv2-artifact-blueprint {
+  border: 1.5px dashed var(--line);
+  background:
+    radial-gradient(120% 100% at 50% 0%, rgba(14,142,232,0.05), transparent 60%),
+    linear-gradient(180deg, rgba(251,250,246,0.6), rgba(237,233,227,0.3));
+  backdrop-filter: blur(4px);
+  transition: border-color 220ms ease, background 220ms ease;
+}
+.sv2-artifact-blueprint:hover {
+  border-color: rgba(14,142,232,0.38);
+}
+.spectra-v2.dark .sv2-artifact-blueprint {
+  background:
+    radial-gradient(120% 100% at 50% 0%, rgba(14,142,232,0.10), transparent 60%),
+    linear-gradient(180deg, rgba(19,22,28,0.55), rgba(13,15,20,0.35));
+}

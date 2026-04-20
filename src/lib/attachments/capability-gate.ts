@@ -1,5 +1,5 @@
 import { modelSupportsCapability, pickModelAndFallbacks, type CatalogModelEntry } from "@/lib/model-selection";
-import { MODEL_CONFIG } from "@/lib/model-config";
+import { getCatalogBackedEmergencyModel } from "@/lib/model-config";
 import { canUseInTier } from "@/lib/routing/heuristic";
 
 const LEGACY_VISION_PATTERNS = [
@@ -33,6 +33,7 @@ export function gateCapabilities(params: {
   spendingTier?: "normal" | "expensive_blocked" | "cheap_only" | "free_only";
 }): CapabilityGateResult {
   const modelCatalog = params.modelCatalog ?? [];
+  const selectedMeta = modelCatalog.find((model) => model.modelId === params.selectedModel);
 
   if (!params.requiresVision) {
     return {
@@ -42,7 +43,7 @@ export function gateCapabilities(params: {
     };
   }
 
-  if (isVisionCapable(params.selectedModel, modelCatalog)) {
+  if (selectedMeta ? modelSupportsCapability(selectedMeta, "vision") : isVisionCapable(params.selectedModel, modelCatalog)) {
     return {
       finalModel: params.selectedModel,
       modelSwitched: false,
@@ -91,12 +92,16 @@ export function gateCapabilities(params: {
     };
   }
 
+  const emergencyVisionModel = getCatalogBackedEmergencyModel({
+    catalog: modelCatalog,
+    role: "vision",
+  });
   const defaultPrepassModel = canUseInTier(
-    MODEL_CONFIG.multimodal,
+    emergencyVisionModel,
     params.spendingTier ?? "normal",
     modelCatalog,
   )
-    ? MODEL_CONFIG.multimodal
+    ? emergencyVisionModel
     : undefined;
   if (defaultPrepassModel) {
     return {

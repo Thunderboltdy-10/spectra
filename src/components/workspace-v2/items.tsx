@@ -51,8 +51,11 @@ function GlanceLayer({ item }: { item: V2Item }) {
 }
 
 /* ─── Layer: touch — rich card at working zoom ─── */
-function TouchLayer({ item }: { item: V2Item }) {
+function TouchLayer({ item, onEdit }: { item: V2Item; onEdit?: (patch: Partial<V2Item>) => void }) {
   const meta = KIND_META[item.kind];
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(item.title);
+  useEffect(() => { setDraft(item.title); }, [item.title]);
   return (
     <div className="p-5 h-full flex flex-col">
       {/* Header row */}
@@ -64,12 +67,36 @@ function TouchLayer({ item }: { item: V2Item }) {
           <Icon name={meta.icon} size={13} style={{ color: meta.tone }} />
         </div>
         <div className="flex-1 min-w-0">
-          <div
-            className="font-display text-[21px] leading-[1.15] tracking-[-0.01em]"
-            style={{ color: "var(--ink-100)" }}
-          >
-            {item.title}
-          </div>
+          {editing ? (
+            <input
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.stopPropagation()}
+              onBlur={() => {
+                setEditing(false);
+                const next = draft.trim();
+                if (next && next !== item.title) onEdit?.({ title: next });
+                else setDraft(item.title);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { (e.currentTarget as HTMLInputElement).blur(); }
+                if (e.key === "Escape") { setDraft(item.title); setEditing(false); }
+              }}
+              className="w-full bg-transparent outline-none font-display text-[21px] leading-[1.15] tracking-[-0.01em]"
+              style={{ color: "var(--ink-100)" }}
+            />
+          ) : (
+            <div
+              className="font-display text-[21px] leading-[1.15] tracking-[-0.01em] truncate cursor-text"
+              style={{ color: "var(--ink-100)" }}
+              title="Double-click to rename"
+              onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
+            >
+              {item.title}
+            </div>
+          )}
           <div className="mt-1.5 flex items-center gap-2">
             <div
               className="h-[2px] rounded-full"
@@ -825,7 +852,7 @@ export function ItemCard({
         />
       )}
       {mode === "glance" && <GlanceLayer item={item} />}
-      {mode === "touch" && <TouchLayer item={item} />}
+      {mode === "touch" && <TouchLayer item={item} onEdit={onEdit} />}
       {mode === "bloom" && <BloomBody item={item} onEdit={onEdit} />}
       {bloomed && (
         <div className="absolute top-4 right-4 flex gap-1.5 z-10">

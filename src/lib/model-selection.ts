@@ -63,6 +63,8 @@ export type ModelCapability =
   | "search"
   | "image_generation";
 
+export const AUTO_ROUTER_FRESHNESS_MAX_DAYS = 90;
+
 export function inferRoutingLane(params: {
   mode?: StudyMode | string;
   requiredCapabilities?: ModelCapability[];
@@ -232,7 +234,7 @@ function recencyScore(model: CatalogModelEntry) {
   if (ageDays <= 21) return 0.98;
   if (ageDays <= 45) return 0.82;
   if (ageDays <= 75) return 0.58;
-  if (ageDays <= 120) return 0.24;
+  if (ageDays <= AUTO_ROUTER_FRESHNESS_MAX_DAYS) return 0.24;
   return 0.02;
 }
 
@@ -250,6 +252,37 @@ function parameterSizeBillions(model: CatalogModelEntry) {
   const value = Number.parseFloat(match[1]);
   if (!Number.isFinite(value) || value <= 0) return undefined;
   return value;
+}
+
+function providerQualityPreferenceScore(model: CatalogModelEntry) {
+  const provider = (model.provider ?? model.modelId.split("/")[0] ?? "").toLowerCase();
+  const blob = `${textBlob(model)} ${modalityBlob(model)}`.toLowerCase();
+
+  if (/\b(audio|speech|tts|stt|transcrib|whisper|voice|music|video)\b/.test(blob) && !isTextChatCapableModel(model)) {
+    return -0.35;
+  }
+
+  if (/^(minimax|z-ai|thudm|moonshotai|deepseek|qwen|mistralai|mistral|arcee-ai|arcee|stepfun|stepup|inception|01-ai|baai)$/.test(provider)) {
+    return 0.16;
+  }
+  if (/^(google|anthropic|openai|meta-llama|meta|nousresearch)$/.test(provider)) {
+    return 0.08;
+  }
+  if (/^(cohere|nvidia|x-ai|amazon|microsoft|perplexity)$/.test(provider)) {
+    return 0.03;
+  }
+  return -0.02;
+}
+
+function lowEndOpenSourcePenalty(model: CatalogModelEntry) {
+  const sizeB = parameterSizeBillions(model);
+  if (typeof sizeB === "number" && sizeB < 24) return 0.18;
+  if (typeof sizeB === "number" && sizeB < 40) return 0.08;
+
+  const blob = `${model.modelId} ${model.name ?? ""}`.toLowerCase();
+  if (/\b(3b|4b|7b|8b|9b|12b|14b)\b/.test(blob)) return 0.14;
+  if (/\b(16b|20b|22b)\b/.test(blob)) return 0.08;
+  return 0;
 }
 
 function isVideoGenerationModel(model: CatalogModelEntry) {
@@ -423,9 +456,8 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
     const imageGenerationModel = isImageGenerationModel(model);
     const textChatCapable = isTextChatCapableModel(model);
     const modelAge = modelAgeDays(model);
-    const staleModel = typeof modelAge === "number" && modelAge > 120;
+    const staleModel = typeof modelAge === "number" && modelAge > AUTO_ROUTER_FRESHNESS_MAX_DAYS;
     if (!params.allowStaleModels && staleModel) continue;
-    if (!params.allowStaleModels && typeof modelAge === "number" && modelAge > 120) continue;
     if (isVideoGenerationModel(model)) continue;
     if (!imageTurn && imageGenerationModel && !textChatCapable) continue;
     if (!imageGenerationModel && !textChatCapable) continue;
@@ -486,7 +518,7 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
       if (freeLike) score += 0.12;
     }
     if (params.anchorModelId && params.anchorModelId === model.modelId) {
-      score += params.preserveAnchor === false ? 0.03 : (params.anchorModelBias ?? 0.12);
+      score += params.preserveAnchor === false ? 0.03 : (params.anchorModelBias ?? 0.2);
       reasons.push("anchor-model");
     }
 
@@ -505,6 +537,18 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
     if (params.tier === "normal" && !freeLike) {
       score += 0.05;
       reasons.push("paid-option-allowed");
+    }
+
+    const providerQuality = providerQualityPreferenceScore(model);
+    if (providerQuality !== 0) {
+      score += providerQuality;
+      reasons.push(providerQuality > 0 ? "provider-quality-bias" : "provider-mismatch-penalty");
+    }
+
+    const lowEndPenalty = lowEndOpenSourcePenalty(model);
+    if (lowEndPenalty > 0 && params.tier === "normal" && complexTurn) {
+      score -= lowEndPenalty;
+      reasons.push("small-open-model-penalty");
     }
 
     if (complexTurn && params.tier === "normal") {

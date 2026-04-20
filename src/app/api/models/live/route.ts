@@ -2,7 +2,6 @@ import { requireActor } from "@/lib/auth-server";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 import { ok } from "@/lib/http";
 import { fetchOpenRouterModels } from "@/lib/openrouter";
-import { DEFAULT_MANUAL_MODEL_COST_CAP_PER_MILLION } from "@/lib/model-policy";
 
 type LiveModel = {
   id: string;
@@ -52,8 +51,6 @@ function shouldExclude(modelId: string, modality: string, promptCost?: number, c
   if (audioOnly || speechOnly) return true;
   const freeLike = modelId.includes(":free") || ((promptCost ?? 0) === 0 && (completionCost ?? 0) === 0);
   if (!freeLike && (typeof promptCost !== "number" || typeof completionCost !== "number")) return true;
-  if ((promptCost ?? 0) > DEFAULT_MANUAL_MODEL_COST_CAP_PER_MILLION) return true;
-  if ((completionCost ?? 0) > DEFAULT_MANUAL_MODEL_COST_CAP_PER_MILLION) return true;
   return false;
 }
 

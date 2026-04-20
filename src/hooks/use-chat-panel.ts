@@ -17,6 +17,7 @@ type UseChatPanelParams = {
   usePersonalResources?: boolean;
   title?: string;
   scopeLevel?: "global" | "workspace" | "artifact";
+  manualModel?: string;
 };
 
 function toPanelMessages(messages: Array<Record<string, unknown>>): PanelChatMessage[] {
@@ -38,6 +39,7 @@ function toPanelMessages(messages: Array<Record<string, unknown>>): PanelChatMes
             }))
             .filter((citation) => citation.url.length > 0)
         : undefined,
+      routeTrace: message.routeTrace as PanelChatMessage["routeTrace"],
       createdAt: typeof message.createdAt === "number" ? message.createdAt : Date.now(),
     }));
 }
@@ -108,6 +110,7 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
           mode: params.mode ?? "tutor",
           thinkingLevel: params.thinkingLevel ?? "low",
           routerMode: params.routerMode ?? "auto",
+        manualModel: params.manualModel,
           usePersonalResources: params.usePersonalResources ?? true,
           title: params.title,
         }),
@@ -137,6 +140,7 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
     params.artifactId,
     params.agentId,
     params.mode,
+    params.manualModel,
     params.routerMode,
     params.thinkingLevel,
     params.threadType,
@@ -196,6 +200,7 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
         mode: params.mode ?? "tutor",
         thinkingLevel: params.thinkingLevel ?? "low",
         routerMode: params.routerMode ?? "auto",
+        manualModel: params.manualModel,
         agentId: params.agentId,
         workstreamId: params.workstreamId,
         artifactId: params.artifactId,
@@ -236,6 +241,7 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
     params.agentId,
     params.artifactId,
     params.mode,
+    params.manualModel,
     params.routerMode,
     params.scopeLevel,
     params.thinkingLevel,

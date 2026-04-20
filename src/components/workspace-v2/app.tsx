@@ -25,17 +25,17 @@ import {
   FloatingWidget,
   ThreadWidget,
   WidgetBloom,
-  WidgetChipRail,
   useTimerTick,
   type FloatingWidgetData,
   type WidgetKind,
 } from "./widgets";
-import { Icon } from "./icons";
+import { Icon, type IconName } from "./icons";
 import {
   buildV2Graph,
   KIND_META,
   QUICK_STARTS,
   TIERS,
+  V2_LAYOUT,
   ZOOM_MAX,
   ZOOM_MIN,
   type V2Item,
@@ -45,11 +45,11 @@ import {
 import {
   createCommandResult,
   createWorkspaceWidget,
-  removeWorkspaceWidget,
   updateCommandResult,
   useWorkspaceData,
   useWorkspacePageData,
   updateWorkspaceWidget,
+  updateWorkspace,
 } from "@/hooks/use-workspace-data";
 import {
   notifyWorkspaceContentMutated,
@@ -108,6 +108,8 @@ function FocusPaneContent({ item, onEdit }: { item: V2Item; onEdit?: (patch: { t
 
 /* ─── Demo data (fallback when backend returns no workspaces) ───────── */
 
+const DEMO_NOW = 1_760_000_000_000;
+
 const DEMO_WORKSPACES: WorkspaceData[] = [
   {
     id: "demo-bio",
@@ -115,13 +117,13 @@ const DEMO_WORKSPACES: WorkspaceData[] = [
     emoji: "🧬",
     status: "active",
     itemCount: 5,
-    lastActivity: Date.now() - 3_600_000,
+    lastActivity: DEMO_NOW - 3_600_000,
     items: [
-      { id: "b1", workspaceId: "demo-bio", title: "Glycolysis pathway", preview: "10 steps from glucose to pyruvate — ATP yields and regulation.", itemType: "note", status: "active", meta: "2h ago", updatedAt: Date.now() - 7_200_000 },
-      { id: "b2", workspaceId: "demo-bio", title: "Midterm review flashcards", preview: "45 cards across cell bio, genetics, metabolism.", itemType: "flashcard_deck", status: "active", meta: "yesterday", updatedAt: Date.now() - 86_400_000 },
-      { id: "b3", workspaceId: "demo-bio", title: "Krebs cycle diagram", preview: "Mermaid-style diagram of citric acid cycle intermediates.", itemType: "visual", status: "active", meta: "3d ago", updatedAt: Date.now() - 3 * 86_400_000 },
-      { id: "b4", workspaceId: "demo-bio", title: "Practice problem set 3", preview: "Stoichiometry & enzyme kinetics — 12 problems.", itemType: "export", status: "active", meta: "1d ago", updatedAt: Date.now() - 86_400_000 },
-      { id: "b5", workspaceId: "demo-bio", title: "Midterm · Thu 9am", preview: "Chapters 4-9. Proctored, closed notes.", itemType: "planner", status: "active", meta: "due Thu", updatedAt: Date.now() - 1_800_000 },
+      { id: "b1", workspaceId: "demo-bio", title: "Glycolysis pathway", preview: "10 steps from glucose to pyruvate — ATP yields and regulation.", itemType: "note", status: "active", meta: "2h ago", updatedAt: DEMO_NOW - 7_200_000 },
+      { id: "b2", workspaceId: "demo-bio", title: "Midterm review flashcards", preview: "45 cards across cell bio, genetics, metabolism.", itemType: "flashcard_deck", status: "active", meta: "yesterday", updatedAt: DEMO_NOW - 86_400_000 },
+      { id: "b3", workspaceId: "demo-bio", title: "Krebs cycle diagram", preview: "Mermaid-style diagram of citric acid cycle intermediates.", itemType: "visual", status: "active", meta: "3d ago", updatedAt: DEMO_NOW - 3 * 86_400_000 },
+      { id: "b4", workspaceId: "demo-bio", title: "Practice problem set 3", preview: "Stoichiometry & enzyme kinetics — 12 problems.", itemType: "export", status: "active", meta: "1d ago", updatedAt: DEMO_NOW - 86_400_000 },
+      { id: "b5", workspaceId: "demo-bio", title: "Midterm · Thu 9am", preview: "Chapters 4-9. Proctored, closed notes.", itemType: "planner", status: "active", meta: "due Thu", updatedAt: DEMO_NOW - 1_800_000 },
     ],
   },
   {
@@ -130,12 +132,12 @@ const DEMO_WORKSPACES: WorkspaceData[] = [
     emoji: "📖",
     status: "active",
     itemCount: 4,
-    lastActivity: Date.now() - 2 * 3_600_000,
+    lastActivity: DEMO_NOW - 2 * 3_600_000,
     items: [
-      { id: "e1", workspaceId: "demo-eng", title: "Gatsby essay draft", preview: "Distance as unavailability — thesis strong, §3 transition weak.", itemType: "note", status: "active", meta: "1h ago", updatedAt: Date.now() - 3_600_000 },
-      { id: "e2", workspaceId: "demo-eng", title: "Chapter 5 passage analysis", preview: "Reunion scene — close reading on restoration and artifice.", itemType: "export", status: "active", meta: "2d ago", updatedAt: Date.now() - 2 * 86_400_000 },
-      { id: "e3", workspaceId: "demo-eng", title: "Counter-argument thread", preview: "Q: Is Nick a reliable narrator?", itemType: "thread", status: "active", meta: "4h ago", updatedAt: Date.now() - 4 * 3_600_000 },
-      { id: "e4", workspaceId: "demo-eng", title: "Essay due · Fri", preview: "1500 words, MLA, one outside source.", itemType: "planner", status: "active", meta: "due Fri", updatedAt: Date.now() - 7_200_000 },
+      { id: "e1", workspaceId: "demo-eng", title: "Gatsby essay draft", preview: "Distance as unavailability — thesis strong, §3 transition weak.", itemType: "note", status: "active", meta: "1h ago", updatedAt: DEMO_NOW - 3_600_000 },
+      { id: "e2", workspaceId: "demo-eng", title: "Chapter 5 passage analysis", preview: "Reunion scene — close reading on restoration and artifice.", itemType: "export", status: "active", meta: "2d ago", updatedAt: DEMO_NOW - 2 * 86_400_000 },
+      { id: "e3", workspaceId: "demo-eng", title: "Counter-argument thread", preview: "Q: Is Nick a reliable narrator?", itemType: "thread", status: "active", meta: "4h ago", updatedAt: DEMO_NOW - 4 * 3_600_000 },
+      { id: "e4", workspaceId: "demo-eng", title: "Essay due · Fri", preview: "1500 words, MLA, one outside source.", itemType: "planner", status: "active", meta: "due Fri", updatedAt: DEMO_NOW - 7_200_000 },
     ],
   },
   {
@@ -144,17 +146,296 @@ const DEMO_WORKSPACES: WorkspaceData[] = [
     emoji: "∫",
     status: "active",
     itemCount: 4,
-    lastActivity: Date.now() - 5 * 3_600_000,
+    lastActivity: DEMO_NOW - 5 * 3_600_000,
     items: [
-      { id: "c1", workspaceId: "demo-calc", title: "Pset 7 — IBP & trig sub", preview: "Problems 1–8. Stuck on Q4 (∫ arctan x dx).", itemType: "export", status: "active", meta: "5h ago", updatedAt: Date.now() - 5 * 3_600_000 },
-      { id: "c2", workspaceId: "demo-calc", title: "Integration techniques notes", preview: "Substitution, IBP, partial fractions, trig subs.", itemType: "note", status: "active", meta: "today", updatedAt: Date.now() - 1_800_000 },
-      { id: "c3", workspaceId: "demo-calc", title: "Weekly review flashcards", preview: "Limit laws, derivative rules, integration shortcuts.", itemType: "flashcard_deck", status: "active", meta: "2d ago", updatedAt: Date.now() - 2 * 86_400_000 },
-      { id: "c4", workspaceId: "demo-calc", title: "Spanish subjunctive deck", preview: "20 cards — dudo que, es posible que, ojalá…", itemType: "flashcard_deck", status: "active", meta: "3d ago", updatedAt: Date.now() - 3 * 86_400_000 },
+      { id: "c1", workspaceId: "demo-calc", title: "Pset 7 — IBP & trig sub", preview: "Problems 1–8. Stuck on Q4 (∫ arctan x dx).", itemType: "export", status: "active", meta: "5h ago", updatedAt: DEMO_NOW - 5 * 3_600_000 },
+      { id: "c2", workspaceId: "demo-calc", title: "Integration techniques notes", preview: "Substitution, IBP, partial fractions, trig subs.", itemType: "note", status: "active", meta: "today", updatedAt: DEMO_NOW - 1_800_000 },
+      { id: "c3", workspaceId: "demo-calc", title: "Weekly review flashcards", preview: "Limit laws, derivative rules, integration shortcuts.", itemType: "flashcard_deck", status: "active", meta: "2d ago", updatedAt: DEMO_NOW - 2 * 86_400_000 },
+      { id: "c4", workspaceId: "demo-calc", title: "Spanish subjunctive deck", preview: "20 cards — dudo que, es posible que, ojalá…", itemType: "flashcard_deck", status: "active", meta: "3d ago", updatedAt: DEMO_NOW - 3 * 86_400_000 },
     ],
   },
 ];
 
 const WORLD_SIZE = { w: 6000, h: 4400 };
+
+type LayoutSection = {
+  key: string;
+  label: string;
+  color: string;
+  items: V2Item[];
+};
+
+type PlacedSection = LayoutSection & { y: number; h: number; x: number; w: number };
+
+type TerritoryLayout = {
+  positions: Record<string, { x: number; y: number }>;
+  sections: PlacedSection[];
+  minX: number;
+  maxX: number;
+  contentBottom: number;
+};
+
+type TopicSignal = {
+  topic?: string;
+  itemCount?: number;
+  plannerCount?: number;
+  chatCount?: number;
+  resultCount?: number;
+  latestTimestamp?: number;
+  overdueCount?: number;
+  unresolvedCount?: number;
+  state?: string;
+};
+
+const TOPIC_SECTION_TONES = ["#20b8b2", "#0e8ee8", "#b67616", "#148f5d", "#e05137", "#6b5f52"] as const;
+
+function normalizeTopicLabel(value: string): string {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function normalizeTopicKey(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function itemUpdatedAt(item: V2Item): number {
+  if (typeof item.meta?.updatedAt === "number") return item.meta.updatedAt;
+  return 0;
+}
+
+/* ─── Stopwords + tokenizer for "by topic" TF-IDF ─── */
+const TOPIC_STOPWORDS = new Set([
+  // base
+  "this", "that", "with", "from", "have", "will", "been", "what", "when", "where", "which",
+  "your", "more", "also", "some", "they", "their", "about", "these", "would", "could",
+  "should", "there", "other", "after", "before", "during", "study", "notes", "review",
+  "flashcard", "flashcards", "cards", "deck", "items", "item", "draft", "practice",
+  // expanded per spec
+  "make", "using", "based", "through", "across", "within", "every", "first", "second",
+  "third", "great", "better", "still", "even", "just", "much", "many", "into", "onto",
+  "over", "under", "because", "while", "then", "than", "only", "really", "however",
+  "though",
+]);
+
+function tokenizeTopic(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 4 && !TOPIC_STOPWORDS.has(w) && Number.isNaN(Number(w)));
+}
+
+function foldPlural(token: string, allTokens: Set<string>): string {
+  if (token.length > 3 && token.endsWith("s") && !token.endsWith("ss")) {
+    const singular = token.slice(0, -1);
+    if (allTokens.has(singular)) return singular;
+  }
+  return token;
+}
+
+function computeSemanticTopicSections(items: V2Item[], topicSignals?: TopicSignal[] | null): LayoutSection[] {
+  // ── 1. Backend topicCluster signal (primary) ──
+  const itemsByCluster = new Map<string, V2Item[]>();
+  items.forEach((item) => {
+    const cluster = typeof item.meta?.topicCluster === "string" ? item.meta.topicCluster : "";
+    const key = cluster ? normalizeTopicKey(cluster) : "";
+    if (!key) return;
+    const bucket = itemsByCluster.get(key) ?? [];
+    bucket.push(item);
+    itemsByCluster.set(key, bucket);
+  });
+
+  if (itemsByCluster.size > 0) {
+    const normalizedSignals = (topicSignals ?? [])
+      .filter((signal): signal is TopicSignal & { topic: string } => typeof signal?.topic === "string" && signal.topic.trim().length > 0)
+      .map((signal) => ({ ...signal, topic: normalizeTopicKey(signal.topic) }));
+    const signalByTopic = new Map(normalizedSignals.map((signal) => [signal.topic, signal]));
+    const keys = Array.from(itemsByCluster.keys());
+    const sections = keys
+      .map((topic, index) => {
+        const sectionItems = [...(itemsByCluster.get(topic) ?? [])].sort((a, b) => itemUpdatedAt(b) - itemUpdatedAt(a) || a.title.localeCompare(b.title));
+        const signal = signalByTopic.get(topic);
+        const score =
+          sectionItems.length * 5 +
+          (signal?.itemCount ?? 0) * 4 +
+          (signal?.plannerCount ?? 0) * 3 +
+          (signal?.chatCount ?? 0) * 2 +
+          (signal?.resultCount ?? 0) * 2 +
+          (signal?.overdueCount ?? 0) * 3 +
+          (signal?.unresolvedCount ?? 0) * 2;
+        return {
+          key: topic,
+          label: normalizeTopicLabel(signal?.topic ?? topic),
+          color: TOPIC_SECTION_TONES[index % TOPIC_SECTION_TONES.length],
+          items: sectionItems,
+          score,
+          latestTimestamp: Math.max(signal?.latestTimestamp ?? 0, ...sectionItems.map(itemUpdatedAt)),
+        };
+      })
+      .filter((section) => section.items.length > 0)
+      .sort((a, b) => b.score - a.score || b.latestTimestamp - a.latestTimestamp || a.label.localeCompare(b.label))
+      .map(({ key, label, color, items: sectionItems }) => ({ key, label, color, items: sectionItems }));
+    if (sections.length > 0) return sections;
+  }
+
+  // ── 2. Low-count fallback: just group by kind ──
+  if (items.length < 4) {
+    const buckets = new Map<string, V2Item[]>();
+    items.forEach((item) => {
+      const label = KIND_META[item.kind]?.label ?? normalizeTopicLabel(item.kind);
+      const bucket = buckets.get(label) ?? [];
+      bucket.push(item);
+      buckets.set(label, bucket);
+    });
+    return Array.from(buckets.entries())
+      .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
+      .map(([label, sectionItems], index) => ({
+        key: `kind-${label.toLowerCase()}`,
+        label,
+        color: TOPIC_SECTION_TONES[index % TOPIC_SECTION_TONES.length],
+        items: [...sectionItems].sort((a, b) => itemUpdatedAt(b) - itemUpdatedAt(a) || a.title.localeCompare(b.title)),
+      }));
+  }
+
+  // ── 3. TF-IDF-like scoring over title/preview/body ──
+  // Collect global token universe for plural folding.
+  const globalTokens = new Set<string>();
+  const perItemTokens: Array<{ item: V2Item; unigrams: Map<string, number>; bigrams: Map<string, number>; surface: Map<string, string> }> = [];
+  items.forEach((item) => {
+    const sources: Array<{ text: string; weight: number }> = [
+      { text: item.title ?? "", weight: 2.0 },
+      { text: item.preview ?? "", weight: 1.0 },
+      { text: item.body ?? "", weight: 0.5 },
+    ];
+    const unigrams = new Map<string, number>();
+    const bigrams = new Map<string, number>();
+    const surface = new Map<string, string>();
+    sources.forEach(({ text, weight }) => {
+      if (!text) return;
+      const rawWords = text.split(/\s+/).filter(Boolean);
+      const tokens = tokenizeTopic(text);
+      tokens.forEach((t) => globalTokens.add(t));
+      // Track surface form from the title only (weight 2.0 sources first).
+      if (weight >= 2.0) {
+        rawWords.forEach((raw) => {
+          const clean = raw.replace(/[^\p{L}\p{N}]/gu, "").toLowerCase();
+          if (clean && !surface.has(clean)) surface.set(clean, raw.replace(/[^\p{L}\p{N}]/gu, ""));
+        });
+      }
+      tokens.forEach((t) => unigrams.set(t, (unigrams.get(t) ?? 0) + weight));
+      for (let i = 0; i < tokens.length - 1; i += 1) {
+        const bg = `${tokens[i]} ${tokens[i + 1]}`;
+        bigrams.set(bg, (bigrams.get(bg) ?? 0) + weight);
+      }
+    });
+    perItemTokens.push({ item, unigrams, bigrams, surface });
+  });
+
+  // Fold plurals: merge counts into singular.
+  const foldedPerItem = perItemTokens.map(({ item, unigrams, bigrams, surface }) => {
+    const folded = new Map<string, number>();
+    unigrams.forEach((count, token) => {
+      const key = foldPlural(token, globalTokens);
+      folded.set(key, (folded.get(key) ?? 0) + count);
+    });
+    return { item, unigrams: folded, bigrams, surface };
+  });
+
+  // Per-term: score = sum(weight × count) across items that contain it; itemSet.
+  type TermStat = { term: string; score: number; itemIds: Set<string> };
+  const termStats = new Map<string, TermStat>();
+  const recordTerm = (term: string, score: number, itemId: string) => {
+    const entry = termStats.get(term) ?? { term, score: 0, itemIds: new Set<string>() };
+    entry.score += score;
+    entry.itemIds.add(itemId);
+    termStats.set(term, entry);
+  };
+  foldedPerItem.forEach(({ item, unigrams, bigrams }) => {
+    unigrams.forEach((score, term) => recordTerm(term, score, item.id));
+    bigrams.forEach((score, term) => recordTerm(term, score, item.id));
+  });
+
+  // Filter: each term must have ≥ 2 items.
+  const candidates = Array.from(termStats.values())
+    .filter((t) => t.itemIds.size >= 2)
+    .sort((a, b) => b.score - a.score || b.itemIds.size - a.itemIds.size || a.term.localeCompare(b.term))
+    .slice(0, 12);
+
+  // Merge near-duplicate topics (Jaccard ≥ 0.6): keep higher-scoring one.
+  const kept: TermStat[] = [];
+  candidates.forEach((cand) => {
+    let merged = false;
+    for (const existing of kept) {
+      const intersection = new Set(Array.from(cand.itemIds).filter((id) => existing.itemIds.has(id)));
+      const union = new Set([...cand.itemIds, ...existing.itemIds]);
+      const jaccard = intersection.size / union.size;
+      if (jaccard >= 0.6) {
+        // existing has higher/equal score (came first); discard cand.
+        merged = true;
+        break;
+      }
+    }
+    if (!merged) kept.push(cand);
+  });
+
+  // Greedy-assign items: terms claim items not yet in a larger section.
+  const claimed = new Set<string>();
+  const assigned: Array<{ term: TermStat; items: V2Item[] }> = [];
+  kept.forEach((term) => {
+    const available = items.filter((item) => term.itemIds.has(item.id) && !claimed.has(item.id));
+    if (available.length < 2) return;
+    available.forEach((item) => claimed.add(item.id));
+    assigned.push({ term, items: available });
+  });
+
+  // Cap at 6 sections; sort by (count desc, score desc, label asc).
+  // Build surface labels — most-frequent title-cased form seen across section items.
+  const surfaceByItemId = new Map(foldedPerItem.map(({ item, surface }) => [item.id, surface]));
+  const labelForTerm = (term: string, sectionItems: V2Item[]): string => {
+    // For bigrams, join two surfaces; for unigrams, most-common title-surface.
+    const parts = term.split(" ");
+    const surfaces = parts.map((part) => {
+      const counts = new Map<string, number>();
+      sectionItems.forEach((it) => {
+        const map = surfaceByItemId.get(it.id);
+        const s = map?.get(part);
+        if (s) counts.set(s, (counts.get(s) ?? 0) + 1);
+      });
+      const best = Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0];
+      return best ?? part;
+    });
+    return normalizeTopicLabel(surfaces.join(" "));
+  };
+
+  const sections: LayoutSection[] = assigned
+    .sort((a, b) => b.items.length - a.items.length || b.term.score - a.term.score || a.term.term.localeCompare(b.term.term))
+    .slice(0, 6)
+    .map(({ term, items: sectionItems }, index) => ({
+      key: `tfidf-${term.term.replace(/\s+/g, "-")}`,
+      label: labelForTerm(term.term, sectionItems),
+      color: TOPIC_SECTION_TONES[index % TOPIC_SECTION_TONES.length],
+      items: [...sectionItems].sort((a, b) => itemUpdatedAt(b) - itemUpdatedAt(a) || a.title.localeCompare(b.title)),
+    }));
+
+  // Trailing "Other" section for unclaimed items.
+  const leftovers = items.filter((item) => !claimed.has(item.id));
+  if (leftovers.length > 0) {
+    sections.push({
+      key: "other",
+      label: "Other",
+      color: "var(--ink-300)",
+      items: [...leftovers].sort((a, b) => itemUpdatedAt(b) - itemUpdatedAt(a) || a.title.localeCompare(b.title)),
+    });
+  }
+
+  return sections;
+}
 
 export default function WorkspaceV2() {
   /* ─── Theme ─── */
@@ -178,7 +459,6 @@ export default function WorkspaceV2() {
 
   /* ─── Inspector (single-click opens artifact/thread) ─── */
   const [openInspectorId, setOpenInspectorId] = useState<string | null>(null);
-  const [inspectorPos, setInspectorPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
   /* ─── Focus set (double-click builds set; Space opens focused view) ─── */
   const [buildingFocusSet, setBuildingFocusSet] = useState(false);
@@ -204,49 +484,61 @@ export default function WorkspaceV2() {
   const [resultIsland, setResultIsland] = useState<ResultIsland>(null);
 
   /* ─── Widgets — positions from localStorage (loaded after mount to avoid SSR mismatch) ─── */
-  const WIDGET_LS_KEY = "spectra-v2:widget-positions";
-  const loadWidgetPositions = (): Record<string, { x: number; y: number; collapsed: boolean }> => {
+  const WIDGET_LS_KEY = "spectra-v2:widget-layout";
+  type PersistedWidget = { x: number; y: number; collapsed: boolean; hidden?: boolean; collapseAnchor?: "left" | "right" };
+  const loadWidgetLayout = (): Record<string, PersistedWidget> => {
     if (typeof window === "undefined") return {};
     try {
       const raw = localStorage.getItem(WIDGET_LS_KEY);
       if (!raw) return {};
-      const parsed: Record<string, { x?: number; y?: number; collapsed?: boolean }> = JSON.parse(raw);
-      const result: Record<string, { x: number; y: number; collapsed: boolean }> = {};
+      const parsed: Record<string, { x?: number; y?: number; collapsed?: boolean; hidden?: boolean; collapseAnchor?: string }> = JSON.parse(raw);
+      const result: Record<string, PersistedWidget> = {};
       for (const [k, v] of Object.entries(parsed)) {
         if (typeof v?.x === "number" && typeof v?.y === "number") {
-          result[k] = { x: v.x, y: v.y, collapsed: v.collapsed ?? false };
+          const anchor = v.collapseAnchor === "left" || v.collapseAnchor === "right" ? v.collapseAnchor : undefined;
+          result[k] = { x: v.x, y: v.y, collapsed: v.collapsed ?? false, hidden: v.hidden ?? false, collapseAnchor: anchor };
         }
       }
       return result;
     } catch { return {}; }
   };
-  const saveWidgetPositions = (ws: FloatingWidgetData[]) => {
+  const saveWidgetLayout = (ws: FloatingWidgetData[]) => {
     if (typeof window === "undefined") return;
     try {
-      const positions: Record<string, { x: number; y: number; collapsed: boolean }> = {};
-      ws.forEach((w) => { positions[w.id] = { x: w.x, y: w.y, collapsed: w.collapsed ?? false }; });
+      const positions: Record<string, PersistedWidget> = {};
+      ws.forEach((w) => {
+        positions[w.id] = {
+          x: w.x,
+          y: w.y,
+          collapsed: w.collapsed ?? false,
+          hidden: Boolean((w.state as Record<string, unknown>).hidden),
+          collapseAnchor: w.collapseAnchor,
+        };
+      });
       localStorage.setItem(WIDGET_LS_KEY, JSON.stringify(positions));
     } catch { /* ignore */ }
   };
-  // Default positions: spread down the left edge, expanded
   const WIDGET_DEFAULTS: FloatingWidgetData[] = [
-    { id: "w-timer",   kind: "timer",   x: 16, y: 72,  w: 288, h: 132, collapsed: false, state: { secs: 25 * 60, running: false, totalSecs: 25 * 60 } },
-    { id: "w-planner", kind: "planner", x: 16, y: 224, w: 300, h: 278, collapsed: false, state: {} },
-    { id: "w-today",   kind: "today",   x: 16, y: 522, w: 296, h: 230, collapsed: false, state: {} },
+    { id: "w-timer",     kind: "timer",     x: 16, y: 84,  w: 288, h: 132, collapsed: false, state: { secs: 25 * 60, running: false, totalSecs: 25 * 60 } },
+    { id: "w-today",     kind: "today",     x: 16, y: 238, w: 296, h: 230, collapsed: false, state: {} },
+    { id: "w-planner",   kind: "planner",   x: 16, y: 492, w: 300, h: 278, collapsed: false, state: {} },
+    { id: "w-timetable", kind: "timetable", x: 16, y: 794, w: 308, h: 248, collapsed: false, state: {} },
+    { id: "w-scratch",   kind: "scratch",   x: 0, y: 120, w: 304, h: 232, collapsed: false, state: {} },
+    { id: "w-artifact",  kind: "artifact",  x: 0, y: 376, w: 380, h: 300, collapsed: false, state: {} },
   ];
   // Init with plain defaults (no localStorage read here → avoids SSR hydration mismatch)
   const [widgets, setWidgets] = useState<FloatingWidgetData[]>(WIDGET_DEFAULTS);
 
   // After mount, load saved positions from localStorage
   useEffect(() => {
-    const saved = loadWidgetPositions();
+    const saved = loadWidgetLayout();
     if (Object.keys(saved).length > 0) {
       setWidgets((prev) => prev.map((w) => {
         const p = saved[w.id];
-        return p ? { ...w, x: p.x, y: p.y, collapsed: p.collapsed } : w;
+        return p ? { ...w, x: p.x, y: p.y, collapsed: p.collapsed, collapseAnchor: p.collapseAnchor, state: { ...w.state, hidden: p.hidden ?? false } } : w;
       }));
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [widgetsHidden, setWidgetsHidden] = useState(false);
   const [widgetStateRevision, setWidgetStateRevision] = useState(0);
@@ -290,16 +582,23 @@ export default function WorkspaceV2() {
     | null
   >(null);
 
-  /* ─── Viewport size tracking ─── */
-  const [vpSize, setVpSize] = useState<{ w: number; h: number }>({
-    w: typeof window !== "undefined" ? window.innerWidth : 1400,
-    h: typeof window !== "undefined" ? window.innerHeight : 900,
-  });
+  /* ─── Viewport size tracking (SSR-safe; populated after mount to avoid hydration drift) ─── */
+  const [vpSize, setVpSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  /** Tracks whether the client has mounted. Server and first-client paints must match, so
+   *  anything that depends on viewport-derived values is disabled until `mounted === true`. */
+  const [mounted, setMounted] = useState(false);
   useEffect(() => {
+    setMounted(true);
+    setVpSize({ w: window.innerWidth, h: window.innerHeight });
     const onR = () => setVpSize({ w: window.innerWidth, h: window.innerHeight });
     window.addEventListener("resize", onR);
     return () => window.removeEventListener("resize", onR);
   }, []);
+
+  const clampWidgetPosition = useCallback((x: number, y: number, width: number, height: number) => ({
+    x: Math.max(16, Math.min(vpSize.w - width - 16, x)),
+    y: Math.max(84, Math.min(vpSize.h - height - 20, y)),
+  }), [vpSize.h, vpSize.w]);
 
   /* ─── Preferences (best-effort) ─── */
   useEffect(() => {
@@ -318,12 +617,12 @@ export default function WorkspaceV2() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [setViewMode]);
 
   /* ─── Committed workspace from camera center ─── */
   const [committedWorkspaceId, setCommittedWorkspaceId] = useState<string | null>(null);
   const { workspaces: live, isLive, refresh } = useWorkspaceData(committedWorkspaceId);
-  const { widgets: liveWidgets } = useWorkspacePageData(committedWorkspaceId);
+  const { widgets: liveWidgets, signals: activeWorkspaceSignals } = useWorkspacePageData(committedWorkspaceId);
 
   useEffect(() => {
     if (!isLive || !committedWorkspaceId) return;
@@ -336,7 +635,7 @@ export default function WorkspaceV2() {
       w: widget.w,
       h: widget.h,
       collapsed: widget.collapsed,
-      state: widget.state ?? {},
+      state: { ...(widget.state ?? {}), hidden: false },
     })));
   }, [isLive, committedWorkspaceId, liveWidgets]);
 
@@ -363,102 +662,244 @@ export default function WorkspaceV2() {
   const territories = graph.territories;
   const baseItems = graph.items;
 
+  const topicSignalsByWorkspace = useMemo(() => {
+    const map = new Map<string, TopicSignal[]>();
+    if (committedWorkspaceId && activeWorkspaceSignals?.topicSignals?.length) {
+      map.set(`terr-${committedWorkspaceId}`, activeWorkspaceSignals.topicSignals);
+    }
+    return map;
+  }, [activeWorkspaceSignals, committedWorkspaceId]);
+
+  const timelineBucketsFor = useCallback((items: V2Item[]) => {
+    const now = Date.now();
+    const buckets: { label: string; until: number; items: V2Item[] }[] = [
+      { label: "Today", until: now - 86_400_000, items: [] },
+      { label: "Yesterday", until: now - 2 * 86_400_000, items: [] },
+      { label: "Last week", until: now - 7 * 86_400_000, items: [] },
+      { label: "Older", until: 0, items: [] },
+    ];
+    items.forEach((it) => {
+      const ts = (it.meta?.updatedAt as number) ?? 0;
+      const bucket = buckets.find((candidate) => ts > candidate.until) ?? buckets[buckets.length - 1];
+      bucket.items.push(it);
+    });
+    buckets.forEach((bucket) => bucket.items.sort((a, z) => ((z.meta?.updatedAt as number) ?? 0) - ((a.meta?.updatedAt as number) ?? 0)));
+    return buckets.filter((bucket) => bucket.items.length > 0);
+  }, []);
+
+  const buildTerritoryLayout = useCallback((territory: V2Territory, wsItems: V2Item[]): TerritoryLayout => {
+    const positions: Record<string, { x: number; y: number }> = {};
+    const sections: Array<LayoutSection & { y: number; h: number; x: number; w: number }> = [];
+    const {
+      itemW: ITEM_W,
+      itemH: ITEM_H,
+      gapX: GAP_X,
+      gapY: GAP_Y,
+      sectionGap: GROUP_GAP_Y,
+      sectionGapX: GROUP_GAP_X,
+      sidePad,
+    } = V2_LAYOUT;
+    const usableW = Math.max(ITEM_W, territory.w - sidePad * 2);
+    const maxCols = Math.max(1, Math.min(V2_LAYOUT.maxCols, Math.floor((usableW + GAP_X) / (ITEM_W + GAP_X))));
+    const leftBound = territory.cx - territory.w / 2 + sidePad;
+    const rightBound = territory.cx + territory.w / 2 - sidePad;
+
+    const createSection = (key: string, label: string, color: string, items: V2Item[]): LayoutSection => ({ key, label, color, items });
+
+    const sectionsToRender: LayoutSection[] =
+      viewMode === "type"
+        ? Object.entries(wsItems.reduce<Record<string, V2Item[]>>((acc, item) => {
+            (acc[item.kind] = acc[item.kind] ?? []).push(item);
+            return acc;
+          }, {})).map(([key, items]) => createSection(key, KIND_META[key as V2Kind]?.label ?? key, KIND_META[key as V2Kind]?.tone ?? "var(--ink-400)", items))
+        : viewMode === "topic"
+          ? computeSemanticTopicSections(wsItems, topicSignalsByWorkspace.get(territory.id))
+          : timelineBucketsFor(wsItems).map((bucket) => createSection(bucket.label, bucket.label, "var(--ink-300)", bucket.items));
+
+    // Step 1: compute each section's intrinsic width (columns) and height (rows).
+    const sized = sectionsToRender
+      .filter((s) => s.items.length > 0)
+      .map((section) => {
+        // Target columns based on section size. Small sections stay narrow so
+        // they can pack side-by-side. Large ones expand up to maxCols.
+        const desired = section.items.length <= 2
+          ? section.items.length
+          : section.items.length <= 4
+            ? 2
+            : Math.min(maxCols, Math.ceil(Math.sqrt(section.items.length)));
+        const cols = Math.max(1, Math.min(maxCols, desired));
+        const rows = Math.max(1, Math.ceil(section.items.length / cols));
+        const w = cols * ITEM_W + Math.max(0, cols - 1) * GAP_X;
+        const h = rows * ITEM_H + Math.max(0, rows - 1) * GAP_Y;
+        return { section, cols, rows, w, h };
+      });
+
+    // Step 2: shelf-pack sections into rows. A section fits the current shelf
+    // if current shelf width + gap + section width ≤ usableW.
+    type Shelf = { items: typeof sized; width: number; height: number };
+    const shelves: Shelf[] = [];
+    sized.forEach((entry) => {
+      const last = shelves[shelves.length - 1];
+      const projected = last ? last.width + GROUP_GAP_X + entry.w : entry.w;
+      if (last && projected <= usableW) {
+        last.items.push(entry);
+        last.width = projected;
+        last.height = Math.max(last.height, entry.h);
+      } else {
+        shelves.push({ items: [entry], width: entry.w, height: entry.h });
+      }
+    });
+
+    // Step 3: place each shelf vertically, each section horizontally centered.
+    let yCursor = territory.contentTop;
+    let minX = leftBound;
+    let maxX = rightBound;
+    shelves.forEach((shelf, shelfIdx) => {
+      // Center the shelf row within usableW.
+      const shelfStartX = territory.cx - shelf.width / 2;
+      let xCursor = shelfStartX;
+      shelf.items.forEach((entry) => {
+        const { section, cols, rows, w: sectionW, h: sectionH } = entry;
+        // Clamp x so the section never crosses the territory's side bounds.
+        const clampedX = Math.max(leftBound, Math.min(rightBound - sectionW, xCursor));
+        // Place items inside this section.
+        section.items.forEach((item, index) => {
+          const col = index % cols;
+          const row = Math.floor(index / cols);
+          const x = clampedX + col * (ITEM_W + GAP_X);
+          const y = yCursor + row * (ITEM_H + GAP_Y);
+          positions[item.id] = { x, y };
+          minX = Math.min(minX, x);
+          maxX = Math.max(maxX, x + ITEM_W);
+        });
+        sections.push({
+          ...section,
+          x: clampedX,
+          w: sectionW,
+          y: yCursor,
+          h: sectionH,
+          items: section.items,
+          key: `${section.key}-${shelfIdx}`,
+        });
+        xCursor = clampedX + sectionW + GROUP_GAP_X;
+        void rows;
+      });
+      yCursor += shelf.height + GROUP_GAP_Y;
+    });
+
+    return {
+      positions,
+      sections,
+      minX,
+      maxX,
+      contentBottom: Math.max(territory.contentTop, yCursor - GROUP_GAP_Y),
+    };
+  }, [viewMode, timelineBucketsFor, topicSignalsByWorkspace]);
+
+  /**
+   * Two-pass layout:
+   * 1. Probe each territory at its base position to learn how tall its packed
+   *    content needs to be.
+   * 2. Re-flow territories vertically (per atlas row) using required heights so
+   *    workspaces never collide. Width is never expanded — that would push into
+   *    a neighbor territory in the same row.
+   * 3. Re-layout sections against the effective territory (so item positions
+   *    track the new cy/contentTop).
+   */
+  const layoutPass = useMemo(() => {
+    if (territories.length === 0) {
+      return { effectiveTerritories: territories, layoutByTerritory: {} as Record<string, TerritoryLayout> };
+    }
+    // Probe heights using base territories.
+    const probe: Record<string, TerritoryLayout> = {};
+    territories.forEach((t) => {
+      const wsItems = baseItems.filter((item) => item.workspaceId === t.id);
+      probe[t.id] = buildTerritoryLayout(t, wsItems);
+    });
+
+    const bottomPad = V2_LAYOUT.bottomPad;
+    const rowGap = V2_LAYOUT.territoryGapY;
+    const atlasCols = V2_LAYOUT.atlasCols;
+
+    // Compute required heights.
+    const heights = territories.map((t) => {
+      const layout = probe[t.id];
+      const originalTopOffset = t.contentTop - (t.cy - t.h / 2);
+      const requiredContentH = layout
+        ? Math.max(t.contentBottom - t.contentTop, layout.contentBottom - t.contentTop)
+        : t.contentBottom - t.contentTop;
+      const requiredH = Math.max(t.h, originalTopOffset + requiredContentH + bottomPad);
+      return { originalTopOffset, requiredH };
+    });
+
+    // Group rows.
+    const rowsCount = Math.ceil(territories.length / atlasCols);
+    const rowHeights: number[] = Array.from({ length: rowsCount }, () => 0);
+    territories.forEach((_, idx) => {
+      const r = Math.floor(idx / atlasCols);
+      rowHeights[r] = Math.max(rowHeights[r], heights[idx].requiredH);
+    });
+    const totalHeight = rowHeights.reduce((s, h) => s + h, 0) + Math.max(0, rowsCount - 1) * rowGap;
+
+    // Compute new cy for each row.
+    const rowYCenters: number[] = [];
+    let yCursor = -totalHeight / 2;
+    for (let r = 0; r < rowsCount; r += 1) {
+      rowYCenters[r] = yCursor + rowHeights[r] / 2;
+      yCursor += rowHeights[r] + rowGap;
+    }
+
+    const effective: V2Territory[] = territories.map((t, idx) => {
+      const { originalTopOffset, requiredH } = heights[idx];
+      const r = Math.floor(idx / atlasCols);
+      const newH = requiredH;
+      const newCy = rowYCenters[r];
+      const newContentTop = newCy - newH / 2 + originalTopOffset;
+      return {
+        ...t,
+        h: newH,
+        cy: newCy,
+        minY: newCy - newH / 2,
+        maxY: newCy + newH / 2,
+        contentTop: newContentTop,
+        contentBottom: newCy + newH / 2 - bottomPad,
+      };
+    });
+
+    // Re-layout against effective territories so item positions match.
+    const final: Record<string, TerritoryLayout> = {};
+    effective.forEach((t) => {
+      const wsItems = baseItems.filter((item) => item.workspaceId === t.id);
+      final[t.id] = buildTerritoryLayout(t, wsItems);
+    });
+
+    return { effectiveTerritories: effective, layoutByTerritory: final };
+  }, [territories, baseItems, buildTerritoryLayout]);
+
+  const effectiveTerritories = layoutPass.effectiveTerritories;
+  const layoutByTerritory = layoutPass.layoutByTerritory;
+
   /* ─── Derive current territory from pan ─── */
   const currentTerritory = useMemo<V2Territory | null>(() => {
     const cx = -pan.x, cy = -pan.y;
-    const hit = territories.find(
+    const hit = effectiveTerritories.find(
       (t) => cx >= t.cx - t.w / 2 && cx <= t.cx + t.w / 2 && cy >= t.cy - t.h / 2 && cy <= t.cy + t.h / 2,
     );
     return hit ?? null;
-  }, [pan, territories]);
+  }, [pan, effectiveTerritories]);
 
   useEffect(() => {
     const nextCommit = currentTerritory && zoom > 0.34 ? currentTerritory.sourceId : null;
     if (nextCommit !== committedWorkspaceId) setCommittedWorkspaceId(nextCommit);
   }, [currentTerritory, zoom, committedWorkspaceId]);
 
-  /* ─── Topic grouping — keyword-based (no embeddings required) ─── */
-  const computeTopicGroups = useCallback((items: V2Item[]): Record<string, V2Item[]> => {
-    const STOP = new Set(["this","that","with","from","have","will","been","what","when","where","which","your","more","also","some","they","their","about","these","would","could","should","there","other","after","before","during","study","notes","review","flashcard","cards","deck","items","item"]);
-    const wordItems: Record<string, string[]> = {};
-    items.forEach((it) => {
-      const text = (it.title + " " + (it.preview ?? "")).toLowerCase();
-      const words = text.split(/\W+/).filter((w) => w.length > 4 && !STOP.has(w) && isNaN(Number(w)));
-      const seen = new Set<string>();
-      words.forEach((w) => {
-        if (!seen.has(w)) { seen.add(w); (wordItems[w] = wordItems[w] ?? []).push(it.id); }
-      });
-    });
-    const sorted = Object.entries(wordItems).filter(([, ids]) => ids.length >= 2).sort((a, b) => b[1].length - a[1].length);
-    const assigned = new Set<string>();
-    const groups: Record<string, V2Item[]> = {};
-    for (const [word, itemIds] of sorted) {
-      const unassigned = itemIds.filter((id) => !assigned.has(id));
-      if (unassigned.length >= 2) {
-        const label = word.charAt(0).toUpperCase() + word.slice(1);
-        groups[label] = unassigned.map((id) => items.find((it) => it.id === id)).filter(Boolean) as V2Item[];
-        unassigned.forEach((id) => assigned.add(id));
-      }
-    }
-    // Remaining fall back to kind label
-    items.forEach((it) => {
-      if (!assigned.has(it.id)) {
-        const label = KIND_META[it.kind]?.label ?? it.kind;
-        (groups[label] = groups[label] ?? []).push(it);
-      }
-    });
-    return groups;
-  }, []);
-
-  /* ─── View-mode reflow: produce positions keyed by item id ─── */
   const arranged = useMemo<Record<string, { x: number; y: number }> | null>(() => {
-    const coords: Record<string, { x: number; y: number }> = {};
-    for (const w of territories) {
-      const wsItems = baseItems.filter((i) => i.workspaceId === w.id);
-      const padLeft = w.cx - w.w / 2 + 80;
-      const padTop = w.cy - w.h / 2 + 160;
-
-      if (viewMode === "type") {
-        const byKey: Record<string, V2Item[]> = {};
-        wsItems.forEach((it) => { (byKey[it.kind] = byKey[it.kind] ?? []).push(it); });
-        let y = padTop;
-        Object.keys(byKey).forEach((k) => {
-          const row = byKey[k];
-          row.forEach((it, idx) => { coords[it.id] = { x: padLeft + (idx % 3) * 360, y: y + Math.floor(idx / 3) * 270 }; });
-          y += Math.ceil(row.length / 3) * 270 + 60;
-        });
-      } else if (viewMode === "topic") {
-        const groups = computeTopicGroups(wsItems);
-        let y = padTop;
-        Object.keys(groups).forEach((k) => {
-          const row = groups[k];
-          row.forEach((it, idx) => { coords[it.id] = { x: padLeft + (idx % 3) * 360, y: y + Math.floor(idx / 3) * 270 }; });
-          y += Math.ceil(row.length / 3) * 270 + 60;
-        });
-      } else if (viewMode === "timeline") {
-        const buckets: { label: string; until: number; items: V2Item[] }[] = [
-          { label: "Today",      until: Date.now() - 86_400_000,     items: [] },
-          { label: "Yesterday",  until: Date.now() - 2 * 86_400_000, items: [] },
-          { label: "Last week",  until: Date.now() - 7 * 86_400_000, items: [] },
-          { label: "Older",      until: 0,                            items: [] },
-        ];
-        wsItems.forEach((it) => {
-          const ts = (it.meta?.updatedAt as number) ?? (0);
-          const bucket = buckets.find((b) => ts > b.until) ?? buckets[buckets.length - 1];
-          bucket.items.push(it);
-        });
-        // Sort within each bucket by date desc
-        buckets.forEach((b) => b.items.sort((a, z) => ((z.meta?.updatedAt as number) ?? 0) - ((a.meta?.updatedAt as number) ?? 0)));
-        let y = padTop;
-        buckets.forEach((b) => {
-          if (b.items.length === 0) return;
-          b.items.forEach((it, idx) => { coords[it.id] = { x: padLeft + 80 + (idx % 3) * 360, y: y + Math.floor(idx / 3) * 270 }; });
-          y += Math.ceil(b.items.length / 3) * 270 + 70;
-        });
-      }
-    }
+    const coords = Object.values(layoutByTerritory).reduce<Record<string, { x: number; y: number }>>((acc, layout) => {
+      Object.assign(acc, layout.positions);
+      return acc;
+    }, {});
     return Object.keys(coords).length > 0 ? coords : null;
-  }, [viewMode, territories, baseItems, computeTopicGroups]);
+  }, [layoutByTerritory]);
 
   const posOf = useCallback(
     (it: V2Item): { x: number; y: number } => {
@@ -516,7 +957,7 @@ export default function WorkspaceV2() {
   );
 
   /* ─── Wheel: trackpad pan vs cmd/ctrl/shift zoom ─── */
-  const onWheel = (e: React.WheelEvent) => {
+  const onWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
     const rect = viewportRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -540,10 +981,10 @@ export default function WorkspaceV2() {
     } else {
       setPan((p) => ({ x: p.x - e.deltaX / zoom, y: p.y - e.deltaY / zoom }));
     }
-  };
+  }, [zoom, zoomAt]);
 
   /* ─── Mouse drag: pan OR lasso ─── */
-  const onMouseDown = (e: React.MouseEvent) => {
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
     const el = e.target as HTMLElement;
     if (el.closest("[data-widget]")) return;
     if (el.closest("[data-bloom-editor]")) return;
@@ -558,6 +999,12 @@ export default function WorkspaceV2() {
         setOpenInspectorId(null);
         return;
       }
+      // Auto-collapse artifact panel (blueprint) when clicking on empty canvas.
+      const artifactPanel = widgets.find((w) => w.kind === "artifact");
+      if (artifactPanel && !artifactPanel.collapsed) {
+        toggleWidgetCollapsed(artifactPanel.id);
+        return;
+      }
       const rect = viewportRef.current?.getBoundingClientRect();
       if (!rect) return;
       const wx = (e.clientX - rect.left - rect.width / 2) / zoom - pan.x;
@@ -566,8 +1013,9 @@ export default function WorkspaceV2() {
       setLasso({ x0: wx, y0: wy, x1: wx, y1: wy });
       if (!e.shiftKey) setSelection(new Set());
     }
-  };
-  const onMouseMove = (e: React.MouseEvent) => {
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx, openInspectorId, pan.x, pan.y, spaceHeld, zoom, widgets]);
+  const onMouseMove = useCallback((e: React.MouseEvent) => {
     const d = dragRef.current;
     if (!d) return;
     if (d.type === "pan") {
@@ -579,8 +1027,8 @@ export default function WorkspaceV2() {
       const wy = (e.clientY - rect.top - rect.height / 2) / zoom - pan.y;
       setLasso({ x0: d.wx0, y0: d.wy0, x1: wx, y1: wy });
     }
-  };
-  const onMouseUp = () => {
+  }, [pan.x, pan.y, zoom]);
+  const onMouseUp = useCallback(() => {
     const d = dragRef.current;
     if (d?.type === "lasso" && lasso) {
       const x0 = Math.min(lasso.x0, lasso.x1), x1 = Math.max(lasso.x0, lasso.x1);
@@ -599,12 +1047,12 @@ export default function WorkspaceV2() {
     dragRef.current = null;
     setLasso(null);
     setPanning(false);
-  };
+  }, [baseItems, lasso, posOf, selection]);
 
   /* ─── Navigation helpers ─── */
   const goToWorkspace = (terrId: string) => {
     // Do NOT force viewMode — keep the previous arrangement so items don't jump around
-    const t = territories.find((x) => x.id === terrId);
+    const t = effectiveTerritories.find((x) => x.id === terrId);
     if (!t) return;
     setBloomedIds([]);
     flyTo({ x: -t.cx, y: -t.cy }, TIERS.WORKSPACE);
@@ -620,6 +1068,11 @@ export default function WorkspaceV2() {
     flyTo({ x: -(p.x + it.w / 2), y: -(p.y + it.h / 2) }, TIERS.ITEM);
     if (bloom) setTimeout(() => setBloomedIds((bs) => (bs.includes(it.id) ? bs : [...bs, it.id].slice(-3))), 440);
   }, [baseItems, posOf, flyTo]);
+
+  const getBaseItemById = useCallback((id: string | null | undefined) => {
+    if (!id) return null;
+    return baseItems.find((item) => item.id === id) ?? null;
+  }, [baseItems]);
 
   /* ─── Focused item (nearest to camera center) ─── */
   const focusedItem = useMemo<V2Item | null>(() => {
@@ -692,8 +1145,6 @@ export default function WorkspaceV2() {
     clickTimerRef.current = setTimeout(() => {
       clickTimerRef.current = null;
       // Set inspector position near item but on right side of screen
-      const vpW = typeof window !== "undefined" ? window.innerWidth : 1400;
-      setInspectorPos({ x: Math.min(vpW - 420, vpW - 440), y: 90 });
       setOpenInspectorId(item.id);
       const p = posOf(item);
       flyTo({ x: -(p.x + item.w / 2), y: -(p.y + item.h / 2) }, Math.max(zoom, TIERS.ITEM));
@@ -786,8 +1237,31 @@ export default function WorkspaceV2() {
           refresh();
         } catch {}
       }
+      return;
     }
-  }, [isLive, refresh]);
+
+    if (patch.title !== undefined && patch.title.trim() && patch.title !== item.title) {
+      if (item.sourceArtifactId) {
+        try {
+          await fetch("/api/artifacts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "update", artifactId: item.sourceArtifactId, title: patch.title.trim() }),
+          });
+          refresh();
+        } catch {}
+      } else if (item.sourcePlannerItemId) {
+        try {
+          await fetch("/api/planner-items", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ plannerItemId: item.sourcePlannerItemId, title: patch.title.trim() }),
+          });
+          refresh();
+        } catch {}
+      }
+    }
+  }, [committedWorkspaceId, isLive, refresh]);
 
   /* ─── Result island auto-dismiss ─── */
   const scheduleIslandDismiss = useCallback((island: ResultIsland, ms = 8000) => {
@@ -861,25 +1335,28 @@ export default function WorkspaceV2() {
         // Ensure it's expanded and pulse-highlight it.
         setRevealingWidgetId(existing.id);
         setTimeout(() => setRevealingWidgetId(null), 1100);
-        if (isLive) void updateWorkspaceWidget({ widgetId: existing.id, collapsed: false });
-        return ws.map((w) => w.id === existing.id ? { ...w, collapsed: false } : w);
+        if (isLive) void updateWorkspaceWidget({ widgetId: existing.id, collapsed: false, hidden: false });
+        const next = ws.map((w) => w.id === existing.id ? { ...w, collapsed: false, state: { ...w.state, hidden: false } } : w);
+        saveWidgetLayout(next);
+        return next;
       }
 
       const id = `w-${Date.now()}`;
       const sizes: Record<string, { w: number; h: number }> = {
         timer: { w: 288, h: 132 }, planner: { w: 300, h: 278 }, today: { w: 296, h: 230 },
-        scratch: { w: 304, h: 232 }, calendar: { w: 312, h: 270 }, library: { w: 308, h: 276 },
+        timetable: { w: 308, h: 248 }, scratch: { w: 304, h: 232 }, calendar: { w: 312, h: 270 },
         thread: { w: 340, h: 320 }, artifact: { w: 380, h: 300 }
       };
       const size = sizes[kind] ?? { w: 288, h: 200 };
+      const pos = clampWidgetPosition(position?.x ?? 96, position?.y ?? 96, size.w, size.h);
       const widget: FloatingWidgetData = {
         id,
         kind: (kind as WidgetKind),
-        x: position?.x ?? 96,
-        y: position?.y ?? 96,
+        x: pos.x,
+        y: pos.y,
         ...size,
-        collapsed: true, // new widgets start as chips
-        state: kind === "timer" ? { secs: 25 * 60, running: false } : {},
+        collapsed: false,
+        state: kind === "timer" ? { secs: 25 * 60, running: false, hidden: false } : { hidden: false },
       };
       if (isLive) {
         void createWorkspaceWidget({
@@ -898,7 +1375,8 @@ export default function WorkspaceV2() {
       return [...ws, widget];
     });
     if (widgetsHidden) setWidgetsHidden(false);
-  }, [isLive, committedWorkspaceId, refresh, widgetsHidden]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clampWidgetPosition, isLive, committedWorkspaceId, refresh, widgetsHidden]);
 
   /* ─── Quick-start scaffold (multi-widget + seeded tasks) ─── */
   const runQuickStartScaffold = useCallback(
@@ -928,7 +1406,7 @@ export default function WorkspaceV2() {
         seed(["calendar", "planner"]);
         chips.push("break");
       } else if (lc.includes("research")) {
-        seed(["library", "scratch", "planner"]);
+        seed(["scratch", "planner", "today"]);
         chips.push("research");
       } else {
         seed(["today", "timer"]);
@@ -1130,7 +1608,7 @@ export default function WorkspaceV2() {
         stub = { status: "done", text: "Condensed into 3 lines and extracted 6 flashcard-ready terms at the bottom.", chips: ["Note updated"] };
         inferredAction = "artifact_request";
       } else if (lc.includes("plan") && (lc.includes("week") || lc.includes("exam"))) {
-        touched = territories.flatMap((t) => baseItems.filter((i) => i.workspaceId === t.id).slice(0, 1).map((i) => i.id));
+        touched = effectiveTerritories.flatMap((t) => baseItems.filter((i) => i.workspaceId === t.id).slice(0, 1).map((i) => i.id));
         stub = { status: "done", text: "This week: Biology midterm Thu, Calc pset Fri, essay Mon. Scheduled 6×50-min focus blocks with a 2-day taper.", chips: ["Plan drafted"] };
         inferredAction = "plan_week";
       } else if (/thread|chat|discuss/.test(lc)) {
@@ -1150,6 +1628,13 @@ export default function WorkspaceV2() {
       if (isLive && wsId) {
         scheduleIslandDismiss({ status: "streaming", text: "Thinking…", chips: [] });
         try {
+          const scopedPrimaryItem = focusedViewOpen
+            ? getBaseItemById(focusViewPrimaryId ?? focusSetIds[0] ?? null)
+            : focusedItem;
+          const scopedSelectionIds = focusedViewOpen ? focusSetIds : Array.from(selection);
+          const scopedArtifactIds = scopedSelectionIds
+            .map((id) => getBaseItemById(id)?.sourceArtifactId)
+            .filter((id): id is string => Boolean(id));
           const res = await fetch("/api/workspace-data", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1158,15 +1643,17 @@ export default function WorkspaceV2() {
               workstreamId: wsId,
               prompt: raw,
               quickAction: inferredAction,
-              targetArtifactId: focusedItem?.sourceArtifactId,
-              targetPlannerItemId: focusedItem?.sourcePlannerItemId,
-              targetChatId: focusedItem?.sourceChatId,
-              title: focusedItem ? `${focusedItem.title} · ${raw.slice(0, 48)}` : raw.slice(0, 72),
-              content: focusedItem?.preview,
+              targetArtifactId: scopedPrimaryItem?.sourceArtifactId,
+              targetPlannerItemId: scopedPrimaryItem?.sourcePlannerItemId,
+              targetChatId: scopedPrimaryItem?.sourceChatId,
+              title: scopedPrimaryItem ? `${scopedPrimaryItem.title} · ${raw.slice(0, 48)}` : raw.slice(0, 72),
+              content: scopedPrimaryItem?.preview,
               metadata: {
                 source: "workspace-v2-quick-chat",
-                focusedItemId: focusedItem?.sourceId,
-                selectedItemIds: Array.from(selection),
+                focusedItemId: scopedPrimaryItem?.sourceId,
+                selectedItemIds: scopedSelectionIds,
+                focusMode: focusedViewOpen ? "focus-group" : selection.size > 1 ? "selection" : "workspace",
+                selectedArtifactIds: scopedArtifactIds,
               },
             }),
           });
@@ -1191,8 +1678,7 @@ export default function WorkspaceV2() {
       }
       if (touched.length) touchAI(touched, raw);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [committedWorkspaceId, isLive, createItemAction, scheduleIslandDismiss, baseItems, focusedItem, selection, territories, touchAI, runQuickStartScaffold, spawnTrail],
+    [committedWorkspaceId, isLive, createItemAction, scheduleIslandDismiss, baseItems, focusedItem, selection, effectiveTerritories, touchAI, runQuickStartScaffold, spawnTrail, focusedViewOpen, focusViewPrimaryId, focusSetIds, getBaseItemById, addWidget, refresh],
   );
 
   /* ─── Tray actions ─── */
@@ -1235,17 +1721,38 @@ export default function WorkspaceV2() {
   /* ─── Widget Handlers ─── */
   const moveWidget = (id: string, x: number, y: number) =>
     setWidgets((ws) => {
-      const next = ws.map((w) => (w.id === id ? { ...w, x, y } : w));
+      const next = ws.map((w) => {
+        if (w.id !== id) return w;
+        const pos = clampWidgetPosition(x, y, w.collapsed ? 52 : w.w, w.collapsed ? 52 : w.h);
+        return { ...w, x: pos.x, y: pos.y };
+      });
       if (isLive) {
-        void updateWorkspaceWidget({ widgetId: id, x, y });
+        const moved = next.find((w) => w.id === id);
+        if (moved) void updateWorkspaceWidget({
+          widgetId: id,
+          x: moved.x,
+          y: moved.y,
+          hidden: Boolean((moved.state as Record<string, unknown>).hidden),
+        });
       }
-      saveWidgetPositions(next);
+      saveWidgetLayout(next);
       return next;
     });
+  const dropWidgetAnchor = (id: string, anchor: "left" | "right") =>
+    setWidgets((ws) => {
+      const next = ws.map((w) => (w.id === id ? { ...w, collapseAnchor: anchor } : w));
+      saveWidgetLayout(next);
+      return next;
+    });
+
   const closeWidget = (id: string) => {
-    setWidgets((ws) => ws.filter((w) => w.id !== id));
+    setWidgets((ws) => {
+      const next = ws.map((w) => w.id === id ? { ...w, state: { ...w.state, hidden: true } } : w);
+      saveWidgetLayout(next);
+      return next;
+    });
     if (isLive) {
-      void removeWorkspaceWidget(id);
+      void updateWorkspaceWidget({ widgetId: id, hidden: true });
     }
   };
   const toggleWidgetCollapsed = (id: string) =>
@@ -1256,9 +1763,9 @@ export default function WorkspaceV2() {
       });
       const w = next.find((w) => w.id === id);
       if (w && isLive) {
-        void updateWorkspaceWidget({ widgetId: id, collapsed: w.collapsed });
+        void updateWorkspaceWidget({ widgetId: id, collapsed: w.collapsed, hidden: Boolean((w.state as Record<string, unknown>).hidden) });
       }
-      saveWidgetPositions(next);
+      saveWidgetLayout(next);
       return next;
     });
 
@@ -1269,35 +1776,18 @@ export default function WorkspaceV2() {
         if (w.collapsed === false) return w;
         return { ...w, collapsed: false };
       });
-      if (isLive) void updateWorkspaceWidget({ widgetId: id, collapsed: false });
-      saveWidgetPositions(next);
+      const revived = next.find((w) => w.id === id);
+      if (isLive && revived) void updateWorkspaceWidget({
+        widgetId: id,
+        collapsed: false,
+        hidden: Boolean((revived.state as Record<string, unknown>).hidden),
+      });
+      saveWidgetLayout(next);
       return next;
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLive]);
 
-  const collapseAllWidgets = useCallback(() => {
-    setWidgets((ws) => {
-      const next = ws.map((w) => {
-        if (w.collapsed) return w;
-        return { ...w, collapsed: true };
-      });
-      next.forEach((w) => { if (isLive) void updateWorkspaceWidget({ widgetId: w.id, collapsed: true }); });
-      saveWidgetPositions(next);
-      return next;
-    });
-  }, [isLive]);
-
-  const expandAllWidgets = useCallback(() => {
-    setWidgets((ws) => {
-      const next = ws.map((w) => {
-        if (!w.collapsed) return w;
-        return { ...w, collapsed: false };
-      });
-      next.forEach((w) => { if (isLive) void updateWorkspaceWidget({ widgetId: w.id, collapsed: false }); });
-      saveWidgetPositions(next);
-      return next;
-    });
-  }, [isLive]);
   const toggleTimer = useCallback((id: string) =>
     setWidgets((ws) => ws.map((w) => {
       if (w.id !== id) return w;
@@ -1325,6 +1815,21 @@ export default function WorkspaceV2() {
       }
       return next;
     }));
+
+  // Re-expand the artifact panel whenever a new inspector item is opened.
+  useEffect(() => {
+    if (!openInspectorId) return;
+    const artifactPanel = widgets.find((w) => w.kind === "artifact");
+    if (artifactPanel?.collapsed) expandWidget(artifactPanel.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openInspectorId]);
+
+  const renameWorkspace = useCallback(async (id: string, name: string) => {
+    const workstreamId = effectiveTerritories.find((territory) => territory.id === id)?.sourceId;
+    if (!workstreamId || !name.trim()) return;
+    const ok = await updateWorkspace({ workstreamId, title: name.trim() });
+    if (ok) refresh();
+  }, [effectiveTerritories, refresh]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1535,11 +2040,9 @@ export default function WorkspaceV2() {
     if (currentTerritory) {
       flyTo({ x: -currentTerritory.cx, y: -currentTerritory.cy + 40 }, Math.max(0.62, zoom));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode]);
+  }, [viewMode, currentTerritory, flyTo, zoom]);
 
   const [pendingOpenSourceId, setPendingOpenSourceId] = useState<string | null>(null);
-
   /* ─── Check pending open (after backend creation returns id) ─── */
   useEffect(() => {
     if (!pendingOpenSourceId) return;
@@ -1553,7 +2056,9 @@ export default function WorkspaceV2() {
   }, [baseItems, pendingOpenSourceId, posOf, flyTo, zoom]);
 
   /* ─── Derived ─── */
-  const canvasTransform = `translate(${vpSize.w / 2 + pan.x * zoom}px, ${vpSize.h / 2 + pan.y * zoom}px) scale(${zoom})`;
+  const canvasTransform = mounted
+    ? `translate(${vpSize.w / 2 + pan.x * zoom}px, ${vpSize.h / 2 + pan.y * zoom}px) scale(${zoom})`
+    : "translate(0px, 0px) scale(1)";
   const trayItems = Array.from(selection).map((id) => baseItems.find((i) => i.id === id)).filter(Boolean) as V2Item[];
   const pinnedItems = pinned.map((id) => baseItems.find((i) => i.id === id)).filter(Boolean) as V2Item[];
 
@@ -1588,7 +2093,7 @@ export default function WorkspaceV2() {
           style={{ left: 0, top: 0, transform: canvasTransform, transformOrigin: "0 0", width: 1, height: 1 }}
         >
           {/* Territory borders */}
-          {territories.map((t) => (
+          {effectiveTerritories.map((t) => (
               <div
                 key={t.id}
                 className="absolute pointer-events-none"
@@ -1601,7 +2106,7 @@ export default function WorkspaceV2() {
           ))}
 
           {/* Territory titles */}
-          {territories.map((t) => {
+          {effectiveTerritories.map((t) => {
             const labelOpacity = 1;
             if (labelOpacity <= 0) return null;
             const itemCount = baseItems.filter((i) => i.workspaceId === t.id).length;
@@ -1627,85 +2132,49 @@ export default function WorkspaceV2() {
           {/* ─── View-mode group labels for ALL territories ─── */}
           {arranged && (() => {
             const allLabels: import("react").ReactNode[] = [];
-            for (const w of territories) {
-              const wsItems = baseItems.filter((i) => i.workspaceId === w.id);
-              const padLeft = w.cx - w.w / 2 + 80;
-              const padTop = w.cy - w.h / 2 + 160;
-
-              if (viewMode === "type") {
-                const byKey: Record<string, V2Item[]> = {};
-                wsItems.forEach((it) => { (byKey[it.kind] = byKey[it.kind] || []).push(it); });
-                let y = padTop;
-                Object.keys(byKey).forEach((k, ki) => {
-                  const row = byKey[k];
-                  const color = KIND_META[k as V2Kind]?.tone ?? "var(--ink-400)";
+            for (const w of effectiveTerritories) {
+              const layout = layoutByTerritory[w.id];
+              if (!layout) continue;
+              // Group sections by shelf row (same y). The shelf divider only
+              // renders before the first section of each shelf that is NOT
+              // the first shelf, and spans the full width of that shelf.
+              const shelvesMap = new Map<number, PlacedSection[]>();
+              layout.sections.forEach((section) => {
+                const bucket = shelvesMap.get(section.y) ?? [];
+                bucket.push(section);
+                shelvesMap.set(section.y, bucket);
+              });
+              const shelfYs = Array.from(shelvesMap.keys()).sort((a, b) => a - b);
+              shelfYs.forEach((shelfY, shelfIdx) => {
+                const shelfSections = (shelvesMap.get(shelfY) ?? []).slice().sort((a, b) => a.x - b.x);
+                if (shelfSections.length === 0) return;
+                // Shelf divider — spans the shelf width.
+                if (shelfIdx > 0) {
+                  const shelfLeft = shelfSections[0].x;
+                  const last = shelfSections[shelfSections.length - 1];
+                  const shelfRight = last.x + last.w;
                   allLabels.push(
-                    <div key={`group-${w.id}-${ki}`} className="absolute pointer-events-none" style={{ left: 0, top: 0 }}>
-                      {ki > 0 && (
-                        <div className="absolute sv2-view-lane-divider"
-                             style={{ left: padLeft - 20, top: y - 28, width: w.w - 100 }} />
-                      )}
-                      <div className="absolute sv2-view-group-label" style={{ left: padLeft, top: y - 22, color }}>
-                        {KIND_META[k as V2Kind]?.label ?? k} · {row.length}
-                      </div>
-                    </div>
+                    <div
+                      key={`${w.id}-shelf-div-${shelfIdx}`}
+                      className="absolute sv2-view-lane-divider pointer-events-none"
+                      style={{ left: shelfLeft - 18, top: shelfY - 30, width: shelfRight - shelfLeft + 36 }}
+                    />,
                   );
-                  y += Math.ceil(row.length / 3) * 270 + 60;
-                });
-              }
-
-              if (viewMode === "topic") {
-                const groups = computeTopicGroups(wsItems);
-                let y = padTop;
-                Object.entries(groups).forEach(([topicLabel, items], ki) => {
+                }
+                // Section labels — one per section, sitting above it.
+                shelfSections.forEach((section, sectionIdx) => {
                   allLabels.push(
-                    <div key={`topic-${w.id}-${ki}`} className="absolute pointer-events-none" style={{ left: 0, top: 0 }}>
-                      {ki > 0 && (
-                        <div className="absolute sv2-view-lane-divider"
-                             style={{ left: padLeft - 20, top: y - 28, width: w.w - 100 }} />
-                      )}
-                      <div className="absolute sv2-view-group-label" style={{ left: padLeft, top: y - 22, color: "var(--mint)" }}>
-                        {topicLabel} · {items.length}
-                      </div>
-                    </div>
+                    <div
+                      key={`${w.id}-${section.key}-${shelfIdx}-${sectionIdx}`}
+                      className={viewMode === "timeline" ? "absolute sv2-timeline-tick-label sv2-timeline-bucket-header pointer-events-none" : "absolute sv2-view-group-label pointer-events-none"}
+                      style={{ left: section.x, top: section.y - 22, color: viewMode === "timeline" ? undefined : section.color }}
+                    >
+                      {section.label}
+                      <span className="ml-2 font-normal opacity-55">{section.items.length}</span>
+                    </div>,
                   );
-                  y += Math.ceil(items.length / 3) * 270 + 60;
                 });
-              }
-
-              if (viewMode === "timeline") {
-                const now = Date.now();
-                const buckets: { label: string; until: number; items: V2Item[] }[] = [
-                  { label: "Today",      until: now - 86_400_000,     items: [] },
-                  { label: "Yesterday",  until: now - 2 * 86_400_000, items: [] },
-                  { label: "Last week",  until: now - 7 * 86_400_000, items: [] },
-                  { label: "Older",      until: 0,                    items: [] },
-                ];
-                wsItems.forEach((it) => {
-                  const ts = (it.meta?.updatedAt as number) ?? (0);
-                  const bucket = buckets.find((b) => ts > b.until) ?? buckets[buckets.length - 1];
-                  bucket.items.push(it);
-                });
-                buckets.forEach((b) => b.items.sort((a, z) => ((z.meta?.updatedAt as number) ?? 0) - ((a.meta?.updatedAt as number) ?? 0)));
-                let y = padTop;
-                buckets.forEach((b, bi) => {
-                  if (b.items.length === 0) return;
-                  allLabels.push(
-                    <div key={`tl-${w.id}-${bi}`} className="absolute pointer-events-none" style={{ left: 0, top: 0 }}>
-                      {bi > 0 && (
-                        <div className="absolute sv2-view-lane-divider"
-                             style={{ left: padLeft, top: y - 28, width: w.w - 180 }} />
-                      )}
-                      <div className="absolute sv2-timeline-tick-label sv2-timeline-bucket-header"
-                           style={{ left: padLeft, top: y - 20 }}>
-                        {b.label}
-                        <span className="ml-2 font-normal opacity-55">{b.items.length}</span>
-                      </div>
-                    </div>
-                  );
-                  y += Math.ceil(b.items.length / 3) * 270 + 70;
-                });
-              }
+              });
             }
             return allLabels;
           })()}
@@ -1890,9 +2359,10 @@ export default function WorkspaceV2() {
         onSpotlight={() => setSpotOpen(true)}
         onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
         onOpenInfo={() => setInfoOpen(true)}
-        territories={territories}
+        territories={effectiveTerritories}
         currentWorkspaceId={currentTerritory?.id ?? null}
         onPickWorkspace={goToWorkspace}
+        onRenameWorkspace={renameWorkspace}
         onCreateWorkspace={async () => {
           if (isLive) {
             const r = await createItemAction({ action: "createWorkspace", title: "New workspace" });
@@ -1904,7 +2374,7 @@ export default function WorkspaceV2() {
       />
 
       <Minimap
-        territories={territories}
+        territories={effectiveTerritories}
         items={baseItems}
         viewport={{ x: -pan.x, y: -pan.y, w: vpSize.w / zoom, h: vpSize.h / zoom }}
         worldSize={WORLD_SIZE}
@@ -1928,65 +2398,71 @@ export default function WorkspaceV2() {
         onReset={goToAtlas}
       />
 
-      {/* Widget chip rail — collapsed widget chips + add/manage */}
-      <WidgetChipRail
-        widgets={widgets.filter((w) => w.kind !== "artifact" && w.kind !== "thread")}
-        tick={widgetStateRevision}
-        aiTouched={Object.fromEntries(
-          Object.entries(aiTouched).filter(([k]) => widgets.some((w) => w.id === k)).map(([k]) => [k, true])
-        )}
-        onExpand={expandWidget}
-        onAddWidget={addWidget}
-        onCollapseAll={collapseAllWidgets}
-        onExpandAll={expandAllWidgets}
-        allCollapsed={widgets.filter((w) => w.kind !== "artifact" && w.kind !== "thread").every((w) => Boolean(w.collapsed))}
-        someCollapsed={widgets.filter((w) => w.kind !== "artifact" && w.kind !== "thread").some((w) => Boolean(w.collapsed))}
-        revealingWidgetId={revealingWidgetId}
-      />
+      {/* Collapsed widgets now render in-place as rich pills via FloatingWidget — no separate chip rail. */}
 
       {/* ─── Inspector: ArtifactWidget / ThreadWidget (single-click opens item) ─── */}
       {(() => {
-        if (!openInspectorId) return null;
-        const item = baseItems.find((i) => i.id === openInspectorId);
-        if (!item) return null;
-        const vpW = typeof window !== "undefined" ? window.innerWidth : 1400;
-        const x = Math.min(vpW - 456, vpW - 460);
-        const y = 90;
-        if (item.kind === "thread") {
-          return (
-            <ThreadWidget
-              item={item}
-              x={x} y={y} w={440} h={520}
-              collapsed={false}
-              onMove={() => {}}
-              onClose={() => setOpenInspectorId(null)}
-              onCollapse={() => setOpenInspectorId(null)}
-              onExpand={() => {}}
-            />
-          );
-        }
+        const artifactPanel = widgets.find((widget) => widget.kind === "artifact");
+        if (!artifactPanel || widgetsHidden || artifactPanel.collapsed) return null;
+        const item = openInspectorId ? baseItems.find((candidate) => candidate.id === openInspectorId && candidate.kind !== "thread") ?? null : null;
+        const fallbackWorkspace = currentTerritory ?? effectiveTerritories[0] ?? null;
+        const artifactItem = item ?? (fallbackWorkspace ? ({
+          id: "artifact-panel",
+          sourceId: "artifact-panel",
+          workspaceId: fallbackWorkspace.id,
+          kind: "note" as const,
+          title: "Artifacts",
+          preview: "Create a note, visual, code file, or quick capture from here.",
+          body: "Use the quick-create actions below to start a new artifact in this workspace.",
+          x: artifactPanel.x,
+          y: artifactPanel.y,
+          w: artifactPanel.w,
+          h: artifactPanel.h,
+          color: fallbackWorkspace.color,
+          updated: "ready",
+          meta: {},
+        }) : null);
+        if (!artifactItem) return null;
         return (
           <ArtifactWidget
+            item={artifactItem}
+            x={artifactPanel.x} y={artifactPanel.y} w={artifactPanel.w} h={artifactPanel.h}
+            collapsed={false}
+            onMove={(x, y) => moveWidget(artifactPanel.id, x, y)}
+            onClose={() => closeWidget(artifactPanel.id)}
+            onCollapse={() => toggleWidgetCollapsed(artifactPanel.id)}
+            onExpand={() => expandWidget(artifactPanel.id)}
+            onEdit={(patch) => { if (item) handleItemEdit(item, patch); }}
+          />
+        );
+      })()}
+
+      {(() => {
+        const item = openInspectorId ? baseItems.find((candidate) => candidate.id === openInspectorId && candidate.kind === "thread") : null;
+        if (!item) return null;
+        const x = Math.max(16, vpSize.w - 460);
+        return (
+          <ThreadWidget
             item={item}
-            x={x} y={y} w={440} h={520}
+            x={x} y={90} w={440} h={520}
             collapsed={false}
             onMove={() => {}}
             onClose={() => setOpenInspectorId(null)}
             onCollapse={() => setOpenInspectorId(null)}
             onExpand={() => {}}
-            onEdit={(patch) => handleItemEdit(item, patch)}
           />
         );
       })()}
 
       {/* Floating utility widgets — never include artifact/thread (handled above as inspector) */}
       {widgets.filter((w) => w.kind !== "artifact" && w.kind !== "thread").map((w) => {
-        if (widgetsHidden) return null;
+        if (widgetsHidden || Boolean((w.state as Record<string, unknown>).hidden)) return null;
         return (
           <FloatingWidget
             key={w.id}
             widget={w}
             workspaceItems={baseItems}
+            tick={widgetStateRevision}
             onMove={moveWidget}
             onClose={closeWidget}
             onCollapse={toggleWidgetCollapsed}
@@ -1998,6 +2474,8 @@ export default function WorkspaceV2() {
             onExpandEdit={(id) => setEditingWidgetId(id)}
             onWidgetEdit={updateWidgetState}
             onOpenItem={(id) => setPendingOpenSourceId(id)}
+            onDropAnchor={dropWidgetAnchor}
+            isRevealing={revealingWidgetId === w.id}
           />
         );
       })}
@@ -2039,47 +2517,79 @@ export default function WorkspaceV2() {
         onAction={onTrayAction}
       />
 
-      <CommandBar
-        focusedItem={focusedItem}
-        workspace={currentTerritory}
-        selectedCount={selection.size}
-        bloomedCount={0}
-        resultIsland={resultIsland}
-        quickStarts={QUICK_STARTS}
-        onSubmit={handleSendMessage}
-        onDismissResult={() => setResultIsland(null)}
-        onSpotlight={() => setSpotOpen(true)}
-        onCreate={(kind) => {
-          void createHereByKind(kind, -pan.x, -pan.y);
-        }}
-        onClearFocusContext={() => {
-          setOpenInspectorId(null);
-          setBuildingFocusSet(false);
-          setFocusSetIds([]);
-          setPrimaryFocusId(null);
-          setFocusedViewOpen(false);
-          setFocusViewPrimaryId(null);
-        }}
-        focusContext={
-          focusedViewOpen
-            ? { kind: "focused-view", title: `${focusSetIds.length} items`, color: "var(--accent)", count: focusSetIds.length }
-            : buildingFocusSet && focusSetIds.length > 0
-            ? { kind: "building-set", title: `${focusSetIds.length} items`, color: "var(--ink-300)", count: focusSetIds.length }
-            : openInspectorId
-            ? (() => {
-                const it = baseItems.find((i) => i.id === openInspectorId);
-                if (!it) return null;
-                return { kind: it.kind === "thread" ? "thread" as const : "artifact" as const, title: it.title, color: it.color };
-              })()
-            : null
-        }
-      />
+      {/* ─── Always-visible artifact creation shortcut (bottom of workspace) ─── */}
+      <div
+        className="absolute left-1/2 -translate-x-1/2 z-40 pointer-events-auto flex flex-col items-center"
+        style={{ bottom: 84 }}
+      >
+        {/* Quick create row — always visible */}
+        <div className="flex items-center gap-2 mb-2">
+          {(["note", "task", "thread", "visual", "code"] as const).map((kind) => {
+            const icons: Record<string, IconName> = { note: "note", task: "schedule", thread: "thread", visual: "layers", code: "pset" };
+            const labels: Record<string, string> = { note: "Note", task: "Task", thread: "Thread", visual: "Visual", code: "Code" };
+            return (
+              <button
+                key={kind}
+                onClick={() => void createHereByKind(kind, -pan.x, -pan.y)}
+                className="sv2-quick-create-btn"
+                title={`Create ${labels[kind]} at cursor`}
+              >
+                <Icon name={icons[kind]} size={11} />
+                <span className="font-mono text-[9.5px] uppercase tracking-[0.1em]">{labels[kind]}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Quick chat. When focus view is open, float above the scrim (z=60) so it
+          remains usable and carries focus-group scope into `handleSendMessage`. */}
+      <div
+        className="absolute inset-x-0 bottom-0 pointer-events-none"
+        style={{ zIndex: focusedViewOpen ? 60 : undefined }}
+      >
+        <CommandBar
+          focusedItem={focusedItem}
+          workspace={currentTerritory}
+          selectedCount={selection.size}
+          bloomedCount={0}
+          resultIsland={resultIsland}
+          quickStarts={QUICK_STARTS}
+          onSubmit={handleSendMessage}
+          onDismissResult={() => setResultIsland(null)}
+          onSpotlight={focusedViewOpen ? () => {} : () => setSpotOpen(true)}
+          onCreate={(kind) => {
+            void createHereByKind(kind, -pan.x, -pan.y);
+          }}
+          onClearFocusContext={() => {
+            setOpenInspectorId(null);
+            setBuildingFocusSet(false);
+            setFocusSetIds([]);
+            setPrimaryFocusId(null);
+            setFocusedViewOpen(false);
+            setFocusViewPrimaryId(null);
+          }}
+          focusContext={
+            focusedViewOpen
+              ? { kind: "focused-view", title: `${focusSetIds.length} items`, color: "var(--accent)", count: focusSetIds.length }
+              : buildingFocusSet && focusSetIds.length > 0
+              ? { kind: "building-set", title: `${focusSetIds.length} items`, color: "var(--ink-300)", count: focusSetIds.length }
+              : openInspectorId && !widgets.some((widget) => widget.kind === "artifact" && widget.collapsed === false)
+              ? (() => {
+                  const it = baseItems.find((i) => i.id === openInspectorId);
+                  if (!it) return null;
+                  return { kind: it.kind === "thread" ? "thread" as const : "artifact" as const, title: it.title, color: it.color };
+                })()
+              : null
+          }
+        />
+      </div>
 
       <Spotlight
         open={spotOpen}
         onClose={() => setSpotOpen(false)}
         items={baseItems}
-        territories={territories}
+        territories={effectiveTerritories}
         quickStarts={QUICK_STARTS}
         onPick={onSpotlightPick}
       />

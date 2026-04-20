@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState, useEffect } from "react";
+import { useCallback, useRef, useState, useEffect, useMemo } from "react";
 import {
   Plus,
   Square,
@@ -8,7 +8,6 @@ import {
   ArrowUp,
   Zap,
   Layers,
-  Sparkles,
   LayoutGrid,
   FileText,
   Loader2,
@@ -127,45 +126,12 @@ function FocusContextTags({ contextOverride }: { contextOverride?: { id: string;
   );
 }
 
-/* --- Suggestion Chips --- */
-
-function SuggestionChips({
-  workspaceName,
-  hasContext,
-  onSelect,
-}: {
-  workspaceName?: string;
-  hasContext: boolean;
-  onSelect: (text: string) => void;
-}) {
-  const suggestions = hasContext
-    ? ["Summarize this", "Expand section", "Create flashcards", "Quiz me"]
-    : workspaceName
-      ? [`Review ${workspaceName}`, "Create a note", "Plan my study", "Search"]
-      : ["Create a workspace", "Ask a question", "Plan my study"];
-
-  return (
-    <div className="flex items-center gap-1.5 px-1 overflow-x-auto scrollbar-none">
-      {suggestions.map((s) => (
-        <button
-          key={s}
-          type="button"
-          onClick={() => onSelect(s)}
-          className="flex items-center gap-1 whitespace-nowrap rounded-full border border-[var(--border-default)]/30 bg-[var(--bg-secondary)]/60 px-2.5 py-1 text-[11px] font-medium text-[var(--text-tertiary)] transition-all duration-150 hover:border-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--border-default))] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]"
-        >
-          <Sparkles className="h-2.5 w-2.5 opacity-50" />
-          {s}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 /* --- Command Bar Props --- */
 
 type CommandBarProps = {
   workspaceName?: string;
   contextOverride?: { id: string; title: string; type: string };
+  scopeLevel?: "global" | "workspace" | "artifact";
   onSendMessage: (message: string) => void;
   onStopStreaming?: () => void;
   onCreateWorkspace?: () => void;
@@ -185,8 +151,8 @@ type CommandBarProps = {
 };
 
 export function CommandBar({
-  workspaceName,
   contextOverride,
+  scopeLevel = "global",
   onSendMessage,
   onStopStreaming,
   onCreateWorkspace,
@@ -218,7 +184,16 @@ export function CommandBar({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const mode = detectMode(value);
-  const hasContextualItem = !!focusedItemId;
+  const hasContextualItem = !!focusedItemId || !!contextOverride;
+  const placeholder = useMemo(() => {
+    if (scopeLevel === "artifact") {
+      return hasContextualItem ? "Ask about this artifact only…" : "Select an artifact to chat…";
+    }
+    if (scopeLevel === "workspace") {
+      return hasContextualItem ? "Act on this focused workspace item…" : "Ask AI, search, or create in this workspace…";
+    }
+    return hasContextualItem ? "Act on focused item…" : "Ask AI, search, or create…";
+  }, [hasContextualItem, scopeLevel]);
 
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -271,11 +246,6 @@ export function CommandBar({
     onSendMessage(trimmed);
     setValue("");
   }, [disabled, onSendMessage, value]);
-
-  const handleSuggestionSelect = useCallback((text: string) => {
-    setValue(text);
-    textareaRef.current?.focus();
-  }, []);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (menuOpen) {
@@ -338,17 +308,6 @@ export function CommandBar({
           maxVisible={3}
         />
       </div>
-
-      {/* Suggestion chips */}
-      {!value && focused && (
-        <div className="mb-1">
-          <SuggestionChips
-            workspaceName={workspaceName}
-            hasContext={hasContextualItem}
-            onSelect={handleSuggestionSelect}
-          />
-        </div>
-      )}
 
       {/* Main command input */}
       <div
@@ -416,7 +375,7 @@ export function CommandBar({
             onKeyDown={handleKeyDown}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
-            placeholder={hasContextualItem ? "Act on focused item\u2026" : "Ask AI, search, or create\u2026"}
+            placeholder={placeholder}
             disabled={Boolean((disabled || isProcessing) && !isStreaming)}
             className="min-w-0 flex-1 resize-none border-none bg-transparent py-1.5 text-[14px] leading-[1.5] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]/60"
             style={{ maxHeight: 120, minHeight: 24 }}

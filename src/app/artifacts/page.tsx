@@ -294,6 +294,7 @@ function ArtifactsPageInner() {
           <CommandBar
             workspaceName="Artifacts"
             contextOverride={activeNote ? { id: activeNote._id, title: activeNote.title || "Untitled", type: activeNote.type || "note" } : undefined}
+            scopeLevel="artifact"
             onSendMessage={handleSendMessage}
             onCreateWorkspace={() => {}}
             onCreateNote={() => setCreateDialogOpen(true)}
@@ -302,7 +303,7 @@ function ArtifactsPageInner() {
             onCreateTask={() => {}}
             onCreateThread={() => {}}
             onCreateWithAi={() => {}}
-            className="bottom-6"
+            className="bottom-4"
           />
         </main>
       </div>

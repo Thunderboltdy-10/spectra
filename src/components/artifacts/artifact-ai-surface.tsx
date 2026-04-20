@@ -19,6 +19,7 @@ import {
   Undo2,
   Check,
   Sparkles,
+  GitBranch,
 } from "lucide-react";
 import type { Editor } from "@tiptap/core";
 import { useChatPanel } from "@/hooks/use-chat-panel";
@@ -63,6 +64,7 @@ export function ArtifactAiSurface({
     thinkingLevel: "low",
     routerMode: "auto",
   });
+  const latestAssistantTrace = [...messages].reverse().find((message) => message.role === "assistant" && message.routeTrace)?.routeTrace;
 
   // Auto-scroll
   useEffect(() => {
@@ -131,6 +133,26 @@ export function ArtifactAiSurface({
               transition={{ duration: 0.2 }}
               className="border-t border-[var(--border-default)] overflow-hidden"
             >
+              {latestAssistantTrace ? (
+                <div className="px-4 pt-3">
+                  <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] px-2 py-1">
+                      <GitBranch className="w-3 h-3" />
+                      {latestAssistantTrace.routePlan?.executionPath ?? "direct_chat"}
+                    </span>
+                    {latestAssistantTrace.routePlan?.workstreamAssignment?.status ? (
+                      <span className="rounded-full border border-[var(--border-default)] px-2 py-1">
+                        workstream {latestAssistantTrace.routePlan.workstreamAssignment.status}
+                      </span>
+                    ) : null}
+                    {latestAssistantTrace.routePlan?.threadStrategy?.action ? (
+                      <span className="rounded-full border border-[var(--border-default)] px-2 py-1">
+                        thread {latestAssistantTrace.routePlan.threadStrategy.action}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
               <div className="max-h-48 overflow-y-auto px-4 py-3 space-y-3">
                 {messages.filter((m) => m.role === "assistant").slice(-2).map((msg) => (
                   <div key={msg.id} className="text-sm text-[var(--text-primary)] leading-relaxed">
@@ -238,6 +260,18 @@ export function ArtifactAiSurface({
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        {latestAssistantTrace ? (
+          <div className="flex flex-wrap gap-2">
+            <span className="rounded-full border border-[var(--border-default)] px-2 py-1 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+              {latestAssistantTrace.routePlan?.executionPath ?? "direct_chat"}
+            </span>
+            {latestAssistantTrace.routePlan?.workspaceAction?.intent ? (
+              <span className="rounded-full border border-[var(--border-default)] px-2 py-1 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                action {latestAssistantTrace.routePlan.workspaceAction.intent}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center py-8">
             <Sparkles className="w-6 h-6 text-[var(--text-tertiary)] mb-2" />

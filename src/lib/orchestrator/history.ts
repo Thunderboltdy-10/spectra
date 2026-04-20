@@ -38,8 +38,10 @@ export function shouldScheduleCompaction(params: {
   mode?: StudyMode;
   hasExistingSummary?: boolean;
   contextWindowTokens?: number;
+  routerMode?: "auto" | "manual" | "openrouter_auto";
 }) {
   if (params.hasExistingSummary) return false;
+  if ((params.routerMode ?? "auto") !== "auto") return false;
   const turns = params.history.length;
   if (turns < MIN_MESSAGES_FOR_COMPACTION) return false;
 

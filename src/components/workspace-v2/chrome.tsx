@@ -26,14 +26,17 @@ type TopRailProps = {
   currentWorkspaceId?: string | null;
   onPickWorkspace?: (id: string) => void;
   onCreateWorkspace?: () => void;
+  onRenameWorkspace?: (id: string, name: string) => void;
 };
 
 export function TopRail({
   workspace, viewMode,
   onViewMode, onHome,
   onOpenInfo,
-  territories, currentWorkspaceId, onPickWorkspace, onCreateWorkspace,
+  territories, currentWorkspaceId, onPickWorkspace, onCreateWorkspace, onRenameWorkspace,
 }: TopRailProps) {
+  const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
+  const [draftName, setDraftName] = useState("");
   const modes: { id: ViewMode; label: string; icon: IconName }[] = [
     { id: "topic",    label: "Topic",    icon: "topic"    },
     { id: "type",     label: "Type",     icon: "grid"     },
@@ -41,11 +44,11 @@ export function TopRail({
   ];
 
   return (
-    <div className="absolute top-0 left-0 right-0 z-30 pointer-events-none">
+    <div className="absolute top-[6px] left-0 right-0 z-30 pointer-events-none">
       {/* Single unified bar — h-14 = 56px */}
       <div className="mx-auto max-w-[1800px] px-3 h-14 flex items-center gap-2">
         {/* LEFT: home button + Spectra label + workspace identity */}
-        <div className="flex items-center gap-2 pointer-events-auto shrink-0">
+        <div className="flex items-center gap-2 pointer-events-auto flex-1 justify-start min-w-0">
           <button
             onClick={onHome}
             className="w-9 h-9 rounded-xl flex items-center justify-center transition-colors hover:bg-[var(--bg2)]"
@@ -56,24 +59,55 @@ export function TopRail({
           <span className="font-mono text-[10px] uppercase tracking-[0.16em] opacity-75 hidden sm:block" style={{ color: "var(--ink-400)" }}>
             Spectra
           </span>
-          {workspace && (
-            <>
+          <div className="flex items-center gap-2 min-w-[220px]">
+            {workspace ? (
+              <>
               <Icon name="chevron" size={11} className="opacity-40" style={{ color: "var(--ink-400)" }} />
-              <span className="text-[16px] leading-none">{workspace.glyph}</span>
-              <span className="font-display text-[22px] font-medium leading-none" style={{ color: "var(--ink-100)" }}>
-                {workspace.name}
-              </span>
-              {workspace.subtitle && (
+              <span className="text-[16px] leading-none">{workspace?.glyph ?? "◌"}</span>
+              {editingWorkspaceId === workspace.id ? (
+                <input
+                  value={draftName}
+                  autoFocus
+                  onChange={(e) => setDraftName(e.target.value)}
+                  onBlur={() => {
+                    const next = draftName.trim();
+                    if (next) onRenameWorkspace?.(workspace.id, next);
+                    setEditingWorkspaceId(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+                    if (e.key === "Escape") setEditingWorkspaceId(null);
+                  }}
+                  className="font-display text-[22px] font-medium leading-none bg-transparent outline-none min-w-[140px]"
+                  style={{ color: "var(--ink-100)" }}
+                />
+              ) : (
+                <button
+                  onDoubleClick={() => {
+                    setEditingWorkspaceId(workspace.id);
+                    setDraftName(workspace.name);
+                  }}
+                  className="font-display text-[22px] font-medium leading-none text-left truncate"
+                  style={{ color: "var(--ink-100)" }}
+                  title="Double-click to rename workspace"
+                >
+                  {workspace?.name ?? "Workspace"}
+                </button>
+              )}
+              {(workspace?.subtitle ?? "Subtitle") && (
                 <span className="text-[12px] font-mono opacity-55 ml-0.5 hidden md:block" style={{ color: "var(--ink-400)" }}>
-                  {workspace.subtitle}
+                  {workspace?.subtitle ?? "Subtitle"}
                 </span>
               )}
-            </>
-          )}
+              </>
+            ) : (
+              <div className="h-8" />
+            )}
+          </div>
         </div>
 
         {/* CENTER: workspace picker */}
-        <div className="flex-1 flex justify-center pointer-events-auto">
+        <div className="flex justify-center pointer-events-auto shrink-0">
           {territories && territories.length > 0 && (
             <div
               className="flex items-center gap-0.5 p-1 rounded-full"
@@ -116,7 +150,7 @@ export function TopRail({
         </div>
 
         {/* RIGHT: view mode pills (teal when active) + info button */}
-        <div className="flex items-center gap-2 pointer-events-auto shrink-0">
+        <div className="flex items-center gap-2 pointer-events-auto flex-1 justify-end">
           <div
             className="flex items-center p-[3px] rounded-full"
             style={{ border: "1px solid var(--line)", background: "var(--paper)", backdropFilter: "blur(8px)" }}
@@ -463,12 +497,11 @@ export const CREATION_MENU_ITEMS = [
 
 export function CommandBar({
   focusedItem, workspace, selectedCount,
-  resultIsland, quickStarts, onSubmit, onDismissResult,
+  resultIsland, onSubmit, onDismissResult,
   onSpotlight, onCreate, onClearFocusContext, focusContext,
 }: CommandBarProps) {
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
-  const [showQS, setShowQS] = useState(false);
   const [showCreateMenu, setShowCreateMenu] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -554,7 +587,7 @@ export function CommandBar({
         </div>
       )}
 
-      <div className={`flex items-center gap-2 transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] ${focused ? "w-[560px]" : "w-[440px]"}`}>
+      <div className={`flex items-center gap-2 transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] ${focused ? "w-[640px]" : "w-[520px]"}`}>
         {/* Plus button — opens inline creation menu */}
         <div className="relative shrink-0">
           <button
@@ -591,30 +624,6 @@ export function CommandBar({
         </div>
 
         <div className="relative flex-1">
-          {/* Quick-starts panel */}
-          {showQS && focused && (
-            <div className="absolute bottom-full mb-3 w-full sv2-island rounded-2xl p-2 sv2-drift-in shadow-xl border" style={{ borderColor: "var(--line)" }}>
-              <div className="font-mono text-[10px] uppercase tracking-[0.15em] px-3 py-1.5 font-medium" style={{ color: "var(--ink-400)" }}>
-                Quick starts
-              </div>
-              <div className="grid grid-cols-2 gap-1.5">
-                {quickStarts.map((q) => (
-                  <button
-                    key={q.id}
-                    onMouseDown={() => { onSubmit(q.title); setShowQS(false); setValue(""); }}
-                    className="text-left p-2.5 rounded-xl flex gap-3 items-start transition-colors hover:bg-[var(--bg2)] group"
-                  >
-                    <div className="rounded-full mt-0.5 shrink-0" style={{ background: q.tone, width: 4, minHeight: 28 }} />
-                    <div>
-                      <div className="text-[12.5px] font-medium" style={{ color: "var(--ink-100)" }}>{q.title}</div>
-                      <div className="text-[11px] mt-0.5 leading-tight opacity-80" style={{ color: "var(--ink-300)" }}>{q.blurb}</div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* Input pill */}
           <div
             className={`sv2-island ${focused ? "shadow-lg" : "shadow-md"} rounded-[20px] flex items-center gap-2 transition-all h-12`}
@@ -654,7 +663,7 @@ export function CommandBar({
               value={value}
               onChange={(e) => setValue(e.target.value)}
               onFocus={() => setFocused(true)}
-              onBlur={() => setTimeout(() => { setFocused(false); setShowQS(false); setShowCreateMenu(false); }, 160)}
+              onBlur={() => setTimeout(() => { setFocused(false); setShowCreateMenu(false); }, 160)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && value.trim()) {
                   onSubmit(value);
@@ -665,16 +674,6 @@ export function CommandBar({
               className="flex-1 bg-transparent outline-none text-[14.5px] font-medium placeholder-[var(--ink-400)]"
               style={{ color: "var(--ink-100)" }}
             />
-
-            {/* Sparkle quick-starts toggle */}
-            <button
-              onClick={() => setShowQS((v) => !v)}
-              className={`shrink-0 transition-all ${showQS ? "opacity-100 scale-110" : "opacity-50 hover:opacity-80"}`}
-              style={{ color: "var(--accent)" }}
-              title="Quick starts"
-            >
-              <Icon name="sparkle" size={13} />
-            </button>
 
             {/* Focused item context chip */}
             {focusedItem && !value && (

@@ -225,13 +225,6 @@ export const getWorkspacePageData = query({
         .collect(),
     ]);
 
-    const chatById = new Map(liveChats.map((chat) => [chat._id, chat]));
-
-    const liveMessages = messages.filter((message) => {
-      const chat = chatById.get(message.chatId);
-      return Boolean(chat && message.userId === actor._id);
-    });
-
     const activeItems = items
       .filter((item) => item.ownerUserId === actor._id && item.orgId === actor.orgId && item.status === "active")
       .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0) || a.createdAt - b.createdAt)
@@ -239,6 +232,11 @@ export const getWorkspacePageData = query({
     const liveArtifacts = artifacts.filter((artifact) => artifact.ownerUserId === actor._id && artifact.orgId === actor.orgId && artifact.status === "active");
     const livePlannerItems = plannerItems.filter((item) => item.ownerUserId === actor._id && item.orgId === actor.orgId && item.status !== "cancelled");
     const liveChats = chats.filter((chat) => isActiveThreadChat(chat, actor._id, actor.orgId, args.workstreamId));
+    const chatById = new Map(liveChats.map((chat) => [chat._id, chat]));
+    const liveMessages = messages.filter((message) => {
+      const chat = chatById.get(message.chatId);
+      return Boolean(chat && message.userId === actor._id);
+    });
     const liveWidgets = widgets
       .filter((widget) => widget.ownerUserId === actor._id && widget.orgId === actor.orgId && !widget.hidden)
       .slice(0, widgetLimit);

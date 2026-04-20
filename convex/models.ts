@@ -50,14 +50,7 @@ type ModelInput = {
   arenaElo?: number;
 };
 
-const FEATURED_LABELS: Record<string, string> = {
-  "stepfun/step-3.5-flash:free": "Fast Included",
-  "minimax/minimax-m2.5:free": "Deep Reasoning",
-  "anthropic/claude-sonnet-4.5": "Best Writing",
-  "openai/gpt-5.4-mini": "Best Reasoning",
-  "openai/gpt-5.4-nano": "Smart & Cheap",
-  "google/gemma-3-27b-vision:free": "Vision",
-};
+const FEATURED_LABELS: Record<string, string> = {};
 
 const seededModels = [
   {

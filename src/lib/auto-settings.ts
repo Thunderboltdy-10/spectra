@@ -1,4 +1,4 @@
-import { MODEL_CONFIG } from "@/lib/model-config";
+import { getCatalogBackedEmergencyModel, MODEL_CONFIG } from "@/lib/model-config";
 import {
   extractRequestedModelPhrase,
   MODEL_ALIAS_QUERIES,
@@ -788,9 +788,10 @@ export async function maybeEnhancePrompt(message: string, actorClerkId?: string)
   };
 
   const startedAt = Date.now();
+  const promptEnhanceModel = getCatalogBackedEmergencyModel({ role: "text" });
   const completionPromise = openRouterChatCompletion({
-    model: MODEL_CONFIG.promptEnhance,
-    fallbackModels: [MODEL_CONFIG.tutorFast],
+    model: promptEnhanceModel,
+    fallbackModels: [],
     messages: [
       {
         role: "system",
@@ -810,7 +811,7 @@ export async function maybeEnhancePrompt(message: string, actorClerkId?: string)
     usageRecorded = true;
     await recordOpenRouterUsage({
       actorClerkId,
-      model: result.model ?? MODEL_CONFIG.promptEnhance,
+      model: result.model ?? promptEnhanceModel,
       usage: result.usage,
     }).catch(() => {});
   };
@@ -828,7 +829,7 @@ export async function maybeEnhancePrompt(message: string, actorClerkId?: string)
     return fallback;
   }
 
-  const model = result.model ?? MODEL_CONFIG.promptEnhance;
+  const model = result.model ?? promptEnhanceModel;
   const usage = result.usage;
   const durationMs = Date.now() - startedAt;
 

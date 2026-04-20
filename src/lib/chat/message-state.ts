@@ -1,6 +1,7 @@
 "use client";
 
 import type { ChatStreamEvent } from "@/lib/chat/streaming";
+import type { RouteTrace } from "@/types";
 
 export type PanelChatMessage = {
   id: string;
@@ -11,6 +12,7 @@ export type PanelChatMessage = {
   phase?: string;
   modelUsed?: string;
   citations?: Array<{ url: string; title: string }>;
+  routeTrace?: RouteTrace;
   createdAt: number;
 };
 
@@ -134,7 +136,10 @@ export class ChatMessageAccumulator {
 
     if (event.type === "route_model" && event.modelUsed) {
       this.modelUsed = event.modelUsed;
-      this.patchAssistant({ modelUsed: this.modelUsed });
+      this.patchAssistant({
+        modelUsed: this.modelUsed,
+        routeTrace: event.routeTrace as RouteTrace | undefined,
+      });
       return;
     }
 

@@ -91,7 +91,17 @@ type BackendPageData = {
   };
   signals?: {
     workspaceHealth?: Record<string, unknown>;
-    topicSignals?: Array<Record<string, unknown>>;
+    topicSignals?: Array<{
+      topic?: string;
+      itemCount?: number;
+      plannerCount?: number;
+      chatCount?: number;
+      resultCount?: number;
+      latestTimestamp?: number;
+      overdueCount?: number;
+      unresolvedCount?: number;
+      state?: string;
+    }>;
     timelineSignals?: Array<Record<string, unknown>>;
   };
   revision?: number;
@@ -332,6 +342,24 @@ export async function removeWorkspaceWidget(widgetId: string): Promise<boolean> 
   }
 }
 
+export async function updateWorkspace(payload: {
+  workstreamId: string;
+  title?: string;
+  emoji?: string;
+  description?: string;
+}): Promise<boolean> {
+  try {
+    const res = await fetch("/api/workspace-data", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "updateWorkspace", ...payload }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function persistWorkspaceViewMode(
   viewMode: "spatial" | "type" | "topic" | "timeline",
 ): Promise<boolean> {
@@ -479,6 +507,7 @@ export function useWorkspacePageData(workstreamId: string | null) {
   const [commandResultCards, setCommandResultCards] = useState<ResultCardData[]>([]);
   const [widgets, setWidgets] = useState<BackendWorkspaceWidget[]>([]);
   const [preferences, setPreferences] = useState<BackendPageData["preferences"] | null>(null);
+  const [signals, setSignals] = useState<BackendPageData["signals"] | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -487,6 +516,7 @@ export function useWorkspacePageData(workstreamId: string | null) {
       setCommandResultCards([]);
       setWidgets([]);
       setPreferences(null);
+      setSignals(null);
       return;
     }
 
@@ -502,6 +532,7 @@ export function useWorkspacePageData(workstreamId: string | null) {
       setCommandResultCards(data.commandResults.map(backendResultToCard));
       setWidgets(data.widgets ?? []);
       setPreferences(data.preferences ?? null);
+      setSignals(data.signals ?? null);
       setLoading(false);
     });
 
@@ -510,5 +541,5 @@ export function useWorkspacePageData(workstreamId: string | null) {
     };
   }, [workstreamId]);
 
-  return { items, commandResultCards, widgets, preferences, loading };
+  return { items, commandResultCards, widgets, preferences, signals, loading };
 }

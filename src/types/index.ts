@@ -138,7 +138,15 @@ export type OrchestrationProfile =
   | "teacher_marking"
   | "long_context_reconstruction";
 
+export type RuntimeExecutionPath = "direct_chat" | "single_action" | "action_loop" | "research_workflow";
+
 export type AiToolName =
+  | "inspect_runtime_context"
+  | "search_skills"
+  | "load_skill"
+  | "propose_actions"
+  | "apply_actions"
+  | "get_version_history"
   | "recall_memory"
   | "save_memory"
   | "update_memory"
@@ -302,6 +310,7 @@ export type RoutePlan = {
     required: Array<"vision" | "reasoning" | "code" | "search" | "image_generation">;
     preferred: Array<"vision" | "reasoning" | "code" | "search" | "image_generation">;
   };
+  executionPath?: RuntimeExecutionPath;
   requestedArtifactFormats: ArtifactFormat[];
   allowSubAgents: boolean;
   orchestrationProfile: OrchestrationProfile;
@@ -364,6 +373,7 @@ export type ModelRouteInput = {
   isMultipart?: boolean;
   conversationLength?: number;
   previousModelUsed?: string;
+  preserveContinuity?: boolean;
   agentPreferredModel?: string;
   agentTopModels?: Array<{ modelId: string; score: number }>;
   modelCatalog?: Array<{

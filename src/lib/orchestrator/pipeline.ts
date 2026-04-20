@@ -2733,13 +2733,23 @@ export async function runChatPipeline(request: NextRequest) {
   let imageDescriptionBlock = "";
   if (capability.requiresPrepass && capability.prepassModel && allImageBlocks.length > 0) {
     const visionPrepassStartedAt = Date.now();
+    const visionPrepassFallbackModels = Array.from(
+      new Set([
+        ...route.fallbackModels,
+        ...catalog
+          .filter((model) => model.modelId !== capability.prepassModel)
+          .filter((model) => modelSupportsCapability(model, "vision"))
+          .map((model) => model.modelId)
+          .slice(0, 3),
+      ]),
+    ).filter((candidate) => candidate !== capability.prepassModel);
     imageDescriptionBlock = await runVisionPrepass({
       actorClerkId: actor.clerkId,
       chatId,
       imageContentBlocks: allImageBlocks,
       userMessage: auto.message,
       model: capability.prepassModel,
-      fallbackModels: route.fallbackModels,
+      fallbackModels: visionPrepassFallbackModels,
     });
     appendSubcall({
       phaseId: "analysis",
@@ -4355,6 +4365,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
             actorClerkId: actor.clerkId,
             chatId,
             activeWorkstreamId,
+            artifactId: body.artifactId,
             mode: effectiveMode,
             spendingTier: budget.tier,
             onModelCall: (call) => {
@@ -4412,7 +4423,15 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
             messages,
             maxTokens,
             maxContinuations: Math.max(maxContinuations, routePlan.responseBudget === "deep" ? 4 : 2),
-            maxToolRounds: routePlan.responseBudget === "deep" ? 6 : 4,
+            maxToolRounds:
+              routePlan.executionPath === "single_action"
+                ? 2
+                : routePlan.executionPath === "action_loop"
+                  ? 4
+                  : routePlan.executionPath === "research_workflow"
+                    ? 5
+                    : 1,
+            executionPath: routePlan.executionPath ?? "direct_chat",
             send,
             onUsageTokens: consumeUsageTokens,
             onFallback,

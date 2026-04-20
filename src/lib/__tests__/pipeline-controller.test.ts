@@ -26,7 +26,7 @@ describe("PipelineController", () => {
     expect(gated.skippedStages.some((row) => row.step === "multiAgent")).toBe(true);
   });
 
-  it("denies forced multi-agent in cheap_only tier", () => {
+  it("allows forced multi-agent in cheap_only tier when the request is complex enough", () => {
     const controller = new PipelineController({
       requestClass: "T2",
       classificationReason: "research request",
@@ -42,8 +42,8 @@ describe("PipelineController", () => {
       budgetSoftLimited: false,
     });
 
-    expect(gated.forceMultiAgentAllowed).toBe(false);
-    expect(gated.forceDeniedReasons.some((reason) => reason.includes("cheap_only"))).toBe(true);
+    expect(gated.forceMultiAgentAllowed).toBe(true);
+    expect(gated.forceDeniedReasons).toHaveLength(0);
   });
 
   it("allows forced multi-agent in normal tier when request class is T2+", () => {

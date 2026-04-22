@@ -76,11 +76,7 @@ describe("proxy invitation handling", () => {
     expect(response).toBeDefined();
     expect(response!.headers.get("location")).toBeNull();
     const setCookie = response!.headers.get("set-cookie") ?? "";
-    expect(setCookie).toContain("ai-school-invitation-token=");
-    // A cleared cookie from NextResponse.cookies.delete appears with an
-    // empty value + Max-Age=0 (or an expired Expires). Match either form.
-    expect(/ai-school-invitation-token=;/.test(setCookie) || /Max-Age=0/.test(setCookie))
-      .toBe(true);
+    expect(setCookie).toContain("ai-school-access-state=ok");
 
     restore();
   });
@@ -117,7 +113,7 @@ describe("proxy invitation handling", () => {
     restore();
   });
 
-  it("clears the cookie and redirects to /no-access?reason=inactive when the org is inactive", async () => {
+  it("clears the cookie and redirects to /request-access?reason=inactive when the org is inactive", async () => {
     mockClerk("user_1");
     const restore = mockAccessStateFetch({ status: 403, body: { status: "org_inactive" } });
 
@@ -128,10 +124,9 @@ describe("proxy invitation handling", () => {
     const response = await proxy(request, {} as never);
 
     expect(response).toBeDefined();
-    expect(response!.headers.get("location")).toBe("http://localhost/no-access?reason=inactive");
+    expect(response!.headers.get("location")).toBe("http://localhost/request-access?reason=inactive");
     const setCookie = response!.headers.get("set-cookie") ?? "";
-    expect(/ai-school-invitation-token=;/.test(setCookie) || /Max-Age=0/.test(setCookie))
-      .toBe(true);
+    expect(setCookie).toContain("ai-school-access-state=org_inactive");
 
     restore();
   });

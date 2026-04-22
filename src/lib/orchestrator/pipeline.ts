@@ -25,7 +25,7 @@ import { countFlashcardPairs, isFlashcardDeckStructured, normalizeFlashcardDeck 
 import { safeStudyMode } from "@/lib/contracts/studyModes";
 import { createRequestLogger } from "@/lib/logging";
 import { isModeAvailable } from "@/lib/modes";
-import { inferRoutingLane, isModelTooExpensivePerMillion, modelSupportsCapability, pickModelAndFallbacks } from "@/lib/model-selection";
+import { modelSupportsCapability, pickModelAndFallbacks } from "@/lib/model-selection";
 import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
 import { normalizeAttachments } from "@/lib/attachments/normalizer";
 import { gateCapabilities } from "@/lib/attachments/capability-gate";
@@ -69,10 +69,15 @@ import {
   validateClassifierInput,
   type ClassifierDecision,
 } from "@/lib/orchestrator/classifier-contract";
-import { runAssistantStreaming, runCollaborativeStreaming } from "@/lib/orchestrator/streaming";
 import { buildCapabilityContract, getOpenRouterToolsForAssignmentLevel, formatToolUsageGuidance } from "@/lib/orchestrator/tool-definitions";
 import { executeOrchestratorTool } from "@/lib/orchestrator/tool-executor";
 import { buildTaskGraph, shouldUseMultiAgent } from "@/lib/orchestrator/task-graph";
+import { buildRuntimeContextEnvelope } from "@/lib/orchestrator/runtime-context";
+import { buildExecutionPathInputs, selectRuntimeExecutionPath } from "@/lib/orchestrator/runtime-path";
+import { buildRuntimeDoneEvent, buildRuntimeErrorEvent } from "@/lib/orchestrator/runtime-response";
+import { runRuntimeHarness } from "@/lib/orchestrator/runtime-harness";
+import { toLegacyChatStreamEvent, type RuntimeEvent, type RuntimeSurface } from "@/lib/orchestrator/runtime-contract";
+import { supportsDocumentReasoningModel } from "@/lib/runtime/model-guardrails";
 import {
   buildModeSuggestions,
   buildModeTransformGuidance,
@@ -857,6 +862,10 @@ export async function runChatPipeline(request: NextRequest) {
         });
       }
     }
+  };
+  const emitRuntimeEvent = async (event: RuntimeEvent) => {
+    captureRuntimeEvent(event);
+    await send(toLegacyChatStreamEvent(event));
   };
 
   // Buffer events that fire before the Response is returned (no reader attached yet).
@@ -1852,6 +1861,19 @@ export async function runChatPipeline(request: NextRequest) {
     routePlan.shouldWriteMemory = false;
     routePlan.allowedToolBundles = routePlan.allowedToolBundles.filter((bundle) => bundle !== "memory");
   }
+  const runtimeSurface: RuntimeSurface =
+    body.artifactId ? "artifact"
+      : activeWorkstreamId ? "workspace"
+        : "chat";
+  const runtimePathDecision = selectRuntimeExecutionPath(buildExecutionPathInputs({
+    routePlan,
+    mode: effectiveMode,
+    message: auto.message,
+    activeSurface: runtimeSurface,
+    artifactId: body.artifactId,
+    workstreamId: activeWorkstreamId,
+  }));
+  routePlan.executionPath = runtimePathDecision.executionPath;
   pipelineController.markStageCompleted("buildRoutePlan");
   const costGates = pipelineController.applyCostGates({
     allowSearch: routePlan.shouldUseWebSearch,
@@ -2384,6 +2406,7 @@ export async function runChatPipeline(request: NextRequest) {
       routingDurationMs: routeDecision.routingDurationMs,
       phasePlan: [routeDecision.phase],
       subcalls: deferredSubcalls,
+      executionEvents: [],
       assignmentLevel: auto.assignmentLevel,
       requestClass: auto.requestClass,
       classificationReason: auto.classificationReason,
@@ -2444,6 +2467,171 @@ export async function runChatPipeline(request: NextRequest) {
     });
     route.trace.subcalls = existing;
   };
+  const toolEventKind = (toolName?: string) => {
+    const normalized = (toolName ?? "").toLowerCase();
+    if (!normalized) return "tool" as const;
+    if (normalized.includes("search")) return "search" as const;
+    if (normalized.includes("memory")) return "memory" as const;
+    if (normalized === "apply_actions" || normalized.includes("artifact") || normalized.includes("widget") || normalized.includes("planner")) {
+      return "action" as const;
+    }
+    if (normalized.includes("skill")) return "skill" as const;
+    return "tool" as const;
+  };
+  const formatRuntimeLabel = (value: string | undefined, fallback: string) => {
+    const normalized = (value ?? "").trim();
+    if (!normalized) return fallback;
+    return normalized
+      .replace(/[_-]+/g, " ")
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+  };
+  function captureRuntimeEvent(event: RuntimeEvent) {
+    const existing = route.trace.executionEvents ?? [];
+    const now = Date.now();
+    const upsert = (id: string, patch: typeof existing[number]) => {
+      const index = existing.findIndex((entry) => entry.id === id);
+      if (index >= 0) {
+        existing[index] = {
+          ...existing[index],
+          ...patch,
+          startedAt: existing[index]?.startedAt ?? patch.startedAt,
+        };
+      } else {
+        existing.push(patch);
+      }
+    };
+
+    if (event.type === "thinking") {
+      const current = existing.find((entry) => entry.id === "runtime-thinking");
+      upsert("runtime-thinking", {
+        id: "runtime-thinking",
+        kind: "thinking",
+        label: "Thinking",
+        status: "running",
+        content: `${current?.content ?? ""}${String((event as { content?: unknown }).content ?? "")}`,
+        startedAt: current?.startedAt ?? now,
+      });
+      route.trace.executionEvents = existing;
+      return;
+    }
+
+    if (event.type === "model_selected") {
+      const runtimeModelUsed = typeof event.modelUsed === "string" ? event.modelUsed : undefined;
+      const runtimeExecutionPath = typeof event.executionPath === "string" ? event.executionPath : undefined;
+      upsert("runtime-routing", {
+        id: "runtime-routing",
+        kind: "routing",
+        label: `Selected ${formatRuntimeLabel(runtimeModelUsed, "Model")}`,
+        status: "completed",
+        detail: runtimeExecutionPath ? `Execution path: ${runtimeExecutionPath}` : route.trace.selected.reason,
+        startedAt: now,
+        finishedAt: now,
+      });
+      route.trace.executionEvents = existing;
+      return;
+    }
+
+    if (event.type === "skill_loaded") {
+      const skill = (event as { skill?: { id?: string; name?: string } | string }).skill;
+      existing.push({
+        id: `skill-${existing.length + 1}`,
+        kind: "skill",
+        label: `Loaded ${formatRuntimeLabel(typeof skill === "string" ? skill : skill?.name ?? skill?.id, "Skill")}`,
+        status: "completed",
+        startedAt: now,
+        finishedAt: now,
+      });
+      route.trace.executionEvents = existing;
+      return;
+    }
+
+    if (event.type === "tool_call") {
+      const toolName = typeof event.toolName === "string" ? event.toolName : undefined;
+      const toolCallId = typeof event.toolCallId === "string" ? event.toolCallId : `unknown-${existing.length + 1}`;
+      upsert(`tool:${toolCallId}`, {
+        id: `tool:${toolCallId}`,
+        kind: toolEventKind(toolName),
+        label: formatRuntimeLabel(toolName, "Tool"),
+        status: "running",
+        detail: typeof event.arguments === "string" ? event.arguments.slice(0, 280) : undefined,
+        toolName,
+        toolCallId,
+        startedAt: now,
+      });
+      route.trace.executionEvents = existing;
+      return;
+    }
+
+    if (event.type === "tool_result") {
+      const toolName = typeof event.toolName === "string" ? event.toolName : undefined;
+      const toolCallId = typeof event.toolCallId === "string" ? event.toolCallId : `unknown-${existing.length + 1}`;
+      const resultRecord = event.result && typeof event.result === "object" ? event.result as Record<string, unknown> : undefined;
+      const detail =
+        typeof event.summary === "string" && event.summary.trim()
+          ? event.summary
+          : typeof resultRecord?.summary === "string"
+            ? resultRecord.summary
+            : undefined;
+      upsert(`tool:${toolCallId}`, {
+        id: `tool:${toolCallId}`,
+        kind: toolEventKind(toolName),
+        label: formatRuntimeLabel(toolName, "Tool"),
+        status: "completed",
+        detail,
+        toolName,
+        toolCallId,
+        finishedAt: now,
+        durationMs: undefined,
+      });
+      route.trace.executionEvents = existing;
+      return;
+    }
+
+    if (event.type === "mode_switched" || event.type === "navigation_instruction" || event.type === "notice") {
+      const modeLabel = event.type === "mode_switched" && typeof event.mode === "string"
+        ? formatRuntimeLabel(event.mode, "Mode")
+        : "Mode";
+      const navigationTarget = event.type === "navigation_instruction"
+        ? [
+            event.title,
+            event.chatId,
+            event.artifactId,
+            event.workstreamId,
+          ].find((value): value is string => typeof value === "string" && value.trim().length > 0)
+        : undefined;
+      const noticeDetail: string | undefined = event.type === "notice"
+        ? String((event as { content?: unknown; message?: unknown }).content ?? (event as { message?: unknown }).message ?? "")
+        : (typeof event.reason === "string" ? event.reason : undefined);
+      existing.push({
+        id: `runtime-note-${existing.length + 1}`,
+        kind: event.type === "notice" ? "notice" : "action",
+        label:
+          event.type === "mode_switched"
+            ? `Switched to ${modeLabel}`
+            : event.type === "navigation_instruction"
+              ? `Opened ${formatRuntimeLabel(navigationTarget, "Target")}`
+              : "Runtime notice",
+        status: "completed",
+        detail: noticeDetail,
+        startedAt: now,
+        finishedAt: now,
+      });
+      route.trace.executionEvents = existing;
+      return;
+    }
+
+    if (event.type === "done" || event.type === "error") {
+      const thinkingIndex = existing.findIndex((entry) => entry.id === "runtime-thinking");
+      if (thinkingIndex >= 0) {
+        existing[thinkingIndex] = {
+          ...existing[thinkingIndex],
+          status: event.type === "done" ? "completed" : "failed",
+          finishedAt: now,
+        };
+      }
+      route.trace.executionEvents = existing;
+    }
+  }
   const finalizePhasePlan = (params?: {
     memoryUpdated?: boolean;
     titleUpdated?: boolean;
@@ -2515,29 +2703,6 @@ export async function runChatPipeline(request: NextRequest) {
     });
   };
   const manualLockRequested = routingMode === "manual" && Boolean(routingManualModel) && !body.forcedModel;
-  const manualModelMeta = routingManualModel
-    ? catalog.find((model) => model.modelId === routingManualModel)
-    : undefined;
-  const generationLane = inferRoutingLane({
-    mode: effectiveMode,
-    requiredCapabilities: routePlan.candidateModelRequirements.required,
-    needsSearch: routePlan.shouldUseWebSearch || usedRecentContextCache,
-    preferFast: routePlan.responseBudget === "simple",
-  });
-  const manualModelExceedsCap = Boolean(manualModelMeta && isModelTooExpensivePerMillion(manualModelMeta, { lane: generationLane }));
-  if (manualLockRequested && routingManualModel && manualModelExceedsCap && !body.confirmExpensiveModel) {
-    await rollbackPersistedUserMessage();
-    return jsonError(409, {
-      code: "MANUAL_MODEL_CONFIRM_REQUIRED",
-      message: `The selected model (${routingManualModel}) exceeds the automatic 30/M cap. Confirm once to run it manually for this request.`,
-      retryable: false,
-    }, {
-      requiredConfirmation: true,
-      modelId: routingManualModel,
-      inputCostPerM: manualModelMeta?.inputCostPerM,
-      outputCostPerM: manualModelMeta?.outputCostPerM,
-    });
-  }
   if (manualLockRequested && routingManualModel && route.primaryModel !== routingManualModel) {
     const allowedAlternatives = route.trace.candidates
       .filter((candidate) => candidate.allowed)
@@ -2683,6 +2848,8 @@ export async function runChatPipeline(request: NextRequest) {
   let capability = gateCapabilities({
     selectedModel: route.primaryModel,
     requiresVision,
+    requiresFileUnderstanding: attachments.requiresFileUnderstanding,
+    requiresDocumentReasoning: attachments.requiresDocumentReasoning,
     fallbackModels: route.fallbackModels,
     modelCatalog: constrainedCatalog,
     spendingTier: budget.tier,
@@ -2690,22 +2857,30 @@ export async function runChatPipeline(request: NextRequest) {
 
   if (capability.modelSwitched) {
     if (manualLockRequested) {
-      const manualVisionPrepassModel = capability.prepassModel
+      const manualPrepassKind = capability.prepassKind ?? (requiresVision ? "vision" : "file_understanding");
+      const manualPrepassModel = capability.prepassModel
         ?? route.fallbackModels.find((candidate) => {
           const fallbackMeta = constrainedCatalog.find((model) => model.modelId === candidate);
-          return fallbackMeta ? modelSupportsCapability(fallbackMeta, "vision") : false;
+          if (!fallbackMeta) return false;
+          if (manualPrepassKind === "vision") return modelSupportsCapability(fallbackMeta, "vision");
+          return supportsDocumentReasoningModel(fallbackMeta);
         });
       capability = {
         finalModel: route.primaryModel,
         modelSwitched: false,
-        requiresPrepass: Boolean(manualVisionPrepassModel),
-        prepassModel: manualVisionPrepassModel,
-        userNotice: manualVisionPrepassModel
-          ? "Manual model kept; using vision prepass for attached images."
-          : "Manual model kept. No vision-capable prepass model available in your current tier.",
+        requiresPrepass: Boolean(manualPrepassModel),
+        prepassKind: manualPrepassKind,
+        prepassModel: manualPrepassModel,
+        userNotice: manualPrepassModel
+          ? manualPrepassKind === "vision"
+            ? "Manual model kept; using vision prepass for attached images."
+            : "Manual model kept; using document prepass for attachment reasoning."
+          : manualPrepassKind === "vision"
+            ? "Manual model kept. No vision-capable prepass model available in your current tier."
+            : "Manual model kept. No document-capable prepass model available in your current tier.",
       };
-      route.reason = `${route.reason}; manual model retained with vision prepass`;
-      route.trace.toolchain.push("vision_prepass_manual_lock");
+      route.reason = `${route.reason}; manual model retained with ${manualPrepassKind === "vision" ? "vision" : "document"} prepass`;
+      route.trace.toolchain.push(manualPrepassKind === "vision" ? "vision_prepass_manual_lock" : "document_prepass_manual_lock");
     } else {
       const originalPrimary = route.primaryModel;
       route.primaryModel = capability.finalModel;
@@ -2720,7 +2895,7 @@ export async function runChatPipeline(request: NextRequest) {
         modelId: route.primaryModel,
         reason: route.reason,
       };
-      route.trace.toolchain.push("vision_gate");
+      route.trace.toolchain.push(capability.prepassKind === "file_understanding" ? "document_capability_gate" : "vision_gate");
     }
   }
 
@@ -2731,7 +2906,8 @@ export async function runChatPipeline(request: NextRequest) {
   });
 
   let imageDescriptionBlock = "";
-  if (capability.requiresPrepass && capability.prepassModel && allImageBlocks.length > 0) {
+  let documentReasoningBlock = "";
+  if (capability.requiresPrepass && capability.prepassModel && capability.prepassKind === "vision" && allImageBlocks.length > 0) {
     const visionPrepassStartedAt = Date.now();
     const visionPrepassFallbackModels = Array.from(
       new Set([
@@ -2761,6 +2937,69 @@ export async function runChatPipeline(request: NextRequest) {
       durationMs: Date.now() - visionPrepassStartedAt,
     });
     route.trace.toolchain.push("vision_prepass");
+  }
+  if (
+    capability.requiresPrepass
+    && capability.prepassModel
+    && capability.prepassKind === "file_understanding"
+    && attachments.quickExtractBlock.trim().length > 0
+  ) {
+    const documentPrepassStartedAt = Date.now();
+    const documentPrepassFallbackModels = Array.from(
+      new Set([
+        ...route.fallbackModels,
+        ...catalog
+          .filter((model) => model.modelId !== capability.prepassModel)
+          .filter((model) => supportsDocumentReasoningModel(model))
+          .map((model) => model.modelId)
+          .slice(0, 3),
+      ]),
+    ).filter((candidate) => candidate !== capability.prepassModel);
+    const documentPrepass = await openRouterChatCompletion({
+      model: capability.prepassModel,
+      fallbackModels: documentPrepassFallbackModels,
+      messages: [
+        {
+          role: "system",
+          content: "Summarize attachment extracts into concise, verifiable bullet points with concrete entities, numbers, and unresolved gaps. Use markdown bullets only.",
+        },
+        {
+          role: "user",
+          content: [
+            `User request:\n${auto.message}`,
+            attachments.quickExtractBlock,
+          ].join("\n\n"),
+        },
+      ],
+      maxTokens: 520,
+      temperature: 0.2,
+      onFallback: (event) => {
+        route.trace.fallbacks.push(event);
+      },
+    }).catch(() => null);
+    documentReasoningBlock = documentPrepass?.choices?.[0]?.message?.content?.trim() ?? "";
+    appendSubcall({
+      phaseId: "analysis",
+      label: "Document prepass",
+      endpoint: "chat.completions",
+      status: documentPrepass ? "ok" : "error",
+      modelRequested: capability.prepassModel,
+      modelUsed: documentPrepass?.model ?? capability.prepassModel,
+      inputTokens: documentPrepass?.usage?.prompt_tokens,
+      outputTokens: documentPrepass?.usage?.completion_tokens,
+      costCents: costCentsFromUsage(documentPrepass?.usage),
+      durationMs: Date.now() - documentPrepassStartedAt,
+      reason: documentPrepass ? "Attachment extracts normalized for downstream reasoning." : "Document prepass failed.",
+    });
+    if (documentPrepass?.usage) {
+      await recordOpenRouterUsage({
+        actorClerkId: actor.clerkId,
+        chatId,
+        model: documentPrepass.model ?? capability.prepassModel,
+        usage: documentPrepass.usage,
+      }).catch(() => {});
+    }
+    route.trace.toolchain.push("document_prepass");
   }
 
   const primaryModel = route.primaryModel;
@@ -3375,6 +3614,9 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
   if (includeRichContextBlocks && attachments.quickExtractBlock) {
     systemPromptParts.push(attachments.quickExtractBlock);
   }
+  if (includeRichContextBlocks && documentReasoningBlock) {
+    systemPromptParts.push(`DOCUMENT PREPASS:\n${documentReasoningBlock}`);
+  }
   if (includeRichContextBlocks && researchEvidenceBlock) {
     systemPromptParts.push(researchEvidenceBlock);
   }
@@ -3385,6 +3627,30 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
   if (includeRichContextBlocks && imageDescriptionBlock) {
     systemPromptParts.push(`IMAGE DESCRIPTION:\n${imageDescriptionBlock}`);
   }
+  const runtimeContextEnvelope = buildRuntimeContextEnvelope({
+    routePlan,
+    surface: runtimeSurface,
+    systemPromptParts,
+    historyMessages: history.map((message) => ({
+      role: message.role,
+      content: message.content,
+    })),
+    memoryProfile: useMemoryProfile ? personalSoulExcerpt : undefined,
+    retrievalBlock: retrieval.sourceBlock,
+    searchBlock,
+    attachmentsBlock: [attachments.quickExtractBlock, documentReasoningBlock, imageDescriptionBlock].filter(Boolean).join("\n\n"),
+    workspaceBlock:
+      activeWorkstream && includeRichContextBlocks && routePlan.assignmentLevel === "L4"
+        ? [
+            `Workstream: ${String((activeWorkstream as { title?: unknown }).title ?? "Workspace")}`,
+            workstreamPlannerSummary,
+            workstreamArtifactSummary,
+            workstreamMemoryBlock,
+          ].filter(Boolean).join("\n\n")
+        : undefined,
+  });
+  route.trace.toolchain.push(`runtime_surface_${runtimeContextEnvelope.surface}`);
+  route.trace.toolchain.push(`runtime_path_${runtimePathDecision.executionPath}`);
 
   const multiAgentGateDebug = {
     budgetTier: budget.tier,
@@ -4385,7 +4651,8 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         });
 
       const streamed = multiAgentEnabled
-        ? await runCollaborativeStreaming({
+        ? await runRuntimeHarness({
+            mode: "collaborative",
             actorClerkId: actor.clerkId,
             chatId,
             graph: taskGraph,
@@ -4407,12 +4674,14 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
             maxWallTimeMs: collabLimits.maxWallTimeMs,
             usageBudgetTokens: usageBudgetState.usageBudgetRemaining,
             budgetOverrunFactor: 1.5,
-            send,
+            emit: emitRuntimeEvent,
             onUsageTokens: consumeUsageTokens,
             onFallback,
             logger,
+            surface: runtimeSurface,
           })
-        : await runAssistantStreaming({
+        : await runRuntimeHarness({
+            mode: "assistant",
             actorClerkId: actor.clerkId,
             chatId,
             shouldVerify,
@@ -4432,12 +4701,13 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
                     ? 5
                     : 1,
             executionPath: routePlan.executionPath ?? "direct_chat",
-            send,
+            emit: emitRuntimeEvent,
             onUsageTokens: consumeUsageTokens,
             onFallback,
             tools: openRouterTools,
             executeTool: executeAssistantTool,
             logger,
+            surface: runtimeSurface,
           });
       if (route.trace.phasePlan?.some((phase) => phase.id === "planning")) {
         await emitPhaseUpdate(
@@ -5461,23 +5731,29 @@ BACK: [answer or definition]`,
       route.trace.totalDurationMs = Date.now() - requestStartedAt;
 
       await send({
-        type: "done",
+        ...buildRuntimeDoneEvent({
+          messageId: appended.messageId,
+          artifacts: {
+            routeTrace: route.trace,
+            modelUsed,
+            citations: citations.map((citation) => ({
+              url: citation.url ?? "",
+              title: citation.title ?? citation.filename,
+            })),
+            thinkingContent: thinkingContent || undefined,
+          },
+        }),
         content: finalizedResponse,
         chatId,
         userMessageId: resolvedUserMessageId,
-        messageId: appended.messageId,
-        modelUsed,
         modelRequested,
         usageIn: finalUsageIn,
         usageOut: finalUsageOut,
         whyThisResponse,
-        citations,
         attachments: generatedArtifactAttachments,
         attachmentResourceIds: generatedArtifactResourceIds,
         verificationPassed,
-        thinkingContent: thinkingContent || undefined,
         finishReason,
-        routeTrace: route.trace,
         spendingUpdate,
         autoResult: {
           modelUsed,
@@ -5529,14 +5805,11 @@ BACK: [answer or definition]`,
           expectedClientMessageId: normalizedClientMessageId,
         }).catch(() => {});
       }
-      await send({
-        type: "error",
-        error: {
-          code: "CHAT_STREAM_FAILED",
-          message: error instanceof Error ? error.message : "Failed to stream response",
-          retryable: true,
-        },
-      });
+      await send(buildRuntimeErrorEvent({
+        code: "CHAT_STREAM_FAILED",
+        message: error instanceof Error ? error.message : "Failed to stream response",
+        retryable: true,
+      }));
     } finally {
       if (!streamClosed) {
         await writer.close().catch(() => {});

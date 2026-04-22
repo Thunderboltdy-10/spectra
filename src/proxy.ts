@@ -35,10 +35,51 @@ type AccessStatePayload = {
   expected?: boolean;
 };
 
+const ACCESS_STATE_CACHE_TTL_MS = 15_000;
+const ACCESS_STATE_COOKIE = "ai-school-access-state";
+const ACCESS_STATE_AT_COOKIE = "ai-school-access-state-at";
+
+function persistAccessState(response: NextResponse, status: NonNullable<AccessStatePayload["status"]>) {
+  response.cookies.set(ACCESS_STATE_COOKIE, status, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: Math.floor(ACCESS_STATE_CACHE_TTL_MS / 1000),
+    path: "/",
+  });
+  response.cookies.set(ACCESS_STATE_AT_COOKIE, String(Date.now()), {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: Math.floor(ACCESS_STATE_CACHE_TTL_MS / 1000),
+    path: "/",
+  });
+}
+
+function clearAccessState(response: NextResponse) {
+  response.cookies.delete(ACCESS_STATE_COOKIE);
+  response.cookies.delete(ACCESS_STATE_AT_COOKIE);
+}
+
 async function fetchAccessState(req: NextRequest): Promise<{
   status: number;
   payload: AccessStatePayload | null;
 } | null> {
+  const cachedStatus = req.cookies.get(ACCESS_STATE_COOKIE)?.value;
+  const cachedAtRaw = req.cookies.get(ACCESS_STATE_AT_COOKIE)?.value;
+  const cachedAt = cachedAtRaw ? Number(cachedAtRaw) : Number.NaN;
+  if (
+    cachedStatus &&
+    ["ok", "no_access", "org_inactive", "signed_out"].includes(cachedStatus) &&
+    Number.isFinite(cachedAt) &&
+    Date.now() - cachedAt < ACCESS_STATE_CACHE_TTL_MS
+  ) {
+    return {
+      status: cachedStatus === "signed_out" ? 401 : 200,
+      payload: { status: cachedStatus as AccessStatePayload["status"], expected: true },
+    };
+  }
+
   try {
     const response = await fetch(new URL("/api/auth/access-state", req.url), {
       method: "GET",
@@ -54,11 +95,20 @@ async function fetchAccessState(req: NextRequest): Promise<{
   }
 }
 
+const ACCESS_STATE_PATH_PREFIX = "/api/auth/access-state";
+
 const authMiddleware = clerkMiddleware(async (auth, req) => {
   const url = new URL(req.url);
   const invitationToken = url.searchParams.get("token") ?? url.searchParams.get("invitation");
   const cookieToken = req.cookies.get(INVITATION_TOKEN_COOKIE)?.value;
   const isApiRoute = url.pathname.startsWith("/api/") || url.pathname.startsWith("/trpc");
+
+  // Skip access-state check for the access-state route itself to prevent
+  // recursive middleware invocations (fetchAccessState fetches this route,
+  // which would re-enter the middleware and call fetchAccessState again).
+  if (url.pathname.startsWith(ACCESS_STATE_PATH_PREFIX)) {
+    return NextResponse.next();
+  }
 
   const { userId } = await auth();
 
@@ -74,6 +124,7 @@ const authMiddleware = clerkMiddleware(async (auth, req) => {
       ? NextResponse.next()
       : NextResponse.redirect(destination);
 
+    clearAccessState(response);
     response.cookies.set(INVITATION_TOKEN_COOKIE, invitationToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -97,6 +148,7 @@ const authMiddleware = clerkMiddleware(async (auth, req) => {
       const response = NextResponse.redirect(new URL("/chat", req.url));
       response.cookies.delete(INVITATION_TOKEN_COOKIE);
       response.cookies.delete(INVITATION_HANDOFF_COOKIE);
+      persistAccessState(response, "ok");
       return response;
     }
   }
@@ -133,19 +185,30 @@ const authMiddleware = clerkMiddleware(async (auth, req) => {
     const response = NextResponse.redirect(destination);
     response.cookies.delete(INVITATION_TOKEN_COOKIE);
     response.cookies.delete(INVITATION_HANDOFF_COOKIE);
+    persistAccessState(response, "org_inactive");
     return response;
   }
 
   if (access?.payload?.status === "no_access") {
     // If they have an invitation token, send them to /join to accept it.
     if (cookieToken) {
-      return NextResponse.redirect(new URL(`/join?token=${cookieToken}`, req.url));
+      const response = NextResponse.redirect(new URL(`/join?token=${cookieToken}`, req.url));
+      persistAccessState(response, "no_access");
+      return response;
     }
     // Otherwise, send them to request access.
-    return NextResponse.redirect(new URL("/request-access", req.url));
+    const response = NextResponse.redirect(new URL("/request-access", req.url));
+    persistAccessState(response, "no_access");
+    return response;
   }
 
-  return NextResponse.next();
+  const response = NextResponse.next();
+  if (userId && access?.payload?.status) {
+    persistAccessState(response, access.payload.status);
+  } else if (!userId) {
+    clearAccessState(response);
+  }
+  return response;
 });
 
 export default function proxy(request: NextRequest, event: NextFetchEvent) {

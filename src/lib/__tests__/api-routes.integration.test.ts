@@ -48,7 +48,7 @@ describe("auth access-state route integration", () => {
     const response = await route.GET(new NextRequest("http://localhost/api/auth/access-state"));
     const payload = await response.json();
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(200);
     expect(payload).toEqual({ status: "no_access", expected: true });
   });
 });

@@ -5,6 +5,8 @@ export type ChatStreamEvent = {
   content?: string;
   message?: string;
   phase?: string;
+  phaseId?: string;
+  phasePlan?: unknown;
   modelUsed?: string;
   error?: string;
   messageId?: string;
@@ -19,6 +21,7 @@ export type ChatStreamEvent = {
   reason?: string;
   result?: unknown;
   routeTrace?: unknown;
+  skill?: unknown;
 };
 
 export type CreateChatStreamParams = {

@@ -2,14 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Plus, Search } from "lucide-react";
+import { PanelRightClose, PanelRightOpen, Plus, Search } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
 import { TiptapEditor } from "@/components/editor/tiptap-editor";
 import { CreateArtifactDialog, type ArtifactTemplate } from "@/components/artifacts/create-artifact-dialog";
+import { ArtifactAiSurface } from "@/components/artifacts/artifact-ai-surface";
 import { useNotesData } from "@/hooks/use-notes-data";
 import { useEditorStore, normalizeEditorMode } from "@/stores/editor-store";
-import { useWorkspaceStore } from "@/stores/workspace-store";
-import { CommandBar } from "@/components/workspace/command-bar";
 import { getArtifactMeta, type ArtifactType } from "@/lib/artifact-types";
 import { cn } from "@/lib/utils";
 import { stripGeneratedDocumentMarkers } from "@/lib/document-generator";
@@ -28,6 +27,7 @@ function ArtifactsPageInner() {
   const versionHistoryOpen = params.get("versionHistory") === "1" || params.get("versionHistory") === "true";
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [aiPanelOpen, setAiPanelOpen] = useState(true);
   const { editorMode, setEditorMode, openVersionHistory } = useEditorStore();
   const {
     notes,
@@ -86,61 +86,6 @@ function ArtifactsPageInner() {
     next.set("id", createdId);
     router.replace(`/artifacts?${next.toString()}`, { scroll: false });
   }, [createNote, params, router]);
-
-  const pushResultCard = useWorkspaceStore((s) => s.pushResultCard);
-  const updateResultCard = useWorkspaceStore((s) => s.updateResultCard);
-
-  const handleSendMessage = useCallback(async (message: string) => {
-    const trimmed = message.trim();
-    if (!trimmed) return;
-    
-    // Command parsing for artifacts resolver
-    const isCreateCmd = trimmed.startsWith("/create") || trimmed.startsWith("/new");
-    if (isCreateCmd) {
-      setCreateDialogOpen(true);
-      return;
-    }
-
-    if (!activeNote) {
-      alert("Select an artifact first.");
-      return;
-    }
-
-    const optimisticId = `optimistic-edit-${Date.now()}`;
-    pushResultCard({
-      id: optimisticId,
-      state: "loading",
-      promptSnippet: trimmed.length > 60 ? trimmed.slice(0, 57) + "\u2026" : trimmed,
-      actionType: "modified",
-      targetItemType: "note",
-    });
-
-    try {
-      const res = await fetch("/api/editor/ai-edit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          documentId: activeNote._id,
-          prompt: trimmed,
-          content: activeNote.content,
-        }),
-      });
-
-      if (!res.ok) throw new Error("Edit failed");
-
-      updateResultCard(optimisticId, {
-        state: "done",
-        summary: `Edited \u201c${activeNote.title || "artifact"}\u201d`,
-      });
-      // Content is updated via websocket/polling in TiptapEditor or we trigger fetch
-      void fetchNote(activeNote._id);
-    } catch (err) {
-      updateResultCard(optimisticId, {
-        state: "error",
-        summary: err instanceof Error ? err.message : "Failed to edit artifact",
-      });
-    }
-  }, [activeNote, fetchNote, pushResultCard, updateResultCard]);
 
   const noteList = useMemo(() => {
     let filtered = notes.slice();
@@ -259,8 +204,8 @@ function ArtifactsPageInner() {
           </div>
         </aside>
 
-        <main className="relative flex min-h-0 flex-1 flex-col bg-[var(--bg-primary)]">
-          <div className="min-h-0 flex-1">
+        <main className="relative flex min-h-0 flex-1 bg-[var(--bg-primary)]">
+          <div className="min-h-0 min-w-0 flex-1">
             {activeNote ? (
               <TiptapEditor
                 key={activeNote._id}
@@ -290,21 +235,34 @@ function ArtifactsPageInner() {
               </div>
             )}
           </div>
-          
-          <CommandBar
-            workspaceName="Artifacts"
-            contextOverride={activeNote ? { id: activeNote._id, title: activeNote.title || "Untitled", type: activeNote.type || "note" } : undefined}
-            scopeLevel="artifact"
-            onSendMessage={handleSendMessage}
-            onCreateWorkspace={() => {}}
-            onCreateNote={() => setCreateDialogOpen(true)}
-            onCreateCode={() => setCreateDialogOpen(true)}
-            onCreateVisual={() => setCreateDialogOpen(true)}
-            onCreateTask={() => {}}
-            onCreateThread={() => {}}
-            onCreateWithAi={() => {}}
-            className="bottom-4"
-          />
+
+          {activeNote ? (
+            <aside
+              className={cn(
+                "min-h-0 shrink-0 border-l border-[var(--border-default)] bg-[var(--bg-elevated)]/80 backdrop-blur-xl transition-all duration-200",
+                aiPanelOpen ? "w-[380px]" : "w-0 overflow-hidden border-l-0",
+              )}
+            >
+              {aiPanelOpen ? (
+                <ArtifactAiSurface
+                  key={`artifact-ai-${activeNote._id}`}
+                  artifactId={activeNote._id}
+                  workstreamId={activeNote.workstreamId}
+                  context="full-page"
+                />
+              ) : null}
+            </aside>
+          ) : null}
+
+          <button
+            type="button"
+            onClick={() => setAiPanelOpen((open) => !open)}
+            disabled={!activeNote}
+            className="absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)]/90 px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] shadow-sm backdrop-blur-md transition-colors hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {aiPanelOpen ? <PanelRightClose className="h-3.5 w-3.5" /> : <PanelRightOpen className="h-3.5 w-3.5" />}
+            {aiPanelOpen ? "Hide AI panel" : "Show AI panel"}
+          </button>
         </main>
       </div>
 

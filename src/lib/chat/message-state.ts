@@ -113,13 +113,19 @@ export class ChatMessageAccumulator {
       return;
     }
 
-    if (event.type === "mode_switch" && event.mode) {
+    if ((event.type === "mode_switch" || event.type === "mode_switched") && event.mode) {
       this.thinkingContent = appendThinkingNote(this.thinkingContent, `[Mode] Switched to ${event.mode}.`);
       this.patchAssistant({ thinking: this.thinkingContent });
       return;
     }
 
-    if (event.type === "thread_fork") {
+    if (event.type === "skill_loaded") {
+      this.thinkingContent = appendThinkingNote(this.thinkingContent, "[Skill] Loaded runtime skill.");
+      this.patchAssistant({ thinking: this.thinkingContent });
+      return;
+    }
+
+    if (event.type === "thread_fork" || event.type === "navigation_instruction") {
       this.thinkingContent = appendThinkingNote(
         this.thinkingContent,
         `[Thread] Forked${event.title ? ` ${event.title}` : ""}.`,

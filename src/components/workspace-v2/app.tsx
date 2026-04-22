@@ -10,6 +10,7 @@ import {
 import "./spectra-v2.css";
 import {
   TopRail,
+  WidgetLauncher,
   Minimap,
   CommandBar,
   Spotlight,
@@ -58,6 +59,11 @@ import type {
   WorkspaceData,
   WorkspaceItemData,
 } from "@/lib/workspace/contracts";
+import { useChatPanel } from "@/hooks/use-chat-panel";
+import type { ChatStreamEvent } from "@/lib/chat/streaming";
+import type { RouteTrace } from "@/types";
+
+import { UnifiedPanel } from "@/components/chat/unified-panel";
 
 /* ─── FocusPaneContent — renders item body inside focused view pane ─── */
 function FocusPaneContent({ item, onEdit }: { item: V2Item; onEdit?: (patch: { title?: string; body?: string }) => void }) {
@@ -437,6 +443,75 @@ function computeSemanticTopicSections(items: V2Item[], topicSignals?: TopicSigna
   return sections;
 }
 
+type RuntimeRunState = {
+  startedAt: number;
+  prompt: string;
+  targetIds: Set<string>;
+  lastSummary?: string;
+  routeTrace?: RouteTrace;
+  failed?: string;
+  aborted?: boolean;
+};
+
+function collectRuntimeTargetIds(payload: unknown, sink: Set<string>, depth = 0) {
+  if (!payload || depth > 4) return;
+  if (typeof payload === "string") {
+    sink.add(payload);
+    return;
+  }
+  if (Array.isArray(payload)) {
+    payload.forEach((entry) => collectRuntimeTargetIds(entry, sink, depth + 1));
+    return;
+  }
+  if (typeof payload !== "object") return;
+  const record = payload as Record<string, unknown>;
+  const direct = ["artifactId", "chatId", "plannerItemId", "targetId", "itemId", "workspaceItemId"];
+  direct.forEach((key) => {
+    if (typeof record[key] === "string" && record[key]) sink.add(record[key] as string);
+  });
+  if (Array.isArray(record.targetIds)) {
+    record.targetIds.forEach((entry) => {
+      if (entry && typeof entry === "object" && typeof (entry as { id?: unknown }).id === "string") {
+        sink.add((entry as { id: string }).id);
+      }
+    });
+  }
+  Object.values(record).forEach((value) => {
+    if (value && (typeof value === "object" || Array.isArray(value))) {
+      collectRuntimeTargetIds(value, sink, depth + 1);
+    }
+  });
+}
+
+function runtimePhaseLabel(event: ChatStreamEvent): string | null {
+  if (event.type === "phase" && typeof event.phase === "string") {
+    if (event.phase === "routing") return "Routing workspace request…";
+    if (event.phase === "searching") return "Searching workspace context…";
+    if (event.phase === "thinking") return "Thinking…";
+    if (event.phase === "generating") return "Generating response…";
+    if (event.phase === "synthesizing") return "Synthesizing result…";
+    if (event.phase === "compacting") return "Compacting context…";
+    return null;
+  }
+  if (event.type !== "phase_update") return null;
+  const status = typeof event.status === "string" ? event.status : "";
+  if (status !== "in_progress") return null;
+  const phaseId = typeof (event as Record<string, unknown>).phaseId === "string"
+    ? String((event as Record<string, unknown>).phaseId).toLowerCase()
+    : "";
+  if (phaseId.includes("route")) return "Routing workspace request…";
+  if (phaseId.includes("search")) return "Searching workspace context…";
+  if (phaseId.includes("compact")) return "Compacting context…";
+  if (phaseId.includes("author") || phaseId.includes("compose") || phaseId.includes("write")) return "Drafting output…";
+  if (phaseId.includes("synth") || phaseId.includes("verif") || phaseId.includes("repair")) return "Finalizing…";
+  return "Thinking…";
+}
+
+function compactRuntimeSummary(value: string) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > 132 ? `${normalized.slice(0, 129)}…` : normalized;
+}
+
 export default function WorkspaceV2() {
   /* ─── Theme ─── */
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -482,6 +557,58 @@ export default function WorkspaceV2() {
     if (typeof window !== "undefined") localStorage.setItem("spectra-v2:viewMode", m);
   }, []);
   const [resultIsland, setResultIsland] = useState<ResultIsland>(null);
+  const [commandProcessing, setCommandProcessing] = useState(false);
+  const [pendingOpenSourceId, setPendingOpenSourceId] = useState<string | null>(null);
+  const [artifactBlueprintPendingKind, setArtifactBlueprintPendingKind] = useState<"note" | "task" | "thread" | "visual" | "code" | null>(null);
+  const runtimeRunRef = useRef<RuntimeRunState | null>(null);
+
+  const handleWorkspaceRuntimeEvent = useCallback((event: ChatStreamEvent) => {
+    const activeRun = runtimeRunRef.current;
+    if (!activeRun) return;
+
+    const phaseLabel = runtimePhaseLabel(event);
+    if (phaseLabel) {
+      setResultIsland((current) => ({
+        status: "streaming",
+        text: phaseLabel,
+        routeTrace: activeRun.routeTrace ?? current?.routeTrace,
+      }));
+    }
+
+    if ((event.type === "route_model" || event.type === "done") && event.routeTrace) {
+      activeRun.routeTrace = event.routeTrace as RouteTrace;
+      setResultIsland((current) => ({
+        status: current?.status === "pending" ? "streaming" : (current?.status ?? "streaming"),
+        text: current?.text ?? "Thinking…",
+        routeTrace: activeRun.routeTrace,
+      }));
+    }
+
+    if (event.type === "tool_result") {
+      collectRuntimeTargetIds(event.result, activeRun.targetIds);
+      if (typeof event.summary === "string" && event.summary.trim().length > 0) {
+        activeRun.lastSummary = compactRuntimeSummary(event.summary);
+        setResultIsland((current) => ({
+          status: "running",
+          text: activeRun.lastSummary ?? current?.text ?? "Applying workspace action…",
+          routeTrace: activeRun.routeTrace ?? current?.routeTrace,
+        }));
+      }
+    }
+
+    if (event.type === "done" && typeof event.content === "string" && event.content.trim().length > 0) {
+      activeRun.lastSummary = compactRuntimeSummary(event.content);
+    }
+
+    if (event.type === "error") {
+      if (typeof event.error === "string") {
+        activeRun.failed = event.error;
+        return;
+      }
+      const payload = event.error as Record<string, unknown> | undefined;
+      activeRun.failed = typeof payload?.message === "string" ? payload.message : "Workspace action failed.";
+    }
+  }, []);
 
   /* ─── Widgets — positions from localStorage (loaded after mount to avoid SSR mismatch) ─── */
   const WIDGET_LS_KEY = "spectra-v2:widget-layout";
@@ -520,11 +647,12 @@ export default function WorkspaceV2() {
   };
   const WIDGET_DEFAULTS: FloatingWidgetData[] = [
     { id: "w-timer",     kind: "timer",     x: 16, y: 84,  w: 288, h: 132, collapsed: false, state: { secs: 25 * 60, running: false, totalSecs: 25 * 60 } },
-    { id: "w-today",     kind: "today",     x: 16, y: 238, w: 296, h: 230, collapsed: false, state: {} },
-    { id: "w-planner",   kind: "planner",   x: 16, y: 492, w: 300, h: 278, collapsed: false, state: {} },
-    { id: "w-timetable", kind: "timetable", x: 16, y: 794, w: 308, h: 248, collapsed: false, state: {} },
-    { id: "w-scratch",   kind: "scratch",   x: 0, y: 120, w: 304, h: 232, collapsed: false, state: {} },
-    { id: "w-artifact",  kind: "artifact",  x: 0, y: 376, w: 380, h: 300, collapsed: false, state: {} },
+    { id: "w-today",     kind: "today",     x: 16, y: 238, w: 296, h: 230, collapsed: true, state: {} },
+    { id: "w-planner",   kind: "planner",   x: 16, y: 318, w: 300, h: 278, collapsed: true, state: {} },
+    { id: "w-timetable", kind: "timetable", x: 16, y: 398, w: 308, h: 248, collapsed: true, state: {} },
+    { id: "w-scratch",   kind: "scratch",   x: 9999, y: 9999, w: 304, h: 232, collapsed: true, collapseAnchor: "right", state: {} },
+    { id: "w-thread",    kind: "thread",    x: 9999, y: 8000, w: 340, h: 320, collapsed: true, collapseAnchor: "right", state: {} },
+    { id: "w-artifact",  kind: "artifact",  x: 9999, y: 6000, w: 380, h: 300, collapsed: false, collapseAnchor: "right", state: {} },
   ];
   // Init with plain defaults (no localStorage read here → avoids SSR hydration mismatch)
   const [widgets, setWidgets] = useState<FloatingWidgetData[]>(WIDGET_DEFAULTS);
@@ -577,7 +705,7 @@ export default function WorkspaceV2() {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<
-    | { type: "pan"; sx: number; sy: number; px: number; py: number }
+    | { type: "pan"; sx: number; sy: number; px: number; py: number; nx: number; ny: number }
     | { type: "lasso"; wx0: number; wy0: number }
     | null
   >(null);
@@ -621,8 +749,30 @@ export default function WorkspaceV2() {
 
   /* ─── Committed workspace from camera center ─── */
   const [committedWorkspaceId, setCommittedWorkspaceId] = useState<string | null>(null);
-  const { workspaces: live, isLive, refresh } = useWorkspaceData(committedWorkspaceId);
+  const {
+    workspaces: live,
+    commandResultCards,
+    isLive,
+    refresh,
+  } = useWorkspaceData(committedWorkspaceId);
   const { widgets: liveWidgets, signals: activeWorkspaceSignals } = useWorkspacePageData(committedWorkspaceId);
+  const workspaceRuntime = useChatPanel({
+    workstreamId: committedWorkspaceId ?? undefined,
+    threadType: "conversation",
+    mode: "tutor",
+    thinkingLevel: "low",
+    routerMode: "auto",
+    scopeLevel: "workspace",
+    onStreamEvent: handleWorkspaceRuntimeEvent,
+  });
+  const runtimeWorkspaceRef = useRef<string | null>(committedWorkspaceId);
+
+  useEffect(() => {
+    if (runtimeWorkspaceRef.current === committedWorkspaceId) return;
+    runtimeWorkspaceRef.current = committedWorkspaceId;
+    runtimeRunRef.current = null;
+    workspaceRuntime.reset();
+  }, [committedWorkspaceId, workspaceRuntime.reset]);
 
   useEffect(() => {
     if (!isLive || !committedWorkspaceId) return;
@@ -670,17 +820,19 @@ export default function WorkspaceV2() {
     return map;
   }, [activeWorkspaceSignals, committedWorkspaceId]);
 
+  /* ─── Timeline Buckets ─── */
   const timelineBucketsFor = useCallback((items: V2Item[]) => {
     const now = Date.now();
-    const buckets: { label: string; until: number; items: V2Item[] }[] = [
-      { label: "Today", until: now - 86_400_000, items: [] },
-      { label: "Yesterday", until: now - 2 * 86_400_000, items: [] },
-      { label: "Last week", until: now - 7 * 86_400_000, items: [] },
-      { label: "Older", until: 0, items: [] },
+    const buckets: { label: string; until: number; since: number; items: V2Item[] }[] = [
+      { label: "Today", until: now, since: now - 86_400_000, items: [] },
+      { label: "Yesterday", until: now - 86_400_000, since: now - 2 * 86_400_000, items: [] },
+      { label: "Last week", until: now - 2 * 86_400_000, since: now - 7 * 86_400_000, items: [] },
+      { label: "Earlier this month", until: now - 7 * 86_400_000, since: now - 30 * 86_400_000, items: [] },
+      { label: "Older", until: now - 30 * 86_400_000, since: 0, items: [] },
     ];
     items.forEach((it) => {
       const ts = (it.meta?.updatedAt as number) ?? 0;
-      const bucket = buckets.find((candidate) => ts > candidate.until) ?? buckets[buckets.length - 1];
+      const bucket = buckets.find((candidate) => ts <= candidate.until && ts > candidate.since) ?? buckets[buckets.length - 1];
       bucket.items.push(it);
     });
     buckets.forEach((bucket) => bucket.items.sort((a, z) => ((z.meta?.updatedAt as number) ?? 0) - ((a.meta?.updatedAt as number) ?? 0)));
@@ -919,6 +1071,8 @@ export default function WorkspaceV2() {
     [zoom],
   );
 
+
+
   /* ─── Smooth flyTo via rAF, cubic-ease (1 - (1-t)^3) over 520ms ─── */
   const flyTo = useCallback(
     (targetPan: { x: number; y: number }, targetZoom?: number) => {
@@ -957,6 +1111,8 @@ export default function WorkspaceV2() {
   );
 
   /* ─── Wheel: trackpad pan vs cmd/ctrl/shift zoom ─── */
+  const wheelPanRef = useRef<{ x: number; y: number; active: boolean; timeout: ReturnType<typeof setTimeout> | null }>({ x: 0, y: 0, active: false, timeout: null });
+
   const onWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
     const rect = viewportRef.current?.getBoundingClientRect();
@@ -977,11 +1133,32 @@ export default function WorkspaceV2() {
         }
         factor = nearest / zoom;
       }
+      if (wheelPanRef.current.active) {
+        if (wheelPanRef.current.timeout) clearTimeout(wheelPanRef.current.timeout);
+        setPan({ x: wheelPanRef.current.x, y: wheelPanRef.current.y });
+        wheelPanRef.current.active = false;
+      }
       zoomAt(mx, my, factor);
     } else {
-      setPan((p) => ({ x: p.x - e.deltaX / zoom, y: p.y - e.deltaY / zoom }));
+      if (!wheelPanRef.current.active) {
+         wheelPanRef.current.x = pan.x;
+         wheelPanRef.current.y = pan.y;
+         wheelPanRef.current.active = true;
+      }
+      wheelPanRef.current.x -= e.deltaX / zoom;
+      wheelPanRef.current.y -= e.deltaY / zoom;
+
+      if (canvasRef.current) {
+        canvasRef.current.style.transform = `translate(${vpSize.w / 2 + wheelPanRef.current.x * zoom}px, ${vpSize.h / 2 + wheelPanRef.current.y * zoom}px) scale(${zoom})`;
+      }
+
+      if (wheelPanRef.current.timeout) clearTimeout(wheelPanRef.current.timeout);
+      wheelPanRef.current.timeout = setTimeout(() => {
+         setPan({ x: wheelPanRef.current.x, y: wheelPanRef.current.y });
+         wheelPanRef.current.active = false;
+      }, 100);
     }
-  }, [zoom, zoomAt]);
+  }, [zoom, zoomAt, pan.x, pan.y, vpSize]);
 
   /* ─── Mouse drag: pan OR lasso ─── */
   const onMouseDown = useCallback((e: React.MouseEvent) => {
@@ -989,21 +1166,33 @@ export default function WorkspaceV2() {
     if (el.closest("[data-widget]")) return;
     if (el.closest("[data-bloom-editor]")) return;
     if (ctx) setCtx(null);
-    if (e.button === 1 || e.button === 2 || (e.button === 0 && (e.altKey || spaceHeld))) {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("workspace:close-create-menu"));
+    }
+    
+    const isBackground = el === canvasRef.current || el.closest("[data-canvas-bg]");
+
+    if (e.button === 1 || e.button === 2 || (e.button === 0 && !e.shiftKey && isBackground)) {
       e.preventDefault();
-      dragRef.current = { type: "pan", sx: e.clientX, sy: e.clientY, px: pan.x, py: pan.y };
-      setPanning(true);
-    } else if (e.button === 0 && (el === canvasRef.current || el.closest("[data-canvas-bg]"))) {
-      // Close inspector on empty canvas click
+      // Close inspector/artifact panel if clicking on empty canvas
       if (openInspectorId) {
         setOpenInspectorId(null);
-        return;
       }
-      // Auto-collapse artifact panel (blueprint) when clicking on empty canvas.
       const artifactPanel = widgets.find((w) => w.kind === "artifact");
-      if (artifactPanel && !artifactPanel.collapsed) {
+      if (artifactPanel && !artifactPanel.collapsed && isBackground) {
         toggleWidgetCollapsed(artifactPanel.id);
-        return;
+      }
+      dragRef.current = { type: "pan", sx: e.clientX, sy: e.clientY, px: pan.x, py: pan.y, nx: pan.x, ny: pan.y };
+      setPanning(true);
+    } else if (e.button === 0 && e.shiftKey && isBackground) {
+      e.preventDefault();
+      // Close inspector/artifact panel if clicking on empty canvas
+      if (openInspectorId) {
+        setOpenInspectorId(null);
+      }
+      const artifactPanel = widgets.find((w) => w.kind === "artifact");
+      if (artifactPanel && !artifactPanel.collapsed && isBackground) {
+        toggleWidgetCollapsed(artifactPanel.id);
       }
       const rect = viewportRef.current?.getBoundingClientRect();
       if (!rect) return;
@@ -1011,15 +1200,21 @@ export default function WorkspaceV2() {
       const wy = (e.clientY - rect.top - rect.height / 2) / zoom - pan.y;
       dragRef.current = { type: "lasso", wx0: wx, wy0: wy };
       setLasso({ x0: wx, y0: wy, x1: wx, y1: wy });
-      if (!e.shiftKey) setSelection(new Set());
+      setSelection(new Set());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ctx, openInspectorId, pan.x, pan.y, spaceHeld, zoom, widgets]);
+  }, [ctx, openInspectorId, pan.x, pan.y, zoom, widgets]);
   const onMouseMove = useCallback((e: React.MouseEvent) => {
     const d = dragRef.current;
     if (!d) return;
     if (d.type === "pan") {
-      setPan({ x: d.px + (e.clientX - d.sx) / zoom, y: d.py + (e.clientY - d.sy) / zoom });
+      const newX = d.px + (e.clientX - d.sx) / zoom;
+      const newY = d.py + (e.clientY - d.sy) / zoom;
+      d.nx = newX;
+      d.ny = newY;
+      if (canvasRef.current) {
+        canvasRef.current.style.transform = `translate(${vpSize.w / 2 + newX * zoom}px, ${vpSize.h / 2 + newY * zoom}px) scale(${zoom})`;
+      }
     } else {
       const rect = viewportRef.current?.getBoundingClientRect();
       if (!rect) return;
@@ -1027,10 +1222,12 @@ export default function WorkspaceV2() {
       const wy = (e.clientY - rect.top - rect.height / 2) / zoom - pan.y;
       setLasso({ x0: d.wx0, y0: d.wy0, x1: wx, y1: wy });
     }
-  }, [pan.x, pan.y, zoom]);
+  }, [pan.x, pan.y, zoom, vpSize]);
   const onMouseUp = useCallback(() => {
     const d = dragRef.current;
-    if (d?.type === "lasso" && lasso) {
+    if (d?.type === "pan") {
+      setPan({ x: d.nx, y: d.ny });
+    } else if (d?.type === "lasso" && lasso) {
       const x0 = Math.min(lasso.x0, lasso.x1), x1 = Math.max(lasso.x0, lasso.x1);
       const y0 = Math.min(lasso.y0, lasso.y1), y1 = Math.max(lasso.y0, lasso.y1);
       const hits = baseItems.filter((it) => {
@@ -1075,10 +1272,18 @@ export default function WorkspaceV2() {
   }, [baseItems]);
 
   /* ─── Focused item (nearest to camera center) ─── */
-  const focusedItem = useMemo<V2Item | null>(() => {
+  const centeredFocusedItem = useMemo<V2Item | null>(() => {
     if (zoom < 0.48) return null;
     if (focusedViewOpen) return null;
-    const cx = -pan.x, cy = -pan.y;
+    
+    // Instead of raw pan, use the visually-accurate canvas offset during drag if available
+    let cx = -pan.x;
+    let cy = -pan.y;
+    if (dragRef.current?.type === "pan") {
+      cx = -dragRef.current.nx;
+      cy = -dragRef.current.ny;
+    }
+
     // Search ALL items, not just current territory
     let best: V2Item | null = null;
     let bd = Infinity;
@@ -1090,7 +1295,28 @@ export default function WorkspaceV2() {
       if (d < bd && d < maxDist) { best = it; bd = d; }
     });
     return best;
-  }, [pan, zoom, posOf, baseItems, focusedViewOpen]);
+  }, [pan, zoom, posOf, baseItems, focusedViewOpen, panning]); // Need `panning` state to trigger re-eval when letting go of drag!
+
+  const deepFocusItem = useMemo<V2Item | null>(() => {
+    if (!focusedViewOpen) return null;
+    return getBaseItemById(focusViewPrimaryId ?? primaryFocusId ?? focusSetIds[0] ?? null);
+  }, [focusSetIds, focusViewPrimaryId, focusedViewOpen, getBaseItemById, primaryFocusId]);
+
+  const highlightedFocusItem = useMemo<V2Item | null>(() => {
+    if (selection.size > 0) {
+      const selectedId = primaryFocusId ?? focusSetIds[0] ?? Array.from(selection)[0] ?? null;
+      return getBaseItemById(selectedId);
+    }
+    if (buildingFocusSet && focusSetIds.length > 0) {
+      return getBaseItemById(primaryFocusId ?? focusSetIds[0] ?? null);
+    }
+    return null;
+  }, [buildingFocusSet, focusSetIds, getBaseItemById, primaryFocusId, selection]);
+
+  const explicitTargetItem = useMemo<V2Item | null>(() => getBaseItemById(openInspectorId), [getBaseItemById, openInspectorId]);
+
+  // Focus weighting: explicit target > opened deep edit > highlighted > centered.
+  const focusedItem = explicitTargetItem ?? deepFocusItem ?? highlightedFocusItem ?? centeredFocusedItem;
 
   const cycleFocus = (dir: 1 | -1) => {
     // Cycle through ALL items
@@ -1099,6 +1325,7 @@ export default function WorkspaceV2() {
     idx = (idx + dir + baseItems.length) % baseItems.length;
     const it = baseItems[idx];
     const p = posOf(it);
+    setOpenInspectorId(null);
     flyTo({ x: -(p.x + it.w / 2), y: -(p.y + it.h / 2) }, Math.max(zoom, TIERS.ITEM));
   };
 
@@ -1285,6 +1512,14 @@ export default function WorkspaceV2() {
         scheduleIslandDismiss({ status: "error", text: "Zoom into a workspace first.", chips: ["No workspace"] });
         return;
       }
+      if (!isLive) {
+        scheduleIslandDismiss({ status: "error", text: "Live workspace runtime is unavailable.", chips: ["Offline"] });
+        return;
+      }
+      setResultIsland({ status: "pending", text: `Queueing ${kind}…`, chips: [kind] });
+      if (kind === "note" || kind === "thread" || kind === "visual" || kind === "code") {
+        setArtifactBlueprintPendingKind(kind);
+      }
       const rect = viewportRef.current?.getBoundingClientRect();
       if (rect) {
         const screenX = rect.width / 2 + (worldX + pan.x) * zoom;
@@ -1293,7 +1528,8 @@ export default function WorkspaceV2() {
         const startY = rect.height - 56;
         spawnTrail(startX, startY, screenX, screenY);
       }
-      if (isLive) {
+      setResultIsland({ status: "running", text: `Creating ${kind}…`, chips: [kind] });
+      try {
         const base = { workstreamId: wsId, canvasX: worldX, canvasY: worldY };
         const actions: Record<string, Record<string, unknown>> = {
           note: { action: "createNote", title: "Untitled note", content: "", ...base },
@@ -1305,22 +1541,23 @@ export default function WorkspaceV2() {
         const r = await createItemAction(actions[kind]);
         let action;
         if (r.ok) {
-           const id = r.data?.artifactId || r.data?.plannerItemId || r.data?.chatId;
-           if (id) {
-             action = { label: `Open ${kind}`, onClick: () => setPendingOpenSourceId(id) };
-           }
+          const id = r.data?.artifactId || r.data?.plannerItemId || r.data?.chatId;
+          if (id) {
+            setPendingOpenSourceId(id);
+            action = { label: `Open ${kind}`, onClick: () => setPendingOpenSourceId(id) };
+          }
         }
         scheduleIslandDismiss({
           status: r.ok ? "done" : "error",
           text: r.ok ? `Created ${kind} here.` : `Could not create ${kind}.`,
           chips: action ? undefined : [kind],
-          action
+          action,
         });
-      } else {
-        scheduleIslandDismiss({ status: "done", text: `(demo) Created ${kind} here.`, chips: [kind] });
+      } finally {
+        setArtifactBlueprintPendingKind((current) => (current === kind ? null : current));
       }
     },
-    [committedWorkspaceId, isLive, createItemAction, scheduleIslandDismiss, pan, zoom, spawnTrail],
+    [committedWorkspaceId, createItemAction, isLive, pan, scheduleIslandDismiss, spawnTrail, zoom],
   );
 
   /* ─── Reveal animation state (singleton enforcement pulse) ─── */
@@ -1442,7 +1679,7 @@ export default function WorkspaceV2() {
   const handleSendMessage = useCallback(
     async (text: string) => {
       const raw = text.trim();
-      if (!raw) return;
+      if (!raw || commandProcessing) return;
       // If the text matches a known quick-start title, run the scaffold instead of chat.
       const qsMatch = QUICK_STARTS.find((q) => q.title === raw);
       if (qsMatch) {
@@ -1464,6 +1701,18 @@ export default function WorkspaceV2() {
         return true;
       };
 
+      const requiresLiveRuntime = () => {
+        if (!isLive) {
+          scheduleIslandDismiss({
+            status: "error",
+            text: "Live workspace runtime is unavailable.",
+            chips: ["Offline"],
+          });
+          return false;
+        }
+        return true;
+      };
+
       // Helper — spawn a trail from command bar center to viewport center (approximate landing).
       const spawnCenterTrail = () => {
         const rect = viewportRef.current?.getBoundingClientRect();
@@ -1473,78 +1722,86 @@ export default function WorkspaceV2() {
 
       // /note, /task, /thread, /workspace, /widget
       if (raw.startsWith("/note ")) {
-        if (!requiresWorkspace()) return;
+        if (!requiresWorkspace() || !requiresLiveRuntime()) return;
         const title = raw.slice(6).trim() || "Untitled note";
-        if (isLive) {
-          // Show pending → running → done sequence honestly
+        setCommandProcessing(true);
+        try {
           scheduleIslandDismiss({ status: "pending", text: "Queued…" }, 60000);
-          await new Promise((r) => setTimeout(r, 150));
+          await new Promise((r) => setTimeout(r, 120));
           setResultIsland({ status: "running", text: `Creating note "${title}"…` });
           const r = await createItemAction({ action: "createNote", workstreamId: wsId, title, content: "" });
           if (r.ok) {
-             spawnCenterTrail();
+            spawnCenterTrail();
+          }
+          if (r.data?.artifactId) {
+            setPendingOpenSourceId(r.data.artifactId);
           }
           scheduleIslandDismiss({
             status: r.ok ? "done" : "error",
             text: r.ok ? `Created note "${title}".` : "Could not create note.",
-            action: r.data?.artifactId ? { label: "Open Note", onClick: () => setPendingOpenSourceId(r.data.artifactId) } : undefined
+            action: r.data?.artifactId ? { label: "Open note", onClick: () => setPendingOpenSourceId(r.data.artifactId) } : undefined,
           });
-        } else {
-          // Demo: still show the sequence so the UI is honest
-          scheduleIslandDismiss({ status: "pending", text: "Queued…" }, 60000);
-          await new Promise((r) => setTimeout(r, 150));
-          setResultIsland({ status: "running", text: `Creating note "${title}"…` });
-          await new Promise((r) => setTimeout(r, 400));
-          spawnCenterTrail();
-          scheduleIslandDismiss({ status: "done", text: `(demo) Created note "${title}".`, chips: ["Note"] });
+        } finally {
+          setCommandProcessing(false);
         }
         return;
       }
       if (raw.startsWith("/task ")) {
-        if (!requiresWorkspace()) return;
+        if (!requiresWorkspace() || !requiresLiveRuntime()) return;
         const title = raw.slice(6).trim() || "Untitled task";
-        if (isLive) {
+        setCommandProcessing(true);
+        try {
+          setResultIsland({ status: "running", text: `Adding task "${title}"…` });
           const r = await createItemAction({ action: "createPlannerItem", workstreamId: wsId, title, type: "deadline", priority: "medium" });
           if (r.ok) {
-             spawnCenterTrail();
+            spawnCenterTrail();
           }
-          scheduleIslandDismiss({ 
-            status: r.ok ? "done" : "error", 
-            text: r.ok ? `Added planner task "${title}".` : "Could not add task.", 
-            action: r.data?.plannerItemId ? { label: "Open Task", onClick: () => setPendingOpenSourceId(r.data.plannerItemId) } : undefined
+          if (r.data?.plannerItemId) {
+            setPendingOpenSourceId(r.data.plannerItemId);
+          }
+          scheduleIslandDismiss({
+            status: r.ok ? "done" : "error",
+            text: r.ok ? `Added planner task "${title}".` : "Could not add task.",
+            action: r.data?.plannerItemId ? { label: "Open task", onClick: () => setPendingOpenSourceId(r.data.plannerItemId) } : undefined,
           });
-        } else {
-          spawnCenterTrail();
-          scheduleIslandDismiss({ status: "done", text: `(demo) Added planner task "${title}".`, chips: ["Task"] });
+        } finally {
+          setCommandProcessing(false);
         }
         return;
       }
       if (raw.startsWith("/thread ")) {
-        if (!requiresWorkspace()) return;
+        if (!requiresWorkspace() || !requiresLiveRuntime()) return;
         const title = raw.slice(8).trim() || "New thread";
-        if (isLive) {
+        setCommandProcessing(true);
+        try {
+          setResultIsland({ status: "running", text: `Starting thread "${title}"…` });
           const r = await createItemAction({ action: "createThread", workstreamId: wsId, title });
           if (r.ok) {
-             spawnCenterTrail();
+            spawnCenterTrail();
           }
-          scheduleIslandDismiss({ 
-            status: r.ok ? "done" : "error", 
-            text: r.ok ? `Started thread "${title}".` : "Could not start thread.", 
-            action: r.data?.chatId ? { label: "Open Thread", onClick: () => setPendingOpenSourceId(r.data.chatId) } : undefined
+          if (r.data?.chatId) {
+            setPendingOpenSourceId(r.data.chatId);
+          }
+          scheduleIslandDismiss({
+            status: r.ok ? "done" : "error",
+            text: r.ok ? `Started thread "${title}".` : "Could not start thread.",
+            action: r.data?.chatId ? { label: "Open thread", onClick: () => setPendingOpenSourceId(r.data.chatId) } : undefined,
           });
-        } else {
-          spawnCenterTrail();
-          scheduleIslandDismiss({ status: "done", text: `(demo) Started thread "${title}".`, chips: ["Thread"] });
+        } finally {
+          setCommandProcessing(false);
         }
         return;
       }
       if (raw.startsWith("/workspace ")) {
+        if (!requiresLiveRuntime()) return;
         const title = raw.slice(11).trim() || "New workspace";
-        if (isLive) {
+        setCommandProcessing(true);
+        try {
+          setResultIsland({ status: "running", text: `Creating workspace "${title}"…` });
           const r = await createItemAction({ action: "createWorkspace", title });
           scheduleIslandDismiss({ status: r.ok ? "done" : "error", text: r.ok ? `Created workspace "${title}".` : "Could not create workspace.", chips: ["Workspace"] });
-        } else {
-          scheduleIslandDismiss({ status: "done", text: `(demo) Created workspace "${title}".`, chips: ["Workspace"] });
+        } finally {
+          setCommandProcessing(false);
         }
         return;
       }
@@ -1557,129 +1814,110 @@ export default function WorkspaceV2() {
       // ?query / search …
       if (raw.startsWith("?") || lc.startsWith("search ")) {
         const q = raw.startsWith("?") ? raw.slice(1).trim() : raw.slice(7).trim();
-        if (!requiresWorkspace()) return;
+        if (!requiresWorkspace() || !requiresLiveRuntime()) return;
+        const workspaceId = wsId;
+        if (!workspaceId) return;
+        setCommandProcessing(true);
         scheduleIslandDismiss({ status: "streaming", text: `Searching for "${q}"…`, chips: ["Search"] });
-        if (isLive && wsId) {
-          const cr = await createCommandResult({ workstreamId: wsId, intent: "result", status: "processing", title: `Search: ${q}`, summary: "Searching…" });
-          try {
-            const res = await fetch("/api/workspace-data", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ action: "search", workstreamId: wsId, query: q, limit: 8 }),
-            });
-            const j = res.ok ? await res.json() : null;
-            const hits = (j?.results ?? []) as Array<{ title: string }>;
-            const summary = hits.length > 0 ? `${hits.length} results found.` : "No matches.";
-            if (cr) await updateCommandResult({ resultId: cr.resultId, status: "completed", summary });
-            scheduleIslandDismiss({ status: "done", text: summary, chips: hits.slice(0, 3).map((h) => h.title) });
-          } catch {
-            scheduleIslandDismiss({ status: "error", text: "Search failed.", chips: ["Error"] });
-          }
-        } else {
-          const hits = baseItems.filter((i) => i.title.toLowerCase().includes(q.toLowerCase())).slice(0, 5);
-          touchAI(hits.map((h) => h.id), `search ${q}`);
-          scheduleIslandDismiss({ status: "done", text: hits.length ? `${hits.length} matches across the canvas.` : "No matches.", chips: hits.slice(0, 3).map((h) => h.title) });
+        const cr = await createCommandResult({ workstreamId: workspaceId, intent: "result", status: "processing", title: `Search: ${q}`, summary: "Searching…" });
+        try {
+          const res = await fetch("/api/workspace-data", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "search", workstreamId: workspaceId, query: q, limit: 8 }),
+          });
+          const j = res.ok ? await res.json() : null;
+          const hits = (j?.results ?? []) as Array<{ title: string }>;
+          const summary = hits.length > 0 ? `${hits.length} results found.` : "No matches.";
+          if (cr) await updateCommandResult({ resultId: cr.resultId, status: "completed", summary });
+          scheduleIslandDismiss({ status: "done", text: summary, chips: hits.slice(0, 3).map((h) => h.title) });
+        } catch {
+          if (cr) await updateCommandResult({ resultId: cr.resultId, status: "completed", summary: "Search failed." });
+          scheduleIslandDismiss({ status: "error", text: "Search failed.", chips: ["Error"] });
+        } finally {
+          setCommandProcessing(false);
         }
         return;
       }
 
       // Default → persisted workspace quick action / linked result.
-      let touched: string[] = [];
-      let stub: ResultIsland = null;
-      let inferredAction: "summarize" | "make_flashcards" | "plan_week" | "create_note" | "create_task" | "create_thread" | "artifact_request" | undefined;
-      if (selection.size > 1) {
-        touched = Array.from(selection);
-        stub = { status: "done", text: `Asked about ${selection.size} items.`, chips: [`${selection.size} items`] };
-        inferredAction = "summarize";
-      } else if (focusedItem?.kind === "essay") {
-        touched = [focusedItem.id];
-        stub = { status: "done", text: "Your thesis reads strong. The weakest transition is ¶3→¶4 — I've drafted a bridge sentence.", chips: ["Suggestion"] };
-        inferredAction = "artifact_request";
-      } else if (focusedItem?.kind === "pset") {
-        touched = [focusedItem.id];
-        stub = { status: "done", text: "Hint inserted at the current stuck problem. Try IBP with u=arctan(x), then a trig substitution.", chips: ["Hint"] };
-        inferredAction = "summarize";
-      } else if (focusedItem?.kind === "flashcards") {
-        touched = [focusedItem.id];
-        stub = { status: "done", text: "Review queued — 10 cards, weakest first.", chips: ["Review"] };
-        inferredAction = "make_flashcards";
-      } else if (focusedItem?.kind === "note") {
-        touched = [focusedItem.id];
-        stub = { status: "done", text: "Condensed into 3 lines and extracted 6 flashcard-ready terms at the bottom.", chips: ["Note updated"] };
-        inferredAction = "artifact_request";
-      } else if (lc.includes("plan") && (lc.includes("week") || lc.includes("exam"))) {
-        touched = effectiveTerritories.flatMap((t) => baseItems.filter((i) => i.workspaceId === t.id).slice(0, 1).map((i) => i.id));
-        stub = { status: "done", text: "This week: Biology midterm Thu, Calc pset Fri, essay Mon. Scheduled 6×50-min focus blocks with a 2-day taper.", chips: ["Plan drafted"] };
-        inferredAction = "plan_week";
-      } else if (/thread|chat|discuss/.test(lc)) {
-        inferredAction = "create_thread";
-        stub = { status: "done", text: `Started a linked thread for "${raw}".`, chips: ["Thread"] };
-      } else if (/task|todo|deadline|remind/.test(lc)) {
-        inferredAction = "create_task";
-        stub = { status: "done", text: `Captured a planner task for "${raw}".`, chips: ["Task"] };
-      } else if (/note|write down|capture/.test(lc)) {
-        inferredAction = "create_note";
-        stub = { status: "done", text: `Saved a note for "${raw}".`, chips: ["Note"] };
-      } else {
-        inferredAction = "summarize";
-        stub = { status: "done", text: `Working on: "${raw}". I've surfaced the most relevant items for you.`, chips: ["AI"] };
-      }
-
-      if (isLive && wsId) {
-        scheduleIslandDismiss({ status: "streaming", text: "Thinking…", chips: [] });
-        try {
-          const scopedPrimaryItem = focusedViewOpen
-            ? getBaseItemById(focusViewPrimaryId ?? focusSetIds[0] ?? null)
-            : focusedItem;
-          const scopedSelectionIds = focusedViewOpen ? focusSetIds : Array.from(selection);
-          const scopedArtifactIds = scopedSelectionIds
-            .map((id) => getBaseItemById(id)?.sourceArtifactId)
-            .filter((id): id is string => Boolean(id));
-          const res = await fetch("/api/workspace-data", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action: "executeQuickAction",
-              workstreamId: wsId,
-              prompt: raw,
-              quickAction: inferredAction,
-              targetArtifactId: scopedPrimaryItem?.sourceArtifactId,
-              targetPlannerItemId: scopedPrimaryItem?.sourcePlannerItemId,
-              targetChatId: scopedPrimaryItem?.sourceChatId,
-              title: scopedPrimaryItem ? `${scopedPrimaryItem.title} · ${raw.slice(0, 48)}` : raw.slice(0, 72),
-              content: scopedPrimaryItem?.preview,
-              metadata: {
-                source: "workspace-v2-quick-chat",
-                focusedItemId: scopedPrimaryItem?.sourceId,
-                selectedItemIds: scopedSelectionIds,
-                focusMode: focusedViewOpen ? "focus-group" : selection.size > 1 ? "selection" : "workspace",
-                selectedArtifactIds: scopedArtifactIds,
-              },
-            }),
-          });
-          if (res.ok) {
-            const j = await res.json();
-            refresh();
-            scheduleIslandDismiss({
-              status: "done",
-              text: stub?.text ?? "Saved workspace action.",
-              chips: j?.targetKind ? [j.targetKind] : stub?.chips,
-              action: j?.targetId ? { label: "Open result", onClick: () => setPendingOpenSourceId(j.targetId) } : undefined,
-            });
-          } else {
-            scheduleIslandDismiss(stub);
-          }
-        } catch {
-          scheduleIslandDismiss(stub);
+      if (!requiresWorkspace() || !requiresLiveRuntime()) return;
+      const scopedPrimaryItem = explicitTargetItem
+        ?? (focusedViewOpen
+          ? getBaseItemById(focusViewPrimaryId ?? focusSetIds[0] ?? null)
+          : focusedItem);
+      const scopedSelectionIds = explicitTargetItem
+        ? [explicitTargetItem.id]
+        : (focusedViewOpen ? focusSetIds : Array.from(selection));
+      const touched = scopedSelectionIds.length > 0
+        ? scopedSelectionIds
+        : scopedPrimaryItem
+          ? [scopedPrimaryItem.id]
+          : [];
+      setCommandProcessing(true);
+      runtimeRunRef.current = {
+        startedAt: Date.now(),
+        prompt: raw,
+        targetIds: new Set<string>(),
+        routeTrace: workspaceRuntime.latestRouteTrace ?? undefined,
+      };
+      setResultIsland({
+        status: "pending",
+        text: "Queued in workspace runtime…",
+        chips: scopedPrimaryItem ? [KIND_META[scopedPrimaryItem.kind].label] : undefined,
+        routeTrace: workspaceRuntime.latestRouteTrace ?? undefined,
+      });
+      try {
+        await workspaceRuntime.sendMessage(raw);
+        refresh();
+        const run = runtimeRunRef.current;
+        if (!run) return;
+        if (run.aborted) {
+          setResultIsland(null);
+          return;
         }
-      } else {
-        setResultIsland({ ...stub, status: "streaming" } as ResultIsland);
-        setTimeout(() => scheduleIslandDismiss(stub), 500);
+        if (!run.failed && workspaceRuntime.error) {
+          run.failed = workspaceRuntime.error;
+        }
+        let resolvedTargetId = Array.from(run.targetIds)[0];
+        if (!resolvedTargetId && commandResultCards.length > 0) {
+          const latestResult = [...commandResultCards]
+            .filter((card) => card.targetId && card.createdAt >= run.startedAt - 5_000)
+            .sort((a, b) => b.createdAt - a.createdAt)[0];
+          if (typeof latestResult?.targetId === "string") {
+            resolvedTargetId = latestResult.targetId;
+          }
+        }
+        if (resolvedTargetId) {
+          setPendingOpenSourceId(resolvedTargetId);
+          spawnCenterTrail();
+        }
+        const completionText = run.failed
+          ? compactRuntimeSummary(run.failed)
+          : run.lastSummary || "Workspace runtime completed.";
+        scheduleIslandDismiss({
+          status: run.failed ? "error" : "done",
+          text: completionText,
+          routeTrace: run.routeTrace ?? workspaceRuntime.latestRouteTrace ?? undefined,
+          action: resolvedTargetId ? { label: "Open result", onClick: () => setPendingOpenSourceId(resolvedTargetId!) } : undefined,
+        });
+      } catch {
+        scheduleIslandDismiss({ status: "error", text: "Workspace action failed.", chips: ["Error"] });
+      } finally {
+        runtimeRunRef.current = null;
+        setCommandProcessing(false);
       }
       if (touched.length) touchAI(touched, raw);
     },
-    [committedWorkspaceId, isLive, createItemAction, scheduleIslandDismiss, baseItems, focusedItem, selection, effectiveTerritories, touchAI, runQuickStartScaffold, spawnTrail, focusedViewOpen, focusViewPrimaryId, focusSetIds, getBaseItemById, addWidget, refresh],
+    [addWidget, commandProcessing, commandResultCards, committedWorkspaceId, createItemAction, explicitTargetItem, focusSetIds, focusViewPrimaryId, focusedItem, focusedViewOpen, getBaseItemById, isLive, refresh, runQuickStartScaffold, scheduleIslandDismiss, selection, spawnTrail, touchAI, workspaceRuntime],
   );
+
+  const stopWorkspaceRuntime = useCallback(() => {
+    const run = runtimeRunRef.current;
+    if (run) run.aborted = true;
+    workspaceRuntime.stopGeneration();
+    setCommandProcessing(false);
+  }, [workspaceRuntime]);
 
   /* ─── Tray actions ─── */
   const onTrayAction = (action: "ask" | "focus") => {
@@ -1934,6 +2172,9 @@ export default function WorkspaceV2() {
             const n = focusSetIds.length;
             return ((i + (e.shiftKey ? -1 : 1)) + n) % n;
           });
+        } else if (openInspectorId) {
+          e.preventDefault();
+          cycleFocus(e.shiftKey ? -1 : 1);
         } else {
           e.preventDefault();
           cycleFocus(e.shiftKey ? -1 : 1);
@@ -1986,7 +2227,17 @@ export default function WorkspaceV2() {
       if (!id) return;
       // Match either v2 id or source id
       const hit = baseItems.find((i) => i.id === id || i.sourceId === id);
-      if (hit) goToItem(hit.id, true);
+      if (hit) {
+        goToItem(hit.id, true);
+        setFocusedViewOpen(false);
+        setBuildingFocusSet(false);
+        setFocusSetIds([]);
+        setPrimaryFocusId(null);
+        setFocusViewPrimaryId(null);
+        setSelection(new Set());
+        setTrayOpen(false);
+        setOpenInspectorId(hit.id);
+      }
     };
     const onContextAction = (e: Event) => {
       const ce = e as CustomEvent<{ action?: string; flowX?: number; flowY?: number }>;
@@ -1996,7 +2247,11 @@ export default function WorkspaceV2() {
       const worldX = ce.detail?.flowX ?? -pan.x;
       const worldY = ce.detail?.flowY ?? -pan.y;
       const map: Record<string, "note" | "task" | "thread" | "visual" | "code"> = {
-        note: "note", task: "task", thread: "thread", visual: "visual", code: "code",
+        note: "note", newNote: "note",
+        task: "task", newTask: "task",
+        thread: "thread", newThread: "thread",
+        visual: "visual", newVisual: "visual",
+        code: "code", newCode: "code",
       };
       const kind = map[action];
       if (kind) void createHereByKind(kind, worldX, worldY);
@@ -2036,13 +2291,16 @@ export default function WorkspaceV2() {
   }, []);
 
   /* ─── On view-mode change, frame the territory ─── */
+  const lastViewModeRef = useRef(viewMode);
   useEffect(() => {
-    if (currentTerritory) {
-      flyTo({ x: -currentTerritory.cx, y: -currentTerritory.cy + 40 }, Math.max(0.62, zoom));
+    if (viewMode !== lastViewModeRef.current) {
+      lastViewModeRef.current = viewMode;
+      if (currentTerritory) {
+        flyTo({ x: -currentTerritory.cx, y: -currentTerritory.cy + 40 }, Math.max(0.62, zoom));
+      }
     }
   }, [viewMode, currentTerritory, flyTo, zoom]);
 
-  const [pendingOpenSourceId, setPendingOpenSourceId] = useState<string | null>(null);
   /* ─── Check pending open (after backend creation returns id) ─── */
   useEffect(() => {
     if (!pendingOpenSourceId) return;
@@ -2050,23 +2308,70 @@ export default function WorkspaceV2() {
     if (hit) {
       const p = posOf(hit);
       flyTo({ x: -(p.x + hit.w / 2), y: -(p.y + hit.h / 2) }, Math.max(zoom, TIERS.ITEM));
+      setFocusedViewOpen(false);
+      setBuildingFocusSet(false);
+      setFocusSetIds([]);
+      setPrimaryFocusId(null);
+      setFocusViewPrimaryId(null);
+      setSelection(new Set());
+      setTrayOpen(false);
       setOpenInspectorId(hit.id);
       setPendingOpenSourceId(null);
     }
   }, [baseItems, pendingOpenSourceId, posOf, flyTo, zoom]);
 
   /* ─── Derived ─── */
-  const canvasTransform = mounted
-    ? `translate(${vpSize.w / 2 + pan.x * zoom}px, ${vpSize.h / 2 + pan.y * zoom}px) scale(${zoom})`
-    : "translate(0px, 0px) scale(1)";
+  const getCanvasTransform = () => {
+    if (!mounted) return "translate(0px, 0px) scale(1)";
+    let activeX = pan.x;
+    let activeY = pan.y;
+    if (dragRef.current?.type === "pan") {
+      activeX = dragRef.current.nx;
+      activeY = dragRef.current.ny;
+    } else if (wheelPanRef.current.active) {
+      activeX = wheelPanRef.current.x;
+      activeY = wheelPanRef.current.y;
+    }
+    return `translate(${vpSize.w / 2 + activeX * zoom}px, ${vpSize.h / 2 + activeY * zoom}px) scale(${zoom})`;
+  };
+  const canvasTransform = getCanvasTransform();
   const trayItems = Array.from(selection).map((id) => baseItems.find((i) => i.id === id)).filter(Boolean) as V2Item[];
   const pinnedItems = pinned.map((id) => baseItems.find((i) => i.id === id)).filter(Boolean) as V2Item[];
+  const quickChatFocusContext = useMemo(() => {
+    if (openInspectorId) {
+      const target = baseItems.find((item) => item.id === openInspectorId);
+      if (target) {
+        return {
+          kind: target.kind === "thread" ? "thread" as const : "artifact" as const,
+          title: target.title,
+          color: target.color,
+        };
+      }
+    }
+    if (focusedViewOpen) {
+      return {
+        kind: "focused-view" as const,
+        title: `${focusSetIds.length} items`,
+        color: "var(--accent)",
+        count: focusSetIds.length,
+      };
+    }
+    if (buildingFocusSet && focusSetIds.length > 0) {
+      return {
+        kind: "building-set" as const,
+        title: `${focusSetIds.length} items`,
+        color: "var(--ink-300)",
+        count: focusSetIds.length,
+      };
+    }
+    return null;
+  }, [baseItems, buildingFocusSet, focusSetIds, focusedViewOpen, openInspectorId]);
 
   /* ─── Render ─── */
   return (
     <div
       className={`spectra-v2 spectra-v2-grid fixed inset-0 overflow-hidden ${theme === "dark" ? "dark" : ""} ${buildingFocusSet ? "sv2-building-set" : ""}`}
-      style={{ cursor: panning ? "grabbing" : spaceHeld ? "grab" : "default" }}
+      style={{ cursor: panning ? "grabbing" : spaceHeld ? "grab" : "default", userSelect: panning ? "none" : "auto" }}
     >
       {/* Viewport / canvas bg */}
       <div
@@ -2348,6 +2653,11 @@ export default function WorkspaceV2() {
       })()}
 
       {/* Chrome — unified bar */}
+      {/* Sidebar - integrated UnifiedPanel */}
+      <div className="absolute left-0 top-0 bottom-0 z-50 pointer-events-auto">
+        <UnifiedPanel />
+      </div>
+
       <TopRail
         workspace={currentTerritory}
         zoom={zoom}
@@ -2371,6 +2681,12 @@ export default function WorkspaceV2() {
             scheduleIslandDismiss({ status: "done", text: "(demo) New workspace would be created here.", chips: ["Workspace"] });
           }
         }}
+      />
+
+      <WidgetLauncher
+        widgetsHidden={widgetsHidden}
+        onToggleWidgets={() => setWidgetsHidden((v) => !v)}
+        onAddWidget={(kind) => addWidget(kind)}
       />
 
       <Minimap
@@ -2433,6 +2749,8 @@ export default function WorkspaceV2() {
             onCollapse={() => toggleWidgetCollapsed(artifactPanel.id)}
             onExpand={() => expandWidget(artifactPanel.id)}
             onEdit={(patch) => { if (item) handleItemEdit(item, patch); }}
+            onQuickCreate={(kind) => { void createHereByKind(kind, -pan.x, -pan.y); }}
+            pendingCreateKind={artifactBlueprintPendingKind}
           />
         );
       })()}
@@ -2554,6 +2872,9 @@ export default function WorkspaceV2() {
           selectedCount={selection.size}
           bloomedCount={0}
           resultIsland={resultIsland}
+          isProcessing={commandProcessing}
+          isStreaming={workspaceRuntime.streaming}
+          onStop={stopWorkspaceRuntime}
           quickStarts={QUICK_STARTS}
           onSubmit={handleSendMessage}
           onDismissResult={() => setResultIsland(null)}
@@ -2569,19 +2890,7 @@ export default function WorkspaceV2() {
             setFocusedViewOpen(false);
             setFocusViewPrimaryId(null);
           }}
-          focusContext={
-            focusedViewOpen
-              ? { kind: "focused-view", title: `${focusSetIds.length} items`, color: "var(--accent)", count: focusSetIds.length }
-              : buildingFocusSet && focusSetIds.length > 0
-              ? { kind: "building-set", title: `${focusSetIds.length} items`, color: "var(--ink-300)", count: focusSetIds.length }
-              : openInspectorId && !widgets.some((widget) => widget.kind === "artifact" && widget.collapsed === false)
-              ? (() => {
-                  const it = baseItems.find((i) => i.id === openInspectorId);
-                  if (!it) return null;
-                  return { kind: it.kind === "thread" ? "thread" as const : "artifact" as const, title: it.title, color: it.color };
-                })()
-              : null
-          }
+          focusContext={quickChatFocusContext}
         />
       </div>
 

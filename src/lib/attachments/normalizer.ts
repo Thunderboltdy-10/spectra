@@ -18,6 +18,9 @@ export type NormalizedAttachments = {
   }>;
   quickExtractBlock: string;
   requiresVision: boolean;
+  requiresDocumentReasoning: boolean;
+  requiresFileUnderstanding: boolean;
+  preferredCapabilities: Array<"vision" | "file_understanding" | "document_reasoning">;
 };
 
 type ConvexQueryFn = <T>(name: string, args: Record<string, unknown>) => Promise<T>;
@@ -79,6 +82,9 @@ export async function normalizeAttachments(params: {
       imageContentBlocks: [],
       quickExtractBlock: "",
       requiresVision: false,
+      requiresDocumentReasoning: false,
+      requiresFileUnderstanding: false,
+      preferredCapabilities: [],
     };
   }
 
@@ -103,6 +109,8 @@ export async function normalizeAttachments(params: {
   const imageContentBlocks: NormalizedAttachments["imageContentBlocks"] = [];
   const quickExtracts: string[] = [];
   let hasImageAttachment = false;
+  let hasDocumentAttachment = false;
+  let hasFileUnderstandingNeed = false;
 
   for (const resource of resources) {
     const type = inferType(resource.filename, resource.mimeType);
@@ -154,6 +162,8 @@ export async function normalizeAttachments(params: {
     }
 
     if (type === "document") {
+      hasDocumentAttachment = true;
+      hasFileUnderstandingNeed = true;
       let quickExtract = resource.quickExtractText?.slice(0, 4000).trim() ?? "";
 
       if (!quickExtract) {
@@ -187,5 +197,12 @@ export async function normalizeAttachments(params: {
     imageContentBlocks,
     quickExtractBlock: quickExtracts.length > 0 ? `ATTACHMENT CONTEXT:\n${quickExtracts.join("\n\n")}` : "",
     requiresVision: hasImageAttachment,
+    requiresDocumentReasoning: hasDocumentAttachment,
+    requiresFileUnderstanding: hasFileUnderstandingNeed,
+    preferredCapabilities: [
+      ...(hasImageAttachment ? ["vision" as const] : []),
+      ...(hasFileUnderstandingNeed ? ["file_understanding" as const] : []),
+      ...(hasDocumentAttachment ? ["document_reasoning" as const] : []),
+    ],
   };
 }

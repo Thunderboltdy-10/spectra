@@ -421,6 +421,9 @@ export function FloatingWidget({
   void onExpandEdit;
   const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number; moved: boolean } | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
+  // Force a re-render when drag state changes to apply userSelect: none globally
+  const [isDragging, setIsDragging] = useState(false);
+  
   // `mounted` gates any viewport-dependent clamp logic so server and client
   // render the exact same positions on first paint → no hydration mismatch.
   const [mounted, setMounted] = useState(false);
@@ -438,7 +441,7 @@ export function FloatingWidget({
     return {
       width: currentW,
       height: currentH,
-      maxX: Math.max(16, viewportW - currentW - 16),
+      maxX: Math.max(8, viewportW - currentW - 8),
       maxY: Math.max(84, viewportH - currentH - 20),
     };
   }, [isCollapsed, widget.h, widget.w]);
@@ -447,22 +450,57 @@ export function FloatingWidget({
     if ((e.target as HTMLElement).closest("[data-nodrag]")) return;
     dragRef.current = { sx: e.clientX, sy: e.clientY, ox: widget.x, oy: widget.y, moved: false };
     let lastX = widget.x;
+    let lastY = widget.y;
+    
+    // Add global unselectable class to body to prevent text highlighting anywhere
+    document.body.classList.add("sv2-dragging-widget");
+    setIsDragging(true);
+
     const move = (ev: MouseEvent) => {
       const d = dragRef.current;
       if (!d) return;
       const bounds = measureBounds();
-      const nx = Math.max(16, Math.min(bounds.maxX, d.ox + (ev.clientX - d.sx)));
+      const nx = Math.max(8, Math.min(bounds.maxX, d.ox + (ev.clientX - d.sx)));
       const ny = Math.max(84, Math.min(bounds.maxY, d.oy + (ev.clientY - d.sy)));
       if (Math.abs(ev.clientX - d.sx) > 2 || Math.abs(ev.clientY - d.sy) > 2) d.moved = true;
       lastX = nx;
-      onMove(widget.id, nx, ny);
+      lastY = ny;
+      if (frameRef.current) {
+         // Temporarily clear transitions to prevent competing with pointer
+         frameRef.current.style.transition = "none";
+         
+         // Use the literal updated screen pixel coordinates
+         // Note: since the initial render uses `left` and `top`, it's generally cleaner 
+         // to continue overriding those direct styles on the frame instead of transform,
+         // ensuring it strictly tracks the pointer
+         const currentW = isCollapsed ? COLLAPSED_W : widget.w;
+         let renderL = isCollapsed || anchor !== "right" ? nx : nx + (COLLAPSED_W - widget.w);
+         renderL = Math.max(8, Math.min(window.innerWidth - currentW - 8, renderL));
+         
+         let renderT = ny;
+         const currentH = isCollapsed ? COLLAPSED_H : widget.h;
+         renderT = Math.max(84, Math.min(window.innerHeight - currentH - 20, renderT));
+         
+         frameRef.current.style.left = `${renderL}px`;
+         frameRef.current.style.top = `${renderT}px`;
+         frameRef.current.style.transform = `none`;
+      }
     };
     const up = () => {
       const d = dragRef.current;
       dragRef.current = null;
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
+      
+      // Clean up global unselectable class
+      document.body.classList.remove("sv2-dragging-widget");
+      setIsDragging(false);
+
+      if (frameRef.current) {
+         frameRef.current.style.transition = "";
+      }
       if (!d?.moved) return;
+      onMove(widget.id, lastX, lastY);
       // Compute collapse anchor from drop x (widget center vs viewport midline)
       if (onDropAnchor && typeof window !== "undefined") {
         const bounds = measureBounds();
@@ -479,17 +517,22 @@ export function FloatingWidget({
 
   // When anchored right, shift `left` by (expanded.w - collapsed.w) so the expanded
   // panel's RIGHT edge aligns with the collapsed pill's right edge. This makes the
-  // morph appear to slide/grow from the right side. Clamp to viewport on both ends.
-  // Render-only shift (does not mutate widget.x).
+  // Morph appear to slide/grow from the right side. Clamp to viewport on both ends.
+  // Render-only shift (does not mutate widget.x or widget.y).
   let renderLeft = widget.x;
-  if (!isCollapsed && mounted) {
-    if (anchor === "right") {
+  let renderTop = widget.y;
+  if (mounted) {
+    if (!isCollapsed && anchor === "right") {
       renderLeft = widget.x + (COLLAPSED_W - widget.w);
     }
     if (typeof window !== "undefined") {
-      const maxLeft = window.innerWidth - widget.w - 16;
-      if (renderLeft > maxLeft) renderLeft = Math.max(16, maxLeft);
-      if (renderLeft < 16) renderLeft = 16;
+      const maxLeft = window.innerWidth - (isCollapsed ? COLLAPSED_W : widget.w) - 8;
+      if (renderLeft > maxLeft) renderLeft = Math.max(8, maxLeft);
+      if (renderLeft < 8) renderLeft = 8;
+
+      const maxTop = window.innerHeight - (isCollapsed ? COLLAPSED_H : widget.h) - 20;
+      if (renderTop > maxTop) renderTop = Math.max(84, maxTop);
+      if (renderTop < 84) renderTop = 84;
     }
   }
 
@@ -504,7 +547,7 @@ export function FloatingWidget({
       } ${aiTouched ? "sv2-ai-touched" : ""} ${isRevealing ? "sv2-chip-reveal" : ""}`}
       style={{
         left: renderLeft,
-        top: widget.y,
+        top: renderTop,
         width: isCollapsed ? COLLAPSED_W : widget.w,
         height: isCollapsed ? COLLAPSED_H : widget.h,
         borderRadius: isCollapsed ? 14 : 16,
@@ -512,6 +555,7 @@ export function FloatingWidget({
         border: `1px solid ${isCollapsed ? `${meta.color}28` : "var(--line)"}`,
         boxShadow: isCollapsed ? "0 3px 10px rgba(8,22,40,0.06)" : "0 24px 54px -30px rgba(8,22,40,0.22)",
         backdropFilter: "blur(12px)",
+        userSelect: isDragging ? "none" : "auto",
       }}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -619,9 +663,25 @@ type ArtifactWidgetProps = {
   onCollapse: () => void;
   onExpand: () => void;
   onEdit: (patch: { title?: string; body?: string }) => void;
+  onQuickCreate?: (kind: "note" | "task" | "thread" | "visual" | "code") => void;
+  pendingCreateKind?: "note" | "task" | "thread" | "visual" | "code" | null;
 };
 
-export function ArtifactWidget({ item, x, y, w, h, collapsed, onMove, onClose, onCollapse, onExpand, onEdit }: ArtifactWidgetProps) {
+export function ArtifactWidget({
+  item,
+  x,
+  y,
+  w,
+  h,
+  collapsed,
+  onMove,
+  onClose,
+  onCollapse,
+  onExpand,
+  onEdit,
+  onQuickCreate,
+  pendingCreateKind = null,
+}: ArtifactWidgetProps) {
   const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
   const onDown = (e: React.MouseEvent) => {
@@ -809,18 +869,30 @@ export function ArtifactWidget({ item, x, y, w, h, collapsed, onMove, onClose, o
                     Pick a starting point
                   </div>
                 </div>
+                {pendingCreateKind ? (
+                  <div className="w-full max-w-[260px] rounded-lg border border-[var(--line)] bg-[var(--paper)]/90 px-3 py-2 text-center">
+                    <div className="font-mono text-[9px] uppercase tracking-[0.14em] animate-pulse" style={{ color: "var(--ink-400)" }}>
+                      creating {pendingCreateKind}…
+                    </div>
+                  </div>
+                ) : null}
                 <div className="grid grid-cols-2 gap-2 w-full max-w-[260px]">
                   {([
-                    { label: "Note", action: "newNote", icon: "note" as IconName },
-                    { label: "Visual", action: "newVisual", icon: "layers" as IconName },
-                    { label: "Code", action: "newCode", icon: "pset" as IconName },
-                    { label: "Thread", action: "newThread", icon: "thread" as IconName },
+                    { label: "Note", kind: "note", action: "newNote", icon: "note" as IconName },
+                    { label: "Visual", kind: "visual", action: "newVisual", icon: "layers" as IconName },
+                    { label: "Code", kind: "code", action: "newCode", icon: "pset" as IconName },
+                    { label: "Thread", kind: "thread", action: "newThread", icon: "thread" as IconName },
                   ] as const).map((b) => (
                     <button
                       key={b.action}
                       type="button"
+                      disabled={Boolean(pendingCreateKind)}
                       className="sv2-quick-create-btn justify-center"
                       onClick={() => {
+                        if (onQuickCreate) {
+                          onQuickCreate(b.kind);
+                          return;
+                        }
                         window.dispatchEvent(new CustomEvent("workspace:context-action", { detail: { action: b.action } }));
                       }}
                     >
@@ -830,7 +902,7 @@ export function ArtifactWidget({ item, x, y, w, h, collapsed, onMove, onClose, o
                   ))}
                 </div>
                 <div className="text-[11px] italic" style={{ color: "var(--ink-400)" }}>
-                  or ask the quick chat below
+                  {pendingCreateKind ? "syncing workspace items…" : "or ask the quick chat below"}
                 </div>
               </div>
             </div>

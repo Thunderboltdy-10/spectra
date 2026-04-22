@@ -449,6 +449,31 @@ export type RouteTraceSubcall = {
   finishedAt?: number;
 };
 
+export type RouteTraceExecutionEventKind =
+  | "thinking"
+  | "search"
+  | "memory"
+  | "tool"
+  | "skill"
+  | "action"
+  | "synthesis"
+  | "routing"
+  | "notice";
+
+export type RouteTraceExecutionEvent = {
+  id: string;
+  kind: RouteTraceExecutionEventKind;
+  label: string;
+  status: RouteTracePhaseStatus;
+  detail?: string;
+  content?: string;
+  startedAt?: number;
+  finishedAt?: number;
+  durationMs?: number;
+  toolName?: string;
+  toolCallId?: string;
+};
+
 export type RouteTrace = {
   inputs: {
     routerMode: import("@/lib/contracts/studyModes").RouterMode;
@@ -549,6 +574,7 @@ export type RouteTrace = {
   routePlan?: RoutePlan;
   phasePlan?: RouteTracePhase[];
   subcalls?: RouteTraceSubcall[];
+  executionEvents?: RouteTraceExecutionEvent[];
   toolchain: string[];
   fallbacks: RouteTraceFallback[];
   routingDurationMs: number;

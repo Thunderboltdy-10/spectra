@@ -65,6 +65,7 @@ type ChatMessagesProps = {
   thinkingLevel?: "low" | "medium" | "high";
   lastModelUsed?: string;
   streamRouteTrace?: RouteTrace | null;
+  livePhasePlan?: RouteTrace["phasePlan"];
   lastAutoResult?: {
     modelUsed?: string;
     searchEnabled: boolean;
@@ -222,6 +223,7 @@ export function ChatMessages({
   thinkingLevel = "medium",
   lastModelUsed,
   streamRouteTrace = null,
+  livePhasePlan,
   lastAutoResult,
   activeCollaborators = [],
   collaboratorPhase = "idle",
@@ -621,6 +623,45 @@ export function ChatMessages({
   })();
   const streamingModelId = streamRouteTrace?.selected?.modelId ?? lastModelUsed;
   const activeProvider = streamingModelId?.split("/")[0] ?? "openrouter";
+  const runtimeRouteTrace = useMemo<RouteTrace | null>(() => {
+    const activePhasePlan = livePhasePlan && livePhasePlan.length > 0 ? livePhasePlan : undefined;
+    if (streamRouteTrace) {
+      if (!activePhasePlan) return streamRouteTrace;
+      return {
+        ...streamRouteTrace,
+        phasePlan: activePhasePlan,
+      };
+    }
+    if (!activePhasePlan) return null;
+    return {
+      inputs: {
+        routerMode: "auto",
+        mode,
+        thinkingLevel,
+        complexPrompt: false,
+        promptCategory: "runtime",
+        needsSearch: Boolean(lastAutoResult?.searchEnabled),
+        needsRag: false,
+        needsVision: false,
+        spendingTier: "normal",
+        hasAttachments: false,
+        attachmentTypes: [],
+        promptEnhanced: false,
+        messageLength: 0,
+      },
+      candidates: [],
+      selected: {
+        modelId: streamingModelId ?? "openrouter/auto",
+        reason: sending
+          ? "Live runtime phases in progress."
+          : "Runtime phases captured for this turn.",
+      },
+      phasePlan: activePhasePlan,
+      toolchain: [],
+      fallbacks: [],
+      routingDurationMs: 0,
+    };
+  }, [lastAutoResult?.searchEnabled, livePhasePlan, mode, sending, streamRouteTrace, streamingModelId, thinkingLevel]);
   const visibleDraftResponse = (() => {
     const cleanDraft = draftResponse.trim();
     if (!cleanDraft) return "";
@@ -1428,8 +1469,12 @@ export function ChatMessages({
                       <span className="h-1 w-1 rounded-full bg-[var(--border-default)]" />
                       <span className="thinking-wave">{streamingStatus}</span>
                     </div>
-                    {hasRealThinking && draftThinking ? (
-                      <ThinkingBlock content={draftThinking} streaming={streamPhase === "thinking"} />
+                    {(runtimeRouteTrace || (hasRealThinking && draftThinking)) ? (
+                      <ThinkingBlock
+                        content={hasRealThinking ? draftThinking ?? "" : ""}
+                        routeTrace={runtimeRouteTrace ?? undefined}
+                        streaming={sending}
+                      />
                     ) : null}
                     {streamingOpenTag ? (() => {
                       const tagPattern = /<<(?:quiz|flashcard|flashcards|document|doc)_?start>>/i;
@@ -1472,8 +1517,12 @@ export function ChatMessages({
                       <span className="h-1 w-1 rounded-full bg-[var(--border-default)]" />
                       <span className="thinking-wave">{streamingStatus}</span>
                     </div>
-                    {hasRealThinking && draftThinking ? (
-                      <ThinkingBlock content={draftThinking} streaming={streamPhase === "thinking"} />
+                    {(runtimeRouteTrace || (hasRealThinking && draftThinking)) ? (
+                      <ThinkingBlock
+                        content={hasRealThinking ? draftThinking ?? "" : ""}
+                        routeTrace={runtimeRouteTrace ?? undefined}
+                        streaming={sending}
+                      />
                     ) : null}
                     {!hasRealThinking && activeCollaborators.length === 0 ? (
                       <div className="space-y-2">

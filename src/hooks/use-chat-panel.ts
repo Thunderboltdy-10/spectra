@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChatMessageAccumulator, type PanelChatMessage } from "@/lib/chat/message-state";
-import { createChatStream } from "@/lib/chat/streaming";
+import { createChatStream, type ChatStreamEvent } from "@/lib/chat/streaming";
 import { notifyWorkspaceContentMutated } from "@/lib/workspace/events";
 
 type UseChatPanelParams = {
@@ -18,7 +18,32 @@ type UseChatPanelParams = {
   title?: string;
   scopeLevel?: "global" | "workspace" | "artifact";
   manualModel?: string;
+  onStreamEvent?: (event: ChatStreamEvent) => void;
 };
+
+function phaseFromPhaseUpdate(event: ChatStreamEvent): string | null {
+  const status = typeof event.status === "string" ? event.status : "";
+  if (status !== "in_progress") return null;
+  const raw = event as Record<string, unknown>;
+  const phaseId = typeof raw.phaseId === "string" ? raw.phaseId.toLowerCase() : "";
+  if (!phaseId) return null;
+  if (phaseId.includes("route")) return "routing";
+  if (phaseId.includes("search")) return "searching";
+  if (phaseId.includes("compact") || phaseId.includes("history")) return "compacting";
+  if (phaseId.includes("author") || phaseId.includes("compose") || phaseId.includes("write")) return "generating";
+  if (phaseId.includes("synth") || phaseId.includes("verif") || phaseId.includes("repair")) return "synthesizing";
+  return "thinking";
+}
+
+function phaseFromEvent(event: ChatStreamEvent): string | null {
+  if (event.type === "phase" && typeof event.phase === "string") {
+    return event.phase;
+  }
+  if (event.type === "phase_update") {
+    return phaseFromPhaseUpdate(event);
+  }
+  return null;
+}
 
 function toPanelMessages(messages: Array<Record<string, unknown>>): PanelChatMessage[] {
   return messages
@@ -49,6 +74,7 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
   const [messages, setMessages] = useState<PanelChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [streamPhase, setStreamPhase] = useState<string>("idle");
+  const [latestRouteTrace, setLatestRouteTrace] = useState<PanelChatMessage["routeTrace"]>();
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const createChatPromiseRef = useRef<Promise<string> | null>(null);
@@ -64,8 +90,12 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
   }, [params.initialChatId]);
 
   const syncAccumulator = useCallback(() => {
-    setMessages([...accumulatorRef.current.messages]);
-    setStreamPhase(accumulatorRef.current.phase);
+    const nextMessages = [...accumulatorRef.current.messages];
+    setMessages(nextMessages);
+    const latestTrace = [...nextMessages]
+      .reverse()
+      .find((message) => message.role === "assistant" && message.routeTrace)?.routeTrace;
+    setLatestRouteTrace(latestTrace);
   }, []);
 
   const hydrateChat = useCallback(async (targetChatId: string) => {
@@ -178,6 +208,7 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
     if (!text.trim() || streaming) return;
 
     setError(null);
+    setLatestRouteTrace(undefined);
     const accumulator = accumulatorRef.current;
     const userMessageId = accumulator.appendUserMessage(text.trim());
     const assistantId = accumulator.beginAssistantMessage();
@@ -207,6 +238,12 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
         scopeLevel,
         signal: abortRef.current.signal,
       })) {
+        const phase = phaseFromEvent(event);
+        if (phase) setStreamPhase(phase);
+        if ((event.type === "route_model" || event.type === "done") && event.routeTrace) {
+          setLatestRouteTrace(event.routeTrace as PanelChatMessage["routeTrace"]);
+        }
+        params.onStreamEvent?.(event);
         accumulator.consume(event);
         syncAccumulator();
         if (event.type === "error") {
@@ -242,6 +279,7 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
     params.artifactId,
     params.mode,
     params.manualModel,
+    params.onStreamEvent,
     params.routerMode,
     params.scopeLevel,
     params.thinkingLevel,
@@ -263,6 +301,7 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
     setChatId(null);
     setStreaming(false);
     setStreamPhase("idle");
+    setLatestRouteTrace(undefined);
     setError(null);
   }, []);
 
@@ -271,6 +310,7 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
     messages,
     streaming,
     streamPhase,
+    latestRouteTrace,
     error,
     sendMessage,
     stopGeneration,

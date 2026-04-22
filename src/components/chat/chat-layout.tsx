@@ -79,12 +79,6 @@ const TOUR_STEPS: GuidedTourStep[] = [
     position: "top",
   },
   {
-    selector: '[data-tour="auto-controls"]',
-    title: "Auto controls",
-    description: "Tune automation for prompt enhancement, reasoning depth, and web search behavior.",
-    position: "top",
-  },
-  {
     selector: '[data-tour="settings-trigger"]',
     title: "Settings panel",
     description: "Open session settings for reasoning depth, search behavior, and resources.",
@@ -215,8 +209,6 @@ export function ChatLayout() {
     );
   }, [chat]);
 
-  const setSelectedChatId = chat.setSelectedChatId;
-
   useEffect(() => {
     const onSwitchMode = (event: Event) => {
       const detail = (event as CustomEvent<{ mode?: string }>).detail;
@@ -224,20 +216,13 @@ export function ChatLayout() {
       handleModeChange(detail.mode as StudyMode);
     };
     const onOpenOrchestration = () => openPanel("orchestration");
-    const onResumeChat = (event: Event) => {
-      const detail = (event as CustomEvent<{ chatId?: string }>).detail;
-      if (!detail?.chatId) return;
-      setSelectedChatId(detail.chatId);
-    };
     window.addEventListener("ai-school:switch-mode", onSwitchMode);
     window.addEventListener("ai-school:open-orchestration", onOpenOrchestration);
-    window.addEventListener("ai-school:resume-chat", onResumeChat);
     return () => {
       window.removeEventListener("ai-school:switch-mode", onSwitchMode);
       window.removeEventListener("ai-school:open-orchestration", onOpenOrchestration);
-      window.removeEventListener("ai-school:resume-chat", onResumeChat);
     };
-  }, [handleModeChange, openPanel, setSelectedChatId]);
+  }, [handleModeChange, openPanel]);
 
   function markTourSeen() {
     try {
@@ -730,6 +715,7 @@ export function ChatLayout() {
           thinkingLevel={chat.thinkingLevel}
           lastModelUsed={lastModelUsed}
           streamRouteTrace={chat.liveRouteTrace}
+          livePhasePlan={chat.livePhasePlan}
           lastAutoResult={chat.lastAutoResult}
           activeCollaborators={chat.activeCollaborators}
           collaboratorPhase={chat.collaboratorPhase}
@@ -794,8 +780,6 @@ export function ChatLayout() {
           onMessageChange={chat.setMessage}
           fileList={chat.fileList}
           fileUploadState={chat.fileUploadState}
-          streakAtRisk={chat.streakAtRisk}
-          continuationChat={chat.continuationChat}
           onFilesAdd={(files) =>
             chat.setFileList((prev) => {
               const seen = new Set(prev.map((file) => `${file.name}:${file.size}:${file.lastModified}`));
@@ -859,19 +843,9 @@ export function ChatLayout() {
             void chat.updateExistingChatSettings({ routerMode: "manual", manualModel: modelId })
               .catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Failed to update model", { duration: 8000 }));
           }}
-          imageModel={chat.imageModel}
-          onSelectImageModel={chat.setImageModel}
-          autoEnhancePrompt={chat.autoEnhancePrompt}
-          autoThinking={chat.autoThinking}
-          autoSearch={chat.autoSearch}
-          autoCompaction={chat.autoCompaction}
-          onAutoEnhancePromptChange={chat.setAutoEnhancePrompt}
-          onAutoThinkingChange={chat.setAutoThinking}
-          onAutoSearchChange={chat.setAutoSearch}
-          onAutoCompactionChange={chat.setAutoCompaction}
           onSlashCommand={handleSlashCommand}
-          lastAutoResult={chat.lastAutoResult}
           messageCount={chat.messages.length}
+          streakAtRisk={chat.streakAtRisk}
         />
         </div>
       </main>

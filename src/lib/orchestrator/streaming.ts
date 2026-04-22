@@ -7,6 +7,7 @@ import {
   type OpenRouterUsage,
 } from "@/lib/openrouter";
 import type { ExecutedToolResult } from "@/lib/orchestrator/tool-executor";
+import type { RuntimeEvent } from "@/lib/orchestrator/runtime-contract";
 import { executeGraph, synthesize, type TaskNode } from "@/lib/orchestrator/task-graph";
 import { getSpecialist } from "@/lib/orchestrator/specialists";
 import { runMarkerVerificationPipeline, type VerificationSubcall } from "@/lib/orchestrator/verification";
@@ -95,7 +96,7 @@ export async function runAssistantStreaming(params: {
   verificationModel?: string;
   messages: OpenRouterMessage[];
   maxTokens?: number;
-  send: (payload: Record<string, unknown>) => Promise<void>;
+  send: (payload: RuntimeEvent) => Promise<void>;
   onUsageTokens?: (tokens: number) => void;
   onFallback?: (event: RouteTraceFallback) => void;
   maxContinuations?: number;
@@ -220,20 +221,54 @@ export async function runAssistantStreaming(params: {
           const toolName = toolCall.function?.name?.trim();
           if (!toolName) continue;
           const callId = toolCall.id ?? `${toolName}-${toolRound}`;
+          const helperWorkerId = `helper:${callId}`;
           await params.send({
             type: "tool_call",
             toolName,
             toolCallId: callId,
             arguments: toolCall.function?.arguments ?? "{}",
           });
+          await params.send({
+            type: "helper_worker_started",
+            workerId: helperWorkerId,
+            toolName,
+            toolCallId: callId,
+          } as RuntimeEvent);
+          const toolStartedAt = Date.now();
           const executed = await params.executeTool({
             name: toolName,
             rawArguments: toolCall.function?.arguments ?? "{}",
+          }).catch(async (error) => {
+            await params.send({
+              type: "helper_worker_finished",
+              workerId: helperWorkerId,
+              toolName,
+              toolCallId: callId,
+              ok: false,
+              durationMs: Date.now() - toolStartedAt,
+              summary: error instanceof Error ? error.message : "Tool execution failed.",
+            } as RuntimeEvent);
+            throw error;
           });
+          await params.send({
+            type: "helper_worker_finished",
+            workerId: helperWorkerId,
+            toolName,
+            toolCallId: callId,
+            ok: true,
+            durationMs: Date.now() - toolStartedAt,
+            summary: executed.summary,
+          } as RuntimeEvent);
           executedToolCalls += 1;
+          if (executed.loadedSkill) {
+            await params.send({
+              type: "skill_loaded",
+              skill: executed.loadedSkill,
+            } as RuntimeEvent);
+          }
           if (executed.modeSwitch) {
             await params.send({
-              type: "mode_switch",
+              type: "mode_switched",
               mode: executed.modeSwitch,
               reason: executed.eventPayload.reason,
             });
@@ -244,7 +279,7 @@ export async function runAssistantStreaming(params: {
           }
           if (executed.threadFork) {
             await params.send({
-              type: "thread_fork",
+              type: "navigation_instruction",
               ...executed.eventPayload,
             });
           }
@@ -255,6 +290,15 @@ export async function runAssistantStreaming(params: {
             summary: executed.summary,
             result: executed.eventPayload,
           });
+          if (executed.runtimeEventType && executed.runtimeEventType !== "tool_result") {
+            await params.send({
+              type: executed.runtimeEventType as RuntimeEvent["type"],
+              toolName,
+              toolCallId: callId,
+              summary: executed.summary,
+              result: executed.eventPayload,
+            });
+          }
           workingMessages.push({
             role: "tool",
             name: toolName,
@@ -523,7 +567,7 @@ export async function runCollaborativeStreaming(params: {
   maxWallTimeMs?: number;
   usageBudgetTokens?: number;
   budgetOverrunFactor?: number;
-  send: (payload: Record<string, unknown>) => Promise<void>;
+  send: (payload: RuntimeEvent) => Promise<void>;
   onUsageTokens?: (tokens: number) => void;
   onFallback?: (event: RouteTraceFallback) => void;
   maxContinuations?: number;

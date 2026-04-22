@@ -2,42 +2,30 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import Image from "next/image";
 import Link from "next/link";
 import {
-  AlertCircle,
-  ArrowUp,
   Bot,
-  Brain,
-  CheckCircle2,
   ChevronDown,
-  ChevronUp,
-  FileText,
-  Loader2,
-  Mic,
-  MoreHorizontal,
   Paperclip,
   Plus,
   Search,
   Sparkles,
-  Square,
   X,
   Globe,
   Star,
 } from "lucide-react";
 import { ProviderLogo } from "@/components/provider-logo";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { SlashCommandMenu } from "@/components/chat/slash-command-menu";
 import { SmartTipRotator } from "@/components/chat/smart-tip-rotator";
+import { QuickChat } from "@/components/shared/quick-chat";
 import { ALL_MODES, COMING_SOON_MODES, getModeConfig, isModeAvailable } from "@/lib/modes";
 import type { Agent } from "@/types";
-import type { AutoPreference, FileStatus, ModelOption, UserSpending } from "@/hooks/use-chat-state";
+import type { FileStatus, ModelOption, UserSpending } from "@/hooks/use-chat-state";
 import type { RouterMode, StudyMode } from "@/types";
 import { fuzzyScore } from "@/lib/fuzzy-model-search";
 import { cn } from "@/lib/utils";
 import { parseSlashCommand } from "@/lib/slash-commands";
-import { useSpeechToText } from "@/hooks/use-speech-to-text";
 import { CHEAP_MODEL_COST_PER_MILLION, MAX_MODEL_COST_PER_MILLION } from "@/lib/model-policy";
 
 type ChatComposerProps = {
@@ -46,8 +34,6 @@ type ChatComposerProps = {
   onMessageChange: (value: string) => void;
   fileList: File[];
   fileUploadState: Record<string, { status: FileStatus; thumbnailUrl?: string; error?: string }>;
-  streakAtRisk?: boolean;
-  continuationChat?: { id: string; title: string } | null;
   onFilesAdd: (files: File[]) => void;
   onRemoveFile: (file: File) => void;
   onSend: () => void;
@@ -66,25 +52,11 @@ type ChatComposerProps = {
   isSuperAdmin?: boolean;
   routerMode: RouterMode;
   manualModel: string;
-  imageModel?: string;
   onSelectAuto: () => void;
   onSelectModel: (modelId: string) => void;
-  onSelectImageModel?: (modelId: string) => void;
-  autoEnhancePrompt: AutoPreference;
-  autoThinking: AutoPreference;
-  autoSearch: AutoPreference;
-  autoCompaction: AutoPreference;
-  onAutoEnhancePromptChange: (value: AutoPreference) => void;
-  onAutoThinkingChange: (value: AutoPreference) => void;
-  onAutoSearchChange: (value: AutoPreference) => void;
-  onAutoCompactionChange: (value: AutoPreference) => void;
   onSlashCommand?: (value: string) => Promise<boolean> | boolean;
-  lastAutoResult?: {
-    promptEnhanced: boolean;
-    searchEnabled: boolean;
-    thinkingLevel: "low" | "medium" | "high";
-  } | null;
   messageCount?: number;
+  streakAtRisk?: boolean;
 };
 
 function formatModelLabel(modelId: string) {
@@ -218,17 +190,7 @@ function filesFromDataTransfer(dataTransfer: DataTransfer | null) {
   return Array.from(dataTransfer.files ?? []);
 }
 
-function nextPreference(value: AutoPreference): AutoPreference {
-  if (value === "auto") return "on";
-  if (value === "on") return "off";
-  return "auto";
-}
 
-function preferenceLabel(value: AutoPreference) {
-  if (value === "auto") return "Auto";
-  if (value === "on") return "On";
-  return "Off";
-}
 
 function sortedByPopularity(models: ModelOption[]) {
   return [...models].sort((a, b) => {
@@ -276,43 +238,6 @@ function estimateTokens(message: string): number {
   return Math.ceil(message.length / 4);
 }
 
-function SettingPill({
-  label,
-  value,
-  onChange,
-  icon,
-}: {
-  label: string;
-  value: AutoPreference;
-  onChange: (value: AutoPreference) => void;
-  icon: React.ReactNode;
-}) {
-  const pillClass =
-    value === "on"
-      ? "border-[color-mix(in_oklab,var(--accent-cyan)_50%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_16%,transparent)] text-[var(--accent-cyan)]"
-      : value === "auto"
-        ? "auto-pill-active border-[color-mix(in_oklab,var(--accent-cyan)_35%,var(--border-default))] text-[var(--text-primary)]"
-        : "border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]";
-  return (
-    <div className="group/pill relative py-0.5">
-      <button
-        type="button"
-        onClick={() => onChange(nextPreference(value))}
-        aria-label={label}
-        className={`inline-flex h-[34px] cursor-pointer items-center justify-center rounded-full border px-[9px] transition-all duration-200 group-hover/pill:px-3 ${pillClass}`}
-      >
-        <span className="shrink-0">{icon}</span>
-        <span className="ml-0 max-w-0 overflow-hidden whitespace-nowrap text-[11px] font-medium opacity-0 transition-all duration-200 group-hover/pill:ml-1.5 group-hover/pill:max-w-[80px] group-hover/pill:opacity-100">
-          {preferenceLabel(value)}
-        </span>
-      </button>
-      <span className="pointer-events-none absolute -top-7 left-1/2 z-[95] -translate-x-1/2 whitespace-nowrap rounded-md border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)] opacity-0 shadow-sm transition-opacity duration-200 group-hover/pill:opacity-100">
-        {label}: {preferenceLabel(value)}
-      </span>
-    </div>
-  );
-}
-
 export function ChatComposer(props: ChatComposerProps) {
   const {
     sidebarExpanded = true,
@@ -320,8 +245,6 @@ export function ChatComposer(props: ChatComposerProps) {
     onMessageChange,
     fileList,
     fileUploadState,
-    streakAtRisk,
-    continuationChat,
     onFilesAdd,
     onRemoveFile,
     onSend,
@@ -342,14 +265,9 @@ export function ChatComposer(props: ChatComposerProps) {
     manualModel,
     onSelectAuto,
     onSelectModel,
-    autoEnhancePrompt,
-    autoThinking,
-    autoSearch,
-    onAutoEnhancePromptChange,
-    onAutoThinkingChange,
-    onAutoSearchChange,
     onSlashCommand,
     messageCount = 0,
+    streakAtRisk = false,
   } = props;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const modelSearchRef = useRef<HTMLInputElement | null>(null);
@@ -359,8 +277,6 @@ export function ChatComposer(props: ChatComposerProps) {
   const modelMenuRef = useRef<HTMLDivElement | null>(null);
   const agentMenuRef = useRef<HTMLDivElement | null>(null);
   const attachInputRef = useRef<HTMLInputElement | null>(null);
-  const previousFileCountRef = useRef(0);
-  const listeningBaseMessageRef = useRef<string | null>(null);
   const [showModeSelector, setShowModeSelector] = useState(false);
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [showAgentSelector, setShowAgentSelector] = useState(false);
@@ -392,8 +308,6 @@ export function ChatComposer(props: ChatComposerProps) {
     });
   };
 
-  const [attachmentsExpanded, setAttachmentsExpanded] = useState(true);
-  const [showVoiceStub, setShowVoiceStub] = useState(false);
   const [modeTransitioning, setModeTransitioning] = useState(false);
   const [agentTransitioning, setAgentTransitioning] = useState(false);
   const lastModeRef = useRef(mode);
@@ -583,7 +497,6 @@ export function ChatComposer(props: ChatComposerProps) {
   const selectorTriggerClass =
     "inline-flex cursor-pointer items-center gap-2 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]";
   const slashActive = message.trimStart().startsWith("/");
-  const speech = useSpeechToText();
   useEffect(() => {
     if (lastModeRef.current !== mode) {
       setModeTransitioning(true);
@@ -612,14 +525,6 @@ export function ChatComposer(props: ChatComposerProps) {
     window.addEventListener("ai-school:set-message", handler);
     return () => window.removeEventListener("ai-school:set-message", handler);
   }, [onMessageChange]);
-
-  useEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-
-    textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
-  }, [message]);
 
   useEffect(() => {
     if (!showModelSelector) {
@@ -651,32 +556,6 @@ export function ChatComposer(props: ChatComposerProps) {
       window.removeEventListener("scroll", updateModelSelectorPosition, true);
     };
   }, [showModelSelector]);
-
-  useEffect(() => {
-    const previousCount = previousFileCountRef.current;
-    if (fileList.length === 0) {
-      setAttachmentsExpanded(false);
-    } else if (fileList.length > previousCount) {
-      setAttachmentsExpanded(true);
-    }
-    previousFileCountRef.current = fileList.length;
-  }, [fileList.length]);
-
-  useEffect(() => {
-    if (!speech.isListening) {
-      listeningBaseMessageRef.current = null;
-      return;
-    }
-    if (listeningBaseMessageRef.current === null) {
-      listeningBaseMessageRef.current = message;
-    }
-    const baseMessage = listeningBaseMessageRef.current ?? "";
-    const transcript = speech.transcript.trim();
-    const nextValue = [baseMessage.trim(), transcript].filter(Boolean).join(baseMessage.trim() ? " " : "");
-    if (nextValue !== message) {
-      onMessageChange(nextValue);
-    }
-  }, [message, onMessageChange, speech.isListening, speech.transcript]);
 
   useEffect(() => {
     const preventWindowFileDrop = (event: DragEvent) => {
@@ -772,17 +651,6 @@ export function ChatComposer(props: ChatComposerProps) {
     setShowModeSelector(false);
   }
 
-  function fileKey(file: File) {
-    return `${file.name}-${file.size}-${file.lastModified}`;
-  }
-
-  function handlePaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
-    const files = filesFromDataTransfer(event.clipboardData);
-    if (files.length === 0) return;
-    event.preventDefault();
-    onFilesAdd(files);
-  }
-
   function handleDragEnter(event: React.DragEvent<HTMLElement>) {
     if (!dataTransferHasFiles(event.dataTransfer)) return;
     event.preventDefault();
@@ -819,65 +687,6 @@ export function ChatComposer(props: ChatComposerProps) {
     }
   }
 
-  function handleToggleMic() {
-    if (!speech.isSupported) {
-      setShowVoiceStub(true);
-      return;
-    }
-    if (speech.isListening) {
-      speech.stop();
-      speech.reset();
-      listeningBaseMessageRef.current = null;
-      return;
-    }
-    listeningBaseMessageRef.current = message;
-    speech.start();
-  }
-
-  function renderStatus(status: FileStatus, warning?: string) {
-    if (status === "uploading") {
-      return (
-        <span className="inline-flex items-center gap-1 text-[10px] text-[var(--text-secondary)]">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          Uploading
-        </span>
-      );
-    }
-    if (status === "processing") {
-      return (
-        <span className="inline-flex items-center gap-1 text-[10px] text-[var(--text-secondary)]">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          Processing
-        </span>
-      );
-    }
-    if (status === "ready") {
-      if (warning?.trim()) {
-        return (
-          <span className="inline-flex items-center gap-1 text-[10px] text-[var(--warning)]">
-            <AlertCircle className="h-3 w-3" />
-            Chat-only
-          </span>
-        );
-      }
-      return (
-        <span className="inline-flex items-center gap-1 text-[10px] text-[var(--success)]">
-          <CheckCircle2 className="h-3 w-3" />
-          Ready
-        </span>
-      );
-    }
-    if (status === "error") {
-      return (
-        <span className="inline-flex items-center gap-1 text-[10px] text-[var(--danger)]">
-          <AlertCircle className="h-3 w-3" />
-          Error
-        </span>
-      );
-    }
-    return null;
-  }
-
   function handleTipAction(actionId: "switch-research" | "open-settings" | "open-tour" | "open-timer" | "open-feedback" | "new-chat" | "open-orchestration") {
     if (actionId === "switch-research") {
       handleModeSelect("research");
@@ -906,7 +715,7 @@ export function ChatComposer(props: ChatComposerProps) {
     window.dispatchEvent(new CustomEvent("ai-school:open-orchestration"));
   }
 
-  const showSmartTip = !slashActive && fileList.length === 0;
+  const showSmartTip = !slashActive && fileList.length === 0 && (sending || messageCount === 0 || streakAtRisk);
 
   return (
     <footer
@@ -946,83 +755,12 @@ export function ChatComposer(props: ChatComposerProps) {
             streamPhase={sending ? "generating" : "idle"}
             hasResources={fileList.length > 0}
             streakAtRisk={streakAtRisk}
-            continuationChat={continuationChat}
             onAction={handleTipAction}
           />
         ) : null}
 
-        {fileList.length > 0 && (
-          <div className="-mb-px mx-auto w-[95%] overflow-hidden rounded-t-xl rounded-b-none border border-b-0 border-[var(--border-default)] bg-[var(--bg-elevated)]">
-            <div className="flex items-center justify-between gap-2 px-2.5 py-1.5">
-              <button
-                type="button"
-                onClick={() => setAttachmentsExpanded((prev) => !prev)}
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[11px] text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]"
-                aria-expanded={attachmentsExpanded}
-              >
-                <Paperclip className="h-3.5 w-3.5" />
-                {fileList.length} attachment{fileList.length === 1 ? "" : "s"} attached
-                {attachmentsExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
-              </button>
-            </div>
-
-            <div
-              className={cn(
-                "grid overflow-hidden transition-[grid-template-rows,opacity] duration-300 ease-[var(--ease-standard)]",
-                attachmentsExpanded ? "[grid-template-rows:1fr] opacity-100" : "[grid-template-rows:0fr] opacity-0",
-              )}
-            >
-              <div className="min-h-0 overflow-hidden border-t border-[var(--border-default)] px-2.5 pb-2.5 pt-2">
-                <div className="max-h-[220px] overflow-y-auto rounded-xl bg-[var(--bg-elevated)] p-1.5">
-                  <div className="flex flex-wrap gap-2 pr-1">
-                    {fileList.map((file) => {
-                      const status = fileUploadState[fileKey(file)]?.status ?? "pending";
-                      const thumbnailUrl = fileUploadState[fileKey(file)]?.thumbnailUrl;
-                      const warning = fileUploadState[fileKey(file)]?.error;
-                      const extension = file.name.split(".").pop()?.toUpperCase().slice(0, 4) || "FILE";
-                      return (
-                        <span
-                          key={`${file.name}-${file.size}`}
-                          className="inline-flex items-center gap-2 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-2 text-xs font-medium"
-                        >
-                          {thumbnailUrl ? (
-                            <span className="inline-flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-[var(--bg-secondary)]">
-                              <Image
-                                src={thumbnailUrl}
-                                alt={file.name}
-                                className="h-16 w-16 rounded-lg object-contain"
-                                width={64}
-                                height={64}
-                              />
-                            </span>
-                          ) : (
-                            <span className="inline-flex h-12 min-w-12 items-center justify-center rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-1.5 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
-                              <FileText className="mr-1 h-3 w-3" />
-                              {extension}
-                            </span>
-                          )}
-                          <span className="max-w-[220px] truncate">{file.name}</span>
-                          {renderStatus(status, warning)}
-                          <button
-                            type="button"
-                            className="inline-flex h-4 w-4 items-center justify-center rounded-full transition hover:bg-[var(--bg-hover)]"
-                            onClick={() => onRemoveFile(file)}
-                            aria-label={`Remove ${file.name}`}
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
-                        </span>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="relative overflow-visible rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-soft)]">
-          <div className="flex items-center gap-2 px-3 pt-2.5 pb-1">
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 px-1 pt-1 pb-1">
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
               <div ref={modeMenuRef} className="relative">
                 <button
@@ -1548,54 +1286,10 @@ export function ChatComposer(props: ChatComposerProps) {
               </div>
             </div>
 
-            <div
-              data-tour="auto-controls"
-              className="hidden shrink-0 items-center gap-1.5 sm:flex"
-            >
-              <SettingPill
-                label="Enhance"
-                value={autoEnhancePrompt}
-                onChange={onAutoEnhancePromptChange}
-                icon={<Sparkles className="h-3.5 w-3.5" />}
-              />
-              <SettingPill
-                label="Think"
-                value={autoThinking}
-                onChange={onAutoThinkingChange}
-                icon={<Brain className="h-3.5 w-3.5" />}
-              />
-              <SettingPill
-                label="Search"
-                value={autoSearch}
-                onChange={onAutoSearchChange}
-                icon={<Search className="h-3.5 w-3.5" />}
-              />
             </div>
-
-            <div className="sm:hidden">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-full" aria-label="More controls">
-                    <MoreHorizontal className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onSelect={() => onAutoEnhancePromptChange(nextPreference(autoEnhancePrompt))}>
-                    Enhance: {preferenceLabel(autoEnhancePrompt)}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => onAutoThinkingChange(nextPreference(autoThinking))}>
-                    Think: {preferenceLabel(autoThinking)}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => onAutoSearchChange(nextPreference(autoSearch))}>
-                    Search: {preferenceLabel(autoSearch)}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </div>
 
           {!selectedAgentId && agentSuggestion ? (
-            <div className="border-b border-[var(--border-default)] px-3 py-1.5">
+            <div className="px-1 py-0.5">
               <button
                 type="button"
                 onClick={onApplyAgentSuggestion}
@@ -1608,111 +1302,59 @@ export function ChatComposer(props: ChatComposerProps) {
             </div>
           ) : null}
 
-          <div className={sidebarExpanded ? "flex items-end gap-2 px-3 pb-3 pt-2" : "flex flex-col"}>
-            <div className={sidebarExpanded ? "flex-1 min-w-0 max-h-[200px] overflow-y-auto" : "max-h-[200px] overflow-y-auto px-4 py-1.5"}>
-              <textarea
-                ref={textareaRef}
-                value={message}
-                onChange={(event) => onMessageChange(event.target.value)}
-                onPaste={handlePaste}
-                placeholder="Ask anything. For best results, include your context and goal."
-                data-tour="composer"
-                aria-label="Message input"
-                rows={1}
-                className="min-h-[24px] w-full resize-none appearance-none border-0 bg-transparent pl-3 pr-0 py-1 text-[15px] leading-6 text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] shadow-none outline-none ring-0 focus:border-transparent focus:outline-none focus:ring-0 focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0 focus-visible:shadow-none"
-                onKeyDown={handleKeyDown}
-              />
-              {speech.isListening ? (
-                <p className="inline-flex items-center gap-1 pb-1 text-xs text-[var(--danger)]" aria-live="polite">
-                  <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-[var(--danger)]" />
-                  Recording... dictating into composer
-                </p>
-              ) : null}
-              {sendDisabledReason ? (
-                <p className="pb-1 text-xs text-[var(--warning)]" aria-live="polite">{sendDisabledReason}</p>
-              ) : null}
-              {speech.error ? (
-                <p className="pb-1 text-xs text-[var(--warning)]" aria-live="polite">{speech.error}</p>
-              ) : null}
-            </div>
-
-            <div className={sidebarExpanded ? "flex shrink-0 items-center gap-1.5 mb-1" : "flex items-center justify-end gap-2 px-3 pb-2.5 pt-0.5"}>
-              <input
-                ref={attachInputRef}
-                type="file"
-                className="hidden"
-                multiple
-                onChange={(event) => {
-                  const files = Array.from(event.target.files ?? []);
-                  if (files.length > 0) {
-                    onFilesAdd(files);
-                  }
-                  event.currentTarget.value = "";
-                }}
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-9 w-9 rounded-full text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                onClick={() => attachInputRef.current?.click()}
-                aria-label="Attach files"
-                title="Attach files"
-              >
-                <Paperclip className="h-4.5 w-4.5" />
-              </Button>
-              <Button
-                onClick={handleToggleMic}
-                variant={speech.isListening ? "destructive" : "ghost"}
-                size="icon"
-                className={cn("h-9 w-9 rounded-full text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]", speech.isListening && "animate-pulse text-[var(--danger)]")}
-                aria-label={speech.isListening ? "Stop voice input" : "Start voice input"}
-                title={speech.isSupported ? "Voice input" : "Voice input support is coming soon for this browser."}
-              >
-                <Mic className="h-4.5 w-4.5" />
-              </Button>
-              {sending && onStop ? (
+          <div>
+            <input
+              ref={attachInputRef}
+              type="file"
+              className="hidden"
+              multiple
+              onChange={(event) => {
+                const files = Array.from(event.target.files ?? []);
+                if (files.length > 0) {
+                  onFilesAdd(files);
+                }
+                event.currentTarget.value = "";
+              }}
+            />
+            <QuickChat
+              textareaRef={textareaRef}
+              value={message}
+              onChange={onMessageChange}
+              onSubmit={onSend}
+              onStop={onStop}
+              onKeyDown={handleKeyDown}
+              files={fileList}
+              fileUploadState={fileUploadState}
+              onFilesAdd={onFilesAdd}
+              onRemoveFile={onRemoveFile}
+              isStreaming={sending}
+              disabled={Boolean(sendDisabledReason)}
+              placeholder="Ask anything. For best results, include your context and goal."
+              showSpeechStatus
+              onMicUnsupported={() => {
+                window.dispatchEvent(new CustomEvent("ai-school:open-feedback"));
+              }}
+              className={cn(!sidebarExpanded && "px-2")}
+              leftContent={
                 <Button
-                  onClick={onStop}
-                  variant="secondary"
+                  type="button"
+                  variant="ghost"
                   size="icon"
-                  className="h-9 w-9 rounded-full"
-                  aria-label="Stop generation"
+                  className="h-9 w-9 rounded-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                  onClick={() => attachInputRef.current?.click()}
+                  aria-label="Attach files"
+                  title="Attach files"
                 >
-                  <Square className="h-4.5 w-4.5" />
+                  <Paperclip className="h-4.5 w-4.5" />
                 </Button>
-              ) : (
-                <Button
-                  onClick={onSend}
-                  disabled={sending || !message.trim() || Boolean(sendDisabledReason)}
-                  size="icon"
-                  className="h-9 w-9 rounded-full"
-                  aria-label="Send message"
-                  title={sendDisabledReason ?? "Send message"}
-                >
-                  <ArrowUp className="h-4.5 w-4.5" />
-                </Button>
-              )}
-            </div>
+              }
+            />
+            {sendDisabledReason ? (
+              <p className="pt-1 text-xs text-[var(--warning)]" aria-live="polite">{sendDisabledReason}</p>
+            ) : null}
           </div>
         </div>
       </div>
-
-      {showVoiceStub ? (
-        <div className="fixed inset-0 z-[230] flex items-end justify-center bg-black/35 p-4 sm:items-center">
-          <div className="w-full max-w-sm rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-overlay)]">
-            <h3 className="text-sm font-semibold text-[var(--text-primary)]">Voice input</h3>
-            <p className="mt-1 text-sm text-[var(--text-secondary)]">
-              Voice capture is not available in this browser yet. You can still attach audio files and transcribe later.
-            </p>
-            <div className="mt-3 flex justify-end">
-              <Button type="button" variant="secondary" onClick={() => setShowVoiceStub(false)}>
-                Close
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </footer>
   );
 }

@@ -105,11 +105,6 @@ function stageAllowedByPlan(stage: PipelineStageId, executionPlan: PipelineStage
   return executionPlan.includes(stage);
 }
 
-function requestClassAtLeast(requestClass: RequestClass, minimum: RequestClass) {
-  const rank: Record<RequestClass, number> = { T0: 0, T1: 1, T2: 2, T3: 3 };
-  return rank[requestClass] >= rank[minimum];
-}
-
 function usageTokenBudgetForUsd(costBudgetUsd: number) {
   // Conservative budget conversion: assume worst-case 30 USD / 1M tokens.
   return Math.max(300, Math.floor((costBudgetUsd * 1_000_000) / 30));
@@ -192,7 +187,6 @@ export class PipelineController {
     orchestratorEnabled: boolean;
     budgetSoftLimited: boolean;
   }) {
-    const requestClass = this.state.requestClass;
     let searchEnabled = params.allowSearch && this.shouldRun("webSearch");
     let ragEnabled = params.allowRag && this.shouldRun("ragRetrieval");
     let multiAgentEnabled = params.allowMultiAgent && this.shouldRun("multiAgent");
@@ -207,24 +201,9 @@ export class PipelineController {
       this.markStageSkipped("multiAgent", "Multi-agent is disabled for this route.");
     }
 
-    if (!requestClassAtLeast(requestClass, "T2")) {
-      if (searchEnabled) {
-        searchEnabled = false;
-        this.markStageSkipped("webSearch", `${requestClass} requests skip web search for cost discipline.`);
-      }
-      if (ragEnabled) {
-        ragEnabled = false;
-        this.markStageSkipped("ragRetrieval", `${requestClass} requests skip RAG retrieval for cost discipline.`);
-      }
-      if (multiAgentEnabled) {
-        multiAgentEnabled = false;
-        this.markStageSkipped("multiAgent", `${requestClass} requests skip multi-agent orchestration.`);
-      }
-    }
-
-    if (params.spendingTier === "free_only" && ragEnabled) {
-      ragEnabled = false;
-      this.markStageSkipped("ragRetrieval", "free_only tier disables embedding-based retrieval.");
+    if (params.spendingTier === "free_only" && multiAgentEnabled) {
+      multiAgentEnabled = false;
+      this.markStageSkipped("multiAgent", "free_only tier disables multi-agent orchestration.");
     }
 
     const tierAllowsForcedMultiAgent =
@@ -233,11 +212,13 @@ export class PipelineController {
     if (params.forceMultiAgentRequested) {
       if (!tierAllowsForcedMultiAgent) forceDeniedReasons.push(`tier ${params.spendingTier} blocks forced multi-agent`);
       if (!params.orchestratorEnabled) forceDeniedReasons.push("org orchestrator_v2 feature is disabled");
-      if (!requestClassAtLeast(requestClass, "T2")) forceDeniedReasons.push(`request class ${requestClass} is below T2`);
-      if (params.budgetSoftLimited) forceDeniedReasons.push("user budget is in soft-limit mode");
     }
 
     const forceMultiAgentAllowed = params.forceMultiAgentRequested && forceDeniedReasons.length === 0;
+    if (forceMultiAgentAllowed) {
+      multiAgentEnabled = true;
+      this.markStageCompleted("multiAgent");
+    }
     if (params.forceMultiAgentRequested && !forceMultiAgentAllowed) {
       this.markStageSkipped("multiAgent", `forceMultiAgent denied: ${forceDeniedReasons.join("; ")}.`);
     }

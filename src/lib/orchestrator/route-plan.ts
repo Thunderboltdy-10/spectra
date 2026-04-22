@@ -15,6 +15,8 @@ import type {
   WorkstreamAssignment,
   WorkspaceActionTarget,
 } from "@/types";
+import { buildExecutionPathInputs, selectRuntimeExecutionPath } from "@/lib/orchestrator/runtime-path";
+import { getAllowedAiToolNames } from "@/lib/orchestrator/tool-definitions";
 
 type BuildRoutePlanParams = {
   message: string;
@@ -353,9 +355,13 @@ function decideThreadStrategy(params: {
   }
 
   const normalizedMessage = compactText(params.message).toLowerCase();
-  const explicitFork = /\b(new question|different topic|separate thread|start fresh|new thread|fork this|branch this)\b/i.test(params.message);
-  const explicitContinueCue = /\b(continue|carry on|pick up|resume|keep going|same thread|as above|based on that|from the previous|from the prior|tighten|revise|iterate|keep working on|finish this|keep building)\b/i.test(params.message);
-  const explicitContinue = Boolean(params.threadContext.explicitlySameThread) || (explicitContinueCue && !explicitFork);
+  const explicitFork = /\b(new thread|separate thread|start fresh|fork this|branch this|split this off)\b/i.test(params.message);
+  const explicitContinueCue =
+    /\b(continue(?: this| the)?(?: thread| chat| conversation)?|resume(?: this| the)?(?: thread| chat| conversation)?|same thread|same chat|pick up where we left off|carry on from previous)\b/i.test(params.message);
+  const explicitContinuationReference = /\b(as above|based on that|from the previous|from the prior)\b/i.test(params.message);
+  const explicitContinue =
+    Boolean(params.threadContext.explicitlySameThread)
+    || ((explicitContinueCue || explicitContinuationReference) && !explicitFork);
   const recentMessages = params.threadContext.recentMessages ?? [];
   const recentContext = recentMessages
     .slice(-6)
@@ -369,71 +375,35 @@ function decideThreadStrategy(params: {
     : undefined;
   const contextWindowPressure = normalizeConfidence(params.threadContext.contextWindowUtilization ?? 0);
   const turnsSinceCompaction = params.threadContext.turnsSinceCompaction ?? 0;
-  const hasSummaryLikeMessage = recentMessages.some((entry) =>
-    entry.role === "assistant" && /\bsummary:|thread snapshot|unresolved tasks|commitments|recent raw turns\b/i.test(entry.content),
-  );
-  const switchIntent = /\b(switch to|instead|ignore the old|move to|now for|let'?s do|let us do|separately focus on)\b/i.test(normalizedMessage);
+  const switchIntent = /\b(switch to|instead|move to|now for|let'?s do|let us do|separately focus on)\b/i.test(normalizedMessage);
   const explicitIgnorePrior = /\b(ignore the old|ignore previous|ignore the prior|forget the old thread)\b/i.test(normalizedMessage);
-  const continuityScore = [
-    explicitContinue ? 0.42 : 0,
-    topicContinuity >= 0.55 ? 0.28 : topicContinuity >= 0.42 ? 0.18 : 0,
-    lastUserContinuity >= 0.5 ? 0.14 : lastUserContinuity >= 0.38 ? 0.08 : 0,
-    contextWindowPressure < 0.75 ? 0.12 : 0,
-    turnsSinceCompaction < 15 ? 0.08 : 0,
-    typeof timeGapHours !== "number" || timeGapHours < 12 ? 0.08 : 0,
-  ].reduce((sum, value) => sum + value, 0);
-  const forkScore = [
-    explicitFork ? 0.52 : 0,
-    switchIntent && !explicitIgnorePrior ? 0.22 : 0,
-    contextWindowPressure >= 0.75 ? 0.28 : contextWindowPressure >= 0.68 ? 0.14 : 0,
-    turnsSinceCompaction >= 15 ? 0.18 : turnsSinceCompaction >= 12 ? 0.08 : 0,
-    typeof timeGapHours === "number" && timeGapHours >= 12 ? 0.16 : 0,
-    topicContinuity < 0.3 ? 0.24 : topicContinuity < 0.42 ? 0.1 : 0,
-    lastUserContinuity < 0.22 ? 0.12 : 0,
-    hasSummaryLikeMessage && topicContinuity < 0.35 ? 0.08 : 0,
-  ].reduce((sum, value) => sum + value, 0);
+  const strongContinuity =
+    topicContinuity >= 0.7
+    && lastUserContinuity >= 0.58
+    && contextWindowPressure < 0.74
+    && turnsSinceCompaction < 12
+    && (typeof timeGapHours !== "number" || timeGapHours < 10);
+  const pivotIntent = switchIntent || explicitIgnorePrior;
   const shouldContinue =
     explicitContinue
-    || (
-      topicContinuity >= 0.56
-      && lastUserContinuity >= 0.42
-      && contextWindowPressure < 0.76
-      && turnsSinceCompaction < 14
-      && (typeof timeGapHours !== "number" || timeGapHours < 12)
-    );
-  const shouldFork =
-    !shouldContinue
-    && explicitFork
-    && (
-      contextWindowPressure >= 0.72
-      || turnsSinceCompaction >= 14
-      || (typeof timeGapHours === "number" && timeGapHours >= 10)
-      || params.workstreamAssignment.status === "assigned"
-    );
+    || (!pivotIntent && strongContinuity);
+  const shouldFork = !shouldContinue && explicitFork;
   return {
     action: shouldFork ? "fork" : shouldContinue ? "continue" : "new_chat",
     confidence: shouldFork
-        ? normalizeConfidence(0.5 + (forkScore * 0.4))
+        ? 0.92
         : shouldContinue
-          ? normalizeConfidence(0.52 + (continuityScore * 0.38) + (topicContinuity * 0.14))
-          : normalizeConfidence(0.76 + ((1 - topicContinuity) * 0.12)),
+          ? explicitContinue
+            ? 0.9
+            : normalizeConfidence(0.64 + (topicContinuity * 0.22) + (lastUserContinuity * 0.14))
+          : normalizeConfidence(0.78 + ((1 - topicContinuity) * 0.16)),
     reason: shouldFork
-        ? explicitFork
-          ? "User explicitly requested a fresh topic/thread."
-          : contextWindowPressure >= 0.75
-            ? "Current thread is approaching context saturation."
-            : turnsSinceCompaction >= 15
-              ? "Thread has run long enough that a clean fork is safer than continuing."
-              : typeof timeGapHours === "number" && timeGapHours >= 12
-                ? "Long gap since the last turn suggests a fresh thread is cleaner."
-                : switchIntent
-                  ? "Prompt pivots away from the current topic and is safer as a fork."
-                  : "Topic continuity with the recent thread is too weak."
+        ? "User explicitly requested a fresh topic/thread."
       : shouldContinue
         ? explicitContinue
           ? "User explicitly requested continuation of the active thread."
-          : "Prompt remains strongly aligned with the active thread."
-        : "Starting a clean new conversation because prior-thread continuity was not explicitly requested.",
+          : "Prompt remains strongly aligned with the active thread under low context pressure."
+        : "Starting a clean new conversation because continuation was not explicit and continuity evidence was insufficient.",
     contextWindowPressure,
     topicContinuity: Math.max(topicContinuity, lastUserContinuity),
     timeGapHours,
@@ -784,39 +754,7 @@ function buildAgentContract(params: BuildRoutePlanParams): AgentContract | undef
 }
 
 function allowedAiToolsForAssignmentLevel(assignmentLevel: AssignmentLevel): AiToolName[] {
-  if (assignmentLevel === "L0") return [];
-  if (assignmentLevel === "L1") return ["recall_memory"];
-  if (assignmentLevel === "L2") return ["recall_memory", "save_memory", "search_web"];
-  if (assignmentLevel === "L3") {
-    return [
-      "recall_memory",
-      "save_memory",
-      "update_memory",
-      "dismiss_memory",
-      "create_note",
-      "update_planner",
-      "create_widget",
-      "update_widget",
-      "attach_items_to_workstream",
-      "search_web",
-      "switch_mode",
-    ];
-  }
-  return [
-    "recall_memory",
-    "save_memory",
-    "update_memory",
-    "dismiss_memory",
-    "get_workstream_context",
-    "create_note",
-    "update_planner",
-    "create_widget",
-    "update_widget",
-    "attach_items_to_workstream",
-    "fork_thread",
-    "search_web",
-    "switch_mode",
-  ];
+  return getAllowedAiToolNames(assignmentLevel);
 }
 
 function resolveOrchestrationProfile(params: {
@@ -843,55 +781,6 @@ function resolveOrchestrationProfile(params: {
     return "long_context_reconstruction";
   }
   return "simple_direct";
-}
-
-function deterministicExecutionPath(params: {
-  mode: StudyMode;
-  message: string;
-  hasAttachments: boolean;
-  shouldUseWebSearch: boolean;
-  workstreamAssignment: WorkstreamAssignment;
-  workspaceAction?: RoutePlan["workspaceAction"];
-  requestedArtifactFormats: ArtifactFormat[];
-  threadStrategy: ThreadStrategy;
-  assignmentLevel: AssignmentLevel;
-}) {
-  const lower = params.message.toLowerCase();
-  const targetCount =
-    (lower.match(/\b(and|then|also|plus|along with)\b/g) ?? []).length
-    + (lower.match(/\b(two|three|four|multiple|several)\b/g) ?? []).length;
-  const explicitMultiStep =
-    /\b(step by step|iterate|keep going|multi-step|workflow|plan then|first .* then|research and compare)\b/.test(lower);
-  const actionIntent = params.workspaceAction?.intent;
-  const hasWorkspaceTarget = params.workstreamAssignment.status === "assigned";
-  const artifactMutationRequest =
-    params.requestedArtifactFormats.length > 0
-    || /\b(create|make|build|generate|draft|save|update|edit|rewrite|organi[sz]e|move|rename|attach)\b/.test(lower);
-  const directAnswerOnly =
-    !params.shouldUseWebSearch
-    && !params.hasAttachments
-    && !actionIntent
-    && !artifactMutationRequest
-    && params.assignmentLevel === "L0";
-
-  if (params.shouldUseWebSearch || params.mode === "research") return "research_workflow";
-  if (directAnswerOnly) return "direct_chat";
-  if (
-    hasWorkspaceTarget
-    && (
-      explicitMultiStep
-      || params.assignmentLevel === "L3"
-      || params.assignmentLevel === "L4"
-      || params.hasAttachments
-      || targetCount >= 2
-      || params.threadStrategy.action === "defer_to_workspace_action"
-      || actionIntent === "widget"
-    )
-  ) {
-    return "action_loop";
-  }
-  if (actionIntent || artifactMutationRequest || params.hasAttachments) return "single_action";
-  return "direct_chat";
 }
 
 export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
@@ -1085,17 +974,48 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
     ]),
   ).filter((bundle) => bundle !== "none");
 
-  const executionPath = deterministicExecutionPath({
+  const runtimePath = selectRuntimeExecutionPath(buildExecutionPathInputs({
+    routePlan: {
+      taskClass: "simple_question",
+      assignmentLevel,
+      timeSensitive,
+      hasAttachments: params.hasAttachments,
+      hasSelectedMode: params.selectedMode !== "auto",
+      hasSelectedAgent: params.hasAgent,
+      personalTask,
+      shouldConsultMemory: personalTask || assignmentLevel === "L4",
+      shouldWriteMemory: shouldWriteMemoryFromMessage(params.message) || assignmentLevel === "L4",
+      shouldUseSchoolResources,
+      shouldUseWebSearch,
+      shouldUseMultiStep: false,
+      allowedAiTools: allowedAiToolsForAssignmentLevel(assignmentLevel),
+      responseBudget: "simple",
+      tokenBudgetTarget,
+      allowedToolBundles: ["none"],
+      retrievalScopes: [],
+      memoryScopes: ["none"],
+      workstreamAssignment,
+      threadStrategy,
+      contextWindowStrategy,
+      candidateModelRequirements: { required: [], preferred: [] },
+      requestedArtifactFormats,
+      allowSubAgents: false,
+      orchestrationProfile: "simple_direct",
+      modeContract,
+      workspaceAction,
+    },
     mode: params.mode,
     message: params.message,
-    hasAttachments: params.hasAttachments,
-    shouldUseWebSearch,
-    workstreamAssignment,
-    workspaceAction,
-    requestedArtifactFormats,
-    threadStrategy,
-    assignmentLevel,
-  });
+    activeSurface:
+      params.workstreamContext?.focusSurface === "workspace" || params.workstreamContext?.focusSurface === "panel"
+        ? "workspace"
+        : "chat",
+    workstreamId:
+      workstreamAssignment.status === "assigned"
+        ? workstreamAssignment.workstreamId
+        : undefined,
+  }));
+  const executionPath = runtimePath.executionPath;
 
   const required = [
     ...(multimodal ? ["vision" as const] : []),

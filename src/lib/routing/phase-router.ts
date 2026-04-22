@@ -4,12 +4,17 @@ import {
   inferRoutingLane,
   isTextChatCapableModel,
   isModelAllowedInTier,
-  isModelTooExpensivePerMillion,
   modelSupportsCapability,
   type CatalogModelEntry,
   type ModelCapability,
   type ModelRuntimeStat,
 } from "@/lib/model-selection";
+import { runCapabilityFirstBroker } from "@/lib/model-broker";
+import {
+  failsTextQualityFloor,
+  isFreshForAutoRouting,
+  isNonTextOnlyModel,
+} from "@/lib/runtime/model-guardrails";
 import type { AssignmentLevel, RouteTraceCandidate, RouteTracePhase, SpendingTier, StudyMode } from "@/types";
 
 export type RoutingLane = "scored" | "challenger";
@@ -442,11 +447,18 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
   const weights = scoreWeights(input);
   const required = input.requiredCapabilities ?? [];
   const preferred = input.preferredCapabilities ?? [];
-  const catalog = input.modelCatalog.filter((model) =>
+  const rawCatalog = input.modelCatalog.filter((model) =>
     model.modelId
     && model.modelId !== "openrouter/auto"
     && !model.modelId.includes(":online"),
   );
+  const imageTurn = input.mode === "image" || (input.requiredCapabilities ?? []).includes("image_generation");
+  const textSafeCatalog = rawCatalog.filter((model) => imageTurn || !isNonTextOnlyModel(model));
+  const freshnessFilteredCatalog =
+    input.routerMode === "auto"
+      ? textSafeCatalog.filter((model) => isFreshForAutoRouting(model, AUTO_ROUTER_FRESHNESS_MAX_DAYS))
+      : textSafeCatalog;
+  const catalog = input.routerMode === "auto" ? freshnessFilteredCatalog : textSafeCatalog;
   const preferredIds = new Set((input.preferredModelIds ?? []).filter(Boolean));
 
   const manualEntry = input.manualModel
@@ -458,7 +470,6 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
     needsSearch: input.needsSearch,
     preferFast: input.stakes === "low",
   });
-  const manualBlockedByCap = Boolean(manualEntry && isModelTooExpensivePerMillion(manualEntry, { lane }));
   const manualAllowedByTier = Boolean(manualEntry && isModelAllowedInTier(manualEntry, input.spendingTier, {
     lane,
     allowManualOverride: input.routerMode === "manual",
@@ -466,14 +477,7 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
   const manualAllowedWithOverride =
     input.routerMode === "manual"
     && Boolean(input.manualModel)
-    && (
-      manualAllowedByTier
-      || (
-        manualBlockedByCap
-        && input.manualModelConfirmedExpensive
-        && input.spendingTier === "normal"
-      )
-    );
+    && manualAllowedByTier;
 
   if (manualAllowedWithOverride && input.manualModel) {
     const candidates: RouteTraceCandidate[] = [
@@ -481,14 +485,8 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
         modelId: input.manualModel,
         allowed: true,
         score: 1,
-        reason: manualBlockedByCap
-          ? "Manual model lock (cost-cap override confirmed by user)"
-          : "Manual model lock",
-        scoreBreakdown: [
-          manualBlockedByCap
-            ? "manual override confirmed"
-            : "manual selection",
-        ],
+        reason: "Manual model lock",
+        scoreBreakdown: ["manual selection"],
       },
     ];
     const fallbackModels: string[] = [];
@@ -497,9 +495,7 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
       selectedModel: input.manualModel,
       fallbackModels,
       lane: "scored",
-      reason: manualBlockedByCap
-        ? `Manual override kept ${input.manualModel} for ${input.phaseLabel.toLowerCase()} despite cost cap.`
-        : `Manual model lock for ${input.phaseLabel.toLowerCase()}`,
+      reason: `Manual model lock for ${input.phaseLabel.toLowerCase()}`,
       candidates,
       phase: {
         id: input.phaseId,
@@ -556,9 +552,50 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
   const shouldExplore = explorationRoll < 0.1;
   const challengerAllowed = modeAllowsChallengers(input) && shouldExplore && !hasWarmCacheCandidate;
 
+  const brokerIntent = {
+    mode: input.mode,
+    lane,
+    messageLength: input.messageLength,
+    requiredCapabilities: input.requiredCapabilities,
+    preferredCapabilities: input.preferredCapabilities,
+    preferredModelIds: input.preferredModelIds,
+    anchorModelId: input.previousModelUsed,
+    preserveAnchor: Boolean(input.cacheWindow?.lastModel && input.cacheWindow.lastModel === input.previousModelUsed),
+    needsSearch: input.needsSearch,
+    preferFast: input.requestClass === "T0" || input.stakes === "low",
+    preferLongContext: Boolean(input.preferLargeContext || input.assignmentLevel === "L4"),
+    stakeLevel: input.stakes,
+    spendingTier: input.spendingTier,
+    allowManualSelection: input.routerMode === "manual",
+    enforceFreshAutoCutoff: input.routerMode === "auto",
+    qualityFloor: input.mode === "image" ? "off" as const : "standard" as const,
+  } as const;
+  const brokerDecision = runCapabilityFirstBroker({
+    catalog,
+    intent: brokerIntent,
+    runtimeStats: input.modelRuntimeStats,
+    maxFallbacks: 5,
+  });
+  const brokerRankById = new Map(
+    brokerDecision.ranked.map((row, index) => [row.model.modelId, { row, index }]),
+  );
+
   const scored: ScoredCandidate[] = [];
   for (const model of catalog) {
+    const brokerRank = brokerRankById.get(model.modelId);
+    if (!brokerRank && brokerDecision.ranked.length > 0) continue;
     if (!isModelAllowedInTier(model, input.spendingTier, { lane })) continue;
+    if (!imageTurn && isNonTextOnlyModel(model)) continue;
+    if (
+      !imageTurn
+      && failsTextQualityFloor(model, {
+        mode: input.mode,
+        stakes: input.stakes,
+        messageLength: input.messageLength,
+      })
+    ) {
+      continue;
+    }
     if (input.mode !== "image" && !modelSupportsCapability(model, "image_generation") && !isTextChatCapableModel(model)) {
       continue;
     }
@@ -606,6 +643,14 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
       + (weights.cache * cacheBonus)
       + (weights.freshness * fresh)
       + (weights.context * context);
+    const brokerPriorWeight =
+      input.stakes === "high" || input.mode === "research" || input.mode === "exam" || input.mode === "marker"
+        ? 0.08
+        : 0.05;
+    const brokerScorePrior = brokerRank ? brokerRank.row.totalScore * brokerPriorWeight : 0;
+    const brokerRankBonus = brokerRank
+      ? Math.max(0.008, 0.05 - (brokerRank.index * 0.006))
+      : 0;
     const quickReplyBonus =
       input.requestClass === "T0" && !input.needsSearch && !input.hasAttachments
         ? (latency * 0.08) + (cost * 0.06) + quickReplyModelBias(model)
@@ -623,6 +668,19 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
       `freshness ${fresh.toFixed(2)} x${weights.freshness.toFixed(2)}`,
       `context_fit ${context.toFixed(2)} x${weights.context.toFixed(2)}`,
     ];
+    if (brokerRank) {
+      breakdown.push(`broker_rank ${brokerRank.index + 1}`);
+      breakdown.push(`broker_prior ${(brokerRank.row.totalScore * brokerPriorWeight).toFixed(3)}`);
+      breakdown.push(`broker_cost_band ${brokerRank.row.costBand}`);
+      breakdown.push(`broker_bonus +${brokerRankBonus.toFixed(3)}`);
+      if (brokerRank.row.scoreBreakdown.length > 0) {
+        breakdown.push(...brokerRank.row.scoreBreakdown.map((entry) => `broker_${entry}`));
+      }
+      if (brokerRank.row.eligibilityNotes.length > 0) {
+        breakdown.push(...brokerRank.row.eligibilityNotes.map((entry) => `broker_note ${entry}`));
+      }
+      reasonTags.push(`broker ${brokerRank.row.costBand}`);
+    }
     if (typeof ageDays === "number") {
       breakdown.push(`age_days ${ageDays.toFixed(0)}`);
     }
@@ -735,7 +793,7 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
       breakdown.push("promotion_signal reliability>0.60 after 12 runs");
     }
 
-    const rawScore = Math.max(0, (weightedScore + quickReplyBonus) * multiplier);
+    const rawScore = Math.max(0, (weightedScore + brokerScorePrior + brokerRankBonus + quickReplyBonus) * multiplier);
 
     scored.push({
       modelId: model.modelId,
@@ -746,6 +804,7 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
       breakdown: [
         ...breakdown,
         `weighted_score ${weightedScore.toFixed(3)}`,
+        `broker_adjusted_score ${(weightedScore + brokerScorePrior + brokerRankBonus).toFixed(3)}`,
         `final_multiplier ${multiplier.toFixed(3)}`,
         `challenger_state ${challengerState}`,
       ],
@@ -756,6 +815,31 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
   }
 
   if (scored.length === 0) {
+    if (brokerDecision.primary) {
+      const candidates: RouteTraceCandidate[] = brokerDecision.ranked.slice(0, 12).map((row) => ({
+        modelId: row.model.modelId,
+        allowed: true,
+        score: Number(row.totalScore.toFixed(3)),
+        reason: `capability-first broker (${row.costBand})`,
+        scoreBreakdown: [...row.scoreBreakdown, ...(row.eligibilityNotes.length ? row.eligibilityNotes : [])],
+      }));
+      const routingDurationMs = Math.max(0, Math.round(nowMs() - startedAt));
+      return {
+        selectedModel: brokerDecision.primary.modelId,
+        fallbackModels: brokerDecision.fallbacks.map((model) => model.modelId),
+        lane: "scored",
+        reason: `Capability-first broker selected ${brokerDecision.primary.modelId} for ${input.phaseLabel.toLowerCase()} after weighted heuristics found no eligible model.`,
+        candidates,
+        phase: {
+          id: input.phaseId,
+          label: input.phaseLabel,
+          status: "planned",
+          thinkingLevel: input.thinkingLevel,
+          model: brokerDecision.primary.modelId,
+        },
+        routingDurationMs,
+      };
+    }
     const fallbackModel = input.manualModel || "openrouter/auto";
     const routingDurationMs = Math.max(0, Math.round(nowMs() - startedAt));
     return {

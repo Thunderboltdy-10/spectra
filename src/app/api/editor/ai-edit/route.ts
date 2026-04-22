@@ -4,7 +4,7 @@ import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 import { ok, badRequest } from "@/lib/http";
 import { getLiveCatalogSnapshot } from "@/lib/openrouter-catalog-cache";
-import { pickModelAndFallbacks } from "@/lib/model-selection";
+import { inferRoutingLane, pickModelAndFallbacks } from "@/lib/model-selection";
 import { openRouterChatCompletion } from "@/lib/openrouter";
 import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 
@@ -173,13 +173,15 @@ ${body.documentText.slice(0, 8000)}
     const selection = pickModelAndFallbacks({
       catalog: catalog.filter((model) => model.modelId !== "openrouter/auto" && !model.modelId.includes(":online")),
       tier: budget.tier,
+      lane: inferRoutingLane({ mode: "document", requiredCapabilities: ["reasoning"] }),
+      mode: "document",
+      messageLength: body.instruction.length + body.documentText.length,
       requiredCapabilities: ["reasoning"],
       preferredCapabilities: ["reasoning"],
-      preferCheap: true,
-      preferFast: true,
+      preferFast: false,
       maxFallbacks: 3,
     });
-    const model = selection.selected?.modelId ?? "openai/gpt-5-nano";
+    const model = selection.selected?.modelId ?? "mistralai/mistral-medium-3.1";
     const completion = await openRouterChatCompletion({
       model,
       fallbackModels: selection.fallbacks.filter((candidate) => candidate !== model),

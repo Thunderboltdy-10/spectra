@@ -3,9 +3,12 @@ import {
   CHEAP_MODEL_COST_PER_MILLION,
   DEFAULT_MANUAL_MODEL_COST_CAP_PER_MILLION,
   MAX_MODEL_COST_PER_MILLION,
-  ROUTING_LANE_COST_CAPS,
   type RoutingLane,
 } from "@/lib/model-policy";
+import {
+  failsTextQualityFloor,
+  isNonTextOnlyModel,
+} from "@/lib/runtime/model-guardrails";
 
 export type CatalogModelEntry = {
   modelId: string;
@@ -83,34 +86,12 @@ export function inferRoutingLane(params: {
   return "utility";
 }
 
-function normalizeModalities(values?: string[]) {
-  return new Set((values ?? []).map((value) => value.trim().toLowerCase()).filter(Boolean));
-}
-
 function modalityBlob(model: CatalogModelEntry) {
   return `${(model.inputModalities ?? []).join(" ")} ${(model.outputModalities ?? []).join(" ")}`.toLowerCase();
 }
 
-function hasExplicitTextChatModalities(model: CatalogModelEntry) {
-  const input = normalizeModalities(model.inputModalities);
-  const output = normalizeModalities(model.outputModalities);
-  if (input.size === 0 && output.size === 0) return null;
-  const inputSupportsText = input.has("text");
-  const outputSupportsText = output.has("text");
-  return inputSupportsText && outputSupportsText;
-}
-
 export function isTextChatCapableModel(model: CatalogModelEntry) {
-  const explicit = hasExplicitTextChatModalities(model);
-  if (explicit !== null) {
-    return explicit;
-  }
-
-  const blob = `${textBlob(model)} ${modalityBlob(model)}`;
-  if (/\b(whisper|transcrib|transcript|tts|text-to-speech|speech-to-text|speech|audio-only|lyra|text-to-video|video[-_ ]gen|veo|sora)\b/.test(blob)) {
-    return false;
-  }
-  return true;
+  return !isNonTextOnlyModel(model);
 }
 
 type RankParams = {
@@ -303,13 +284,10 @@ export function isModelTooExpensivePerMillion(
   if (freeLike) return false;
   const hasKnownInput = typeof model.inputCostPerM === "number" && Number.isFinite(model.inputCostPerM);
   const hasKnownOutput = typeof model.outputCostPerM === "number" && Number.isFinite(model.outputCostPerM);
-  // Keep policy explicit: unknown-priced paid models are not eligible for runtime routing.
-  if (!hasKnownInput || !hasKnownOutput) return true;
+  if (!hasKnownInput || !hasKnownOutput) return false;
   const cap = options?.allowManualOverride
     ? (options.manualCostCap ?? DEFAULT_MANUAL_MODEL_COST_CAP_PER_MILLION)
-    : options?.lane
-      ? ROUTING_LANE_COST_CAPS[options.lane]
-      : MAX_MODEL_COST_PER_MILLION;
+    : MAX_MODEL_COST_PER_MILLION;
   return (
     Math.max(0, model.inputCostPerM as number) > cap
     || Math.max(0, model.outputCostPerM as number) > cap
@@ -335,10 +313,6 @@ export function isModelAllowedInTier(
     manualCostCap?: number;
   },
 ) {
-  if (isModelTooExpensivePerMillion(model, options)) {
-    return false;
-  }
-
   if (isOpenRouterAutoModel(model.modelId)) {
     return tier === "normal";
   }
@@ -357,9 +331,11 @@ export function isModelAllowedInTier(
     return cheapLike;
   }
 
-  // expensive_blocked: enforce only the global 30/M cap and budget heuristics,
-  // do not silently apply a stricter hidden threshold.
-  return true;
+  if (tier === "expensive_blocked") {
+    return true;
+  }
+
+  return false;
 }
 
 export function buildRuntimeStatMap(rows: Array<{
@@ -458,9 +434,20 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
     const modelAge = modelAgeDays(model);
     const staleModel = typeof modelAge === "number" && modelAge > AUTO_ROUTER_FRESHNESS_MAX_DAYS;
     if (!params.allowStaleModels && staleModel) continue;
-    if (isVideoGenerationModel(model)) continue;
+    if (isVideoGenerationModel(model) || isNonTextOnlyModel(model)) continue;
     if (!imageTurn && imageGenerationModel && !textChatCapable) continue;
     if (!imageGenerationModel && !textChatCapable) continue;
+    if (
+      !imageTurn
+      && (params.tier === "normal" || params.tier === "expensive_blocked")
+      && failsTextQualityFloor(model, {
+        mode: String(params.mode ?? ""),
+        stakes: complexTurn ? "high" : "low",
+        messageLength: params.messageLength,
+      })
+    ) {
+      continue;
+    }
 
     let missingRequired = false;
     for (const capability of required) {
@@ -575,13 +562,7 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
 }
 
 export function pickModelAndFallbacks(params: RankParams & { maxFallbacks?: number }) {
-  let ranked = rankCatalogModels(params);
-  if (ranked.length === 0 && !params.allowStaleModels) {
-    ranked = rankCatalogModels({
-      ...params,
-      allowStaleModels: true,
-    });
-  }
+  const ranked = rankCatalogModels(params);
   const selected = ranked[0]?.model;
   const fallbackCount = Math.max(1, params.maxFallbacks ?? 4);
   const fallbacks = ranked.slice(1, fallbackCount + 1).map((row) => row.model.modelId);

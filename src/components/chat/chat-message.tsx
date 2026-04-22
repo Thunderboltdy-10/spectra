@@ -10,6 +10,7 @@ import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { ModelRoutingBadge } from "@/components/chat/model-routing-badge";
 import { ProviderLogo } from "@/components/provider-logo";
 import { ThinkingBlock } from "@/components/chat/thinking-block";
+import { ExecutionTimeline } from "@/components/shared/execution-timeline";
 import { CollaboratorsBadge } from "@/components/chat/collaborators-badge";
 import { type QuizSubmitResult } from "@/components/chat/quiz-reveal";
 import { usePanel } from "@/context/panel-context";
@@ -545,7 +546,32 @@ export function ChatMessage({
                 ) : null}
               </div>
 
-              <ThinkingBlock content={thinkingContent ?? ""} />
+              {/* Inline toolchain execution strip */}
+              {routeTrace && routeTrace.toolchain.length > 0 && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                  {routeTrace.toolchain.map((tool, idx) => (
+                    <span
+                      key={tool}
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[9px] font-medium",
+                        idx === routeTrace.toolchain.length - 1
+                          ? "border-[color-mix(in_oklab,var(--accent-cyan)_25%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_6%,transparent)] text-[var(--accent-cyan)]"
+                          : "border-[var(--border-default)]/40 bg-[var(--bg-secondary)] text-[var(--text-tertiary)]"
+                      )}
+                    >
+                      <Zap className="h-2 w-2" />
+                      {tool.replace(/_/g, " ")}
+                    </span>
+                  ))}
+                  {routeTrace.totalDurationMs != null && routeTrace.totalDurationMs > 0 && (
+                    <span className="text-[9px] text-[var(--text-tertiary)] tabular-nums ml-1">
+                      {(routeTrace.totalDurationMs / 1000).toFixed(1)}s
+                    </span>
+                  )}
+                </div>
+              )}
+
+              <ThinkingBlock content={thinkingContent ?? ""} routeTrace={routeTrace} streaming={!isLastAssistant ? false : !content && !!thinkingContent} />
               {children ? children : parsedDocument.document ? (
                 <>
                   {parsedDocument.preamble ? (
@@ -737,24 +763,15 @@ export function ChatMessage({
                   </DropdownMenu>
                 ) : null}
               </div>
-              {showWhy && whyThisResponse && (
+              {showWhy && (whyThisResponse || routeTrace) && (
                 <div className="mt-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
                   <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Why this response</p>
-                  <p className="text-xs text-[var(--text-secondary)] leading-relaxed">{whyThisResponse}</p>
-                  {routeTrace && routeTrace.toolchain.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {routeTrace.toolchain.map((tool) => (
-                        <span key={tool} className="inline-flex items-center rounded-full bg-[var(--bg-primary)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)] border border-[var(--border-default)]">
-                          {tool.replace(/_/g, " ")}
-                        </span>
-                      ))}
-                    </div>
+                  {whyThisResponse && (
+                    <p className="text-xs text-[var(--text-secondary)] leading-relaxed">{whyThisResponse}</p>
                   )}
                   {routeTrace && (
-                    <div className="mt-2 flex items-center gap-3 text-[10px] text-[var(--text-secondary)]">
-                      {routeTrace.routingDurationMs > 0 && <span>Routing: {routeTrace.routingDurationMs}ms</span>}
-                      {routeTrace.totalDurationMs && routeTrace.totalDurationMs > 0 && <span>Total: {(routeTrace.totalDurationMs / 1000).toFixed(1)}s</span>}
-                      {routeTrace.fallbacks.length > 0 && <span className="text-[var(--warning)]">{routeTrace.fallbacks.length} fallback{routeTrace.fallbacks.length > 1 ? "s" : ""}</span>}
+                    <div className="mt-2">
+                      <ExecutionTimeline routeTrace={routeTrace} compact />
                     </div>
                   )}
                 </div>

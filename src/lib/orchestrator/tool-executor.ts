@@ -2,6 +2,7 @@ import { convexAction, convexMutation, convexQuery } from "@/lib/convex-server";
 import { MODEL_CONFIG } from "@/lib/model-config";
 import { openRouterEmbeddingRequest } from "@/lib/openrouter";
 import { maybeSearchWeb } from "@/lib/orchestrator/retrieval";
+import { describeStructuredActionTypes, executeStructuredActions } from "@/lib/orchestrator/action-engine";
 import { listRegisteredSkills } from "@/lib/skills/skill-registry";
 import { selectRuntimeSkills } from "@/lib/orchestrator/skills";
 import { recordOpenRouterUsage } from "@/lib/usage-tracking";
@@ -34,6 +35,7 @@ export type ExecutedToolResult = {
   modeSwitch?: StudyMode;
   threadFork?: { chatId: string; workstreamId?: string };
   loadedSkill?: { id: string; prompt?: string };
+  runtimeEventType?: string;
 };
 
 type ListedMemoryEntry = {
@@ -208,31 +210,48 @@ export async function executeOrchestratorTool(params: {
       modelPayload: payload ? { skill: payload } : { skill: null },
       eventPayload: payload ? { skill: { id: payload.id, name: payload.name, summary: payload.summary } } : { skill: null },
       loadedSkill: payload ? { id: payload.id, prompt: payload.prompt } : undefined,
+      runtimeEventType: "skill_loaded",
     };
   }
 
   if (params.name === "propose_actions") {
     const intent = compactText(args.intent, 120).toLowerCase();
     const targetType = compactText(args.targetType, 80).toLowerCase();
-    const templates = [
-      intent.includes("planner")
-        ? { op: "update_planner_item", required: ["title"], optional: ["description", "priority", "status", "dueAt"] }
-        : null,
-      intent.includes("thread")
-        ? { op: "append_thread_message", required: ["content"], optional: ["title"] }
-        : null,
-      targetType.includes("artifact") || intent.includes("artifact") || intent.includes("note")
-        ? { op: "artifact_patch", required: ["artifactId", "patch"], optional: ["title"] }
-        : null,
-      intent.includes("layout") || intent.includes("organize") || intent.includes("move")
-        ? { op: "move_widget", required: ["itemId"], optional: ["x", "y", "workstreamId"] }
-        : null,
-    ].filter(Boolean);
+    const availableActionTypes = describeStructuredActionTypes();
+    const recommendedActionTypes = availableActionTypes.filter((type) => {
+      if (targetType.includes("artifact")) {
+        return ["create_artifact", "patch_artifact", "replace_range", "insert_block", "delete_block", "rename_artifact", "restore_artifact_version", "create_child_artifact", "generate_flashcards_from_artifact", "generate_quiz_from_artifact"].includes(type);
+      }
+      if (targetType.includes("planner") || intent.includes("planner") || intent.includes("task")) {
+        return ["create_planner_item", "update_planner_item"].includes(type);
+      }
+      if (targetType.includes("thread") || intent.includes("thread")) {
+        return ["create_thread", "append_thread_message", "fork_thread"].includes(type);
+      }
+      if (targetType.includes("widget") || intent.includes("widget") || intent.includes("layout") || intent.includes("workspace")) {
+        return ["create_widget", "update_widget", "move_widget", "attach_items_to_workstream", "update_workstream_layout"].includes(type);
+      }
+      return true;
+    });
     return {
       name: params.name,
-      summary: templates.length > 0 ? "Prepared structured action templates." : "No structured action template matched the request.",
-      modelPayload: { intent, targetType, templates },
-      eventPayload: { intent, targetType, templates },
+      summary: recommendedActionTypes.length > 0 ? "Prepared structured action contracts." : "No structured action contract matched the request.",
+      modelPayload: {
+        intent,
+        targetType,
+        actionTypes: availableActionTypes,
+        recommendedActionTypes,
+        contract: {
+          shape: { type: "object", required: ["type"], additionalProperties: true },
+          notes: [
+            "Use deterministic action types only.",
+            "Artifact mutations can provide expectedUpdatedAt to enable optimistic version checks.",
+            "Every applied action produces a structured result or a typed failure.",
+          ],
+        },
+      },
+      eventPayload: { intent, targetType, actionTypes: recommendedActionTypes },
+      runtimeEventType: "action_proposed",
     };
   }
 
@@ -269,68 +288,24 @@ export async function executeOrchestratorTool(params: {
   }
 
   if (params.name === "apply_actions") {
-    const actions = Array.isArray(args.actions) ? args.actions as Array<Record<string, unknown>> : [];
-    const applied: Array<Record<string, unknown>> = [];
-    for (const action of actions.slice(0, 6)) {
-      const op = compactText(action.op, 80);
-      if (op === "update_planner_item") {
-        const plannerItemId = compactText(action.plannerItemId, 128);
-        const title = compactText(action.title, 160);
-        if (!plannerItemId || !title) continue;
-        await convexMutation("plannerItems:updatePlannerItem", {
-          actorClerkId: context.actorClerkId,
-          plannerItemId,
-          title,
-          description: compactText(action.description, 600) || undefined,
-          priority: compactText(action.priority, 20) || undefined,
-          status: compactText(action.status, 20) || undefined,
-          dueAt: typeof action.dueAt === "number" ? action.dueAt : undefined,
-        }).catch(() => null);
-        applied.push({ op, plannerItemId, title });
-        continue;
-      }
-      if (op === "move_widget") {
-        const itemId = compactText(action.itemId, 128);
-        if (!itemId) continue;
-        await convexMutation("workspaceItems:updateWidget", {
-          actorClerkId: context.actorClerkId,
-          itemId,
-          x: typeof action.x === "number" ? action.x : undefined,
-          y: typeof action.y === "number" ? action.y : undefined,
-        }).catch(() => null);
-        applied.push({ op, itemId, x: action.x, y: action.y });
-        continue;
-      }
-      if (op === "artifact_patch") {
-        const artifactId = compactText(action.artifactId, 128) || context.artifactId;
-        if (!artifactId) continue;
-        await convexMutation("artifacts:applyAiEdit", {
-          actorClerkId: context.actorClerkId,
-          artifactId,
-          instruction: compactText(action.instruction ?? "Apply structured artifact update", 500),
-          operations: Array.isArray(action.patch) ? action.patch : [],
-        }).catch(() => null);
-        applied.push({ op, artifactId });
-        continue;
-      }
-      if (op === "append_thread_message") {
-        const content = compactText(action.content, 1_200);
-        if (!context.chatId || !content) continue;
-        await convexMutation("chats:appendAssistantMessage", {
-          actorClerkId: context.actorClerkId,
-          chatId: context.chatId,
-          content,
-          mode: context.mode,
-          citations: [],
-        }).catch(() => null);
-        applied.push({ op, chatId: context.chatId });
-      }
-    }
+    const run = await executeStructuredActions({
+      context,
+      actions: Array.isArray(args.actions) ? args.actions : [],
+      maxActions: 12,
+    });
     return {
       name: params.name,
-      summary: applied.length > 0 ? `Applied ${applied.length} structured action${applied.length === 1 ? "" : "s"}.` : "No actions were applied.",
-      modelPayload: { applied },
-      eventPayload: { applied },
+      summary: run.summary,
+      modelPayload: run,
+      eventPayload: {
+        ok: run.ok,
+        appliedCount: run.appliedCount,
+        failedCount: run.failedCount,
+        targetIds: run.targetIds,
+        resultIds: run.resultIds,
+        results: run.results,
+      },
+      runtimeEventType: run.appliedCount > 0 ? "action_applied" : "tool_result",
     };
   }
 
@@ -345,6 +320,7 @@ export async function executeOrchestratorTool(params: {
         summary: "Memory recall skipped because no query was provided.",
         modelPayload: { entries: [], scope, query },
         eventPayload: { entries: [], scope, query },
+        runtimeEventType: "memory_read",
       };
     }
 
@@ -377,6 +353,7 @@ export async function executeOrchestratorTool(params: {
         summary: filtered.length > 0 ? `Recalled ${filtered.length} cross-workstream memory entr${filtered.length === 1 ? "y" : "ies"}.` : "No relevant cross-workstream memory found.",
         modelPayload: { query, scope, entries: filtered },
         eventPayload: { query, scope, entries: filtered },
+        runtimeEventType: "memory_read",
       };
     }
 
@@ -389,6 +366,7 @@ export async function executeOrchestratorTool(params: {
           summary: "Workstream recall skipped because no workstream was available.",
           modelPayload: { query, scope, entries: [] },
           eventPayload: { query, scope, entries: [] },
+          runtimeEventType: "memory_read",
         };
       }
 
@@ -419,6 +397,7 @@ export async function executeOrchestratorTool(params: {
         summary: normalized.length > 0 ? `Recalled ${normalized.length} workstream memory entr${normalized.length === 1 ? "y" : "ies"}.` : "No relevant workstream memory found.",
         modelPayload: { query, scope, workstreamId, entries: normalized },
         eventPayload: { query, scope, workstreamId, entries: normalized },
+        runtimeEventType: "memory_read",
       };
     }
 
@@ -450,6 +429,7 @@ export async function executeOrchestratorTool(params: {
       summary: normalized.length > 0 ? `Recalled ${normalized.length} global memory entr${normalized.length === 1 ? "y" : "ies"}.` : "No relevant global memory found.",
       modelPayload: { query, scope, entries: normalized },
       eventPayload: { query, scope, entries: normalized },
+      runtimeEventType: "memory_read",
     };
   }
 
@@ -559,6 +539,7 @@ export async function executeOrchestratorTool(params: {
         written: (writeResult.inserted ?? 0) + (writeResult.updated ?? 0),
         workstreamWrite,
       },
+      runtimeEventType: "memory_write",
     };
   }
 
@@ -603,6 +584,7 @@ export async function executeOrchestratorTool(params: {
       summary: "Updated memory entry.",
       modelPayload: { memoryKind, entryId, updated: true },
       eventPayload: { memoryKind, entryId, updated: true },
+      runtimeEventType: "memory_write",
     };
   }
 
@@ -626,6 +608,7 @@ export async function executeOrchestratorTool(params: {
       summary: "Dismissed memory entry.",
       modelPayload: { memoryKind, entryId, dismissed: true },
       eventPayload: { memoryKind, entryId, dismissed: true },
+      runtimeEventType: "memory_write",
     };
   }
 
@@ -725,6 +708,7 @@ export async function executeOrchestratorTool(params: {
       summary: `Created note: ${title}.`,
       modelPayload: { noteId: artifactId, artifactId, title, workstreamId },
       eventPayload: { noteId: artifactId, artifactId, title, workstreamId },
+      runtimeEventType: "action_applied",
     };
   }
 
@@ -786,6 +770,7 @@ export async function executeOrchestratorTool(params: {
       summary: `Surfaced workspace result: ${title}.`,
       modelPayload: { resultId: result.resultId, title, summary, workstreamId },
       eventPayload: { resultId: result.resultId, title, summary, workstreamId },
+      runtimeEventType: "action_applied",
     };
   }
 
@@ -815,6 +800,7 @@ export async function executeOrchestratorTool(params: {
         summary: "Updated planner item.",
         modelPayload: { plannerItemId, updated: true },
         eventPayload: { plannerItemId, updated: true },
+        runtimeEventType: "action_applied",
       };
     }
 
@@ -824,6 +810,7 @@ export async function executeOrchestratorTool(params: {
       summary: `Created planner item: ${title || "Untitled task"}.`,
       modelPayload: { plannerItemId: result.plannerItemId, title },
       eventPayload: { plannerItemId: result.plannerItemId, title },
+      runtimeEventType: "action_applied",
     };
   }
 
@@ -869,6 +856,7 @@ export async function executeOrchestratorTool(params: {
       summary: `Created workspace: ${title}.`,
       modelPayload: { workstreamId: result.workstreamId, mutationId: result.mutationId, title },
       eventPayload: { workstreamId: result.workstreamId, mutationId: result.mutationId, title },
+      runtimeEventType: "action_applied",
     };
   }
 
@@ -936,6 +924,7 @@ export async function executeOrchestratorTool(params: {
       summary: `Created widget: ${title}.`,
       modelPayload: { itemId: result.itemId, mutationId: result.mutationId, title, workstreamId },
       eventPayload: { itemId: result.itemId, mutationId: result.mutationId, title, workstreamId },
+      runtimeEventType: "action_applied",
     };
   }
 
@@ -977,6 +966,7 @@ export async function executeOrchestratorTool(params: {
       summary: "Updated widget.",
       modelPayload: { itemId, mutationId: result.mutationId, updated: true },
       eventPayload: { itemId, mutationId: result.mutationId, updated: true },
+      runtimeEventType: "action_applied",
     };
   }
 
@@ -1007,6 +997,7 @@ export async function executeOrchestratorTool(params: {
       summary: "Moved widget.",
       modelPayload: { itemId, workstreamId, mutationId: result.mutationId, moved: true },
       eventPayload: { itemId, workstreamId, mutationId: result.mutationId, moved: true },
+      runtimeEventType: "action_applied",
     };
   }
 
@@ -1050,6 +1041,7 @@ export async function executeOrchestratorTool(params: {
       summary: `Attached ${result.createdItemIds?.length ?? 0} item${result.createdItemIds?.length === 1 ? "" : "s"} to the workspace.`,
       modelPayload: { workstreamId, createdItemIds: result.createdItemIds ?? [], mutationId: result.mutationId },
       eventPayload: { workstreamId, createdItemIds: result.createdItemIds ?? [], mutationId: result.mutationId },
+      runtimeEventType: "action_applied",
     };
   }
 
@@ -1110,6 +1102,7 @@ export async function executeOrchestratorTool(params: {
       summary: "Updated workspace layout.",
       modelPayload: { workstreamId, widgetCount: widgets.length, mutationId: result.mutationId },
       eventPayload: { workstreamId, widgetCount: widgets.length, mutationId: result.mutationId },
+      runtimeEventType: "action_applied",
     };
   }
 
@@ -1206,6 +1199,7 @@ export async function executeOrchestratorTool(params: {
         threadUrl: `/chat?chatId=${createResult.chatId}${workstreamId ? `&from=workspace&ws=${workstreamId}` : ""}`,
       },
       threadFork: { chatId: createResult.chatId, workstreamId },
+      runtimeEventType: "action_applied",
     };
   }
 

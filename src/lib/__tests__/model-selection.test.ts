@@ -127,7 +127,7 @@ describe("model selection guardrails", () => {
     expect(picked.selected?.modelId).toBe("provider/fresh-model");
   });
 
-  it("hard-excludes models older than roughly 120 days from primary auto routing", () => {
+  it("hard-excludes models older than 90 days from auto routing", () => {
     const picked = pickModelAndFallbacks({
       catalog: [
         {
@@ -155,7 +155,7 @@ describe("model selection guardrails", () => {
     expect(picked.ranked.some((row) => row.model.modelId === "provider/very-stale")).toBe(false);
   });
 
-  it("falls back to stale models when no fresh options exist", () => {
+  it("does not auto-route to stale models when no fresh options exist", () => {
     const picked = pickModelAndFallbacks({
       catalog: [
         {
@@ -172,7 +172,8 @@ describe("model selection guardrails", () => {
       messageLength: 80,
     });
 
-    expect(picked.selected?.modelId).toBe("provider/only-stale");
+    expect(picked.selected).toBeUndefined();
+    expect(picked.ranked).toHaveLength(0);
   });
 
   it("preserves a valid anchor model when scores are close", () => {
@@ -204,7 +205,7 @@ describe("model selection guardrails", () => {
     expect(picked.selected?.modelId).toBe("provider/anchor");
   });
 
-  it("allows manual visibility above router lane caps while keeping routing bounded", () => {
+  it("allows manual visibility above router caps while keeping the legacy helper explicit", () => {
     const model = {
       modelId: "provider/premium",
       inputCostPerM: 55,
@@ -213,6 +214,16 @@ describe("model selection guardrails", () => {
 
     expect(isModelTooExpensivePerMillion(model, { lane: "deep_reasoning" })).toBe(true);
     expect(isModelAllowedInTier(model, "normal", { allowManualOverride: true })).toBe(true);
+  });
+
+  it("does not hard-block premium models in expensive-blocked tier", () => {
+    const model = {
+      modelId: "provider/premium",
+      inputCostPerM: 55,
+      outputCostPerM: 70,
+    };
+
+    expect(isModelAllowedInTier(model, "expensive_blocked")).toBe(true);
   });
 
   it("infers routing lanes from modality and search needs", () => {

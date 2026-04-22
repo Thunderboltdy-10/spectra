@@ -152,11 +152,10 @@ type SearchStatusInfo = {
 type AbortReason = "user_stop" | "mode_switch" | "chat_switch" | "new_send" | "unknown";
 type ProactiveBanner = {
   id: string;
-  kind: "reminder_flashcards_due" | "reminder_streak_risk" | "reminder_study_plan" | "continuation_chat";
+  kind: "reminder_flashcards_due" | "reminder_streak_risk" | "reminder_study_plan";
   title: string;
   body: string;
   actionLabel: string;
-  chatId?: string;
   mode?: StudyMode;
   followUpMessage?: string;
   actionUrl?: string;
@@ -600,7 +599,6 @@ export function useChatState() {
   const [liveRouteTrace, setLiveRouteTrace] = useState<RouteTrace | null>(null);
   const [proactiveBanner, setProactiveBanner] = useState<ProactiveBanner | null>(null);
   const [streakAtRisk, setStreakAtRisk] = useState(false);
-  const [continuationChat, setContinuationChat] = useState<{ id: string; title: string } | null>(null);
   const [collaboratorPhase, setCollaboratorPhase] = useState<"idle" | "running" | "synthesizing">("idle");
   const [fileList, setFileList] = useState<File[]>([]);
   const [fileUploadState, setFileUploadState] = useState<
@@ -1443,18 +1441,6 @@ export function useChatState() {
         }
       }
 
-      if (!selectedChatId) {
-        const recencyWindowMs = 14 * 24 * 60 * 60 * 1000;
-        const recentChat = chats.find((chat) => Date.now() - chat.updatedAt <= recencyWindowMs);
-        if (recentChat) {
-          setContinuationChat({ id: recentChat._id, title: recentChat.title });
-        } else {
-          setContinuationChat(null);
-        }
-      } else {
-        setContinuationChat(null);
-      }
-
       const next = candidates.find((candidate) => !dismissedProactiveIdsRef.current.has(candidate.id)) ?? null;
       if (!cancelled) {
         setProactiveBanner(next);
@@ -1465,7 +1451,7 @@ export function useChatState() {
     return () => {
       cancelled = true;
     };
-  }, [chats, messages.length, selectedChatId, sending]);
+  }, [messages.length, sending]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1584,12 +1570,6 @@ export function useChatState() {
     markProactiveDismissed(banner.id);
     setProactiveBanner(null);
 
-    if (banner.kind === "continuation_chat" && banner.chatId) {
-      setSelectedChatId(banner.chatId);
-      markChatActive(banner.chatId);
-      return;
-    }
-
     if (banner.actionUrl && banner.actionUrl.startsWith("/")) {
       window.location.href = banner.actionUrl;
       return;
@@ -1606,7 +1586,7 @@ export function useChatState() {
     if (banner.followUpMessage && banner.followUpMessage.trim().length > 0) {
       setMessage(banner.followUpMessage.trim());
     }
-  }, [markProactiveDismissed, markChatActive, mode, proactiveBanner, updateChatSettingsById]);
+  }, [markProactiveDismissed, mode, proactiveBanner, updateChatSettingsById]);
 
   useEffect(() => {
     const handleNewChat = () => startNewChat(selectedAgentId);
@@ -3651,7 +3631,6 @@ export function useChatState() {
     liveRouteTrace,
     proactiveBanner,
     streakAtRisk,
-    continuationChat,
     activeCollaborators,
     collaboratorPhase,
     activeStreamIds,

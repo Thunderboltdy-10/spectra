@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Icon, type IconName } from "./icons";
+import { ExecutionTimeline } from "@/components/shared/execution-timeline";
+import { QuickChat } from "@/components/shared/quick-chat";
+import type { RouteTrace } from "@/types";
 import type { V2Item, V2Territory, QuickStart } from "./data";
 import { KIND_META } from "./data";
 
@@ -207,8 +210,21 @@ export function WidgetLauncher({
 
   const [expanded, setExpanded] = useState(false);
 
+  useEffect(() => {
+    const handleGlobalClick = (e: MouseEvent) => {
+      const el = e.target as HTMLElement;
+      if (!el.closest(".widget-launcher-container")) {
+        setExpanded(false);
+      }
+    };
+    if (expanded) {
+      document.addEventListener("mousedown", handleGlobalClick);
+    }
+    return () => document.removeEventListener("mousedown", handleGlobalClick);
+  }, [expanded]);
+
   return (
-    <div className="absolute top-[110px] right-4 z-30 pointer-events-auto flex flex-col items-end gap-2">
+    <div className="absolute top-[110px] right-4 z-30 pointer-events-auto flex flex-col items-end gap-2 widget-launcher-container">
       <button
         onClick={() => {
           if (widgetsHidden) onToggleWidgets();
@@ -460,6 +476,8 @@ export type ResultIsland = {
   text: string;
   chips?: string[];
   action?: { label: string; onClick: () => void };
+  /** Execution trace for showing timeline steps during streaming/running */
+  routeTrace?: RouteTrace;
 } | null;
 
 type CommandBarProps = {
@@ -471,6 +489,9 @@ type CommandBarProps = {
   quickStarts: readonly QuickStart[];
   onSubmit: (text: string) => void;
   onDismissResult: () => void;
+  isProcessing?: boolean;
+  isStreaming?: boolean;
+  onStop?: () => void;
   /** Opens the Spotlight (⌘K) overlay from the search icon inside the bar. */
   onSpotlight?: () => void;
   /** Creates an item at camera center. Called from the + inline menu. */
@@ -497,13 +518,18 @@ export const CREATION_MENU_ITEMS = [
 
 export function CommandBar({
   focusedItem, workspace, selectedCount,
-  resultIsland, onSubmit, onDismissResult,
+  resultIsland, onSubmit, onDismissResult, isProcessing = false,
+  isStreaming = false, onStop,
   onSpotlight, onCreate, onClearFocusContext, focusContext,
 }: CommandBarProps) {
   const [value, setValue] = useState("");
-  const [focused, setFocused] = useState(false);
   const [showCreateMenu, setShowCreateMenu] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handleCloseCreate = () => setShowCreateMenu(false);
+    window.addEventListener("workspace:close-create-menu", handleCloseCreate);
+    return () => window.removeEventListener("workspace:close-create-menu", handleCloseCreate);
+  }, []);
 
   const placeholder = (() => {
     if (focusContext?.kind === "focused-view") return `Ask about ${focusContext.count ?? 1} items in focus…`;
@@ -522,6 +548,13 @@ export function CommandBar({
     if (status === "running" || status === "streaming") return null; // breathing orb
     if (status === "done") return "sparkle" as const;
     return "close" as const; // error
+  };
+
+  const submit = () => {
+    const trimmed = value.trim();
+    if (!trimmed || isProcessing || isStreaming) return;
+    onSubmit(trimmed);
+    setValue("");
   };
 
   return (
@@ -564,6 +597,27 @@ export function CommandBar({
             {resultIsland.text}
           </span>
 
+          {/* Execution-aware chips — show route steps when streaming */}
+          {resultIsland.routeTrace && (resultIsland.status === "running" || resultIsland.status === "streaming") && (
+            <div className="flex items-center gap-1">
+              {resultIsland.routeTrace.toolchain.slice(0, 3).map((tool) => (
+                <span key={tool} className="sv2-chip" style={{ borderColor: "var(--accent)", color: "var(--accent)" }}>
+                  {tool.replace(/_/g, " ")}
+                </span>
+              ))}
+              {resultIsland.routeTrace.toolchain.length > 3 && (
+                <span className="sv2-chip">+{resultIsland.routeTrace.toolchain.length - 3}</span>
+              )}
+            </div>
+          )}
+          {resultIsland.chips && resultIsland.chips.length > 0 && (!resultIsland.routeTrace || (resultIsland.status !== "running" && resultIsland.status !== "streaming")) && (
+            <div className="flex items-center gap-1">
+              {resultIsland.chips.map((chip) => (
+                <span key={chip} className="sv2-chip">{chip}</span>
+              ))}
+            </div>
+          )}
+
           {/* Action button — only when done */}
           {resultIsland.status === "done" && resultIsland.action && (
             <button
@@ -587,7 +641,21 @@ export function CommandBar({
         </div>
       )}
 
-      <div className={`flex items-center gap-2 transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] ${focused ? "w-[640px]" : "w-[520px]"}`}>
+      {/* Expandable execution timeline below result island when streaming */}
+      {resultIsland && resultIsland.routeTrace && (resultIsland.status === "running" || resultIsland.status === "streaming") && (
+        <div
+          className="sv2-island mb-1.5 px-3 py-2 overflow-hidden"
+          style={{ maxWidth: "420px", width: "100%", borderRadius: "12px", fontSize: "11px" }}
+        >
+          <ExecutionTimeline
+            routeTrace={resultIsland.routeTrace}
+            streaming
+            compact
+          />
+        </div>
+      )}
+
+      <div className="flex items-end gap-2 w-[min(760px,calc(100vw-34px))]">
         {/* Plus button — opens inline creation menu */}
         <div className="relative shrink-0">
           <button
@@ -623,81 +691,50 @@ export function CommandBar({
           )}
         </div>
 
-        <div className="relative flex-1">
-          {/* Input pill */}
-          <div
-            className={`sv2-island ${focused ? "shadow-lg" : "shadow-md"} rounded-[20px] flex items-center gap-2 transition-all h-12`}
-            style={{
-              border: focused ? "1.5px solid var(--accent)" : "1px solid var(--line)",
-              padding: "0 14px 0 16px",
-              boxShadow: focused ? "0 8px 24px -8px rgba(14,142,232,0.18), var(--shadow-md)" : "var(--shadow-md)",
-            }}
-          >
-            {/* Search / Spotlight icon — leftmost, opens Spotlight */}
-            <button
-              onClick={() => { onSpotlight?.(); }}
-              className="shrink-0 transition-opacity opacity-60 hover:opacity-100"
-              style={{ color: "var(--ink-400)" }}
-              title="Spotlight (⌘K)"
-            >
-              <Icon name="search" size={14} />
-            </button>
-            {/* Focus context chip */}
-            {focusContext && (
-              <div className="hidden sm:flex items-center gap-1 shrink-0 px-2 h-6 rounded-full border text-[10px] font-mono"
-                   style={{ background: `${focusContext.color}12`, borderColor: `${focusContext.color}30`, color: focusContext.color, maxWidth: 160 }}>
-                <span className="truncate max-w-[100px]">{focusContext.title}</span>
-                {focusContext.count != null && <span className="opacity-60">·{focusContext.count}</span>}
-                <button
-                  onMouseDown={(e) => { e.preventDefault(); onClearFocusContext?.(); }}
-                  className="ml-0.5 opacity-60 hover:opacity-100 transition-opacity"
-                  title="Clear focus"
-                >
-                  <Icon name="close" size={8} />
-                </button>
-              </div>
-            )}
-
-            <input
-              ref={inputRef}
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              onFocus={() => setFocused(true)}
-              onBlur={() => setTimeout(() => { setFocused(false); setShowCreateMenu(false); }, 160)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && value.trim()) {
-                  onSubmit(value);
-                  setValue("");
-                }
-              }}
-              placeholder={placeholder}
-              className="flex-1 bg-transparent outline-none text-[14.5px] font-medium placeholder-[var(--ink-400)]"
-              style={{ color: "var(--ink-100)" }}
-            />
-
-            {/* Focused item context chip */}
-            {focusedItem && !value && (
-              <div className="hidden sm:flex sv2-chip shrink-0 opacity-70 h-6">
-                <Icon name={KIND_META[focusedItem.kind].icon} size={10} />
-                <span className="max-w-[72px] truncate">{focusedItem.title}</span>
-              </div>
-            )}
-
-            {/* Send button */}
-            <button
-              onClick={() => { if (value.trim()) { onSubmit(value); setValue(""); } }}
-              className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition-all"
-              style={{
-                background: value.trim() ? "var(--accent)" : "var(--bg2)",
-                color: value.trim() ? "#fff" : "var(--ink-400)",
-                transform: value.trim() ? "scale(1.05)" : "scale(1)",
-              }}
-            >
-              <Icon name="arrow-rt" size={11} />
-            </button>
-          </div>
-          {/* Suggestion chips row removed per design spec */}
-        </div>
+        <QuickChat
+          value={value}
+          onChange={setValue}
+          onSubmit={submit}
+          onStop={onStop}
+          isStreaming={isStreaming}
+          isProcessing={isProcessing}
+          placeholder={placeholder}
+          className="w-full min-w-0"
+          leftContent={(
+            <>
+              <button
+                onClick={() => { onSpotlight?.(); }}
+                className="shrink-0 transition-opacity opacity-60 hover:opacity-100"
+                style={{ color: "var(--ink-400)" }}
+                title="Spotlight (⌘K)"
+              >
+                <Icon name="search" size={14} />
+              </button>
+              {focusContext && (
+                <div className="hidden sm:flex items-center gap-1 shrink-0 px-2 h-6 rounded-full border text-[10px] font-mono"
+                     style={{ background: `${focusContext.color}12`, borderColor: `${focusContext.color}30`, color: focusContext.color, maxWidth: 160 }}>
+                  <span className="truncate max-w-[100px]">{focusContext.title}</span>
+                  {focusContext.count != null && <span className="opacity-60">·{focusContext.count}</span>}
+                  <button
+                    onMouseDown={(e) => { e.preventDefault(); onClearFocusContext?.(); }}
+                    className="ml-0.5 opacity-60 hover:opacity-100 transition-opacity"
+                    title="Clear focus"
+                  >
+                    <Icon name="close" size={8} />
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+          rightContent={focusedItem && !value
+            ? (
+                <div className="hidden sm:flex sv2-chip shrink-0 opacity-70 h-6">
+                  <Icon name={KIND_META[focusedItem.kind].icon} size={10} />
+                  <span className="max-w-[72px] truncate">{focusedItem.title}</span>
+                </div>
+              )
+            : null}
+        />
       </div>
     </div>
   );

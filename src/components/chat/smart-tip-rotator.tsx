@@ -20,7 +20,6 @@ type SmartTipRotatorProps = {
   streamPhase?: "idle" | "compacting" | "routing" | "searching" | "thinking" | "generating" | "synthesizing";
   hasResources: boolean;
   streakAtRisk?: boolean;
-  continuationChat?: { id: string; title: string } | null;
   onAction: (actionId: TipActionId) => void;
 };
 
@@ -42,23 +41,10 @@ export function SmartTipRotator({
   streamPhase = "idle",
   hasResources,
   streakAtRisk,
-  continuationChat,
   onAction,
 }: SmartTipRotatorProps) {
   const candidates = useMemo(() => {
     const tips: TipCandidate[] = [];
-
-    if (continuationChat) {
-      tips.push({
-        id: `continue-${continuationChat.id}`,
-        message: `Resume thread: Jump back into "${continuationChat.title}" to keep momentum.`,
-        actionLabel: "Resume",
-        onClick: () => {
-          // Send custom event to chat layout to select the chat
-          window.dispatchEvent(new CustomEvent("ai-school:resume-chat", { detail: { chatId: continuationChat.id } }));
-        },
-      });
-    }
 
     if (streakAtRisk) {
       tips.push({
@@ -136,15 +122,6 @@ export function SmartTipRotator({
       });
     }
 
-    if (messageCount >= 12) {
-      tips.push({
-        id: "long-chat-settings",
-        message: "Long session detected. Keep auto-compaction enabled to maintain response quality.",
-        actionLabel: "Open settings",
-        actionId: "open-settings",
-      });
-    }
-
     if (messageCount >= 2) {
       tips.push({
         id: "report-feedback",
@@ -155,7 +132,7 @@ export function SmartTipRotator({
     }
 
     return tips;
-  }, [hasResources, messageCount, mode, sending, streamPhase, streakAtRisk, continuationChat]);
+  }, [hasResources, messageCount, mode, sending, streamPhase, streakAtRisk]);
 
   const [index, setIndex] = useState(0);
 

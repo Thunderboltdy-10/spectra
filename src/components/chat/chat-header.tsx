@@ -5,7 +5,6 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Bot, Download, Layers, LoaderCircle, Menu, MoreHorizontal, Search, Settings2, Square, WifiOff } from "lucide-react";
 import { useKBar } from "kbar";
-import { ContextualTip } from "@/components/ui/contextual-tip";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
@@ -136,7 +135,6 @@ export function ChatHeader({
   const responseAgo = lastResponseAt
     ? formatRelativeTime(lastResponseAt)
     : undefined;
-  const showCompactTip = messageCount > 8;
 
   return (
     <header className="sticky top-0 z-20 relative after:content-[''] after:absolute after:top-[56px] after:left-0 after:right-0 after:h-px after:bg-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_92%,transparent)] backdrop-blur-xl min-h-[var(--header-height,56px)]">
@@ -289,17 +287,6 @@ export function ChatHeader({
           </div>
         </div>
       </div>
-      
-      {showCompactTip ? (
-        <div className="mx-auto w-full max-w-[680px] xl:max-w-[780px] 2xl:max-w-[860px] px-3 sm:px-6 lg:px-10 pb-2 -mt-1">
-          <ContextualTip
-            tipId="chat-header-compact-tip"
-            message="Use Compact to reduce context length."
-            actionLabel={!sending && onCompact && !compacting ? "Compact now" : undefined}
-            onAction={!sending && onCompact && !compacting ? onCompact : undefined}
-          />
-        </div>
-      ) : null}
     </header>
   );
 }

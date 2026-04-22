@@ -22,6 +22,7 @@ describe("editor ai-edit route integration", () => {
       selected: { modelId: "openai/gpt-5-nano" },
       fallbacks: [],
     });
+    const inferRoutingLane = vi.fn().mockReturnValue("deep_reasoning");
     const openRouterChatCompletion = vi.fn().mockResolvedValue({
       model: "openai/gpt-5-nano",
       usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
@@ -41,7 +42,7 @@ describe("editor ai-edit route integration", () => {
     vi.doMock("@/lib/auth-server", () => ({ requireActor }));
     vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
     vi.doMock("@/lib/openrouter-catalog-cache", () => ({ getLiveCatalogSnapshot }));
-    vi.doMock("@/lib/model-selection", () => ({ pickModelAndFallbacks }));
+    vi.doMock("@/lib/model-selection", () => ({ pickModelAndFallbacks, inferRoutingLane }));
     vi.doMock("@/lib/openrouter", () => ({ openRouterChatCompletion }));
     vi.doMock("@/lib/usage-tracking", () => ({ recordOpenRouterUsage }));
 
@@ -106,6 +107,7 @@ describe("editor ai-edit route integration", () => {
       selected: { modelId: "openai/gpt-5-nano" },
       fallbacks: [],
     });
+    const inferRoutingLane = vi.fn().mockReturnValue("deep_reasoning");
     const openRouterChatCompletion = vi.fn().mockResolvedValue({
       model: "openai/gpt-5-nano",
       usage: { prompt_tokens: 5, completion_tokens: 7, total_tokens: 12 },
@@ -129,7 +131,7 @@ describe("editor ai-edit route integration", () => {
     vi.doMock("@/lib/auth-server", () => ({ requireActor }));
     vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
     vi.doMock("@/lib/openrouter-catalog-cache", () => ({ getLiveCatalogSnapshot }));
-    vi.doMock("@/lib/model-selection", () => ({ pickModelAndFallbacks }));
+    vi.doMock("@/lib/model-selection", () => ({ pickModelAndFallbacks, inferRoutingLane }));
     vi.doMock("@/lib/openrouter", () => ({ openRouterChatCompletion }));
     vi.doMock("@/lib/usage-tracking", () => ({ recordOpenRouterUsage }));
 

@@ -1,32 +1,43 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useMemo, useRef, useEffect } from "react";
 import { Brain, Sparkles } from "lucide-react";
+import { motion } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { ExecutionTimeline } from "@/components/shared/execution-timeline";
+import type { RouteTrace } from "@/types";
+
 
 type ThinkingBlockProps = {
   content: string;
   streaming?: boolean;
+  routeTrace?: RouteTrace;
 };
 
-export function ThinkingBlock({ content, streaming = false }: ThinkingBlockProps) {
+export function ThinkingBlock({ content, streaming = false, routeTrace }: ThinkingBlockProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
-  const startTimeRef = useRef<number>(0);
-  const elapsedRef = useRef(0);
   const clean = content.trim();
 
-  // Elapsed timer while streaming (stored in ref, not state — avoids re-renders)
+  // Auto-scroll to bottom when streaming new content
   useEffect(() => {
-    if (!streaming) return;
-    startTimeRef.current = Date.now();
-    elapsedRef.current = 0;
-    const interval = setInterval(() => {
-      elapsedRef.current = Math.floor((Date.now() - startTimeRef.current) / 1000);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [streaming]);
+    const node = scrollRef.current;
+    if (!node) return;
+    const onScroll = () => {
+      const delta = node.scrollHeight - node.scrollTop - node.clientHeight;
+      shouldAutoScrollRef.current = delta < 30;
+    };
+    node.addEventListener("scroll", onScroll);
+    return () => node.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (!node || !streaming) return;
+    if (!shouldAutoScrollRef.current) return;
+    node.scrollTop = node.scrollHeight;
+  }, [clean, streaming]);
 
   const segments = useMemo(() => {
     const sanitized = clean
@@ -74,48 +85,72 @@ export function ThinkingBlock({ content, streaming = false }: ThinkingBlockProps
     return output;
   }, [clean]);
 
-  // Auto-scroll to bottom when streaming new content
-  useEffect(() => {
-    const node = scrollRef.current;
-    if (!node) return;
-    const onScroll = () => {
-      const delta = node.scrollHeight - node.scrollTop - node.clientHeight;
-      shouldAutoScrollRef.current = delta < 30;
-    };
-    node.addEventListener("scroll", onScroll);
-    return () => node.removeEventListener("scroll", onScroll);
-  }, []);
-
-  useEffect(() => {
-    const node = scrollRef.current;
-    if (!node || !streaming) return;
-    if (!shouldAutoScrollRef.current) return;
-    node.scrollTop = node.scrollHeight;
-  }, [segments, streaming]);
-
-  if (!clean) return null;
+  const hasTimeline = routeTrace?.phasePlan && routeTrace.phasePlan.length > 0;
+  const hasSearchTrace = routeTrace?.searchTrace && routeTrace.searchTrace.strategy && routeTrace.searchTrace.strategy !== "none";
+  const hasExecutionContent = hasTimeline || hasSearchTrace;
+  if (!clean && !hasExecutionContent) return null;
 
   return (
-    <details className="mb-3 group [&_summary::-webkit-details-marker]:hidden">
-      <summary className="flex w-max cursor-pointer items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.11em] text-[var(--text-tertiary)] transition hover:text-[var(--text-secondary)] select-none">
-        <Brain className="h-3 w-3" />
-        {streaming ? "Thinking…" : "Thinking Process"}
-        {streaming ? (
-          <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] ml-1">
-            <Sparkles className="h-2 w-2 animate-pulse" />
-            live
-          </span>
-        ) : null}
-      </summary>
-      <div className="mt-2 ml-1.5 border-l-2 border-[var(--border-default)] pl-3">
-        <div ref={scrollRef} className="max-h-48 overflow-y-auto pr-1 space-y-2 py-1">
-          {segments.map((segment, index) => (
-            <div key={`${index}-${segment.slice(0, 24)}`} className="text-[11px] leading-relaxed text-[var(--text-tertiary)] opacity-90">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{segment}</ReactMarkdown>
-            </div>
-          ))}
+    <div className="mb-4">
+      {/* Execution Timeline — visible, execution-native rendering */}
+      {hasExecutionContent && (
+        <div className="mb-2">
+          <details
+            className="group [&_summary::-webkit-details-marker]:hidden"
+            open={streaming}
+          >
+            <summary className="flex w-max cursor-pointer items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.11em] text-[var(--text-tertiary)] transition hover:text-[var(--text-secondary)] select-none">
+              <Brain className="h-3 w-3" />
+              {streaming ? "Executing..." : "Execution Trace"}
+              {streaming ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_30%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,transparent)] px-1.5 py-0.5 text-[9px] ml-1 text-[var(--accent-cyan)]">
+                  <Sparkles className="h-2 w-2 animate-pulse" />
+                  live
+                </span>
+              ) : null}
+            </summary>
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
+              className="mt-2 ml-0.5"
+            >
+              <ExecutionTimeline
+                routeTrace={routeTrace}
+                streaming={streaming}
+              />
+            </motion.div>
+          </details>
         </div>
-      </div>
-    </details>
+      )}
+
+      {/* Thinking Content — collapsible raw reasoning */}
+      {clean && (
+        <details
+          className="group [&_summary::-webkit-details-marker]:hidden"
+          open={streaming && !hasExecutionContent}
+        >
+          <summary className="flex w-max cursor-pointer items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.11em] text-[var(--text-tertiary)] transition hover:text-[var(--text-secondary)] select-none">
+            <Brain className="h-3 w-3" />
+            {streaming ? "Thinking..." : "Thinking Process"}
+            {streaming ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_30%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,transparent)] px-1.5 py-0.5 text-[9px] ml-1 text-[var(--accent-cyan)]">
+                <Sparkles className="h-2 w-2 animate-pulse" />
+                live
+              </span>
+            ) : null}
+          </summary>
+          <div className="mt-2 ml-1.5 border-l-2 border-[var(--border-default)]/50 pl-3">
+            <div ref={scrollRef} className="max-h-48 overflow-y-auto pr-1 space-y-2 py-1">
+              {segments.map((segment, index) => (
+                <div key={`${index}-${segment.slice(0, 24)}`} className="text-[11px] leading-relaxed text-[var(--text-tertiary)] opacity-90">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{segment}</ReactMarkdown>
+                </div>
+              ))}
+            </div>
+          </div>
+        </details>
+      )}
+    </div>
   );
 }

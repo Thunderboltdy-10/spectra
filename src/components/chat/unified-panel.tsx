@@ -1479,7 +1479,7 @@ export function UnifiedPanel({ settingsProps, orchestrationProps, canvasProps }:
 
       <aside
         ref={shellRef as React.RefObject<HTMLElement>}
-        className={`right-panel-shell ${rightPanelSurfaceClassName()} pointer-events-auto flex flex-col ${
+        className={`right-panel-shell ${rightPanelSurfaceClassName("w-full min-w-0 max-w-none xl:w-full xl:min-w-0 xl:max-w-none")} pointer-events-auto flex flex-col ${
           docked ? "right-panel-shell--docked" : "right-panel-shell--sheet"
         } ${
           docked

@@ -43,28 +43,47 @@ function RequestAccessForm({ isLoaded, userId, userEmail, userEmails }: RequestA
 
   // Smart re-check: if the user is signed in but stuck here, periodically
   // check if they've been granted access yet (e.g. admin approved request).
+  // Uses exponential backoff to avoid hammering the server and caps out
+  // at a maximum interval so we still detect access changes in a reasonable time.
   useEffect(() => {
     if (!isLoaded || !userId) return;
 
     let cancelled = false;
+    let attempts = 0;
+    const BASE_INTERVAL_MS = 5_000;
+    const MAX_INTERVAL_MS = 60_000;
+    const MAX_ATTEMPTS = 120; // ~30 min at backoff rates
+
+    const getDelay = () => {
+      if (attempts < 3) return BASE_INTERVAL_MS;
+      // Exponential backoff: 5s, 5s, 5s, 10s, 20s, 40s, 60s (capped)
+      return Math.min(BASE_INTERVAL_MS * Math.pow(2, attempts - 2), MAX_INTERVAL_MS);
+    };
+
+    let timeoutId: number;
+
     const recheck = async () => {
+      if (attempts >= MAX_ATTEMPTS) return;
+      attempts++;
       try {
         const response = await fetch("/api/auth/access-state", { cache: "no-store" });
         if (cancelled || !response.ok) return;
         const payload = (await response.json().catch(() => null)) as { status?: string } | null;
         if (payload?.status === "ok") {
           window.location.replace("/chat");
+          return;
         }
       } catch {
         // Best effort.
       }
+      // Schedule next check with backoff.
+      timeoutId = window.setTimeout(recheck, getDelay());
     };
 
     void recheck();
-    const interval = window.setInterval(recheck, 5000);
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
+      window.clearTimeout(timeoutId);
     };
   }, [isLoaded, userId]);
 

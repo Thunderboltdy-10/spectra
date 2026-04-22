@@ -16,7 +16,7 @@ import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { useSidebar } from "@/context/sidebar-context";
 import { cn } from "@/lib/utils";
 
-type OrgSettings = { name?: string; description?: string; schoolType?: string; timezone?: string; maxStudents?: number; maxResourceFileSizeBytes?: number; monthlyBudgetCentsPerUser?: number; budgetMarginPercent?: number; soulEnabled?: boolean; orchestratorV2Enabled?: boolean; adaptiveQuizEnabled?: boolean; spacedRepetitionEnabled?: boolean; agentModelBoostEnabled?: boolean };
+type OrgSettings = { _id?: string; name?: string; description?: string; schoolType?: string; timezone?: string; maxStudents?: number; maxResourceFileSizeBytes?: number; monthlyBudgetCentsPerUser?: number; budgetMarginPercent?: number; soulEnabled?: boolean; orchestratorV2Enabled?: boolean; adaptiveQuizEnabled?: boolean; spacedRepetitionEnabled?: boolean; agentModelBoostEnabled?: boolean };
 type OrgSettingsEnvelope = {
   org: OrgSettings;
   openRouterConfigured?: boolean;
@@ -62,6 +62,8 @@ type ManagebacAdminConfig = {
   };
 };
 
+type OrgSummary = { _id: string; name: string; slug: string; memberCount: number };
+
 function shortDay(day: string) {
   return new Date(`${day}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
@@ -103,6 +105,8 @@ function AdminPageContent() {
   const [analytics, setAnalytics] = useState<SchoolAnalytics | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [schoolAgents, setSchoolAgents] = useState<SchoolAgent[]>([]);
+  const [allOrgs, setAllOrgs] = useState<OrgSummary[]>([]);
+  const [switchingOrg, setSwitchingOrg] = useState(false);
   const [memberSearch, setMemberSearch] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"student" | "teacher">("student");
@@ -123,8 +127,12 @@ function AdminPageContent() {
   const [managebacSyncing, setManagebacSyncing] = useState(false);
 
   async function refresh() {
-    const [bootstrap, schoolDashboard, membersPayload, usagePayload, schoolAnalytics, modelPayload, agentsPayload, managebacPayload] = await Promise.all([
-      loadJson<{ actor: { onboardingComplete?: boolean }; orgSettings: OrgSettingsEnvelope }>("/api/bootstrap"),
+    const fetchAllOrgs = isSuperAdmin 
+      ? loadJson<{ orgs: OrgSummary[] }>("/api/super-admin/schools").catch(() => ({ orgs: [] }))
+      : Promise.resolve({ orgs: [] });
+
+    const [bootstrap, schoolDashboard, membersPayload, usagePayload, schoolAnalytics, modelPayload, agentsPayload, managebacPayload, orgsPayload] = await Promise.all([
+      loadJson<{ actor: { onboardingComplete?: boolean; orgId: string }; orgSettings: OrgSettingsEnvelope }>("/api/bootstrap"),
       loadJson<SchoolDashboard>("/api/school-admin/dashboard"),
       loadJson<{ members: { members: Member[] }; invitations: Invitation[]; accessRequests?: AccessRequest[] }>("/api/school-admin/members"),
       loadJson<{ usage: UsageRow[] }>("/api/admin/users"),
@@ -132,6 +140,7 @@ function AdminPageContent() {
       loadJson<{ models: LeaderboardEntry[] }>("/api/analytics/model-leaderboard"),
       loadJson<{ agents: SchoolAgent[] }>("/api/agents").catch(() => ({ agents: [] })),
       loadJson<ManagebacAdminConfig>("/api/admin/managebac").catch(() => null),
+      fetchAllOrgs,
     ]);
     setOnboardingComplete(Boolean(bootstrap.actor.onboardingComplete));
     setOrg(bootstrap.orgSettings?.org ?? null);
@@ -145,6 +154,7 @@ function AdminPageContent() {
     setLeaderboard(modelPayload.models ?? []);
     setSchoolAgents((agentsPayload.agents ?? []).filter((a) => a.visibility !== "private"));
     setManagebac(managebacPayload);
+    setAllOrgs(orgsPayload.orgs);
   }
 
   useEffect(() => {
@@ -163,6 +173,23 @@ function AdminPageContent() {
   }, [memberSearch, members]);
   const seatUsed = members.length;
   const pendingInvites = invitations.filter((item) => item.status === "pending").length;
+
+  async function switchOrg(orgId: string) {
+    if (switchingOrg) return;
+    setSwitchingOrg(true);
+    try {
+      await loadJson("/api/admin/switch-org", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orgId }),
+      });
+      toast.success("Switched school context");
+      window.location.reload();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to switch school");
+      setSwitchingOrg(false);
+    }
+  }
 
 
   async function completeOnboarding() {
@@ -392,10 +419,37 @@ function AdminPageContent() {
         ) : null}
 
          {/* Page header */}
-         <div className="pb-2 pt-1">
-           <Breadcrumb items={[{ label: "Admin" }]} />
-           <h1 className="font-display text-3xl mt-2">Admin Console</h1>
-           <p className="mt-1 text-sm text-[var(--text-secondary)]">Manage your school settings, members, and usage.</p>
+         <div className="pb-2 pt-1 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+           <div>
+             <Breadcrumb items={[{ label: "Admin" }]} />
+             <h1 className="font-display text-3xl mt-2">Admin Console</h1>
+             <p className="mt-1 text-sm text-[var(--text-secondary)]">Manage your school settings, members, and usage.</p>
+           </div>
+
+           {isSuperAdmin && allOrgs.length > 1 && (
+             <div className="flex flex-col gap-1.5 min-w-[240px]">
+               <span className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)] font-medium px-1">Switch School Context</span>
+               <Select 
+                 value={org?._id || ""} 
+                 onValueChange={(val) => void switchOrg(val)}
+                 disabled={switchingOrg}
+               >
+                 <SelectTrigger className="bg-[var(--bg-elevated)] border-[var(--border-default)] h-9 text-sm">
+                   <SelectValue placeholder="Select a school" />
+                 </SelectTrigger>
+                 <SelectContent>
+                   {allOrgs.map((o) => (
+                     <SelectItem key={o._id} value={o._id}>
+                       <div className="flex flex-col">
+                         <span className="font-medium">{o.name}</span>
+                         <span className="text-[10px] text-[var(--text-tertiary)]">{o.slug} &middot; {o.memberCount} members</span>
+                       </div>
+                     </SelectItem>
+                   ))}
+                 </SelectContent>
+               </Select>
+             </div>
+           )}
          </div>
 
         <nav className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-xs text-[var(--text-secondary)]">

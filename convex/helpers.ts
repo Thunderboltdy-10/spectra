@@ -31,7 +31,13 @@ export async function getOrCreateDefaultOrg(ctx: MutationCtx): Promise<Id<"orgs"
   return orgId as Id<"orgs">;
 }
 
-export async function getUserByClerkId(ctx: QueryCtx | MutationCtx, clerkId: string) {
+export async function getUserByClerkId(ctx: QueryCtx | MutationCtx, clerkId: string, orgId?: Id<"orgs">) {
+  if (orgId) {
+    return ctx.db
+      .query("users")
+      .withIndex("by_clerk_id_org", (q) => q.eq("clerkId", clerkId).eq("orgId", orgId))
+      .unique();
+  }
   return ctx.db
     .query("users")
     .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))

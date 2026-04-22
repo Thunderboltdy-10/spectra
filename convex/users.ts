@@ -182,12 +182,17 @@ export const ensureUser = mutation({
     name: v.string(),
     requestedRole: v.optional(v.string()),
     bootstrapAdmin: v.boolean(),
+    orgId: v.optional(v.id("orgs")),
   },
   handler: async (ctx, args) => {
     const normalizedEmail = normalizeEmail(args.email);
-    let existing = await getUserByClerkId(ctx, args.clerkId);
+    const isSuperAdmin = SUPER_ADMIN_EMAILS.has(normalizedEmail);
+    
+    // If orgId is provided, we look for the user in THAT specific org.
+    // If not, we fall back to any existing record (usually for non-super-admins who have only one).
+    let existing = await getUserByClerkId(ctx, args.clerkId, args.orgId);
 
-    if (!existing) {
+    if (!existing && !args.orgId) {
       // Try to find by email if not found by clerkId to support auto-linking
       // for users manually added by admin or following old links.
       const byEmail = await ctx.db
@@ -199,18 +204,17 @@ export const ensureUser = mutation({
         // If this record already has a DIFFERENT clerkId, we have a conflict.
         // We shouldn't auto-link in that case to prevent account hijacking.
         if (byEmail.clerkId && byEmail.clerkId !== args.clerkId) {
-          // Fall through to normal logic - it will likely fail on orgId check below
-          // unless it's a bootstrap admin.
+          // Fall through
         } else {
           existing = byEmail;
         }
       }
     }
 
-    let orgId = existing?.orgId;
+    let orgId = args.orgId ?? existing?.orgId;
 
     // Super admins should remain operable even if their previous org was deleted.
-    if (args.bootstrapAdmin) {
+    if (args.bootstrapAdmin || (isSuperAdmin && !orgId)) {
       if (!orgId) {
         orgId = await getOrCreateDefaultOrg(ctx);
       } else {
@@ -227,12 +231,12 @@ export const ensureUser = mutation({
     }
 
     let role = normalizeRole(args.requestedRole);
-    if (args.bootstrapAdmin) {
+    if (args.bootstrapAdmin || isSuperAdmin) {
       role = "admin";
     }
 
     if (existing) {
-      const nextRole = existing.role === "admin" ? "admin" : role;
+      const nextRole = (existing.role === "admin" || isSuperAdmin) ? "admin" : role;
       const previous = { _id: existing._id, role: existing.role };
       await ctx.db.patch(existing._id, {
         clerkId: args.clerkId, // Ensure clerkId is set (links it if it was only email-based)
@@ -257,8 +261,16 @@ export const ensureUser = mutation({
       return { ...existing, role: nextRole, orgId, clerkId: args.clerkId };
     }
 
-    if (!args.bootstrapAdmin) {
-      throw new Error("INVITATION_TOKEN_REQUIRED: Account must be provisioned via invitation.");
+    // If no existing record for this clerkId+orgId, create one.
+    // For super-admins, we allow creating multiple records (one per org).
+    // For others, they still need an invitation if they don't have ANY record.
+    if (!isSuperAdmin && !args.bootstrapAdmin) {
+       // Check if they have ANY record to prevent duplicate accounts for non-super-admins
+       const anyExisting = await getUserByClerkId(ctx, args.clerkId);
+       if (anyExisting && anyExisting.orgId !== orgId) {
+         // They are trying to join a new org without an invitation?
+         throw new Error("INVITATION_TOKEN_REQUIRED: Account must be provisioned via invitation.");
+       }
     }
 
     const userId = await ctx.db.insert("users", {
@@ -304,16 +316,16 @@ export const getAnyByEmail = query({
 });
 
 export const me = query({
-  args: { clerkId: v.string() },
+  args: { clerkId: v.string(), orgId: v.optional(v.id("orgs")) },
   handler: async (ctx, args) => {
-    return getUserByClerkId(ctx, args.clerkId);
+    return getUserByClerkId(ctx, args.clerkId, args.orgId);
   },
 });
 
 export const accessState = query({
-  args: { clerkId: v.string() },
+  args: { clerkId: v.string(), orgId: v.optional(v.id("orgs")) },
   handler: async (ctx, args) => {
-    const user = await getUserByClerkId(ctx, args.clerkId);
+    const user = await getUserByClerkId(ctx, args.clerkId, args.orgId);
     if (!user) {
       return {
         hasUser: false,

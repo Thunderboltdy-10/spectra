@@ -308,21 +308,22 @@ async function resolveFirstTurnTitle(params: {
   if (params.assistantCount !== 0) return undefined;
 
   try {
-    const generated = await maybeGenerateTitle({
+    // Priority: AI-generated title from user prompt (prompt-first as requested)
+    const generated = await maybeGenerateTitleFromUserPrompt({
       chatId: params.chatId,
       actorClerkId: params.actorClerkId,
       userMessage: params.userMessage,
-      assistantMessage: params.assistantMessage,
       onModelCall: params.onModelCall,
     });
     if (generated?.trim()) return generated.trim();
   } catch (error) {
-    params.logger?.warn("chat title generation failed", {
+    params.logger?.warn("early AI title generation failed", {
       chatId: params.chatId,
       error: error instanceof Error ? error.message : String(error),
     });
   }
 
+  // Secondary fallback: heuristic from prompt
   const fallbackTitle = fallbackTitleFromUserMessage(params.userMessage);
   try {
     await convexMutation("chats:setChatTitle", {

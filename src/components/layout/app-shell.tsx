@@ -370,7 +370,16 @@ export function AppShell({
           onToggleCollapse={() => sidebar.setSidebarOpen((prev) => !prev)}
           onSearchChange={sidebar.setSearch}
           onSelectChat={(chatId) => router.push(`/chat?chatId=${encodeURIComponent(chatId)}`)}
-          onNewChat={() => router.push("/chat")}
+          onNewChat={() => {
+            try {
+              window.localStorage.removeItem("ai-school:lastActiveChatId");
+              window.localStorage.removeItem("ai-school:lastActiveChatTimestamp");
+            } catch {
+              // Ignore storage failures.
+            }
+            router.push("/chat");
+            window.dispatchEvent(new Event("ai-school:new-chat"));
+          }}
           onDeleteChat={(chatId) => {
             void sidebar.deleteChat(chatId).catch((error: unknown) =>
               toast.error(error instanceof Error ? error.message : "Failed to delete chat"),

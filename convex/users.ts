@@ -261,15 +261,20 @@ export const ensureUser = mutation({
       return { ...existing, role: nextRole, orgId, clerkId: args.clerkId };
     }
 
-    // If no existing record for this clerkId+orgId, create one.
-    // For super-admins, we allow creating multiple records (one per org).
-    // For others, they still need an invitation if they don't have ANY record.
+    // Check if they have ANY record to prevent duplicate accounts for non-super-admins
     if (!isSuperAdmin && !args.bootstrapAdmin) {
-       // Check if they have ANY record to prevent duplicate accounts for non-super-admins
-       const anyExisting = await getUserByClerkId(ctx, args.clerkId);
-       if (anyExisting && anyExisting.orgId !== orgId) {
-         // They are trying to join a new org without an invitation?
-         throw new Error("INVITATION_TOKEN_REQUIRED: Account must be provisioned via invitation.");
+       const allMemberships = await ctx.db
+         .query("users")
+         .withIndex("by_clerk_id", (q) => q.eq("clerkId", args.clerkId))
+         .collect();
+       
+       if (allMemberships.length > 0) {
+         const matchingOrg = allMemberships.find(m => m.orgId === orgId);
+         if (!matchingOrg) {
+            // They are trying to join a new org but already have an account elsewhere.
+            // Non-super-admins MUST use an invitation token to join a different org.
+            throw new Error("INVITATION_TOKEN_REQUIRED: Account must be provisioned via invitation.");
+         }
        }
     }
 

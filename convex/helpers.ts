@@ -38,10 +38,12 @@ export async function getUserByClerkId(ctx: QueryCtx | MutationCtx, clerkId: str
       .withIndex("by_clerk_id_org", (q) => q.eq("clerkId", clerkId).eq("orgId", orgId))
       .unique();
   }
+  // When no orgId is specified, we return the first record found (usually the default or first joined).
+  // We cannot use .unique() here anymore because super-admins can have multiple records for the same clerkId.
   return ctx.db
     .query("users")
     .withIndex("by_clerk_id", (q) => q.eq("clerkId", clerkId))
-    .unique();
+    .first();
 }
 
 export async function adjustWorkstreamArtifactCount(

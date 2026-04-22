@@ -25,8 +25,8 @@ function randomToken(): string {
 const INVITATION_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 const INVITATION_RATE_LIMIT_MAX = 50;
 
-async function requireAdmin(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string) {
-  const actor = await getUserByClerkId(ctx, actorClerkId);
+async function requireAdmin(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string, orgId?: Id<"orgs">) {
+  const actor = await getUserByClerkId(ctx, actorClerkId, orgId);
   if (!actor) throw new Error("Unauthorized");
   if (actor.role !== "admin" && !SUPER_ADMIN_EMAILS.has(actor.email.trim().toLowerCase())) throw new Error("Admin access required");
   return actor;
@@ -146,9 +146,9 @@ async function expirePendingInvitationsForEmail(
  * Dashboard stats for an admin's school
  */
 export const getSchoolDashboard = query({
-  args: { actorClerkId: v.string() },
+  args: { actorClerkId: v.string(), orgId: v.optional(v.id("orgs")) },
   handler: async (ctx, args) => {
-    const actor = await requireAdmin(ctx, args.actorClerkId);
+    const actor = await requireAdmin(ctx, args.actorClerkId, args.orgId);
     const today = dayKey();
 
     const [members, analyticsToday, invitations, org] = await Promise.all([
@@ -194,13 +194,14 @@ export const getSchoolDashboard = query({
 export const listMembers = query({
   args: {
     actorClerkId: v.string(),
+    orgId: v.optional(v.id("orgs")),
     role: v.optional(vRole),
     search: v.optional(v.string()),
     limit: v.optional(v.number()),
     cursor: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const actor = await requireAdmin(ctx, args.actorClerkId);
+    const actor = await requireAdmin(ctx, args.actorClerkId, args.orgId);
 
     const limit = Math.min(100, Math.max(1, args.limit ?? 50));
 
@@ -248,12 +249,13 @@ export const listMembers = query({
 export const listInvitations = query({
   args: {
     actorClerkId: v.string(),
+    orgId: v.optional(v.id("orgs")),
     status: v.optional(
       v.union(v.literal("pending"), v.literal("accepted"), v.literal("expired")),
     ),
   },
   handler: async (ctx, args) => {
-    const actor = await requireAdmin(ctx, args.actorClerkId);
+    const actor = await requireAdmin(ctx, args.actorClerkId, args.orgId);
 
     const now = Date.now();
     let invitations = await ctx.db
@@ -283,10 +285,11 @@ export const listInvitations = query({
 export const getSchoolAnalytics = query({
   args: {
     actorClerkId: v.string(),
+    orgId: v.optional(v.id("orgs")),
     days: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const actor = await requireAdmin(ctx, args.actorClerkId);
+    const actor = await requireAdmin(ctx, args.actorClerkId, args.orgId);
 
     const daysBack = Math.min(Math.max(args.days ?? 30, 1), 90);
     const cutoff = new Date();
@@ -341,11 +344,12 @@ export const getSchoolAnalytics = query({
 export const inviteMember = mutation({
   args: {
     actorClerkId: v.string(),
+    orgId: v.optional(v.id("orgs")),
     email: v.string(),
     role: vRole,
   },
   handler: async (ctx, args) => {
-    const actor = await requireAdmin(ctx, args.actorClerkId);
+    const actor = await requireAdmin(ctx, args.actorClerkId, args.orgId);
     if (args.role === "admin") {
       throw new Error("Only super admin can invite admins");
     }
@@ -403,10 +407,11 @@ export const inviteMember = mutation({
 export const cancelInvitation = mutation({
   args: {
     actorClerkId: v.string(),
+    orgId: v.optional(v.id("orgs")),
     invitationId: v.id("schoolInvitations"),
   },
   handler: async (ctx, args) => {
-    const actor = await requireAdmin(ctx, args.actorClerkId);
+    const actor = await requireAdmin(ctx, args.actorClerkId, args.orgId);
 
     const invitation = await ctx.db.get(args.invitationId);
     if (!invitation) throw new Error("Invitation not found");
@@ -424,10 +429,11 @@ export const cancelInvitation = mutation({
 export const resendInvitation = mutation({
   args: {
     actorClerkId: v.string(),
+    orgId: v.optional(v.id("orgs")),
     invitationId: v.id("schoolInvitations"),
   },
   handler: async (ctx, args) => {
-    const actor = await requireAdmin(ctx, args.actorClerkId);
+    const actor = await requireAdmin(ctx, args.actorClerkId, args.orgId);
 
     const invitation = await ctx.db.get(args.invitationId);
     if (!invitation) throw new Error("Invitation not found");
@@ -480,10 +486,11 @@ export const resendInvitation = mutation({
 export const removeMember = mutation({
   args: {
     actorClerkId: v.string(),
+    orgId: v.optional(v.id("orgs")),
     userId: v.id("users"),
   },
   handler: async (ctx, args) => {
-    const actor = await requireAdmin(ctx, args.actorClerkId);
+    const actor = await requireAdmin(ctx, args.actorClerkId, args.orgId);
 
     const target = await ctx.db.get(args.userId);
     if (!target) throw new Error("User not found");
@@ -518,11 +525,12 @@ export const removeMember = mutation({
 export const updateMemberRole = mutation({
   args: {
     actorClerkId: v.string(),
+    orgId: v.optional(v.id("orgs")),
     userId: v.id("users"),
     role: vRole,
   },
   handler: async (ctx, args) => {
-    const actor = await requireAdmin(ctx, args.actorClerkId);
+    const actor = await requireAdmin(ctx, args.actorClerkId, args.orgId);
     if (args.role === "admin") {
       throw new Error("Only super admin can assign admin role");
     }
@@ -545,6 +553,7 @@ export const updateMemberRole = mutation({
     return { ok: true };
   },
 });
+
 
 /**
  * Look up a school invitation by token (public - no auth required)

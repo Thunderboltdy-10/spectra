@@ -198,7 +198,7 @@ export const ensureUser = mutation({
       const byEmail = await ctx.db
         .query("users")
         .withIndex("by_email", (q) => q.eq("email", normalizedEmail))
-        .unique();
+        .first();
 
       if (byEmail) {
         // If this record already has a DIFFERENT clerkId, we have a conflict.
@@ -316,7 +316,7 @@ export const getAnyByEmail = query({
     return ctx.db
       .query("users")
       .withIndex("by_email", (q) => q.eq("email", normalizeEmail(args.email)))
-      .unique();
+      .first();
   },
 });
 

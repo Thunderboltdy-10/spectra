@@ -15,9 +15,9 @@ function normalizeMaxResourceFileSizeBytes(value: number | undefined) {
 }
 
 export const getOrgSettings = query({
-  args: { actorClerkId: v.string() },
+  args: { actorClerkId: v.string(), orgId: v.optional(v.id("orgs")) },
   handler: async (ctx, args) => {
-    const actor = await getUserByClerkId(ctx, args.actorClerkId);
+    const actor = await getUserByClerkId(ctx, args.actorClerkId, args.orgId);
     if (!actor) {
       throw new Error("Unauthorized");
     }
